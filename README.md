@@ -31,8 +31,9 @@ END
 %{} -> Creates a hash
 %[] -> Creates a list
 
+@c_ -> concurrent higher-order array function
 @p_ -> parallel higher-order array function
-@dp_ -> distributed parallel higher-order array function
+@d_ -> distributed higher-order array function
 ```
 
 ### STRUCTS

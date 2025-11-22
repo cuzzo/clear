@@ -207,7 +207,6 @@ def print_all_chunks(chunk)
   end
 end
 
-
 code = File.open("prog.flux").read()
 puts "==== CODE ====="
 puts code
