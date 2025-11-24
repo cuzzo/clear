@@ -11,11 +11,14 @@ module AST
   VarDecl     = Struct.new(:name, :type, :value)
   Assignment  = Struct.new(:name, :value)
   BinaryOp    = Struct.new(:left, :op, :right)
+  UnaryOp     = Struct.new(:op, :right)
   Literal     = Struct.new(:type, :value)
   Identifier  = Struct.new(:name)
   ListLit     = Struct.new(:items)
   HashLit     = Struct.new(:pairs)
   StructLit   = Struct.new(:name, :fields)
+  IfStatement = Struct.new(:condition, :then_branch, :else_branch)
+  WhileLoop   = Struct.new(:condition, :do_branch)
   Lambda      = Struct.new(:params, :captures, :body)
   FuncCall    = Struct.new(:name, :args)
   MethodCall  = Struct.new(:object, :method, :args)
@@ -29,14 +32,15 @@ module AST
     :DIV => :/,
     :POW => :**,
     :MOD => :%,
-    :EQ => :EQ,
+    :EQ => :==,
     :NEQ => :!=,
     :LT => :<,
     :GT => :>,
     :LTE => :<=,
-    :GTE => :>=
+    :GTE => :>=,
   }
 
+  # TODO: Make these symbols
   OP_TO_OP_CODE = {
     '+' => :ADD,
     '-' => :SUB,
@@ -48,7 +52,7 @@ module AST
     '<'  => :LT,
     '<=' => :LTE,
     '>'  => :GT,
-    '>=' => :GTE
+    '>=' => :GTE,
   }
 end
 
@@ -59,7 +63,7 @@ class Lexer
   Token = Struct.new(:type, :value, :line)
 
   # We use a hash for O(1) lookups
-  KEYWORDS = %w[FN VAR IF THEN ELSE END RETURN RETURNS SET CAST AS USE STRUCT TRUE FALSE VOID].map { |k| [k, true] }.to_h
+  KEYWORDS = %w[FN VAR IF THEN ELSE ELSE_IF END WHILE DO RETURN RETURNS SET CAST AS USE STRUCT TRUE FALSE NIL].map { |k| [k, true] }.to_h
 
   def initialize(source)
     @s = StringScanner.new(source)
@@ -78,6 +82,10 @@ class Lexer
 
       when @s.scan(/->/) then add(:ARROW, '->')
       when @s.scan(/\|>/) then add(:PIPE, '|>')
+      when @s.scan(/==/) then add(:CHAR, '==') # TODO: Is this right?
+      when @s.scan(/>=/) then add(:CHAR, '>=')
+      when @s.scan(/<=/) then add(:CHAR, '<=')
+      when @s.scan(/!=/) then add(:CHAR, '!=')
 
       # Triple Quote Strings (Multiline)
       # Match """ then anything (non-greedy) until the next """
@@ -110,8 +118,8 @@ class Lexer
           add(:VAR_ID, word)  # Lowercase start = Var
         end
 
-      when @s.scan(/\d+/)
-        add(:NUMBER, @s.matched.to_i)
+      when @s.scan(/\d+\.?\d*/)
+        add(:NUMBER, @s.matched.to_f)
 
       when @s.scan(/"[^"]*"/)
         add(:STRING, @s.matched[1..-2])
@@ -173,7 +181,6 @@ class Parser
       name = consume(:VAR_ID).value
       type_node = :Any
       if match?(:CHAR, ':')
-        puts "FOUND COLON"
         consume(:CHAR)
         type_node = parse_type_annotation.to_sym
       end
@@ -192,6 +199,12 @@ class Parser
 
     elsif match?(:KEYWORD, 'FN')
       parse_function_def
+
+    elsif match?(:KEYWORD, 'IF')
+      parse_if_statement
+
+    elsif match?(:KEYWORD, 'WHILE')
+      parse_while_loop
 
     elsif match?(:KEYWORD, 'STRUCT')
       consume(:KEYWORD)
@@ -266,13 +279,83 @@ class Parser
 
   def parse_expression
     lhs = parse_primary
-    while ['+', '-', '*', '/', '|>'].include?(current.value)
+    while ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>'].include?(current.value)
       op = current.value
-      current.type == :PIPE ? consume(:PIPE) : consume(:CHAR)
+      consume(current.type)
+      #current.type == :PIPE ? consume(:PIPE) : consume(:CHAR)
       rhs = parse_primary
       lhs = AST::BinaryOp.new(lhs, op, rhs)
     end
     lhs
+  end
+
+  def parse_unary
+    v = current.value
+    if ['-', '!'].include?(v)
+      consume(:CHAR)
+      # Recursively parse the thing being negated (handles --5)
+      right = parse_unary
+      op_code = v == '-' ? :SUB : :NOT
+      return AST::UnaryOp.new(op_code, right)
+    end
+
+    parse_primary
+  end
+
+  def parse_if_statement
+    consume(:KEYWORD, 'IF')
+    parse_if_chain
+  end
+
+  def parse_if_chain
+    condition = parse_expression
+    consume(:KEYWORD, 'THEN')
+
+    # 2. Parse 'THEN' Block
+    then_branch = []
+    until match?(:KEYWORD, 'ELSE') || match?(:KEYWORD, 'ELSE_IF') || match?(:KEYWORD, 'END')
+      stmt = parse_statement
+      then_branch << stmt if stmt
+    end
+
+    # 3. Parse Optional 'ELSE' Block
+    else_branch = []
+    if match?(:KEYWORD, 'ELSE_IF')
+      consume(:KEYWORD, 'ELSE_IF')
+      # We recurse! We treat the ELSIF as the start of a new IF node.
+      # This new node becomes the single statement inside our 'else_branch'.
+      # Note: We do NOT consume 'END' here, the recursion handles it.
+      nested_if = parse_if_chain
+      else_branch << nested_if
+
+    elsif match?(:KEYWORD, 'ELSE')
+      consume(:KEYWORD)
+      until match?(:KEYWORD, 'END')
+        stmt = parse_statement
+        else_branch << stmt if stmt
+      end
+      consume(:KEYWORD, 'END') # The chain finally ends here
+    else
+      consume(:KEYWORD, 'END')
+    end
+
+    AST::IfStatement.new(condition, then_branch, else_branch)
+  end
+
+  def parse_while_loop
+    consume(:KEYWORD, 'WHILE')
+    condition = parse_expression
+    consume(:KEYWORD, 'DO')
+
+    # Parse 'DO' Block
+    do_branch = []
+    until match?(:KEYWORD, 'END')
+      stmt = parse_statement
+      do_branch << stmt if stmt
+    end
+
+    consume(:KEYWORD, 'END')
+    AST::WhileLoop.new(condition, do_branch)
   end
 
   def parse_primary
@@ -293,13 +376,26 @@ class Parser
       target = parse_type_annotation
       consume(:CHAR, ')')
       return AST::Cast.new(val, target)
-    end
 
-    if match?(:PERCENT)
+    elsif match?(:PERCENT)
       return parse_sigil_construct
-    end
 
-    if match?(:VAR_ID)
+    elsif match?(:KEYWORD, 'TRUE')
+      consume(:KEYWORD)
+      return AST::Literal.new(:BOOLEAN, true)
+
+    elsif match?(:KEYWORD, 'FALSE')
+      consume(:KEYWORD)
+      return AST::Literal.new(:BOOLEAN, false)
+
+    elsif match?(:KEYWORD, 'NIL')
+      consume(:KEYWORD)
+      return AST::Literal.new(:NIL, nil)
+
+    elsif current.value == '-' || current.value == '!'
+      return parse_unary
+
+    elsif match?(:VAR_ID)
       name = consume(:VAR_ID).value
       if match?(:CHAR, '(')
          args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
@@ -385,18 +481,54 @@ class Compiler
       @code = []
       @constants = []
     end
+
     def add_constant(val)
       idx = @constants.index(val) || @constants.size
       @constants << val unless @constants.include?(val)
       idx
     end
+
     def emit(opcode, *operands); @code << [opcode, *operands]; end
+
+    # Returns the index of the instruction we just added
+    # so we can patch it later.
+    def emit_with_index(opcode, *operands)
+      @code << [opcode, *operands]
+      @code.size - 1
+    end
+
+    # Updates an operand of a previously emitted instruction
+    # offset: the index returned by emit_with_index
+    # operand_index: usually 1 (the first operand after the opcode)
+    # value: the jump target
+    def patch(offset, value, op_index = 1)
+      # instruction is [OPCODE, OP1, OP2...]
+      # We usually want to patch OP1, which is at index 1
+      @code[offset][op_index] = value
+    end
+
+    def current_address
+      @code.size
+    end
+
     def disassemble
       puts "== #{@name} =="
       @code.each_with_index do |ins, i|
         puts sprintf("%04d  %-10s %s", i, ins[0], ins[1..-1].join(" "))
       end
       puts ""
+    end
+
+    def to_h
+      {
+        name: @name,
+        code: @code,
+        constants: @constants.map do |c| 
+          v = c.is_a?(Chunk) ? c.to_h : c
+          k = c.is_a?(Chunk) ? "chunks" : c.is_a?(String) ? "string" : "number"
+          { k => v }
+        end
+      }
     end
   end
 
@@ -445,7 +577,7 @@ class Compiler
         with_temp_reg { |r| visit(s, r) }
       end
     end
-    @chunk.emit(:RETURN, 0)
+    @chunk.emit(:RETURN, "R0")
     @chunk
   end
 
@@ -492,7 +624,6 @@ class Compiler
 
         # 3. If it doesn't exist, fail
         if target_reg.nil?
-          puts "SCOPE: #{current_scope.locals.first(10)}"
           raise "Compile Error: Cannot SET '#{node.name}' because it has not been declared with VAR."
         end
 
@@ -544,9 +675,100 @@ class Compiler
         end
       end
 
+    when AST::UnaryOp
+      if node.op == :SUB
+        # Optimization: If it's a literal number, just load the negative version directly
+        if node.right.is_a?(AST::Literal) && node.right.type == :NUMBER
+           # Emit LOADK -5 directly
+           k = @chunk.add_constant(-node.right.value)
+           @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
+           return
+        end
+
+        # Generic Case: Calculate (0 - value)
+        with_temp_reg do |r_zero|
+          # 1. Load 0
+          k_zero = @chunk.add_constant(0)
+          emit(:LOADK, r_zero, "K#{k_zero}")
+
+          # 2. Compile the expression being negated
+          # Note: Depending on your register allocator, ensure 'visit' puts result in a known reg
+          # For this example, let's assume 'visit' returns the register it used.
+          r_val = visit(node.right)
+
+          # 3. Perform 0 - value
+          emit(:SUB, r_val, r_zero, r_val) # Target, LHS, RHS
+        end
+      
+      elsif node.op == :NOT
+        with_temp_reg do |r_src|
+          visit(node.right, r_src)
+          @chunk.emit(:NOT, "R#{target_reg}", "R#{r_src}")
+        end
+      end
+
     when AST::Cast
       visit(node.value, target_reg)
       @chunk.emit(:CAST, "R#{target_reg}", node.target)
+
+    when AST::IfStatement
+      # 1. Compile Condition
+      with_temp_reg do |r_cond|
+        visit(node.condition, r_cond)
+
+        # 2. Emit JMP_FALSE
+        # "If condition (r_cond) is false, jump to... Unknown (0) for now"
+        else_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+
+        # 3. Compile THEN branch
+        node.then_branch.each { |stmt| visit(stmt) }
+
+        # 4. Emit JMP (Unconditional)
+        # If we finished the THEN block, we must skip the ELSE block.
+        # Target is unknown (0) for now.
+        end_jump = @chunk.emit_with_index(:JMP, 0)
+
+        # 5. Patch the JMP_FALSE
+        # If the condition failed, we land HERE (start of else)
+        @chunk.patch(else_jump, @chunk.current_address, 2)
+
+        # 6. Compile ELSE branch (if exists)
+        node.else_branch.each { |stmt| visit(stmt) }
+
+        # 7. Patch the JMP
+        # If we finished the THEN block, we land HERE (end of everything)
+        @chunk.patch(end_jump, @chunk.current_address)
+      end
+
+    when AST::WhileLoop
+      with_temp_reg do |r_cond|
+        # 1. MARK START
+        # We need to know where to jump BACK to.
+        # Current instruction index is the start of the loop.
+        loop_start_index = @chunk.code.length
+
+        visit(node.condition, r_cond)
+
+        # 2. EMIT EXIT JUMP (Placeholder)
+        # If condition is false, we jump to the END.
+        # We don't know where the END is yet, so we write '0' for now.
+        do_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+        exit_jump_index = @chunk.code.length - 1
+
+        # 3. COMPILE BODY
+        # This emits the code inside the loop
+        node.do_branch.each { |stmt| visit(stmt) }
+
+        # 4. EMIT LOOP BACK
+        # Unconditionally jump back to the top (loop_start_index)
+        @chunk.emit_with_index(:JMP, loop_start_index)
+
+        # 5. PATCH THE EXIT JUMP
+        # Now that the body is done, we know the current index is the "End".
+        # Go back to the JMP_FALSE instruction and update the '0' to the current index.
+        loop_end_index = @chunk.code.length
+        @chunk.code[exit_jump_index][2] = loop_end_index
+      end
 
     when AST::ListLit
       # 1. Homogeneity Check (Compile Time)
@@ -593,7 +815,7 @@ class Compiler
     when AST::Identifier
       r = current_scope.resolve_reg(node.name)
       raise "Compile Error: Undefined variable '#{node.name}'" unless r
-      @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r
+      @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
 
     when AST::FuncCall # <-- Added missing handler for regular calls
        # Check if it's a print call (intrinsic) or regular
@@ -708,7 +930,7 @@ class Compiler
 
        # Always emit an implicit return
        # If the user already wrote a return statement, this cannot be reached
-       fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, 0)
+       fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R0")
 
        fn_chunk = fn_compiler.instance_variable_get(:@chunk)
        fn_chunk.name = node.name
@@ -722,7 +944,6 @@ class Compiler
     when AST::ReturnNode
       # 1. Check type
       actual_type = infer_type(node.value)
-      puts "RETURN VAL: #{node.value}"
       if @expected_return && @expected_return != :Any
         if actual_type != :Any && actual_type != @expected_return
           raise "Type Error: Function expected to return #{@expected_return}, but returned #{actual_type}"

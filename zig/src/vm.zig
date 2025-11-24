@@ -1,5 +1,94 @@
 const std = @import("std");
 
+pub const ChunkConstant = union(enum) {
+    chunks: *Chunk,
+    string: []const u8,
+    number: f64,
+};
+
+pub const Chunk = struct {
+    name: []const u8,
+    code: []const []const []const u8,
+    constants: []ChunkConstant = &.{},
+};
+
+pub const LoadedChunk = struct {
+    parsed: std.json.Parsed(Chunk),
+    raw_text: []u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: LoadedChunk) void {
+        // 1. Free the parsed structs (Arena)
+        self.parsed.deinit();
+        // 2. Free the raw file text
+        self.allocator.free(self.raw_text);
+    }
+};
+
+pub fn readChunk(allocator: std.mem.Allocator) !LoadedChunk {
+    const path = "/home/yahn/flux/prog.flux.json";
+
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        std.debug.print("Could not open {s}: {s}\n", .{path, @errorName(err)});
+        return err;
+    };
+    defer file.close();
+
+    // 1. Read file into a buffer (We know this works!)
+    const file_contents = try file.readToEndAlloc(allocator, 10 * 1024 * 1024);
+
+    // 2. Parse it
+    // Note: We use 'errdefer' to free the file_contents if parsing fails
+    const parsed = std.json.parseFromSlice(Chunk, allocator, file_contents, .{
+        .ignore_unknown_fields = true,
+    }) catch |err| {
+        allocator.free(file_contents);
+        return err;
+    };
+
+    // 3. Return BOTH the data and the buffer owner
+    return LoadedChunk{
+        .parsed = parsed,
+        .raw_text = file_contents,
+        .allocator = allocator,
+    };
+}
+
+// Return type is `!std.json.Parsed(Chunk)`
+// The `!` means "The union of all possible errors thrown inside this function"
+//pub fn readChunk(allocator: std.mem.Allocator) !std.json.Parsed(Chunk) {
+//    const file = std.fs.cwd().openFile("/home/yahn/flux/prog.flux.json", .{}) catch |err| {
+//        std.debug.print("Caught error: {s}\n", .{@errorName(err)});
+//        return err;
+//    };
+//    defer file.close();
+//
+//    // This worked
+//    // Use readToEndAlloc. We limit the file size to 100MB (100 * 1024 * 1024) to be safe.
+//    //const file_contents = try file.readToEndAlloc(allocator, 100 * 1024 * 1024);
+//
+//    //// Parse
+//    //const parsed = try std.json.parseFromSlice(Chunk, allocator, file_contents, .{
+//
+//
+//    // TRY THIS
+//    // 2. Create a buffered reader (faster than reading 1 byte at a time)
+//    const reader = file.reader();
+//    var json_reader = std.json.reader(allocator, reader);
+//    defer json_reader.deinit();
+//
+//    // 3. Create a JSON Reader (this converts the file stream into JSON tokens)
+//    //const json_reader = std.json.reader(allocator, reader);
+//    //const parsed = try std.json.parseFromSlice(Chunk, allocator, json_reader, .{
+//    const parsed = try std.json.parseFromTokenSource(Chunk, allocator, &json_reader, .{
+//        .ignore_unknown_fields = true,
+//    });
+//
+//    // Remember: Do NOT defer parsed.deinit() here, or you return dead pointers.
+//    return parsed;
+//}
+
+
 /// Memory
 pub const NanBoxedValue = packed struct {
     bits: u64,
@@ -409,7 +498,22 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("=== MsgPack Bytecode Loader Demo ===\n\n", .{});
+    const parsed_json = try readChunk(allocator);
+    defer parsed_json.deinit();
+
+    const main_chunk = parsed_json.parsed.value;
+    std.debug.print("=== JSON Bytecode Loader Demo ===\n\n", .{});
+
+    for (main_chunk.code, 0..) |instr_list, i| {
+        std.debug.print("  [{d:0>3}] ", .{i});
+        
+        // Loop through the tokens in the instruction
+        for (instr_list) |token| {
+            std.debug.print("{s} ", .{token});
+        }
+        std.debug.print("\n", .{});
+    }
+
     std.debug.print("\n=== Simulated Bytecode Execution ===\n\n", .{});
 
     // Create a mock bytecode module (as if loaded from MsgPack)

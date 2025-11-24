@@ -9,7 +9,7 @@ FN main %(args) RETURNS Number ->
 
   FN test %() USE(multiple) RETURNS String ->
     --
-    SET multiple = 1;
+    -- SET multiple = 1;
     RETURN "HI";
   END
 

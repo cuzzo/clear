@@ -1,6 +1,7 @@
 #! /usr/bin/env ruby
 
 require_relative "parser"
+require "msgpack"
 
 # ==========================================
 # 6. THE VIRTUAL MACHINE
@@ -142,8 +143,6 @@ class VM
         rhs_val = frame.registers[reg_idx[ins[3]]]
 
         sym = AST::OP_CODE_SENDABLE_SYMS[opcode]
-        puts "FRAME: #{frame.registers[1..10]}"
-        puts "BINARY OP: #{lhs_val} #{sym} #{rhs_val}"
         frame.registers[target] = lhs_val.send(sym, rhs_val)
 
       when :PIPE
@@ -151,6 +150,16 @@ class VM
         target = reg_idx[ins[1]]
         lhs = reg_idx[ins[2]]
         frame.registers[target] = frame.registers[lhs]
+
+      when :NOT
+        # NOT Rtarget, Rsrc
+        target = reg_idx[ins[1]]
+        src = reg_idx[ins[2]]
+        val = frame.registers[src]
+
+        # In Ruby, !nil is true, !false is true. Everything else is false.
+        # We can just leverage Ruby's native operator:
+        frame.registers[target] = !val
 
       when :PRINT
         # PRINT Rval
@@ -163,6 +172,27 @@ class VM
 
         @frames.pop
         return return_val
+
+      when :JMP
+        # JMP target_ip
+        # Unconditionally jump to a specific instruction index
+        target_ip = ins[1]
+        frame.ip = target_ip
+
+      when :JMP_FALSE
+        # JMP_FALSE Rcond, target_ip
+        # If the value in Rcond is "falsey", jump to target.
+        # Otherwise, do nothing (and let the loop increment ip naturally).
+        cond_reg = reg_idx[ins[1]]
+        target_ip = ins[2]
+        val = frame.registers[cond_reg]
+
+        # DEFINE TRUTHINESS:
+        # In Ruby, only false and nil are false. 0 is true. "" is true.
+        # We will stick to Ruby semantics for simplicity:
+        if val == false || val.nil?
+          frame.ip = target_ip
+        end
       end
     end
   end
@@ -207,7 +237,7 @@ def print_all_chunks(chunk)
   end
 end
 
-code = File.open("prog.flux").read()
+code = File.open(ARGV.first).read()
 puts "==== CODE ====="
 puts code
 
@@ -219,8 +249,9 @@ chunk = compiler.compile(ast)
 print_all_chunks(chunk)
 
 vm = VM.new()
-main_chunk = chunk.constants[0]
-resp = vm.run(main_chunk)
+resp = vm.run(chunk)
+
+File.binwrite(ARGV.first + 'c', chunk.to_h.to_msgpack)  # Fast, compact
 
 puts resp
 
