@@ -61,6 +61,28 @@ class VM
         target = reg_idx[ins[1]]
         frame.registers[target] = {}
 
+      when :NEWSTRUCT
+        target_reg = reg_idx[ins[1]]
+        struct_name = ins[2]
+        # We can implement Structs simply as Ruby Hashes for now
+        # You might want to store the struct_name in a special key like '__type'
+        frame.registers[target_reg] = { "__type" => struct_name }
+
+      when :SETFIELD
+        target_reg = reg_idx[ins[1]]
+        key        = ins[2]
+        val_reg    = reg_idx[ins[3]]
+
+        target = frame.registers[target_reg]
+        val    = frame.registers[val_reg]
+
+        # Safety Check
+        unless target.is_a?(Hash)
+          raise "Runtime Error: Cannot set field '#{key}' on #{target.class}"
+        end
+
+        target[key] = val
+
       when :SETHASH
         target = reg_idx[ins[1]]
         key    = ins[2]
@@ -203,6 +225,37 @@ class VM
         # Ruby semantics: false and nil are falsey. Everything else is true.
         if val != false && !val.nil?
           frame.ip = target_ip
+        end
+
+      when :GET_INDEX
+        target_reg = reg_idx[ins[1]]
+        list_reg   = reg_idx[ins[2]]
+        idx_reg    = reg_idx[ins[3]]
+
+        list = frame.registers[list_reg]
+        index = frame.registers[idx_reg]
+
+        # Basic error checking
+        unless list.is_a?(Array) || list.is_a?(String)
+           raise "Runtime Error: Attempt to index a #{list.class}"
+        end
+        
+        # Ruby arrays handle out-of-bounds by returning nil, which works fine for us
+        frame.registers[target_reg] = list[index]
+
+      when :GET_FIELD
+        target_reg = reg_idx[ins[1]]
+        obj_reg    = reg_idx[ins[2]]
+        field_name = ins[3] # This is a raw string from the bytecode
+
+        obj = frame.registers[obj_reg]
+        
+        # Determine how to read the field based on the object type
+        if obj.is_a?(Hash)
+          # For Structs/Maps implemented as Ruby Hashes
+          frame.registers[target_reg] = obj[field_name] || obj[field_name.to_sym]
+        else
+          raise "Runtime Error: Cannot get field '#{field_name}' from #{obj.class}"
         end
       end
     end

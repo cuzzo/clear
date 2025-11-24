@@ -22,6 +22,8 @@ module AST
   Lambda      = Struct.new(:params, :captures, :body)
   FuncCall    = Struct.new(:name, :args)
   MethodCall  = Struct.new(:object, :method, :args)
+  GetField    = Struct.new(:target, :field)
+  GetIndex    = Struct.new(:target, :index)
   Cast        = Struct.new(:value, :target)
   ReturnNode  = Struct.new(:value)
 
@@ -410,10 +412,34 @@ class Parser
       else
          node = AST::Identifier.new(name)
       end
-      while match?(:CHAR, '.')
-        consume(:CHAR); method = consume(:VAR_ID).value
-        args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-        node = AST::MethodCall.new(node, method, args)
+
+      # 2. Suffix Loop: Handle .method(), .field, and [index]
+      loop do
+        if match?(:CHAR, '.')
+          consume(:CHAR)
+          member = consume(:VAR_ID).value
+
+          if match?(:CHAR, '(')
+            # It's a Method Call: x.pop()
+            args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+            node = AST::MethodCall.new(node, member, args)
+          else
+            # It's a Field Access: x.name (New!)
+            # We need a new AST node for this, or treat it as "Get Field"
+            node = AST::GetField.new(node, member)
+          end
+
+        elsif match?(:CHAR, '[')
+          # It's an Index Access: x[0] (New!)
+          consume(:CHAR, '[')
+          index_expr = parse_expression
+          consume(:CHAR, ']')
+          node = AST::GetIndex.new(node, index_expr)
+
+        else
+          # No more suffixes, we are done.
+          break
+        end
       end
       return node
     end
@@ -742,6 +768,26 @@ class Compiler
           visit(node.right, r_src)
           @chunk.emit(:NOT, "R#{target_reg}", "R#{r_src}")
         end
+      end
+
+    when AST::GetIndex
+      # x[i]
+      with_temp_reg do |r_target|
+        visit(node.target, r_target) # Compile 'x'
+        with_temp_reg do |r_index|
+          visit(node.index, r_index) # Compile 'i'
+          # Emit GET_INDEX R_result, R_target, R_index
+          @chunk.emit(:GET_INDEX, "R#{target_reg}", "R#{r_target}", "R#{r_index}")
+        end
+      end
+
+    when AST::GetField
+      # x.name
+      with_temp_reg do |r_target|
+        visit(node.target, r_target)
+        # We assume field names are static strings for now
+        # Emit GET_FIELD R_result, R_target, "field_name"
+        @chunk.emit(:GET_FIELD, "R#{target_reg}", "R#{r_target}", node.field)
       end
 
     when AST::Cast
