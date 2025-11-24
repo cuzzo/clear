@@ -296,9 +296,9 @@ END
 
 ```
 FN sync_user %(id) ->
-  fetch_user(id) OR RETURN        -- Explicit: Return error to the user
+  fetch_user(id) OR RETURN         -- Explicit: Return error to the user
     |> parse_user OR GOTO_RECOVER -- Explicit: "Do this OR ghost to RECOVER"
-    |> enrich_data OR EXIT        -- Explicit Ejection (to CATCH below)
+    |> enrich_data OR EXIT_CHAIN  -- Explicit Ejection (to CATCH below)
     |> save_to_db OR ELSE 0       -- Explicit Recovery
        |> RECOVER(DefaultSync);
 CATCH EnrichError

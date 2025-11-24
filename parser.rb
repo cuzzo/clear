@@ -1,13 +1,15 @@
 #! /usr/bin/env ruby
 
 require 'strscan'
+require 'logger'
+#require 'byebug'
 
 # ==========================================
 # 1. AST
 # ==========================================
 module AST
   Program     = Struct.new(:statements)
-  FunctionDef = Struct.new(:name, :params, :captures, :return_type, :body)
+  FunctionDef = Struct.new(:name, :params, :captures, :return_type, :body, :catch_body, :catch_var)
   VarDecl     = Struct.new(:name, :type, :value)
   Assignment  = Struct.new(:name, :value)
   BinaryOp    = Struct.new(:left, :op, :right)
@@ -28,6 +30,8 @@ module AST
   Cast        = Struct.new(:value, :target)
   ReturnNode  = Struct.new(:value)
   Assert      = Struct.new(:condition, :message)
+  Raise       = Struct.new(:message_expr)
+  ThrowNode   = Struct.new(:value)
 
   BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>', '&&', '||', 'MOD', '**']
   UNARY_OPS = ['-', '!']
@@ -62,7 +66,8 @@ module AST
     '!' => :NOT,
     '&&' => :AND,
     '||' => :OR,
-    'MOD' => :MOD
+    'MOD' => :MOD,
+    'OR' => :OR_RESCUE
   }
 end
 
@@ -75,8 +80,13 @@ class Lexer
   # We use a hash for O(1) lookups
   # TODO: Should MOD be a keyword ???
   KEYWORDS = %w[
-      FN VAR IF THEN ELSE ELSE_IF END WHILE DO RETURN RETURNS SET CAST AS USE 
-      STRUCT TRUE FALSE NIL ASSERT
+      VAR SET
+      FN RETURN RETURNS USE
+      IF THEN ELSE ELSE_IF END 
+      WHILE DO 
+      CAST AS
+      STRUCT TRUE FALSE NIL 
+      ASSERT RAISE CATCH OR 
     ].map { |k| [k, true] }.to_h
 
   def initialize(source)
@@ -162,7 +172,7 @@ class Parser
 
   def parse
     stmts = []
-    stmts << parse_statement while current.type != :EOF
+    stmts << parse_statement() while current.type != :EOF
     AST::Program.new(stmts)
   end
 
@@ -195,67 +205,100 @@ class Parser
 
   def parse_statement
     if match?(:KEYWORD, 'VAR')
-      consume(:KEYWORD)
-      name = consume(:VAR_ID).value
-      type_node = :Any
-      if match?(:CHAR, ':')
-        consume(:CHAR)
-        type_node = parse_type_annotation.to_sym
-      end
-      consume(:CHAR, '=')
-      val = parse_expression
-      consume(:CHAR, ';')
-      AST::VarDecl.new(name, type_node, val)
+      parse_var_declare()
 
     elsif match?(:KEYWORD, 'SET')
-      consume(:KEYWORD)
-      name = consume(:VAR_ID).value
-      consume(:CHAR, '=')
-      val = parse_expression
-      consume(:CHAR, ';')
-      AST::Assignment.new(name, val)
+      parse_set_var()
 
     elsif match?(:KEYWORD, 'FN')
-      parse_function_def
+      parse_function_def()
 
     elsif match?(:KEYWORD, 'IF')
-      parse_if_statement
+      parse_if_statement()
 
     elsif match?(:KEYWORD, 'WHILE')
-      parse_while_loop
+      parse_while_loop()
 
     elsif match?(:KEYWORD, 'STRUCT')
-      parse_struct_def
+      parse_struct_def()
 
     elsif match?(:KEYWORD, 'RETURN')
-      consume(:KEYWORD)
-      val = parse_expression
-      consume(:CHAR, ';')
-      AST::ReturnNode.new(val)
+      parse_return()
 
     elsif match?(:KEYWORD, 'ASSERT')
-      consume(:KEYWORD)
+      parse_assert()
 
-      # 1. Parse the Condition
-      condition = parse_expression
-
-      # 2. Parse Optional Message
-      message = "Assertion Failed"
-      if match?(:CHAR, ',')
-        consume(:CHAR)
-        # For simplicity v1, strict string literal.
-        # (For v2, use parse_expression to allow dynamic strings)
-        message = consume(:STRING).value
-      end
-
-      consume(:CHAR, ';')
-      AST::Assert.new(condition, message)
+    elsif match?(:KEYWORD, 'RAISE')
+      parse_raise()
 
     else
       expr = parse_expression
       consume(:CHAR, ';')
       expr
     end
+  end
+
+  def parse_assert()
+    consume(:KEYWORD)
+
+    # 1. Parse the Condition
+    condition = parse_expression
+
+    # 2. Parse Optional Message
+    message = "Assertion Failed"
+    if match?(:CHAR, ',')
+      consume(:CHAR)
+      # For simplicity v1, strict string literal.
+      # (For v2, use parse_expression to allow dynamic strings)
+      message = consume(:STRING).value
+    end
+
+    consume(:CHAR, ';')
+    AST::Assert.new(condition, message)
+  end
+
+  def parse_raise()
+   consume(:KEYWORD)
+
+   message_expr = nil
+
+   # Check for optional message expression
+   if !match?(:CHAR, ';')
+     message_expr = parse_expression
+   end
+
+   consume(:CHAR, ';')
+   AST::Raise.new(message_expr)
+  end
+
+  def parse_return()
+    consume(:KEYWORD)
+    val = parse_expression
+    consume(:CHAR, ';')
+    AST::ReturnNode.new(val)
+  end
+
+  def parse_set_var()
+    consume(:KEYWORD)
+    name = consume(:VAR_ID).value
+    consume(:CHAR, '=')
+    val = parse_expression
+    consume(:CHAR, ';')
+    AST::Assignment.new(name, val)
+  end
+
+  def parse_var_declare()
+    consume(:KEYWORD)
+    name = consume(:VAR_ID).value
+    type_node = :Any
+    if match?(:CHAR, ':')
+      consume(:CHAR)
+      type_node = parse_type_annotation.to_sym
+    end
+    consume(:CHAR, '=')
+    val = parse_expression
+    consume(:CHAR, ';')
+    AST::VarDecl.new(name, type_node, val)
   end
 
   def parse_argument_list()
@@ -296,24 +339,70 @@ class Parser
 
     consume(:ARROW, '->')
     body = []
-    until match?(:KEYWORD, 'END')
-      stmt = parse_statement
+    until match?(:KEYWORD, 'END') || match?(:KEYWORD, 'CATCH')
+      stmt = parse_statement()
       body << stmt if stmt # Handle nil from STRUCT skip
     end
+
+    # 2. Parse Optional CATCH block
+    catch_body = []
+    catch_var = nil
+    if match?(:KEYWORD, 'CATCH')
+      consume(:KEYWORD)
+      catch_var = consume(:VAR_ID).value # Capture 'e' in CATCH e
+
+      until match?(:KEYWORD, 'END')
+        stmt = parse_statement()
+        catch_body << stmt if stmt
+      end
+    end
+
     consume(:KEYWORD, 'END')
-    AST::FunctionDef.new(name, params, captures, return_type, body)
+    AST::FunctionDef.new(name, params, captures, return_type, body, catch_body, catch_var)
   end
 
   def parse_expression
     lhs = parse_primary
-    while AST::BINARY_OPS.include?(current.value)
+    while AST::BINARY_OPS.include?(current.value) || current.value == 'OR'
       op = current.value
       consume(current.type)
-      #current.type == :PIPE ? consume(:PIPE) : consume(:CHAR)
-      rhs = parse_primary
-      lhs = AST::BinaryOp.new(lhs, op, rhs)
+      rhs = nil
+      if op == 'OR'
+        rhs = parse_or_rescue
+        lhs = AST::BinaryOp.new(lhs, :OR_RESCUE, rhs)
+      else
+        #current.type == :PIPE ? consume(:PIPE) : consume(:CHAR)
+        rhs = parse_primary
+        lhs = AST::BinaryOp.new(lhs, op, rhs)
+      end
     end
     lhs
+  end
+
+  def parse_or_rescue
+    if match?(:KEYWORD, 'RETURN')
+      # Syntax: ... OR RETURN
+      # Meaning: Return the error object to the caller
+      consume(:KEYWORD)
+      rhs = AST::ReturnNode.new(nil) # Nil value implies "Use the Pipe Result"
+
+    elsif match?(:KEYWORD, 'EXIT')
+      # Syntax: ... OR EXIT
+      # Meaning: Throw the error object (triggering local CATCH)
+      consume(:KEYWORD)
+      rhs = AST::ThrowNode.new(nil) # Nil value implies "Use the Pipe Result"
+
+    elsif match?(:KEYWORD, 'ELSE')
+      # Syntax: ... OR ELSE value
+      # Meaning: Replace the error with a default value
+      consume(:KEYWORD)
+      rhs = parse_primary # Parse the value (e.g., 0 or "default")
+
+    else
+      # Syntax: ... OR expression
+      # Standard OR behavior
+      rhs = parse_primary
+    end
   end
 
   def parse_unary
@@ -380,7 +469,7 @@ class Parser
     # 2. Parse 'THEN' Block
     then_branch = []
     until match?(:KEYWORD, 'ELSE') || match?(:KEYWORD, 'ELSE_IF') || match?(:KEYWORD, 'END')
-      stmt = parse_statement
+      stmt = parse_statement()
       then_branch << stmt if stmt
     end
 
@@ -397,7 +486,7 @@ class Parser
     elsif match?(:KEYWORD, 'ELSE')
       consume(:KEYWORD)
       until match?(:KEYWORD, 'END')
-        stmt = parse_statement
+        stmt = parse_statement()
         else_branch << stmt if stmt
       end
       consume(:KEYWORD, 'END') # The chain finally ends here
@@ -416,7 +505,7 @@ class Parser
     # Parse 'DO' Block
     do_branch = []
     until match?(:KEYWORD, 'END')
-      stmt = parse_statement
+      stmt = parse_statement()
       do_branch << stmt if stmt
     end
 
@@ -448,28 +537,16 @@ class Parser
     AST::StructDef.new(name, fields)
   end
 
-
   def parse_primary
     return AST::Literal.new(:NUMBER, consume(:NUMBER).value) if match?(:NUMBER)
     return AST::Literal.new(:STRING, consume(:STRING).value) if match?(:STRING)
 
     # CAST LOGIC
     if current.value == 'CAST'
-      consume(current.type) # CAST
-      consume(:CHAR, '(')
-
-      val = parse_expression
-
-      if current.value != 'AS'
-        raise "Expected AS, got #{current.value}"
-      end
-      consume(current.type) # AS
-      target = parse_type_annotation
-      consume(:CHAR, ')')
-      return AST::Cast.new(val, target)
+      return parse_cast()
 
     elsif match?(:PERCENT)
-      return parse_sigil_construct
+      return parse_sigil_construct()
 
     elsif match?(:KEYWORD, 'TRUE')
       consume(:KEYWORD)
@@ -484,13 +561,28 @@ class Parser
       return AST::Literal.new(:NIL, nil)
 
     elsif current.value == '-' || current.value == '!'
-      return parse_unary
+      return parse_unary()
 
     elsif match?(:VAR_ID)
-      return parse_var_id
+      return parse_var_id()
     end
 
     raise "Unexpected token #{current.value} (#{current.type}) line #{current.line}"
+  end
+
+  def parse_cast
+    consume(current.type) # CAST
+    consume(:CHAR, '(')
+
+    val = parse_expression
+
+    if current.value != 'AS'
+      raise "Expected AS, got #{current.value}"
+    end
+    consume(current.type) # AS
+    target = parse_type_annotation
+    consume(:CHAR, ')')
+    return AST::Cast.new(val, target)
   end
 
   def parse_sigil_construct
@@ -554,11 +646,12 @@ end
 # ==========================================
 class Compiler
   class Chunk
-    attr_accessor :code, :constants, :name
+    attr_accessor :code, :constants, :name, :handler_info
     def initialize(name = "main")
       @name = name
       @code = []
       @constants = []
+      @logger = $logger || Logger.new(STDOUT)
     end
 
     def add_constant(val)
@@ -591,11 +684,11 @@ class Compiler
     end
 
     def disassemble
-      puts "== #{@name} =="
+      @logger.debug("== #{@name} ==")
       @code.each_with_index do |ins, i|
-        puts sprintf("%04d  %-10s %s", i, ins[0], ins[1..-1].join(" "))
+        @logger.debug(sprintf("%04d  %-10s %s", i, ins[0], ins[1..-1].join(" ")))
       end
-      puts ""
+      @logger.debug("")
     end
 
     def to_h
@@ -639,19 +732,21 @@ class Compiler
     end
   end
 
+  attr_accessor :chunk, :reg_top
   def initialize(name = "main", return_type = :Any)
     @chunk = Chunk.new(name)
     @scopes = [Scope.new]
     @reg_top = 0
     @expected_return = return_type
+    @logger = $logger || Logger.new(STDOUT)
   end
 
   def compile(ast)
     ast.statements.each do |s|
-      # If it's a VarDecl, it handles its own register.
-      # If it's an Expression (like the pipe), we must give it a temp register.
-      if s.is_a?(AST::VarDecl) || s.is_a?(AST::FunctionDef)
-        with_temp_reg { |r| visit(s, r) }
+      if s.is_a?(AST::VarDecl)
+        # FIX: Call directly. Let VarDecl manage @reg_top internally.
+        # It will increment it and KEEP it incremented.
+        visit(s)
       else
         with_temp_reg { |r| visit(s, r) }
       end
@@ -663,399 +758,56 @@ class Compiler
   def current_scope; @scopes.last; end
   def with_temp_reg; r = @reg_top; @reg_top += 1; yield r; @reg_top -= 1; end
 
-  def visit(node, target_reg = nil)
+  def visit(node, target_reg = nil, auto_throw_pipe: true)
     case node
-    when AST::VarDecl
-      r = @reg_top; @reg_top += 1
-      visit(node.value, r)
-
-      # 1. Determine the Type
-      actual_type = infer_type(node.value)
-      declared_type = node.type
-
-      final_type = :Any
-
-      if declared_type && declared_type != :Any
-        # Case A: Explicit Type (VAR x: Number = ...)
-        # Verify it matches!
-        if declared_type != actual_type && actual_type != :Any
-           raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
-        end
-        final_type = declared_type
-      else
-        # Case B: Inferred Type (VAR x = ...)
-        final_type = actual_type
-      end
-
-      current_scope.declare(node.name, r, final_type)
-
-    when AST::Assignment
-      if current_scope.is_immutable?(node.name)
-        raise "Compile Error: Variable '#{node.name}' is immutable/captured and cannot be SET."
-      end
-
-      # 1. Compile the new value into a temporary register
-      with_temp_reg do |r_new_val|
-        visit(node.value, r_new_val)
-
-        # 2. Look up the variable's existing register
-        target_reg = current_scope.resolve_reg(node.name)
-
-        # 3. If it doesn't exist, fail
-        if target_reg.nil?
-          raise "Compile Error: Cannot SET '#{node.name}' because it has not been declared with VAR."
-        end
-
-        existing_type = current_scope.resolve_type(node.name)
-        new_type = infer_type(node.value)
-        new_type = new_type == :Any ? existing_type : new_type
-        if new_type != existing_type
-          raise "Type Error: Cannot assign #{new_type} to variable '#{node.name}' of type #{existing_type}"
-        end
-
-        @chunk.emit(:MOVE, "R#{target_reg}", "R#{r_new_val}")
-      end
-
-    when AST::Literal
-      k = @chunk.add_constant(node.value)
-      @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
-
-    when AST::BinaryOp
-      if node.op == '|>'
-         # Don't do the normal math logic
-         return compile_pipe(node, target_reg)
-
-      elsif node.op == '&&'
-        # 1. Compile Left into target_reg
-        visit(node.left, target_reg)
-
-        # 2. Short Circuit: If Left is FALSE, Jump to End
-        # The result (FALSE) is already sitting in target_reg, so we are done.
-        end_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{target_reg}", 0)
-
-        # 3. Compile Right
-        # If we didn't jump, calculate Right and put it in target_reg
-        visit(node.right, target_reg)
-
-        # 4. Patch the Jump
-        @chunk.patch(end_jump, @chunk.current_address, 2)
-        return # Don't do the normal math logic
-
-      elsif node.op == '||'
-        # 1. Compile Left
-        visit(node.left, target_reg)
-
-        # 2. Short Circuit: If Left is TRUE, Jump to End
-        end_jump = @chunk.emit_with_index(:JMP_TRUE, "R#{target_reg}", 0)
-
-        # 3. Compile Right
-        visit(node.right, target_reg)
-
-        # 4. Patch
-        @chunk.patch(end_jump, @chunk.current_address, 2)
-        return # Don't do the normal math logic
-      end
-
-      with_temp_reg do |r1|
-        visit(node.left, r1)
-        with_temp_reg do |r2|
-          visit(node.right, r2)
-
-          if AST::OP_TO_OP_CODE[node.op]
-            @chunk.emit(AST::OP_TO_OP_CODE[node.op], "R#{target_reg}", "R#{r1}", "R#{r2}")
-          else
-            raise "Unknown binary operator: #{node.op}"
-          end
-        end
-      end
-
-    when AST::UnaryOp
-      if node.op == :SUB
-        # Optimization: If it's a literal number, just load the negative version directly
-        if node.right.is_a?(AST::Literal) && node.right.type == :NUMBER
-           # Emit LOADK -5 directly
-           k = @chunk.add_constant(-node.right.value)
-           @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
-           return
-        end
-
-        # Generic Case: Calculate (0 - value)
-        with_temp_reg do |r_zero|
-          # 1. Load 0
-          k_zero = @chunk.add_constant(0)
-          emit(:LOADK, r_zero, "K#{k_zero}")
-
-          # 2. Compile the expression being negated
-          # Note: Depending on your register allocator, ensure 'visit' puts result in a known reg
-          # For this example, let's assume 'visit' returns the register it used.
-          r_val = visit(node.right)
-
-          # 3. Perform 0 - value
-          emit(:SUB, r_val, r_zero, r_val) # Target, LHS, RHS
-        end
-      
-      elsif node.op == :NOT
-        with_temp_reg do |r_src|
-          visit(node.right, r_src)
-          @chunk.emit(:NOT, "R#{target_reg}", "R#{r_src}")
-        end
-      end
-
-    when AST::GetIndex
-      # x[i]
-      with_temp_reg do |r_target|
-        visit(node.target, r_target) # Compile 'x'
-        with_temp_reg do |r_index|
-          visit(node.index, r_index) # Compile 'i'
-          # Emit GET_INDEX R_result, R_target, R_index
-          @chunk.emit(:GET_INDEX, "R#{target_reg}", "R#{r_target}", "R#{r_index}")
-        end
-      end
-
-    when AST::GetField
-      # x.name
-      with_temp_reg do |r_target|
-        visit(node.target, r_target)
-        # We assume field names are static strings for now
-        # Emit GET_FIELD R_result, R_target, "field_name"
-        @chunk.emit(:GET_FIELD, "R#{target_reg}", "R#{r_target}", node.field)
-      end
-
-    when AST::Cast
-      visit(node.value, target_reg)
-      @chunk.emit(:CAST, "R#{target_reg}", node.target)
-
-    when AST::IfStatement
-      # 1. Compile Condition
-      with_temp_reg do |r_cond|
-        visit(node.condition, r_cond)
-
-        # 2. Emit JMP_FALSE
-        # "If condition (r_cond) is false, jump to... Unknown (0) for now"
-        else_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
-
-        # 3. Compile THEN branch
-        node.then_branch.each { |stmt| visit(stmt) }
-
-        # 4. Emit JMP (Unconditional)
-        # If we finished the THEN block, we must skip the ELSE block.
-        # Target is unknown (0) for now.
-        end_jump = @chunk.emit_with_index(:JMP, 0)
-
-        # 5. Patch the JMP_FALSE
-        # If the condition failed, we land HERE (start of else)
-        @chunk.patch(else_jump, @chunk.current_address, 2)
-
-        # 6. Compile ELSE branch (if exists)
-        node.else_branch.each { |stmt| visit(stmt) }
-
-        # 7. Patch the JMP
-        # If we finished the THEN block, we land HERE (end of everything)
-        @chunk.patch(end_jump, @chunk.current_address)
-      end
-
-    when AST::WhileLoop
-      with_temp_reg do |r_cond|
-        # 1. MARK START
-        # We need to know where to jump BACK to.
-        # Current instruction index is the start of the loop.
-        loop_start_index = @chunk.code.length
-
-        visit(node.condition, r_cond)
-
-        # 2. EMIT EXIT JUMP (Placeholder)
-        # If condition is false, we jump to the END.
-        # We don't know where the END is yet, so we write '0' for now.
-        do_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
-        exit_jump_index = @chunk.code.length - 1
-
-        # 3. COMPILE BODY
-        # This emits the code inside the loop
-        node.do_branch.each { |stmt| visit(stmt) }
-
-        # 4. EMIT LOOP BACK
-        # Unconditionally jump back to the top (loop_start_index)
-        @chunk.emit_with_index(:JMP, loop_start_index)
-
-        # 5. PATCH THE EXIT JUMP
-        # Now that the body is done, we know the current index is the "End".
-        # Go back to the JMP_FALSE instruction and update the '0' to the current index.
-        loop_end_index = @chunk.code.length
-        @chunk.code[exit_jump_index][2] = loop_end_index
-      end
-
-    when AST::ListLit
-      # 1. Homogeneity Check (Compile Time)
-      if node.items.any?
-        # Guess type of first item (e.g. :Number)
-        expected_type = infer_type(node.items.first)
-
-        node.items.each_with_index do |item, idx|
-          current_type = infer_type(item)
-          if current_type != expected_type
-             raise "Type Error: List contains mixed types. Item #{idx} is #{current_type}, expected #{expected_type}."
-          end
-        end
-      else
-        # TODO - next, add optional type annotations to initializations
-        # Then - if not declared when empty, raise error
-
-        # Edge Case: Empty List %[]
-        # You either force a type annotation (VAR x: Vector[Number] = %[])
-        # or assume Vector[Any].
-      end
-
-      @chunk.emit(:NEWLIST, "R#{target_reg}")
-      node.items.each { |item| with_temp_reg { |r| visit(item, r); @chunk.emit(:APPEND, "R#{target_reg}", "R#{r}") } }
-
-    when AST::StructLit
-      @chunk.emit(:NEWSTRUCT, "R#{target_reg}", node.name)
-      node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(:SETFIELD, "R#{target_reg}", k, "R#{r}") } }
-
-    when AST::StructDef
-      # Emit: DEF_STRUCT "Name", { "field" => "Type" }
-      @chunk.emit(:DEF_STRUCT, node.name, node.fields)
-
-     when AST::HashLit
-       # Treat Hash like a Struct or List (for v0.1, let's use NEWSTRUCT for simplicity)
-       @chunk.emit(:NEWHASH, "R#{target_reg}")
-       node.pairs.each do |k, v|
-         with_temp_reg do |r|
-           visit(v, r)
-           # Assuming keys are strings/identifiers
-           # If 'k' is an expression, you'd need to visit it too.
-           # For v0.1 simple string keys:
-           key_name = k.is_a?(AST::Literal) ? k.value : k.name
-           @chunk.emit(:SETHASH, "R#{target_reg}", key_name, "R#{r}")
-         end
-       end
-
-    when AST::Identifier
-      r = current_scope.resolve_reg(node.name)
-      raise "Compile Error: Undefined variable '#{node.name}'" unless r
-      @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
-
-    when AST::FuncCall 
-      compile_func_call(node, target_reg)
-
-    when AST::MethodCall
-       with_temp_reg do |r_obj|
-         visit(node.object, r_obj)
-         args = []
-         node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
-         @chunk.emit(:CALL_METHOD, "R#{target_reg}", "R#{r_obj}", node.method, *args)
-         @reg_top -= args.size
-       end
-
-    when AST::Lambda
-       # 1. Spin up a new compiler for the anonymous function
-       fn_compiler = Compiler.new("lambda")
-
-       # 2. Register parameters (e.g., "x" becomes R0)
-       node.params.each_with_index do |p, i|
-         fn_compiler.current_scope.declare(p[:name], i, p[:type])
-       end
-
-       # Start allocating registers after the params
-       reg_offset = node.params.size
-
-       captured_regs = []
-       # 2. Register Captures (multiple -> R1)
-       # We treat captures like "Hidden Parameters" that get loaded into
-       # registers R1, R2, etc., immediately after the real arguments.
-       node.captures.each do |cap|
-          cap_name, cap_type = cap.values_at(:name, :type)
-
-          outer_reg = current_scope.resolve_reg(cap_name)
-
-          # A. Ensure it exists in the outer scope
-          unless outer_reg
-             raise "Compile Error: Cannot capture '#{cap_name}' - undefined in outer scope."
-          end
-
-          captured_regs << "R#{outer_reg}"
-
-          # B. Declare it in the inner scope
-          fn_compiler.current_scope.declare(cap_name, reg_offset, cap_type, false)
-          reg_offset += 1
-       end
-
-       # 3. Set register offset (Next free reg is after params)
-       # If we have 1 param (R0), next is R1.
-       result_reg = reg_offset
-       fn_compiler.instance_variable_set(:@reg_top, result_reg)
-
-       # 4. Compile the Body
-       # The body is a single expression (x * 10).
-       # We visit it, putting the result into 'result_reg'.
-       fn_compiler.send(:visit, node.body, result_reg)
-
-       # 5. Emit Return
-       fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R#{result_reg}")
-
-       # 6. Store the Chunk as a Constant
-       fn_chunk = fn_compiler.instance_variable_get(:@chunk)
-       k = @chunk.add_constant(fn_chunk)
-
-       # 7. Emit the CLOSURE op with the Constant ID
-       # NOTE: In a real VM, this instruction would also need to list
-       # the registers to capture (e.g., CLOSURE R6 K3 [R_multiple]).
-       # For v0.1, we are just fixing the Scope resolution.
-       @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
-
-    when AST::FunctionDef
-       compile_function_def(node, target_reg)
-
-    when AST::ReturnNode
-      # 1. Check type
-      actual_type = infer_type(node.value)
-      if @expected_return && @expected_return != :Any
-        if actual_type != :Any && actual_type != @expected_return
-          raise "Type Error: Function expected to return #{@expected_return}, but returned #{actual_type}"
-        end
-      end
-
-      # 2. We need a register to hold the return value
-      with_temp_reg do |r|
-        # 3. Compile the expression into that register
-        visit(node.value, r)
-        # 4. Emit the instruction
-        @chunk.emit(:RETURN, "R#{r}")
-      end
-
-    when AST::Assert
-      with_temp_reg do |r_cond|
-        # 1. Compile Condition
-        visit(node.condition, r_cond)
-
-        # 2. Store Message in Constants
-        k_msg = @chunk.add_constant(node.message)
-
-        # 3. Emit ASSERT R_cond, K_msg
-        @chunk.emit(:ASSERT, "R#{r_cond}", "K#{k_msg}")
-      end
+    when AST::VarDecl then compile_var_declare(node, target_reg);
+    when AST::Assignment then compile_assignment(node, target_reg);
+    when AST::Literal then compile_literal(node, target_reg);
+    when AST::BinaryOp then compile_binary_op(node, target_reg, auto_throw_pipe);
+    when AST::UnaryOp then compile_unary_op(node, target_reg);
+    when AST::GetIndex then compile_get_index(node, target_reg);
+    when AST::GetField then compile_get_field(node, target_reg);
+    when AST::Cast then compile_cast(node, target_reg);
+    when AST::IfStatement then compile_if_statement(node, target_reg);
+    when AST::WhileLoop then compile_while_loop(node, target_reg);
+    when AST::ListLit then compile_list_lit(node, target_reg);
+    when AST::StructLit then compile_struct_lit(node, target_reg);
+    when AST::StructDef then compile_struct_def(node, target_reg);
+    when AST::HashLit then compile_hash_lit(node, target_reg);
+    when AST::Identifier then compile_identifier(node, target_reg);
+    when AST::FuncCall then compile_func_call(node, target_reg);
+    when AST::MethodCall then compile_method_call(node, target_reg);
+    when AST::Lambda then compile_lambda(node, target_reg);
+    when AST::FunctionDef then compile_function_def(node, target_reg);
+    when AST::ReturnNode then compile_return_node(node, target_reg);
+    when AST::Assert then compile_assert(node, target_reg);
+    when AST::Raise then compile_raise(node, target_reg);
     end
   end
 
-  def compile_pipe(node, target_reg)
+  def compile_pipe(node, target_reg, auto_throw_pipe)
     # 1. Compile the Left Side (The Data)
     # We keep the result in 'target_reg' because we want the final result 
     # of the chain to end up there.
     visit(node.left, target_reg)
 
-    # --- RAILWAY LOGIC ---
-    
-    # 2. Emit the Guard Check
-    # "If target_reg holds an Error, JUMP over the function call."
-    # The Error value remains in target_reg, effectively skipping the step.
-    skip_jump = @chunk.emit_with_index(:JMP_IF_ERROR, "R#{target_reg}", 0)
+    # 2. Emit Guard Logic based on Context
+    if auto_throw_pipe
+      # A. Default Mode: "Bang" Pipe (Auto-Throw)
+      # If error, crash immediately to CATCH.
+      @chunk.emit(:THROW_IF_ERROR, "R#{target_reg}")
+
+      # Note: We don't need a jump here because THROW stops execution.
+      skip_jump = nil
+    else
+      # B. Soft Mode: Railway Pipe (Pass-through)
+      # If error, JUMP over the call, keeping the Error in the register.
+      skip_jump = @chunk.emit_with_index(:JMP_IF_ERROR, "R#{target_reg}", 0)
+    end
 
     # 3. Compile the Function Call (Right Side)
     if node.right.is_a?(AST::FuncCall)
-       # We need to treat this like a function call, but with 
-       # 'target_reg' injected as the FIRST argument.
-       
-       # A. Compile the explicit arguments from the code
+       # A. Collect Arguments
        args_regs = ["R#{target_reg}"] # Start with the piped data
        
        node.right.args.each do |arg|
@@ -1066,29 +818,23 @@ class Compiler
        end
        
        # B. Emit the Call
-       # CRITICAL: The result of the call must land back in 'target_reg'
-       # to continue the pipeline chain!
        if node.right.name == "print"
           @chunk.emit(:PRINT, *args_regs)
-          # Print doesn't return a value in some languages, 
-          # but in a pipeline, it usually returns nil or the input.
-          # For now, let's assume it passes the input through or returns NIL.
        elsif node.right.name == "native_call"
-         raise "Compiler Error: Cannot pipe directly to 'native_call'. Wrap it in a function."
+          raise "Compiler Error: Cannot pipe directly to 'native_call'. Wrap it in a function."
        else
           # Standard Function Call
-          # Note: We need to update CALL_FUNC to accept a target register!
-          # Change your CALL_FUNC emission to include target_reg:
           @chunk.emit(:CALL_FUNC, "R#{target_reg}", node.right.name, args_regs.size, *args_regs)
        end
 
-       # Cleanup registers used for args (but NOT the target_reg)
+       # Cleanup registers used for args
        @reg_top -= (args_regs.size - 1) 
     end
-    
-    # 4. Patch the Jump
-    # If we had an error, we land here. 'target_reg' still holds the Error.
-    @chunk.patch(skip_jump, @chunk.current_address, 2)
+
+    # 4. Patch Jump (Only if we are in Soft Mode)
+    if skip_jump
+      @chunk.patch(skip_jump, @chunk.current_address, 2)
+    end
   end
 
   def compile_function_def(node, target_reg)
@@ -1133,6 +879,29 @@ class Compiler
         end
       end
     end
+
+    success_jump = fn_compiler.chunk.emit_with_index(:JMP, 0)
+
+    if node.catch_body.any?
+      handler_ip = fn_compiler.chunk.current_address
+
+       # A. Allocate register for the error variable 'e'
+       r_err = fn_compiler.reg_top
+       fn_compiler.reg_top += 1
+       fn_compiler.current_scope.declare(node.catch_var, r_err, :Error)
+
+       # B. Compile CATCH block
+       node.catch_body.each { |s| fn_compiler.send(:visit, s) }
+       fn_compiler.chunk.emit(:RETURN, "R0") # ENSURE IMPLICIT RETURN
+
+       # C. Store handler metadata on the Chunk (for VM to find)
+       fn_compiler.chunk.handler_info = {
+           handler: handler_ip,
+           err_reg: r_err
+       }
+    end
+
+    fn_compiler.chunk.patch(success_jump, fn_compiler.chunk.current_address)
 
     # Always emit an implicit return
     # If the user already wrote a return statement, this cannot be reached
@@ -1206,6 +975,454 @@ class Compiler
 
        # C. Cleanup registers
        @reg_top -= args_regs.size
+    end
+  end
+
+  def compile_var_declare(node, target_reg)
+    r = @reg_top; 
+    @reg_top += 1
+    visit(node.value, r)
+
+    # 1. Determine the Type
+    actual_type = infer_type(node.value)
+    declared_type = node.type
+
+    final_type = :Any
+
+    if declared_type && declared_type != :Any
+      # Case A: Explicit Type (VAR x: Number = ...)
+      # Verify it matches!
+      if declared_type != actual_type && actual_type != :Any
+         raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
+      end
+      final_type = declared_type
+    else
+      # Case B: Inferred Type (VAR x = ...)
+      final_type = actual_type
+    end
+
+    current_scope.declare(node.name, r, final_type)
+  end
+
+  def compile_assignment(node, target_reg)
+    if current_scope.is_immutable?(node.name)
+      raise "Compile Error: Variable '#{node.name}' is immutable/captured and cannot be SET."
+    end
+
+    # 1. Compile the new value into a temporary register
+    with_temp_reg do |r_new_val|
+      visit(node.value, r_new_val)
+
+      # 2. Look up the variable's existing register
+      target_reg = current_scope.resolve_reg(node.name)
+
+      # 3. If it doesn't exist, fail
+      if target_reg.nil?
+        raise "Compile Error: Cannot SET '#{node.name}' because it has not been declared with VAR."
+      end
+
+      existing_type = current_scope.resolve_type(node.name)
+      new_type = infer_type(node.value)
+      new_type = new_type == :Any ? existing_type : new_type
+      if new_type != existing_type
+        raise "Type Error: Cannot assign #{new_type} to variable '#{node.name}' of type #{existing_type}"
+      end
+
+      @chunk.emit(:MOVE, "R#{target_reg}", "R#{r_new_val}")
+    end
+  end
+
+  def compile_binary_op(node, target_reg, auto_throw_pipe)
+    if node.op == '|>'
+       # Don't do the normal math logic
+       return compile_pipe(node, target_reg, auto_throw_pipe)
+
+    elsif node.op == :OR_RESCUE
+      # 1. Compile Left Side (The Pipe/Expression)
+      # auto_throw_pipe: false -> Return Error struct, don't crash
+      visit(node.left, target_reg, auto_throw_pipe: false)
+
+      # 2. Emit Check: "Jump to End if OK"
+      # If target_reg is valid data, we skip the recovery block.
+      success_jump = @chunk.emit_with_index(:JMP_IF_OK, "R#{target_reg}", 0)
+
+      # 3. Compile Right Side (The Recovery)
+      # At this point, target_reg holds the %Error object.
+
+      if node.right.is_a?(AST::ReturnNode) && node.right.value.nil?
+         # Syntax: OR RETURN
+         # Action: Return the current register (the Error)
+         @chunk.emit(:RETURN, "R#{target_reg}")
+
+      elsif node.right.is_a?(AST::ThrowNode) && node.right.value.nil?
+         # Syntax: OR EXIT
+         # Action: Throw the current register (the Error)
+         @chunk.emit(:THROW, "R#{target_reg}")
+
+      else
+         # Syntax: OR ELSE <value>
+         # Action: Compile the value into the target register (overwriting the Error)
+         visit(node.right, target_reg)
+      end
+
+      # 4. Patch the Jump
+      @chunk.patch(success_jump, @chunk.current_address, 2)
+      return
+
+    elsif node.op == '&&'
+      # 1. Compile Left into target_reg
+      visit(node.left, target_reg)
+
+      # 2. Short Circuit: If Left is FALSE, Jump to End
+      # The result (FALSE) is already sitting in target_reg, so we are done.
+      end_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{target_reg}", 0)
+
+      # 3. Compile Right
+      # If we didn't jump, calculate Right and put it in target_reg
+      visit(node.right, target_reg)
+
+      # 4. Patch the Jump
+      @chunk.patch(end_jump, @chunk.current_address, 2)
+      return # Don't do the normal math logic
+
+    elsif node.op == '||'
+      # 1. Compile Left
+      visit(node.left, target_reg)
+
+      # 2. Short Circuit: If Left is TRUE, Jump to End
+      end_jump = @chunk.emit_with_index(:JMP_TRUE, "R#{target_reg}", 0)
+
+      # 3. Compile Right
+      visit(node.right, target_reg)
+
+      # 4. Patch
+      @chunk.patch(end_jump, @chunk.current_address, 2)
+      return # Don't do the normal math logic
+    end
+
+    with_temp_reg do |r1|
+      visit(node.left, r1)
+      with_temp_reg do |r2|
+        visit(node.right, r2)
+
+        if AST::OP_TO_OP_CODE[node.op]
+          @chunk.emit(AST::OP_TO_OP_CODE[node.op], "R#{target_reg}", "R#{r1}", "R#{r2}")
+        else
+          raise "Unknown binary operator: #{node.op}"
+        end
+      end
+    end
+  end
+
+  def compile_unary_op(node, target_reg)
+    if node.op == :SUB
+      # Optimization: If it's a literal number, just load the negative version directly
+      if node.right.is_a?(AST::Literal) && node.right.type == :NUMBER
+         # Emit LOADK -5 directly
+         k = @chunk.add_constant(-node.right.value)
+         @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
+         return
+      end
+
+      # Generic Case: Calculate (0 - value)
+      with_temp_reg do |r_zero|
+        # 1. Load 0
+        k_zero = @chunk.add_constant(0)
+        emit(:LOADK, r_zero, "K#{k_zero}")
+
+        # 2. Compile the expression being negated
+        # Note: Depending on your register allocator, ensure 'visit' puts result in a known reg
+        # For this example, let's assume 'visit' returns the register it used.
+        r_val = visit(node.right)
+
+        # 3. Perform 0 - value
+        emit(:SUB, r_val, r_zero, r_val) # Target, LHS, RHS
+      end
+    
+    elsif node.op == :NOT
+      with_temp_reg do |r_src|
+        visit(node.right, r_src)
+        @chunk.emit(:NOT, "R#{target_reg}", "R#{r_src}")
+      end
+    end
+  end
+
+  def compile_get_index(node, target_reg)
+    # x[i]
+    with_temp_reg do |r_target|
+      visit(node.target, r_target) # Compile 'x'
+      with_temp_reg do |r_index|
+        visit(node.index, r_index) # Compile 'i'
+        # Emit GET_INDEX R_result, R_target, R_index
+        @chunk.emit(:GET_INDEX, "R#{target_reg}", "R#{r_target}", "R#{r_index}")
+      end
+    end
+  end
+
+  def compile_get_field(node, target_reg)
+    # x.name
+    with_temp_reg do |r_target|
+      visit(node.target, r_target)
+      # We assume field names are static strings for now
+      # Emit GET_FIELD R_result, R_target, "field_name"
+      @chunk.emit(:GET_FIELD, "R#{target_reg}", "R#{r_target}", node.field)
+    end
+  end
+
+  def compile_cast(node, target_reg)
+    visit(node.value, target_reg)
+    @chunk.emit(:CAST, "R#{target_reg}", node.target)
+  end
+
+  def compile_literal(node, target_reg)
+    k = @chunk.add_constant(node.value)
+    @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
+  end
+
+  def compile_if_statement(node, target_reg)
+    # 1. Compile Condition
+    with_temp_reg do |r_cond|
+      visit(node.condition, r_cond)
+
+      # 2. Emit JMP_FALSE
+      # "If condition (r_cond) is false, jump to... Unknown (0) for now"
+      else_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+
+      # 3. Compile THEN branch
+      node.then_branch.each { |stmt| visit(stmt) }
+
+      # 4. Emit JMP (Unconditional)
+      # If we finished the THEN block, we must skip the ELSE block.
+      # Target is unknown (0) for now.
+      end_jump = @chunk.emit_with_index(:JMP, 0)
+
+      # 5. Patch the JMP_FALSE
+      # If the condition failed, we land HERE (start of else)
+      @chunk.patch(else_jump, @chunk.current_address, 2)
+
+      # 6. Compile ELSE branch (if exists)
+      node.else_branch.each { |stmt| visit(stmt) }
+
+      # 7. Patch the JMP
+      # If we finished the THEN block, we land HERE (end of everything)
+      @chunk.patch(end_jump, @chunk.current_address)
+    end
+  end
+
+  def compile_while_loop(node, target_reg)
+    with_temp_reg do |r_cond|
+      # 1. MARK START
+      # We need to know where to jump BACK to.
+      # Current instruction index is the start of the loop.
+      loop_start_index = @chunk.code.length
+
+      visit(node.condition, r_cond)
+
+      # 2. EMIT EXIT JUMP (Placeholder)
+      # If condition is false, we jump to the END.
+      # We don't know where the END is yet, so we write '0' for now.
+      do_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+      exit_jump_index = @chunk.code.length - 1
+
+      # 3. COMPILE BODY
+      # This emits the code inside the loop
+      node.do_branch.each { |stmt| visit(stmt) }
+
+      # 4. EMIT LOOP BACK
+      # Unconditionally jump back to the top (loop_start_index)
+      @chunk.emit_with_index(:JMP, loop_start_index)
+
+      # 5. PATCH THE EXIT JUMP
+      # Now that the body is done, we know the current index is the "End".
+      # Go back to the JMP_FALSE instruction and update the '0' to the current index.
+      loop_end_index = @chunk.code.length
+      @chunk.code[exit_jump_index][2] = loop_end_index
+    end
+  end
+
+  def compile_list_lit(node, target_reg)
+    # 1. Homogeneity Check (Compile Time)
+    if node.items.any?
+      # Guess type of first item (e.g. :Number)
+      expected_type = infer_type(node.items.first)
+
+      node.items.each_with_index do |item, idx|
+        current_type = infer_type(item)
+        if current_type != expected_type
+           raise "Type Error: List contains mixed types. Item #{idx} is #{current_type}, expected #{expected_type}."
+        end
+      end
+    else
+      # TODO - next, add optional type annotations to initializations
+      # Then - if not declared when empty, raise error
+
+      # Edge Case: Empty List %[]
+      # You either force a type annotation (VAR x: Vector[Number] = %[])
+      # or assume Vector[Any].
+    end
+
+    @chunk.emit(:NEWLIST, "R#{target_reg}")
+    node.items.each { |item| with_temp_reg { |r| visit(item, r); @chunk.emit(:APPEND, "R#{target_reg}", "R#{r}") } }
+  end
+
+  def compile_struct_lit(node, target_reg)
+    @chunk.emit(:NEWSTRUCT, "R#{target_reg}", node.name)
+    node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(:SETFIELD, "R#{target_reg}", k, "R#{r}") } }
+  end
+
+  def compile_struct_def(node, target_reg)
+    # Emit: DEF_STRUCT "Name", { "field" => "Type" }
+    @chunk.emit(:DEF_STRUCT, node.name, node.fields)
+  end
+
+  def compile_hash_lit(node, target_reg)
+    # Treat Hash like a Struct or List (for v0.1, let's use NEWSTRUCT for simplicity)
+    @chunk.emit(:NEWHASH, "R#{target_reg}")
+    node.pairs.each do |k, v|
+      with_temp_reg do |r|
+        visit(v, r)
+        # Assuming keys are strings/identifiers
+        # If 'k' is an expression, you'd need to visit it too.
+        # For v0.1 simple string keys:
+        key_name = k.is_a?(AST::Literal) ? k.value : k.name
+        @chunk.emit(:SETHASH, "R#{target_reg}", key_name, "R#{r}")
+      end
+    end
+  end
+
+  def compile_identifier(node, target_reg)
+    r = current_scope.resolve_reg(node.name)
+    raise "Compile Error: Undefined variable '#{node.name}'" unless r
+    @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
+  end
+
+  def compile_method_call(node, target_reg)
+    with_temp_reg do |r_obj|
+      visit(node.object, r_obj)
+      args = []
+      node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
+      @chunk.emit(:CALL_METHOD, "R#{target_reg}", "R#{r_obj}", node.method, *args)
+      @reg_top -= args.size
+    end
+  end
+
+  def compile_lambda(node, target_reg)
+    # 1. Spin up a new compiler for the anonymous function
+    fn_compiler = Compiler.new("lambda")
+
+    # 2. Register parameters (e.g., "x" becomes R0)
+    node.params.each_with_index do |p, i|
+      fn_compiler.current_scope.declare(p[:name], i, p[:type])
+    end
+
+    # Start allocating registers after the params
+    reg_offset = node.params.size
+
+    captured_regs = []
+    # 2. Register Captures (multiple -> R1)
+    # We treat captures like "Hidden Parameters" that get loaded into
+    # registers R1, R2, etc., immediately after the real arguments.
+    node.captures.each do |cap|
+      cap_name, cap_type = cap.values_at(:name, :type)
+
+      outer_reg = current_scope.resolve_reg(cap_name)
+
+      # A. Ensure it exists in the outer scope
+      unless outer_reg
+         raise "Compile Error: Cannot capture '#{cap_name}' - undefined in outer scope."
+      end
+
+      captured_regs << "R#{outer_reg}"
+
+      # B. Declare it in the inner scope
+      fn_compiler.current_scope.declare(cap_name, reg_offset, cap_type, false)
+      reg_offset += 1
+    end
+
+    # 3. Set register offset (Next free reg is after params)
+    # If we have 1 param (R0), next is R1.
+    result_reg = reg_offset
+    fn_compiler.instance_variable_set(:@reg_top, result_reg)
+
+    # 4. Compile the Body
+    # The body is a single expression (x * 10).
+    # We visit it, putting the result into 'result_reg'.
+    fn_compiler.send(:visit, node.body, result_reg)
+
+    # 5. Emit Return
+    fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R#{result_reg}")
+
+    # 6. Store the Chunk as a Constant
+    fn_chunk = fn_compiler.instance_variable_get(:@chunk)
+    k = @chunk.add_constant(fn_chunk)
+
+    # 7. Emit the CLOSURE op with the Constant ID
+    # NOTE: In a real VM, this instruction would also need to list
+    # the registers to capture (e.g., CLOSURE R6 K3 [R_multiple]).
+    # For v0.1, we are just fixing the Scope resolution.
+    @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
+  end
+
+  def compile_return_node(node, target_reg)
+    # 1. Check type
+    actual_type = infer_type(node.value)
+    if @expected_return && @expected_return != :Any
+      if actual_type != :Any && actual_type != @expected_return
+        raise "Type Error: Function expected to return #{@expected_return}, but returned #{actual_type}"
+      end
+    end
+
+    # 2. We need a register to hold the return value
+    with_temp_reg do |r|
+      # 3. Compile the expression into that register
+      visit(node.value, r)
+      # 4. Emit the instruction
+      @chunk.emit(:RETURN, "R#{r}")
+    end
+  end
+
+  def compile_assert(node, target_reg)
+    with_temp_reg do |r_cond|
+      # 1. Compile Condition
+      visit(node.condition, r_cond)
+
+      # 2. Store Message in Constants
+      k_msg = @chunk.add_constant(node.message)
+
+      # 3. Emit ASSERT R_cond, K_msg
+      @chunk.emit(:ASSERT, "R#{r_cond}", "K#{k_msg}")
+    end
+  end
+
+  def compile_raise(node, target_reg)
+    # This logic compiles the expression into a function call:
+    # VAR temp = make_error(message_expr);
+    # RETURN temp;
+
+    # 1. Compile the message expression (or NIL literal if no message)
+    msg_node = node.message_expr || AST::Literal.new(:NIL, nil)
+
+    # 2. Build the AST node for the function call: make_error(msg_node)
+    error_call_node = AST::FuncCall.new("make_error", [msg_node])
+
+    # 3. Compile the function call result into a register
+    # We need a new register (r_err) to hold the Error struct
+    with_temp_reg do |r_err|
+      visit(error_call_node, r_err)
+
+      # 4. Emit RETURN instruction
+      @chunk.emit(:RETURN, "R#{r_err}")
+    end
+
+    # 3. Compile the function call result (the Error Struct) into a register
+    with_temp_reg do |r_err|
+      # Compile the call (will emit LOADK, CALL_FUNC, etc.)
+      visit(error_call_node, r_err)
+
+      # 4. Emit THROW instruction
+      # This is the actual instruction that interrupts the program flow and
+      # initiates stack unwinding via the raise_error helper function.
+      @chunk.emit(:THROW, "R#{r_err}")
     end
   end
 

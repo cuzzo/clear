@@ -14,6 +14,7 @@ FN main %(args) RETURNS Number ->
   END
 
   print(multiple);
+  print(test());
 
   -- This should work now:
   VAR raw = CAST(json AS Config);

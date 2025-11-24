@@ -20,7 +20,7 @@ FN fetch_user %(id) ->
     RETURN "{name: 'Alice'}";
   ELSE
     -- Failure: Return the Error Struct
-    RETURN make_error("404 Not Found");
+    RAISE "404 Not Found";
   END
 END
 
@@ -35,16 +35,24 @@ FN enrich_data %(user) ->
   RETURN user + " + [Permissions]";
 END
 
+FN get_resp %(user) ->
+  VAR resp = fetch_user(user) OR RETURN
+    |> parse_json()
+    |> enrich_data();
+  RETURN resp;
+CATCH e
+  print("IN CATCH BLOCK");
+  RETURN "CAUGHT";
+END
+
+
 -- ==========================================
 -- TEST 1: THE HAPPY PATH
 -- ==========================================
 print("=== STARTING HAPPY PATH ===");
 
 -- fetch_user(1) returns string, so pipe continues
-VAR happy_result = fetch_user(1) 
-                   |> parse_json() 
-                   |> enrich_data();
-
+VAR happy_result = get_resp(1);
 print("FINAL RESULT: " + happy_result);
 ASSERT happy_result == "UserObject({name: 'Alice'}) + [Permissions]", "Happy Path Failed";
 
@@ -59,19 +67,19 @@ print("=== STARTING ERROR PATH ===");
 -- The VM sees the Error and should JUMP over parse_json and enrich_data.
 -- You should NOT see "Parsing JSON" or "Enriching Data" in the logs.
 
-VAR error_result = fetch_user(999)
-                   |> parse_json()
-                   |> enrich_data();
+VAR error_result = get_resp(999);
 
 -- Check the result
+print(error_result);
 print("FINAL RESULT TYPE: " + CAST(error_result AS String));
+print("AFTER RESULT TYPE");
 
 -- Verify we actually got an error
 -- (Note: Accessing fields on dynamic structs requires the struct to be cast or generic access)
-VAR err = CAST(error_result AS Error);
-print("ERROR MSG: " + err.msg);
+-- VAR err = CAST(error_result AS Error);
+print("ERROR MSG: " + error_result.message);
 
-ASSERT err.msg == "404 Not Found", "Error Message Incorrect";
+ASSERT error_result.message == "404 Not Found", "Error Message Incorrect";
 
 print("");
 print("ALL TESTS PASSED.");
