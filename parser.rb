@@ -17,6 +17,7 @@ module AST
   ListLit     = Struct.new(:items)
   HashLit     = Struct.new(:pairs)
   StructLit   = Struct.new(:name, :fields)
+  StructDef   = Struct.new(:name, :fields)
   IfStatement = Struct.new(:condition, :then_branch, :else_branch)
   WhileLoop   = Struct.new(:condition, :do_branch)
   Lambda      = Struct.new(:params, :captures, :body)
@@ -32,7 +33,6 @@ module AST
   UNARY_OPS = ['-', '!']
 
   OP_CODE_SENDABLE_SYMS = {
-    :ADD => :+,
     :SUB => :-,
     :MUL => :*,
     :DIV => :/,
@@ -44,7 +44,6 @@ module AST
     :GT => :>,
     :LTE => :<=,
     :GTE => :>=,
-    :MOD => :%
   }
 
   # TODO: Make these symbols
@@ -68,7 +67,7 @@ module AST
 end
 
 # ==========================================
-# 2. LEXER (Robust)
+# 2. LEXER 
 # ==========================================
 class Lexer
   Token = Struct.new(:type, :value, :line)
@@ -97,7 +96,7 @@ class Lexer
 
       when @s.scan(/->/) then add(:ARROW, '->')
       when @s.scan(/\|>/) then add(:PIPE, '|>')
-      when @s.scan(/==/) then add(:CHAR, '==') # TODO: Is this right?
+      when @s.scan(/==/) then add(:CHAR, '==')
       when @s.scan(/>=/) then add(:CHAR, '>=')
       when @s.scan(/<=/) then add(:CHAR, '<=')
       when @s.scan(/!=/) then add(:CHAR, '!=')
@@ -160,6 +159,7 @@ end
 # ==========================================
 class Parser
   def initialize(tokens); @tokens = tokens; @pos = 0; end
+
   def parse
     stmts = []
     stmts << parse_statement while current.type != :EOF
@@ -225,16 +225,7 @@ class Parser
       parse_while_loop
 
     elsif match?(:KEYWORD, 'STRUCT')
-      consume(:KEYWORD)
-      name = consume(:TYPE_ID).value
-      consume(:CHAR, '{')
-      until match?(:CHAR, '}')
-         # Skip fields for v0.1 demo
-         consume(current.type)
-      end
-      consume(:CHAR, '}')
-      # Return nil or AST node (ignored in this simple loop)
-      nil
+      parse_struct_def
 
     elsif match?(:KEYWORD, 'RETURN')
       consume(:KEYWORD)
@@ -337,6 +328,46 @@ class Parser
     parse_primary
   end
 
+  def parse_var_id
+    name = consume(:VAR_ID).value
+    if match?(:CHAR, '(')
+       args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+       node = AST::FuncCall.new(name, args)
+    else
+       node = AST::Identifier.new(name)
+    end
+
+    # 2. Suffix Loop: Handle .method(), .field, and [index]
+    loop do
+      if match?(:CHAR, '.')
+        consume(:CHAR)
+        member = consume(:VAR_ID).value
+
+        if match?(:CHAR, '(')
+          # It's a Method Call: x.pop()
+          args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+          node = AST::MethodCall.new(node, member, args)
+        else
+          # It's a Field Access: x.name (New!)
+          # We need a new AST node for this, or treat it as "Get Field"
+          node = AST::GetField.new(node, member)
+        end
+
+      elsif match?(:CHAR, '[')
+        # It's an Index Access: x[0] (New!)
+        consume(:CHAR, '[')
+        index_expr = parse_expression
+        consume(:CHAR, ']')
+        node = AST::GetIndex.new(node, index_expr)
+
+      else
+        # No more suffixes, we are done.
+        break
+      end
+    end
+    return node
+  end
+
   def parse_if_statement
     consume(:KEYWORD, 'IF')
     parse_if_chain
@@ -393,6 +424,31 @@ class Parser
     AST::WhileLoop.new(condition, do_branch)
   end
 
+  def parse_struct_def
+    consume(:KEYWORD)
+    name = consume(:TYPE_ID).value
+    consume(:CHAR, '{')
+
+    fields = {}
+
+    # Parse fields: name: Type, name: Type...
+    until match?(:CHAR, '}')
+       field_name = consume(:VAR_ID).value
+       consume(:CHAR, ':')
+       field_type = parse_type_annotation
+
+       fields[field_name] = field_type
+
+       consume(:CHAR, ',') if match?(:CHAR, ',')
+    end
+
+    consume(:CHAR, '}')
+
+    # Return a new AST Node (Make sure to add StructDef to AST module!)
+    AST::StructDef.new(name, fields)
+  end
+
+
   def parse_primary
     return AST::Literal.new(:NUMBER, consume(:NUMBER).value) if match?(:NUMBER)
     return AST::Literal.new(:STRING, consume(:STRING).value) if match?(:STRING)
@@ -431,43 +487,7 @@ class Parser
       return parse_unary
 
     elsif match?(:VAR_ID)
-      name = consume(:VAR_ID).value
-      if match?(:CHAR, '(')
-         args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-         node = AST::FuncCall.new(name, args)
-      else
-         node = AST::Identifier.new(name)
-      end
-
-      # 2. Suffix Loop: Handle .method(), .field, and [index]
-      loop do
-        if match?(:CHAR, '.')
-          consume(:CHAR)
-          member = consume(:VAR_ID).value
-
-          if match?(:CHAR, '(')
-            # It's a Method Call: x.pop()
-            args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-            node = AST::MethodCall.new(node, member, args)
-          else
-            # It's a Field Access: x.name (New!)
-            # We need a new AST node for this, or treat it as "Get Field"
-            node = AST::GetField.new(node, member)
-          end
-
-        elsif match?(:CHAR, '[')
-          # It's an Index Access: x[0] (New!)
-          consume(:CHAR, '[')
-          index_expr = parse_expression
-          consume(:CHAR, ']')
-          node = AST::GetIndex.new(node, index_expr)
-
-        else
-          # No more suffixes, we are done.
-          break
-        end
-      end
-      return node
+      return parse_var_id
     end
 
     raise "Unexpected token #{current.value} (#{current.type}) line #{current.line}"
@@ -702,23 +722,8 @@ class Compiler
 
     when AST::BinaryOp
       if node.op == '|>'
-         # 1. Compile the Left Side (The Data)
-         with_temp_reg do |r_data|
-            visit(node.left, r_data)
-
-            # 2. Check if Right Side is a Call
-            if node.right.is_a?(AST::FuncCall)
-               # 3. Inject r_data as the FIRST argument
-               # We manually compile the function call here
-               if node.right.name == "print"
-                  @chunk.emit(:PRINT, "R#{r_data}")
-               else
-                  # Generic function call handling...
-                  # (For v0.1, we can just say Pipelines only work with print for now)
-               end
-            end
-         end
-         return # Don't do the normal math logic
+         # Don't do the normal math logic
+         return compile_pipe(node, target_reg)
 
       elsif node.op == '&&'
         # 1. Compile Left into target_reg
@@ -907,6 +912,10 @@ class Compiler
       @chunk.emit(:NEWSTRUCT, "R#{target_reg}", node.name)
       node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(:SETFIELD, "R#{target_reg}", k, "R#{r}") } }
 
+    when AST::StructDef
+      # Emit: DEF_STRUCT "Name", { "field" => "Type" }
+      @chunk.emit(:DEF_STRUCT, node.name, node.fields)
+
      when AST::HashLit
        # Treat Hash like a Struct or List (for v0.1, let's use NEWSTRUCT for simplicity)
        @chunk.emit(:NEWHASH, "R#{target_reg}")
@@ -927,53 +936,7 @@ class Compiler
       @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
 
     when AST::FuncCall 
-       # Check if it's a print call (intrinsic) or regular
-       if node.name == "print"
-          args = []
-          node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
-          @chunk.emit(:PRINT, *args)
-          @reg_top -= args.size
-
-       # 2. Handle Intrinsic: NATIVE_CALL (New!)
-       elsif node.name == "native_call"
-          # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
-          
-          # Extract Class/Method literals (Must be string literals for simplicity)
-          if node.args.size < 2
-             raise "native_call requires at least 'Class' and 'Method' string literals."
-          end
-          
-          class_node = node.args[0]
-          method_node = node.args[1]
-
-          # Verify they are strings
-          unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
-             raise "native_call arg 1 must be a static String (Class Name)"
-          end
-          class_name = class_node.value
-          method_name = method_node.value
-
-          # Compile the ACTUAL arguments (index 2 onwards)
-          real_args_regs = []
-          node.args[2..-1].each do |arg|
-             r = @reg_top
-             @reg_top += 1
-             real_args_regs << "R#{r}"
-             visit(arg, r)
-          end
-
-          # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
-          @chunk.emit(:CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
-          
-          # Clean up temp registers
-          @reg_top -= real_args_regs.size
-
-       # 3. Handle Regular Functions
-       else
-          # In a real VM, resolve function name to register/closure
-          # For v0.1, assume intrinsic or placeholder
-          @chunk.emit(:CALL_FUNC, node.name, node.args.size)
-       end
+      compile_func_call(node, target_reg)
 
     when AST::MethodCall
        with_temp_reg do |r_obj|
@@ -1041,50 +1004,7 @@ class Compiler
        @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
 
     when AST::FunctionDef
-       fn_compiler = Compiler.new(node.name, node.return_type)
-
-       node.params.each_with_index do |p, i|
-         fn_compiler.current_scope.declare(p[:name], i, p[:type])
-       end
-
-       reg_offset = node.params.size
-
-       # TODO -> This look identical to the logic to build a closure later
-       # REUSE it.
-       captured_regs = []
-       node.captures.each do |cap|
-          cap_name, cap_type = cap.values_at(:name, :type)
-
-          # A. Resolve the register in the OUTER scope
-          outer_reg = current_scope.resolve_reg(cap_name)
-
-          unless outer_reg
-            raise "Compile Error: Cannot capture '#{cap_name}' inside function '#{node.name}' - undefined in outer scope."
-          end
-
-          # B. Add to the list for the CLOSURE instruction
-          captured_regs << "R#{outer_reg}"
-
-          # C. Declare it in the INNER scope
-          fn_compiler.current_scope.declare(cap_name, reg_offset, cap_type, false)
-          reg_offset += 1
-       end
-
-       fn_compiler.instance_variable_set(:@reg_top, reg_offset)
-       node.body.each { |s| fn_compiler.send(:visit, s) }
-
-       # Always emit an implicit return
-       # If the user already wrote a return statement, this cannot be reached
-       fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R0")
-
-       fn_chunk = fn_compiler.instance_variable_get(:@chunk)
-       fn_chunk.name = node.name
-       k = @chunk.add_constant(fn_chunk)
-
-       # Closure creates the function in the target register
-       @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
-       # We also declare the function name in the current scope so we can call it later
-       # (Not fully implemented in this snippet, but this is where it goes)
+       compile_function_def(node, target_reg)
 
     when AST::ReturnNode
       # 1. Check type
@@ -1114,6 +1034,178 @@ class Compiler
         # 3. Emit ASSERT R_cond, K_msg
         @chunk.emit(:ASSERT, "R#{r_cond}", "K#{k_msg}")
       end
+    end
+  end
+
+  def compile_pipe(node, target_reg)
+    # 1. Compile the Left Side (The Data)
+    # We keep the result in 'target_reg' because we want the final result 
+    # of the chain to end up there.
+    visit(node.left, target_reg)
+
+    # --- RAILWAY LOGIC ---
+    
+    # 2. Emit the Guard Check
+    # "If target_reg holds an Error, JUMP over the function call."
+    # The Error value remains in target_reg, effectively skipping the step.
+    skip_jump = @chunk.emit_with_index(:JMP_IF_ERROR, "R#{target_reg}", 0)
+
+    # 3. Compile the Function Call (Right Side)
+    if node.right.is_a?(AST::FuncCall)
+       # We need to treat this like a function call, but with 
+       # 'target_reg' injected as the FIRST argument.
+       
+       # A. Compile the explicit arguments from the code
+       args_regs = ["R#{target_reg}"] # Start with the piped data
+       
+       node.right.args.each do |arg|
+          r_arg = @reg_top
+          @reg_top += 1
+          visit(arg, r_arg)
+          args_regs << "R#{r_arg}"
+       end
+       
+       # B. Emit the Call
+       # CRITICAL: The result of the call must land back in 'target_reg'
+       # to continue the pipeline chain!
+       if node.right.name == "print"
+          @chunk.emit(:PRINT, *args_regs)
+          # Print doesn't return a value in some languages, 
+          # but in a pipeline, it usually returns nil or the input.
+          # For now, let's assume it passes the input through or returns NIL.
+       elsif node.right.name == "native_call"
+         raise "Compiler Error: Cannot pipe directly to 'native_call'. Wrap it in a function."
+       else
+          # Standard Function Call
+          # Note: We need to update CALL_FUNC to accept a target register!
+          # Change your CALL_FUNC emission to include target_reg:
+          @chunk.emit(:CALL_FUNC, "R#{target_reg}", node.right.name, args_regs.size, *args_regs)
+       end
+
+       # Cleanup registers used for args (but NOT the target_reg)
+       @reg_top -= (args_regs.size - 1) 
+    end
+    
+    # 4. Patch the Jump
+    # If we had an error, we land here. 'target_reg' still holds the Error.
+    @chunk.patch(skip_jump, @chunk.current_address, 2)
+  end
+
+  def compile_function_def(node, target_reg)
+    fn_compiler = Compiler.new(node.name, node.return_type)
+
+    node.params.each_with_index do |p, i|
+      fn_compiler.current_scope.declare(p[:name], i, p[:type])
+    end
+
+    reg_offset = node.params.size
+
+    # TODO -> This look identical to the logic to build a closure later
+    # REUSE it.
+    captured_regs = []
+    node.captures.each do |cap|
+       cap_name, cap_type = cap.values_at(:name, :type)
+
+       # A. Resolve the register in the OUTER scope
+       outer_reg = current_scope.resolve_reg(cap_name)
+
+       unless outer_reg
+         raise "Compile Error: Cannot capture '#{cap_name}' inside function '#{node.name}' - undefined in outer scope."
+       end
+
+       # B. Add to the list for the CLOSURE instruction
+       captured_regs << "R#{outer_reg}"
+
+       # C. Declare it in the INNER scope
+       fn_compiler.current_scope.declare(cap_name, reg_offset, cap_type, false)
+       reg_offset += 1
+    end
+
+    fn_compiler.instance_variable_set(:@reg_top, reg_offset)
+    node.body.each do |stmt|
+      # VarDecls manage their own registers.
+      # Everything else (Expressions, Returns) needs a temp register assigned.
+      if stmt.is_a?(AST::VarDecl)
+        fn_compiler.send(:visit, stmt)
+      else
+        fn_compiler.send(:with_temp_reg) do |r|
+          fn_compiler.send(:visit, stmt, r)
+        end
+      end
+    end
+
+    # Always emit an implicit return
+    # If the user already wrote a return statement, this cannot be reached
+    fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R0")
+
+    fn_chunk = fn_compiler.instance_variable_get(:@chunk)
+    fn_chunk.name = node.name
+    k = @chunk.add_constant(fn_chunk)
+
+    # Closure creates the function in the target register
+    @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
+    # Register it as a global, so it can be called later with CALL_FUNC
+    @chunk.emit(:DEF_GLOBAL, node.name, "R#{target_reg}")
+  end
+
+  def compile_func_call(node, target_reg)
+    # Check if it's a print call (intrinsic) or regular
+    if node.name == "print"
+       args = []
+       node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
+       @chunk.emit(:PRINT, *args)
+       @reg_top -= args.size
+
+    # 2. Handle Intrinsic: NATIVE_CALL (New!)
+    elsif node.name == "native_call"
+       # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
+       
+       # Extract Class/Method literals (Must be string literals for simplicity)
+       if node.args.size < 2
+          raise "native_call requires at least 'Class' and 'Method' string literals."
+       end
+       
+       class_node = node.args[0]
+       method_node = node.args[1]
+
+       # Verify they are strings
+       unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
+          raise "native_call arg 1 must be a static String (Class Name)"
+       end
+       class_name = class_node.value
+       method_name = method_node.value
+
+       # Compile the ACTUAL arguments (index 2 onwards)
+       real_args_regs = []
+       node.args[2..-1].each do |arg|
+          r = @reg_top
+          @reg_top += 1
+          real_args_regs << "R#{r}"
+          visit(arg, r)
+       end
+
+       # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
+       @chunk.emit(:CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
+       
+       # Clean up temp registers
+       @reg_top -= real_args_regs.size
+
+    # 3. Handle Regular Functions
+    else
+       # A. Compile Arguments into registers
+       args_regs = []
+       node.args.each do |arg|
+          r = @reg_top
+          @reg_top += 1
+          args_regs << "R#{r}"
+          visit(arg, r)
+       end
+
+       # B. Emit New Format: [OP, Target, Name, ArgCount, *ArgRegs]
+       @chunk.emit(:CALL_FUNC, "R#{target_reg}", node.name, node.args.size, *args_regs)
+
+       # C. Cleanup registers
+       @reg_top -= args_regs.size
     end
   end
 

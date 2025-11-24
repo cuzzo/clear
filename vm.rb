@@ -11,6 +11,7 @@ class VM
 
   def initialize
     @globals = {} # To store global structs/functions
+    @structs = {} # Stores "Name" => { "field" => "Type" }
   end
 
   # A "Stack Frame" represents a running function
@@ -100,19 +101,52 @@ class VM
 
       # --- THE CRITICAL LOGIC: CAST ---
       when :CAST
-        # CAST Rtarget, "TypeName"
-        target = reg_idx[ins[1]]
-        type_name = ins[2]
-        val = frame.registers[target]
+        target_reg = reg_idx[ins[1]]
+        type_name  = ins[2]
+        val = frame.registers[target_reg]
+        schema = @structs[type_name] # Assuming @structs is the global registry
 
-        # In a real VM, you'd check a StructRegistry.
-        # For v0.1, we'll hardcode the check for 'Config'
-        if type_name == "Config"
-          unless val.is_a?(Hash) && val.key?("debug") && val["debug"].is_a?(Integer)
-             raise "Runtime Error: Cast Failed! Expected Config (debug: Number), got #{val}"
+        # --- 1. PRIMITIVES / COERCION ---
+        if type_name == "String"
+          # Fix #1: Coercion
+          frame.registers[target_reg] = val.to_s
+          return
+        elsif type_name == "Number"
+          raise "Cast Error" unless val.is_a?(Numeric)
+          # Note: Add logic here if you want to convert Float -> Int
+          return
+        elsif type_name == "Bool"
+          raise "Cast Error" unless (val == true || val == false)
+          return
+
+        # --- 2. STRUCT CHECK ---
+        elsif @structs.key?(type_name)
+          # If the outer check fails, we immediately raise an error.
+          unless check_type(val, type_name, @structs)
+             # The recursive check will already raise a specific error, but this is a final fail-safe.
+             raise "Runtime Error: Struct validation failed for '#{type_name}'"
           end
+
+        else
+          raise "Runtime Error: Unknown Type '#{type_name}'"
         end
         # If successful, the value remains in the register (no-op)
+
+      when :DEF_GLOBAL
+        # Format: [:DEF_GLOBAL, "func_name", "R_source"]
+        global_name = ins[1]
+        src_reg = reg_idx[ins[2]]
+
+        # Take the Closure/Value from the register
+        val = frame.registers[src_reg]
+
+        # Save it to the VM's global registry
+        @globals[global_name] = val
+
+      when :DEF_STRUCT
+        name = ins[1]
+        schema = ins[2] # The ruby hash from the compiler
+        @structs[name] = schema
 
       when :CLOSURE
         # CLOSURE Rtarget, Kfunc_chunk, Rcapture1, Rcapture2...
@@ -132,6 +166,41 @@ class VM
 
         # 3. Store it in the target register
         frame.registers[target] = closure
+
+      when :CALL_FUNC
+        # Format: [:CALL_FUNC, "R_target", "func_name", argc, "R_arg1"...]
+        target_reg = reg_idx[ins[1]]
+        func_name  = ins[2]
+        # argc = ins[3] (Unused here, but useful for Arity checks)
+        arg_regs   = ins[4..-1].map { |r| reg_idx[r] }
+        args       = arg_regs.map { |r| frame.registers[r] }
+
+        # 1. Resolve the Function
+        # Priority: 
+        #   A. Is it a variable in the current scope? (e.g., VAR f = FN...)
+        #   B. Is it a global function? (e.g., defined with FN name...)
+        
+        func = nil
+        
+        # Check if 'func_name' matches a local variable holding a Closure
+        # (This requires your compiler to support first-class functions in vars)
+        # local_reg = resolve_local_reg(func_name) ... (Skipping for v0.1 simplicity)
+
+        # Check Globals (Standard Definitions)
+        if @globals.key?(func_name)
+           func = @globals[func_name]
+        end
+
+        if func
+           # 2. Execute the Function
+           # execute_function spins up a new frame, runs the loop, and returns the :RETURN value
+           result = execute_function(func, args)
+           
+           # 3. Store the result in the Target Register (CRITICAL for Pipes!)
+           frame.registers[target_reg] = result
+        else
+           raise "Runtime Error: Undefined function '#{func_name}'"
+        end
 
       when :CALL_METHOD
         # CALL_METHOD Rresult, Robj, "method", Rargs...
@@ -157,6 +226,24 @@ class VM
           frame.registers[res_reg] = new_list
         else
            raise "Unknown method #{method} on #{obj}"
+        end
+
+      when :ADD
+        target = reg_idx[ins[1]]
+        lhs    = frame.registers[reg_idx[ins[2]]]
+        rhs    = frame.registers[reg_idx[ins[3]]]
+
+        if lhs.is_a?(Numeric) && rhs.is_a?(Numeric)
+          # 1. Math Path (Fast)
+          frame.registers[target] = lhs + rhs
+
+        elsif lhs.is_a?(String) || rhs.is_a?(String)
+          # 2. String Path (Concat)
+          # This handles "A" + "B", "A" + 1, and 1 + "A"
+          frame.registers[target] = lhs.to_s + rhs.to_s
+
+        else
+          raise "Runtime Error: Cannot ADD types #{lhs.class} and #{rhs.class}"
         end
 
       when *(AST::OP_CODE_SENDABLE_SYMS.keys)
@@ -243,8 +330,23 @@ class VM
         target_ip = ins[2]
         val = frame.registers[cond_reg]
 
+        # Is it an Error? If so, treat as FALSE (don't jump)
+        is_error = val.is_a?(Hash) && val["__type"] == "Error"
+
         # Ruby semantics: false and nil are falsey. Everything else is true.
-        if val != false && !val.nil?
+        if val != false && !val.nil? && !is_error?
+          frame.ip = target_ip
+        end
+
+      when :JMP_IF_ERROR
+        # JMP_IF_ERROR R_val, target_ip
+        val_reg   = reg_idx[ins[1]]
+        target_ip = ins[2]
+
+        val = frame.registers[val_reg]
+
+        # Check if it is a Hash (Struct) and has the type "Error"
+        if val.is_a?(Hash) && val["__type"] == "Error"
           frame.ip = target_ip
         end
 
@@ -322,6 +424,28 @@ class VM
 
     # 5. Run
     return run_loop
+  end
+
+  def check_type(val, required_type, structs_registry)
+    case required_type
+    when "Any"
+      return true
+    when "Number"
+      return val.is_a?(Numeric)
+    when "String"
+      return val.is_a?(String)
+    when "Bool"
+      return (val == true || val == false)
+    else
+      # Recursive Struct Check: Check against the schema registry
+      if structs_registry.key?(required_type)
+        # Check if the value is a runtime Struct/Hash AND the fields match the schema
+        return val.is_a?(Hash) && validate_struct(val, structs_registry[required_type], structs_registry)
+      else
+        # Unknown type name (e.g., a custom type that wasn't defined)
+        return false
+      end
+    end
   end
 end
 

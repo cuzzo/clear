@@ -1,3 +1,4 @@
 vendor
 .byebug_history
 examples/*.fluxc
+log.txt

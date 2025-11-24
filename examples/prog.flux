@@ -25,3 +25,4 @@ FN main %(args) RETURNS Number ->
   RETURN 1;
 END
 
+main("");
