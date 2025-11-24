@@ -25,6 +25,9 @@ module AST
   Cast        = Struct.new(:value, :target)
   ReturnNode  = Struct.new(:value)
 
+  BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>', '&&', '||']
+  UNARY_OPS = ['-', '!']
+
   OP_CODE_SENDABLE_SYMS = {
     :ADD => :+,
     :SUB => :-,
@@ -53,6 +56,9 @@ module AST
     '<=' => :LTE,
     '>'  => :GT,
     '>=' => :GTE,
+    '!' => :NOT,
+    '&&' => :AND,
+    '||' => :OR
   }
 end
 
@@ -86,6 +92,8 @@ class Lexer
       when @s.scan(/>=/) then add(:CHAR, '>=')
       when @s.scan(/<=/) then add(:CHAR, '<=')
       when @s.scan(/!=/) then add(:CHAR, '!=')
+      when @s.scan(/&&/) then add(:CHAR, '&&')
+      when @s.scan(/\|\|/) then add(:CHAR, '||')
 
       # Triple Quote Strings (Multiline)
       # Match """ then anything (non-greedy) until the next """
@@ -279,7 +287,7 @@ class Parser
 
   def parse_expression
     lhs = parse_primary
-    while ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>'].include?(current.value)
+    while AST::BINARY_OPS.include?(current.value)
       op = current.value
       consume(current.type)
       #current.type == :PIPE ? consume(:PIPE) : consume(:CHAR)
@@ -291,12 +299,11 @@ class Parser
 
   def parse_unary
     v = current.value
-    if ['-', '!'].include?(v)
+    if AST::UNARY_OPS.include?(v)
       consume(:CHAR)
       # Recursively parse the thing being negated (handles --5)
       right = parse_unary
-      op_code = v == '-' ? :SUB : :NOT
-      return AST::UnaryOp.new(op_code, right)
+      return AST::UnaryOp.new(AST::OP_TO_OP_CODE[v], right)
     end
 
     parse_primary
@@ -660,6 +667,36 @@ class Compiler
             end
          end
          return # Don't do the normal math logic
+
+      elsif node.op == '&&'
+        # 1. Compile Left into target_reg
+        visit(node.left, target_reg)
+
+        # 2. Short Circuit: If Left is FALSE, Jump to End
+        # The result (FALSE) is already sitting in target_reg, so we are done.
+        end_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{target_reg}", 0)
+
+        # 3. Compile Right
+        # If we didn't jump, calculate Right and put it in target_reg
+        visit(node.right, target_reg)
+
+        # 4. Patch the Jump
+        @chunk.patch(end_jump, @chunk.current_address, 2)
+        return # Don't do the normal math logic
+
+      elsif node.op == '||'
+        # 1. Compile Left
+        visit(node.left, target_reg)
+
+        # 2. Short Circuit: If Left is TRUE, Jump to End
+        end_jump = @chunk.emit_with_index(:JMP_TRUE, "R#{target_reg}", 0)
+
+        # 3. Compile Right
+        visit(node.right, target_reg)
+
+        # 4. Patch
+        @chunk.patch(end_jump, @chunk.current_address, 2)
+        return # Don't do the normal math logic
       end
 
       with_temp_reg do |r1|

@@ -193,6 +193,17 @@ class VM
         if val == false || val.nil?
           frame.ip = target_ip
         end
+
+      when :JMP_TRUE
+        # JMP_TRUE Rcond, target_ip
+        cond_reg = reg_idx[ins[1]]
+        target_ip = ins[2]
+        val = frame.registers[cond_reg]
+
+        # Ruby semantics: false and nil are falsey. Everything else is true.
+        if val != false && !val.nil?
+          frame.ip = target_ip
+        end
       end
     end
   end
