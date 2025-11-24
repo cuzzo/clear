@@ -26,8 +26,9 @@ module AST
   GetIndex    = Struct.new(:target, :index)
   Cast        = Struct.new(:value, :target)
   ReturnNode  = Struct.new(:value)
+  Assert      = Struct.new(:condition, :message)
 
-  BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>', '&&', '||']
+  BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>', '&&', '||', 'MOD', '**']
   UNARY_OPS = ['-', '!']
 
   OP_CODE_SENDABLE_SYMS = {
@@ -43,6 +44,7 @@ module AST
     :GT => :>,
     :LTE => :<=,
     :GTE => :>=,
+    :MOD => :%
   }
 
   # TODO: Make these symbols
@@ -60,7 +62,8 @@ module AST
     '>=' => :GTE,
     '!' => :NOT,
     '&&' => :AND,
-    '||' => :OR
+    '||' => :OR,
+    'MOD' => :MOD
   }
 end
 
@@ -71,7 +74,11 @@ class Lexer
   Token = Struct.new(:type, :value, :line)
 
   # We use a hash for O(1) lookups
-  KEYWORDS = %w[FN VAR IF THEN ELSE ELSE_IF END WHILE DO RETURN RETURNS SET CAST AS USE STRUCT TRUE FALSE NIL].map { |k| [k, true] }.to_h
+  # TODO: Should MOD be a keyword ???
+  KEYWORDS = %w[
+      FN VAR IF THEN ELSE ELSE_IF END WHILE DO RETURN RETURNS SET CAST AS USE 
+      STRUCT TRUE FALSE NIL ASSERT
+    ].map { |k| [k, true] }.to_h
 
   def initialize(source)
     @s = StringScanner.new(source)
@@ -95,6 +102,7 @@ class Lexer
       when @s.scan(/<=/) then add(:CHAR, '<=')
       when @s.scan(/!=/) then add(:CHAR, '!=')
       when @s.scan(/&&/) then add(:CHAR, '&&')
+      when @s.scan(/\*\*/) then add(:CHAR, '**')
       when @s.scan(/\|\|/) then add(:CHAR, '||')
 
       # Triple Quote Strings (Multiline)
@@ -233,6 +241,24 @@ class Parser
       val = parse_expression
       consume(:CHAR, ';')
       AST::ReturnNode.new(val)
+
+    elsif match?(:KEYWORD, 'ASSERT')
+      consume(:KEYWORD)
+
+      # 1. Parse the Condition
+      condition = parse_expression
+
+      # 2. Parse Optional Message
+      message = "Assertion Failed"
+      if match?(:CHAR, ',')
+        consume(:CHAR)
+        # For simplicity v1, strict string literal.
+        # (For v2, use parse_expression to allow dynamic strings)
+        message = consume(:STRING).value
+      end
+
+      consume(:CHAR, ';')
+      AST::Assert.new(condition, message)
 
     else
       expr = parse_expression
@@ -900,13 +926,49 @@ class Compiler
       raise "Compile Error: Undefined variable '#{node.name}'" unless r
       @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
 
-    when AST::FuncCall # <-- Added missing handler for regular calls
+    when AST::FuncCall 
        # Check if it's a print call (intrinsic) or regular
        if node.name == "print"
           args = []
           node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
           @chunk.emit(:PRINT, *args)
           @reg_top -= args.size
+
+       # 2. Handle Intrinsic: NATIVE_CALL (New!)
+       elsif node.name == "native_call"
+          # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
+          
+          # Extract Class/Method literals (Must be string literals for simplicity)
+          if node.args.size < 2
+             raise "native_call requires at least 'Class' and 'Method' string literals."
+          end
+          
+          class_node = node.args[0]
+          method_node = node.args[1]
+
+          # Verify they are strings
+          unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
+             raise "native_call arg 1 must be a static String (Class Name)"
+          end
+          class_name = class_node.value
+          method_name = method_node.value
+
+          # Compile the ACTUAL arguments (index 2 onwards)
+          real_args_regs = []
+          node.args[2..-1].each do |arg|
+             r = @reg_top
+             @reg_top += 1
+             real_args_regs << "R#{r}"
+             visit(arg, r)
+          end
+
+          # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
+          @chunk.emit(:CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
+          
+          # Clean up temp registers
+          @reg_top -= real_args_regs.size
+
+       # 3. Handle Regular Functions
        else
           # In a real VM, resolve function name to register/closure
           # For v0.1, assume intrinsic or placeholder
@@ -1039,6 +1101,18 @@ class Compiler
         visit(node.value, r)
         # 4. Emit the instruction
         @chunk.emit(:RETURN, "R#{r}")
+      end
+
+    when AST::Assert
+      with_temp_reg do |r_cond|
+        # 1. Compile Condition
+        visit(node.condition, r_cond)
+
+        # 2. Store Message in Constants
+        k_msg = @chunk.add_constant(node.message)
+
+        # 3. Emit ASSERT R_cond, K_msg
+        @chunk.emit(:ASSERT, "R#{r_cond}", "K#{k_msg}")
       end
     end
   end

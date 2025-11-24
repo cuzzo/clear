@@ -183,6 +183,27 @@ class VM
         # We can just leverage Ruby's native operator:
         frame.registers[target] = !val
 
+      when :CALL_NATIVE
+        # CALL_NATIVE R_result, "ClassName", "method_name", R_arg1, ...
+        target_reg = reg_idx[ins[1]]
+        class_name = ins[2]
+        method_name = ins[3]
+        arg_regs   = ins[4..-1].map { |r| reg_idx[r] }
+
+        # 1. Collect Arguments
+        args = arg_regs.map { |r| frame.registers[r] }
+
+        # 2. Find the Ruby Class (Security Risk in prod, fun for dev!)
+        # Object.const_get("File") returns the actual Ruby File class
+        ruby_class = Object.const_get(class_name)
+
+        # 3. Call the method via Ruby reflection
+        result = ruby_class.send(method_name, *args)
+
+        # 4. Store result
+        frame.registers[target_reg] = result
+
+      # TODO: Replace this with std wrapper to CALL_NATIVE
       when :PRINT
         # PRINT Rval
         val_reg = reg_idx[ins[1]]
@@ -256,6 +277,19 @@ class VM
           frame.registers[target_reg] = obj[field_name] || obj[field_name.to_sym]
         else
           raise "Runtime Error: Cannot get field '#{field_name}' from #{obj.class}"
+        end
+
+      when :ASSERT
+        # ASSERT R_cond, K_message
+        cond_reg = reg_idx[ins[1]]
+        k_idx    = ins[2][1..-1].to_i
+
+        val = frame.registers[cond_reg]
+        msg = frame.chunk.constants[k_idx]
+
+        # Use standard Ruby truthiness (false/nil fail)
+        if val == false || val.nil?
+          raise "🛑 ASSERTION FAILED: #{msg}"
         end
       end
     end
