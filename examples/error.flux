@@ -1,11 +1,15 @@
 -- ==========================================
 -- std
 -- ==========================================
-STRUCT Error { message: String }
+STRUCT Error {
+  message: String,
+  context: String,
+  snapshot: Any
+}
 
 -- Helper to make raising errors easier
 FN make_error %(msg) ->
-  RETURN %Error{ message: msg };
+  RETURN %Error{ message: msg, context: NIL, snapshot: NIL };
 END
 
 -- ==========================================
@@ -36,12 +40,12 @@ FN enrich_data %(user) ->
 END
 
 FN get_resp %(user) ->
-  VAR resp = fetch_user(user) OR RETURN
-    |> parse_json()
-    |> enrich_data();
+  VAR resp = fetch_user(user) OR EXIT "NOT OKAY"
+    s> parse_json()
+    s> enrich_data();
   RETURN resp;
 CATCH e
-  print("IN CATCH BLOCK");
+  print("IN CATCH BLOCK: " + e.message + " : " + e.context);
   RETURN "CAUGHT";
 END
 
@@ -81,5 +85,7 @@ print("ERROR MSG: " + error_result.message);
 
 ASSERT error_result.message == "404 Not Found", "Error Message Incorrect";
 
-print("");
+-- VAR err = fetch(999) s> parse() OR EXIT "Parsing Phase Failed";
+
+-- print(err);
 print("ALL TESTS PASSED.");

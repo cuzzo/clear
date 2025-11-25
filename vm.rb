@@ -3,7 +3,6 @@
 require_relative "parser"
 require "msgpack"
 require "optparse"
-require "byebug"
 
 $logger = Logger.new(STDOUT)
 $logger.level = Logger::INFO
@@ -21,6 +20,8 @@ end.parse!
 # 6. THE VIRTUAL MACHINE
 # ==========================================
 class VM
+  UNWIND_SIGNAL = :__vm_unwind_signal__
+
   Closure = Struct.new(:chunk, :captures)
 
   def initialize
@@ -53,7 +54,7 @@ class VM
       frame = @frames.last
 
       # Safety check: If we somehow popped below our depth without returning
-      return nil if !frame || @frames.size < start_depth
+      return UNWIND_SIGNAL if !frame || @frames.size < start_depth
 
       # 2. Fetch Instruction
       ins = frame.chunk.code[frame.ip]
@@ -84,7 +85,7 @@ class VM
       when :CALL_METHOD then process_call_method(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
-      when :PIPE then process_pipe(reg_idx, ins, frame);
+      when :SMOOTH then process_pipe(reg_idx, ins, frame);
       when :NOT then process_not(reg_idx, ins, frame);
       when :CALL_NATIVE then process_call_native(reg_idx, ins, frame);
       # TODO: Replace this with std wrapper to CALL_NATIVE
@@ -247,38 +248,33 @@ class VM
   def process_call_func(reg_idx, ins, frame)
     # Format: [:CALL_FUNC, "R_target", "func_name", argc, "R_arg1"...]
     target_reg = reg_idx[ins[1]]
-    func_name  = ins[2]
+    func_name = ins[2]
     # argc = ins[3] (Unused here, but useful for Arity checks)
-    arg_regs   = ins[4..-1].map { |r| reg_idx[r] }
-    args       = arg_regs.map { |r| frame.registers[r] }
+    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
+    args = arg_regs.map { |r| frame.registers[r] }
 
     # 1. Resolve the Function
     # Priority: 
     #   A. Is it a variable in the current scope? (e.g., VAR f = FN...)
     #   B. Is it a global function? (e.g., defined with FN name...)
     
-    func = nil
-    
     # Check if 'func_name' matches a local variable holding a Closure
     # (This requires your compiler to support first-class functions in vars)
     # local_reg = resolve_local_reg(func_name) ... (Skipping for v0.1 simplicity)
-
     # Check Globals (Standard Definitions)
-    if @globals.key?(func_name)
-       func = @globals[func_name]
-    end
+    raise "Runtime Error: Undefined function '#{func_name}'" unless @globals.key?(func_name)
+    func = @globals[func_name]
 
-    if func
-       # 2. Execute the Function
-       # execute_function spins up a new frame, runs the loop, and returns the :RETURN value
-       result = execute_function(func, args)
-       $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
-       
-       # 3. Store the result in the Target Register (CRITICAL for Pipes!)
-       frame.registers[target_reg] = result
-    else
-       raise "Runtime Error: Undefined function '#{func_name}'"
-    end
+    # 2. Execute the Function
+    # execute_function spins up a new frame, runs the loop, and returns the :RETURN value
+    result = execute_function(func, args)
+    $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
+
+    # DON'T OBLITERATE REGISTER ON ERROR
+    return if result == UNWIND_SIGNAL 
+    
+    # 3. Store the result in the Target Register (CRITICAL for Pipes!)
+    frame.registers[target_reg] = result
   end
 
   def process_call_method(reg_idx, ins, frame)
@@ -611,7 +607,7 @@ class VM
 
         # If we just pop, the loop continues and returns nil.
         # We throw :vm_unwind to force run_loop to stop immediately.
-        throw :vm_unwind
+        #throw :vm_unwind
       end
     end
 
@@ -619,12 +615,8 @@ class VM
     abort "CRITICAL UNHANDLED ERROR: #{error_obj.inspect}"
   end
 
-  def run_file(fname)
-    code = File.open(ARGV.first).read()
-    $logger.debug("==== CODE =====")
-    $logger.debug("\n" + code)
-    
-    tokens = Lexer.new(code).tokenize
+  def run_code(code_str)
+    tokens = Lexer.new(code_str).tokenize
     ast = Parser.new(tokens).parse
     
     compiler = Compiler.new("main")
@@ -634,8 +626,16 @@ class VM
     
     vm = VM.new()
     resp = vm.run(chunk)
+  end
 
-    #File.binwrite(ARGV.first + 'c', chunk.to_h.to_msgpack)  # Fast, compact
+  def run_file(fname)
+    code = File.open(ARGV.first).read()
+    $logger.debug("==== CODE =====")
+    $logger.debug("\n" + code)
+  
+    run_code(code)  
+
+    File.binwrite(ARGV.first + 'c', chunk.to_h.to_msgpack)  # Fast, compact
   end
 
   # Recursive code printer
@@ -651,6 +651,8 @@ class VM
 end
 
 
-vm = VM.new()
-puts vm.run_file(ARGV.first)
+if __FILE__ == $0
+  vm = VM.new()
+  puts vm.run_file(ARGV.first)
+end
 

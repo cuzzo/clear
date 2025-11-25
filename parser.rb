@@ -2,7 +2,7 @@
 
 require 'strscan'
 require 'logger'
-#require 'byebug'
+require 'byebug'
 
 # ==========================================
 # 1. AST
@@ -33,7 +33,7 @@ module AST
   Raise       = Struct.new(:message_expr)
   ThrowNode   = Struct.new(:value)
 
-  BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', '|>', '&&', '||', 'MOD', '**']
+  BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', 's>', '&&', '||', 'MOD', '**']
   UNARY_OPS = ['-', '!']
 
   OP_CODE_SENDABLE_SYMS = {
@@ -86,7 +86,7 @@ class Lexer
       WHILE DO 
       CAST AS
       STRUCT TRUE FALSE NIL 
-      ASSERT RAISE CATCH OR 
+      ASSERT RAISE CATCH OR EXIT
     ].map { |k| [k, true] }.to_h
 
   def initialize(source)
@@ -105,7 +105,7 @@ class Lexer
         # Comment - ignore
 
       when @s.scan(/->/) then add(:ARROW, '->')
-      when @s.scan(/\|>/) then add(:PIPE, '|>')
+      when @s.scan(/s>/) then add(:SMOOTH, 's>')
       when @s.scan(/==/) then add(:CHAR, '==')
       when @s.scan(/>=/) then add(:CHAR, '>=')
       when @s.scan(/<=/) then add(:CHAR, '<=')
@@ -204,33 +204,16 @@ class Parser
   end
 
   def parse_statement
-    if match?(:KEYWORD, 'VAR')
-      parse_var_declare()
-
-    elsif match?(:KEYWORD, 'SET')
-      parse_set_var()
-
-    elsif match?(:KEYWORD, 'FN')
-      parse_function_def()
-
-    elsif match?(:KEYWORD, 'IF')
-      parse_if_statement()
-
-    elsif match?(:KEYWORD, 'WHILE')
-      parse_while_loop()
-
-    elsif match?(:KEYWORD, 'STRUCT')
-      parse_struct_def()
-
-    elsif match?(:KEYWORD, 'RETURN')
-      parse_return()
-
-    elsif match?(:KEYWORD, 'ASSERT')
-      parse_assert()
-
-    elsif match?(:KEYWORD, 'RAISE')
-      parse_raise()
-
+    if match?(:KEYWORD, 'VAR') then parse_var_declare();
+    elsif match?(:KEYWORD, 'SET') then parse_set_var();
+    elsif match?(:KEYWORD, 'FN') then parse_function_def();
+    elsif match?(:KEYWORD, 'IF') then parse_if_statement();
+    elsif match?(:KEYWORD, 'WHILE') then parse_while_loop();
+    elsif match?(:KEYWORD, 'STRUCT') then parse_struct_def();
+    elsif match?(:KEYWORD, 'RETURN') then parse_return();
+    elsif match?(:KEYWORD, 'ASSERT') then parse_assert();
+    elsif match?(:KEYWORD, 'RAISE') then parse_raise();
+    elsif match?(:HEWORD, 'EXIT') then parse_exit();
     else
       expr = parse_expression
       consume(:CHAR, ';')
@@ -269,6 +252,22 @@ class Parser
 
    consume(:CHAR, ';')
    AST::Raise.new(message_expr)
+  end
+
+  def parse_exit()
+    consume(:KEYWORD)
+    # Check for optional context message
+    # (Look ahead: if it's a string or variable, parse it)
+    # We assume EXIT is followed by an expression if not ')' or ';' or 'END'
+    context_expr = nil
+    if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
+    # unless ['}', ')', ';', 'END'].include?(current.value)
+       context_expr = parse_primary
+    end
+
+    # Store the context in the ThrowNode
+    byebug
+    rhs = AST::ThrowNode.new(context_expr)
   end
 
   def parse_return()
@@ -371,7 +370,7 @@ class Parser
         rhs = parse_or_rescue
         lhs = AST::BinaryOp.new(lhs, :OR_RESCUE, rhs)
       else
-        #current.type == :PIPE ? consume(:PIPE) : consume(:CHAR)
+        #current.type == :SMOOTH ? consume(:SMOOTH) : consume(:CHAR)
         rhs = parse_primary
         lhs = AST::BinaryOp.new(lhs, op, rhs)
       end
@@ -390,7 +389,13 @@ class Parser
       # Syntax: ... OR EXIT
       # Meaning: Throw the error object (triggering local CATCH)
       consume(:KEYWORD)
-      rhs = AST::ThrowNode.new(nil) # Nil value implies "Use the Pipe Result"
+      context = nil
+
+      # CRITICAL FIX: Look ahead for the context string
+      if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
+         context = parse_primary
+      end
+      rhs = AST::ThrowNode.new(context) # Nil value implies "Use the Pipe Result"
 
     elsif match?(:KEYWORD, 'ELSE')
       # Syntax: ... OR ELSE value
@@ -785,56 +790,89 @@ class Compiler
     end
   end
 
-  def compile_pipe(node, target_reg, auto_throw_pipe)
-    # 1. Compile the Left Side (The Data)
-    # We keep the result in 'target_reg' because we want the final result 
-    # of the chain to end up there.
-    visit(node.left, target_reg)
+  def compile_smooth_operator(node, target_reg, auto_throw_pipe)
+    # 1. Compile the Left Side (The Input)
+    visit(node.left, target_reg, auto_throw_pipe: auto_throw_pipe)
 
-    # 2. Emit Guard Logic based on Context
+    # 2. Input Guard: Check if the *Input* is already an error
     if auto_throw_pipe
-      # A. Default Mode: "Bang" Pipe (Auto-Throw)
-      # If error, crash immediately to CATCH.
+      # Default Mode: Crash if input is error
       @chunk.emit(:THROW_IF_ERROR, "R#{target_reg}")
-
-      # Note: We don't need a jump here because THROW stops execution.
       skip_jump = nil
     else
-      # B. Soft Mode: Railway Pipe (Pass-through)
-      # If error, JUMP over the call, keeping the Error in the register.
+      # Soft Mode: Skip everything if input is error
       skip_jump = @chunk.emit_with_index(:JMP_IF_ERROR, "R#{target_reg}", 0)
     end
 
-    # 3. Compile the Function Call (Right Side)
+    # 3. Compile the Function Call
     if node.right.is_a?(AST::FuncCall)
-       # A. Collect Arguments
-       args_regs = ["R#{target_reg}"] # Start with the piped data
+       # Case 1: Explicit Call -> f(args)
        
-       node.right.args.each do |arg|
-          r_arg = @reg_top
-          @reg_top += 1
-          visit(arg, r_arg)
-          args_regs << "R#{r_arg}"
-       end
-       
-       # B. Emit the Call
-       if node.right.name == "print"
-          @chunk.emit(:PRINT, *args_regs)
-       elsif node.right.name == "native_call"
-          raise "Compiler Error: Cannot pipe directly to 'native_call'. Wrap it in a function."
-       else
-          # Standard Function Call
-          @chunk.emit(:CALL_FUNC, "R#{target_reg}", node.right.name, args_regs.size, *args_regs)
+       with_temp_reg do |r_snapshot|
+         # A. Save Snapshot
+         @chunk.emit(:MOVE, "R#{r_snapshot}", "R#{target_reg}")
+
+         # B. Collect Arguments (Start with Piped Data)
+         args_regs = ["R#{target_reg}"] 
+         
+         node.right.args.each do |arg|
+            r_arg = @reg_top
+            @reg_top += 1
+            visit(arg, r_arg)
+            args_regs << "R#{r_arg}"
+         end
+         
+         # C. Call Helper (Fixed Name and Variables)
+         _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
+         
+         # D. Cleanup
+         @reg_top -= (args_regs.size - 1) 
        end
 
-       # Cleanup registers used for args
-       @reg_top -= (args_regs.size - 1) 
+    elsif node.right.is_a?(AST::Identifier)
+       # Case 2: Bare Identifier: x s> f
+       
+       with_temp_reg do |r_snapshot|
+         # A. Save Snapshot
+         @chunk.emit(:MOVE, "R#{r_snapshot}", "R#{target_reg}")
+
+         # B. Arguments
+         # The only argument is the piped value (target_reg)
+         args_regs = ["R#{target_reg}"] 
+
+         # C. Call Helper (Pass args_regs, NOT empty array)
+         _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
+       end
     end
 
-    # 4. Patch Jump (Only if we are in Soft Mode)
+    # 4. Patch the Input Guard Jump (Only if we were in Soft Mode)
     if skip_jump
       @chunk.patch(skip_jump, @chunk.current_address, 2)
     end
+  end
+
+  def _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
+    # A. Emit the Call
+    # This overwrites 'target_reg' with the Result (or new Error)
+    func_name = node.right.name
+
+    if func_name == "print"
+       @chunk.emit(:PRINT, *args_regs)
+    elsif func_name == "native_call"
+       raise "Compiler Error: Cannot pipe to native_call directly."
+    else
+       @chunk.emit(:CALL_FUNC, "R#{target_reg}", func_name, args_regs.size, *args_regs)
+    end
+
+    # B. Error Enrichment (Snapshot)
+    # 1. If result is OK, jump over the enrichment logic
+    ok_jump = @chunk.emit_with_index(:JMP_IF_OK, "R#{target_reg}", 0)
+
+    # 2. If we are here, it IS an Error. Attach snapshot.
+    @chunk.emit(:SETFIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
+
+    # 3. Patch the jump
+    @chunk.patch(ok_jump, @chunk.current_address, 2)
   end
 
   def compile_function_def(node, target_reg)
@@ -1033,9 +1071,10 @@ class Compiler
   end
 
   def compile_binary_op(node, target_reg, auto_throw_pipe)
-    if node.op == '|>'
+    # TODO: Figure out why some of these are strings...
+    if node.op == 's>'
        # Don't do the normal math logic
-       return compile_pipe(node, target_reg, auto_throw_pipe)
+       return compile_smooth_operator(node, target_reg, auto_throw_pipe)
 
     elsif node.op == :OR_RESCUE
       # 1. Compile Left Side (The Pipe/Expression)
@@ -1048,14 +1087,23 @@ class Compiler
 
       # 3. Compile Right Side (The Recovery)
       # At this point, target_reg holds the %Error object.
-
       if node.right.is_a?(AST::ReturnNode) && node.right.value.nil?
          # Syntax: OR RETURN
          # Action: Return the current register (the Error)
          @chunk.emit(:RETURN, "R#{target_reg}")
 
-      elsif node.right.is_a?(AST::ThrowNode) && node.right.value.nil?
-         # Syntax: OR EXIT
+      elsif node.right.is_a?(AST::ThrowNode)
+         # Syntax: OR EXIT (with optional context)
+         if node.right.value # context_expr exists
+            # 1. Compile the Context String
+            with_temp_reg do |r_ctx|
+              visit(node.right.value, r_ctx)
+
+              # 2. Set the Context Field on the Error
+              # target_reg currently holds the Error object
+              @chunk.emit(:SETFIELD, "R#{target_reg}", "context", "R#{r_ctx}")
+            end
+         end
          # Action: Throw the current register (the Error)
          @chunk.emit(:THROW, "R#{target_reg}")
 
@@ -1404,15 +1452,6 @@ class Compiler
 
     # 2. Build the AST node for the function call: make_error(msg_node)
     error_call_node = AST::FuncCall.new("make_error", [msg_node])
-
-    # 3. Compile the function call result into a register
-    # We need a new register (r_err) to hold the Error struct
-    with_temp_reg do |r_err|
-      visit(error_call_node, r_err)
-
-      # 4. Emit RETURN instruction
-      @chunk.emit(:RETURN, "R#{r_err}")
-    end
 
     # 3. Compile the function call result (the Error Struct) into a register
     with_temp_reg do |r_err|

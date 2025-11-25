@@ -1,8 +1,20 @@
 require 'rspec'
 require_relative '../parser' # Adjust path to your parser.rb
+require_relative 'support/ast_matchers'
+require "byebug"
+
+RSpec.configure do |c|
+  c.include AstMatchers
+end
 
 RSpec.describe Compiler do
   # Helper to compile source directly to a Chunk
+  def parse(source)
+    lexer = Lexer.new(source)
+    tokens = lexer.tokenize
+    Parser.new(tokens).parse
+  end
+
   def compile(source)
     lexer = Lexer.new(source)
     tokens = lexer.tokenize
@@ -10,6 +22,146 @@ RSpec.describe Compiler do
     ast = parser.parse
     compiler = Compiler.new
     compiler.compile(ast)
+  end
+
+  describe 'Syntax: VAR x = <BLAH>;' do
+    let(:source) {
+      <<~FLUX
+        VAR x = #{x};
+      FLUX
+    }
+
+    context 'x = 5' do
+      let(:x) { 5 }
+
+      it 'parses into the correct AST structure (Left-Associative)' do
+        program = parse(source)
+        stmt = program.statements[0] # The VAR ASSIGNMENT (index 0)
+
+        ast_str = <<~AST
+          VarDecl(name: x, type: :Any, value: #{x})
+        AST
+
+        expect(stmt).to match_ast(ast_str)
+      end
+
+      it 'compiles' do
+        chunk = compile(source)
+        code = chunk.code
+
+        expect(code[0]).to eq([:LOADK, "R0", "K0"])
+        expect(code[1]).to eq([:RETURN, "R0"])
+      end
+    end
+
+    context 'x = %[1, 2, 3]' do
+      let(:x) { '%[1, 2, 3]' }
+
+      it 'parses into the correct AST structure (Left-Associative)' do
+        program = parse(source)
+        stmt = program.statements[0] # The VAR ASSIGNMENT (index 0)
+
+        # Don't match on type here
+        ast_str = <<~AST
+          VarDecl(name: x, type: :Any, value: [1, 2, 3])
+        AST
+
+        expect(stmt).to match_ast(ast_str)
+      end
+    end
+
+    context 'x = %{ name:  "test" }' do
+      let(:x) { '%{ name: "test" }' }
+
+      it 'parses into the correct AST structure (Left-Associative)' do
+        program = parse(source)
+        stmt = program.statements[0] # The VAR ASSIGNMENT (index 0)
+
+        # Don't match on type here
+        ast_str = <<~AST
+          VarDecl(name: x, type: :Any, value: { name: "test" })
+        AST
+
+        expect(stmt).to match_ast(ast_str)
+      end
+    end
+  end
+
+  # TODO: TEST SET, FUNCTION DEF, CLOSURE DEF, CAST
+
+  describe 'Syntax: x s> fn() OR EXIT s> next_fn()' do
+    let(:source) {
+      <<~FLUX
+        VAR x = %[1, 2, 3];
+        x s> fail_task OR EXIT "NOK" s> recover_task;
+      FLUX
+    }
+
+    it 'parses into the correct AST structure (Left-Associative)' do
+      program = parse(source)
+      stmt = program.statements[1] # The pipe statement (index 1)
+
+      ast_str = <<~AST
+        Smooth(
+          left: OrRescue(
+            left: Smooth(left: Var(x), right: Var(fail_task)),        
+            right: ThrowNode("NOK")
+          ),
+          right: Var(recover_task)
+        )
+      AST
+
+      expect(stmt).to match_ast(ast_str)
+    end
+
+    it 'compiles into the correct Bytecode flow' do
+      chunk = compile(source)
+      code = chunk.code
+
+      # Extract just the opcodes for easier reading
+      opcodes = code.map { |ins| ins[0] }
+
+      # --- Verify The Sequence ---
+
+      # 1. Setup variable x
+      expect(opcodes).to include(:LOADK)
+
+      # 2. First Function Call (fail_task)
+      fail_call_idx = opcodes.find_index { |op| op == :CALL_FUNC }
+      expect(fail_call_idx).not_to be_nil
+      # We expect fail_task to be called early
+      expect(chunk.code[fail_call_idx]).to include("fail_task")
+
+      # 3. The OR Check (JMP_IF_OK)
+      # This must happen AFTER fail_task but BEFORE the throw
+      # It checks if the result of fail_task was valid
+      jmp_ok_idx = opcodes.find_index(:JMP_IF_OK)
+      expect(jmp_ok_idx).to be > fail_call_idx
+
+      # 4. The EXIT (THROW)
+      # This must happen immediately after the check (inside the failure block)
+      throw_idx = opcodes.find_index(:THROW)
+      expect(throw_idx).to be > jmp_ok_idx
+
+      # 5. The Second Function Call (recover_task)
+      # This must happen LAST (it consumes the result of the OR group)
+      # Note: We search from the end to ensure we find the second call
+      recover_call_idx = opcodes.rindex { |op| op == :CALL_FUNC }
+      expect(recover_call_idx).to be > throw_idx
+      expect(chunk.code[recover_call_idx]).to include("recover_task")
+    end
+
+    it 'handles Context Strings: OR EXIT "Message"' do
+      source_with_context = 'VAR x = 1; x s> fail OR EXIT "Bad Thing" s> next;'
+      chunk = compile(source_with_context)
+      code = chunk.code
+
+      setfield_idx = code.find_index { |ins| ins[0] == :SETFIELD && ins[2] == "context" }
+      throw_idx = code.find_index { |ins| ins[0] == :THROW }
+
+      expect(setfield_idx).not_to be_nil
+      expect(setfield_idx).to be < throw_idx # Must happen before throw
+    end
   end
 
   describe 'UnaryOp :NOT (!)' do
