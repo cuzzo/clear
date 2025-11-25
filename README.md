@@ -3,11 +3,10 @@
 ```
 FN myFn %(x:Vector![Number]) USE(a,b) RETURNS Number ->
   x
-    .map(%(x) USE(a) -> x ** a ;)
-    .reduce(0, %(acc:Number, y:Number) -> acc + ((y + a.y) * b.y) ;)
-    |> print ;
+    s> map(%(x) USE(a) -> x ** a )
+    s> reduce(0, %(acc:Number, y:Number) -> acc + ((y + a.y) * b.y) )
+    s> print ;
 
-  -- IS THIS AN OUT OF SCOPE PROBLEM?
   VAR info ;
   IF total > 10 THEN
     SET info = %{ "sum": %[10, 9], "status": "high" } ;
@@ -30,10 +29,72 @@ END
 %() -> Creates a parameter list
 %{} -> Creates a hash
 %[] -> Creates a list
+%.  -> Placeholder method/member access
+%   -> Placeholder
 
-@c_ -> concurrent higher-order array function
-@p_ -> parallel higher-order array function
-@d_ -> distributed higher-order array function
+%C -> concurrent higher-order array function
+%P -> parallel higher-order array function
+%D -> distributed higher-order array function
+
+@ALL_CAPS@ -> compiler directives and annotations
+@variableCase -> this inside structs, UpValues in `SMOOTH` pipes, and syntactic magic inside tests.
+
+EG:
+
+VAR bill = users AS @u
+  s> %C UNNEST %.get_orders                 -- Do UNNEST concurrently (pretend it's doing network IO)
+  s> %P SELECT %.price * @u.discount        -- Do SELECT in parallel (pretend this is a matrix transformation)
+  s> reduce(10_000, %(acc, x) -> acc - x ); -- Subtraction is not associative, handle single-threaded
+
+-- NOTE: If you tried `%C`, `%P`, or `%D` before reduce
+-- The compiler can tell this is not *generally* safe, and would reject it.
+--   However, that's general rule of thumb. In this strange case, it is perfectly okay.
+-- If it was associative, the compiler can *SUGGEST* you optimize it.
+--   But it would not do it automatically, nor force it.
+
+VAR bill = users AS @u
+  s> %C UNNEST %.get_orders                 -- Do UNNEST concurrently (pretend it's doing network IO)
+  s> %P SELECT %.price * @u.discount        -- Do SELECT in parallel (pretend this is a matrix transformation)
+  s> %P(@SAFE@) reduce(10_000, %(acc, x) -> acc - x ); -- Subtraction is not associative, but this is safe, I promise!! 
+
+
+-- OR for a more typical workload:
+
+WITH %C DO
+  VAR bill = users AS @u
+    s> UNNEST %.get_orders                
+    s> SELECT %.price * @u.discount       
+    s> reduce(10_000, %(acc, x) -> acc - x );
+END
+
+-- Because the compiler knows it can't do `-` concurrently (GENERALLY) - it won't allow this
+
+WITH %C DO
+  VAR bill = users AS @u
+    s> UNNEST %.get_orders                
+    s> SELECT %.price * @u.discount       
+    s> %C(@SAFE@) reduce(10_000, %(acc, x) -> acc - x ); -- This is safe, I promise!!
+END
+
+-- Or lets say you want to target a specific architecture for an optimized GPU workload:
+
+WITH %P(@ARCHITECTURE:RTX4090@) DO
+  VAR bill = users AS @u
+    s> UNNEST %.get_orders                
+    s> SELECT %.price * @u.discount       
+    s> %C(@SAFE@) reduce(10_000, %(acc, x) -> acc - x ); -- This is safe, I promise!!
+END
+
+-- If, for some reason, this could not be auto-squished as is, the compiler would force you to do:
+
+WITH %P(@SLOW@, @ARCHITECTURE:RTX4090@) DO
+  VAR bill = users AS @u
+    s> UNNEST %.get_orders                
+    s> SELECT %.price * @u.discount       
+    s> %C(@SAFE@) reduce(10_000, %(acc, x) -> acc - x ); -- This is safe, I promise!!
+END
+
+-- @SLOW@ must come first so it is obvious this is non-ideal code.
 ```
 
 ### STRUCTS
@@ -170,7 +231,7 @@ ELSE
 END
 
 tax = calculate_base()
-  |> IF %% > 100
+  s> IF %% > 100
      THEN %% * 0.2
      ELSE %% * 0.1;
 
@@ -222,20 +283,20 @@ FN myFunc %(a, b, c) ->
   -- ? suffix means the function can return an Error
   -- Despite that, I want to proceed down the pipe if NOT an Error
   val = fetchData(a, b, c) ?
-   |> parseHeader ? "Invalid Header" -- ? after PIPE means set Error Context
-   |> parseBody ? "Invalid Body"
-   |> fetchUser 
-      |> RECOVER(DefaultUser()) -- handle error in place, and continue 
-   |> saveToDb(a, b, c, %%)
+   s> parseHeader ? "Invalid Header" -- ? after PIPE means set Error Context
+   s> parseBody ? "Invalid Body"
+   s> fetchUser 
+      s> RECOVER(DefaultUser()) -- handle error in place, and continue 
+   s> saveToDb(a, b, c, %%)
 
-CATCH ParseError WITH("Invalid Header")
+CATCH ParseError WITH("Invalid Header")  -- ParseError does not acutally exist, that's the string error.type
   -- CATCH sets %e to the as a local Error variable e
   -- All errors have a context ("Invalid Header") set above
   -- All errors also have a `snapshot`
   -- That contains the value piped into the function that caused the error.
   logInvalidHeader(%e.snapshot.header());
   RETURN defaultPage(); 
-CATCH ParseError WITH("Invalid Body")
+CATCH ParseError WITH("Invalid Body")    -- Errors can contain :: namespacing `Network::IOError`, for example
   -- Since we want to handle the same Error `ParseError` in 2 different ways
   -- That is way we set the context above (after the `?` operator)
   --

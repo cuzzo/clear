@@ -1,7 +1,6 @@
 require 'rspec'
 require_relative '../parser' # Adjust path to your parser.rb
 require_relative 'support/ast_matchers'
-require "byebug"
 
 RSpec.configure do |c|
   c.include AstMatchers
