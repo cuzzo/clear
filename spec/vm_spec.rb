@@ -1,5 +1,5 @@
 require 'rspec'
-require_relative '../vm' # Adjust path to your parser.rb
+require_relative '../src/vm' # Adjust path to your parser.rb
 require "byebug"
 
 RSpec.configure do |c|

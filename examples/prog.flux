@@ -20,8 +20,9 @@ FN main %(args) RETURNS Number ->
   VAR raw = CAST(json AS Config);
 
   VAR list = %[1, 2, 3,];
-  list.map( %(x) USE(multiple) -> x * multiple; )
-      |> print();
+  list
+    .map( %(x) USE(multiple) -> x * multiple; )
+     s> print();
 
   RETURN 1;
 END

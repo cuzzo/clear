@@ -1,5 +1,7 @@
 require 'rspec'
-require_relative '../parser' # Adjust path to your parser.rb
+require_relative '../src/lexer'
+require_relative '../src/parser'
+require_relative '../src/compiler'
 require_relative 'support/ast_matchers'
 
 RSpec.configure do |c|

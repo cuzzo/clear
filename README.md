@@ -213,7 +213,8 @@ Everyone else can CHEAT.
 
 ## EXAMPLES
 
-**The *SMOOTH* operator**
+### The *SMOOTH* operator
+
 ```
 VAR bill = users AS @u
   s> UNNEST %.orders
@@ -228,7 +229,7 @@ VAR bill = users AS @u
   s> reduce(0, %(acc, x) -> acc + x )
 ```
 
-**Handling Array Access**
+### Handling Array Access
 ```
 VAR x = getMyVector();
 VAR y = x[10]; -- compiler error!
@@ -271,7 +272,7 @@ FN myVectorGetterWhichTakesADynamicArrayAndResizes %(v) ->
   -- ... do a bunch of stuff
 
   VAR x: Int(10) = v; -- compiler error!
-  VAR xx: Int(10) = TRUNCATE(v) -- OKAY, acknolwedge you *could* be losing data.
+  VAR xx: Int(10) = TRUNCATE(v); -- OKAY, acknolwedge you *could* be losing data.
 
   VAR y = xx[9]; -- OKAY, it will be 0 by default, if v was < 10 items.
 
@@ -291,7 +292,8 @@ FN myVectorGetterWhichTakesADynamicArrayAndResizes %(v) ->
 END
 ```
 
-**Handling Division by Zero**
+### Handling Division by Zero
+
 ```
 FN myDivider(x, y) ->
   SET y = GAURD y != 0 OR ELSE 1; -- OKAY, if y is MUTABLE
@@ -329,7 +331,7 @@ end
 
 FN main()
   -- Good design, no code execution outside of main
-  -- In here, you do you do all kind of division
+  -- In here, you do do all kind of division
 CATCH
   -- Handle however you want, except with code that raises an uncaught error
 END
@@ -349,7 +351,8 @@ callSomeFunc(y / x);
 ```
 
 
-** ASYNC/AWAIT/COLLECT **
+### ASYNC/AWAIT/COLLECT
+
 ```
 listOfUsers 
   s> FILTER %.isActive
@@ -383,7 +386,8 @@ AWAIT file_paths
 -- Ending in COLLECT will convert from Stream<T> to List<T> -> even if it's not assigned to anything.
 ```
 
-** MUTABILITY vs IMMUTABILITY **
+### MUTABILITY vs IMMUTABILITY
+
 ```
 VAR user = %{ name: "Alice", active: false }
 SET user.active = true; -- Error!
@@ -432,7 +436,7 @@ Error: Cannot SET 'x' to 5.
 
 ## THE CONFUSING TYPES
 
-**Errors**
+### Errors
 
 * You don't need to check for errors by default or specify them in your return types.
 * The Compiler and the SMOOTH operator takes care of this for you.
@@ -557,7 +561,7 @@ END
 ```
 
 
-**Strings Vs Bytes**
+### Strings Vs Bytes
 String by default.
 
 ```
@@ -572,7 +576,7 @@ VAR Bytes b: Bytes(10) = ...;     -- Buffer (Immutable, Fixed Size -> you might 
 MUTABLE VAR b: Bytes(10) = ...;   -- Buffer (Mutable, Fixed Size -> common use case)
 ```
 
-**Lists vs Streams**
+### Lists vs Streams
 
 ```
 VAR users = db.all s> filter; -- LIST, default
@@ -584,7 +588,7 @@ VAR userCursor = db.all s> filter s> ITER; -- STREAM, not-default due to EXPLICI
 VAR userCursor = ASYNC db.all s> filter;   -- STREAM, not-default due to EXPLICIT ASYNC
 ```
 
-**Streams are handles, not data**
+### Streams are handles, not data
 
 * A stream is an *immutable* pointer to a *mutable* partition data (the stream / flow where x is `COLLECT`ing).
 * However, you can have an *mutable* pointer.
