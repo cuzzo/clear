@@ -4,6 +4,38 @@ require_relative "./ast"
 # PARSER
 # ==========================================
 class Parser
+  @@stmt_rules = {}
+  @@primary_rules = {}
+  @@suffix_rules = {}
+
+  def self.stmt(type, value, node_class = nil, pattern = nil, &block)
+    if pattern
+      # If pattern provided, create a block that runs the engine
+      @@stmt_rules[[type, value]] = lambda do
+        args = process_pattern(pattern)
+        node_class.new(*args)
+      end
+    else
+      @@stmt_rules[[type, value]] = block
+    end
+  end
+
+  def self.primary(type, value=nil, node_class = nil, pattern = nil,  &block)
+    if pattern
+      # If pattern provided, create a block that runs the engine
+      @@primary_rules[[type, value]] = lambda do
+        args = process_pattern(pattern)
+        node_class.new(*args)
+      end
+    else
+      @@primary_rules[[type, value]] = block
+    end
+  end
+
+  def self.suffix(type, value, &block)
+    @@suffix_rules[[type, value]] = block
+  end
+
   def initialize(tokens); @tokens = tokens; @pos = 0; end
 
   def parse
@@ -13,6 +45,112 @@ class Parser
   end
 
   private
+
+  # COMMANDS
+  stmt(:KEYWORD, 'VAR', AST::VarDecl, ['VAR', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'])
+  stmt(:KEYWORD, 'SET', AST::Assignment, ['SET', :VAR_ID, '=', :expression, ';'])
+  stmt(:KEYWORD, 'FN') { parse_function_def }
+  stmt(:KEYWORD, 'IF') { parse_if_statement }
+  stmt(:KEYWORD, 'STRUCT', AST::StructDef, ['STRUCT', :TYPE_ID, :struct_body])
+  stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
+  stmt(:KEYWORD, 'RETURN', AST::ReturnNode, ['RETURN', :expression, ';'])
+  stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
+  stmt(:KEYWORD, 'RAISE', AST::Raise, ['RAISE', :raise_msg, ';'])
+  stmt(:KEYWORD, 'EXIT') { parse_exit }
+
+  # Primaries
+  primary(:NUMBER) { AST::Literal.new(:NUMBER, consume(:NUMBER).value) }
+  primary(:STRING) { AST::Literal.new(:STRING, consume(:STRING).value) }
+  primary(:VAR_ID) { parse_var_id }
+
+  primary(:KEYWORD, 'TRUE') { consume(:KEYWORD); AST::Literal.new(:BOOLEAN, true) }
+  primary(:KEYWORD, 'FALSE') { consume(:KEYWORD); AST::Literal.new(:BOOLEAN, false) }
+  primary(:KEYWORD, 'NIL') { consume(:KEYWORD); AST::Literal.new(:NIL, nil) }
+  primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
+  primary(:PERCENT, '%') { parse_sigil_construct }
+
+  # Array Indexing: arr[index]
+  suffix(:CHAR, '[') do |lhs|
+    consume(:CHAR, '[')
+    index = parse_expression
+    consume(:CHAR, ']')
+    AST::GetIndex.new(lhs, index)
+  end
+
+  # Dot Access: obj.field OR obj.method()
+  suffix(:CHAR, '.') do |lhs|
+    consume(:CHAR, '.')
+    name = consume(:VAR_ID).value
+
+    if match?(:CHAR, '(')
+      # Method Call
+      args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+      AST::MethodCall.new(lhs, name, args)
+    else
+      # Field Access
+      AST::GetField.new(lhs, name)
+    end
+  end
+
+  # Functor/Call: myVar()
+  # TODO: TEST
+  suffix(:CHAR, '(') do |lhs|
+    args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+    AST::FuncCall.new(lhs.name, args) # Note: Logic depends on your AST
+  end
+
+  ## START PATTERN DSL
+  def process_pattern(pattern)
+    captures = []
+
+    pattern.each do |item|
+      case item
+      # RULE 1: String Literal -> Match & Ignore
+      # Example: '=', ';'
+      when String
+        consume_literal(item)
+
+      # RULE 2: Hash -> Optional
+      # Example: { ':' => :type_annotation }
+      when Hash
+        trigger, action = item.first # Get key/value pair
+
+        if match_literal!(trigger)
+          captures << run_action(action)
+        else
+          captures << :Any
+        end
+
+      # RULE 3: Symbol -> Capture Token or Run Method
+      when Symbol
+        captures << run_action(item)
+      end
+    end
+
+    captures
+  end
+
+  def run_action(item)
+    # Convention: :UPPER_CASE is a Token Type to eat
+    return consume(item).value if item == item.upcase
+    # :down_case => parse function to run
+    return send("parse_#{item}")
+  end
+
+  # Helpers for the literals (Keywords or Chars)
+  def consume_literal(val)
+    # Heuristic: Letters = Keyword, Symbols = Char
+    type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
+    consume(type, val)
+  end
+
+  def match_literal!(val)
+    type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
+    match!(type, val)
+  end
+  ## END PATTERN DSL
+
+
   def current; @tokens[@pos]; end
 
   def consume(type, value=nil)
@@ -39,101 +177,31 @@ class Parser
     current.type == type && (val.nil? || current.value == val)
   end
 
-  def parse_statement
-    if match?(:KEYWORD, 'VAR') then parse_var_declare();
-    elsif match?(:KEYWORD, 'SET') then parse_set_var();
-    elsif match?(:KEYWORD, 'FN') then parse_function_def();
-    elsif match?(:KEYWORD, 'IF') then parse_if_statement();
-    elsif match?(:KEYWORD, 'WHILE') then parse_while_loop();
-    elsif match?(:KEYWORD, 'STRUCT') then parse_struct_def();
-    elsif match?(:KEYWORD, 'RETURN') then parse_return();
-    elsif match?(:KEYWORD, 'ASSERT') then parse_assert();
-    elsif match?(:KEYWORD, 'RAISE') then parse_raise();
-    elsif match?(:HEWORD, 'EXIT') then parse_exit();
+  # Match and immediately eat
+  def match!(type, value=nil)
+    if match?(type, value)
+      consume(type) # We already know it matches, so this is safe
     else
-      expr = parse_expression
-      consume(:CHAR, ';')
-      expr
+      false
     end
   end
 
-  def parse_assert()
-    consume(:KEYWORD)
-
-    # 1. Parse the Condition
-    condition = parse_expression
-
-    # 2. Parse Optional Message
-    message = "Assertion Failed"
-    if match?(:CHAR, ',')
-      consume(:CHAR)
-      # For simplicity v1, strict string literal.
-      # (For v2, use parse_expression to allow dynamic strings)
-      message = consume(:STRING).value
-    end
-
+  def parse_statement
+    rule = @@stmt_rules[[current.type, current.value]]
+    return instance_exec(&rule) if rule
+    expr = parse_expression
     consume(:CHAR, ';')
-    AST::Assert.new(condition, message)
-  end
-
-  def parse_raise()
-   consume(:KEYWORD)
-
-   message_expr = nil
-
-   # Check for optional message expression
-   if !match?(:CHAR, ';')
-     message_expr = parse_expression
-   end
-
-   consume(:CHAR, ';')
-   AST::Raise.new(message_expr)
+    expr
   end
 
   def parse_exit()
     consume(:KEYWORD)
-    # Check for optional context message
-    # (Look ahead: if it's a string or variable, parse it)
-    # We assume EXIT is followed by an expression if not ')' or ';' or 'END'
     context_expr = nil
     if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
-    # unless ['}', ')', ';', 'END'].include?(current.value)
        context_expr = parse_primary
     end
-
-    # Store the context in the ThrowNode
-    byebug
+    match!(:CHAR, ";") # TDOO: Test
     rhs = AST::ThrowNode.new(context_expr)
-  end
-
-  def parse_return()
-    consume(:KEYWORD)
-    val = parse_expression
-    consume(:CHAR, ';')
-    AST::ReturnNode.new(val)
-  end
-
-  def parse_set_var()
-    consume(:KEYWORD)
-    name = consume(:VAR_ID).value
-    consume(:CHAR, '=')
-    val = parse_expression
-    consume(:CHAR, ';')
-    AST::Assignment.new(name, val)
-  end
-
-  def parse_var_declare()
-    consume(:KEYWORD)
-    name = consume(:VAR_ID).value
-    type_node = :Any
-    if match?(:CHAR, ':')
-      consume(:CHAR)
-      type_node = parse_type_annotation.to_sym
-    end
-    consume(:CHAR, '=')
-    val = parse_expression
-    consume(:CHAR, ';')
-    AST::VarDecl.new(name, type_node, val)
   end
 
   def parse_argument_list()
@@ -141,8 +209,7 @@ class Parser
       p_name = consume(:VAR_ID).value
       p_type = :Any
 
-      if match?(:CHAR, ":")
-        consume(:CHAR)
+      if match!(:CHAR, ":")
         p_type = parse_type_annotation
       end
 
@@ -160,40 +227,39 @@ class Parser
 
     # 2. Parse USE() UpValues
     captures = []
-    if current.value == 'USE'
-      consume(:KEYWORD)
+    if match!(:KEYWORD, 'USE')
       captures = parse_argument_list()
     end
 
     # 3. Parse optional RETURNS
     return_type = :Any
-    if current.value == 'RETURNS'
-      consume(:KEYWORD)
+    if match!(:KEYWORD, 'RETURNS')
       return_type = parse_type_annotation.to_sym
     end
 
     consume(:ARROW, '->')
-    body = []
-    until match?(:KEYWORD, 'END') || match?(:KEYWORD, 'CATCH')
-      stmt = parse_statement()
-      body << stmt if stmt # Handle nil from STRUCT skip
-    end
+    body = parse_block_body(['END', 'CATCH'])
 
     # 2. Parse Optional CATCH block
     catch_body = []
     catch_var = nil
-    if match?(:KEYWORD, 'CATCH')
-      consume(:KEYWORD)
+    if match!(:KEYWORD, 'CATCH')
       catch_var = consume(:VAR_ID).value # Capture 'e' in CATCH e
-
-      until match?(:KEYWORD, 'END')
-        stmt = parse_statement()
-        catch_body << stmt if stmt
-      end
+      catch_body = parse_block_body(['END'])
     end
 
     consume(:KEYWORD, 'END')
     AST::FunctionDef.new(name, params, captures, return_type, body, catch_body, catch_var)
+  end
+
+  def parse_block_body(stop_words = ['END'])
+    stmts = []
+    # Keep going until we hit a stop word (END, ELSE, CATCH, etc)
+    until stop_words.any? { |w| match?(:KEYWORD, w) } || match?(:EOF)
+      stmt = parse_statement()
+      stmts << stmt if stmt
+    end
+    stmts
   end
 
   def parse_expression
@@ -206,7 +272,6 @@ class Parser
         rhs = parse_or_rescue
         lhs = AST::BinaryOp.new(lhs, :OR_RESCUE, rhs)
       else
-        #current.type == :SMOOTH ? consume(:SMOOTH) : consume(:CHAR)
         rhs = parse_primary
         lhs = AST::BinaryOp.new(lhs, op, rhs)
       end
@@ -215,28 +280,23 @@ class Parser
   end
 
   def parse_or_rescue
-    if match?(:KEYWORD, 'RETURN')
-      # Syntax: ... OR RETURN
-      # Meaning: Return the error object to the caller
-      consume(:KEYWORD)
-      rhs = AST::ReturnNode.new(nil) # Nil value implies "Use the Pipe Result"
+    # Syntax: ... OR RETURN
+    if match!(:KEYWORD, 'RETURN')
+      # TODO: TEST!
+      rhs = AST::ReturnNode.new(nil)
 
-    elsif match?(:KEYWORD, 'EXIT')
-      # Syntax: ... OR EXIT
-      # Meaning: Throw the error object (triggering local CATCH)
-      consume(:KEYWORD)
+    # Syntax: ... OR EXIT
+    elsif match!(:KEYWORD, 'EXIT')
       context = nil
-
-      # CRITICAL FIX: Look ahead for the context string
       if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
          context = parse_primary
       end
       rhs = AST::ThrowNode.new(context) # Nil value implies "Use the Pipe Result"
 
-    elsif match?(:KEYWORD, 'ELSE')
-      # Syntax: ... OR ELSE value
+
+    # Syntax: ... OR ELSE value
+    elsif match!(:KEYWORD, 'ELSE')
       # Meaning: Replace the error with a default value
-      consume(:KEYWORD)
       rhs = parse_primary # Parse the value (e.g., 0 or "default")
 
     else
@@ -254,48 +314,34 @@ class Parser
       right = parse_unary
       return AST::UnaryOp.new(AST::OP_TO_OP_CODE[v], right)
     end
-
     parse_primary
   end
 
-  def parse_var_id
-    name = consume(:VAR_ID).value
-    if match?(:CHAR, '(')
-       args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-       node = AST::FuncCall.new(name, args)
-    else
-       node = AST::Identifier.new(name)
-    end
-
-    # 2. Suffix Loop: Handle .method(), .field, and [index]
+  def parse_suffixes(lhs)
     loop do
-      if match?(:CHAR, '.')
-        consume(:CHAR)
-        member = consume(:VAR_ID).value
-
-        if match?(:CHAR, '(')
-          # It's a Method Call: x.pop()
-          args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-          node = AST::MethodCall.new(node, member, args)
-        else
-          # It's a Field Access: x.name (New!)
-          # We need a new AST node for this, or treat it as "Get Field"
-          node = AST::GetField.new(node, member)
-        end
-
-      elsif match?(:CHAR, '[')
-        # It's an Index Access: x[0] (New!)
-        consume(:CHAR, '[')
-        index_expr = parse_expression
-        consume(:CHAR, ']')
-        node = AST::GetIndex.new(node, index_expr)
-
-      else
-        # No more suffixes, we are done.
-        break
-      end
+      rule = @@suffix_rules[[current.type, current.value]]
+      break unless rule
+      # Run the rule, passing the current 'lhs' into it
+      # The result becomes the new 'lhs' for the next iteration
+      lhs = instance_exec(lhs, &rule)
     end
-    return node
+    lhs
+  end
+
+  def parse_var_id
+    # 1. Base Case: Always start with an Identifier
+    name = consume(:VAR_ID).value
+    node = AST::Identifier.new(name)
+
+    # 2. Check for Immediate Function Call: name(...)
+    # We treat this as a special "suffix" of the identifier locally
+    if match?(:CHAR, '(')
+      args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+      node = AST::FuncCall.new(name, args)
+    end
+
+    # 3. Apply general suffixes (Dot, Bracket, etc.)
+    return parse_suffixes(node)
   end
 
   def parse_if_statement
@@ -306,31 +352,21 @@ class Parser
   def parse_if_chain
     condition = parse_expression
     consume(:KEYWORD, 'THEN')
+    then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
 
-    # 2. Parse 'THEN' Block
-    then_branch = []
-    until match?(:KEYWORD, 'ELSE') || match?(:KEYWORD, 'ELSE_IF') || match?(:KEYWORD, 'END')
-      stmt = parse_statement()
-      then_branch << stmt if stmt
-    end
-
-    # 3. Parse Optional 'ELSE' Block
+    # Parse Optional 'ELSE_IF'
     else_branch = []
-    if match?(:KEYWORD, 'ELSE_IF')
-      consume(:KEYWORD, 'ELSE_IF')
+    if match!(:KEYWORD, 'ELSE_IF')
       # We recurse! We treat the ELSIF as the start of a new IF node.
       # This new node becomes the single statement inside our 'else_branch'.
       # Note: We do NOT consume 'END' here, the recursion handles it.
       nested_if = parse_if_chain
       else_branch << nested_if
 
-    elsif match?(:KEYWORD, 'ELSE')
-      consume(:KEYWORD)
-      until match?(:KEYWORD, 'END')
-        stmt = parse_statement()
-        else_branch << stmt if stmt
-      end
-      consume(:KEYWORD, 'END') # The chain finally ends here
+    # Parse Optional 'ELSE'
+    elsif match!(:KEYWORD, 'ELSE')
+      else_branch = parse_block_body(['END'])
+      consume(:KEYWORD, 'END')
     else
       consume(:KEYWORD, 'END')
     end
@@ -338,92 +374,32 @@ class Parser
     AST::IfStatement.new(condition, then_branch, else_branch)
   end
 
-  def parse_while_loop
-    consume(:KEYWORD, 'WHILE')
-    condition = parse_expression
-    consume(:KEYWORD, 'DO')
-
-    # Parse 'DO' Block
-    do_branch = []
-    until match?(:KEYWORD, 'END')
-      stmt = parse_statement()
-      do_branch << stmt if stmt
-    end
-
-    consume(:KEYWORD, 'END')
-    AST::WhileLoop.new(condition, do_branch)
+  def parse_raise_msg
+    return nil if match?(:CHAR, ';')
+    parse_expression
   end
 
-  def parse_struct_def
-    consume(:KEYWORD)
-    name = consume(:TYPE_ID).value
-    consume(:CHAR, '{')
+  def parse_stmts_until_end
+    parse_block_body(['END'])
+  end
 
-    fields = {}
+  def parse_struct_body
+    pairs = parse_comma_seq(:CHAR, '{', '}') do
+      name = consume(:VAR_ID).value
+      consume(:CHAR, ':')
+      type = parse_type_annotation
 
-    # Parse fields: name: Type, name: Type...
-    until match?(:CHAR, '}')
-       field_name = consume(:VAR_ID).value
-       consume(:CHAR, ':')
-       field_type = parse_type_annotation
-
-       fields[field_name] = field_type
-
-       consume(:CHAR, ',') if match?(:CHAR, ',')
+      [name, type]
     end
-
-    consume(:CHAR, '}')
-
-    # Return a new AST Node (Make sure to add StructDef to AST module!)
-    AST::StructDef.new(name, fields)
+    pairs.to_h
   end
 
   def parse_primary
-    return AST::Literal.new(:NUMBER, consume(:NUMBER).value) if match?(:NUMBER)
-    return AST::Literal.new(:STRING, consume(:STRING).value) if match?(:STRING)
-
-    # CAST LOGIC
-    if current.value == 'CAST'
-      return parse_cast()
-
-    elsif match?(:PERCENT)
-      return parse_sigil_construct()
-
-    elsif match?(:KEYWORD, 'TRUE')
-      consume(:KEYWORD)
-      return AST::Literal.new(:BOOLEAN, true)
-
-    elsif match?(:KEYWORD, 'FALSE')
-      consume(:KEYWORD)
-      return AST::Literal.new(:BOOLEAN, false)
-
-    elsif match?(:KEYWORD, 'NIL')
-      consume(:KEYWORD)
-      return AST::Literal.new(:NIL, nil)
-
-    elsif current.value == '-' || current.value == '!'
-      return parse_unary()
-
-    elsif match?(:VAR_ID)
-      return parse_var_id()
-    end
-
+    rule = @@primary_rules[[current.type, current.value]]
+    rule ||= @@primary_rules[[current.type, nil]]
+    return instance_exec(&rule) if rule
+    return parse_unary() if current.value == '-' || current.value == '!'
     raise "Unexpected token #{current.value} (#{current.type}) line #{current.line}"
-  end
-
-  def parse_cast
-    consume(current.type) # CAST
-    consume(:CHAR, '(')
-
-    val = parse_expression
-
-    if current.value != 'AS'
-      raise "Expected AS, got #{current.value}"
-    end
-    consume(current.type) # AS
-    target = parse_type_annotation
-    consume(:CHAR, ')')
-    return AST::Cast.new(val, target)
   end
 
   def parse_sigil_construct
@@ -447,22 +423,21 @@ class Parser
     elsif match?(:CHAR, '(')
       params = parse_argument_list
       captures = []
-      if match?(:KEYWORD, 'USE')
-        consume(:KEYWORD)
+      if match!(:KEYWORD, 'USE')
         captures = parse_argument_list
       end
       consume(:ARROW, '->')
       # TODO - Lambdas can be multiple statements...
       body = parse_expression
-      consume(:CHAR, ';')
+      # TODO: Parse
+      # consume(:CHAR, ';')
       return AST::Lambda.new(params, captures, body)
     end
   end
 
   def parse_type_annotation
     base = consume(:TYPE_ID).value
-    if match?(:CHAR, '[')
-      consume(:CHAR, '[')
+    if match!(:CHAR, '[')
       inner = parse_type_annotation
       consume(:CHAR, ']')
       return "#{base}[#{inner}]"
@@ -475,7 +450,7 @@ class Parser
     items = []
     until match?(:CHAR, close)
       items << yield
-      consume(:CHAR, ',') if match?(:CHAR, ',')
+      match!(:CHAR, ',')
     end
     consume(:CHAR, close)
     items

@@ -51,7 +51,8 @@ RSpec.describe Compiler do
         code = chunk.code
 
         expect(code[0]).to eq([:LOADK, "R0", "K0"])
-        expect(code[1]).to eq([:RETURN, "R0"])
+        expect(code[1]).to eq([:DEF_GLOBAL, "x", "R0"])
+        expect(code[2]).to eq([:RETURN, "R0"])
       end
     end
 
@@ -105,7 +106,7 @@ RSpec.describe Compiler do
       ast_str = <<~AST
         Smooth(
           left: OrRescue(
-            left: Smooth(left: Var(x), right: Var(fail_task)),        
+            left: Smooth(left: Var(x), right: Var(fail_task)),
             right: ThrowNode("NOK")
           ),
           right: Var(recover_task)
@@ -175,18 +176,18 @@ RSpec.describe Compiler do
         # 1. LOADK (load TRUE)
         # 2. NOT (flip it)
         # 3. MOVE (assign to x) (Or result ends up in variable slot directly depending on visit logic)
-        
+
         # Find the NOT instruction
         not_instr = code.find { |ins| ins[0] == :NOT }
         expect(not_instr).not_to be_nil
-        
+
         # Verify structure: [:NOT, "R_dest", "R_src"]
         target_reg = not_instr[1]
         src_reg    = not_instr[2]
 
         expect(target_reg).to match(/^R\d+$/)
         expect(src_reg).to match(/^R\d+$/)
-        
+
         # Crucial: They should be valid register strings, not "R" or "Rnil"
         expect(target_reg.length).to be > 1
       end
@@ -208,7 +209,7 @@ RSpec.describe Compiler do
         # The TARGET of the first NOT must be the SOURCE of the second NOT
         # !true -> R_temp
         # !R_temp -> R_final
-        
+
         first_target = first_not[1]
         second_source = second_not[2]
 
@@ -256,7 +257,7 @@ RSpec.describe Compiler do
         # Trace x
         # x is declared first, so it is likely in R0 or R1.
         # We look for the MOVE or LOAD that initializes x (R_x)
-        
+
         # Locate the NOT instruction
         not_instr = code.find { |ins| ins[0] == :NOT }
         target_reg = not_instr[1]
@@ -271,7 +272,7 @@ RSpec.describe Compiler do
     context 'Regression Test: Register Formatting' do
       it 'does not generate empty register numbers (Rnil)' do
         chunk = compile("VAR x = !TRUE;")
-        
+
         chunk.code.each do |ins|
           # Check all operands starting with "R"
           ins[1..-1].each do |operand|

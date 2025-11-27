@@ -14,6 +14,8 @@ RSpec.describe VM do
   end
 
   describe "Smoke Tests" do
+    let(:resp) { run(source).first }
+
     context "Variable Assignment to 42" do
       let(:source) {
         <<~FLUX
@@ -23,7 +25,6 @@ RSpec.describe VM do
       }
 
       it "is 42" do
-        resp = run(source)
         expect(resp).to eq(42)
       end
     end
@@ -36,12 +37,12 @@ RSpec.describe VM do
             SET x = 100;
           ELSE
             SET x = 7;
-          END 
+          END
+          x;
         FLUX
       }
 
       it "is 7" do
-        resp = run(source)
         expect(resp).to eq(7)
       end
     end
@@ -55,7 +56,6 @@ RSpec.describe VM do
       }
 
       it "is 'Hello World'" do
-        resp = run(source)
         expect(resp).to eq("Hello World")
       end
     end
@@ -70,7 +70,6 @@ RSpec.describe VM do
       }
 
       it "is 'Hello World'" do
-        resp = run(source)
         expect(resp).to eq("Hello World")
       end
     end

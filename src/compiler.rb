@@ -58,7 +58,7 @@ class Compiler
       {
         name: @name,
         code: @code,
-        constants: @constants.map do |c| 
+        constants: @constants.map do |c|
           v = c.is_a?(Chunk) ? c.to_h : c
           k = c.is_a?(Chunk) ? "chunks" : c.is_a?(String) ? "string" : "number"
           { k => v }
@@ -100,21 +100,27 @@ class Compiler
     @chunk = Chunk.new(name)
     @scopes = [Scope.new]
     @reg_top = 0
+    @scope_depth = 0
     @expected_return = return_type
     @logger = $logger || Logger.new(STDOUT)
   end
 
   def compile(ast)
+    last_used_reg = 0 # Default to 0 if program is empty
     ast.statements.each do |s|
       if s.is_a?(AST::VarDecl)
         # FIX: Call directly. Let VarDecl manage @reg_top internally.
         # It will increment it and KEEP it incremented.
-        visit(s)
+        result_reg = visit(s)
       else
-        with_temp_reg { |r| visit(s, r) }
+        with_temp_reg do |r|
+          visit(s, r)
+          result_reg = r
+        end
       end
+      last_used_reg = result_reg if result_reg.is_a?(Integer)
     end
-    @chunk.emit(:RETURN, "R0")
+    @chunk.emit(:RETURN, "R#{last_used_reg}")
     @chunk
   end
 
@@ -165,38 +171,38 @@ class Compiler
     # 3. Compile the Function Call
     if node.right.is_a?(AST::FuncCall)
        # Case 1: Explicit Call -> f(args)
-       
+
        with_temp_reg do |r_snapshot|
          # A. Save Snapshot
          @chunk.emit(:MOVE, "R#{r_snapshot}", "R#{target_reg}")
 
          # B. Collect Arguments (Start with Piped Data)
-         args_regs = ["R#{target_reg}"] 
-         
+         args_regs = ["R#{target_reg}"]
+
          node.right.args.each do |arg|
             r_arg = @reg_top
             @reg_top += 1
             visit(arg, r_arg)
             args_regs << "R#{r_arg}"
          end
-         
+
          # C. Call Helper (Fixed Name and Variables)
          _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
-         
+
          # D. Cleanup
-         @reg_top -= (args_regs.size - 1) 
+         @reg_top -= (args_regs.size - 1)
        end
 
     elsif node.right.is_a?(AST::Identifier)
        # Case 2: Bare Identifier: x s> f
-       
+
        with_temp_reg do |r_snapshot|
          # A. Save Snapshot
          @chunk.emit(:MOVE, "R#{r_snapshot}", "R#{target_reg}")
 
          # B. Arguments
          # The only argument is the piped value (target_reg)
-         args_regs = ["R#{target_reg}"] 
+         args_regs = ["R#{target_reg}"]
 
          # C. Call Helper (Pass args_regs, NOT empty array)
          _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
@@ -235,6 +241,7 @@ class Compiler
 
   def compile_function_def(node, target_reg)
     fn_compiler = Compiler.new(node.name, node.return_type)
+    fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)
 
     node.params.each_with_index do |p, i|
       fn_compiler.current_scope.declare(p[:name], i, p[:type])
@@ -309,8 +316,10 @@ class Compiler
 
     # Closure creates the function in the target register
     @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
-    # Register it as a global, so it can be called later with CALL_FUNC
-    @chunk.emit(:DEF_GLOBAL, node.name, "R#{target_reg}")
+    if @scope_depth == 0
+      # Register it as a global, so it can be called later with CALL_FUNC
+      @chunk.emit(:DEF_GLOBAL, node.name, "R#{target_reg}")
+    end
   end
 
   def compile_func_call(node, target_reg)
@@ -324,12 +333,12 @@ class Compiler
     # 2. Handle Intrinsic: NATIVE_CALL (New!)
     elsif node.name == "native_call"
        # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
-       
+
        # Extract Class/Method literals (Must be string literals for simplicity)
        if node.args.size < 2
           raise "native_call requires at least 'Class' and 'Method' string literals."
        end
-       
+
        class_node = node.args[0]
        method_node = node.args[1]
 
@@ -351,7 +360,7 @@ class Compiler
 
        # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
        @chunk.emit(:CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
-       
+
        # Clean up temp registers
        @reg_top -= real_args_regs.size
 
@@ -375,7 +384,7 @@ class Compiler
   end
 
   def compile_var_declare(node, target_reg)
-    r = @reg_top; 
+    r = @reg_top;
     @reg_top += 1
     visit(node.value, r)
 
@@ -397,7 +406,18 @@ class Compiler
       final_type = actual_type
     end
 
+    if @scope_depth == 0
+      # CASE A: GLOBAL
+      # We must explicitly tell the VM to save this register into the Global Map.
+      @chunk.emit(:DEF_GLOBAL, node.name, "R#{r}")
+    else
+      # CASE B: LOCAL
+      # We do NOTHING.
+      # The value is already sitting in Register 'r'.
+    end
+
     current_scope.declare(node.name, r, final_type)
+    return r
   end
 
   def compile_assignment(node, target_reg)
@@ -544,7 +564,7 @@ class Compiler
         # 3. Perform 0 - value
         emit(:SUB, r_val, r_zero, r_val) # Target, LHS, RHS
       end
-    
+
     elsif node.op == :NOT
       with_temp_reg do |r_src|
         visit(node.right, r_src)
@@ -833,7 +853,7 @@ private
 
     when AST::Identifier
       # Look up the variable in the current scope
-      return current_scope.resolve_reg(node.name)
+      return current_scope.resolve_type(node.name)
 
     when AST::BinaryOp
       # Simple inference: if it's math, it's a Number

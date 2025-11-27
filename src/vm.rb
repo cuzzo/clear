@@ -1,8 +1,12 @@
 #! /usr/bin/env ruby
 
+require "byebug"
+require_relative "lexer"
 require_relative "parser"
+require_relative "compiler"
 require "msgpack"
 require "optparse"
+require "logger"
 
 $logger = Logger.new(STDOUT)
 $logger.level = Logger::INFO
@@ -103,7 +107,7 @@ class VM
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
-      when :RETURN then 
+      when :RETURN then
         val = process_return(reg_idx, ins, frame, start_depth)
         return val unless val.nil?
 
@@ -198,7 +202,6 @@ class VM
     # --- 2. STRUCT CHECK ---
     elsif @structs.key?(type_name)
       unless check_type(val, type_name, @structs)
-        byebug
         raise "Runtime Error: Struct validation failed for '#{type_name}'"
       end
     else
@@ -254,10 +257,10 @@ class VM
     args = arg_regs.map { |r| frame.registers[r] }
 
     # 1. Resolve the Function
-    # Priority: 
+    # Priority:
     #   A. Is it a variable in the current scope? (e.g., VAR f = FN...)
     #   B. Is it a global function? (e.g., defined with FN name...)
-    
+
     # Check if 'func_name' matches a local variable holding a Closure
     # (This requires your compiler to support first-class functions in vars)
     # local_reg = resolve_local_reg(func_name) ... (Skipping for v0.1 simplicity)
@@ -271,8 +274,8 @@ class VM
     $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
 
     # DON'T OBLITERATE REGISTER ON ERROR
-    return if result == UNWIND_SIGNAL 
-    
+    return if result == UNWIND_SIGNAL
+
     # 3. Store the result in the Target Register (CRITICAL for Pipes!)
     frame.registers[target_reg] = result
   end
@@ -414,6 +417,12 @@ class VM
     end
   end
 
+  def is_error?(val)
+    # Assuming your errors are instances of a class (e.g., RuntimeError or a custom Struct)
+    # Adjust this check to match your actual Error object type.
+    val.is_a?(RuntimeError)
+  end
+
   def process_jmp_true(reg_idx, ins, frame)
     # JMP_TRUE Rcond, target_ip
     cond_reg = reg_idx[ins[1]]
@@ -424,7 +433,7 @@ class VM
     is_error = val.is_a?(Hash) && val["__type"] == "Error"
 
     # Ruby semantics: false and nil are falsey. Everything else is true.
-    if val != false && !val.nil? && !is_error?
+    if val != false && !val.nil? && !is_error?(val)
       frame.ip = target_ip
     end
   end
@@ -436,7 +445,7 @@ class VM
     val = frame.registers[val_reg]
 
     is_error = val.is_a?(Hash) && val["__type"] == "Error"
-    
+
     # If it is NOT an error, take the jump (skip the OR block)
     if !is_error
       frame.ip = target_ip
@@ -468,7 +477,7 @@ class VM
     unless list.is_a?(Array) || list.is_a?(String)
        raise "Runtime Error: Attempt to index a #{list.class}"
     end
-    
+
     # Ruby arrays handle out-of-bounds by returning nil, which works fine for us
     frame.registers[target_reg] = list[index]
   end
@@ -479,7 +488,7 @@ class VM
     field_name = ins[3] # This is a raw string from the bytecode
 
     obj = frame.registers[obj_reg]
-    
+
     # Determine how to read the field based on the object type
     if obj.is_a?(Hash)
       # For Structs/Maps implemented as Ruby Hashes
@@ -618,24 +627,28 @@ class VM
   def run_code(code_str)
     tokens = Lexer.new(code_str).tokenize
     ast = Parser.new(tokens).parse
-    
+
     compiler = Compiler.new("main")
-    
+
     chunk = compiler.compile(ast)
     print_all_chunks(chunk)
-    
+
     vm = VM.new()
     resp = vm.run(chunk)
+
+    [resp, chunk]
   end
 
   def run_file(fname)
     code = File.open(ARGV.first).read()
     $logger.debug("==== CODE =====")
     $logger.debug("\n" + code)
-  
-    run_code(code)  
+
+    resp, chunk = run_code(code)
 
     File.binwrite(ARGV.first + 'c', chunk.to_h.to_msgpack)  # Fast, compact
+
+    resp
   end
 
   # Recursive code printer

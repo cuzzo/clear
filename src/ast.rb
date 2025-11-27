@@ -28,7 +28,7 @@ module AST
   ThrowNode   = Struct.new(:value)
 
   BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', 's>', '&&', '||', 'MOD', '**']
-  UNARY_OPS = ['-', '!']
+  UNARY_OPS = ['-', '!', '~']
 
   OP_CODE_SENDABLE_SYMS = {
     :SUB => :-,
@@ -42,6 +42,7 @@ module AST
     :GT => :>,
     :LTE => :<=,
     :GTE => :>=,
+    :BITWISE_NOT => :~
   }
 
   # TODO: Make these symbols
@@ -61,8 +62,10 @@ module AST
     '&&' => :AND,
     '||' => :OR,
     'MOD' => :MOD,
-    'OR' => :OR_RESCUE
+    'OR' => :OR_RESCUE,
+    '~' => :BITWISE_NOT
   }
+
 end
 
 
