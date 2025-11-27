@@ -243,37 +243,17 @@ class Compiler
     fn_compiler = Compiler.new(node.name, node.return_type)
     fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)
 
+    # 2. Register Parameters in Child Scope
     node.params.each_with_index do |p, i|
       fn_compiler.current_scope.declare(p[:name], i, p[:type])
     end
 
-    reg_offset = node.params.size
+    # 3. REUSED LOGIC: Process Captures
+    # This handles finding outer regs and registering inner regs
+    captured_regs = process_captures(node, fn_compiler)
 
-    # TODO -> This look identical to the logic to build a closure later
-    # REUSE it.
-    captured_regs = []
-    node.captures.each do |cap|
-       cap_name, cap_type = cap.values_at(:name, :type)
-
-       # A. Resolve the register in the OUTER scope
-       outer_reg = current_scope.resolve_reg(cap_name)
-
-       unless outer_reg
-         raise "Compile Error: Cannot capture '#{cap_name}' inside function '#{node.name}' - undefined in outer scope."
-       end
-
-       # B. Add to the list for the CLOSURE instruction
-       captured_regs << "R#{outer_reg}"
-
-       # C. Declare it in the INNER scope
-       fn_compiler.current_scope.declare(cap_name, reg_offset, cap_type, false)
-       reg_offset += 1
-    end
-
-    fn_compiler.instance_variable_set(:@reg_top, reg_offset)
+    # 4. Compile Body
     node.body.each do |stmt|
-      # VarDecls manage their own registers.
-      # Everything else (Expressions, Returns) needs a temp register assigned.
       if stmt.is_a?(AST::VarDecl)
         fn_compiler.send(:visit, stmt)
       else
@@ -283,43 +263,27 @@ class Compiler
       end
     end
 
-    success_jump = fn_compiler.chunk.emit_with_index(:JMP, 0)
+    # 5. Handle Catch/Return (Same as before...)
+    compile_catch_and_return(fn_compiler, node)
 
-    if node.catch_body.any?
-      handler_ip = fn_compiler.chunk.current_address
-
-       # A. Allocate register for the error variable 'e'
-       r_err = fn_compiler.reg_top
-       fn_compiler.reg_top += 1
-       fn_compiler.current_scope.declare(node.catch_var, r_err, :Error)
-
-       # B. Compile CATCH block
-       node.catch_body.each { |s| fn_compiler.send(:visit, s) }
-       fn_compiler.chunk.emit(:RETURN, "R0") # ENSURE IMPLICIT RETURN
-
-       # C. Store handler metadata on the Chunk (for VM to find)
-       fn_compiler.chunk.handler_info = {
-           handler: handler_ip,
-           err_reg: r_err
-       }
-    end
-
-    fn_compiler.chunk.patch(success_jump, fn_compiler.chunk.current_address)
-
-    # Always emit an implicit return
-    # If the user already wrote a return statement, this cannot be reached
-    fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R0")
-
+    # 6. REUSED LOGIC: Create the Closure
     fn_chunk = fn_compiler.instance_variable_get(:@chunk)
-    fn_chunk.name = node.name
-    k = @chunk.add_constant(fn_chunk)
+    emit_closure(target_reg, fn_chunk, captured_regs)
 
-    # Closure creates the function in the target register
-    @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
+    # 7. (Specific to Named Functions) Define Global if at top level
     if @scope_depth == 0
-      # Register it as a global, so it can be called later with CALL_FUNC
       @chunk.emit(:DEF_GLOBAL, node.name, "R#{target_reg}")
+    else
+      current_scope.declare(node.name, target_reg, :Closure, false) # Closures are immutable
     end
+
+    # Cleanup: since we added a reg in step 6
+    # We should not decrement @reg_top here, as the register holds the function value
+
+    # Note: The main compiler loop assumes 'visit' handles @reg_top,
+    # but since we did it manually, the register is now "used."
+    # We return the register index where the function is stored.
+    return target_reg
   end
 
   def compile_func_call(node, target_reg)
@@ -375,8 +339,12 @@ class Compiler
           visit(arg, r)
        end
 
-       # B. Emit New Format: [OP, Target, Name, ArgCount, *ArgRegs]
-       @chunk.emit(:CALL_FUNC, "R#{target_reg}", node.name, node.args.size, *args_regs)
+       func_reg = current_scope.resolve_reg(node.name)
+       op_code = func_reg ? :CALL_CLOSURE : :CALL_FUNC
+       func_operand = func_reg ? "R#{func_reg}" : node.name
+
+       # B. Emit New Format: [OP, Target, Operand, ArgCount, *ArgRegs]
+       @chunk.emit(op_code, "R#{target_reg}", func_operand, node.args.size, *args_regs)
 
        # C. Cleanup registers
        @reg_top -= args_regs.size
@@ -733,60 +701,28 @@ class Compiler
   end
 
   def compile_lambda(node, target_reg)
-    # 1. Spin up a new compiler for the anonymous function
-    fn_compiler = Compiler.new("lambda")
+    # 1. Setup Child Compiler (Anonymous name)
+    fn_compiler = Compiler.new("lambda", :Any)
+    fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)
 
-    # 2. Register parameters (e.g., "x" becomes R0)
+    # 2. Register Parameters
     node.params.each_with_index do |p, i|
       fn_compiler.current_scope.declare(p[:name], i, p[:type])
     end
 
-    # Start allocating registers after the params
-    reg_offset = node.params.size
+    # 3. REUSED LOGIC: Process Captures
+    captured_regs = process_captures(node, fn_compiler)
 
-    captured_regs = []
-    # 2. Register Captures (multiple -> R1)
-    # We treat captures like "Hidden Parameters" that get loaded into
-    # registers R1, R2, etc., immediately after the real arguments.
-    node.captures.each do |cap|
-      cap_name, cap_type = cap.values_at(:name, :type)
-
-      outer_reg = current_scope.resolve_reg(cap_name)
-
-      # A. Ensure it exists in the outer scope
-      unless outer_reg
-         raise "Compile Error: Cannot capture '#{cap_name}' - undefined in outer scope."
-      end
-
-      captured_regs << "R#{outer_reg}"
-
-      # B. Declare it in the inner scope
-      fn_compiler.current_scope.declare(cap_name, reg_offset, cap_type, false)
-      reg_offset += 1
+    # 4. Compile Body (Lambdas usually have a single expression body)
+    # We assume 'node.body' is an Expression, so we visit it and return it
+    fn_compiler.send(:with_temp_reg) do |r|
+      fn_compiler.visit(node.body, r)
+      fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R#{r}")
     end
 
-    # 3. Set register offset (Next free reg is after params)
-    # If we have 1 param (R0), next is R1.
-    result_reg = reg_offset
-    fn_compiler.instance_variable_set(:@reg_top, result_reg)
-
-    # 4. Compile the Body
-    # The body is a single expression (x * 10).
-    # We visit it, putting the result into 'result_reg'.
-    fn_compiler.send(:visit, node.body, result_reg)
-
-    # 5. Emit Return
-    fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R#{result_reg}")
-
-    # 6. Store the Chunk as a Constant
+    # 5. REUSED LOGIC: Create the Closure
     fn_chunk = fn_compiler.instance_variable_get(:@chunk)
-    k = @chunk.add_constant(fn_chunk)
-
-    # 7. Emit the CLOSURE op with the Constant ID
-    # NOTE: In a real VM, this instruction would also need to list
-    # the registers to capture (e.g., CLOSURE R6 K3 [R_multiple]).
-    # For v0.1, we are just fixing the Scope resolution.
-    @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k}", *captured_regs)
+    emit_closure(target_reg, fn_chunk, captured_regs)
   end
 
   def compile_return_node(node, target_reg)
@@ -841,6 +777,87 @@ class Compiler
       # initiates stack unwinding via the raise_error helper function.
       @chunk.emit(:THROW, "R#{r_err}")
     end
+  end
+
+  def process_captures(node, fn_compiler)
+    captured_op_args = []
+
+    # Captures sit immediately after parameters in the new function's registers
+    # Params are 0..n, Captures are n+1..m
+    capture_reg_offset = node.params.size
+
+    node.captures.each do |cap|
+      cap_name = cap[:name]
+      cap_type = cap[:type]
+
+      # 1. Find the register in the CURRENT (Outer) scope
+      outer_reg = current_scope.resolve_reg(cap_name)
+      unless outer_reg
+        raise "Compile Error: Cannot capture '#{cap_name}' - undefined in outer scope."
+      end
+
+      # 2. Add to the list for the CLOSURE opcode (e.g., "R5")
+      captured_op_args << "R#{outer_reg}"
+
+      # 3. Tell the NEW (Inner) compiler where to find this variable
+      # It will be automatically loaded into 'capture_reg_offset' by the VM
+      fn_compiler.current_scope.declare(cap_name, capture_reg_offset, cap_type)
+
+      capture_reg_offset += 1
+    end
+
+    # Update the inner compiler's register counter so it doesn't overwrite captures
+    fn_compiler.instance_variable_set(:@reg_top, capture_reg_offset)
+
+    return captured_op_args
+  end
+
+  # Helper 3: Handles the function footer (CATCH blocks, Jumps, and Returns)
+  def compile_catch_and_return(fn_compiler, node)
+    # 1. Emit Jump over the catch block (Success Path)
+    # We don't want the main execution to fall through into the error handler.
+    success_jump = fn_compiler.chunk.emit_with_index(:JMP, 0)
+
+    # 2. Compile Catch Block (If one exists)
+    if node.catch_body.any?
+      handler_ip = fn_compiler.chunk.current_address
+
+      # A. Allocate register for the error variable 'e'
+      r_err = fn_compiler.reg_top
+      fn_compiler.reg_top += 1
+
+      # B. Declare 'e' in the scope so the catch block can see it
+      fn_compiler.current_scope.declare(node.catch_var, r_err, :Error)
+
+      # C. Compile the CATCH body statements
+      node.catch_body.each { |s| fn_compiler.send(:visit, s) }
+
+      # D. Ensure the catch block returns something (nil) if it finishes
+      fn_compiler.chunk.emit(:RETURN, "R0")
+
+      # E. Store handler metadata on the Chunk for the VM to find during unwinding
+      fn_compiler.chunk.handler_info = {
+        handler: handler_ip,
+        err_reg: r_err
+      }
+    end
+
+    # 3. Patch the Success Jump
+    # If code ran successfully, jump OVER the catch block to here.
+    fn_compiler.chunk.patch(success_jump, fn_compiler.chunk.current_address)
+
+    # 4. Emit Implicit Return
+    # If the user's code didn't return, we return R0 (usually nil/last val)
+    fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R0")
+
+    # 5. Name the Chunk (for debugging)
+    fn_chunk = fn_compiler.instance_variable_get(:@chunk)
+    fn_chunk.name = node.name
+  end
+
+  def emit_closure(target_reg, fn_chunk, captured_args)
+    k_idx = @chunk.add_constant(fn_chunk)
+    @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k_idx}", *captured_args)
   end
 
 private

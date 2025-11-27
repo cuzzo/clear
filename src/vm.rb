@@ -87,6 +87,7 @@ class VM
       when :CLOSURE then process_closure(reg_idx, ins, frame);
       when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
       when :CALL_METHOD then process_call_method(reg_idx, ins, frame);
+      when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
       when :SMOOTH then process_pipe(reg_idx, ins, frame);
@@ -305,6 +306,32 @@ class VM
     else
        raise "Unknown method #{method} on #{obj}"
     end
+  end
+
+  def process_call_closure(reg_idx, ins, frame)
+    # Format: [:CALL_CLOSURE, "R_target", "R_closure", argc, "R_arg1"...]
+    target_reg = reg_idx[ins[1]]
+    closure_reg = reg_idx[ins[2]]
+    # argc = ins[3]
+    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
+    args = arg_regs.map { |r| frame.registers[r] }
+
+    # 1. Resolve the Function (which must be a Closure)
+    func = frame.registers[closure_reg]
+
+    unless func.is_a?(Closure)
+      # This might happen if a local variable was overwritten
+      raise "Runtime Error: Value in R#{closure_reg} is not a function/Closure."
+    end
+
+    # 2. Execute the Function
+    result = execute_function(func, args)
+    $logger.debug("Closure call returned: #{result.inspect} -> Writing to R#{target_reg}")
+
+    return if result == UNWIND_SIGNAL
+
+    # 3. Store the result in the Target Register
+    frame.registers[target_reg] = result
   end
 
   def process_add(reg_idx, ins, frame)
