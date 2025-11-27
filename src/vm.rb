@@ -25,6 +25,7 @@ end.parse!
 # ==========================================
 class VM
   UNWIND_SIGNAL = :__vm_unwind_signal__
+  EXIT_SIGNAL = :__vm_program_exit__
 
   Closure = Struct.new(:chunk, :captures)
 
@@ -53,8 +54,16 @@ class VM
     # 1. Capture the stack depth when this specific loop starts
     start_depth = @frames.size
 
-    catch(:vm_unwind) do
+    catch(EXIT_SIGNAL) do
+    catch(UNWIND_SIGNAL) do
     loop do
+      # If we catch the tag, it means the program is DONE.
+      # Return the result (the value)
+      #if tag == EXIT_SIGNAL
+      #   byebug
+      #   return result
+      #end
+
       frame = @frames.last
 
       # Safety check: If we somehow popped below our depth without returning
@@ -111,8 +120,8 @@ class VM
       when :RETURN then
         val = process_return(reg_idx, ins, frame, start_depth)
         return val unless val.nil?
-
       end
+    end
     end
     end
   end
@@ -411,14 +420,21 @@ class VM
     return_val = frame.registers[result_reg]
 
     @frames.pop
-    # 5. THE FIX: Check if we are done with this run_loop's responsibility
-    # If the stack is now smaller than when we started, this specific
-    # function call is complete. Return the value to the Ruby caller.
+
+    if @frames.empty?
+     # This is the final program result.
+     throw EXIT_SIGNAL, return_val
+   end
+
     if @frames.size < start_depth
+      # If the stack is now smaller than when we started, this specific
+      # function call is complete. Return the value to the Ruby caller.
       return return_val
     end
 
-    #return return_val
+    # If this was a return within the run_loop's original scope,
+    # just continue to the next instruction in the caller's frame.
+    return nil
   end
 
   def process_jmp(reg_idx, ins, frame)
@@ -643,7 +659,7 @@ class VM
 
         # If we just pop, the loop continues and returns nil.
         # We throw :vm_unwind to force run_loop to stop immediately.
-        #throw :vm_unwind
+        throw UNWIND_SIGNAL
       end
     end
 
@@ -662,6 +678,11 @@ class VM
 
     vm = VM.new()
     resp = vm.run(chunk)
+
+    # Clean-up Resp -- necesarry because there's no true integer system yet.
+    if resp.is_a?(Float) && resp == 0.0
+      resp = 0.to_i
+    end
 
     [resp, chunk]
   end

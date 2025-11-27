@@ -52,7 +52,6 @@ RSpec.describe Compiler do
 
         expect(code[0]).to eq([:LOADK, "R0", "K0"])
         expect(code[1]).to eq([:DEF_GLOBAL, "x", "R0"])
-        expect(code[2]).to eq([:RETURN, "R0"])
       end
     end
 

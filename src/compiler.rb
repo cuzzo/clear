@@ -120,7 +120,11 @@ class Compiler
       end
       last_used_reg = result_reg if result_reg.is_a?(Integer)
     end
-    @chunk.emit(:RETURN, "R#{last_used_reg}")
+    # FIX: Always return R0, which usually holds nil or a standard default.
+    # If you want to force 0:
+    k_zero = @chunk.add_constant(0.to_i)
+    @chunk.emit(:LOADK, "R0", "K#{k_zero}") # Ensure R0 is 0r
+    @chunk.emit(:RETURN, "R0")
     @chunk
   end
 

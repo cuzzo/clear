@@ -29,7 +29,7 @@ RSpec.describe VM do
            "STDOUT > false",
            "STDOUT > true",
            "STDOUT > \"1\"",
-           "__vm_unwind_signal__" # TODO: Error
+           "0"
          ]
          expect(resp).to eq(output)
       end
@@ -40,7 +40,7 @@ RSpec.describe VM do
       it "runs" do
          output = [
            "STDOUT > -100.0",
-           "__vm_unwind_signal__" # TODO: Error
+           "0"
          ]
          expect(resp).to eq(output)
       end
@@ -52,7 +52,7 @@ RSpec.describe VM do
         output = [
            "STDOUT > 20.0",
            "STDOUT > 5.0",
-           "10.0" # TODO: Error
+           "0"
         ]
         expect(resp).to eq(output)
       end
@@ -65,7 +65,7 @@ RSpec.describe VM do
            "STDOUT > 1.0",
            "STDOUT > true",
            "STDOUT > nil",
-           "__vm_unwind_signal__" # TODO: Error
+           "0"
         ]
         expect(resp).to eq(output)
       end
@@ -76,7 +76,7 @@ RSpec.describe VM do
       it "runs" do
         output = (1...10)
            .map { |x| "STDOUT > #{x.to_f}" }
-           .push("__vm_unwind_signal__") # TODO: Error
+           .push("0")
         expect(resp).to eq(output)
       end
     end
@@ -86,9 +86,9 @@ RSpec.describe VM do
       it "runs" do
         output = [
           "STDOUT > 10.0",
-          "STDOUT > \"HI\""
+          "STDOUT > \"HI\"",
+          "0"
         ]
-        resp.pop() # TODO: ERROR
         expect(resp).to eq(output)
       end
     end
@@ -100,7 +100,7 @@ RSpec.describe VM do
           "STDOUT > 100.0",
           "STDOUT > \"HI\"",
           "STDOUT > [100.0, 200.0, 300.0]",
-          "1.0"
+          "0"
         ]
         expect(resp).to eq(output)
       end
@@ -112,7 +112,7 @@ RSpec.describe VM do
         output = [
           "STDOUT > 256.0",
           "STDOUT > 1.0",
-          "__vm_unwind_signal__" # TODO: Error
+          "0"
         ]
         expect(resp).to eq(output)
       end
@@ -126,7 +126,7 @@ RSpec.describe VM do
       let(:source) {
         <<~FLUX
           VAR x = 42;
-          x;
+          RETURN x;
         FLUX
       }
 
@@ -144,7 +144,7 @@ RSpec.describe VM do
           ELSE
             SET x = 7;
           END
-          x;
+          RETURN x;
         FLUX
       }
 
@@ -157,7 +157,7 @@ RSpec.describe VM do
       let(:source) {
         <<~FLUX
           FN x %() -> RETURN "Hello World"; END
-          x();
+          RETURN x();
         FLUX
       }
 
@@ -171,7 +171,7 @@ RSpec.describe VM do
       let(:source) {
         <<~FLUX
           VAR x = %(y)-> "Hello World";
-          x(1);
+          RETURN x(1);
         FLUX
       }
 
