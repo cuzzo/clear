@@ -67,7 +67,6 @@ class VM
       end
     end
 
-    # TODO: Handle hash, list, etc
     def reg_debug_str(v)
       if v.is_a?(String) then "\"#{v}\""
       elsif v.is_a?(Numeric) then v
@@ -91,14 +90,7 @@ class VM
     start_depth = @frames.size
 
     catch(EXIT_SIGNAL) do
-    catch(UNWIND_SIGNAL) do #|tag, error_obj|
     loop do
-      # If we catch the tag, it means the program is DONE.
-      # Return the result (the value)
-      #if tag == UNWIND_SIGNAL
-      #   return error_obj
-      #end
-
       frame = @frames.last
 
       # Safety check: If we somehow popped below our depth without returning
@@ -132,7 +124,6 @@ class VM
       when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
-      when :SMOOTH then process_pipe(reg_idx, ins, frame);
       when :NOT then process_not(reg_idx, ins, frame);
       when :CALL_NATIVE then process_call_native(reg_idx, ins, frame);
       # TODO: Replace this with std wrapper to CALL_NATIVE
@@ -158,7 +149,6 @@ class VM
       $logger.debug(debug_str(ins, frame))
     end
     end
-    end
   end
 
   # current_frame has relative registers
@@ -166,7 +156,7 @@ class VM
   def debug_str(ins, frame)
     line_num = frame.chunk.line_info[frame.ip]
     line_str = "L:#{line_num.to_s.rjust(3, '0')}"
-    src_line = (line_num && line_num > 0 && @source_lines) ?
+    src_line = (line_num && line_num > 0 && @source_lines.length >= line_num) ?
                @source_lines[line_num - 1].strip : ""
     src_line = src_line.length > 30 ? src_line[0..27] + "..." : src_line
     ip = frame.ip.to_s.rjust(5, "0")
@@ -422,12 +412,6 @@ class VM
 
     sym = AST::OP_CODE_SENDABLE_SYMS[opcode]
     frame.registers[target] = lhs_val.send(sym, rhs_val)
-  end
-
-  def process_pipe(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
-    lhs = reg_idx[ins[2]]
-    frame.registers[target] = frame.registers[lhs]
   end
 
   def process_not(reg_idx, ins, frame)
@@ -709,10 +693,6 @@ class VM
       else
         # UNWINDING: Pop and Signal!
         @frames.pop
-
-        # If we just pop, the loop continues and returns nil.
-        # We throw :vm_unwind to force run_loop to stop immediately.
-        throw UNWIND_SIGNAL, error_obj
       end
     end
 

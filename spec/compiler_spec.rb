@@ -284,5 +284,128 @@ RSpec.describe Compiler do
       end
     end
   end
+
+  describe 'Syntax: SMOOTH Operator `s>`' do
+    # Helper to compile and get code
+    def compile_ops(source)
+      compile(source).code
+    end
+
+    # BYTE CODE TRANSLATION
+    #
+    #      [ INPUT (10) ]
+    #          |
+    #          v
+    #  < 1. INPUT GUARD >----(Is Error?)----> [ THROW / SKIP ]
+    #          | NO
+    #          v
+    #    [ 2. SNAPSHOT ] -------------------> (Saved for later)
+    #          |
+    #          v
+    #  [ 3. EXECUTE CMD (print) ]
+    #          |
+    #          v
+    #  < 4. OUTPUT GUARD >---(Is Error?)----> [ ENRICH & THROW ]
+    #          | NO                             ^      |
+    #          |                                |      |
+    #          |      (Attach Snapshot)---------+      |
+    #          |                                       |
+    #          v                                       v
+    #   [ FINAL RESULT ]                           [ EXIT ]
+    context 'Basic Identifier Pipe: 10 s> print' do
+      let(:source) {
+        <<~FLUX
+          VAR x = 10 s> print;
+        FLUX
+      }
+
+      it 'compiles into a guard-call-guard sequence' do
+        ops = compile_ops(source)
+
+        # Step 0: Load 10 (The Input)
+        expect(ops[0]).to include(:LOADK)
+
+        # --- START OF SMOOTH OPERATOR ---
+
+        # Step 1: Input Guard (Hard Mode)
+        # Must crash if the number 10 was actually an error
+        expect(ops[1]).to eq([:THROW_IF_ERROR, "R0"])
+
+        # Step 2: Snapshot
+        expect(ops[2]).to include(:MOVE)
+
+        # Step 3: The Call
+        # Note: print takes 1 argument (the piped 10)
+        # [:CALL_FUNC, Target, Name, Arity, Arg0]
+        expect(ops[3]).to match([:PRINT, "R0"])
+
+        # Step 4: Error Enrichment Logic (JMP_IF_OK + SETFIELD)
+        expect(ops[4]).to include(:JMP_IF_OK)
+        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
+
+        # Find where 'x' is defined.
+        # This ignores the implicit "RETURN 0" at the very end of the chunk.
+        assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
+
+        # Step 5: Output Guard (Hard Mode)
+        # Must crash if print returned an error
+        # (Note: index depends on patch location, usually around here)
+        expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
+
+        # Find the output guard before the assignment
+        # It should be the instruction right before DEF_GLOBAL
+        expect(ops[assign_idx-1]).to eq([:THROW_IF_ERROR, "R0"])
+      end
+    end
+
+    context 'Basic Identifier Pipe: 10 s> print() (WITH PARENS)' do
+      let(:source) {
+        <<~FLUX
+          VAR x = 10 s> print();
+        FLUX
+      }
+
+      it 'compiles into a guard-call-guard sequence' do
+        ops = compile_ops(source)
+
+        expect(ops[0]).to include(:LOADK)
+        expect(ops[1]).to eq([:THROW_IF_ERROR, "R0"])
+        expect(ops[2]).to include(:MOVE)
+        expect(ops[3]).to match([:PRINT, "R0"])
+        expect(ops[4]).to include(:JMP_IF_OK)
+        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
+        assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
+        expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
+
+        expect(ops[assign_idx-1]).to eq([:THROW_IF_ERROR, "R0"])
+      end
+    end
+
+    context 'Argument Injection: 10 s> add(5)' do
+      let(:source) {
+        <<~FLUX
+          -- Should compile to add(10, 5)
+          VAR x = 10 s> add(5);
+        FLUX
+      }
+
+      it 'injects the piped value as the FIRST argument' do
+        ops = compile_ops(source)
+
+        # Look for the CALL_FUNC instruction
+        call_op = ops.find { |op| op[0] == :CALL_FUNC && op[2] == "add" }
+
+        # [:CALL_FUNC, Target, "add", Arity, Arg1, Arg2]
+        # Arg1 (Piped Value) should be R0
+        # Arg2 (Literal 5) should be R1 (or R2 depending on temp usage)
+
+        arity = call_op[3]
+        arg_1 = call_op[4]
+
+        expect(arity).to eq(2) # 1 piped + 1 explicit
+        expect(arg_1).to eq("R0") # The piped value comes FIRST
+      end
+    end
+  end
 end
 
