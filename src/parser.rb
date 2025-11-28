@@ -224,7 +224,7 @@ class Parser
     consume(:KEYWORD)
     context_expr = nil
     if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
-       context_expr = parse_primary
+      context_expr = parse_primary
     end
     match!(:CHAR, ";") # TDOO: Test
     rhs = AST::ThrowNode.new(current.line, context_expr)
@@ -289,19 +289,52 @@ class Parser
   end
 
   def parse_expression
-    lhs = parse_primary
-    while AST::BINARY_OPS.include?(current.value) || current.value == 'OR'
-      op = current.value
-      consume(current.type)
-      rhs = nil
-      if op == 'OR'
-        rhs = parse_or_rescue
-        lhs = AST::BinaryOp.new(current.line, lhs, :OR_RESCUE, rhs)
-      else
-        rhs = parse_primary
-        lhs = AST::BinaryOp.new(current.line, lhs, op, rhs)
-      end
+    # Start at the lowest level (Level 1)
+    parse_precedence_level(1)
+  end
+
+  def parse_precedence_level(level)
+    # 1. Base Case: Unary/Primary
+    if level > AST::MAX_PRECEDENCE
+      return parse_unary
     end
+
+    # 2. Recursive Step: Parse LHS at higher precedence
+    #    This ensures tight binding for *, +, ||, etc.
+    lhs = parse_precedence_level(level + 1)
+
+    level_data = AST::PRECEDENCE_MAP[level]
+    return lhs unless level_data
+
+    current_ops = level_data[:ops]
+
+    # 3. Left-Associativity Loop
+    #    Handles 'OR' and 's>' in the order they appear
+    while current_ops.include?(current.value)
+      op_val = consume(current.type).value
+
+      if op_val == 'OR'
+        # Special handling for OR logic (RETURN/EXIT/ELSE)
+        # We assume parse_or_rescue parses a Primary or similar high-precedence node
+        rhs = parse_or_rescue
+        op_val = :OR_RESCUE
+
+      elsif op_val == 's>'
+        # RHS is parsed at the NEXT HIGHER level (Level 2)
+        # This prevents it from consuming the next 'OR' or 's>'
+        # allowing the loop to handle the chain.
+        rhs = parse_precedence_level(level + 1)
+        op_val = :SMOOTH
+
+      else
+        # Standard Operators
+        rhs = parse_precedence_level(level + 1)
+      end
+
+      # Wrap the tree (Left-Growing)
+      lhs = AST::BinaryOp.new(current.line, lhs, op_val, rhs)
+    end
+
     lhs
   end
 
@@ -315,7 +348,7 @@ class Parser
     elsif match!(:KEYWORD, 'EXIT')
       context = nil
       if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
-         context = parse_primary
+        context = parse_primary
       end
       rhs = AST::ThrowNode.new(current.line, context) # Nil value implies "Use the Pipe Result"
 

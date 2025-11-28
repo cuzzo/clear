@@ -15,7 +15,8 @@ class Lexer
       WHILE DO
       CAST AS
       STRUCT TRUE FALSE NIL
-      ASSERT RAISE CATCH OR EXIT
+      ASSERT RAISE CATCH EXIT
+      MOD OR
     ].map { |k| [k, true] }.to_h
 
   def initialize(source)
@@ -35,6 +36,7 @@ class Lexer
 
       when @s.scan(/->/) then add(:ARROW, '->')
       when @s.scan(/s>/) then add(:SMOOTH, 's>')
+      when @s.scan(/OR/) then add(:OR_RESCUE, 'OR')
       when @s.scan(/==/) then add(:CHAR, '==')
       when @s.scan(/>=/) then add(:CHAR, '>=')
       when @s.scan(/<=/) then add(:CHAR, '<=')

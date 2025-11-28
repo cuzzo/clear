@@ -27,8 +27,20 @@ module AST
   Raise       = Struct.new(:line, :message_expr)
   ThrowNode   = Struct.new(:line, :value)
 
-  BINARY_OPS = ['+', '*', '/', '==', '!=', '>', '>=', '<', '<=', 's>', '&&', '||', 'MOD', '**']
   UNARY_OPS = ['-', '!', '~']
+
+  PRECEDENCE_MAP = {
+    8 => { ops: ['**'], assoc: :right },
+    7 => { ops: ['*', '/', 'MOD'], assoc: :left },
+    6 => { ops: ['+', '-'], assoc: :left },
+    5 => { ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left },
+    4 => { ops: ['&&'], assoc: :left },
+    3 => { ops: ['||'], assoc: :left },
+    # LEVEL 1: Both Pipe and Rescue live here.
+    # They bind loosely and strictly left-to-right.
+    1 => { ops: ['OR', 's>'], assoc: :left }
+  }
+  MAX_PRECEDENCE = PRECEDENCE_MAP.keys.max
 
   OP_CODE_SENDABLE_SYMS = {
     :SUB => :-,
@@ -42,7 +54,9 @@ module AST
     :GT => :>,
     :LTE => :<=,
     :GTE => :>=,
-    :BITWISE_NOT => :~
+    :BITWISE_NOT => :~,
+    :OR => "||".to_sym,
+    :AND => "&&".to_sym
   }
 
   # TODO: Make these symbols

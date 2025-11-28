@@ -93,9 +93,125 @@ RSpec.describe Compiler do
     end
   end
 
-  # TODO: TEST SET, FUNCTION DEF, CLOSURE DEF, CAST
+  # TODO: FUNCTION DEF, CLOSURE DEF, CAST
 
-  describe 'Syntax: x s> fn() OR EXIT s> next_fn()' do
+  describe 'Syntax: SMOOTH Operator `s>`' do
+    # BYTE CODE TRANSLATION
+    #
+    #      [ INPUT (10) ]
+    #          |
+    #          v
+    #  < 1. INPUT GUARD >----(Is Error?)----> [ THROW / SKIP ]
+    #          | NO
+    #          v
+    #    [ 2. SNAPSHOT ] -------------------> (Saved for later)
+    #          |
+    #          v
+    #  [ 3. EXECUTE CMD (print) ]
+    #          |
+    #          v
+    #  < 4. OUTPUT GUARD >---(Is Error?)----> [ ENRICH & THROW ]
+    #          | NO                             ^      |
+    #          |                                |      |
+    #          |      (Attach Snapshot)---------+      |
+    #          |                                       |
+    #          v                                       v
+    #   [ FINAL RESULT ]                           [ EXIT ]
+    context 'Basic Identifier Pipe: 10 s> print' do
+      let(:source) {
+        <<~FLUX
+          VAR x = 10 s> print;
+        FLUX
+      }
+
+      it 'compiles into a guard-call-guard sequence' do
+        ops = compile_ops(source)
+
+        # Step 0: Load 10 (The Input)
+        expect(ops[0]).to include(:LOADK)
+
+        # --- START OF SMOOTH OPERATOR ---
+
+        # Step 1: Input Guard (Hard Mode)
+        # Must crash if the number 10 was actually an error
+        expect(ops[1]).to eq([:THROW_IF_ERROR, "R0"])
+
+        # Step 2: Snapshot
+        expect(ops[2]).to include(:MOVE)
+
+        # Step 3: The Call
+        # Note: print takes 1 argument (the piped 10)
+        # [:CALL_FUNC, Target, Name, Arity, Arg0]
+        expect(ops[3]).to match([:PRINT, "R0"])
+
+        # Step 4: Error Enrichment Logic (JMP_IF_OK + SETFIELD)
+        expect(ops[4]).to include(:JMP_IF_OK)
+        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
+
+        # Find where 'x' is defined.
+        # This ignores the implicit "RETURN 0" at the very end of the chunk.
+        assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
+
+        # Step 5: Output Guard (Hard Mode)
+        # Must crash if print returned an error
+        # (Note: index depends on patch location, usually around here)
+        expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
+
+        # Find the output guard before the assignment
+        # It should be the instruction right before DEF_GLOBAL
+        expect(ops[assign_idx-1]).to eq([:THROW_IF_ERROR, "R0"])
+      end
+    end
+
+    context 'Basic Identifier Pipe: 10 s> print() (WITH PARENS)' do
+      let(:source) {
+        <<~FLUX
+          VAR x = 10 s> print();
+        FLUX
+      }
+
+      it 'compiles into a guard-call-guard sequence' do
+        ops = compile_ops(source)
+
+        expect(ops[0]).to include(:LOADK)
+        expect(ops[1]).to eq([:THROW_IF_ERROR, "R0"])
+        expect(ops[2]).to include(:MOVE)
+        expect(ops[3]).to match([:PRINT, "R0"])
+        expect(ops[4]).to include(:JMP_IF_OK)
+        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
+        assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
+        expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
+
+        expect(ops[assign_idx-1]).to eq([:THROW_IF_ERROR, "R0"])
+      end
+    end
+
+    context 'Argument Injection: 10 s> add(5)' do
+      let(:source) {
+        <<~FLUX
+          -- Should compile to add(10, 5)
+          VAR x = 10 s> add(5);
+        FLUX
+      }
+
+      it 'injects the piped value as the FIRST argument' do
+        ops = compile_ops(source)
+
+        # Look for the CALL_FUNC instruction
+        call_op = ops.find { |op| op[0] == :CALL_FUNC && op[2] == "add" }
+
+        # [:CALL_FUNC, Target, "add", Arity, Arg1, Arg2]
+        # Arg1 (Piped Value) should be R0
+        # Arg2 (Literal 5) should be R1 (or R2 depending on temp usage)
+
+        arity = call_op[3]
+        arg_1 = call_op[4]
+
+        expect(arity).to eq(2) # 1 piped + 1 explicit
+        expect(arg_1).to eq("R0") # The piped value comes FIRST
+      end
+    end
+
     let(:source) {
       <<~FLUX
         VAR x = %[1, 2, 3];
@@ -286,124 +402,6 @@ RSpec.describe Compiler do
             end
           end
         end
-      end
-    end
-  end
-
-  describe 'Syntax: SMOOTH Operator `s>`' do
-    # BYTE CODE TRANSLATION
-    #
-    #      [ INPUT (10) ]
-    #          |
-    #          v
-    #  < 1. INPUT GUARD >----(Is Error?)----> [ THROW / SKIP ]
-    #          | NO
-    #          v
-    #    [ 2. SNAPSHOT ] -------------------> (Saved for later)
-    #          |
-    #          v
-    #  [ 3. EXECUTE CMD (print) ]
-    #          |
-    #          v
-    #  < 4. OUTPUT GUARD >---(Is Error?)----> [ ENRICH & THROW ]
-    #          | NO                             ^      |
-    #          |                                |      |
-    #          |      (Attach Snapshot)---------+      |
-    #          |                                       |
-    #          v                                       v
-    #   [ FINAL RESULT ]                           [ EXIT ]
-    context 'Basic Identifier Pipe: 10 s> print' do
-      let(:source) {
-        <<~FLUX
-          VAR x = 10 s> print;
-        FLUX
-      }
-
-      it 'compiles into a guard-call-guard sequence' do
-        ops = compile_ops(source)
-
-        # Step 0: Load 10 (The Input)
-        expect(ops[0]).to include(:LOADK)
-
-        # --- START OF SMOOTH OPERATOR ---
-
-        # Step 1: Input Guard (Hard Mode)
-        # Must crash if the number 10 was actually an error
-        expect(ops[1]).to eq([:THROW_IF_ERROR, "R0"])
-
-        # Step 2: Snapshot
-        expect(ops[2]).to include(:MOVE)
-
-        # Step 3: The Call
-        # Note: print takes 1 argument (the piped 10)
-        # [:CALL_FUNC, Target, Name, Arity, Arg0]
-        expect(ops[3]).to match([:PRINT, "R0"])
-
-        # Step 4: Error Enrichment Logic (JMP_IF_OK + SETFIELD)
-        expect(ops[4]).to include(:JMP_IF_OK)
-        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
-
-        # Find where 'x' is defined.
-        # This ignores the implicit "RETURN 0" at the very end of the chunk.
-        assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
-
-        # Step 5: Output Guard (Hard Mode)
-        # Must crash if print returned an error
-        # (Note: index depends on patch location, usually around here)
-        expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
-
-        # Find the output guard before the assignment
-        # It should be the instruction right before DEF_GLOBAL
-        expect(ops[assign_idx-1]).to eq([:THROW_IF_ERROR, "R0"])
-      end
-    end
-
-    context 'Basic Identifier Pipe: 10 s> print() (WITH PARENS)' do
-      let(:source) {
-        <<~FLUX
-          VAR x = 10 s> print();
-        FLUX
-      }
-
-      it 'compiles into a guard-call-guard sequence' do
-        ops = compile_ops(source)
-
-        expect(ops[0]).to include(:LOADK)
-        expect(ops[1]).to eq([:THROW_IF_ERROR, "R0"])
-        expect(ops[2]).to include(:MOVE)
-        expect(ops[3]).to match([:PRINT, "R0"])
-        expect(ops[4]).to include(:JMP_IF_OK)
-        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
-        assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
-        expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
-
-        expect(ops[assign_idx-1]).to eq([:THROW_IF_ERROR, "R0"])
-      end
-    end
-
-    context 'Argument Injection: 10 s> add(5)' do
-      let(:source) {
-        <<~FLUX
-          -- Should compile to add(10, 5)
-          VAR x = 10 s> add(5);
-        FLUX
-      }
-
-      it 'injects the piped value as the FIRST argument' do
-        ops = compile_ops(source)
-
-        # Look for the CALL_FUNC instruction
-        call_op = ops.find { |op| op[0] == :CALL_FUNC && op[2] == "add" }
-
-        # [:CALL_FUNC, Target, "add", Arity, Arg1, Arg2]
-        # Arg1 (Piped Value) should be R0
-        # Arg2 (Literal 5) should be R1 (or R2 depending on temp usage)
-
-        arity = call_op[3]
-        arg_1 = call_op[4]
-
-        expect(arity).to eq(2) # 1 piped + 1 explicit
-        expect(arg_1).to eq("R0") # The piped value comes FIRST
       end
     end
   end
@@ -637,6 +635,44 @@ RSpec.describe Compiler do
         expect(append_op).to_not be_nil
       end
     end
+  end
+
+  def compile_if_statement(node, target_reg)
+    # Assuming target_reg is the register for the overall result
+    # (though IF is likely treated as a statement here)
+
+    # 1. Compile the Condition (R_cond)
+    # We use target_reg for the condition's result
+    r_cond = visit(node.condition, target_reg)
+
+    # 2. JUMP A: JMP_FALSE to the ELSE block's address (Placeholder 0)
+    # The 'false_jump' instruction needs patching later.
+    false_jump_ip = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+
+    # 3. THEN Block Compilation
+    node.then_branch.each { |stmt| visit(stmt) }
+
+    # Get the address right after the THEN block (Start of ELSE)
+    else_start_ip = @chunk.code.length
+
+    # 4. JUMP B: JMP unconditionally over the ELSE block (Placeholder 0)
+    # The 'end_jump' instruction needs patching later.
+    end_jump_ip = @chunk.emit_with_index(:JMP, 0)
+
+    # 5. Patch JUMP A
+    # JMP_FALSE should jump to the instruction right after JUMP B (IP 4 in example)
+    @chunk.patch(false_jump_ip, else_start_ip)
+
+    # 6. ELSE Block Compilation (if present)
+    if node.else_branch.any?
+      node.else_branch.each { |stmt| visit(stmt) }
+    end
+
+    # Get the address right after the ELSE block
+    end_ip = @chunk.code.length
+
+    # 7. Patch JUMP B
+    @chunk.patch(end_jump_ip, end_ip)
   end
 end
 

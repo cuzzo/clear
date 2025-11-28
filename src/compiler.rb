@@ -3,7 +3,6 @@ require 'byebug'
 
 require_relative "./ast"
 
-
 # ==========================================
 # COMPILER
 # ==========================================
@@ -185,38 +184,38 @@ class Compiler
 
     # 3. Compile the Function Call
     if node.right.is_a?(AST::FuncCall)
-       # Case 1: Explicit Call -> f(args)
+      # Case 1: Explicit Call -> f(args)
 
-       with_temp_reg do |r_snapshot|
-         # A. Save Snapshot
-         @chunk.emit(node, :MOVE, "R#{r_snapshot}", "R#{target_reg}")
+      with_temp_reg do |r_snapshot|
+        # A. Save Snapshot
+        @chunk.emit(node, :MOVE, "R#{r_snapshot}", "R#{target_reg}")
 
-         # B. Collect Arguments
-         args_regs = compile_args(node.right.args)
-         # Force piped val to the front
-         args_regs.unshift("R#{target_reg}")
+        # B. Collect Arguments
+        args_regs = compile_args(node.right.args)
+        # Force piped val to the front
+        args_regs.unshift("R#{target_reg}")
 
-         # C. Call Helper (Fixed Name and Variables)
-         _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
+        # C. Call Helper (Fixed Name and Variables)
+        _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
 
-         # D. Cleanup
-         @reg_top -= (args_regs.size - 1)
-       end
+        # D. Cleanup
+        @reg_top -= (args_regs.size - 1)
+      end
 
     elsif node.right.is_a?(AST::Identifier)
-       # Case 2: Bare Identifier: x s> f
+      # Case 2: Bare Identifier: x s> f
 
-       with_temp_reg do |r_snapshot|
-         # A. Save Snapshot
-         @chunk.emit(node, :MOVE, "R#{r_snapshot}", "R#{target_reg}")
+      with_temp_reg do |r_snapshot|
+        # A. Save Snapshot
+        @chunk.emit(node, :MOVE, "R#{r_snapshot}", "R#{target_reg}")
 
-         # B. Arguments
-         # The only argument is the piped value (target_reg)
-         args_regs = ["R#{target_reg}"]
+        # B. Arguments
+        # The only argument is the piped value (target_reg)
+        args_regs = ["R#{target_reg}"]
 
-         # C. Call Helper (Pass args_regs, NOT empty array)
-         _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
-       end
+        # C. Call Helper (Pass args_regs, NOT empty array)
+        _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
+      end
     end
 
     # 4. Patch the Input Guard Jump (Only if we were in Soft Mode)
@@ -354,7 +353,6 @@ class Compiler
   end
 
   def compile_args(args)
-    byebug if args.nil?
     args.map do |arg|
       r = @reg_top
       @reg_top += 1
@@ -400,84 +398,85 @@ class Compiler
     return r
   end
 
+  def compile_assignment(node, result_reg)
+    # 1. Compile the Value (R-Value) into a temporary register
+    #    We do this FIRST so the value is ready to be moved anywhere.
+    with_temp_reg do |val_reg|
+      visit(node.value, val_reg)
 
-  def compile_assignment(node, target_reg)
-    # CASE 1: Field Assignment (SET obj.field = val)
-    if node.name.is_a?(AST::GetField)
-      with_temp_reg do |r_obj|
-        # 1. Compile the object (e.g., 'p') into a register
-        visit(node.name.target, r_obj)
+      # 1. Capture the L-Value (The "Left Hand Side")
+      #    For "SET p.x = 10", node.name is the GetField node (p.x)
+      l_value = node.name
 
-        with_temp_reg do |r_val|
-          # 2. Compile the value (e.g., '10') into a register
-          visit(node.value, r_val)
-
-          # 3. Emit SETFIELD
-          # Format: SETFIELD R_obj, "field_name", R_value
-          @chunk.emit(node, :SETFIELD, "R#{r_obj}", node.name.field, "R#{r_val}")
-
-          # 4. Result of assignment is the value itself
-          if target_reg
-             @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_val}")
-          end
-        end
+      case l_value
+      when AST::GetField then compile_field_set(l_value, val_reg)
+      when AST::GetIndex then compile_index_set(l_value, val_reg)
+      when AST::Identifier then compile_var_set(l_value, val_reg)
+      # Legacy support for raw strings
+      when String then compile_var_set(l_value, val_reg)
+      else
+        raise "Compile Error: Invalid assignment target: #{target.class}"
       end
 
-    # CASE 2: Index Assignment (SET list[0] = val)
-    elsif node.name.is_a?(AST::GetIndex)
-      with_temp_reg do |r_obj|
-        visit(node.name.target, r_obj) # The list/hash
-        with_temp_reg do |r_key|
-          visit(node.name.index, r_key) # The index
-          with_temp_reg do |r_val|
-            visit(node.value, r_val)    # The value
-
-            # Reuse SETHASH for index assignment
-            @chunk.emit(node, :SETHASH, "R#{r_obj}", "R#{r_key}", "R#{r_val}")
-
-            if target_reg
-               @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_val}")
-            end
-          end
-        end
+      # 3. If the assignment is used as an expression, return the value
+      if result_reg
+        @chunk.emit(node, :MOVE, "R#{result_reg}", "R#{val_reg}")
       end
+    end
+  end
 
+  def compile_var_set(node, val_reg)
+    var_name = node.is_a?(AST::Identifier) ? node.name : node
+
+    # 1. Check Mutability (Optional feature)
+    if current_scope.is_immutable?(var_name)
+      raise "Compile Error: Variable '#{var_name}' is immutable."
+    end
+
+    # 2. Resolve the Register for this variable
+    target_reg = current_scope.resolve_reg(var_name)
+
+    # 3. Handle Local vs Global
+    if target_reg
+      # It's a Local Variable (in a Register)
+      @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{val_reg}")
+
+    elsif @chunk.globals_include?(var_name) # Assuming you track globals
+      # It's a Global Variable (Needs explicit SET_GLOBAL if your VM supports it)
+      # If your VM maps globals to registers in main, this might need adjustment.
+      @chunk.emit(node, :SET_GLOBAL, var_name, "R#{val_reg}")
     else
-      # CASE 3: Standard Variable Assignment (SET x = val)
-      # The name is a String Identifier here.
+      # 4. Error if not found
+      raise "Compile Error: Cannot SET '#{var_name}' because it has not been declared with VAR."
+    end
+  end
 
-      # Check mutability first
-      if current_scope.is_immutable?(node.name)
-        raise "Compile Error: Variable '#{node.name}' is immutable/captured and cannot be SET."
-      end
+  def compile_field_set(node, val_reg)
+    # node is the AST::GetField(target, field)
+    with_temp_reg do |obj_reg|
+      visit(node.target, obj_reg) # Compile 'obj'
 
-      with_temp_reg do |r_new_val|
-        visit(node.value, r_new_val)
+      # Emit: SETFIELD R_obj, "field_name", R_val
+      @chunk.emit(node, :SETFIELD, "R#{obj_reg}", node.field, "R#{val_reg}")
+    end
+  end
 
-        target_reg_var = current_scope.resolve_reg(node.name)
+  def compile_index_set(node, val_reg)
+    # node is the AST::GetIndex(target, index)
+    with_temp_reg do |obj_reg|
+      visit(node.target, obj_reg) # Compile array/hash
 
-        if target_reg_var.nil?
-          # This is where your error was coming from!
-          raise "Compile Error: Cannot SET '#{node.name}' because it has not been declared with VAR."
-        end
+      with_temp_reg do |key_reg|
+        visit(node.index, key_reg) # Compile the index/key
 
-        # ... type checking ...
-        existing_type = current_scope.resolve_type(node.name)
-        # ...
-
-        @chunk.emit(node, :MOVE, "R#{target_reg_var}", "R#{r_new_val}")
-
-        # If this assignment is an expression returning a value
-        if target_reg
-          @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_new_val}")
-        end
+        # Emit: SETHASH R_obj, R_key, R_val
+        @chunk.emit(node, :SETHASH, "R#{obj_reg}", "R#{key_reg}", "R#{val_reg}")
       end
     end
   end
 
   def compile_binary_op(node, target_reg, auto_throw_pipe)
-    # TODO: Figure out why some of these are strings...
-    if node.op == 's>'
+    if node.op == :SMOOTH
        # Don't do the normal math logic
        return compile_smooth_operator(node, target_reg, auto_throw_pipe)
 

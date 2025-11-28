@@ -43,6 +43,7 @@ module AstMatchers
         end
       end
 
+      #<struct AST::BinaryOp line=2, left=#<struct AST::BinaryOp line=2, left=#<struct AST::BinaryOp line=2, left=#<struct AST::Identifier line=2, name="x">, op=:SMOOTH, right=#<struct AST::Identifier line=2, name="fail_task">>, op=:OR_RESCUE, right=#<struct AST::ThrowNode line=2, value=#<struct AST::Literal line=2, type=:STRING, value="NOK">>>, op=:SMOOTH, right=#<struct AST::Identifier line=2, name="recover_task">>
       def description
         # Generate a DSL-like description (e.g. "Smooth(left: Var(x), right: ...)")
         name = dsl_name
@@ -50,7 +51,7 @@ module AstMatchers
           val_desc = v.respond_to?(:description) ? v.description : v.inspect
           "#{k}: #{val_desc}"
         end.join(", ")
-        
+
         "#{name}(#{args})"
       end
 
@@ -61,7 +62,7 @@ module AstMatchers
       private
 
       def dsl_name
-        return "Smooth" if @attributes[:op] == 's>'
+        return "Smooth" if @attributes[:op] == :SMOOTH
         return "OrRescue" if @attributes[:op] == :OR_RESCUE
         return "Var" if @node_class.name.end_with?("Identifier")
         @node_class.name.split('::').last
@@ -73,7 +74,7 @@ module AstMatchers
 
         case node
         when AST::BinaryOp
-          if node.op == 's>'
+          if node.op == :SMOOTH
             "Smooth(left: #{format_actual(node.left)}, right: #{format_actual(node.right)})"
           elsif node.op == :OR_RESCUE
             "OrRescue(left: #{format_actual(node.left)}, right: #{format_actual(node.right)})"
@@ -106,10 +107,10 @@ module AstMatchers
         right = args[1]
       end
 
-      attrs = { op: 's>' }
+      attrs = { op: :SMOOTH }
       attrs[:left] = left if left
       attrs[:right] = right if right
-      
+
       NodeMatcher.new(AST::BinaryOp, attrs)
     end
 
@@ -122,7 +123,7 @@ module AstMatchers
       attrs = { op: :OR_RESCUE }
       attrs[:left] = left if left
       attrs[:right] = right if right
-      
+
       NodeMatcher.new(AST::BinaryOp, attrs)
     end
 
@@ -149,7 +150,7 @@ module AstMatchers
     def VarDecl(name: nil,  type: nil, value: nil)
       NodeMatcher.new(AST::VarDecl, name: name, type: type, value: value)
     end
-    
+
     def ListLit(*items)
       NodeMatcher.new(AST::VarDecl, items: items)
     end
