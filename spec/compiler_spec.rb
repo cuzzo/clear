@@ -25,6 +25,11 @@ RSpec.describe Compiler do
     compiler.compile(ast)
   end
 
+  def compile_ops(source)
+    compile(source).code
+  end
+
+
   describe 'Syntax: VAR x = <BLAH>;' do
     let(:source) {
       <<~FLUX
@@ -286,11 +291,6 @@ RSpec.describe Compiler do
   end
 
   describe 'Syntax: SMOOTH Operator `s>`' do
-    # Helper to compile and get code
-    def compile_ops(source)
-      compile(source).code
-    end
-
     # BYTE CODE TRANSLATION
     #
     #      [ INPUT (10) ]
@@ -405,6 +405,100 @@ RSpec.describe Compiler do
         expect(arity).to eq(2) # 1 piped + 1 explicit
         expect(arg_1).to eq("R0") # The piped value comes FIRST
       end
+    end
+  end
+
+  context 'Closures: Capturing Variables' do
+    let(:source) {
+      <<~FLUX
+        VAR outer = 10;
+        FN inner %() USE(outer) ->
+          RETURN outer;
+        END
+      FLUX
+    }
+
+    it 'detects the capture and emits the CLOSURE opcode with arguments' do
+      ops = compile_ops(source)
+
+      # 1. Find where 'outer' is defined (e.g., R0)
+      def_op = ops.find { |op| op[0] == :DEF_GLOBAL && op[1] == "outer" }
+      outer_reg = def_op[2] # e.g. "R0"
+
+      # 2. Find the CLOSURE instruction
+      # Format: [:CLOSURE, TargetReg, ChunkConst, Capture1, Capture2...]
+      closure_op = ops.find { |op| op[0] == :CLOSURE }
+
+      expect(closure_op).to_not be_nil
+
+      # The 4th element (index 3) should be the register of 'outer'
+      expect(closure_op[3]).to eq(outer_reg)
+    end
+  end
+
+  context 'Closures: Missing Capture' do
+    let(:source) {
+      <<~FLUX
+        VAR outer = 10;
+        FN inner %() ->
+          RETURN outer; -- Missing USE(outer)
+        END
+      FLUX
+    }
+
+    it 'raises a Compile Error for undefined variables' do
+      expect {
+        compile(source)
+      }.to raise_error(RuntimeError, /Undefined variable 'outer'/)
+    end
+  end
+
+  context 'Control Flow: Short-Circuit AND (&&)' do
+    let(:source) {
+      <<~FLUX
+        VAR x = FALSE && print("Don't Print Me");
+      FLUX
+    }
+
+    it 'emits a JMP_FALSE to skip the right-hand side' do
+      ops = compile_ops(source)
+
+      # 1. Look for the JMP_FALSE
+      jmp_op = ops.find { |op| op[0] == :JMP_FALSE }
+      expect(jmp_op).to_not be_nil
+
+      # 2. Verify the Jump Target
+      # The target index should be AFTER the instructions for 'print'
+      # print instruction is likely index 3 or 4
+      target_idx = jmp_op[2]
+
+      # The instruction at the target should be the result assignment (or Move)
+      # It definitely should NOT be the PRINT instruction
+      target_instruction = ops[target_idx]
+
+      expect(target_instruction[0]).to_not eq(:PRINT)
+    end
+  end
+
+  context 'Struct Mutation: SET p.x = 10' do
+    let(:source) {
+      <<~FLUX
+        STRUCT Point { x: Number }
+        VAR p = %Point{ x: 0 };
+        SET p.x = 10;
+      FLUX
+    }
+
+    it 'compiles into SETFIELD instructions instead of MOVE' do
+      # If your compiler doesn't handle this, it might crash here
+      ops = compile_ops(source)
+
+      # We expect a SETFIELD instruction
+      # Format: [:SETFIELD, R_Struct, "x", R_Value]
+      set_op = ops.find { |op| op[0] == :SETFIELD }
+
+      expect(set_op).to_not be_nil
+      expect(set_op[2]).to eq("x")
     end
   end
 end

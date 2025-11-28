@@ -400,31 +400,78 @@ class Compiler
     return r
   end
 
+
   def compile_assignment(node, target_reg)
-    if current_scope.is_immutable?(node.name)
-      raise "Compile Error: Variable '#{node.name}' is immutable/captured and cannot be SET."
-    end
+    # CASE 1: Field Assignment (SET obj.field = val)
+    if node.name.is_a?(AST::GetField)
+      with_temp_reg do |r_obj|
+        # 1. Compile the object (e.g., 'p') into a register
+        visit(node.name.target, r_obj)
 
-    # 1. Compile the new value into a temporary register
-    with_temp_reg do |r_new_val|
-      visit(node.value, r_new_val)
+        with_temp_reg do |r_val|
+          # 2. Compile the value (e.g., '10') into a register
+          visit(node.value, r_val)
 
-      # 2. Look up the variable's existing register
-      target_reg = current_scope.resolve_reg(node.name)
+          # 3. Emit SETFIELD
+          # Format: SETFIELD R_obj, "field_name", R_value
+          @chunk.emit(node, :SETFIELD, "R#{r_obj}", node.name.field, "R#{r_val}")
 
-      # 3. If it doesn't exist, fail
-      if target_reg.nil?
-        raise "Compile Error: Cannot SET '#{node.name}' because it has not been declared with VAR."
+          # 4. Result of assignment is the value itself
+          if target_reg
+             @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_val}")
+          end
+        end
       end
 
-      existing_type = current_scope.resolve_type(node.name)
-      new_type = infer_type(node.value)
-      new_type = new_type == :Any ? existing_type : new_type
-      if new_type != existing_type
-        raise "Type Error: Cannot assign #{new_type} to variable '#{node.name}' of type #{existing_type}"
+    # CASE 2: Index Assignment (SET list[0] = val)
+    elsif node.name.is_a?(AST::GetIndex)
+      with_temp_reg do |r_obj|
+        visit(node.name.target, r_obj) # The list/hash
+        with_temp_reg do |r_key|
+          visit(node.name.index, r_key) # The index
+          with_temp_reg do |r_val|
+            visit(node.value, r_val)    # The value
+
+            # Reuse SETHASH for index assignment
+            @chunk.emit(node, :SETHASH, "R#{r_obj}", "R#{r_key}", "R#{r_val}")
+
+            if target_reg
+               @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_val}")
+            end
+          end
+        end
       end
 
-      @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_new_val}")
+    else
+      # CASE 3: Standard Variable Assignment (SET x = val)
+      # The name is a String Identifier here.
+
+      # Check mutability first
+      if current_scope.is_immutable?(node.name)
+        raise "Compile Error: Variable '#{node.name}' is immutable/captured and cannot be SET."
+      end
+
+      with_temp_reg do |r_new_val|
+        visit(node.value, r_new_val)
+
+        target_reg_var = current_scope.resolve_reg(node.name)
+
+        if target_reg_var.nil?
+          # This is where your error was coming from!
+          raise "Compile Error: Cannot SET '#{node.name}' because it has not been declared with VAR."
+        end
+
+        # ... type checking ...
+        existing_type = current_scope.resolve_type(node.name)
+        # ...
+
+        @chunk.emit(node, :MOVE, "R#{target_reg_var}", "R#{r_new_val}")
+
+        # If this assignment is an expression returning a value
+        if target_reg
+          @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_new_val}")
+        end
+      end
     end
   end
 

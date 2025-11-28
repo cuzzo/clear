@@ -48,7 +48,7 @@ class Parser
 
   # COMMANDS
   stmt(:KEYWORD, 'VAR', AST::VarDecl, ['VAR', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'])
-  stmt(:KEYWORD, 'SET', AST::Assignment, ['SET', :VAR_ID, '=', :expression, ';'])
+  stmt(:KEYWORD, 'SET') { parse_set_var }  #, AST::Assignment, ['SET', :VAR_ID, '=', :expression, ';'])
   stmt(:KEYWORD, 'FN') { parse_function_def }
   stmt(:KEYWORD, 'IF') { parse_if_statement }
   stmt(:KEYWORD, 'STRUCT', AST::StructDef, ['STRUCT', :TYPE_ID, :struct_body])
@@ -194,6 +194,30 @@ class Parser
     expr = parse_expression
     consume(:CHAR, ';')
     expr
+  end
+
+  def parse_set_var
+    consume(:KEYWORD, 'SET')
+
+    # 1. Parse the Target (L-Value)
+    # parse_var_id handles "x", "x.y", "x[0]", "x.y[1]", etc.
+    target = parse_var_id
+
+    # Optional: Validation (Prevent "SET f() = 1")
+    unless target.is_a?(AST::Identifier) ||
+           target.is_a?(AST::GetField) ||
+           target.is_a?(AST::GetIndex)
+       raise "Syntax Error: Invalid assignment target on line #{current.line}"
+    end
+
+    consume(:CHAR, '=')
+    value = parse_expression
+    consume(:CHAR, ';')
+
+    # 2. Return Assignment Node
+    # Note: 'target' is now a Node, not just a String name.
+    # Your Compiler already handles this!
+    AST::Assignment.new(current.line, target, value)
   end
 
   def parse_exit()
