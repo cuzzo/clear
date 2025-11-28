@@ -1,5 +1,3 @@
-#! /usr/bin/env ruby
-
 require "byebug"
 require_relative "lexer"
 require_relative "parser"
@@ -8,17 +6,14 @@ require "msgpack"
 require "optparse"
 require "logger"
 
-$logger = Logger.new(STDOUT)
-$logger.level = Logger::INFO
-$logger.formatter = proc do |severity, datetime, progname, msg|
-  "[#{severity}] #{msg}\n"
+if $logger.nil?
+  $logger = Logger.new(STDOUT)
+  $logger.level = Logger::INFO
+  $logger.formatter = proc do |severity, datetime, progname, msg|
+    "[#{severity}] #{msg}\n"
+  end
 end
 
-OptionParser.new do |opts|
-  opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
-    $logger.level = Logger.const_get(level.upcase)
-  end
-end.parse!
 
 # ==========================================
 # 6. THE VIRTUAL MACHINE
@@ -29,9 +24,10 @@ class VM
 
   Closure = Struct.new(:chunk, :captures)
 
-  def initialize
+  def initialize(code_str = "")
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
+    @source_lines = code_str.lines
   end
 
   # A "Stack Frame" represents a running function
@@ -41,6 +37,46 @@ class VM
       @chunk = chunk
       @ip = 0
       @registers = Array.new(256) # The 256 Registers
+    end
+
+    def debug_str(ins)
+      ins[1..]
+        .map { |operand| operand_data(operand) }
+        .zip(ins[1..]).map { |data, operand| joined_str(data, operand) }
+        .join(" ")
+    end
+
+    def operand_data(operand)
+      if operand.is_a?(String)
+        idx = operand[1..].to_i
+        case operand[0]
+          when "R", "K"
+            reg_debug_str(operand.start_with?("R") ? registers[idx] : @chunk.constants[idx])
+          else
+            operand # functions
+        end
+      else
+        operand
+      end
+    end
+
+    def joined_str(data, operand)
+      case data == operand # instruction pointer (jmp target, etc)
+        when true then operand.is_a?(Numeric) ? "IP: #{operand}" : "##{operand}";
+        when false then "#{operand}(#{data})";
+      end
+    end
+
+    # TODO: Handle hash, list, etc
+    def reg_debug_str(v)
+      if v.is_a?(String) then "\"#{v}\""
+      elsif v.is_a?(Numeric) then v
+      elsif v.is_a?(Compiler::Chunk) then "\\#{v.name}"
+      elsif v.is_a?(VM::Closure) then "λ"
+      elsif v.is_a?(Hash) then "{}:#{v.keys.count}"
+      elsif v.is_a?(Array) then "[]:#{v.size}"
+      else v.class
+      end
     end
   end
 
@@ -55,13 +91,12 @@ class VM
     start_depth = @frames.size
 
     catch(EXIT_SIGNAL) do
-    catch(UNWIND_SIGNAL) do
+    catch(UNWIND_SIGNAL) do #|tag, error_obj|
     loop do
       # If we catch the tag, it means the program is DONE.
       # Return the result (the value)
-      #if tag == EXIT_SIGNAL
-      #   byebug
-      #   return result
+      #if tag == UNWIND_SIGNAL
+      #   return error_obj
       #end
 
       frame = @frames.last
@@ -72,8 +107,6 @@ class VM
       # 2. Fetch Instruction
       ins = frame.chunk.code[frame.ip]
       frame.ip += 1
-
-      $logger.debug("PROCESS: #{ins}")
 
       # 3. Decode
       opcode = ins[0]
@@ -121,9 +154,27 @@ class VM
         val = process_return(reg_idx, ins, frame, start_depth)
         return val unless val.nil?
       end
+
+      $logger.debug(debug_str(ins, frame))
     end
     end
     end
+  end
+
+  # current_frame has relative registers
+  # current_chunk has relative constants
+  def debug_str(ins, frame)
+    line_num = frame.chunk.line_info[frame.ip]
+    line_str = "L:#{line_num.to_s.rjust(3, '0')}"
+    src_line = (line_num && line_num > 0 && @source_lines) ?
+               @source_lines[line_num - 1].strip : ""
+    src_line = src_line.length > 30 ? src_line[0..27] + "..." : src_line
+    ip = frame.ip.to_s.rjust(5, "0")
+    indent = "  " * (@frames.size - 1)
+    op_str = "#{indent}#{ins.first} -> #{frame.debug_str(ins)}".ljust(40)
+
+
+    "[#{line_str}] #{ip}: #{op_str} | #{src_line}"
   end
 
   def process_loadk(reg_idx, ins, frame)
@@ -284,10 +335,12 @@ class VM
     $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
 
     # DON'T OBLITERATE REGISTER ON ERROR
-    return if result == UNWIND_SIGNAL
+    return UNWIND_SIGNAL if result == UNWIND_SIGNAL
 
     # 3. Store the result in the Target Register (CRITICAL for Pipes!)
     frame.registers[target_reg] = result
+
+    return result
   end
 
   def process_call_method(reg_idx, ins, frame)
@@ -565,10 +618,10 @@ class VM
   end
 
   def process_throw_if_error(reg_idx, ins, frame)
-    $logger.debug("IN THROW_IF_ERROR")
     # THROW_IF_ERROR R_val
     val_reg = reg_idx[ins[1]]
     val = frame.registers[val_reg]
+    $logger.debug("IN THROW_IF_ERROR: #{val} => #{val.class}")
 
     # Check if it is an Error Struct
     if val.is_a?(Hash) && val["__type"] == "Error"
@@ -643,7 +696,7 @@ class VM
       # 2. Check current function's chunk for a handler
       handler = frame.chunk.handler_info
 
-      if handler
+      if handler && !handler.empty?
         # CAUGHT! (Since it's function-level, we always catch if handler_info is present)
 
         # A. Set IP to handler start
@@ -659,7 +712,7 @@ class VM
 
         # If we just pop, the loop continues and returns nil.
         # We throw :vm_unwind to force run_loop to stop immediately.
-        throw UNWIND_SIGNAL
+        throw UNWIND_SIGNAL, error_obj
       end
     end
 
@@ -676,7 +729,7 @@ class VM
     chunk = compiler.compile(ast)
     print_all_chunks(chunk)
 
-    vm = VM.new()
+    vm = VM.new(code_str)
     resp = vm.run(chunk)
 
     # Clean-up Resp -- necesarry because there's no true integer system yet.
@@ -690,7 +743,7 @@ class VM
   def run_file(fname)
     code = File.open(ARGV.first).read()
     $logger.debug("==== CODE =====")
-    $logger.debug("\n" + code)
+    $logger.debug("\n" + code.lines.each_with_index.map { |l, idx| "L:#{(idx + 1).to_s.rjust(4, '0')}: #{l}" }.join())
 
     resp, chunk = run_code(code)
 
@@ -708,12 +761,5 @@ class VM
       end
     end
   end
-
-end
-
-
-if __FILE__ == $0
-  vm = VM.new()
-  puts vm.run_file(ARGV.first)
 end
 

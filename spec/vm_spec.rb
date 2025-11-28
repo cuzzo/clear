@@ -16,10 +16,23 @@ RSpec.describe VM do
 
   describe "Integeration Tests" do
     let(:resp) {
-       `bundle exec ruby src/vm.rb examples/#{script}.flux`
+       `bundle exec ruby src/cheat.rb examples/#{script}.flux`
           .lines
           .map(&:chomp)
     }
+
+    context "SMOOTH error handling" do
+      let(:script) { 'smooth-error' }
+      it "runs" do
+        output = [
+          "STDOUT > \"1. Fetching User ID: 999.0\"",
+          "STDOUT > \"ELSE\"",
+          "STDOUT > \"404 Not Found\"",
+          "0"
+        ]
+        expect(resp).to eq(output)
+      end
+    end
 
     context "boolean logic" do
       let(:script) { 'boolean-logic' }

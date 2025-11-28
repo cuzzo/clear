@@ -9,11 +9,13 @@ require_relative "./ast"
 # ==========================================
 class Compiler
   class Chunk
-    attr_accessor :code, :constants, :name, :handler_info
+    attr_accessor :code, :constants, :name, :handler_info, :line_info
     def initialize(name = "main")
       @name = name
       @code = []
       @constants = []
+      @handler_info = {}
+      @line_info = []
       @logger = $logger || Logger.new(STDOUT)
     end
 
@@ -23,12 +25,18 @@ class Compiler
       idx
     end
 
-    def emit(opcode, *operands); @code << [opcode, *operands]; end
+    def emit(node, opcode, *operands)
+      line_number = node.nil? ? -1 : node.line
+      @code << [opcode, *operands]
+      @line_info << line_number
+    end
 
     # Returns the index of the instruction we just added
     # so we can patch it later.
-    def emit_with_index(opcode, *operands)
+    def emit_with_index(node, opcode, *operands)
+      line_number = node.nil? ? -1 : node.line
       @code << [opcode, *operands]
+      @line_info << line_number
       @code.size - 1
     end
 
@@ -123,8 +131,10 @@ class Compiler
     # FIX: Always return R0, which usually holds nil or a standard default.
     # If you want to force 0:
     k_zero = @chunk.add_constant(0.to_i)
-    @chunk.emit(:LOADK, "R0", "K#{k_zero}") # Ensure R0 is 0r
-    @chunk.emit(:RETURN, "R0")
+
+    # TODO: What do I put for the current node here?
+    @chunk.emit(nil, :LOADK, "R0", "K#{k_zero}") # Ensure R0 is 0r
+    @chunk.emit(nil, :RETURN, "R0")
     @chunk
   end
 
@@ -163,13 +173,14 @@ class Compiler
     visit(node.left, target_reg, auto_throw_pipe: auto_throw_pipe)
 
     # 2. Input Guard: Check if the *Input* is already an error
+
+    skip_jump = nil
     if auto_throw_pipe
       # Default Mode: Crash if input is error
-      @chunk.emit(:THROW_IF_ERROR, "R#{target_reg}")
-      skip_jump = nil
+      @chunk.emit(node, :THROW_IF_ERROR, "R#{target_reg}")
     else
       # Soft Mode: Skip everything if input is error
-      skip_jump = @chunk.emit_with_index(:JMP_IF_ERROR, "R#{target_reg}", 0)
+      skip_jump = @chunk.emit_with_index(node, :JMP_IF_ERROR, "R#{target_reg}", 0)
     end
 
     # 3. Compile the Function Call
@@ -178,17 +189,12 @@ class Compiler
 
        with_temp_reg do |r_snapshot|
          # A. Save Snapshot
-         @chunk.emit(:MOVE, "R#{r_snapshot}", "R#{target_reg}")
+         @chunk.emit(node, :MOVE, "R#{r_snapshot}", "R#{target_reg}")
 
-         # B. Collect Arguments (Start with Piped Data)
-         args_regs = ["R#{target_reg}"]
-
-         node.right.args.each do |arg|
-            r_arg = @reg_top
-            @reg_top += 1
-            visit(arg, r_arg)
-            args_regs << "R#{r_arg}"
-         end
+         # B. Collect Arguments
+         args_regs = compile_args(node.right.args)
+         # Force piped val to the front
+         args_regs.unshift("R#{target_reg}")
 
          # C. Call Helper (Fixed Name and Variables)
          _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
@@ -202,7 +208,7 @@ class Compiler
 
        with_temp_reg do |r_snapshot|
          # A. Save Snapshot
-         @chunk.emit(:MOVE, "R#{r_snapshot}", "R#{target_reg}")
+         @chunk.emit(node, :MOVE, "R#{r_snapshot}", "R#{target_reg}")
 
          # B. Arguments
          # The only argument is the piped value (target_reg)
@@ -217,6 +223,11 @@ class Compiler
     if skip_jump
       @chunk.patch(skip_jump, @chunk.current_address, 2)
     end
+
+    if auto_throw_pipe
+      # Crash if the result of the function call (R{target_reg}) is an error.
+      @chunk.emit(node, :THROW_IF_ERROR, "R#{target_reg}")
+    end
   end
 
   def _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
@@ -225,19 +236,19 @@ class Compiler
     func_name = node.right.name
 
     if func_name == "print"
-       @chunk.emit(:PRINT, *args_regs)
+       @chunk.emit(node, :PRINT, *args_regs)
     elsif func_name == "native_call"
        raise "Compiler Error: Cannot pipe to native_call directly."
     else
-       @chunk.emit(:CALL_FUNC, "R#{target_reg}", func_name, args_regs.size, *args_regs)
+       @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", func_name, args_regs.size, *args_regs)
     end
 
     # B. Error Enrichment (Snapshot)
     # 1. If result is OK, jump over the enrichment logic
-    ok_jump = @chunk.emit_with_index(:JMP_IF_OK, "R#{target_reg}", 0)
+    ok_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
 
     # 2. If we are here, it IS an Error. Attach snapshot.
-    @chunk.emit(:SETFIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
+    @chunk.emit(node, :SETFIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
 
     # 3. Patch the jump
     @chunk.patch(ok_jump, @chunk.current_address, 2)
@@ -272,11 +283,11 @@ class Compiler
 
     # 6. REUSED LOGIC: Create the Closure
     fn_chunk = fn_compiler.instance_variable_get(:@chunk)
-    emit_closure(target_reg, fn_chunk, captured_regs)
+    emit_closure(node, target_reg, fn_chunk, captured_regs)
 
     # 7. (Specific to Named Functions) Define Global if at top level
     if @scope_depth == 0
-      @chunk.emit(:DEF_GLOBAL, node.name, "R#{target_reg}")
+      @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{target_reg}")
     else
       current_scope.declare(node.name, target_reg, :Closure, false) # Closures are immutable
     end
@@ -293,65 +304,62 @@ class Compiler
   def compile_func_call(node, target_reg)
     # Check if it's a print call (intrinsic) or regular
     if node.name == "print"
-       args = []
-       node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
-       @chunk.emit(:PRINT, *args)
-       @reg_top -= args.size
+      args = compile_args(node.args)
+      @chunk.emit(node, :PRINT, *args)
+      @reg_top -= args.size
 
     # 2. Handle Intrinsic: NATIVE_CALL (New!)
     elsif node.name == "native_call"
-       # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
+      # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
 
-       # Extract Class/Method literals (Must be string literals for simplicity)
-       if node.args.size < 2
-          raise "native_call requires at least 'Class' and 'Method' string literals."
-       end
+      # Extract Class/Method literals (Must be string literals for simplicity)
+      if node.args.size < 2
+        raise "native_call requires at least 'Class' and 'Method' string literals."
+      end
 
-       class_node = node.args[0]
-       method_node = node.args[1]
+      class_node = node.args[0]
+      method_node = node.args[1]
 
-       # Verify they are strings
-       unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
-          raise "native_call arg 1 must be a static String (Class Name)"
-       end
-       class_name = class_node.value
-       method_name = method_node.value
+      # Verify they are strings
+      unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
+        raise "native_call arg 1 must be a static String (Class Name)"
+      end
+      class_name = class_node.value
+      method_name = method_node.value
 
-       # Compile the ACTUAL arguments (index 2 onwards)
-       real_args_regs = []
-       node.args[2..-1].each do |arg|
-          r = @reg_top
-          @reg_top += 1
-          real_args_regs << "R#{r}"
-          visit(arg, r)
-       end
+      # Compile the ACTUAL arguments (index 2 onwards)
+      real_args_regs = compile_args(args[2..-1])
 
-       # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
-       @chunk.emit(:CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
+      # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
+      @chunk.emit(node, :CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
 
-       # Clean up temp registers
-       @reg_top -= real_args_regs.size
+      # Clean up temp registers
+      @reg_top -= real_args_regs.size
 
     # 3. Handle Regular Functions
     else
-       # A. Compile Arguments into registers
-       args_regs = []
-       node.args.each do |arg|
-          r = @reg_top
-          @reg_top += 1
-          args_regs << "R#{r}"
-          visit(arg, r)
-       end
+      # A. Compile Arguments into registers
+      args_regs = compile_args(node.args)
 
-       func_reg = current_scope.resolve_reg(node.name)
-       op_code = func_reg ? :CALL_CLOSURE : :CALL_FUNC
-       func_operand = func_reg ? "R#{func_reg}" : node.name
+      func_reg = current_scope.resolve_reg(node.name)
+      op_code = func_reg ? :CALL_CLOSURE : :CALL_FUNC
+      func_operand = func_reg ? "R#{func_reg}" : node.name
 
-       # B. Emit New Format: [OP, Target, Operand, ArgCount, *ArgRegs]
-       @chunk.emit(op_code, "R#{target_reg}", func_operand, node.args.size, *args_regs)
+      # B. Emit New Format: [OP, Target, Operand, ArgCount, *ArgRegs]
+      @chunk.emit(node, op_code, "R#{target_reg}", func_operand, node.args.size, *args_regs)
 
-       # C. Cleanup registers
-       @reg_top -= args_regs.size
+      # C. Cleanup registers
+      @reg_top -= args_regs.size
+    end
+  end
+
+  def compile_args(args)
+    byebug if args.nil?
+    args.map do |arg|
+      r = @reg_top
+      @reg_top += 1
+      visit(arg, r)
+      "R#{r}"
     end
   end
 
@@ -381,7 +389,7 @@ class Compiler
     if @scope_depth == 0
       # CASE A: GLOBAL
       # We must explicitly tell the VM to save this register into the Global Map.
-      @chunk.emit(:DEF_GLOBAL, node.name, "R#{r}")
+      @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{r}")
     else
       # CASE B: LOCAL
       # We do NOTHING.
@@ -416,7 +424,7 @@ class Compiler
         raise "Type Error: Cannot assign #{new_type} to variable '#{node.name}' of type #{existing_type}"
       end
 
-      @chunk.emit(:MOVE, "R#{target_reg}", "R#{r_new_val}")
+      @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_new_val}")
     end
   end
 
@@ -433,14 +441,14 @@ class Compiler
 
       # 2. Emit Check: "Jump to End if OK"
       # If target_reg is valid data, we skip the recovery block.
-      success_jump = @chunk.emit_with_index(:JMP_IF_OK, "R#{target_reg}", 0)
+      success_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
 
       # 3. Compile Right Side (The Recovery)
       # At this point, target_reg holds the %Error object.
       if node.right.is_a?(AST::ReturnNode) && node.right.value.nil?
          # Syntax: OR RETURN
          # Action: Return the current register (the Error)
-         @chunk.emit(:RETURN, "R#{target_reg}")
+         @chunk.emit(node, :RETURN, "R#{target_reg}")
 
       elsif node.right.is_a?(AST::ThrowNode)
          # Syntax: OR EXIT (with optional context)
@@ -451,11 +459,11 @@ class Compiler
 
               # 2. Set the Context Field on the Error
               # target_reg currently holds the Error object
-              @chunk.emit(:SETFIELD, "R#{target_reg}", "context", "R#{r_ctx}")
+              @chunk.emit(node, :SETFIELD, "R#{target_reg}", "context", "R#{r_ctx}")
             end
          end
          # Action: Throw the current register (the Error)
-         @chunk.emit(:THROW, "R#{target_reg}")
+         @chunk.emit(node, :THROW, "R#{target_reg}")
 
       else
          # Syntax: OR ELSE <value>
@@ -473,7 +481,7 @@ class Compiler
 
       # 2. Short Circuit: If Left is FALSE, Jump to End
       # The result (FALSE) is already sitting in target_reg, so we are done.
-      end_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{target_reg}", 0)
+      end_jump = @chunk.emit_with_index(node, :JMP_FALSE, "R#{target_reg}", 0)
 
       # 3. Compile Right
       # If we didn't jump, calculate Right and put it in target_reg
@@ -488,7 +496,7 @@ class Compiler
       visit(node.left, target_reg)
 
       # 2. Short Circuit: If Left is TRUE, Jump to End
-      end_jump = @chunk.emit_with_index(:JMP_TRUE, "R#{target_reg}", 0)
+      end_jump = @chunk.emit_with_index(node, :JMP_TRUE, "R#{target_reg}", 0)
 
       # 3. Compile Right
       visit(node.right, target_reg)
@@ -504,7 +512,7 @@ class Compiler
         visit(node.right, r2)
 
         if AST::OP_TO_OP_CODE[node.op]
-          @chunk.emit(AST::OP_TO_OP_CODE[node.op], "R#{target_reg}", "R#{r1}", "R#{r2}")
+          @chunk.emit(node, AST::OP_TO_OP_CODE[node.op], "R#{target_reg}", "R#{r1}", "R#{r2}")
         else
           raise "Unknown binary operator: #{node.op}"
         end
@@ -518,7 +526,7 @@ class Compiler
       if node.right.is_a?(AST::Literal) && node.right.type == :NUMBER
          # Emit LOADK -5 directly
          k = @chunk.add_constant(-node.right.value)
-         @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
+         @chunk.emit(node, :LOADK, "R#{target_reg}", "K#{k}")
          return
       end
 
@@ -526,7 +534,7 @@ class Compiler
       with_temp_reg do |r_zero|
         # 1. Load 0
         k_zero = @chunk.add_constant(0)
-        emit(:LOADK, r_zero, "K#{k_zero}")
+        emit(node, :LOADK, r_zero, "K#{k_zero}")
 
         # 2. Compile the expression being negated
         # Note: Depending on your register allocator, ensure 'visit' puts result in a known reg
@@ -534,13 +542,13 @@ class Compiler
         r_val = visit(node.right)
 
         # 3. Perform 0 - value
-        emit(:SUB, r_val, r_zero, r_val) # Target, LHS, RHS
+        emit(node, :SUB, r_val, r_zero, r_val) # Target, LHS, RHS
       end
 
     elsif node.op == :NOT
       with_temp_reg do |r_src|
         visit(node.right, r_src)
-        @chunk.emit(:NOT, "R#{target_reg}", "R#{r_src}")
+        @chunk.emit(node, :NOT, "R#{target_reg}", "R#{r_src}")
       end
     end
   end
@@ -552,7 +560,7 @@ class Compiler
       with_temp_reg do |r_index|
         visit(node.index, r_index) # Compile 'i'
         # Emit GET_INDEX R_result, R_target, R_index
-        @chunk.emit(:GET_INDEX, "R#{target_reg}", "R#{r_target}", "R#{r_index}")
+        @chunk.emit(node, :GET_INDEX, "R#{target_reg}", "R#{r_target}", "R#{r_index}")
       end
     end
   end
@@ -563,18 +571,18 @@ class Compiler
       visit(node.target, r_target)
       # We assume field names are static strings for now
       # Emit GET_FIELD R_result, R_target, "field_name"
-      @chunk.emit(:GET_FIELD, "R#{target_reg}", "R#{r_target}", node.field)
+      @chunk.emit(node, :GET_FIELD, "R#{target_reg}", "R#{r_target}", node.field)
     end
   end
 
   def compile_cast(node, target_reg)
     visit(node.value, target_reg)
-    @chunk.emit(:CAST, "R#{target_reg}", node.target)
+    @chunk.emit(node, :CAST, "R#{target_reg}", node.target)
   end
 
   def compile_literal(node, target_reg)
     k = @chunk.add_constant(node.value)
-    @chunk.emit(:LOADK, "R#{target_reg}", "K#{k}")
+    @chunk.emit(node, :LOADK, "R#{target_reg}", "K#{k}")
   end
 
   def compile_if_statement(node, target_reg)
@@ -584,7 +592,7 @@ class Compiler
 
       # 2. Emit JMP_FALSE
       # "If condition (r_cond) is false, jump to... Unknown (0) for now"
-      else_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+      else_jump = @chunk.emit_with_index(node, :JMP_FALSE, "R#{r_cond}", 0)
 
       # 3. Compile THEN branch
       node.then_branch.each { |stmt| visit(stmt) }
@@ -592,7 +600,7 @@ class Compiler
       # 4. Emit JMP (Unconditional)
       # If we finished the THEN block, we must skip the ELSE block.
       # Target is unknown (0) for now.
-      end_jump = @chunk.emit_with_index(:JMP, 0)
+      end_jump = @chunk.emit_with_index(node, :JMP, 0)
 
       # 5. Patch the JMP_FALSE
       # If the condition failed, we land HERE (start of else)
@@ -619,7 +627,7 @@ class Compiler
       # 2. EMIT EXIT JUMP (Placeholder)
       # If condition is false, we jump to the END.
       # We don't know where the END is yet, so we write '0' for now.
-      do_jump = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
+      do_jump = @chunk.emit_with_index(node, :JMP_FALSE, "R#{r_cond}", 0)
       exit_jump_index = @chunk.code.length - 1
 
       # 3. COMPILE BODY
@@ -628,7 +636,7 @@ class Compiler
 
       # 4. EMIT LOOP BACK
       # Unconditionally jump back to the top (loop_start_index)
-      @chunk.emit_with_index(:JMP, loop_start_index)
+      @chunk.emit_with_index(node, :JMP, loop_start_index)
 
       # 5. PATCH THE EXIT JUMP
       # Now that the body is done, we know the current index is the "End".
@@ -659,23 +667,23 @@ class Compiler
       # or assume Vector[Any].
     end
 
-    @chunk.emit(:NEWLIST, "R#{target_reg}")
-    node.items.each { |item| with_temp_reg { |r| visit(item, r); @chunk.emit(:APPEND, "R#{target_reg}", "R#{r}") } }
+    @chunk.emit(node, :NEWLIST, "R#{target_reg}")
+    node.items.each { |item| with_temp_reg { |r| visit(item, r); @chunk.emit(node, :APPEND, "R#{target_reg}", "R#{r}") } }
   end
 
   def compile_struct_lit(node, target_reg)
-    @chunk.emit(:NEWSTRUCT, "R#{target_reg}", node.name)
-    node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(:SETFIELD, "R#{target_reg}", k, "R#{r}") } }
+    @chunk.emit(node, :NEWSTRUCT, "R#{target_reg}", node.name)
+    node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(node, :SETFIELD, "R#{target_reg}", k, "R#{r}") } }
   end
 
   def compile_struct_def(node, target_reg)
     # Emit: DEF_STRUCT "Name", { "field" => "Type" }
-    @chunk.emit(:DEF_STRUCT, node.name, node.fields)
+    @chunk.emit(node, :DEF_STRUCT, node.name, node.fields)
   end
 
   def compile_hash_lit(node, target_reg)
     # Treat Hash like a Struct or List (for v0.1, let's use NEWSTRUCT for simplicity)
-    @chunk.emit(:NEWHASH, "R#{target_reg}")
+    @chunk.emit(node, :NEWHASH, "R#{target_reg}")
     node.pairs.each do |k, v|
       with_temp_reg do |r|
         visit(v, r)
@@ -683,7 +691,7 @@ class Compiler
         # If 'k' is an expression, you'd need to visit it too.
         # For v0.1 simple string keys:
         key_name = k.is_a?(AST::Literal) ? k.value : k.name
-        @chunk.emit(:SETHASH, "R#{target_reg}", key_name, "R#{r}")
+        @chunk.emit(node, :SETHASH, "R#{target_reg}", key_name, "R#{r}")
       end
     end
   end
@@ -691,15 +699,14 @@ class Compiler
   def compile_identifier(node, target_reg)
     r = current_scope.resolve_reg(node.name)
     raise "Compile Error: Undefined variable '#{node.name}'" unless r
-    @chunk.emit(:MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
+    @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
   end
 
   def compile_method_call(node, target_reg)
     with_temp_reg do |r_obj|
       visit(node.object, r_obj)
-      args = []
-      node.args.each { |a| r=@reg_top; @reg_top+=1; args<<"R#{r}"; visit(a,r) }
-      @chunk.emit(:CALL_METHOD, "R#{target_reg}", "R#{r_obj}", node.method, *args)
+      args = compile_args(node.args)
+      @chunk.emit(node, :CALL_METHOD, "R#{target_reg}", "R#{r_obj}", node.method, *args)
       @reg_top -= args.size
     end
   end
@@ -721,12 +728,12 @@ class Compiler
     # We assume 'node.body' is an Expression, so we visit it and return it
     fn_compiler.send(:with_temp_reg) do |r|
       fn_compiler.visit(node.body, r)
-      fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R#{r}")
+      fn_compiler.instance_variable_get(:@chunk).emit(node, :RETURN, "R#{r}")
     end
 
     # 5. REUSED LOGIC: Create the Closure
     fn_chunk = fn_compiler.instance_variable_get(:@chunk)
-    emit_closure(target_reg, fn_chunk, captured_regs)
+    emit_closure(node, target_reg, fn_chunk, captured_regs)
   end
 
   def compile_return_node(node, target_reg)
@@ -743,7 +750,7 @@ class Compiler
       # 3. Compile the expression into that register
       visit(node.value, r)
       # 4. Emit the instruction
-      @chunk.emit(:RETURN, "R#{r}")
+      @chunk.emit(node, :RETURN, "R#{r}")
     end
   end
 
@@ -756,7 +763,7 @@ class Compiler
       k_msg = @chunk.add_constant(node.message)
 
       # 3. Emit ASSERT R_cond, K_msg
-      @chunk.emit(:ASSERT, "R#{r_cond}", "K#{k_msg}")
+      @chunk.emit(node, :ASSERT, "R#{r_cond}", "K#{k_msg}")
     end
   end
 
@@ -766,10 +773,10 @@ class Compiler
     # RETURN temp;
 
     # 1. Compile the message expression (or NIL literal if no message)
-    msg_node = node.message_expr || AST::Literal.new(:NIL, nil)
+    msg_node = node.message_expr || AST::Literal.new(node.line, :NIL, nil)
 
     # 2. Build the AST node for the function call: make_error(msg_node)
-    error_call_node = AST::FuncCall.new("make_error", [msg_node])
+    error_call_node = AST::FuncCall.new(node.line, "make_error", [msg_node])
 
     # 3. Compile the function call result (the Error Struct) into a register
     with_temp_reg do |r_err|
@@ -779,7 +786,7 @@ class Compiler
       # 4. Emit THROW instruction
       # This is the actual instruction that interrupts the program flow and
       # initiates stack unwinding via the raise_error helper function.
-      @chunk.emit(:THROW, "R#{r_err}")
+      @chunk.emit(node, :THROW, "R#{r_err}")
     end
   end
 
@@ -820,7 +827,7 @@ class Compiler
   def compile_catch_and_return(fn_compiler, node)
     # 1. Emit Jump over the catch block (Success Path)
     # We don't want the main execution to fall through into the error handler.
-    success_jump = fn_compiler.chunk.emit_with_index(:JMP, 0)
+    success_jump = fn_compiler.chunk.emit_with_index(node, :JMP, 0)
 
     # 2. Compile Catch Block (If one exists)
     if node.catch_body.any?
@@ -828,6 +835,7 @@ class Compiler
 
       # A. Allocate register for the error variable 'e'
       r_err = fn_compiler.reg_top
+      $logger.debug("Compiling CATCH for #{node.name}: r_err=#{r_err.inspect}")
       fn_compiler.reg_top += 1
 
       # B. Declare 'e' in the scope so the catch block can see it
@@ -837,7 +845,7 @@ class Compiler
       node.catch_body.each { |s| fn_compiler.send(:visit, s) }
 
       # D. Ensure the catch block returns something (nil) if it finishes
-      fn_compiler.chunk.emit(:RETURN, "R0")
+      fn_compiler.chunk.emit(node, :RETURN, "R0")
 
       # E. Store handler metadata on the Chunk for the VM to find during unwinding
       fn_compiler.chunk.handler_info = {
@@ -852,16 +860,16 @@ class Compiler
 
     # 4. Emit Implicit Return
     # If the user's code didn't return, we return R0 (usually nil/last val)
-    fn_compiler.instance_variable_get(:@chunk).emit(:RETURN, "R0")
+    fn_compiler.instance_variable_get(:@chunk).emit(node, :RETURN, "R0")
 
     # 5. Name the Chunk (for debugging)
     fn_chunk = fn_compiler.instance_variable_get(:@chunk)
     fn_chunk.name = node.name
   end
 
-  def emit_closure(target_reg, fn_chunk, captured_args)
+  def emit_closure(node, target_reg, fn_chunk, captured_args)
     k_idx = @chunk.add_constant(fn_chunk)
-    @chunk.emit(:CLOSURE, "R#{target_reg}", "K#{k_idx}", *captured_args)
+    @chunk.emit(node, :CLOSURE, "R#{target_reg}", "K#{k_idx}", *captured_args)
   end
 
 private

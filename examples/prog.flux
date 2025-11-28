@@ -22,7 +22,7 @@ FN main %(args) RETURNS Number ->
   VAR list = %[1, 2, 3,];
   list
     .map( %(x) USE(multiple) -> x * multiple )
-     s> print();
+     s> print;
 
   RETURN 1;
 END

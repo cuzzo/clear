@@ -1,7 +1,7 @@
 require 'strscan'
 
 # ==========================================
-# 2. LEXER 
+# 2. LEXER
 # ==========================================
 class Lexer
   Token = Struct.new(:type, :value, :line)
@@ -11,10 +11,10 @@ class Lexer
   KEYWORDS = %w[
       VAR SET
       FN RETURN RETURNS USE
-      IF THEN ELSE ELSE_IF END 
-      WHILE DO 
+      IF THEN ELSE ELSE_IF END
+      WHILE DO
       CAST AS
-      STRUCT TRUE FALSE NIL 
+      STRUCT TRUE FALSE NIL
       ASSERT RAISE CATCH OR EXIT
     ].map { |k| [k, true] }.to_h
 

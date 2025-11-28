@@ -1,0 +1,25 @@
+#! /usr/bin/env ruby
+
+require 'bundler/setup' # so `bundle exec` not needed
+require "logger"
+
+require_relative "vm"
+
+$logger = Logger.new(STDOUT)
+$logger.level = Logger::INFO
+$logger.formatter = proc do |severity, datetime, progname, msg|
+  "[#{severity}] #{msg}\n"
+end
+
+OptionParser.new do |opts|
+  opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
+    $logger.level = Logger.const_get(level.upcase)
+  end
+end.parse!
+
+
+if __FILE__ == $0
+  vm = VM.new()
+  puts vm.run_file(ARGV.first)
+end
+
