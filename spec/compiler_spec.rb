@@ -501,5 +501,142 @@ RSpec.describe Compiler do
       expect(set_op[2]).to eq("x")
     end
   end
+
+  describe 'Nested Data Structures (Register Discipline)' do
+    # Ensure the inner hash is built in a *higher* register than the outer hash
+    context 'Hash inside Hash: %{ "inner": %{ "a": 1 } }' do
+      let(:source) {
+        <<~FLUX
+          VAR config = %{ "core": %{ "debug": 1 } };
+        FLUX
+      }
+
+      it 'compiles the inner hash completely before attaching to outer' do
+        ops = compile_ops(source)
+
+        # 1. Find the Outer Hash creation
+        # It should be the first NEWHASH
+        outer_hash_op = ops.find { |op| op[0] == :NEWHASH }
+        outer_reg = outer_hash_op[1] # e.g. "R0"
+
+        # 2. Find the Inner Hash creation
+        # It should use a DIFFERENT register (usually R0 + 1)
+        # We filter for NEWHASH, get the second one
+        inner_hash_op = ops.select { |op| op[0] == :NEWHASH }[1]
+        inner_reg = inner_hash_op[1] # e.g. "R1"
+
+        expect(inner_reg).to_not eq(outer_reg)
+
+        # 3. Verify the Link
+        # Look for the SETHASH that attaches the inner to the outer
+        # SETHASH OuterReg, Key, InnerReg
+        link_op = ops.find { |op| op[0] == :SETHASH && op[1] == outer_reg && op[3] == inner_reg }
+
+        expect(link_op).to_not be_nil, "Failed to find SETHASH linking #{outer_reg} and #{inner_reg}"
+      end
+    end
+
+    # 2. List inside Hash
+    # Ensure the list is built in a temp register, then moved into the hash
+    context 'List inside Hash: %{ "tags": %[1, 2] }' do
+      let(:source) {
+        <<~FLUX
+          VAR user = %{ "tags": %[10, 20] };
+        FLUX
+      }
+
+      it 'creates the list separately and sets it as a hash field' do
+        ops = compile_ops(source)
+
+        # 1. Detect Hash and List creation
+        hash_op = ops.find { |op| op[0] == :NEWHASH }
+        list_op = ops.find { |op| op[0] == :NEWLIST }
+
+        hash_reg = hash_op[1]
+        list_reg = list_op[1]
+
+        # 2. Ensure they use different registers
+        expect(hash_reg).to_not eq(list_reg)
+
+        # 3. Verify the List Population
+        # Look for APPEND instructions targeting the list_reg
+        append_ops = ops.select { |op| op[0] == :APPEND && op[1] == list_reg }
+        expect(append_ops.size).to eq(2)
+
+        # 4. Verify the Link (SETHASH)
+        # SETHASH HashReg, "tags", ListReg
+        link_op = ops.find { |op| op[0] == :SETHASH && op[1] == hash_reg && op[3] == list_reg }
+        expect(link_op).to_not be_nil
+      end
+    end
+
+    # 3. List of Lists (Matrix)
+    context 'List of Lists: %[ %[1], %[2] ]' do
+      let(:source) {
+        <<~FLUX
+          VAR matrix = %[ %[1], %[2] ];
+        FLUX
+      }
+
+      it 'compiles inner lists using temporary registers' do
+        ops = compile_ops(source)
+
+        # 1. Identify the Main List (The one that gets assigned to 'matrix')
+        # It's usually the first NEWLIST or the one passed to DEF_GLOBAL
+        def_op = ops.find { |op| op[0] == :DEF_GLOBAL }
+        main_list_reg = def_op[2]
+
+        # 2. Count all NEWLIST instructions
+        new_lists = ops.select { |op| op[0] == :NEWLIST }
+        expect(new_lists.size).to eq(3) # 1 Outer + 2 Inner
+
+        # 3. Verify APPENDS to the Main List
+        # We expect 2 APPENDS where the target is main_list_reg
+        main_appends = ops.select { |op| op[0] == :APPEND && op[1] == main_list_reg }
+        expect(main_appends.size).to eq(2)
+
+        # 4. Verify the values being appended are indeed other registers (the inner lists)
+        # NOT constants
+        main_appends.each do |append|
+          val_reg = append[2] # The value being appended
+          expect(val_reg).to start_with("R") # Must be a register, not "K..."
+          expect(val_reg).to_not eq(main_list_reg) # Cannot append self
+        end
+      end
+    end
+
+    # 4. List of Hashes
+    context 'List of Hashes: %[ %{ "id": 1 } ]' do
+      let(:source) {
+        <<~FLUX
+          VAR users = %[ %{ "id": 1 } ];
+        FLUX
+      }
+
+      it 'creates a hash and appends it to the list' do
+        ops = compile_ops(source)
+
+        # 1. Find List and Hash creation
+        list_op = ops.find { |op| op[0] == :NEWLIST }
+        hash_op = ops.find { |op| op[0] == :NEWHASH }
+
+        list_reg = list_op[1]
+        hash_reg = hash_op[1]
+
+        # 2. Ensure registers don't clash
+        expect(list_reg).to_not eq(hash_reg)
+
+        # 3. Check that the hash was populated
+        # SETHASH HashReg, "id", Val
+        set_op = ops.find { |op| op[0] == :SETHASH && op[1] == hash_reg }
+        expect(set_op).to_not be_nil
+
+        # 4. Check that the hash was appended to the list
+        # APPEND ListReg, HashReg
+        append_op = ops.find { |op| op[0] == :APPEND && op[1] == list_reg && op[2] == hash_reg }
+        expect(append_op).to_not be_nil
+      end
+    end
+  end
 end
 
