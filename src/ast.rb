@@ -28,6 +28,7 @@ module AST
   Assert      = Struct.new(:line, :condition, :message)
   Raise       = Struct.new(:line, :message_expr)
   ThrowNode   = Struct.new(:line, :value)
+  DieNode     = Struct.new(:line, :status)
 
   UNARY_OPS = ['-', '!', '~']
 

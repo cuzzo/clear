@@ -138,6 +138,7 @@ class VM
       when :ASSERT then process_assert(reg_idx, ins, frame);
       when :THROW then process_throw(reg_idx, ins, frame);
       when :THROW_IF_ERROR then process_throw_if_error(reg_idx, ins, frame);
+      when :EXIT_PROGRAM then process_exit_program(reg_idx, ins, frame);
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
@@ -613,6 +614,21 @@ class VM
     if val == false || val.nil?
       raise "🛑 ASSERTION FAILED: #{msg}"
     end
+  end
+
+  def process_exit_program(reg_idx, ins, frame)
+    # 1. Get the value (Number or String)
+    val_reg = reg_idx[ins[1]]
+    val = frame.registers[val_reg]
+
+    # 2. Optional: If it's a String, print it to Stderr
+    if val.is_a?(String)
+      $stderr.puts(val)
+      val = 1 # Return generic error code
+    end
+
+    # 3. Kill the VM immediately
+    throw EXIT_SIGNAL, val
   end
 
   def process_throw(reg_idx, ins, frame)

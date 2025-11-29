@@ -167,6 +167,7 @@ class Compiler
     when AST::ReturnNode then compile_return_node(node, target_reg);
     when AST::Assert then compile_assert(node, target_reg);
     when AST::Raise then compile_raise(node, target_reg);
+    when AST::DieNode then compile_exit_program(node, target_reg);
     end
   end
 
@@ -920,6 +921,14 @@ class Compiler
       # initiates stack unwinding via the raise_error helper function.
       @chunk.emit(node, :THROW, "R#{r_err}")
     end
+  end
+
+  def compile_exit_program(node, target_reg)
+    # 1. Compile the status/message into the target register
+    visit(node.status, target_reg)
+
+    # 2. Emit the new opcode
+    @chunk.emit(node, :EXIT_PROGRAM, "R#{target_reg}")
   end
 
   def process_captures(node, fn_compiler)

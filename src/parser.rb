@@ -61,6 +61,7 @@ class Parser
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
   stmt(:KEYWORD, 'RAISE', AST::Raise, ['RAISE', :raise_msg, ';'])
   stmt(:KEYWORD, 'EXIT') { parse_exit }
+  stmt(:KEYWORD, 'DIE') { parse_die }
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
 
@@ -233,7 +234,21 @@ class Parser
       context_expr = parse_primary
     end
     match!(:CHAR, ";") # TDOO: Test
-    rhs = AST::ThrowNode.new(current.line, context_expr)
+    AST::ThrowNode.new(current.line, context_expr)
+  end
+
+  def parse_die()
+    consume(:KEYWORD)
+    context_expr = nil
+
+    if match!(:CHAR, ';')
+      status = AST::Literal.new(current.line, :NUMBER, 1)
+    else
+      status = parse_expression
+      consume(:CHAR, ';')
+    end
+
+    AST::DieNode.new(current.line, status)
   end
 
   def parse_argument_list()

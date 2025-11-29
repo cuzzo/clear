@@ -118,6 +118,17 @@ RSpec.describe "INTEGRATION" do
         expect(resp).to eq(output)
       end
     end
+
+    context "binding" do
+      let(:script) { 'binding' }
+      it "runs" do
+        output = [
+          "STDOUT > [20.0, 10.0, 19.0, 9.0]",
+          "0"
+        ]
+        expect(resp).to eq(output)
+      end
+    end
   end
 end
 

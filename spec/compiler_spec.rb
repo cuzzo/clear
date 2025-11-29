@@ -93,6 +93,36 @@ RSpec.describe Compiler do
     end
   end
 
+  describe 'Keyword: DIE' do
+    context 'DIE "Fatal Error";' do
+      let(:source) { 'DIE "Fatal Error";' }
+
+      it 'parses to DieNode' do
+        program = parse(source)
+        stmt = program.statements[0]
+        expect(stmt).to match_ast('DieNode(status: "Fatal Error")')
+      end
+
+      it 'compiles to EXIT_PROGRAM instruction' do
+        ops = compile_ops(source)
+        # 1. LOADK "Fatal Error" -> R0
+        # 2. EXIT_PROGRAM R0
+        expect(ops[0]).to include(:LOADK)
+        expect(ops[1]).to eq([:EXIT_PROGRAM, "R0"])
+      end
+    end
+
+    context "DIE;" do
+      let(:source) { 'DIE;' }
+
+      it 'parses to DieNode with default 1' do
+        program = parse(source)
+        stmt = program.statements[0]
+        expect(stmt).to match_ast('DieNode(status: 1)')
+      end
+    end
+  end
+
   # TODO: FUNCTION DEF, CLOSURE DEF, CAST
 
   describe 'Syntax: SMOOTH Operator `s>`' do

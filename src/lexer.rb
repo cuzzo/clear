@@ -15,7 +15,7 @@ class Lexer
       WHILE DO BREAK CONTINUE
       CAST AS
       STRUCT TRUE FALSE NIL
-      ASSERT RAISE CATCH EXIT
+      ASSERT RAISE CATCH EXIT DIE
       MOD OR
     ].map { |k| [k, true] }.to_h
 

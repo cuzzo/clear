@@ -91,6 +91,9 @@ module AstMatchers
         when AST::ReturnNode
           val = node.value ? format_actual(node.value) : "nil"
           "ReturnNode(value: #{val})"
+        when AST::DieNode
+          val = node.status ? format_actual(node.status) : "nil"
+          "DieNode(status: #{val})"
         when AST::Literal
           node.type == :STRING ? "\"#{node.value}\"" : node.value.to_s
         else
@@ -141,6 +144,10 @@ module AstMatchers
       # If it's the default 'anything', we don't check attributes, just class
       return NodeMatcher.new(AST::ThrowNode, {}) if value_matcher == anything
       NodeMatcher.new(AST::ThrowNode, value: value_matcher)
+    end
+
+    def DieNode(status: anything)
+      NodeMatcher.new(AST::DieNode, status: status)
     end
 
     def Var(name)

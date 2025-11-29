@@ -732,5 +732,23 @@ RSpec.describe VM do
       expect(result).to eq(8)
     end
   end
+
+  context 'DIE "Fatal";' do
+    let(:source) { 'DIE "Fatal Error";' }
+    it 'halts the VM with a signal and correct payload' do
+      allow($stderr).to receive(:puts)
+      result, _chunk = run(source)
+      expect($stderr).to have_received(:puts).with("Fatal Error")
+      expect(result).to eq(1)
+    end
+  end
+
+  context "DIE;" do
+    let(:source) { 'DIE;' }
+    it 'halts the VM with exit code 1' do
+      result, _chunk = run(source)
+      expect(result).to eq(1)
+    end
+  end
 end
 
