@@ -670,5 +670,77 @@ RSpec.describe VM do
       expect(result).to eq("Rescue Path")
     end
   end
+
+  describe 'VM: Higher-Order Functions & Currying' do
+    # Helper to create a chunk (same as previous tests)
+    def make_chunk(name, code, constants)
+      chunk = Compiler::Chunk.new(name)
+      chunk.code = code
+      chunk.constants = constants
+      chunk
+    end
+
+    it "handles immediate invocation of a returned function: myGen(5)(1, 2)" do
+      # SOURCE:
+      # FN adder_gen %(base) ->
+      #   RETURN %(x, y) USE(base) -> base + x + y;
+      # END
+      #
+      # VAR fn = adder_gen(5);
+      # fn(1, 2);
+
+      # --- 1. The Inner Lambda (Closure) ---
+      # Captures: 'base' (at index 0 in capture list)
+      # Args: x (R0), y (R1)
+      # Logic: base + x + y
+      chunk_inner = make_chunk("InnerLambda", [
+        [:LOADK, "R3", "K0"],   # R3 = "Inner" (debug name)
+
+        # Stack: R0=x, R1=y, R2=captured_base
+        [:ADD,   "R4", "R2", "R0"], # R4 = base + x
+        [:ADD,   "R5", "R4", "R1"], # R5 = (base + x) + y
+        [:RETURN, "R5"]
+      ], ["Inner"])
+
+      # --- 2. The Generator Function ---
+      # Args: base (R0)
+      # Logic: Create closure capturing R0, return it.
+      chunk_gen = make_chunk("Generator", [
+        [:CLOSURE, "R1", "K0", "R0"], # Create Inner, capture 'base' (R0)
+        [:RETURN, "R1"]               # Return the closure
+      ], [chunk_inner])
+
+      # --- 3. Main Program ---
+      # Logic: myGen(5)(1, 2)
+      chunk_main = make_chunk("Main", [
+        [:DEF_GLOBAL, "myGen", "R0"], # (Assume myGen is loaded/defined)
+
+        # 1. Call myGen(5) -> Returns Closure into R1
+        [:LOADK, "R2", "K0"],         # Load 5
+        [:CALL_FUNC, "R1", "myGen", 1, "R2"],
+
+        # 2. Call the result (R1) with (1, 2) -> Returns result into R0
+        [:LOADK, "R3", "K1"],         # Load 1
+        [:LOADK, "R4", "K2"],         # Load 2
+        # CALL_FUNC with a Register operand ("R1") instead of a name
+        [:CALL_FUNC, "R0", "R1", 2, "R3", "R4"],
+
+        [:RETURN, "R0"]
+      ], [5, 1, 2, chunk_gen])
+
+      # Inject the generator into globals manually for this test
+      vm = VM.new
+      # We need to wrap the chunk in a closure to store it in globals?
+      # Or just store the chunk directly if your VM supports raw chunk calls.
+      # Based on your VM code, we need a Closure object or raw chunk.
+      # Let's support raw chunk for simplicity in tests:
+      vm.instance_variable_get(:@globals)["myGen"] = chunk_gen
+
+      result = vm.run(chunk_main)
+
+      # 5 + 1 + 2 = 8
+      expect(result).to eq(8)
+    end
+  end
 end
 

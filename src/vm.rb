@@ -299,65 +299,88 @@ class VM
     frame.registers[target] = closure
   end
 
+
   def process_call_func(reg_idx, ins, frame)
-    # Format: [:CALL_FUNC, "R_target", "func_name", argc, "R_arg1"...]
+    # Format: [:CALL_FUNC, "R_target", "Operand", argc, "R_arg1"...]
     target_reg = reg_idx[ins[1]]
-    func_name = ins[2]
-    # argc = ins[3] (Unused here, but useful for Arity checks)
-    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
-    args = arg_regs.map { |r| frame.registers[r] }
+    operand    = ins[2] # Can be "print" (Global) OR "R4" (Register)
 
-    # 1. Resolve the Function
-    # Priority:
-    #   A. Is it a variable in the current scope? (e.g., VAR f = FN...)
-    #   B. Is it a global function? (e.g., defined with FN name...)
+    # 1. Resolve Arguments
+    #    (Map directly from instruction -> register index -> value)
+    args = ins[4..-1].map { |r_str| frame.registers[reg_idx[r_str]] }
 
-    # Check if 'func_name' matches a local variable holding a Closure
-    # (This requires your compiler to support first-class functions in vars)
-    # local_reg = resolve_local_reg(func_name) ... (Skipping for v0.1 simplicity)
-    # Check Globals (Standard Definitions)
-    raise "Runtime Error: Undefined function '#{func_name}'" unless @globals.key?(func_name)
-    func = @globals[func_name]
+    # 2. Resolve Function
+    func = nil
 
-    # 2. Execute the Function
-    # execute_function spins up a new frame, runs the loop, and returns the :RETURN value
+    if operand.start_with?("R")
+      # CASE A: Closure in a Register (e.g., "R4")
+      r = reg_idx[operand]
+      func = frame.registers[r]
+      raise "Runtime Error: Variable '#{operand}' is nil/not a function" if func.nil?
+    else
+      # CASE B: Global Name (e.g., "print", "cur")
+      func = @globals[operand]
+      raise "Runtime Error: Undefined function '#{operand}'" if func.nil?
+    end
+
+    # 3. Execute
     result = execute_function(func, args)
     $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
 
-    # DON'T OBLITERATE REGISTER ON ERROR
+    # 4. Handle Unwinding (CRITICAL)
+    #    If the inner function threw an error/signal, propagate it up immediately.
     return UNWIND_SIGNAL if result == UNWIND_SIGNAL
 
-    # 3. Store the result in the Target Register (CRITICAL for Pipes!)
+    # 5. Store Result
     frame.registers[target_reg] = result
-
-    return result
   end
 
   def process_call_method(reg_idx, ins, frame)
     # CALL_METHOD Rresult, Robj, "method", Rargs...
     res_reg = reg_idx[ins[1]]
     obj_reg = reg_idx[ins[2]]
-    method = ins[3]
-    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
+    method_name = ins[3]
 
-    obj = frame.registers[obj_reg]
+    # 1. Collect Arguments
+    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
     args = arg_regs.map { |r| frame.registers[r] }
 
-    # --- NATIVE METHOD: map ---
-    if obj.is_a?(Array) && method == "map"
-      closure = args[0] # The lambda compiled chunk
+    obj = frame.registers[obj_reg]
 
-      # Execute the REAL bytecode for every item
+    # --- DISPATCH LOGIC ---
+
+    # A. Native Methods (e.g. Array.map)
+    if obj.is_a?(Array) && method_name == "map"
+      closure = args[0]
       new_list = obj.map do |item|
-        # 1. Spin up a temporary VM frame for the lambda
-        # 2. Pass 'item' as the first argument (R0)
         execute_function(closure, [item])
       end
-
       frame.registers[res_reg] = new_list
-    else
-       raise "Unknown method #{method} on #{obj}"
+      return
     end
+
+    # B. Struct Field Call (e.g. h2.fun())
+    #    This allows us to call a closure stored in a field
+    if obj.is_a?(Hash) && obj.key?(method_name)
+      func = obj[method_name]
+
+      # Safety Check
+      unless func.is_a?(Closure) || func.is_a?(Compiler::Chunk)
+        raise "Runtime Error: Property '#{method_name}' is not a function."
+      end
+
+      # Execute
+      result = execute_function(func, args)
+
+      # Handle Unwinding
+      return UNWIND_SIGNAL if result == UNWIND_SIGNAL
+
+      frame.registers[res_reg] = result
+      return
+    end
+
+    # C. Failure
+    raise "Runtime Error: Unknown method '#{method_name}' on #{obj.class}"
   end
 
   def process_call_closure(reg_idx, ins, frame)

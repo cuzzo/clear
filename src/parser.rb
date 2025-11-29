@@ -93,10 +93,10 @@ class Parser
   end
 
   # Functor/Call: myVar()
-  # TODO: TEST
   suffix(:CHAR, '(') do |lhs|
     args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-    AST::FuncCall.new(current.line, lhs.name, args) # Note: Logic depends on your AST
+    # FIX: Pass 'lhs' (the node), not 'lhs.name'
+    AST::FuncCall.new(current.line, lhs, args)
   end
 
   ## START PATTERN DSL

@@ -301,55 +301,62 @@ class Compiler
   end
 
   def compile_func_call(node, target_reg)
-    # Check if it's a print call (intrinsic) or regular
-    if node.name == "print"
-      args = compile_args(node.args)
-      @chunk.emit(node, :PRINT, *args)
-      @reg_top -= args.size
-
-    # 2. Handle Intrinsic: NATIVE_CALL (New!)
-    elsif node.name == "native_call"
-      # Usage: native_call("ClassName", "MethodName", arg1, arg2...)
-
-      # Extract Class/Method literals (Must be string literals for simplicity)
-      if node.args.size < 2
-        raise "native_call requires at least 'Class' and 'Method' string literals."
-      end
-
-      class_node = node.args[0]
-      method_node = node.args[1]
-
-      # Verify they are strings
-      unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
-        raise "native_call arg 1 must be a static String (Class Name)"
-      end
-      class_name = class_node.value
-      method_name = method_node.value
-
-      # Compile the ACTUAL arguments (index 2 onwards)
-      real_args_regs = compile_args(args[2..-1])
-
-      # Emit: CALL_NATIVE Target, "Class", "Method", ArgRegs...
-      @chunk.emit(node, :CALL_NATIVE, "R#{target_reg}", class_name, method_name, *real_args_regs)
-
-      # Clean up temp registers
-      @reg_top -= real_args_regs.size
-
-    # 3. Handle Regular Functions
-    else
-      # A. Compile Arguments into registers
-      args_regs = compile_args(node.args)
-
-      func_reg = current_scope.resolve_reg(node.name)
-      op_code = func_reg ? :CALL_CLOSURE : :CALL_FUNC
-      func_operand = func_reg ? "R#{func_reg}" : node.name
-
-      # B. Emit New Format: [OP, Target, Operand, ArgCount, *ArgRegs]
-      @chunk.emit(node, op_code, "R#{target_reg}", func_operand, node.args.size, *args_regs)
-
-      # C. Cleanup registers
-      @reg_top -= args_regs.size
+    # 1. Handle Intrinsics (Only applies if the name is a static String)
+    if node.name.is_a?(String)
+      return compile_print(node) if node.name == "print"
+      return compile_native_call(node, target_reg) if node.name == "native_call"
     end
+
+    # 2. Compile Arguments
+    #    We compile these first so the registers are populated.
+    arg_regs = compile_args(node.args)
+
+    # 3. Resolve the Function Target
+    if node.name.is_a?(String)
+      # --- CASE A: Simple Name (e.g., "add", "myFunc") ---
+      # Check if it is a Local Register or Global Name
+      func_reg = current_scope.resolve_reg(node.name)
+      operand  = func_reg ? "R#{func_reg}" : node.name
+
+      @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", operand, node.args.size, *arg_regs)
+    else
+      # --- CASE B: Expression / Currying (e.g., "getFunc()(1)") ---
+      # The target is an AST Node. We must compile it into a temp register first.
+      with_temp_reg do |r_func|
+        visit(node.name, r_func) # Recurse: compiles the 'getFunc()' part
+
+        # Now call the result stored in r_func
+        @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", "R#{r_func}", node.args.size, *arg_regs)
+      end
+    end
+
+    # 4. Cleanup Argument Registers
+    @reg_top -= arg_regs.size
+  end
+
+  def compile_print(node)
+    args = compile_args(node.args)
+    @chunk.emit(node, :PRINT, *args)
+    @reg_top -= args.size
+  end
+
+  def compile_native_call(node, target_reg)
+    if node.args.size < 2
+      raise "Compile Error: native_call requires 'Class' and 'Method' string literals."
+    end
+
+    class_node, method_node = node.args[0], node.args[1]
+
+    unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
+      raise "Compile Error: native_call arg 1 must be a static String (Class Name)"
+    end
+
+    # Compile the ACTUAL arguments (skipping Class/Method strings)
+    # We slice the args array, compile the rest, and get their registers
+    real_args_regs = compile_args(node.args[2..-1])
+
+    @chunk.emit(node, :CALL_NATIVE, "R#{target_reg}", class_node.value, method_node.value, *real_args_regs)
+    @reg_top -= real_args_regs.size
   end
 
   def compile_args(args)
