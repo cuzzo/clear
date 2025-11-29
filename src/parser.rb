@@ -44,6 +44,10 @@ class Parser
     AST::Program.new(current.line, stmts)
   end
 
+  def peek
+    @tokens[@pos + 1] || Token.new(:EOF, "", current.line)
+  end
+
   private
 
   # COMMANDS
@@ -313,9 +317,24 @@ class Parser
     # 3. Left-Associativity Loop
     #    Handles 'OR' and 's>' in the order they appear
     while current_ops.include?(current.value)
+      # GUARD CLAUSE, AS is used as a keyword in CAST
+      break if current.value == 'AS' && (peek.type == :TYPE_ID || peek.value[0] != '@')
+
       op_val = consume(current.type).value
 
-      if op_val == 'OR'
+      if op_val == 'AS'
+        # The Right-Hand Side MUST be an Identifier (e.g., @f)
+        # We parse it as a Primary to handle the identifier logic
+        rhs = parse_var_id
+
+        # Validate it is an Identifier (not a function call foo() or array arr[0])
+        unless rhs.is_a?(AST::Identifier)
+          raise "Syntax Error: Expected identifier after 'AS', got #{rhs.class}"
+        end
+
+        lhs = AST::BinaryOp.new(current.line, lhs, :BIND_VAR, rhs)
+
+      elsif op_val == 'OR'
         # Special handling for OR logic (RETURN/EXIT/ELSE)
         # We assume parse_or_rescue parses a Primary or similar high-precedence node
         rhs = parse_or_rescue
@@ -333,8 +352,18 @@ class Parser
         rhs = parse_precedence_level(level + 1)
       end
 
+      # Standard Operators (+, -, *, etc.)
+      # FIX: Look up the Symbol immediately. Never pass 'op_val' (String) to the AST.
+      # FALLBACK: USE existing symbol
+      op_sym = AST::OP_TO_OP_CODE[op_val] || op_val
+
+      # Guard against forgotten operators
+      if op_sym.nil?
+        raise "Parser Error: Unknown operator '#{op_val}'"
+      end
+
       # Wrap the tree (Left-Growing)
-      lhs = AST::BinaryOp.new(current.line, lhs, op_val, rhs)
+      lhs = AST::BinaryOp.new(current.line, lhs, op_sym, rhs)
     end
 
     lhs

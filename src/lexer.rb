@@ -66,7 +66,7 @@ class Lexer
         add(:PERCENT, '%')
 
       # Identifiers (The logic here is critical)
-      when @s.scan(/[a-zA-Z_]\w*/)
+      when @s.scan(/[a-zA-Z_@]\w*/)
         word = @s.matched
         if KEYWORDS[word]
           add(:KEYWORD, word)

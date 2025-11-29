@@ -40,7 +40,7 @@ module AST
     3 => { ops: ['||'], assoc: :left },
     # LEVEL 1: Both Pipe and Rescue live here.
     # They bind loosely and strictly left-to-right.
-    1 => { ops: ['OR', 's>'], assoc: :left }
+    1 => { ops: ['OR', 's>', 'AS'], assoc: :left }
   }
   MAX_PRECEDENCE = PRECEDENCE_MAP.keys.max
 
@@ -57,8 +57,6 @@ module AST
     :LTE => :<=,
     :GTE => :>=,
     :BITWISE_NOT => :~,
-    :OR => "||".to_sym,
-    :AND => "&&".to_sym
   }
 
   # TODO: Make these symbols
@@ -78,11 +76,9 @@ module AST
     '&&' => :AND,
     '||' => :OR,
     'MOD' => :MOD,
-    'OR' => :OR_RESCUE,
-    '~' => :BITWISE_NOT
+    'OR' => :OR_RESCUE, # TODO: Check if this is necessary
+    '~' => :BITWISE_NOT,
+    'AS' => :BIND_VAR
   }
-
 end
-
-
 

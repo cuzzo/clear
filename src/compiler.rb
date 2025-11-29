@@ -232,6 +232,52 @@ class Compiler
     end
   end
 
+  def compile_bind_var(node, target_reg)
+    # 1. Compile the Expression (The Left side) into target_reg
+    #    This puts the result of the pipe chain into 'target_reg'
+    visit(node.left, target_reg)
+
+    var_name = node.right.name
+    existing_reg = current_scope.resolve_reg(var_name)
+
+    if existing_reg
+      # === ASSIGNMENT CASE ===
+      # The variable exists. We just move the value into its register.
+
+      # Check mutability if you implemented that feature
+      if current_scope.is_immutable?(var_name)
+         raise "Compile Error: Cannot rebind immutable variable '#{var_name}'."
+      end
+
+      @chunk.emit(node, :MOVE, "R#{existing_reg}", "R#{target_reg}")
+
+    else
+      # === DECLARATION CASE ===
+      # The variable is new. We allocate a NEW register for it.
+
+      # 1. Allocate a permanent register
+      var_reg = @reg_top
+      @reg_top += 1
+
+      # 2. Move the result: target_reg (temp) -> var_reg (permanent)
+      @chunk.emit(node, :MOVE, "R#{var_reg}", "R#{target_reg}")
+
+      # 3. Register in Scope
+      #    Since we don't have an AST node for the value to infer from,
+      #    we default to :Any. (Or you can try to infer from node.left if you have advanced inference)
+      current_scope.declare(var_name, var_reg, :Any)
+
+      # 4. Handle Global Scope
+      if @scope_depth == 0
+        @chunk.emit(node, :DEF_GLOBAL, var_name, "R#{var_reg}")
+      end
+    end
+
+    # 3. Return nil to signal "Pass Through"
+    #    The value is still sitting in 'target_reg', ready for the next pipe step.
+    return nil
+  end
+
   def _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
     # A. Emit the Call
     # This overwrites 'target_reg' with the Result (or new Error)
@@ -486,94 +532,96 @@ class Compiler
   end
 
   def compile_binary_op(node, target_reg, auto_throw_pipe)
-    if node.op == :SMOOTH
-       # Don't do the normal math logic
-       return compile_smooth_operator(node, target_reg, auto_throw_pipe)
-
-    elsif node.op == :OR_RESCUE
-      # 1. Compile Left Side (The Pipe/Expression)
-      # auto_throw_pipe: false -> Return Error struct, don't crash
-      visit(node.left, target_reg, auto_throw_pipe: false)
-
-      # 2. Emit Check: "Jump to End if OK"
-      # If target_reg is valid data, we skip the recovery block.
-      success_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
-
-      # 3. Compile Right Side (The Recovery)
-      # At this point, target_reg holds the %Error object.
-      if node.right.is_a?(AST::ReturnNode) && node.right.value.nil?
-         # Syntax: OR RETURN
-         # Action: Return the current register (the Error)
-         @chunk.emit(node, :RETURN, "R#{target_reg}")
-
-      elsif node.right.is_a?(AST::ThrowNode)
-         # Syntax: OR EXIT (with optional context)
-         if node.right.value # context_expr exists
-            # 1. Compile the Context String
-            with_temp_reg do |r_ctx|
-              visit(node.right.value, r_ctx)
-
-              # 2. Set the Context Field on the Error
-              # target_reg currently holds the Error object
-              @chunk.emit(node, :SETFIELD, "R#{target_reg}", "context", "R#{r_ctx}")
-            end
-         end
-         # Action: Throw the current register (the Error)
-         @chunk.emit(node, :THROW, "R#{target_reg}")
-
-      else
-         # Syntax: OR ELSE <value>
-         # Action: Compile the value into the target register (overwriting the Error)
-         visit(node.right, target_reg)
-      end
-
-      # 4. Patch the Jump
-      @chunk.patch(success_jump, @chunk.current_address, 2)
-      return
-
-    elsif node.op == '&&'
-      # 1. Compile Left into target_reg
-      visit(node.left, target_reg)
-
-      # 2. Short Circuit: If Left is FALSE, Jump to End
-      # The result (FALSE) is already sitting in target_reg, so we are done.
-      end_jump = @chunk.emit_with_index(node, :JMP_FALSE, "R#{target_reg}", 0)
-
-      # 3. Compile Right
-      # If we didn't jump, calculate Right and put it in target_reg
-      visit(node.right, target_reg)
-
-      # 4. Patch the Jump
-      @chunk.patch(end_jump, @chunk.current_address, 2)
-      return # Don't do the normal math logic
-
-    elsif node.op == '||'
-      # 1. Compile Left
-      visit(node.left, target_reg)
-
-      # 2. Short Circuit: If Left is TRUE, Jump to End
-      end_jump = @chunk.emit_with_index(node, :JMP_TRUE, "R#{target_reg}", 0)
-
-      # 3. Compile Right
-      visit(node.right, target_reg)
-
-      # 4. Patch
-      @chunk.patch(end_jump, @chunk.current_address, 2)
-      return # Don't do the normal math logic
+    # Don't do the normal math logic for non-sendable symbols
+    case node.op # op_sym # node.op
+      when :SMOOTH then return compile_smooth_operator(node, target_reg, auto_throw_pipe);
+      when :BIND_VAR then return compile_bind_var(node, target_reg);
+      when :OR_RESCUE then return compile_or_rescue(node, target_reg);
+      when :AND then return compile_logical_and(node, target_reg);
+      when :OR then return compile_logical_or(node, target_reg);
     end
 
     with_temp_reg do |r1|
       visit(node.left, r1)
       with_temp_reg do |r2|
         visit(node.right, r2)
-
-        if AST::OP_TO_OP_CODE[node.op]
-          @chunk.emit(node, AST::OP_TO_OP_CODE[node.op], "R#{target_reg}", "R#{r1}", "R#{r2}")
-        else
-          raise "Unknown binary operator: #{node.op}"
-        end
+        @chunk.emit(node, node.op, "R#{target_reg}", "R#{r1}", "R#{r2}")
       end
     end
+  end
+
+  def compile_logical_or(node, target_reg)
+    # 1. Compile Left
+    visit(node.left, target_reg)
+
+    # 2. Short Circuit: If Left is TRUE, Jump to End
+    end_jump = @chunk.emit_with_index(node, :JMP_TRUE, "R#{target_reg}", 0)
+
+    # 3. Compile Right
+    visit(node.right, target_reg)
+
+    # 4. Patch
+    @chunk.patch(end_jump, @chunk.current_address, 2)
+    return # Don't do the normal math logic
+  end
+
+  def compile_logical_and(node, target_reg)
+    # 1. Compile Left into target_reg
+    visit(node.left, target_reg)
+
+    # 2. Short Circuit: If Left is FALSE, Jump to End
+    # The result (FALSE) is already sitting in target_reg, so we are done.
+    end_jump = @chunk.emit_with_index(node, :JMP_FALSE, "R#{target_reg}", 0)
+
+    # 3. Compile Right
+    # If we didn't jump, calculate Right and put it in target_reg
+    visit(node.right, target_reg)
+
+    # 4. Patch the Jump
+    @chunk.patch(end_jump, @chunk.current_address, 2)
+    return # Don't do the normal math logic
+  end
+
+  def compile_or_rescue(node, target_reg)
+    # 1. Compile Left Side (The Pipe/Expression)
+    # auto_throw_pipe: false -> Return Error struct, don't crash
+    visit(node.left, target_reg, auto_throw_pipe: false)
+
+    # 2. Emit Check: "Jump to End if OK"
+    # If target_reg is valid data, we skip the recovery block.
+    success_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
+
+    # 3. Compile Right Side (The Recovery)
+    # At this point, target_reg holds the %Error object.
+    if node.right.is_a?(AST::ReturnNode) && node.right.value.nil?
+      # Syntax: OR RETURN
+      # Action: Return the current register (the Error)
+      @chunk.emit(node, :RETURN, "R#{target_reg}")
+
+    elsif node.right.is_a?(AST::ThrowNode)
+      # Syntax: OR EXIT (with optional context)
+      if node.right.value # context_expr exists
+        # 1. Compile the Context String
+        with_temp_reg do |r_ctx|
+          visit(node.right.value, r_ctx)
+
+          # 2. Set the Context Field on the Error
+          # target_reg currently holds the Error object
+          @chunk.emit(node, :SETFIELD, "R#{target_reg}", "context", "R#{r_ctx}")
+        end
+      end
+      # Action: Throw the current register (the Error)
+      @chunk.emit(node, :THROW, "R#{target_reg}")
+
+    else
+      # Syntax: OR ELSE <value>
+      # Action: Compile the value into the target register (overwriting the Error)
+      visit(node.right, target_reg)
+    end
+
+    # 4. Patch the Jump
+    @chunk.patch(success_jump, @chunk.current_address, 2)
+    return nil
   end
 
   def compile_unary_op(node, target_reg)
