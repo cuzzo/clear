@@ -100,6 +100,7 @@ RSpec.describe "INTEGRATION" do
         output = [
           "STDOUT > 100.0",
           "STDOUT > \"HI\"",
+          "STDOUT > 5.0",
           "STDOUT > [100.0, 200.0, 300.0]",
           "0"
         ]

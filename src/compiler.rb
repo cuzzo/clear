@@ -109,6 +109,7 @@ class Compiler
     @reg_top = 0
     @scope_depth = 0
     @loop_stack = []
+    @struct_defs = {}
     @expected_return = return_type
     @logger = $logger || Logger.new(STDOUT)
   end
@@ -310,6 +311,39 @@ class Compiler
     # 2. Register Parameters in Child Scope
     node.params.each_with_index do |p, i|
       fn_compiler.current_scope.declare(p[:name], i, p[:type])
+
+      if p[:default]
+        # We need to inject code: IF param IS NIL -> param = default_val
+
+        # 1. We need a register holding NIL to compare against
+        fn_compiler.send(:with_temp_reg) do |r_nil|
+          # Add literal nil to constants
+          k_nil = fn_compiler.chunk.add_constant(nil)
+          fn_compiler.chunk.emit(node, :LOADK, "R#{r_nil}", "K#{k_nil}")
+
+          # 2. Compare Param (R_i) with NIL
+          fn_compiler.send(:with_temp_reg) do |r_check|
+            # R_check = (R_param == R_nil)
+            fn_compiler.chunk.emit(node, :EQ, "R#{r_check}", "R#{i}", "R#{r_nil}")
+
+            # 3. Jump if FALSE (If it's not nil, it was passed by user; skip default)
+            # We emit a jump with offset 0, we will patch it later
+            skip_jump = fn_compiler.chunk.emit_with_index(node, :JMP_FALSE, "R#{r_check}", 0)
+
+            # 4. Compile the Default Value Expression
+            fn_compiler.send(:with_temp_reg) do |r_def_val|
+              # Compile the expression (e.g., "Hello" or 5 + 5)
+              fn_compiler.visit(p[:default], r_def_val)
+
+              # Move result into the Parameter Register (overwriting nil)
+              fn_compiler.chunk.emit(node, :MOVE, "R#{i}", "R#{r_def_val}")
+            end
+
+            # 5. Patch the Jump (Target is right here, after the assignment)
+            fn_compiler.chunk.patch(skip_jump, fn_compiler.chunk.current_address, 2)
+          end
+        end
+      end
     end
 
     # 3. REUSED LOGIC: Process Captures
@@ -806,12 +840,30 @@ class Compiler
 
   def compile_struct_lit(node, target_reg)
     @chunk.emit(node, :NEWSTRUCT, "R#{target_reg}", node.name)
+
+    def_fields = @struct_defs[node.name] || {} # Non-struct hashmaps have no schema
+    final_fields = def_fields.transform_values { |v| v[:default] }.compact.merge(node.fields)
+
+    # TOOD: TEST
+    # Check if the Struct definition requires something we don't have yet.
+    def_fields.each do |key, info|
+      unless final_fields.key?(key)
+        raise "Compile Error: Missing required field '#{key}' in instantiation of '%#{node.name}'"
+      end
+    end
+
     node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(node, :SETFIELD, "R#{target_reg}", k, "R#{r}") } }
   end
 
   def compile_struct_def(node, target_reg)
-    # Emit: DEF_STRUCT "Name", { "field" => "Type" }
-    @chunk.emit(node, :DEF_STRUCT, node.name, node.fields)
+    # 1. Store full info (Type + Default AST) for the Compiler to use later
+    @struct_defs[node.name] = node.fields
+
+    # 2. Strip defaults for the VM (VM only wants { field => TypeString })
+    vm_schema = node.fields.transform_values { |info| info[:type] }
+
+    # 3. Emit the simplified schema to the VM
+    @chunk.emit(node, :DEF_STRUCT, node.name, vm_schema)
   end
 
   def compile_hash_lit(node, target_reg)

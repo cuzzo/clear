@@ -1,7 +1,7 @@
 -- TODO: TO IMPLEMENT!
-STRUCT Point { x: Number, y: Number }
+STRUCT Point { x: Number, y: Number = 5 }
 
-VAR p = %Point{ x: 10, y: 5 };
+VAR p = %Point{ x: 10 };
 
 -- Test 1: Simple SETFIELD
 SET p.x = 20;

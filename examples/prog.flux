@@ -2,7 +2,7 @@ STRUCT Config { debug: Number }
 
 -- TODO: WHAT TYPE IS VOID and NULL?
 -- TODO: RETURNS Bool
-FN main %(args) RETURNS Number ->
+FN main %(s=5) RETURNS Number ->
   VAR json = %{ "debug": 1 };
 
   VAR multiple = 100;
@@ -15,6 +15,7 @@ FN main %(args) RETURNS Number ->
 
   print(multiple);
   print(test());
+  print(s);
 
   -- This should work now:
   VAR raw = CAST(json AS Config);
@@ -27,4 +28,4 @@ FN main %(args) RETURNS Number ->
   RETURN 1;
 END
 
-main("");
+main();

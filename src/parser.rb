@@ -260,7 +260,13 @@ class Parser
         p_type = parse_type_annotation
       end
 
-      { name: p_name, type: p_type }
+      # TODO: This shouldn't be allowed for function calls
+      default_val = nil
+      if match!(:CHAR, '=')
+        default_val = parse_expression
+      end
+
+      { name: p_name, type: p_type, default: default_val }
     end
   end
 
@@ -494,7 +500,13 @@ class Parser
       consume(:CHAR, ':')
       type = parse_type_annotation
 
-      [name, type]
+      default_val = nil
+      if match!(:CHAR, '=')
+        default_val = parse_expression
+      end
+
+      # Store as a hash containing both type and default
+      [name, { type: type, default: default_val }]
     end
     pairs.to_h
   end
