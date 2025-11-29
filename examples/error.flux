@@ -8,8 +8,8 @@ STRUCT Error {
 }
 
 -- Helper to make raising errors easier
-FN make_error %(msg) ->
-  RETURN %Error{ message: msg, context: NIL, snapshot: NIL };
+FN make_error %(msg, context, snapshot) ->
+  RETURN %Error{ message: msg, context: context, snapshot: snapshot };
 END
 
 -- ==========================================
@@ -18,7 +18,7 @@ END
 
 FN fetch_user %(id) ->
   print("1. Fetching User ID: " + id);
-  
+
   IF id == 1 THEN
     -- Success: Return a String (simulating a JSON blob)
     RETURN "{name: 'Alice'}";
@@ -30,7 +30,7 @@ END
 
 FN parse_json %(json) ->
   -- This print proves this function is running
-  print("2. Parsing JSON..."); 
+  print("2. Parsing JSON...");
   RETURN "UserObject(" + json + ")";
 END
 
@@ -64,7 +64,7 @@ ASSERT happy_result == "UserObject({name: 'Alice'}) + [Permissions]", "Happy Pat
 -- ==========================================
 -- TEST 2: THE ERROR PATH (RAILWAY LOGIC)
 -- ==========================================
-print(""); 
+print("");
 print("=== STARTING ERROR PATH ===");
 
 -- fetch_user(999) returns %Error.

@@ -8,7 +8,7 @@ STRUCT Error {
 }
 
 -- Helper to make raising errors easier
-FN make_error %(msg, context, snapshot) ->
+FN make_error %(msg, context = "", snapshot = "") ->
   RETURN %Error{ message: msg, context: context, snapshot: snapshot };
 END
 

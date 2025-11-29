@@ -110,6 +110,7 @@ class Compiler
     @scope_depth = 0
     @loop_stack = []
     @struct_defs = {}
+    @fn_signatures = {}
     @expected_return = return_type
     @logger = $logger || Logger.new(STDOUT)
   end
@@ -305,8 +306,15 @@ class Compiler
   end
 
   def compile_function_def(node, target_reg)
+    param_types = node.params.map do |p|
+      { type: p[:type], required: p[:default].nil? }
+    end
+    @fn_signatures[node.name] = param_types
+
     fn_compiler = Compiler.new(node.name, node.return_type)
     fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)
+    fn_compiler.instance_variable_set(:@struct_defs, @struct_defs)
+    fn_compiler.instance_variable_set(:@fn_signatures, @fn_signatures)
 
     # 2. Register Parameters in Child Scope
     node.params.each_with_index do |p, i|
@@ -391,16 +399,30 @@ class Compiler
       return compile_native_call(node, target_reg) if node.name == "native_call"
     end
 
-    # 2. Compile Arguments
-    #    We compile these first so the registers are populated.
+    # 2. Determine Call Type
+    # We capture the register index immediately if it's local
+    local_reg = nil
+    if node.name.is_a?(String)
+      local_reg = current_scope.resolve_reg(node.name)
+    end
+
+    # 3. Validation Logic
+    # We only verify signature if it is a NAME (String) and NOT a local variable.
+    # We skip verification for Expressions (Case B) because we can't check them statically.
+    # TODO...
+    if node.name.is_a?(String) && !local_reg
+      verify_function_signature(node)
+    end
+
+    is_local = node.name.is_a?(String) && current_scope.resolve_reg(node.name)
+
     arg_regs = compile_args(node.args)
 
     # 3. Resolve the Function Target
     if node.name.is_a?(String)
       # --- CASE A: Simple Name (e.g., "add", "myFunc") ---
       # Check if it is a Local Register or Global Name
-      func_reg = current_scope.resolve_reg(node.name)
-      operand  = func_reg ? "R#{func_reg}" : node.name
+      operand = local_reg ? "R#{local_reg}" : node.name
 
       @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", operand, node.args.size, *arg_regs)
     else
@@ -416,6 +438,34 @@ class Compiler
 
     # 4. Cleanup Argument Registers
     @reg_top -= arg_regs.size
+  end
+
+  def verify_function_signature(node)
+    raise "Compiler Error: Missing function." if !@fn_signatures.key?(node.name)
+    expected_types = @fn_signatures[node.name]
+
+    signature = @fn_signatures[node.name]
+    min_args = signature.count { |param| param[:required] }
+    max_args = signature.size
+    given_args = node.args.size
+
+    # A. Arity Check (Count)
+    if given_args < min_args || given_args > max_args
+      if min_args == max_args
+        raise "Compile Error: Function '#{node.name}' expects #{min_args} arguments, got #{given_args}."
+      else
+        raise "Compile Error: Function '#{node.name}' expects between #{min_args} and #{max_args} arguments, got #{given_args}."
+      end
+    end
+
+    # B. Type Check
+    node.args.each_with_index do |arg_node, i|
+      expected_type = expected_types[i]
+      actual_type = infer_type(arg_node)
+      if expected_type != :Any && actual_type != :Any && expected_type != actual_type
+        raise "Type Error: Function '#{node.name}' argument #{i+1} expects #{expected_type}, got #{actual_type}"
+      end
+    end
   end
 
   def compile_print(node)
