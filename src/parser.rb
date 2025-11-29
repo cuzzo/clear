@@ -57,6 +57,8 @@ class Parser
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
   stmt(:KEYWORD, 'RAISE', AST::Raise, ['RAISE', :raise_msg, ';'])
   stmt(:KEYWORD, 'EXIT') { parse_exit }
+  stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
+  stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
 
   # Primaries
   primary(:NUMBER) { AST::Literal.new(current.line, :NUMBER, consume(:NUMBER).value) }

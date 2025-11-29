@@ -16,6 +16,8 @@ module AST
   StructDef   = Struct.new(:line, :name, :fields)
   IfStatement = Struct.new(:line, :condition, :then_branch, :else_branch)
   WhileLoop   = Struct.new(:line, :condition, :do_branch)
+  BreakNode   = Struct.new(:line)
+  ContinueNode = Struct.new(:line)
   Lambda      = Struct.new(:line, :params, :captures, :body)
   FuncCall    = Struct.new(:line, :name, :args)
   MethodCall  = Struct.new(:line, :object, :method, :args)

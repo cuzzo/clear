@@ -75,7 +75,7 @@ RSpec.describe "INTEGRATION" do
     context "while" do
       let(:script) { 'while' }
       it "runs" do
-        output = (1...10)
+        output = ((1...10).to_a + [1, 2, 4, 5])
            .map { |x| "STDOUT > #{x.to_f}" }
            .push("0")
         expect(resp).to eq(output)

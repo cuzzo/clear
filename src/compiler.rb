@@ -108,6 +108,7 @@ class Compiler
     @scopes = [Scope.new]
     @reg_top = 0
     @scope_depth = 0
+    @loop_stack = []
     @expected_return = return_type
     @logger = $logger || Logger.new(STDOUT)
   end
@@ -152,6 +153,8 @@ class Compiler
     when AST::Cast then compile_cast(node, target_reg);
     when AST::IfStatement then compile_if_statement(node, target_reg);
     when AST::WhileLoop then compile_while_loop(node, target_reg);
+    when AST::BreakNode then compile_break(node);
+    when AST::ContinueNode then compile_continue(node);
     when AST::ListLit then compile_list_lit(node, target_reg);
     when AST::StructLit then compile_struct_lit(node, target_reg);
     when AST::StructDef then compile_struct_def(node, target_reg);
@@ -670,33 +673,61 @@ class Compiler
 
   def compile_while_loop(node, target_reg)
     with_temp_reg do |r_cond|
-      # 1. MARK START
-      # We need to know where to jump BACK to.
-      # Current instruction index is the start of the loop.
+      # 1. MARK START (Target for CONTINUE)
       loop_start_index = @chunk.code.length
 
+      # PUSH CONTEXT
+      @loop_stack.push({
+        start: loop_start_index,
+        breaks: []
+      })
+
+      # 2. Compile Condition
       visit(node.condition, r_cond)
 
-      # 2. EMIT EXIT JUMP (Placeholder)
-      # If condition is false, we jump to the END.
-      # We don't know where the END is yet, so we write '0' for now.
+      # 3. Exit Jump (If condition is false)
       do_jump = @chunk.emit_with_index(node, :JMP_FALSE, "R#{r_cond}", 0)
-      exit_jump_index = @chunk.code.length - 1
 
-      # 3. COMPILE BODY
-      # This emits the code inside the loop
+      # 4. Compile Body
       node.do_branch.each { |stmt| visit(stmt) }
 
-      # 4. EMIT LOOP BACK
-      # Unconditionally jump back to the top (loop_start_index)
+      # 5. Loop Back
       @chunk.emit_with_index(node, :JMP, loop_start_index)
 
-      # 5. PATCH THE EXIT JUMP
-      # Now that the body is done, we know the current index is the "End".
-      # Go back to the JMP_FALSE instruction and update the '0' to the current index.
+      # 6. PATCH EXIT JUMP
       loop_end_index = @chunk.code.length
-      @chunk.code[exit_jump_index][2] = loop_end_index
+      @chunk.patch(do_jump, loop_end_index, 2) # Patch the JMP_FALSE
+
+      # 7. PATCH BREAK JUMPS (New Logic)
+      context = @loop_stack.pop # Remove context
+      context[:breaks].each do |break_index|
+        # Patch every BREAK instruction to jump to loop_end_index
+        @chunk.patch(break_index, loop_end_index, 1)
+      end
     end
+  end
+
+  def compile_break(node)
+    if @loop_stack.empty?
+      raise "Compile Error: 'BREAK' used outside of a loop."
+    end
+
+    # Emit a JMP to 0 (Placeholder).
+    # We save this index into the current loop context to patch later.
+    idx = @chunk.emit_with_index(node, :JMP, 0)
+
+    # Add to the current loop's list of breaks
+    @loop_stack.last[:breaks] << idx
+  end
+
+  def compile_continue(node)
+    if @loop_stack.empty?
+      raise "Compile Error: 'CONTINUE' used outside of a loop."
+    end
+
+    # Simple JMP to the start of the current loop
+    target = @loop_stack.last[:start]
+    @chunk.emit(node, :JMP, target)
   end
 
   def compile_list_lit(node, target_reg)

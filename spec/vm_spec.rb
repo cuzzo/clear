@@ -672,14 +672,6 @@ RSpec.describe VM do
   end
 
   describe 'VM: Higher-Order Functions & Currying' do
-    # Helper to create a chunk (same as previous tests)
-    def make_chunk(name, code, constants)
-      chunk = Compiler::Chunk.new(name)
-      chunk.code = code
-      chunk.constants = constants
-      chunk
-    end
-
     it "handles immediate invocation of a returned function: myGen(5)(1, 2)" do
       # SOURCE:
       # FN adder_gen %(base) ->
@@ -713,8 +705,6 @@ RSpec.describe VM do
       # --- 3. Main Program ---
       # Logic: myGen(5)(1, 2)
       chunk_main = make_chunk("Main", [
-        [:DEF_GLOBAL, "myGen", "R0"], # (Assume myGen is loaded/defined)
-
         # 1. Call myGen(5) -> Returns Closure into R1
         [:LOADK, "R2", "K0"],         # Load 5
         [:CALL_FUNC, "R1", "myGen", 1, "R2"],
