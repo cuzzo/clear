@@ -538,5 +538,137 @@ RSpec.describe VM do
       end
     end
   end
+
+  describe "Opcode: JMP (Unconditional)" do
+    it "skips instructions unconditionally" do
+      # Logic:
+      # 1. R0 = "Start"
+      # 2. JMP to index 3 (Skipping the overwrite)
+      # 3. R0 = "Skipped" (This line is jumped over)
+      # 4. RETURN R0
+      chunk = make_chunk("JmpTest", [
+        [:LOADK, "R0", "K0"],
+        [:JMP, 3],
+        [:LOADK, "R0", "K1"],
+        [:RETURN, "R0"]
+      ], ["Start", "Skipped"])
+
+      vm = VM.new()
+      result = vm.run(chunk)
+
+      expect(result).to eq("Start")
+    end
+  end
+
+  describe "Opcode: JMP_FALSE (&& logic)" do
+    it "jumps to target if the value is FALSE" do
+      # Logic:
+      # 1. R0 = false
+      # 2. IF R0 is false GOTO 4
+      # 3. R1 = "No Jump" (Skipped)
+      # 4. R1 = "Jumped"
+      # 5. RETURN R1
+      chunk = make_chunk("JmpFalseTest", [
+        [:LOADK, "R0", "K0"],
+        [:JMP_FALSE, "R0", 3],
+        [:LOADK, "R1", "K1"],
+        [:LOADK, "R1", "K2"],
+        [:RETURN, "R1"]
+      ], [false, "No Jump", "Jumped"])
+
+      vm = VM.new()
+      result = vm.run(chunk)
+
+      expect(result).to eq("Jumped")
+    end
+
+    it "falls through if the value is TRUE" do
+      # Logic:
+      # 1. R0 = true
+      # 2. IF R0 is false GOTO 4 (It is true, so don't jump)
+      # 3. R1 = "Fallthrough"
+      # 4. RETURN R1
+      chunk = make_chunk("JmpFalseFallthrough", [
+        [:LOADK, "R0", "K0"],
+        [:JMP_FALSE, "R0", 4],
+        [:LOADK, "R1", "K1"],
+        [:RETURN, "R1"],
+        [:LOADK, "R1", "K2"], # Target (Unreachable)
+      ], [true, "Fallthrough", "Jumped"])
+
+      vm = VM.new()
+      result = vm.run(chunk)
+
+      expect(result).to eq("Fallthrough")
+    end
+  end
+
+  describe "Opcode: JMP_TRUE (|| logic)" do
+    it "jumps to target if the value is TRUE" do
+      # Logic:
+      # 1. R0 = true
+      # 2. IF R0 is true GOTO 4
+      # 3. R1 = "No Jump"
+      # 4. R1 = "Jumped"
+      chunk = make_chunk("JmpTrueTest", [
+        [:LOADK, "R0", "K0"],
+        [:JMP_TRUE, "R0", 3],
+        [:LOADK, "R1", "K1"],
+        [:LOADK, "R1", "K2"],
+        [:RETURN, "R1"]
+      ], [true, "No Jump", "Jumped"])
+
+      vm = VM.new()
+      result = vm.run(chunk)
+
+      expect(result).to eq("Jumped")
+    end
+
+    it "falls through if the value is FALSE" do
+      # Logic: This is critical for 'OR EXIT' chains
+      # 1. R0 = ErrorStruct
+      # 2. IF R0 is truthy (and not error) GOTO 4
+      # 3. R1 = "Rescue Path" (Because Error acts like False)
+      # 4. RETURN R1
+
+      error_struct = { "__type" => "Error", "msg" => "oops" }
+
+      chunk = make_chunk("ErrorCheckTest", [
+        [:LOADK, "R0", "K0"],   # Load Error
+        [:JMP_TRUE, "R0", 4],   # Should NOT jump (Error is falsy)
+        [:LOADK, "R1", "K1"],   # Load Rescue
+        [:RETURN, "R1"],
+        [:LOADK, "R1", "K2"],   # Load "Success" (Target - Unreachable)
+      ], [error_struct, "Rescue Path", "Success"])
+
+      vm = VM.new()
+      result = vm.run(chunk)
+
+      expect(result).to eq("Rescue Path")
+    end
+
+    it "treats ERROR objects as FALSE (does not jump)" do
+      # Logic: This is critical for 'OR EXIT' chains
+      # 1. R0 = ErrorStruct
+      # 2. IF R0 is truthy (and not error) GOTO 4
+      # 3. R1 = "Rescue Path" (Because Error acts like False)
+      # 4. RETURN R1
+
+      error_struct = { "__type" => "Error", "message" => "oops" }
+
+      chunk = make_chunk("ErrorCheckTest", [
+        [:LOADK, "R0", "K0"],   # Load Error
+        [:JMP_TRUE, "R0", 4],   # Should NOT jump (Error is falsy)
+        [:LOADK, "R1", "K1"],   # Load Rescue
+        [:RETURN, "R1"],
+        [:LOADK, "R1", "K2"],   # Load "Success" (Unreachable)
+      ], [error_struct, "Rescue Path", "Success"])
+
+      vm = VM.new()
+      result = vm.run(chunk)
+
+      expect(result).to eq("Rescue Path")
+    end
+  end
 end
 

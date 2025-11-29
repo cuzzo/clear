@@ -500,7 +500,7 @@ class VM
   def is_error?(val)
     # Assuming your errors are instances of a class (e.g., RuntimeError or a custom Struct)
     # Adjust this check to match your actual Error object type.
-    val.is_a?(RuntimeError)
+    (val.is_a?(Hash) && val["__type"] == "Error") || val.is_a?(RuntimeError)
   end
 
   def process_jmp_true(reg_idx, ins, frame)
