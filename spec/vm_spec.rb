@@ -81,6 +81,63 @@ RSpec.describe VM do
       end
     end
 
+    context "VAR List Reassign" do
+      let(:source) {
+        <<~FLUX
+          VAR x = %[ 42 ];
+          SET x[0] = 0;
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Cannot modify index of immutable list 'x'/)
+      end
+    end
+
+    context "MUTABLE List Reassign" do
+      let(:source) {
+        <<~FLUX
+          MUTABLE x = %[ 42 ];
+          SET x[0] = 7;
+          RETURN x[0];
+        FLUX
+      }
+
+      it "raises failure" do
+        expect(resp).to eq(7)
+      end
+    end
+
+    context "VAR Hash Reassign" do
+      let(:source) {
+        <<~FLUX
+          VAR x = %{ y: 42 };
+          SET x.y = 0;
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Cannot modify/)
+      end
+    end
+
+    context "MUTABLE Hash Reassign" do
+      let(:source) {
+        <<~FLUX
+          MUTABLE x = %{ y: 42 };
+          SET x.y = 7;
+          RETURN x.y;
+        FLUX
+      }
+
+      it "raises failure" do
+        expect(resp).to eq(7)
+      end
+    end
 
     context "condition goes to 7" do
       let(:source) {
@@ -408,11 +465,11 @@ RSpec.describe VM do
 
         # Set x = 10
         [:LOADK,     "R1", "K0"],      # R1 = 10
-        [:SETFIELD,  "R0", "x", "R1"], # R0["x"] = 10
+        [:SET_FIELD,  "R0", "x", "R1"], # R0["x"] = 10
 
         # Set y = 20 (Just to ensure we can have multiple fields)
         [:LOADK,     "R1", "K1"],      # R1 = 20
-        [:SETFIELD,  "R0", "y", "R1"], # R0["y"] = 20
+        [:SET_FIELD,  "R0", "y", "R1"], # R0["y"] = 20
 
         # Get x
         [:GET_FIELD, "R2", "R0", "x"], # R2 = R0["x"]
@@ -438,7 +495,7 @@ RSpec.describe VM do
         [:NEWHASH, "R0"],              # R0 = {}
 
         [:LOADK,   "R1", "K0"],        # R1 = "active"
-        [:SETHASH, "R0", "status", "R1"], # R0["status"] = "active"
+        [:SET_HASH, "R0", "status", "R1"], # R0["status"] = "active"
 
         # In your VM, GET_FIELD reads hash keys if the object is a Hash
         [:GET_FIELD, "R2", "R0", "status"],

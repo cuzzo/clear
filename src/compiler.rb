@@ -79,8 +79,13 @@ class Compiler
     attr_accessor :locals
     def initialize; @locals = {}; end
 
-    def declare(name, reg, type, is_mutable = true)
-      @locals[name] = { reg: reg, type: type, mutable: is_mutable }
+    def declare(name, reg, type, is_mutable = true, is_rebindable = false)
+      @locals[name] = {
+        reg: reg,
+        type: type,
+        mutable: is_mutable,
+        rebindable: is_rebindable
+      }
     end
 
     def resolve_reg(name)
@@ -300,7 +305,7 @@ class Compiler
     ok_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
 
     # 2. If we are here, it IS an Error. Attach snapshot.
-    @chunk.emit(node, :SETFIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
+    @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
 
     # 3. Patch the jump
     @chunk.patch(ok_jump, @chunk.current_address, 2)
@@ -511,6 +516,7 @@ class Compiler
     visit(node.value, r)
 
     final_type = coerced_type(node, r)
+    handle_deep_freeze(node, r) # Run-time, probably not necessary
 
     if @scope_depth == 0
       # CASE A: GLOBAL
@@ -524,6 +530,12 @@ class Compiler
 
     current_scope.declare(node.name, r, final_type, node.mutable)
     return r
+  end
+
+  def handle_deep_freeze(node, r)
+    return if node.mutable # Nothing to freeze here
+    return if !node.value.is_a?(AST::ListLit) && !node.value.is_a?(AST::StructLit) # Still nothing to freeze
+    @chunk.emit(node, :FREEZE, "R#{r}")
   end
 
   def coerced_type(node, r)
@@ -612,16 +624,26 @@ class Compiler
   end
 
   def compile_field_set(node, val_reg)
+    # 1. Check Mutability
+    if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
+      raise "Compile Error: Cannot modify field '#{node.field}' of immutable object '#{node.target.name}'."
+    end
+
     # node is the AST::GetField(target, field)
     with_temp_reg do |obj_reg|
       visit(node.target, obj_reg) # Compile 'obj'
 
-      # Emit: SETFIELD R_obj, "field_name", R_val
-      @chunk.emit(node, :SETFIELD, "R#{obj_reg}", node.field, "R#{val_reg}")
+      # Emit: SET_FIELD R_obj, "field_name", R_val
+      @chunk.emit(node, :SET_FIELD, "R#{obj_reg}", node.field, "R#{val_reg}")
     end
   end
 
   def compile_index_set(node, val_reg)
+    # 1. Check Mutability
+    if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
+      raise "Compile Error: Cannot modify index of immutable list '#{node.target.name}'."
+    end
+
     # node is the AST::GetIndex(target, index)
     with_temp_reg do |obj_reg|
       visit(node.target, obj_reg) # Compile array/hash
@@ -629,8 +651,8 @@ class Compiler
       with_temp_reg do |key_reg|
         visit(node.index, key_reg) # Compile the index/key
 
-        # Emit: SETHASH R_obj, R_key, R_val
-        @chunk.emit(node, :SETHASH, "R#{obj_reg}", "R#{key_reg}", "R#{val_reg}")
+        # Emit: SET_INDEX R_obj, R_key, R_val
+        @chunk.emit(node, :SET_INDEX, "R#{obj_reg}", "R#{key_reg}", "R#{val_reg}")
       end
     end
   end
@@ -711,7 +733,7 @@ class Compiler
 
           # 2. Set the Context Field on the Error
           # target_reg currently holds the Error object
-          @chunk.emit(node, :SETFIELD, "R#{target_reg}", "context", "R#{r_ctx}")
+          @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "context", "R#{r_ctx}")
         end
       end
       # Action: Throw the current register (the Error)
@@ -925,7 +947,7 @@ class Compiler
       end
     end
 
-    node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(node, :SETFIELD, "R#{target_reg}", k, "R#{r}") } }
+    node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(node, :SET_FIELD, "R#{target_reg}", k, "R#{r}") } }
   end
 
   def compile_struct_def(node, target_reg)
@@ -949,7 +971,7 @@ class Compiler
         # If 'k' is an expression, you'd need to visit it too.
         # For v0.1 simple string keys:
         key_name = k.is_a?(AST::Literal) ? k.value : k.name
-        @chunk.emit(node, :SETHASH, "R#{target_reg}", key_name, "R#{r}")
+        @chunk.emit(node, :SET_HASH, "R#{target_reg}", key_name, "R#{r}")
       end
     end
   end

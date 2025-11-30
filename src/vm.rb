@@ -111,8 +111,9 @@ class VM
       when :MOVE then process_move(reg_idx, ins, frame);
       when :NEWHASH then process_newhash(reg_idx, ins, frame);
       when :NEWSTRUCT then process_newstruct(reg_idx, ins, frame);
-      when :SETFIELD then process_setfield(reg_idx, ins, frame);
-      when :SETHASH then process_sethash(reg_idx, ins, frame);
+      when :SET_FIELD then process_set_field(reg_idx, ins, frame);
+      when :SET_HASH then process_set_hash(reg_idx, ins, frame);
+      when :SET_INDEX then process_set_index(reg_idx, ins, frame);
       when :NEWLIST then process_newlist(reg_idx, ins, frame);
       when :APPEND then process_append(reg_idx, ins, frame);
       when :CAST then process_cast(reg_idx, ins, frame);
@@ -139,6 +140,7 @@ class VM
       when :THROW then process_throw(reg_idx, ins, frame);
       when :THROW_IF_ERROR then process_throw_if_error(reg_idx, ins, frame);
       when :EXIT_PROGRAM then process_exit_program(reg_idx, ins, frame);
+      when :FREEZE then process_freeze(reg_idx, ins, frame);
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
@@ -195,7 +197,7 @@ class VM
     frame.registers[target_reg] = { "__type" => struct_name }
   end
 
-  def process_setfield(reg_idx, ins, frame)
+  def process_set_field(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
     key = ins[2]
     val_reg = reg_idx[ins[3]]
@@ -203,7 +205,9 @@ class VM
     target = frame.registers[target_reg]
     val = frame.registers[val_reg]
 
-    # Safety Check
+    if target.frozen?
+      raise "Runtime Error: Cannot modify immutable object."
+    end
     unless target.is_a?(Hash)
       raise "Runtime Error: Cannot set field '#{key}' on #{target.class}"
     end
@@ -211,7 +215,7 @@ class VM
     target[key] = val
   end
 
-  def process_sethash(reg_idx, ins, frame)
+  def process_set_hash(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
     key = ins[2]
     val_reg = reg_idx[ins[3]]
@@ -224,9 +228,17 @@ class VM
   end
 
   def process_append(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
+    target_reg = reg_idx[ins[1]]
     val_reg = reg_idx[ins[2]]
-    frame.registers[target] << frame.registers[val_reg]
+
+    target = frame.registers[target_reg]
+    val = frame.registers[val_reg]
+
+    if target.frozen?
+      raise "Runtime Error: Cannot modify immutable object."
+    end
+
+    frame.registers[target_reg] << val
   end
 
   def process_cast(reg_idx, ins, frame)
@@ -606,6 +618,26 @@ class VM
     frame.registers[target_reg] = list[index]
   end
 
+  def process_set_index(reg_idx, ins, frame)
+    target_reg = reg_idx[ins[1]]
+    key_reg = reg_idx[ins[2]]
+    val_reg = reg_idx[ins[3]]
+
+    target = frame.registers[target_reg]
+    key = frame.registers[key_reg]
+    val = frame.registers[val_reg]
+
+    if target.frozen?
+      raise "Runtime Error: Cannot modify immutable object."
+    end
+    unless target.is_a?(Array)
+      raise "Runtime Error: Cannot set index '#{key}' on #{target.class}"
+    end
+
+    target[key] = val
+  end
+
+
   def process_get_field(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
     obj_reg    = reg_idx[ins[2]]
@@ -649,6 +681,13 @@ class VM
 
     # 3. Kill the VM immediately
     throw EXIT_SIGNAL, val
+  end
+
+  def process_freeze(reg_idx, ins, frame)
+    target = reg_idx[ins[1]]
+    val = frame.registers[target]
+    # Ruby's native freeze works on Arrays, Hashes, and Strings
+    val.freeze
   end
 
   def process_throw(reg_idx, ins, frame)
