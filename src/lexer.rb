@@ -79,6 +79,7 @@ class Lexer
       # Hexadecimal (0xFF) - MUST come before generic number
       when @s.scan(/0x[0-9a-fA-F]+/)
         val = @s.matched.to_i(16) # Ruby handles the hex conversion
+        # TODO: Handle size at assignment, not here.
         if val > 255
           raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
         end

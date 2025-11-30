@@ -307,12 +307,15 @@ class Compiler
   end
 
   def compile_function_def(node, target_reg)
-    param_types = node.params.map do |p|
-      { type: p[:type], required: p[:default].nil? }
-    end
-    @fn_signatures[node.name] = param_types
+    signature = {
+        params: node.params.map { |p| { type: p[:type], required: p[:default].nil? } },
+        return_type: node.return_type
+      }
+    @fn_signatures[node.name] = signature
 
     fn_compiler = Compiler.new(node.name, node.return_type)
+    fn_compiler.reg_top = node.params.size
+
     fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)
     fn_compiler.instance_variable_set(:@struct_defs, @struct_defs)
     fn_compiler.instance_variable_set(:@fn_signatures, @fn_signatures)
@@ -443,11 +446,10 @@ class Compiler
 
   def verify_function_signature(node)
     raise "Compiler Error: Missing function." if !@fn_signatures.key?(node.name)
-    expected_types = @fn_signatures[node.name]
 
-    signature = @fn_signatures[node.name]
-    min_args = signature.count { |param| param[:required] }
-    max_args = signature.size
+    params = @fn_signatures[node.name][:params]
+    min_args = params.count { |param| param[:required] }
+    max_args = params.size
     given_args = node.args.size
 
     # A. Arity Check (Count)
@@ -461,7 +463,7 @@ class Compiler
 
     # B. Type Check
     node.args.each_with_index do |arg_node, i|
-      expected_type = expected_types[i]
+      expected_type = params[i][:type]
       actual_type = infer_type(arg_node)
       if expected_type != :Any && actual_type != :Any && expected_type != actual_type
         raise "Type Error: Function '#{node.name}' argument #{i+1} expects #{expected_type}, got #{actual_type}"
@@ -508,23 +510,7 @@ class Compiler
     @reg_top += 1
     visit(node.value, r)
 
-    # 1. Determine the Type
-    actual_type = infer_type(node.value)
-    declared_type = node.type
-
-    final_type = :Any
-
-    if declared_type && declared_type != :Any
-      # Case A: Explicit Type (VAR x: Number = ...)
-      # Verify it matches!
-      if declared_type != actual_type && actual_type != :Any
-         raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
-      end
-      final_type = declared_type
-    else
-      # Case B: Inferred Type (VAR x = ...)
-      final_type = actual_type
-    end
+    final_type = coerced_type(node)
 
     if @scope_depth == 0
       # CASE A: GLOBAL
@@ -538,6 +524,36 @@ class Compiler
 
     current_scope.declare(node.name, r, final_type)
     return r
+  end
+
+  def coerced_type(node)
+    actual_type = infer_type(node.value)
+    declared_type = node.type
+
+    final_type = :Any
+
+    if declared_type == :Any || actual_type == :Any
+      # We don't know enough to complain. Let it pass.
+      final_type = (declared_type == :Any) ? actual_type : declared_type
+
+    elsif declared_type == actual_type
+      final_type = declared_type
+
+    # === ALLOWED IMPLICIT CONVERSIONS ===
+    elsif declared_type == :Number && actual_type == :Byte
+      # We know this is safe, but the VM representation needs to change.
+      # So we emit the instruction to help the user.
+      @chunk.emit(node, :CAST, "R#{r}", "Number")
+
+    elsif declared_type == :Byte && actual_type == :Number
+      # We allow this too (wrapping).
+      @chunk.emit(node, :CAST, "R#{r}", "Byte")
+
+    else
+      raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
+    end
+
+    return final_type
   end
 
   def compile_assignment(node, result_reg)
@@ -1146,9 +1162,17 @@ private
     when AST::Cast
       # CAST(x AS T) -> The type is T
       return node.target.to_sym
+
+    when AST::FuncCall
+      # 1. Check if we know the function
+      name = node.name.is_a?(String) ? node.name : nil
+
+      if name && @fn_signatures.key?(name)
+        return @fn_signatures[name][:return_type]
+      end
     end
 
-    :Any # Fallback if we don't know
+    return :Any # Fallback if we don't know
   end
 end
 
