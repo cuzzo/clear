@@ -9,7 +9,7 @@ class Lexer
   # We use a hash for O(1) lookups
   # TODO: Should MOD be a keyword ???
   KEYWORDS = %w[
-      VAR SET
+      VAR MUTABLE SET
       FN RETURN RETURNS USE
       IF THEN ELSE ELSE_IF END
       WHILE DO BREAK CONTINUE

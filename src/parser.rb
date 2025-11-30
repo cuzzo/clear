@@ -8,11 +8,12 @@ class Parser
   @@primary_rules = {}
   @@suffix_rules = {}
 
-  def self.stmt(type, value, node_class = nil, pattern = nil, &block)
+  def self.stmt(type, value, node_class = nil, pattern = nil, inject: [], &block)
     if pattern
       # If pattern provided, create a block that runs the engine
       @@stmt_rules[[type, value]] = lambda do
         args = process_pattern(pattern)
+        args.concat(inject)
         node_class.new(current.line, *args)
       end
     else
@@ -51,7 +52,8 @@ class Parser
   private
 
   # COMMANDS
-  stmt(:KEYWORD, 'VAR', AST::VarDecl, ['VAR', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'])
+  stmt(:KEYWORD, 'VAR', AST::VarDecl, ['VAR', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [false])
+  stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
   stmt(:KEYWORD, 'SET') { parse_set_var }  #, AST::Assignment, ['SET', :VAR_ID, '=', :expression, ';'])
   stmt(:KEYWORD, 'FN') { parse_function_def }
   stmt(:KEYWORD, 'IF') { parse_if_statement }

@@ -39,7 +39,7 @@ RSpec.describe VM do
   describe "Smoke Tests" do
     let(:resp) { run(source).first }
 
-    context "Variable Assignment to 42" do
+    context "VAR Assignment to 42" do
       let(:source) {
         <<~FLUX
           VAR x = 42;
@@ -52,10 +52,40 @@ RSpec.describe VM do
       end
     end
 
-    context "condition goes to 7" do
+    context "VAR Reassignment" do
       let(:source) {
         <<~FLUX
           VAR x = 42;
+          SET x = 0;
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /'x' is immutable/)
+      end
+    end
+
+    context "MUTABLE Reassignment" do
+      let(:source) {
+        <<~FLUX
+          MUTABLE x = 42;
+          SET x = 0;
+          RETURN x;
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(resp).to eq(0)
+      end
+    end
+
+
+    context "condition goes to 7" do
+      let(:source) {
+        <<~FLUX
+          MUTABLE x = 42;
           IF x > 100 THEN
             SET x = 100;
           ELSE

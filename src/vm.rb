@@ -235,21 +235,31 @@ class VM
     val = frame.registers[target_reg]
     schema = @structs[type_name] # Assuming @structs is the global registry
 
-    $logger.debug("TRY CAST TO #{type_name}")
-
     # --- 1. PRIMITIVES / COERCION ---
     if type_name == "String"
-      # Fix #1: Coercion
       frame.registers[target_reg] = val.to_s
-      $logger.debug("SUCCESFULLY CASTED: #{val.to_s}")
       return
     elsif type_name == "Number"
-      raise "Cast Error" unless val.is_a?(Numeric)
-      # Note: Add logic here if you want to convert Float -> Int
+      if val.is_a?(FluxByte)
+        frame.registers[target_reg] = val.value
+        return
+      end
+      raise "Cast Error: Cannot cast #{val.class} to Number" unless val.is_a?(Numeric)
       return
     elsif type_name == "Bool"
       raise "Cast Error" unless (val == true || val == false)
       return
+    elsif type_name == "Byte"
+      # NEW: Wrap Number -> Byte (or re-wrap Byte -> Byte)
+      # We extract the raw integer value to be safe, then wrap it.
+      if val.is_a?(Numeric)
+        frame.registers[target_reg] = FluxByte.new(val)
+        return
+      elsif val.is_a?(FluxByte)
+        # Already a byte, but creating a new one creates a copy (safe)
+        frame.registers[target_reg] = FluxByte.new(val.value)
+        return
+      end
 
     # --- 2. STRUCT CHECK ---
     elsif @structs.key?(type_name)

@@ -4,7 +4,7 @@
 module AST
   Program     = Struct.new(:line, :statements)
   FunctionDef = Struct.new(:line, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var)
-  VarDecl     = Struct.new(:line, :name, :type, :value)
+  VarDecl     = Struct.new(:line, :name, :type, :value, :mutable)
   Assignment  = Struct.new(:line, :name, :value)
   BinaryOp    = Struct.new(:line, :left, :op, :right)
   UnaryOp     = Struct.new(:line, :op, :right)

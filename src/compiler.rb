@@ -510,7 +510,7 @@ class Compiler
     @reg_top += 1
     visit(node.value, r)
 
-    final_type = coerced_type(node)
+    final_type = coerced_type(node, r)
 
     if @scope_depth == 0
       # CASE A: GLOBAL
@@ -522,13 +522,13 @@ class Compiler
       # The value is already sitting in Register 'r'.
     end
 
-    current_scope.declare(node.name, r, final_type)
+    current_scope.declare(node.name, r, final_type, node.mutable)
     return r
   end
 
-  def coerced_type(node)
+  def coerced_type(node, r)
     actual_type = infer_type(node.value)
-    declared_type = node.type
+    declared_type = node.type.to_sym # TODO: Shouldn't have to do this.
 
     final_type = :Any
 
@@ -544,10 +544,12 @@ class Compiler
       # We know this is safe, but the VM representation needs to change.
       # So we emit the instruction to help the user.
       @chunk.emit(node, :CAST, "R#{r}", "Number")
+      final_type = :Number
 
     elsif declared_type == :Byte && actual_type == :Number
       # We allow this too (wrapping).
       @chunk.emit(node, :CAST, "R#{r}", "Byte")
+      final_type = :Byte
 
     else
       raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
