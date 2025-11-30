@@ -4,7 +4,7 @@
 
 *Cheating is all you need.*
 
-* Software should be performant, robust, AND resilient. 
+* Software should be performant, robust, AND resilient.
 * It should also be effortless to write and understand.
 * It should be able to run anywhere, optimized for distributed parallelism and concurrency.
 
@@ -14,7 +14,7 @@ You can have it all, if you're willing to CHEAT.
 
 **Commands like SQL. Pipelines like Bash. Easy like Ruby. Speed like C.**
 
-Being a genius like *antirez* isn't scalable. It's not something everyone can be. 
+Being a genius like *antirez* isn't scalable. It's not something everyone can be.
 
 Everyone else can CHEAT.
 
@@ -85,11 +85,11 @@ Everyone else can CHEAT.
 
 **1. Arena-Based Memory & Isolation**
   * CHEAT uses Arena-based memory management instead of a global Garbage Collector.
-  * Each function scope or spawned process gets its own memory arena. When the scope ends, the memory is freed instantly. 
+  * Each function scope or spawned process gets its own memory arena. When the scope ends, the memory is freed instantly.
   * *The Result:* Memory safety and high performance *WITHOUT* the unpredictable "Stop-the-World" jitter of Java or Go.
 
 **2. Implicit "Railway" Error Handling**
-  * CHEAT treats errors as data, but handles them via control flow. 
+  * CHEAT treats errors as data, but handles them via control flow.
   * The `SMOOTH` operator `s>` (aka the `PIPE` or `|>` in Elixir, etc) acts as a guard.
     * It automatically bubbles errors down the chain, to be handled elsewhere.
   * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- while errors are handled explicitly at the boundaries.
@@ -101,16 +101,16 @@ Everyone else can CHEAT.
   * *The Result:* Rapid development, with real-time debugging as easy as Ruby, with guarantees your code won't crash in run-time.
 
 **4. Bi-Modal Type System**
-  * CHEAT is dynamic by default (using NaN-boxed values for ease of use) but supports optional "Systems Types" (`u8`, `u64`) and Struct definitions. 
+  * CHEAT is dynamic by default (using NaN-boxed values for ease of use) but supports optional "Systems Types" (`u8`, `u64`) and Struct definitions.
   * *The Result:* You can write scripts fast, then optimize hot paths into raw machine instructions, bridging the gap between Python/Ruby and Zig/C.
 
 **5. Shared-Nothing Concurrency**
-  * Parallelism is achieved via `SPAWN`, which creates isolated execution contexts. 
-  * `SPAWN`ing a process creates a lightweight, isolated memory arena. 
+  * Parallelism is achieved via `SPAWN`, which creates isolated execution contexts.
+  * `SPAWN`ing a process creates a lightweight, isolated memory arena.
   * Because memory is not shared between threads, CHEAT code is lock-free and thread-safe by default.
 
 **6. A Type system that *just works***
-  * CHEAT is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference. 
+  * CHEAT is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference.
   * The compiler takes care of the confusing parts of the type system for you.
   * *The Result:* If you can write code in JavaScript, Lua, Python, or Ruby - you can write blazing fast CHEAT code.
 
@@ -134,10 +134,10 @@ Everyone else can CHEAT.
 ### The *SMOOTH* operator
 
 **1. Ergonomics are King**
-  * The standard pipe `|>` is an ergonomic nightmare. 
+  * The standard pipe `|>` is an ergonomic nightmare.
     * It requires awkward pinky-stretches and holding Shift for two distinct keystrokes.
-  * `s>` is designed for speed. 
-     * It rolls across the keyboard (Left hand `s` -> Right hand `>`). 
+  * `s>` is designed for speed.
+     * It rolls across the keyboard (Left hand `s` -> Right hand `>`).
      * It is a literal "Cheat code" for typing pipes faster.
 
 **2. Different Behavior = Different Syntax**
@@ -159,9 +159,9 @@ Everyone else can CHEAT.
   * **The Tradeoff:**
       * **Strictness vs. Velocity:** We trade static type checks for **Runtime Velocity**. CHEAT guarantees your program won't crash on an error, WITHOUT forcing you to manually unwrap every single variable.
   * **The Defense:**
-      * **Telemetry over Taxonomy:** If you have to create or deal with 50 custom Error classes to use a function, you'll probably have MORE bugs, not less, then if you had one-simple error to handle. 
+      * **Telemetry over Taxonomy:** If you have to create or deal with 50 custom Error classes to use a function, you'll probably have MORE bugs, not less, then if you had one-simple error to handle.
         * CHEAT provides one robust Error object that captures the **Context**, the **Kind**, and the **Data Snapshot** automatically.
-      * **Focus on Value:** CHEAT isn't for writing kernel drivers or flight controllers; It's for everything else. 
+      * **Focus on Value:** CHEAT isn't for writing kernel drivers or flight controllers; It's for everything else.
         * CHEAT allows you to write business logic fast, knowing the safety net is baked into the language semantics.
 
 
@@ -169,9 +169,9 @@ Everyone else can CHEAT.
   * **The Controversy:** By default, every number in CHEAT is a 64-bit Float (Double).
     * This means generic Integers are limited to 53 bits of precision (safe range up to ~9 quadrillion).
   * **The Trade-off:** If you need a raw `Int64` or `u64` for bitwise pointer math, you have to explicitly ask for it (and it's slower in the interpreter because it has to be "boxed" or allocated).
-  * **The Defense:** 
-      * **99% Case:** You are counting loops, array indices, or database IDs. 53 bits handles this effortlessly. 
-      * **The 1% Case:** If you are doing Cryptography or matrix multiplication, you shouldn't be doing it in a hot loop in a dynamic language anyway. 
+  * **The Defense:**
+      * **99% Case:** You are counting loops, array indices, or database IDs. 53 bits handles this effortlessly.
+      * **The 1% Case:** If you are doing Cryptography or matrix multiplication, you shouldn't be doing it in a hot loop in a dynamic language anyway.
       * **The Cheat Code:** CHEAT assumes that if you need high-performance math, you will use a `Vector` (SIMD optimized) or a specialized Struct. We prioritize the speed of dynamic typing over the purity of 64-bit integers.
 
 
@@ -185,11 +185,11 @@ Everyone else can CHEAT.
        * **The Result:** Your code runs at a predictable speed. There is no "Stop the World" pause while the VM cleans up your mess.
 
 
-### Explicit State Mutation (`VAR` vs `SET`)
-  * **The Controversy:** You cannot re-assign a variable declared with `VAR`. You must use the `SET` keyword.
-  * **The Trade-off:** It requires three extra keystrokes to update a variable.
+### Explicit State Mutation (`VAR` vs `MUTABLE`)
+  * **The Controversy:** You cannot re-assign a variable declared with `VAR`. You must use the `MUTABLE` keyword.
+  * **The Trade-off:** It requires four extra keystrokes to create a variable, and four extra to re-assign.
   * **The Defense:** Re-assignment is the root of 50% of debugging time.
-      * By forcing you to type `SET`, CHEAT makes mutation visible.
+      * By forcing you to type `MUTABLE` and `SET`, CHEAT makes mutation visible (and easy to review).
       * If you see a block of code with no `SET`, you know immediately that the state is stable.
       * *The Result:* At code-time the editor knows this and can highlight functions that mutate to the user.
 
@@ -217,8 +217,8 @@ Everyone else can CHEAT.
 
 ```
 VAR bill = users AS @u
-  s> UNNEST %.orders
-  s> SELECT %.price * @u.discount
+  s> UNNEST _.orders
+  s> SELECT _.price * @u.discount
   s> reduce(0, %(acc, x) -> acc + x )
 
 -- The above is equal to the below
@@ -309,7 +309,7 @@ FN typicalFunc(myObj) ->
 end
 
 -- Say you had a complex formula with lots of division
--- You might not want to have 
+-- You might not want to have
 
 FN typicalFunc(myObj) ->
   VAR health = GUARD myObj.health != 0 OR ELSE 1;
@@ -345,7 +345,7 @@ callSomeFunc(y / x);
 -- You'll get a DivisionByZero error, so you must do:
 
 
-VAR x = GUARD readSomeFileGetSomeNumber() != 0 OR ELSE 1; 
+VAR x = GUARD readSomeFileGetSomeNumber() != 0 OR ELSE 1;
 VAR y = 10
 callSomeFunc(y / x);
 ```
@@ -354,14 +354,14 @@ callSomeFunc(y / x);
 ### ASYNC/AWAIT/COLLECT
 
 ```
-listOfUsers 
+listOfUsers
   s> FILTER %.isActive
   s> COLLECT                 -- Converts Stream<User> to List<User>
   s> map(%(x) -> x.size > 5); -- Operates on the List<User> object
 
 -- Did not prefix with AWAIT -> *assumes* intentend ASYNC -> immediately starts next step
 
-file_paths 
+file_paths
   s> concurrentRead
   s> COLLECT             -- Wait for ALL files to be fetched/materialized.
   s> aggregate;          -- Start aggregation only on the complete set.
@@ -369,11 +369,11 @@ file_paths
 
 -- Did not prefix with AWAIT -> *assumes* intentend ASYNC -> immediately starts next step
 
-file_paths 
+file_paths
   s> concurrentRead
   s> COLLECT             -- Wait for ALL files to be fetched/materialized.
   s> aggregate
-  s> COLLECT;            -- waits until THIS finishes to resume (which may happen before the other two finish) 
+  s> COLLECT;            -- waits until THIS finishes to resume (which may happen before the other two finish)
 
 -- The above is *nearly* equivalent to:
 
@@ -399,15 +399,15 @@ VAR upDatedUser = user MUTATE { active: true } -- No error!
 VAR x = 5;
 SET x += 10; -- ERROR!
 
-MUTABLE VAR x = 5;
+MUTABLE x = 5;
 SET x += 10;
 ```
 
 Example compiler errors:
 ```
-Error: Cannot SET field 'active' on 'user' to true. 
-     : This is a READ-ONLY VIEW of memory owned by 'DatabaseQueryResult'. 
-     : To modify, use: 
+Error: Cannot SET field 'active' on 'user' to true.
+     : This is a READ-ONLY VIEW of memory owned by 'DatabaseQueryResult'.
+     : To modify, use:
      :
      : VAR newUser = user MUTATE { active: true };
      :
@@ -419,7 +419,7 @@ Error: Cannot SET field 'active' on 'user' to true.
      : You can SET fields on MUTABLE data.
 
 
-Error: Cannot SET 'x' to 5. 
+Error: Cannot SET 'x' to 5.
      : x is IMMUTABLE.
      :
      : You can create a new variable:
@@ -492,7 +492,7 @@ FN myReallyCarefullFn %(myList) ->
    s> parseData -- this could return an error!
    s> renderPage; -- this could return an error!
 
-CATCH -- anything 
+CATCH -- anything
   -- EXCEPT fetchData error -> It was already handled inline
   -- EXCEPT fetchFromBackup -> It was already handled inline
   RETURN makeDefaultPage();
@@ -505,7 +505,7 @@ FN myVeryCarefullFn %(myList) ->
    s> parseData OR EXIT -- Don't proceed any further, but try to pass this to a catch block below
    s> renderPage; -- this could return an error!
 
-CATCH -- anything 
+CATCH -- anything
   -- EXCEPT fetchData error -> It was already handled inline
   -- EXCEPT fetchFromBackup -> It was already handled inline
   -- DOES CATCH parseData (and renderPage) errors
@@ -520,7 +520,7 @@ FN myExtremelyCarefullFn %(myList) ->
    s> renderPage -- this could return an error!
    s> RECOVER(makeDefaultPage());
 
-CATCH -- anything 
+CATCH -- anything
   -- EXCEPT fetchData error -> It was already handled inline
   -- EXCEPT fetchFromBackup -> It was already handled inline
   -- DOES CATCH parseData (and renderPage) errors
@@ -536,10 +536,10 @@ FN myMostCarefulFn %(myList) ->
    s> renderPage OR EXIT "RenderPage failed"
    s> RECOVER(makeDefaultPage()) OR EXIT "RenderBackupPageFailed";
 
-CATCH -- anything 
+CATCH -- anything
   -- Here, there might be two RenderPage errors
   -- Down here, we might want to do two different things based on the same Error (with the context string from above)
-  -- In both cases, we have acccess to the Error object `%e` 
+  -- In both cases, we have acccess to the Error object `%e`
   -- With %e.message and %e.snapshot (whatever went into the pipe) set.
   --
   -- WARNING: To operate on %e.snapshot, you must cast it from Any to Whatever it is.
@@ -566,14 +566,14 @@ String by default.
 
 ```
 VAR s = "😊";                     -- String (Immutable)
-MUTABLE VAR s = "😊";             -- String (Mutable, enforces UTF-8 on write)
-VAR s: String(10) = "😊";         -- String (Immutable, fixed size UTF-8 buffer, very uncommon use case -> mainly for cache locality, not beginner need)
-MUTABLE VAR s: String(10) = "😊"; -- String (Mutable, fixed size UTF-8 buffer, more common use case, but not beginner)
+MUTABLE s = "😊";                 -- String (Mutable, enforces UTF-8 on write)
+VAR s: String[10] = "😊";         -- String (Immutable, fixed size UTF-8 buffer, very uncommon use case -> mainly for cache locality, not beginner need)
+MUTABLE s: String[10] = "😊";     -- String (Mutable, fixed size UTF-8 buffer, more common use case, but not beginner)
 
-VAR b: Bytes = %[0, 10, 255];     -- Buffer (Immutable -> common / default use case for non-beginners)
-MUTABLE VAR b: Bytes = %[0, 10];  -- Buffer (Mutable, Dynamic -> common use case)
-VAR Bytes b: Bytes(10) = ...;     -- Buffer (Immutable, Fixed Size -> you might want for cache locality)
-MUTABLE VAR b: Bytes(10) = ...;   -- Buffer (Mutable, Fixed Size -> common use case)
+VAR b: UInt8[*] = %[0, 10, 255];  -- Buffer (Immutable -> common / default use case for non-beginners)
+MUTABLE b: UInt8[] = %[0, 10];    -- Buffer (Mutable, Dynamic -> common use case)
+VAR b: UInt8[10] = ...;           -- Buffer (Immutable, Fixed Size -> you might want for cache locality)
+MUTABLE b: UInt8[10] = ...;       -- Buffer (Mutable, Fixed Size -> common use case)
 ```
 
 ### Lists vs Streams
@@ -583,7 +583,7 @@ VAR users = db.all s> filter; -- LIST, default
 VAR users = db.all s> filter s> COLLECT; -- LIST, default, superfluous
 VAR users = AWAIT db.all s> filter; -- LIST, default, superfluous
 
-VAR userCursor: Stream = db.all s> filter; -- STREAM, not-default due to EXPLICIT type 
+VAR userCursor: Stream = db.all s> filter; -- STREAM, not-default due to EXPLICIT type
 VAR userCursor = db.all s> filter s> ITER; -- STREAM, not-default due to EXPLICIT ITER
 VAR userCursor = ASYNC db.all s> filter;   -- STREAM, not-default due to EXPLICIT ASYNC
 ```
@@ -602,7 +602,7 @@ TRY
   source.peek(); -- Check connection
 CATCH
   -- I need to reassign the variable to the backup stream!
-  source = backup_db.users; 
+  source = backup_db.users;
 END
 
 source s> map...
