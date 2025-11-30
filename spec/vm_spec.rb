@@ -155,7 +155,7 @@ RSpec.describe VM do
       end
     end
 
-    context "Cannot pass a VAR as a MUTABLE into a func" do
+    context "Cannot create a MUTABLE func without `!` suffix" do
       let(:source) {
         <<~FLUX
           FN mut %(MUTABLE x) -> SET x = 0; END
@@ -167,10 +167,40 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Argument 1 ('x') is MUTABLE/)
+        }.to raise_error(RuntimeError, /Its name must end in/)
       end
     end
 
+    context "Cannot pass a VAR as a MUTABLE into a func" do
+      let(:source) {
+        <<~FLUX
+          FN mut! %(MUTABLE x) -> SET x = 0; END
+          VAR z = 0;
+          mut!(z);
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Argument 1 .* is MUTABLE/)
+      end
+    end
+
+    context "Can pass a MUTABLE as a MUTABLE into a MUTABLE func" do
+      let(:source) {
+        <<~FLUX
+          FN mut! %(MUTABLE x) -> SET x.p = 0; END
+          MUTABLE z = %{ p: 42 };
+          mut!(z);
+          RETURN z.p;
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(resp).to eq(0)
+      end
+    end
 
     context "condition goes to 7" do
       let(:source) {
