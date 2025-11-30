@@ -76,6 +76,30 @@ class Lexer
           add(:VAR_ID, word)  # Lowercase start = Var
         end
 
+      # Hexadecimal (0xFF) - MUST come before generic number
+      when @s.scan(/0x[0-9a-fA-F]+/)
+        val = @s.matched.to_i(16) # Ruby handles the hex conversion
+        if val > 255
+          raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
+        end
+        add(:BYTE, val)
+
+      # Octal (0o77)
+      when @s.scan(/0b[0-7]+/)
+        val = @s.matched.to_i(8)
+        if val > 255
+          raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
+        end
+        add(:BYTE, val)
+
+      # Binary (0b101)
+      when @s.scan(/0b[0-1]+/)
+        val = @s.matched.to_i(2)
+        if val > 255
+          raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
+        end
+        add(:BYTE, val)
+
       when @s.scan(/\d+\.?\d*/)
         add(:NUMBER, @s.matched.to_f)
 

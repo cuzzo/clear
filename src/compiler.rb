@@ -2,6 +2,7 @@ require 'logger'
 require 'byebug'
 
 require_relative "./ast"
+require_relative "./types"
 
 # ==========================================
 # COMPILER
@@ -770,7 +771,11 @@ class Compiler
   end
 
   def compile_literal(node, target_reg)
-    k = @chunk.add_constant(node.value)
+    val = node.value
+    if node.type == :BYTE
+      val = FluxByte.new(val)
+    end
+    k = @chunk.add_constant(val)
     @chunk.emit(node, :LOADK, "R#{target_reg}", "K#{k}")
   end
 
@@ -1122,6 +1127,7 @@ private
       return :Number if node.type == :NUMBER
       return :String if node.type == :STRING
       return :Bool if node.type == :BOOL
+      return :Byte if node.type == :BYTE
 
     when AST::Identifier
       # Look up the variable in the current scope

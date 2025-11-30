@@ -1,10 +1,11 @@
 require "byebug"
+require "optparse"
+require "logger"
+
 require_relative "lexer"
 require_relative "parser"
 require_relative "compiler"
-require "msgpack"
-require "optparse"
-require "logger"
+require_relative "types"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -13,7 +14,6 @@ if $logger.nil?
     "[#{severity}] #{msg}\n"
   end
 end
-
 
 # ==========================================
 # 6. THE VIRTUAL MACHINE
@@ -418,6 +418,16 @@ class VM
     if lhs.is_a?(Numeric) && rhs.is_a?(Numeric)
       # 1. Math Path (Fast)
       frame.registers[target] = lhs + rhs
+
+    elsif lhs.is_a?(FluxByte) && rhs.is_a?(FluxByte)
+      # 1. Math Path (Fast)
+      frame.registers[target] = lhs + rhs
+
+    elsif lhs.is_a?(FluxByte) && rhs.is_a?(Numeric)
+       frame.registers[target] = lhs + FluxByte.new(rhs)
+
+    elsif lhs.is_a?(Numeric) && rhs.is_a?(FluxByte)
+       frame.registers[target] = lhs + rhs.value
 
     elsif lhs.is_a?(String) || rhs.is_a?(String)
       # 2. String Path (Concat)

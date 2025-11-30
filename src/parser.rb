@@ -68,6 +68,7 @@ class Parser
   # Primaries
   primary(:NUMBER) { AST::Literal.new(current.line, :NUMBER, consume(:NUMBER).value) }
   primary(:STRING) { AST::Literal.new(current.line, :STRING, consume(:STRING).value) }
+  primary(:BYTE) { AST::Literal.new(current.line, :BYTE, consume(:BYTE).value) }
   primary(:VAR_ID) { parse_var_id }
 
   primary(:KEYWORD, 'TRUE') { consume(:KEYWORD); AST::Literal.new(current.line, :BOOLEAN, true) }
