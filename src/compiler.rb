@@ -313,7 +313,7 @@ class Compiler
 
   def compile_function_def(node, target_reg)
     signature = {
-        params: node.params.map { |p| { type: p[:type], required: p[:default].nil? } },
+        params: node.params.map { |p| { name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable] } },
         return_type: node.return_type
       }
     @fn_signatures[node.name] = signature
@@ -327,7 +327,7 @@ class Compiler
 
     # 2. Register Parameters in Child Scope
     node.params.each_with_index do |p, i|
-      fn_compiler.current_scope.declare(p[:name], i, p[:type])
+      fn_compiler.current_scope.declare(p[:name], i, p[:type], p[:mutable])
 
       if p[:default]
         # We need to inject code: IF param IS NIL -> param = default_val
@@ -466,9 +466,24 @@ class Compiler
       end
     end
 
-    # B. Type Check
     node.args.each_with_index do |arg_node, i|
-      expected_type = params[i][:type]
+      param = params[i]
+      # B. Check mutability
+      if param[:mutable]
+        # Rule 1: Must be a Variable (Identifier), not a literal/expression
+        if !arg_node.is_a?(AST::Identifier)
+          raise "Compile Error: Argument #{i+1} ('#{param[:name]}') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable."
+        end
+
+        # Rule 2: The Variable being passed must be MUTABLE
+        # We check the scope to see if the user declared it with 'MUTABLE'
+        if current_scope.is_immutable?(arg_node.name)
+           raise "Compile Error: Argument #{i+1} ('#{param[:name]}') is MUTABLE, but you passed immutable variable '#{arg_node.name}'."
+        end
+      end
+
+      # C. Type Check
+      expected_type = param[:type]
       actual_type = infer_type(arg_node)
       if expected_type != :Any && actual_type != :Any && expected_type != actual_type
         raise "Type Error: Function '#{node.name}' argument #{i+1} expects #{expected_type}, got #{actual_type}"

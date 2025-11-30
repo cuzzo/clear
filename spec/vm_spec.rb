@@ -139,6 +139,39 @@ RSpec.describe VM do
       end
     end
 
+    context "Assigment of default function argument" do
+      let(:source) {
+        <<~FLUX
+          FN mut %(x) -> SET x = 0; END
+          VAR z = 0;
+          mut(x);
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Variable 'x' is immutable/)
+      end
+    end
+
+    context "Cannot pass a VAR as a MUTABLE into a func" do
+      let(:source) {
+        <<~FLUX
+          FN mut %(MUTABLE x) -> SET x = 0; END
+          VAR z = 0;
+          mut(z);
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Argument 1 ('x') is MUTABLE/)
+      end
+    end
+
+
     context "condition goes to 7" do
       let(:source) {
         <<~FLUX

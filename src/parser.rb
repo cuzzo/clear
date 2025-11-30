@@ -256,6 +256,8 @@ class Parser
 
   def parse_argument_list()
     parse_comma_seq(:CHAR, '(', ')') do
+      is_mutable = match!(:KEYWORD, 'MUTABLE')
+
       p_name = consume(:VAR_ID).value
       p_type = :Any
 
@@ -269,7 +271,7 @@ class Parser
         default_val = parse_expression
       end
 
-      { name: p_name, type: p_type, default: default_val }
+      { name: p_name, type: p_type, default: default_val, mutable: is_mutable }
     end
   end
 
