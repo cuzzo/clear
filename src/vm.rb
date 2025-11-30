@@ -243,7 +243,7 @@ class VM
 
   def process_cast(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
-    type_name  = ins[2]
+    type_name = ins[2].to_s
     val = frame.registers[target_reg]
     schema = @structs[type_name] # Assuming @structs is the global registry
 
@@ -273,14 +273,44 @@ class VM
         return
       end
 
+    # --- 3. ARRAY CASTING ---
+    elsif type_name.include?("[")
+      match = type_name.match(/^(\w+)\[(.*)\]$/)
+
+      if match
+        constraint = match[2]
+
+        # 1. Fixed Inferred [*]
+        if constraint == "*"
+          # Lock size to current count
+          frame.registers[target_reg] = FluxArray.new(val.size, val)
+          return
+        end
+
+        # 2. Fixed Explicit [N]
+        if constraint =~ /^\d+$/
+          limit = constraint.to_i
+
+          # Runtime Check (for non-literals)
+          if val.size > limit
+            raise "Runtime Error: Array too large for fixed size #{limit}"
+          end
+
+          frame.registers[target_reg] = FluxArray.new(limit, val)
+          return
+        end
+      end
+
     # --- 2. STRUCT CHECK ---
-    elsif @structs.key?(type_name)
+    # TODO: Why is Number in @structs ??
+    elsif @structs.key?(type_name.to_sym)
       unless check_type(val, type_name, @structs)
         raise "Runtime Error: Struct validation failed for '#{type_name}'"
       end
     else
       raise "Runtime Error: Unknown Type '#{type_name}'"
     end
+
     # If successful, the value remains in the register (no-op)
   end
 
@@ -299,7 +329,7 @@ class VM
   def process_def_struct(reg_idx, ins, frame)
     name = ins[1]
     schema = ins[2] # The ruby hash from the compiler
-    @structs[name] = schema
+    @structs[name.to_sym] = schema
   end
 
   def process_closure(reg_idx, ins, frame)
@@ -610,7 +640,7 @@ class VM
     index = frame.registers[idx_reg]
 
     # Basic error checking
-    unless list.is_a?(Array) || list.is_a?(String)
+    unless list.is_a?(Array) || list.is_a?(FluxArray) || list.is_a?(String)
        raise "Runtime Error: Attempt to index a #{list.class}"
     end
 

@@ -1,7 +1,6 @@
 require 'rspec'
 require_relative '../src/vm'
 require_relative 'support/ast_matchers'
-require "byebug"
 
 RSpec.configure do |c|
   c.include AstMatchers
@@ -217,6 +216,61 @@ RSpec.describe VM do
         expect(resp).to eq(0)
       end
     end
+
+    context "Can create a dynamic list" do
+      let(:source) {
+        <<~FLUX
+          VAR l : Number[] = %[ 0, 1, 2, 3 ];
+          RETURN l[1];
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(resp).to eq(1)
+      end
+    end
+
+    context "Can create a fixed list of unspecified size" do
+      let(:source) {
+        <<~FLUX
+          VAR l : Number[*] = %[ 0, 1, 2, 3 ];
+          RETURN l[1];
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(resp).to eq(1)
+      end
+    end
+
+    context "Can create a fixed list of specified size (large enough)" do
+      let(:source) {
+        <<~FLUX
+          VAR l : Number[10] = %[ 0, 1, 2, 3 ];
+          RETURN l[1];
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(resp).to eq(1)
+      end
+    end
+
+    context "Cannot create a fixed list of specified size not large enough" do
+      let(:source) {
+        <<~FLUX
+          VAR l : Number[2] = %[ 0, 1, 2, 3 ];
+          RETURN l[1];
+        FLUX
+      }
+
+      it "fails" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Cannot initialize array of size 4 to fixed-size/)
+      end
+    end
+
 
     context "condition goes to 7" do
       let(:source) {

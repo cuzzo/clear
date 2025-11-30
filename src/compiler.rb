@@ -79,13 +79,19 @@ class Compiler
     attr_accessor :locals
     def initialize; @locals = {}; end
 
-    def declare(name, reg, type, is_mutable = true, is_rebindable = false)
+    def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil)
       @locals[name] = {
         reg: reg,
         type: type,
         mutable: is_mutable,
-        rebindable: is_rebindable
+        rebindable: is_rebindable,
+        size: size
       }
+    end
+
+    def get_size(name)
+      entry = @locals[name]
+      entry ? entry[:size] : nil
     end
 
     def resolve_reg(name)
@@ -547,6 +553,7 @@ class Compiler
 
     final_type = coerced_type(node, r)
     handle_deep_freeze(node, r) # Run-time, probably not necessary
+    known_size = get_known_size(node)
 
     if @scope_depth == 0
       # CASE A: GLOBAL
@@ -558,8 +565,21 @@ class Compiler
       # The value is already sitting in Register 'r'.
     end
 
-    current_scope.declare(node.name, r, final_type, node.mutable)
+    current_scope.declare(node.name, r, final_type, node.mutable, known_size)
     return r
+  end
+
+  def get_known_size(node)
+    if node.value.is_a?(AST::ListLit)
+      # 1. Literal: We count the items
+      return node.value.items.size
+
+    elsif node.value.is_a?(AST::Identifier)
+      # 2. Variable: We ask the scope
+      return current_scope.get_size(node.value.name)
+    end
+
+    return nil
   end
 
   def handle_deep_freeze(node, r)
@@ -597,7 +617,74 @@ class Compiler
       raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
     end
 
+    if declared_type.to_s.include?("[")
+      handle_array_type(node, r, declared_type, actual_type)
+      final_type = declared_type
+    end
+
     return final_type
+  end
+
+  def handle_array_type(node, reg_idx, declared_type, actual_type)
+    # Extract Base Type and Constraint
+    # regex matches: "Type" and "[something]"
+    match = declared_type.to_s.match(/^(\w+)\[(.*)\]$/)
+    return unless match # Should catch via other checks if invalid
+
+    base_type = match[1]
+    constraint = match[2]
+
+    # 1. Check Content Types (Optional: verify list items are Numbers)
+    #    (Skipping for brevity, requires checking AST::ListLit items)
+
+    # 2. Handle Constraints
+    if constraint == ""
+      # Case: Number[] (Dynamic)
+      # No-op: It's already a List.
+
+    elsif constraint == "*"
+      if node.value.is_a?(AST::Identifier) && current_scope.get_size(node.value.name).nil?
+        raise "Cannot initialize a fixed-array to an unknown size. You must TRUNCATE to a specific size, or use `[]` to create a dynamic array."
+      end
+      # Case: Number[*] (Fixed Inferred)
+      # Convert to Fixed Array with size = current length
+      @chunk.emit(node, :CAST, "R#{reg_idx}", "#{base_type}[*]")
+
+    else
+      # Case: Number[10] (Fixed Explicit)
+      limit = constraint.to_i
+
+      check_size = nil
+
+      # A. Is it a Literal?
+      if node.value.is_a?(AST::ListLit)
+        check_size = node.value.items.size
+
+      # B. Is it a Variable?
+      elsif node.value.is_a?(AST::Identifier)
+        # Look up the size we stored previously
+        check_size = current_scope.get_size(node.value.name)
+      end
+
+      # C. The Check
+      # If check_size is nil, it means the value is dynamic (unknown),
+      # so we MUST fall back to the Runtime Check.
+      if check_size && check_size > limit
+         raise "Compile Error: Cannot initialize array of size #{check_size} to fixed-size '#{declared_type}'"
+      end
+
+      # COMPILE-TIME SIZE CHECK
+      # Only possible if assigning a Literal
+      if node.value.is_a?(AST::ListLit)
+        current_size = node.value.items.size
+        if current_size > limit
+          raise "Compile Error: Cannot initialize array of size #{current_size} to fixed-size '#{declared_type}'"
+        end
+      end
+
+      # Emit CAST to seal it at runtime
+      @chunk.emit(node, :CAST, "R#{reg_idx}", declared_type)
+    end
   end
 
   def compile_assignment(node, result_reg)

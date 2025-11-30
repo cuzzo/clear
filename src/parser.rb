@@ -559,12 +559,30 @@ class Parser
 
   def parse_type_annotation
     base = consume(:TYPE_ID).value
+    inner = ""
+
     if match!(:CHAR, '[')
-      inner = parse_type_annotation
-      consume(:CHAR, ']')
-      return "#{base}[#{inner}]"
+      # Case 1: Dynamic "Number[]"
+      if match!(:CHAR, ']')
+        inner = "[]"
+
+      # Case 2: Fixed Inferred "Number[*]"
+      elsif match!(:CHAR, '*')
+        consume(:CHAR, ']')
+        inner = "[*]"
+
+      # Case 3: Fixed Explicit "Number[10]"
+      elsif match?(:NUMBER)
+        size = consume(:NUMBER).value.to_i
+        consume(:CHAR, ']')
+        inner = "[#{size}]"
+
+      else
+        raise "Syntax Error: Expected ']', '*', or size in array type."
+      end
     end
-    base
+
+    "#{base}#{inner}"
   end
 
   def parse_comma_seq(type, open, close)
