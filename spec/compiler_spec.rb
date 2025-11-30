@@ -174,9 +174,9 @@ RSpec.describe Compiler do
         # [:CALL_FUNC, Target, Name, Arity, Arg0]
         expect(ops[3]).to match([:PRINT, "R0"])
 
-        # Step 4: Error Enrichment Logic (JMP_IF_OK + SETFIELD)
+        # Step 4: Error Enrichment Logic (JMP_IF_OK + SET_FIELD)
         expect(ops[4]).to include(:JMP_IF_OK)
-        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
+        expect(ops[5]).to include(:SET_FIELD) # Snapshot -> The error internally is just a hash like any other
 
         # Find where 'x' is defined.
         # This ignores the implicit "RETURN 0" at the very end of the chunk.
@@ -208,7 +208,7 @@ RSpec.describe Compiler do
         expect(ops[2]).to include(:MOVE)
         expect(ops[3]).to match([:PRINT, "R0"])
         expect(ops[4]).to include(:JMP_IF_OK)
-        expect(ops[5]).to include(:SETFIELD) # Snapshot -> The error internally is just a hash like any other
+        expect(ops[5]).to include(:SET_FIELD) # Snapshot -> The error internally is just a hash like any other
         assign_idx = ops.find_index { |op| op[0] == :DEF_GLOBAL && op[1] == "x" }
         expect(ops[assign_idx]).to eq([:DEF_GLOBAL, "x", "R0"]) # Final assignment
 
@@ -308,7 +308,7 @@ RSpec.describe Compiler do
       chunk = compile(source_with_context)
       code = chunk.code
 
-      setfield_idx = code.find_index { |ins| ins[0] == :SETFIELD && ins[2] == "context" }
+      setfield_idx = code.find_index { |ins| ins[0] == :SET_FIELD && ins[2] == "context" }
       throw_idx = code.find_index { |ins| ins[0] == :THROW }
 
       expect(setfield_idx).not_to be_nil
@@ -512,18 +512,18 @@ RSpec.describe Compiler do
     let(:source) {
       <<~FLUX
         STRUCT Point { x: Number }
-        VAR p = %Point{ x: 0 };
+        MUTABLE p = %Point{ x: 0 };
         SET p.x = 10;
       FLUX
     }
 
-    it 'compiles into SETFIELD instructions instead of MOVE' do
+    it 'compiles into SET_FIELD instructions instead of MOVE' do
       # If your compiler doesn't handle this, it might crash here
       ops = compile_ops(source)
 
-      # We expect a SETFIELD instruction
-      # Format: [:SETFIELD, R_Struct, "x", R_Value]
-      set_op = ops.find { |op| op[0] == :SETFIELD }
+      # We expect a SET_FIELD instruction
+      # Format: [:SET_FIELD, R_Struct, "x", R_Value]
+      set_op = ops.find { |op| op[0] == :SET_FIELD }
 
       expect(set_op).to_not be_nil
       expect(set_op[2]).to eq("x")
@@ -556,11 +556,11 @@ RSpec.describe Compiler do
         expect(inner_reg).to_not eq(outer_reg)
 
         # 3. Verify the Link
-        # Look for the SETHASH that attaches the inner to the outer
-        # SETHASH OuterReg, Key, InnerReg
-        link_op = ops.find { |op| op[0] == :SETHASH && op[1] == outer_reg && op[3] == inner_reg }
+        # Look for the SET_HASH that attaches the inner to the outer
+        # SET_HASH OuterReg, Key, InnerReg
+        link_op = ops.find { |op| op[0] == :SET_HASH && op[1] == outer_reg && op[3] == inner_reg }
 
-        expect(link_op).to_not be_nil, "Failed to find SETHASH linking #{outer_reg} and #{inner_reg}"
+        expect(link_op).to_not be_nil, "Failed to find SET_HASH linking #{outer_reg} and #{inner_reg}"
       end
     end
 
@@ -591,9 +591,9 @@ RSpec.describe Compiler do
         append_ops = ops.select { |op| op[0] == :APPEND && op[1] == list_reg }
         expect(append_ops.size).to eq(2)
 
-        # 4. Verify the Link (SETHASH)
-        # SETHASH HashReg, "tags", ListReg
-        link_op = ops.find { |op| op[0] == :SETHASH && op[1] == hash_reg && op[3] == list_reg }
+        # 4. Verify the Link (SET_HASH)
+        # SET_HASH HashReg, "tags", ListReg
+        link_op = ops.find { |op| op[0] == :SET_HASH && op[1] == hash_reg && op[3] == list_reg }
         expect(link_op).to_not be_nil
       end
     end
@@ -655,8 +655,8 @@ RSpec.describe Compiler do
         expect(list_reg).to_not eq(hash_reg)
 
         # 3. Check that the hash was populated
-        # SETHASH HashReg, "id", Val
-        set_op = ops.find { |op| op[0] == :SETHASH && op[1] == hash_reg }
+        # SET_HASH HashReg, "id", Val
+        set_op = ops.find { |op| op[0] == :SET_HASH && op[1] == hash_reg }
         expect(set_op).to_not be_nil
 
         # 4. Check that the hash was appended to the list

@@ -318,11 +318,7 @@ class Compiler
       }
     @fn_signatures[node.name] = signature
 
-    has_mutable_param = node.params.any? { |p| p[:mutable] }
-    name_has_bang = node.name.end_with?("!")
-    if has_mutable_param && !name_has_bang
-      raise "Style Error: Function '#{node.name}' has MUTABLE parameters (side-effects). Its name must end in '!' (e.g. '#{node.name}!')"
-    end
+    validate_mutability(node)
 
     fn_compiler = Compiler.new(node.name, node.return_type)
     fn_compiler.reg_top = node.params.size
@@ -405,6 +401,19 @@ class Compiler
     # but since we did it manually, the register is now "used."
     # We return the register index where the function is stored.
     return target_reg
+  end
+
+  def validate_mutability(node)
+    mutable_params = node.params.select { |p| p[:mutable] }
+    return if mutable_params.empty?
+    if !node.name.end_with?("!")
+      raise "Style Error: Function '#{node.name}' has MUTABLE parameters (side-effects). Its name must end in '!' (e.g. '#{node.name}!')"
+    end
+
+    # Ensure no mutable parameter is a primitive
+    if mutable_params.any? { |p| AST::PRIMITIVE_TYPES.include?(p[:type]) }
+      raise "Compile Error: Parameter '#{p[:name]}' is MUTABLE but has primitive type '#{p[:type]}'. Primitives are passed by value, so mutating them locally has no effect on the caller."
+    end
   end
 
   def compile_func_call(node, target_reg)

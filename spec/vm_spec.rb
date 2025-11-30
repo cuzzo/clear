@@ -187,6 +187,22 @@ RSpec.describe VM do
       end
     end
 
+    context "MUTABLE primitives are not allowed as parameters" do
+      let(:source) {
+        <<~FLUX
+          FN mut! %(MUTABLE x: Number) -> SET x = 0; END
+          VAR z = 0;
+          mut!(z);
+        FLUX
+      }
+
+      it "raises failure" do
+        expect {
+          resp
+        }.to raise_error(RuntimeError, /Argument 1 .* is MUTABLE/)
+      end
+    end
+
     context "Can pass a MUTABLE as a MUTABLE into a MUTABLE func" do
       let(:source) {
         <<~FLUX
