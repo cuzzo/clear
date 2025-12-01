@@ -54,8 +54,22 @@ class FluxByte
   def -(other); FluxByte.new(@value - other.value); end
   def *(other); FluxByte.new(@value * other.value); end
 
-  # Comparisons
+  # Division / Modulo
+  def /(other); FluxByte.new(@value / other.value); end
+  def %(other); FluxByte.new(@value % other.value); end
+  def **(other); FluxByte.new(@value ** other.value); end
+
+  # Bitwise
+  def ~; FluxByte.new(~@value); end
+
+  # Comparison (These return standard Bools)
+  def <(other);  @value < other.value; end
+  def >(other);  @value > other.value; end
+  def <=(other); @value <= other.value; end
+  def >=(other); @value >= other.value; end
+  def !=(other); @value != other.value; end
   def ==(other); other.is_a?(FluxByte) && @value == other.value; end
+
   def to_s; "0x#{@value.to_s(16).upcase.rjust(2, '0')}"; end
   def inspect; to_s; end
 end

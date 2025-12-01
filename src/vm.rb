@@ -7,6 +7,7 @@ require_relative "parser"
 require_relative "compiler"
 require_relative "types"
 require_relative "memory_visualizer"
+require_relative "value"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -197,9 +198,9 @@ class VM
   def process_loadk(reg_idx, ins, frame)
     # LOADK Rtarget, Kconst
     target = reg_idx[ins[1]]
-    k_idx  = ins[2][1..-1].to_i
+    k_idx = ins[2][1..-1].to_i
     val = frame.chunk.constants[k_idx]
-    frame.registers[target] = val
+    frame.registers[target] = Value.box_constant(val)
   end
 
   def process_move(reg_idx, ins, frame)
@@ -210,7 +211,8 @@ class VM
 
   def process_new_hash(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    frame.registers[target] = FluxHash.new
+    obj = FluxHash.new
+    frame.registers[target] = Value.box_obj(obj)
   end
 
   def process_new_struct(reg_idx, ins, frame)
@@ -250,7 +252,8 @@ class VM
 
   def process_new_list(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    frame.registers[target] = FluxArray.new(nil, [])
+    obj = FluxArray.new(nil, [])
+    frame.registers[target] = Value.box_obj(obj)
   end
 
   def process_append(reg_idx, ins, frame)
@@ -434,7 +437,8 @@ class VM
       new_list = obj.map do |item|
         execute_function(closure, [item])
       end
-      frame.registers[res_reg] = FluxArray.new(nil, new_list)
+      obj = FluxArray.new(nil, new_list)
+      frame.registers[res_reg] = Value.box_obj(obj)
       return
     end
 
@@ -490,40 +494,90 @@ class VM
 
   def process_add(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    lhs = frame.registers[reg_idx[ins[2]]]
-    rhs = frame.registers[reg_idx[ins[3]]]
+    val_a = frame.registers[reg_idx[ins[2]]]
+    val_b = frame.registers[reg_idx[ins[3]]]
 
-    if lhs.is_a?(Numeric) && rhs.is_a?(Numeric)
-      # 1. Math Path (Fast)
-      frame.registers[target] = lhs + rhs
+    tag_a = Value.get_tag(val_a)
+    tag_b = Value.get_tag(val_b)
 
-    elsif lhs.is_a?(FluxByte) && rhs.is_a?(FluxByte)
-      # 1. Math Path (Fast)
-      frame.registers[target] = lhs + rhs
+    result =
+      case [tag_a, tag_b]
+      # 1. Primitives: Number + Number
+      when [Value::TAG_NUMBER, Value::TAG_NUMBER]
+        Value.as_number(val_a) + Value.as_number(val_b)
 
-    elsif lhs.is_a?(FluxByte) && rhs.is_a?(Numeric)
-       frame.registers[target] = lhs + FluxByte.new(rhs)
+      # 2. Primitives: Byte + Byte
+      when [Value::TAG_BYTE, Value::TAG_BYTE]
+        Value.as_byte(val_a) + Value.as_byte(val_b)
 
-    elsif lhs.is_a?(Numeric) && rhs.is_a?(FluxByte)
-       frame.registers[target] = lhs + rhs.value
+      # 3. Mixed Primitive Math (Coerce to dominant type: Number)
+      when [Value::TAG_NUMBER, Value::TAG_BYTE]
+        Value.as_number(val_a) + val_b.value # Number + raw_byte
+      when [Value::TAG_BYTE, Value::TAG_NUMBER]
+        val_a + Value.as_number(val_b) # Byte + Number
 
-    elsif lhs.is_a?(FluxString) || rhs.is_a?(FluxString)
-      # 2. String Path (Concat)
-      # This handles "A" + "B", "A" + 1, and 1 + "A"
-      frame.registers[target] = lhs.to_s + rhs.to_s
+      # --- 4. STRING CONCATENATION (Coercion Path) ---
 
-    else
-      raise "Runtime Error: Cannot ADD types #{lhs.class} and #{rhs.class}"
-    end
+      # Case: String on LHS (e.g., "a" + 10 or "a" + "b")
+      when [Value::TAG_OBJ, Value::TAG_NUMBER],
+           [Value::TAG_OBJ, Value::TAG_BYTE],
+           [Value::TAG_OBJ, Value::TAG_OBJ]
+
+        obj_a = Value.as_obj(val_a)
+
+        # Only handle if the dominant object is a FluxString
+        unless obj_a.is_a?(FluxString)
+          raise "Runtime Error: Cannot ADD object type #{obj_a.class}"
+        end
+
+        # Use the specialized FluxString#+ which coerces the RHS
+        frame.registers[target] = Value.box_obj(obj_a + Value.unbox(val_b))
+        return # Skip final boxing line since we already boxed with box_obj
+
+      # Case: String on RHS (e.g., 10 + "a")
+      when [Value::TAG_NUMBER, Value::TAG_OBJ],
+           [Value::TAG_BYTE, Value::TAG_OBJ]
+
+        obj_b = Value.as_obj(val_b)
+        unless obj_b.is_a?(FluxString)
+          raise "Runtime Error: Cannot ADD object type #{obj_b.class}"
+        end
+
+        # Coerce the primitive LHS to String, then prepend to the RHS object
+        str_a = Value.unbox(val_a).to_s
+        frame.registers[target] = Value.box_obj(FluxString.new(str_a) + obj_b)
+        return # Skip final boxing line
+
+      else
+        raise "Runtime Error: Invalid operands for ADD: [#{tag_a}, #{tag_b}]"
+      end
+
+    # Box the result back up (Only for Primitives/Math result paths)
+    frame.registers[target] = Value.box_constant(result)
   end
 
   def process_sendable_symbol(reg_idx, ins, frame, opcode)
     target = reg_idx[ins[1]]
-    lhs_val = frame.registers[reg_idx[ins[2]]]
-    rhs_val = frame.registers[reg_idx[ins[3]]]
+    lhs_reg = reg_idx[ins[2]]
+    rhs_reg = reg_idx[ins[3]]
+
+    # 1. Retrieve Values (Already Boxed)
+    val_a = frame.registers[lhs_reg]
+    val_b = frame.registers[rhs_reg]
+
+    # 2. Tag Check (Simulating strictness)
+    #    In a real port, you'd switch on tags here.
+    #    For the prototype, we assume if they respond to the method, it's valid.
 
     sym = AST::OP_CODE_SENDABLE_SYMS[opcode]
-    frame.registers[target] = lhs_val.send(sym, rhs_val)
+
+    # 3. Perform Operation
+    #    This returns a Raw value (Integer, Bool) or a FluxByte
+    raw_result = val_a.send(sym, val_b)
+
+    # 4. BOX THE RESULT (The Critical Fix)
+    #    This ensures the register always holds a "Value"-compliant object
+    frame.registers[target] = Value.box_constant(raw_result)
   end
 
   def process_not(reg_idx, ins, frame)
@@ -532,9 +586,15 @@ class VM
     src = reg_idx[ins[2]]
     val = frame.registers[src]
 
-    # In Ruby, !nil is true, !false is true. Everything else is false.
-    # We can just leverage Ruby's native operator:
-    frame.registers[target] = !val
+    # 1. Determine Truthiness (Simulate System Logic)
+    #    In NanBoxing: nil and false have specific bit patterns. Everything else is true.
+    is_falsey = Value.is_nil?(val) || (Value.is_bool?(val) && Value.as_bool(val) == false)
+
+    # 2. Invert
+    result_bool = is_falsey # If it was falsey, NOT makes it true.
+
+    # 3. Box Result
+    frame.registers[target] = Value.box_bool(result_bool)
   end
 
   def process_call_native(reg_idx, ins, frame)

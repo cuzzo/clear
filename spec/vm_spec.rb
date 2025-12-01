@@ -1,6 +1,9 @@
-require 'rspec'
-require_relative '../src/vm'
-require_relative 'support/ast_matchers'
+require "rspec"
+require "byebug"
+
+require_relative "../src/value"
+require_relative "../src/vm"
+require_relative "support/ast_matchers"
 
 RSpec.configure do |c|
   c.include AstMatchers
@@ -36,7 +39,7 @@ RSpec.describe VM do
   end
 
   describe "Smoke Tests" do
-    let(:resp) { run(source).first }
+    let(:resp) { Value.unbox(run(source).first) }
 
     context "VAR Assignment to 42" do
       let(:source) {
@@ -316,6 +319,25 @@ RSpec.describe VM do
         expect(resp.to_s).to eq("Hello World")
       end
     end
+
+    context "SMOOTH passes the result of the previous function as the first argument to the next" do
+      let(:source) { <<~FLUX
+        FN step1 %() -> RETURN 10; END
+        FN step2 %(n) -> RETURN n * 2; END
+        FN step3 %(n) -> RETURN n + 5; END
+
+        FN main %() ->
+          -- Should be ((10 * 2) + 5) = 25
+          RETURN step1() s> step2 s> step3;
+        END
+
+        RETURN main();
+      FLUX
+      }
+      it "flows" do
+        expect(resp).to eq(25)
+      end
+    end
   end
 
   describe "VM OpCode: JMP_IF_ERROR" do
@@ -344,7 +366,7 @@ RSpec.describe VM do
         ]
 
         result = run_bytecode(consts, ops)
-        expect(result).to eq(100)
+        expect(Value.unbox(result)).to eq(100)
       end
     end
 
@@ -368,7 +390,7 @@ RSpec.describe VM do
         ]
 
         result = run_bytecode(consts, ops)
-        expect(result).to eq(100)
+        expect(Value.unbox(result)).to eq(100)
       end
     end
   end
@@ -414,7 +436,7 @@ RSpec.describe VM do
       vm = VM.new("Unit Test")
       result = vm.run(chunk_main)
 
-      expect(result).to eq("Recovered")
+      expect(Value.unbox(result)).to eq("Recovered")
     end
   end
 
@@ -430,7 +452,7 @@ RSpec.describe VM do
       vm = VM.new("ExitTest")
       result = vm.run(chunk)
 
-      expect(result).to eq(42)
+      expect(Value.unbox(result)).to eq(42)
     end
 
     it "returns the result of a function call as the program result" do
@@ -453,7 +475,7 @@ RSpec.describe VM do
       vm = VM.new("ExitTest")
       result = vm.run(chunk_main)
 
-      expect(result).to eq(99)
+      expect(Value.unbox(result)).to eq(99)
     end
   end
 
@@ -490,7 +512,7 @@ RSpec.describe VM do
       vm = VM.new("ArgsTest")
       result = vm.run(chunk_main)
 
-      expect(result).to eq(30)
+      expect(Value.unbox(result)).to eq(30)
     end
   end
 
@@ -525,7 +547,10 @@ RSpec.describe VM do
       vm = VM.new("MapTest")
       result = vm.run(chunk_main)
 
-      expect(result.data).to eq([1, 4, 9])
+      flux_array = Value.unbox(result)
+      unboxed_data = flux_array.data.map { |x| Value.unbox(x) }
+
+      expect(unboxed_data).to eq([1, 4, 9])
     end
   end
 
@@ -568,7 +593,7 @@ RSpec.describe VM do
       # --- 4. Run ---
       result = vm.run(chunk_main)
 
-      expect(result).to eq(30)
+      expect(Value.unbox(result)).to eq(30)
     end
 
     it "raises a Runtime Error if the global function is missing" do
@@ -613,7 +638,7 @@ RSpec.describe VM do
       vm = VM.new("StructTest")
       result = vm.run(chunk)
 
-      expect(result).to eq(10)
+      expect(Value.unbox(result)).to eq(10)
     end
   end
 
@@ -639,7 +664,7 @@ RSpec.describe VM do
       vm = VM.new("HashTest")
       result = vm.run(chunk)
 
-      expect(result).to eq("active")
+      expect(Value.unbox(result)).to eq("active")
     end
   end
 
@@ -672,7 +697,7 @@ RSpec.describe VM do
       vm = VM.new("ListTest")
       result = vm.run(chunk)
 
-      expect(result).to eq(200)
+      expect(Value.unbox(result)).to eq(200)
     end
   end
 
@@ -703,7 +728,7 @@ RSpec.describe VM do
       vm = VM.new("ThrowTest")
       result = vm.run(chunk)
 
-      expect(result).to eq("Caught")
+      expect(Value.unbox(result)).to eq("Caught")
     end
   end
 
@@ -732,7 +757,7 @@ RSpec.describe VM do
         vm = VM.new("HardPipeFail")
         result = vm.run(chunk)
 
-        expect(result).to eq("Rescued")
+        expect(Value.unbox(result)).to eq("Rescued")
       end
     end
 
@@ -754,7 +779,7 @@ RSpec.describe VM do
         vm = VM.new("HardPipeSuccess")
         result = vm.run(chunk)
 
-        expect(result).to eq("Success")
+        expect(Value.unbox(result)).to eq("Success")
       end
     end
   end
@@ -776,7 +801,7 @@ RSpec.describe VM do
       vm = VM.new()
       result = vm.run(chunk)
 
-      expect(result).to eq("Start")
+      expect(Value.unbox(result)).to eq("Start")
     end
   end
 
@@ -799,7 +824,7 @@ RSpec.describe VM do
       vm = VM.new()
       result = vm.run(chunk)
 
-      expect(result).to eq("Jumped")
+      expect(Value.unbox(result)).to eq("Jumped")
     end
 
     it "falls through if the value is TRUE" do
@@ -819,7 +844,7 @@ RSpec.describe VM do
       vm = VM.new()
       result = vm.run(chunk)
 
-      expect(result).to eq("Fallthrough")
+      expect(Value.unbox(result)).to eq("Fallthrough")
     end
   end
 
@@ -841,7 +866,7 @@ RSpec.describe VM do
       vm = VM.new()
       result = vm.run(chunk)
 
-      expect(result).to eq("Jumped")
+      expect(Value.unbox(result)).to eq("Jumped")
     end
 
     it "falls through if the value is FALSE" do
@@ -864,7 +889,7 @@ RSpec.describe VM do
       vm = VM.new()
       result = vm.run(chunk)
 
-      expect(result).to eq("Rescue Path")
+      expect(Value.unbox(result)).to eq("Rescue Path")
     end
 
     it "treats ERROR objects as FALSE (does not jump)" do
@@ -887,7 +912,7 @@ RSpec.describe VM do
       vm = VM.new()
       result = vm.run(chunk)
 
-      expect(result).to eq("Rescue Path")
+      expect(Value.unbox(result)).to eq("Rescue Path")
     end
   end
 
@@ -949,7 +974,7 @@ RSpec.describe VM do
       result = vm.run(chunk_main)
 
       # 5 + 1 + 2 = 8
-      expect(result).to eq(8)
+      expect(Value.unbox(result)).to eq(8)
     end
   end
 
@@ -959,7 +984,7 @@ RSpec.describe VM do
       allow($stderr).to receive(:puts)
       result, _chunk = run(source)
       expect($stderr).to have_received(:puts).with("Fatal Error")
-      expect(result).to eq(1)
+      expect(Value.unbox(result)).to eq(1)
     end
   end
 
@@ -967,7 +992,7 @@ RSpec.describe VM do
     let(:source) { 'DIE;' }
     it 'halts the VM with exit code 1' do
       result, _chunk = run(source)
-      expect(result).to eq(1)
+      expect(Value.unbox(result)).to eq(1)
     end
   end
 
@@ -1011,7 +1036,7 @@ RSpec.describe VM do
       vm = VM.new
       result, _ = vm.run_code(code)
 
-      expect(result).to eq(42)
+      expect(Value.unbox(result)).to eq(42)
     end
 
     it "allows mutation via the implicit pointer" do
@@ -1033,7 +1058,7 @@ RSpec.describe VM do
       vm = VM.new
       result, _ = vm.run_code(code)
 
-      expect(result).to eq(99)
+      expect(Value.unbox(result)).to eq(99)
     end
   end
 end
