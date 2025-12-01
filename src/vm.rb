@@ -24,8 +24,6 @@ class VM
   UNWIND_SIGNAL = :__vm_unwind_signal__
   EXIT_SIGNAL = :__vm_program_exit__
 
-  Closure = Struct.new(:chunk, :captures)
-
   def initialize(code_str = "")
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
@@ -74,7 +72,7 @@ class VM
       if v.is_a?(FluxString) then "\"#{v}\""
       elsif v.is_a?(Numeric) then v
       elsif v.is_a?(Compiler::Chunk) then "\\#{v.name}"
-      elsif v.is_a?(VM::Closure) then "λ"
+      elsif v.is_a?(FluxClosure) then "λ"
       elsif v.is_a?(FluxHash) then "{}:#{v.keys.count}"
       elsif v.is_a?(FluxArray) then "[]:#{v.size}"
       else v.class
@@ -82,16 +80,41 @@ class VM
     end
   end
 
-  def resolve_val(val)
-    while val.is_a?(FluxView) || val.is_a?(FluxPtr)
-      val = val.deref
+  def is_error?(boxed_val)
+    # 1. Check Tag
+    tag = Value.get_tag(boxed_val)
+    return false if tag != Value::TAG_OBJ
+
+    # 2. Unbox
+    val = Value.as_obj(boxed_val)
+
+    # 3. Check Type
+    (val.is_a?(FluxHash) && val["__type"] == :Error) || val.is_a?(RuntimeError)
+  end
+
+  # TODO: Needs to work with NanBox
+  def resolve_val(boxed_val)
+    # 1. Check Tag: If it's not an Object, it cannot be dereferenced.
+    tag = Value.get_tag(boxed_val)
+    return boxed_val if tag != Value::TAG_OBJ
+
+    # 2. Unbox: Convert ID -> FluxObject
+    obj = Value.as_obj(boxed_val)
+
+    # 3. Recursively Deref (View/Pointer -> Owner)
+    while obj.is_a?(FluxView) || obj.is_a?(FluxPtr)
+      obj = obj.deref
     end
-    val
+
+    # Return the raw FluxObject (FluxArray, FluxHash, FluxString)
+    obj
   end
 
   def run(entry_chunk)
+    Arena.reset!
+    current_mark = Arena.current.mark
     # 1. Boot the VM with the top-level script
-    @frames = [Frame.new(entry_chunk)]
+    @frames = [Frame.new(entry_chunk, current_mark)]
     run_loop
   end
 
@@ -222,7 +245,7 @@ class VM
     # Create FluxHash
     obj = FluxHash.new
     obj["__type"] = struct_name.to_sym # Store type in hidden field to use in CAST
-    frame.registers[target_reg] = obj
+    frame.registers[target_reg] = Value.box_obj(obj)
   end
 
   def process_set_field(reg_idx, ins, frame)
@@ -230,24 +253,44 @@ class VM
     key = ins[2].to_sym
     val_reg = reg_idx[ins[3]]
 
-    target = resolve_val(frame.registers[target_reg])
-    val = frame.registers[val_reg]
+    # 1. UNBOX (Auto-Deref included via resolve_val -> as_obj logic?)
+    # If resolve_val isn't updated for NaN Boxing yet, use as_obj for now.
+    target_boxed = frame.registers[target_reg]
 
-    if target.frozen?
+    # We need to unbox. If it's a Pointer (FluxPtr), as_obj returns the FluxPtr.
+    # We then deref.
+    target_obj = Value.as_obj(target_boxed)
+
+    if target_obj.is_a?(FluxPtr)
+      target_obj = target_obj.deref
+    end
+
+    val_boxed = frame.registers[val_reg]
+
+    if target_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
-    unless target.is_a?(FluxHash)
-      raise "Runtime Error: Cannot set field '#{key}' on #{target.class}"
+
+    unless target_obj.is_a?(FluxHash)
+      raise "Runtime Error: Cannot set field '#{key}' on #{target_obj.class}"
     end
 
-    target[key] = val
+    target_obj[key] = val_boxed
   end
 
   def process_set_hash(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
+    target_reg = reg_idx[ins[1]]
     key = ins[2].to_sym
     val_reg = reg_idx[ins[3]]
-    frame.registers[target][key] = frame.registers[val_reg]
+
+    # 1. UNBOX: Get the FluxHash
+    boxed_hash = frame.registers[target_reg]
+    hash_obj = Value.as_obj(boxed_hash)
+
+    # 2. Store the boxed value
+    val_boxed = frame.registers[val_reg]
+
+    hash_obj[key] = val_boxed
   end
 
   def process_new_list(reg_idx, ins, frame)
@@ -260,87 +303,86 @@ class VM
     target_reg = reg_idx[ins[1]]
     val_reg = reg_idx[ins[2]]
 
-    target = frame.registers[target_reg]
-    val = frame.registers[val_reg]
+    # 1. UNBOX: Get the actual FluxArray from the register
+    boxed_list = frame.registers[target_reg]
+    list = Value.as_obj(boxed_list)
 
-    if target.frozen?
+    # 2. Get the val (Keep it boxed! Arrays store boxed values)
+    val_boxed = frame.registers[val_reg]
+
+    if list.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    frame.registers[target_reg] << val
+    list << val_boxed
   end
 
   def process_cast(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
     type_name = ins[2].to_sym
-    val = frame.registers[target_reg]
-    schema = @structs[type_name] # Assuming @structs is the global registry
+    val_boxed = frame.registers[target_reg]
+    tag = Value.get_tag(val_boxed)
 
-    # --- 1. PRIMITIVES / COERCION ---
     if type_name == :String
-      frame.registers[target_reg] = val.to_s
+      str = Value.unbox(val_boxed).to_s
+      frame.registers[target_reg] = Value.box_obj(FluxString.new(str))
       return
+
     elsif type_name == :Number
-      if val.is_a?(FluxByte)
-        frame.registers[target_reg] = val.value
+      if tag == Value::TAG_BYTE
+        raw = Value.as_byte(val_boxed)
+        frame.registers[target_reg] = Value.box_number(raw)
+        return
+      elsif tag == Value::TAG_NUMBER
         return
       end
-      raise "Cast Error: Cannot cast #{val.class} to Number" unless val.is_a?(Numeric)
-      return
-    elsif type_name == :Bool
-      raise "Cast Error" unless (val == true || val == false)
-      return
+      raise "Cast Error: Cannot cast #{tag} to Number"
+
     elsif type_name == :Byte
-      # NEW: Wrap Number -> Byte (or re-wrap Byte -> Byte)
-      # We extract the raw integer value to be safe, then wrap it.
-      if val.is_a?(Numeric)
-        frame.registers[target_reg] = FluxByte.new(val)
+      if tag == Value::TAG_NUMBER
+        raw = Value.as_number(val_boxed)
+        frame.registers[target_reg] = Value.box_byte(raw.to_i)
         return
-      elsif val.is_a?(FluxByte)
-        # Already a byte, but creating a new one creates a copy (safe)
-        frame.registers[target_reg] = FluxByte.new(val.value)
+      elsif tag == Value::TAG_BYTE
         return
       end
+      raise "Cast Error: Cannot cast #{tag} to Byte"
 
-    # --- 3. ARRAY CASTING ---
+    elsif type_name == :Bool
+      raise "Cast Error" unless tag == Value::TAG_BOOL
+      return
+
     elsif type_name.to_s.include?("[")
-      match = type_name.match(/^(\w+)\[(.*)\]$/)
+      if tag == Value::TAG_OBJ
+         list_obj = Value.as_obj(val_boxed)
+         match = type_name.to_s.match(/^(\w+)\[(.*)\]$/)
 
-      if match
-        constraint = match[2]
-
-        # 1. Fixed Inferred [*]
-        if constraint == "*"
-          # Lock size to current count
-          frame.registers[target_reg] = FluxArray.new(val.size, val)
-          return
-        end
-
-        # 2. Fixed Explicit [N]
-        if constraint =~ /^\d+$/
-          limit = constraint.to_i
-
-          # Runtime Check (for non-literals)
-          if val.size > limit
-            raise "Runtime Error: Array too large for fixed size #{limit}"
-          end
-
-          frame.registers[target_reg] = FluxArray.new(limit, val)
-          return
-        end
+         if match
+           constraint = match[2]
+           if constraint =~ /^\d+$/
+             limit = constraint.to_i
+             if list_obj.size > limit
+               raise "Runtime Error: Array too large for fixed size #{limit}"
+             end
+             new_arr = FluxArray.new(limit, list_obj.data)
+             frame.registers[target_reg] = Value.box_obj(new_arr)
+             return
+           elsif constraint == "*"
+             new_arr = FluxArray.new(list_obj.size, list_obj.data)
+             frame.registers[target_reg] = Value.box_obj(new_arr)
+             return
+           end
+         end
+         return
       end
 
-    # --- 2. STRUCT CHECK ---
-    # TODO: Why is Number in @structs ??
     elsif @structs.key?(type_name)
-      unless check_type(val, type_name.to_sym, @structs)
+      unless check_type(val_boxed, type_name, @structs)
         raise "Runtime Error: Struct validation failed for '#{type_name}'"
       end
     else
       raise "Runtime Error: Unknown Type '#{type_name}'"
     end
-
-    # If successful, the value remains in the register (no-op)
   end
 
   def process_def_global(reg_idx, ins, frame)
@@ -375,10 +417,10 @@ class VM
     end
 
     # 2. Create the Closure Object
-    closure = Closure.new(fn_chunk, captured_values)
+    closure = FluxClosure.new(fn_chunk, captured_values)
 
     # 3. Store it in the target register
-    frame.registers[target] = closure
+    frame.registers[target] = Value.box_obj(closure)
   end
 
 
@@ -397,11 +439,20 @@ class VM
     if operand.start_with?("R")
       # CASE A: Closure in a Register (e.g., "R4")
       r = reg_idx[operand]
-      func = frame.registers[r]
+      boxed_func = frame.registers[r]
+      # UNBOX
+      if Value.get_tag(boxed_func) == Value::TAG_OBJ
+        func = Value.as_obj(boxed_func)
+      end
       raise "Runtime Error: Variable '#{operand}' is nil/not a function" if func.nil?
     else
       # CASE B: Global Name (e.g., "print", "cur")
-      func = @globals[operand]
+      boxed_func = @globals[operand]
+      if boxed_func.is_a?(Compiler::Chunk)
+        func = boxed_func
+      elsif boxed_func && Value.get_tag(boxed_func) == Value::TAG_OBJ
+        func = Value.as_obj(boxed_func)
+      end
       raise "Runtime Error: Undefined function '#{operand}'" if func.nil?
     end
 
@@ -418,77 +469,57 @@ class VM
   end
 
   def process_call_method(reg_idx, ins, frame)
-    # CALL_METHOD Rresult, Robj, "method", Rargs...
     res_reg = reg_idx[ins[1]]
     obj_reg = reg_idx[ins[2]]
     method_name = ins[3]
 
-    # 1. Collect Arguments
     arg_regs = ins[4..-1].map { |r| reg_idx[r] }
     args = arg_regs.map { |r| frame.registers[r] }
 
+    # 1. RESOLVE
     obj = resolve_val(frame.registers[obj_reg])
 
-    # --- DISPATCH LOGIC ---
-
-    # A. Native Methods (e.g. Array.map)
+    # A. Native Methods (Map)
     if obj.is_a?(FluxArray) && method_name == "map"
-      closure = args[0]
-      new_list = obj.map do |item|
-        execute_function(closure, [item])
+      boxed_closure = args[0]
+      closure_obj = Value.as_obj(boxed_closure)
+
+      new_list = obj.map do |item_boxed|
+        execute_function(closure_obj, [item_boxed])
       end
-      obj = FluxArray.new(nil, new_list)
-      frame.registers[res_reg] = Value.box_obj(obj)
+      result_obj = FluxArray.new(nil, new_list)
+      frame.registers[res_reg] = Value.box_obj(result_obj)
       return
     end
 
-    # B. Struct Field Call (e.g. h2.fun())
-    #    This allows us to call a closure stored in a field
+    # B. Struct Field Function
     if obj.is_a?(FluxHash) && obj.key?(method_name)
-      func = obj[method_name]
-
-      # Safety Check
-      unless func.is_a?(Closure) || func.is_a?(Compiler::Chunk)
-        raise "Runtime Error: Property '#{method_name}' is not a function."
-      end
-
-      # Execute
-      result = execute_function(func, args)
-
-      # Handle Unwinding
+      func_boxed = obj[method_name]
+      func_obj = Value.as_obj(func_boxed)
+      result = execute_function(func_obj, args)
       return UNWIND_SIGNAL if result == UNWIND_SIGNAL
-
       frame.registers[res_reg] = result
       return
     end
 
-    # C. Failure
     raise "Runtime Error: Unknown method '#{method_name}' on #{obj.class}"
   end
 
   def process_call_closure(reg_idx, ins, frame)
-    # Format: [:CALL_CLOSURE, "R_target", "R_closure", argc, "R_arg1"...]
     target_reg = reg_idx[ins[1]]
     closure_reg = reg_idx[ins[2]]
-    # argc = ins[3]
     arg_regs = ins[4..-1].map { |r| reg_idx[r] }
     args = arg_regs.map { |r| frame.registers[r] }
 
-    # 1. Resolve the Function (which must be a Closure)
-    func = frame.registers[closure_reg]
+    boxed_func = frame.registers[closure_reg]
+    func_obj = Value.as_obj(boxed_func)
 
-    unless func.is_a?(Closure)
-      # This might happen if a local variable was overwritten
-      raise "Runtime Error: Value in R#{closure_reg} is not a function/Closure."
+    unless func_obj.is_a?(FluxClosure)
+      raise "Runtime Error: Value in R#{closure_reg} is not a Closure."
     end
 
-    # 2. Execute the Function
-    result = execute_function(func, args)
-    $logger.debug("Closure call returned: #{result.inspect} -> Writing to R#{target_reg}")
-
+    result = execute_function(func_obj, args)
     return if result == UNWIND_SIGNAL
-
-    # 3. Store the result in the Target Register
     frame.registers[target_reg] = result
   end
 
@@ -502,39 +533,44 @@ class VM
 
     result =
       case [tag_a, tag_b]
-      # 1. Primitives: Number + Number
+
+      # 1. Number + Number (Fast Math)
+      #    Unbox to Float -> Add -> Box result
       when [Value::TAG_NUMBER, Value::TAG_NUMBER]
-        Value.as_number(val_a) + Value.as_number(val_b)
+        Value.box_number(Value.as_number(val_a) + Value.as_number(val_b))
 
-      # 2. Primitives: Byte + Byte
+      # 2. Byte + Byte (Wrapping Math)
+      #    Unbox to Integer -> Add -> Box result (box_byte handles % 256)
       when [Value::TAG_BYTE, Value::TAG_BYTE]
-        Value.as_byte(val_a) + Value.as_byte(val_b)
+        raw_a = Value.as_byte(val_a)
+        raw_b = Value.as_byte(val_b)
+        Value.box_byte(raw_a + raw_b)
 
-      # 3. Mixed Primitive Math (Coerce to dominant type: Number)
+      # 3. Mixed Primitive Math (Coerce to Number)
+      #    Unbox specific types -> Add -> Box as Number
       when [Value::TAG_NUMBER, Value::TAG_BYTE]
-        Value.as_number(val_a) + val_b.value # Number + raw_byte
+        Value.box_number(Value.as_number(val_a) + Value.as_byte(val_b))
       when [Value::TAG_BYTE, Value::TAG_NUMBER]
-        val_a + Value.as_number(val_b) # Byte + Number
+        Value.box_number(Value.as_byte(val_a) + Value.as_number(val_b))
 
-      # --- 4. STRING CONCATENATION (Coercion Path) ---
-
-      # Case: String on LHS (e.g., "a" + 10 or "a" + "b")
+      # 4. String Concatenation (LHS is String Object)
       when [Value::TAG_OBJ, Value::TAG_NUMBER],
            [Value::TAG_OBJ, Value::TAG_BYTE],
            [Value::TAG_OBJ, Value::TAG_OBJ]
 
         obj_a = Value.as_obj(val_a)
 
-        # Only handle if the dominant object is a FluxString
         unless obj_a.is_a?(FluxString)
           raise "Runtime Error: Cannot ADD object type #{obj_a.class}"
         end
 
-        # Use the specialized FluxString#+ which coerces the RHS
-        frame.registers[target] = Value.box_obj(obj_a + Value.unbox(val_b))
-        return # Skip final boxing line since we already boxed with box_obj
+        # FluxString#+ handles coercion of the RHS argument automatically
+        # We simply unbox the RHS to get the raw value (Int/Float/FluxString)
+        rhs_unboxed = Value.unbox(val_b)
 
-      # Case: String on RHS (e.g., 10 + "a")
+        Value.box_obj(obj_a + rhs_unboxed)
+
+      # 5. String Concatenation (RHS is String Object)
       when [Value::TAG_NUMBER, Value::TAG_OBJ],
            [Value::TAG_BYTE, Value::TAG_OBJ]
 
@@ -543,41 +579,75 @@ class VM
           raise "Runtime Error: Cannot ADD object type #{obj_b.class}"
         end
 
-        # Coerce the primitive LHS to String, then prepend to the RHS object
-        str_a = Value.unbox(val_a).to_s
-        frame.registers[target] = Value.box_obj(FluxString.new(str_a) + obj_b)
-        return # Skip final boxing line
+        # Convert LHS primitive to string, create new FluxString, then concat
+        lhs_str = Value.unbox(val_a).to_s
+        new_str = FluxString.new(lhs_str) + obj_b
+
+        Value.box_obj(new_str)
 
       else
         raise "Runtime Error: Invalid operands for ADD: [#{tag_a}, #{tag_b}]"
       end
 
-    # Box the result back up (Only for Primitives/Math result paths)
-    frame.registers[target] = Value.box_constant(result)
+    frame.registers[target] = result
   end
 
   def process_sendable_symbol(reg_idx, ins, frame, opcode)
     target = reg_idx[ins[1]]
-    lhs_reg = reg_idx[ins[2]]
-    rhs_reg = reg_idx[ins[3]]
+    val_a  = frame.registers[reg_idx[ins[2]]]
+    val_b  = frame.registers[reg_idx[ins[3]]]
 
-    # 1. Retrieve Values (Already Boxed)
-    val_a = frame.registers[lhs_reg]
-    val_b = frame.registers[rhs_reg]
+    tag_a = Value.get_tag(val_a)
+    tag_b = Value.get_tag(val_b)
+    sym   = AST::OP_CODE_SENDABLE_SYMS[opcode]
 
-    # 2. Tag Check (Simulating strictness)
-    #    In a real port, you'd switch on tags here.
-    #    For the prototype, we assume if they respond to the method, it's valid.
+    # Helper to decide how to box the result
+    is_comparison = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE].include?(opcode)
 
-    sym = AST::OP_CODE_SENDABLE_SYMS[opcode]
+    result = case [tag_a, tag_b]
 
-    # 3. Perform Operation
-    #    This returns a Raw value (Integer, Bool) or a FluxByte
-    raw_result = val_a.send(sym, val_b)
+             # 1. Number op Number
+             when [Value::TAG_NUMBER, Value::TAG_NUMBER]
+               res = Value.as_number(val_a).send(sym, Value.as_number(val_b))
+               is_comparison ? Value.box_bool(res) : Value.box_number(res)
 
-    # 4. BOX THE RESULT (The Critical Fix)
-    #    This ensures the register always holds a "Value"-compliant object
-    frame.registers[target] = Value.box_constant(raw_result)
+             # 2. Byte op Byte
+             when [Value::TAG_BYTE, Value::TAG_BYTE]
+               res = Value.as_byte(val_a).send(sym, Value.as_byte(val_b))
+               is_comparison ? Value.box_bool(res) : Value.box_byte(res)
+
+             # 3. Mixed (Promote to Number)
+             when [Value::TAG_NUMBER, Value::TAG_BYTE]
+               res = Value.as_number(val_a).send(sym, Value.as_byte(val_b))
+               is_comparison ? Value.box_bool(res) : Value.box_number(res)
+
+             when [Value::TAG_BYTE, Value::TAG_NUMBER]
+               res = Value.as_byte(val_a).send(sym, Value.as_number(val_b))
+               is_comparison ? Value.box_bool(res) : Value.box_number(res)
+
+             # 4. Objects (Comparison Only)
+             when [Value::TAG_OBJ, Value::TAG_OBJ]
+               if is_comparison
+                 res = Value.as_obj(val_a).send(sym, Value.as_obj(val_b))
+                 Value.box_bool(res)
+               else
+                 raise "Runtime Error: Invalid math op '#{sym}' on Objects"
+               end
+
+             else
+               if [:EQ, :NEQ].include?(opcode)
+                 # Unbox to compare raw values (Ruby handles nil == nil correctly)
+                 raw_a = Value.unbox(val_a)
+                 raw_b = Value.unbox(val_b)
+
+                 res = raw_a.send(sym, raw_b)
+                 Value.box_bool(res)
+              else
+                raise "Runtime Error: Invalid operands [#{tag_a}, #{tag_b}] for #{opcode}"
+              end
+            end
+
+    frame.registers[target] = result
   end
 
   def process_not(reg_idx, ins, frame)
@@ -621,7 +691,9 @@ class VM
   def process_print(reg_idx, ins, frame)
     # PRINT Rval
     val_reg = reg_idx[ins[1]]
-    puts "STDOUT > #{frame.registers[val_reg].inspect}"
+    val = frame.registers[val_reg]
+
+    puts "STDOUT > #{Value.unbox(val).inspect}"
   end
 
   def process_return(reg_idx, ins, frame, start_depth)
@@ -661,19 +733,16 @@ class VM
     target_ip = ins[2]
     val = frame.registers[cond_reg]
 
-    # DEFINE TRUTHINESS:
-    # In Ruby, only false and nil are false. 0 is true. "" is true.
-    # We will stick to Ruby semantics for simplicity:
-    if val == false || val.nil?
+    # Truthiness Logic for NanBoxing:
+    # Only TAG_NIL and TAG_BOOL(false) are falsey.
+    tag = Value.get_tag(val)
+
+    is_falsey = (tag == Value::TAG_NIL) ||
+                (tag == Value::TAG_BOOL && Value.as_bool(val) == false)
+
+    if is_falsey
       frame.ip = target_ip
     end
-  end
-
-  # TODO: are these Hash or FluxHash
-  def is_error?(val)
-    # Assuming your errors are instances of a class (e.g., RuntimeError or a custom Struct)
-    # Adjust this check to match your actual Error object type.
-    (val.is_a?(FluxHash) && val["__type"] == :Error) || val.is_a?(RuntimeError)
   end
 
   def process_jmp_true(reg_idx, ins, frame)
@@ -682,11 +751,12 @@ class VM
     target_ip = ins[2]
     val = frame.registers[cond_reg]
 
-    # Is it an Error? If so, treat as FALSE (don't jump)
-    is_error = val.is_a?(FluxHash) && val["__type"] == :Error
+    tag = Value.get_tag(val)
+    is_falsey = (tag == Value::TAG_NIL) ||
+                (tag == Value::TAG_BOOL && Value.as_bool(val) == false)
+    is_error  = is_error?(val) # This helper now handles boxing
 
-    # Ruby semantics: false and nil are falsey. Everything else is true.
-    if val != false && !val.nil? && !is_error?(val)
+    if !is_falsey && !is_error
       frame.ip = target_ip
     end
   end
@@ -723,16 +793,31 @@ class VM
     list_reg = reg_idx[ins[2]]
     idx_reg = reg_idx[ins[3]]
 
-    list = frame.registers[list_reg]
-    index = frame.registers[idx_reg]
+    # 1. Unbox (Do not Deref)
+    boxed_list = frame.registers[list_reg]
+    list = Value.as_obj(boxed_list) # FluxArray, FluxString, OR FluxView
 
-    # Basic error checking
-    unless list.is_a?(FluxArray) || list.is_a?(FluxView) || list.is_a?(FluxString)
-       raise "Runtime Error: Attempt to index a #{list.class}"
+    # 2. Unbox Index
+    boxed_idx = frame.registers[idx_reg]
+
+    idx_val = 0
+    if Value.get_tag(boxed_idx) == Value::TAG_NUMBER
+      idx_val = Value.as_number(boxed_idx).to_i
+    else
+      idx_val = Value.as_byte(boxed_idx)
     end
 
-    # Ruby arrays handle out-of-bounds by returning nil, which works fine for us
-    frame.registers[target_reg] = list[index]
+    # 3. Access
+    result = list[idx_val]
+
+    # 4. Box Result
+    # If list is String or StringView, result is a raw String char -> Box it
+    # If list is Array or ArrayView, result is already a Boxed Value -> Keep it
+    if list.is_a?(FluxString) || (list.is_a?(FluxView) && list.owner.is_a?(FluxString))
+      frame.registers[target_reg] = Value.box_constant(result)
+    else
+      frame.registers[target_reg] = result
+    end
   end
 
   def process_set_index(reg_idx, ins, frame)
@@ -740,20 +825,24 @@ class VM
     key_reg = reg_idx[ins[2]]
     val_reg = reg_idx[ins[3]]
 
-    target = frame.registers[target_reg]
-    key = frame.registers[key_reg]
-    val = frame.registers[val_reg]
+    # 1. Unbox Target
+    boxed_target = frame.registers[target_reg]
+    target = Value.as_obj(boxed_target)
+
+    # 2. Unbox Key
+    boxed_key = frame.registers[key_reg]
+    # Assuming integer index for arrays
+    key = Value.get_tag(boxed_key) == Value::TAG_NUMBER ? Value.as_number(boxed_key).to_i : Value.as_byte(boxed_key)
+
+    val_boxed = frame.registers[val_reg]
 
     if target.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
-    unless target.is_a?(FluxArray)
-      raise "Runtime Error: Cannot set index '#{key}' on #{target.class}"
-    end
 
-    target[key] = val
+    # Target can be FluxArray OR FluxView (if view allows mutation)
+    target[key] = val_boxed
   end
-
 
   def process_get_field(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
@@ -790,14 +879,17 @@ class VM
     val_reg = reg_idx[ins[1]]
     val = frame.registers[val_reg]
 
-    # 2. Optional: If it's a String, print it to Stderr
-    if val.is_a?(FluxString)
-      $stderr.puts(val.to_s)
-      val = 1 # Return generic error code
+    if Value.get_tag(val) == Value::TAG_OBJ
+      obj = Value.as_obj(val)
+      if obj.is_a?(FluxString)
+        $stderr.puts(obj.to_s)
+        val = Value.box_number(1) # Return generic error code
+      end
     end
 
     # 3. Kill the VM immediately
-    throw EXIT_SIGNAL, val
+    exit_code = (Value.get_tag(val) == Value::TAG_NUMBER) ? Value.as_number(val).to_i : 1
+    throw EXIT_SIGNAL, exit_code
   end
 
   def process_freeze(reg_idx, ins, frame)
@@ -819,35 +911,23 @@ class VM
 
   def process_new_slice(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
-    owner_reg = reg_idx[ins[2]]
-    start_reg = reg_idx[ins[3]]
-    end_reg = reg_idx[ins[4]]
+    owner_boxed = frame.registers[reg_idx[ins[2]]]
 
-    owner = frame.registers[owner_reg]
-    s_idx = frame.registers[start_reg]
-    e_idx = frame.registers[end_reg]
+    s_idx = Value.unbox(frame.registers[reg_idx[ins[3]]]).to_i
+    e_idx = Value.unbox(frame.registers[reg_idx[ins[4]]]).to_i
 
-    # Validate Inputs
-    unless s_idx.is_a?(Numeric) && e_idx.is_a?(Numeric)
-      raise "Runtime Error: Slice indices must be Integers"
-    end
+    # Unbox, don't deref.
+    # If owner_obj is a FluxView, the new FluxView will wrap it (View of View).
+    owner_obj = Value.as_obj(owner_boxed)
 
-    # Numbers by default, need to cast to integers.
-    s_idx = frame.registers[start_reg].to_i
-    e_idx = frame.registers[end_reg].to_i
-
-    # Calculate Length (Inclusive Range: 0..1 has length 2)
     len = e_idx - s_idx + 1
 
     if len < 0
       raise "Runtime Error: Invalid Slice range (End < Start)"
     end
 
-    # Create the View
-    # Note: FluxView constructor checks owner.is_alive automatically!
-    view = FluxView.new(owner, s_idx, len)
-
-    frame.registers[target_reg] = view
+    view = FluxView.new(owner_obj, s_idx, len)
+    frame.registers[target_reg] = Value.box_obj(view)
   end
 
   def process_throw(reg_idx, ins, frame)
@@ -864,7 +944,7 @@ class VM
     val = frame.registers[val_reg]
 
     # Check if it is an Error Struct
-    if val.is_a?(FluxHash) && val["__type"] == :Error
+    if is_error?(val)
       # Stop execution and unwind to the nearest CATCH
       raise_error(val)
     end
@@ -872,10 +952,10 @@ class VM
 
   # Helper to run a chunk synchronously and return its result
   # This mimics a function call overhead
-  def execute_function(closure, args)
+  def execute_function(func_obj, args)
     # Handle case where we might be passed a raw Chunk (main) vs a Closure
-    chunk = closure.is_a?(Closure) ? closure.chunk : closure
-    captures = closure.is_a?(Closure) ? closure.captures : []
+    chunk = func_obj.is_a?(FluxClosure) ? func_obj.chunk : func_obj
+    captures = func_obj.is_a?(FluxClosure) ? func_obj.captures : []
 
     # 1. Create a new frame
     current_mark = Arena.current.mark
@@ -900,30 +980,34 @@ class VM
     return run_loop
   end
 
-  def check_type(val, required_type, structs_registry)
+  def check_type(val_boxed, required_type, structs_registry)
+    tag = Value.get_tag(val_boxed)
     case required_type
     when :Any then return true;
-    when :Number then return val.is_a?(Numeric);
-    when :String then return val.is_a?(FluxString);
-    when :Bool then return (val == true || val == false);
+    when :Number then return tag == Value::TAG_NUMBER;
+    when :Byte then return tag == Value::TAG_BYTE;
+    when :Bool then return tag == Value::TAG_BOOL;
+    when :String
+      return false unless tag == Value::TAG_OBJ
+      return Value.as_obj(val_boxed).is_a?(FluxString)
     else
-      # Recursive Struct Check: Check against the schema registry
+      # Recursive Struct Check
       if structs_registry.key?(required_type)
-        schema = structs_registry[required_type]
 
-        # Must be a FluxHash (Runtime Struct)
+        # If we don't check this, Value.as_obj will crash on Numbers
+        return false unless tag == Value::TAG_OBJ
+
+        val = Value.as_obj(val_boxed)
         return false unless val.is_a?(FluxHash)
 
-        # Check every field recursively
+        schema = structs_registry[required_type]
+
         schema.each do |field, field_type|
           return false unless val.key?(field)
-
-          # RECURSIVE CALL: Check the field's value against the field's required type
           return false unless check_type(val[field], field_type.to_sym, structs_registry)
         end
-      return true # All fields checked out
+        return true
       else
-        # Unknown type name (e.g., a custom type that wasn't defined)
         return false
       end
     end

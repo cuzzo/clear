@@ -1,6 +1,7 @@
 require "rspec"
 require "byebug"
 
+require_relative "../src/types"
 require_relative "../src/value"
 require_relative "../src/vm"
 require_relative "support/ast_matchers"
@@ -14,6 +15,10 @@ RSpec.describe VM do
   def run(source)
     vm = VM.new(source)
     vm.run_code(source)
+  end
+
+  def make_error(msg, context = nil)
+    FluxHash.new({ "__type" => :Error, "message" => msg, "context" => context }, register: :static)
   end
 
   def run_bytecode(constants, instructions)
@@ -39,7 +44,7 @@ RSpec.describe VM do
   end
 
   describe "Smoke Tests" do
-    let(:resp) { Value.unbox(run(source).first) }
+    let(:resp) { run(source).first }
 
     context "VAR Assignment to 42" do
       let(:source) {
@@ -302,7 +307,7 @@ RSpec.describe VM do
       }
 
       it "is 'Hello World'" do
-        expect(resp.to_s).to eq("Hello World")
+        expect(Value.unbox(resp).to_s).to eq("Hello World")
       end
     end
 
@@ -316,7 +321,7 @@ RSpec.describe VM do
       }
 
       it "is 'Hello World'" do
-        expect(resp.to_s).to eq("Hello World")
+        expect(Value.unbox(resp).to_s).to eq("Hello World")
       end
     end
 
@@ -342,7 +347,7 @@ RSpec.describe VM do
 
   describe "VM OpCode: JMP_IF_ERROR" do
     # Define reusable constants
-    let(:error_struct) { FluxHash.new({ "__type" => :Error, "message" => "TestError" }) }
+    let(:error_struct) {  }
     let(:safe_string)  { "All Good" }
     let(:success_val)  { 100 }
     let(:fail_val)     { -1 }
@@ -366,7 +371,7 @@ RSpec.describe VM do
         ]
 
         result = run_bytecode(consts, ops)
-        expect(Value.unbox(result)).to eq(100)
+        expect(result).to eq(100)
       end
     end
 
@@ -399,7 +404,7 @@ RSpec.describe VM do
     it "unwinds through an intermediate frame that has no handler" do
       # --- 1. The Inner Function (Throws Error) ---
       # Logic: THROW ErrorObject
-      error_obj = FluxHash.new({ "__type" => :Error, "message" => "Deep Error" })
+      error_obj = make_error("Deep Error")
       chunk_fail = make_chunk("Fail", [
         [:LOADK, "R0", "K0"],
         [:THROW, "R0"]
@@ -587,8 +592,9 @@ RSpec.describe VM do
       # --- 3. Manually Register the Global (Critical Step) ---
       # This mimics what the compiler does with DEF_GLOBAL
       # We wrap the chunk in a Closure (captures=[] for global funcs)
-      global_closure = VM::Closure.new(chunk_triple, [])
-      vm.instance_variable_get(:@globals)["Triple"] = global_closure
+      global_closure = FluxClosure.new(chunk_triple, [], register: :static)
+      boxed_global = Value.box_obj(global_closure)
+      vm.instance_variable_get(:@globals)["Triple"] = boxed_global
 
       # --- 4. Run ---
       result = vm.run(chunk_main)
@@ -709,7 +715,7 @@ RSpec.describe VM do
       # 3. (Should Jump to Handler)
       # 4. Handler returns "Caught"
 
-      error_obj = FluxHash.new({ "__type" => :Error, "msg" => "Boom" })
+      error_obj = make_error("Boom")
 
       chunk = make_chunk("ThrowTest", [
         [:LOADK, "R0", "K0"],        # Load Error
@@ -733,7 +739,7 @@ RSpec.describe VM do
   end
 
   describe "VM: Opcode THROW_IF_ERROR" do
-    let(:error_obj) { FluxHash.new({ "__type" => :Error, "msg" => "Pipe Break" }) }
+    let(:error_obj) { make_error("Pipe Break") }
     let(:valid_val) { "Valid Data" }
 
     context "when register contains an Error" do
@@ -876,7 +882,7 @@ RSpec.describe VM do
       # 3. R1 = "Rescue Path" (Because Error acts like False)
       # 4. RETURN R1
 
-      error_struct = FluxHash.new({ "__type" => :Error, "msg" => "oops" })
+      error_struct = make_error("oops")
 
       chunk = make_chunk("ErrorCheckTest", [
         [:LOADK, "R0", "K0"],   # Load Error
@@ -899,7 +905,7 @@ RSpec.describe VM do
       # 3. R1 = "Rescue Path" (Because Error acts like False)
       # 4. RETURN R1
 
-      error_struct = FluxHash.new({ "__type" => :Error, "message" => "oops" })
+      error_struct = make_error("oops")
 
       chunk = make_chunk("ErrorCheckTest", [
         [:LOADK, "R0", "K0"],   # Load Error
@@ -984,7 +990,7 @@ RSpec.describe VM do
       allow($stderr).to receive(:puts)
       result, _chunk = run(source)
       expect($stderr).to have_received(:puts).with("Fatal Error")
-      expect(Value.unbox(result)).to eq(1)
+      expect(result).to eq(1)
     end
   end
 
@@ -992,7 +998,7 @@ RSpec.describe VM do
     let(:source) { 'DIE;' }
     it 'halts the VM with exit code 1' do
       result, _chunk = run(source)
-      expect(Value.unbox(result)).to eq(1)
+      expect(result).to eq(1)
     end
   end
 

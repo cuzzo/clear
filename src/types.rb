@@ -13,7 +13,12 @@ class FluxObject
   def initialize(register: true)
     @is_alive = true
     @is_frozen = false
-    Arena.current.register(self) if register
+
+    if register == :static
+      Arena.register_static(self)
+    elsif register
+      Arena.current.register(self)
+    end
   end
 
   def freeze!
@@ -78,11 +83,24 @@ end
 # HEAP TYPES - PASS BY REFERENCE - ARENA MANAGED
 ##
 
+class FluxClosure < FluxObject
+  attr_reader :chunk, :captures
+
+  def initialize(chunk, captures, register: true)
+    super(register: register)
+    @chunk = chunk
+    @captures = captures # Array of Boxed Values
+  end
+
+  def to_s; "FN<#{@chunk.name}>"; end
+  def inspect; to_s; end
+end
+
 class FluxArray < FluxObject
   attr_reader :data, :max_size
 
-  def initialize(max_size, initial_data)
-    super() # Register with Arena
+  def initialize(max_size, initial_data, register: true)
+    super(register: :register) # Register with Arena
 
     @max_size = max_size
     @data = initial_data
@@ -151,8 +169,8 @@ end
 class FluxHash < FluxObject
   attr_reader :data
 
-  def initialize(initial_data = {})
-    super()
+  def initialize(initial_data = {}, register: true)
+    super(register: register)
     @data = initial_data
   end
 
@@ -189,7 +207,7 @@ class FluxString < FluxObject
   def +(other)
     check_alive!
     other_str = other.is_a?(FluxString) ? other.data : other.to_s
-    FluxString.new(@data + other_str)
+    FluxString.new(@data + other_str, register: true)
   end
 
   def to_s; check_alive!; @data.to_s; end

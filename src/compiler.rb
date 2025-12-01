@@ -1054,12 +1054,10 @@ class Compiler
   def compile_literal(node, target_reg)
     val = node.value
     if node.type == :BYTE
-      val = FluxByte.new(val)
+      val = Value.box_byte(val) # Immediate
     elsif node.type == :STRING
-      # Do not register GLOBAL literals for deletion.
-      # Otherwise, errors messages (strings) will get wiped
-      # And cause dangling pointer / use after free errors.
-      val = FluxString.new(val, register: false)
+      # Register as Static so it survives Arena.reset! and is found by ID
+      val = FluxString.new(val, register: :static)
     end
     k = @chunk.add_constant(val)
     @chunk.emit(node, :LOADK, "R#{target_reg}", "K#{k}")
