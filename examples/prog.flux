@@ -3,7 +3,7 @@ STRUCT Config { debug: Number }
 -- TODO: WHAT TYPE IS VOID and NULL?
 -- TODO: RETURNS Bool
 FN main %(s=5) RETURNS Number ->
-  VAR json = %{ "debug": 1 };
+  VAR json = %{ debug: 1 };
 
   VAR multiple = 100;
 

@@ -186,7 +186,7 @@ class VM
 
   def process_newhash(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    frame.registers[target] = {}
+    frame.registers[target] = Hash.new
   end
 
   def process_newstruct(reg_idx, ins, frame)
@@ -224,7 +224,7 @@ class VM
 
   def process_newlist(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    frame.registers[target] = []
+    frame.registers[target] = Array.new()
   end
 
   def process_append(reg_idx, ins, frame)
@@ -304,7 +304,7 @@ class VM
     # --- 2. STRUCT CHECK ---
     # TODO: Why is Number in @structs ??
     elsif @structs.key?(type_name.to_sym)
-      unless check_type(val, type_name, @structs)
+      unless check_type(val, type_name.to_sym, @structs)
         raise "Runtime Error: Struct validation failed for '#{type_name}'"
       end
     else
