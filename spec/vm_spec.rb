@@ -299,7 +299,7 @@ RSpec.describe VM do
       }
 
       it "is 'Hello World'" do
-        expect(resp).to eq("Hello World")
+        expect(resp.to_s).to eq("Hello World")
       end
     end
 
@@ -313,14 +313,14 @@ RSpec.describe VM do
       }
 
       it "is 'Hello World'" do
-        expect(resp).to eq("Hello World")
+        expect(resp.to_s).to eq("Hello World")
       end
     end
   end
 
   describe "VM OpCode: JMP_IF_ERROR" do
     # Define reusable constants
-    let(:error_struct) { { "__type" => "Error", "message" => "TestError" } }
+    let(:error_struct) { FluxHash.new({ "__type" => :Error, "message" => "TestError" }) }
     let(:safe_string)  { "All Good" }
     let(:success_val)  { 100 }
     let(:fail_val)     { -1 }
@@ -377,7 +377,7 @@ RSpec.describe VM do
     it "unwinds through an intermediate frame that has no handler" do
       # --- 1. The Inner Function (Throws Error) ---
       # Logic: THROW ErrorObject
-      error_obj = { "__type" => "Error", "message" => "Deep Error" }
+      error_obj = FluxHash.new({ "__type" => :Error, "message" => "Deep Error" })
       chunk_fail = make_chunk("Fail", [
         [:LOADK, "R0", "K0"],
         [:THROW, "R0"]
@@ -509,7 +509,7 @@ RSpec.describe VM do
       # R2 = Square
       # CALL_METHOD R0, R1, "map", R2
       chunk_main = make_chunk("Main", [
-        [:NEWLIST, "R1"],
+        [:NEW_LIST, "R1"],
         [:LOADK, "R2", "K0"], [:APPEND, "R1", "R2"], # Add 1
         [:LOADK, "R2", "K1"], [:APPEND, "R1", "R2"], # Add 2
         [:LOADK, "R2", "K2"], [:APPEND, "R1", "R2"], # Add 3
@@ -594,7 +594,7 @@ RSpec.describe VM do
       # 4. Return result
 
       chunk = make_chunk("StructTest", [
-        [:NEWSTRUCT, "R0", "Point"],   # R0 = %Point{}
+        [:NEW_STRUCT, "R0", "Point"],   # R0 = %Point{}
 
         # Set x = 10
         [:LOADK,     "R1", "K0"],      # R1 = 10
@@ -625,7 +625,7 @@ RSpec.describe VM do
       # 3. result = h.status
 
       chunk = make_chunk("HashTest", [
-        [:NEWHASH, "R0"],              # R0 = {}
+        [:NEW_HASH, "R0"],              # R0 = {}
 
         [:LOADK,   "R1", "K0"],        # R1 = "active"
         [:SET_HASH, "R0", "status", "R1"], # R0["status"] = "active"
@@ -652,7 +652,7 @@ RSpec.describe VM do
       # 4. result = list[1] (Should be 200)
 
       chunk = make_chunk("ListTest", [
-        [:NEWLIST, "R0"],              # R0 = []
+        [:NEW_LIST, "R0"],              # R0 = []
 
         # Append 100
         [:LOADK,   "R1", "K0"],        # R1 = 100
@@ -684,7 +684,7 @@ RSpec.describe VM do
       # 3. (Should Jump to Handler)
       # 4. Handler returns "Caught"
 
-      error_obj = { "__type" => "Error", "msg" => "Boom" }
+      error_obj = FluxHash.new({ "__type" => :Error, "msg" => "Boom" })
 
       chunk = make_chunk("ThrowTest", [
         [:LOADK, "R0", "K0"],        # Load Error
@@ -708,7 +708,7 @@ RSpec.describe VM do
   end
 
   describe "VM: Opcode THROW_IF_ERROR" do
-    let(:error_obj) { { "__type" => "Error", "msg" => "Pipe Break" } }
+    let(:error_obj) { FluxHash.new({ "__type" => :Error, "msg" => "Pipe Break" }) }
     let(:valid_val) { "Valid Data" }
 
     context "when register contains an Error" do
@@ -851,7 +851,7 @@ RSpec.describe VM do
       # 3. R1 = "Rescue Path" (Because Error acts like False)
       # 4. RETURN R1
 
-      error_struct = { "__type" => "Error", "msg" => "oops" }
+      error_struct = FluxHash.new({ "__type" => :Error, "msg" => "oops" })
 
       chunk = make_chunk("ErrorCheckTest", [
         [:LOADK, "R0", "K0"],   # Load Error
@@ -874,7 +874,7 @@ RSpec.describe VM do
       # 3. R1 = "Rescue Path" (Because Error acts like False)
       # 4. RETURN R1
 
-      error_struct = { "__type" => "Error", "message" => "oops" }
+      error_struct = FluxHash.new({ "__type" => :Error, "message" => "oops" })
 
       chunk = make_chunk("ErrorCheckTest", [
         [:LOADK, "R0", "K0"],   # Load Error
@@ -968,6 +968,26 @@ RSpec.describe VM do
     it 'halts the VM with exit code 1' do
       result, _chunk = run(source)
       expect(result).to eq(1)
+    end
+  end
+
+  context "Memory Management" do
+    it "crashes when accessing a View after the Owner has returned (popped stack)" do
+      code = <<~FLUX
+        FN get_dangling_view %() ->
+          VAR list = %[10, 20, 30];
+          -- Create a view of local list
+          VAR v = list[0..1];
+          -- Return view, but 'list' dies here!
+          RETURN v;
+        END
+
+        VAR crash = get_dangling_view();
+        print(crash[0]); -- Should Explode here
+      FLUX
+
+      vm = VM.new
+      expect { vm.run_code(code) }.to raise_error(/Memory Error: Dangling Pointer/)
     end
   end
 end

@@ -29,6 +29,7 @@ module AST
   Raise       = Struct.new(:line, :message_expr)
   ThrowNode   = Struct.new(:line, :value)
   DieNode     = Struct.new(:line, :status)
+  Slice       = Struct.new(:line, :target, :start, :end)
 
   UNARY_OPS = ['-', '!', '~']
 

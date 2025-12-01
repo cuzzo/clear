@@ -34,6 +34,8 @@ class Lexer
       when @s.scan(/--.*$/)
         # Comment - ignore
 
+      # TODO: Change range syntax to ..< and ..=
+      when @s.scan(/\.\./) then add(:RANGE, '..')
       when @s.scan(/->/) then add(:ARROW, '->')
       when @s.scan(/s>/) then add(:SMOOTH, 's>')
       when @s.scan(/OR/) then add(:OR_RESCUE, 'OR')
@@ -101,7 +103,7 @@ class Lexer
         end
         add(:BYTE, val)
 
-      when @s.scan(/\d+\.?\d*/)
+      when @s.scan(/\d+(\.(?!\.)\d*)?/)
         add(:NUMBER, @s.matched.to_f)
 
       when @s.scan(/"[^"]*"/)

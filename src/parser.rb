@@ -82,9 +82,19 @@ class Parser
   # Array Indexing: arr[index]
   suffix(:CHAR, '[') do |lhs|
     consume(:CHAR, '[')
-    index = parse_expression
-    consume(:CHAR, ']')
-    AST::GetIndex.new(current.line, lhs, index)
+    first = parse_expression
+    # TODO: handle ..< and ..= and [..] and [5..] and [..5]
+    if match?(:RANGE, '..')
+      # SLICE: list[0..1]
+      consume(:RANGE, '..')
+      last = parse_expression
+      consume(:CHAR, ']')
+      AST::Slice.new(current.line, lhs, first, last)
+    else
+      # INDEX: list[0]
+      consume(:CHAR, ']')
+      AST::GetIndex.new(current.line, lhs, first)
+    end
   end
 
   # Dot Access: obj.field OR obj.method()

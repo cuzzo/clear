@@ -10,10 +10,18 @@ require_relative "./arena"
 class FluxObject
   attr_reader :is_alive
 
-  def initialize
+  def initialize(register: true)
     @is_alive = true
-    # Automatically register with the active Arena
-    Arena.current.register(self)
+    @is_frozen = false
+    Arena.current.register(self) if register
+  end
+
+  def freeze!
+    @is_frozen = true
+  end
+
+  def frozen?
+    @is_frozen
   end
 
   def check_alive!
@@ -143,6 +151,7 @@ class FluxHash < FluxObject
   end
 
   def key?(k); check_alive!; @data.key?(k); end
+  def keys; check_alive!; @data.keys; end
 
   def to_s; check_alive!; @data.to_s; end
   def inspect; to_s; end
@@ -156,8 +165,8 @@ end
 class FluxString < FluxObject
   attr_reader :data
 
-  def initialize(val)
-    super()
+  def initialize(val, register: false)
+    super(register: register)
     @data = val.to_s
   end
 
@@ -167,8 +176,8 @@ class FluxString < FluxObject
     FluxString.new(@data + other_str)
   end
 
-  def to_s; check_alive!; @data; end
-  def inspect; to_s; end
+  def to_s; check_alive!; @data.to_s; end
+  def inspect; @data.inspect; end
 
   def to_msgpack(packer=nil)
     check_alive!

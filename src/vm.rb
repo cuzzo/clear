@@ -32,11 +32,12 @@ class VM
 
   # A "Stack Frame" represents a running function
   class Frame
-    attr_accessor :chunk, :ip, :registers
-    def initialize(chunk)
+    attr_accessor :chunk, :ip, :registers, :arena_mark
+    def initialize(chunk, arena_mark = 0) # Default 0 for main
       @chunk = chunk
       @ip = 0
       @registers = Array.new(256) # The 256 Registers
+      @arena_mark = arena_mark
     end
 
     def debug_str(ins)
@@ -68,12 +69,12 @@ class VM
     end
 
     def reg_debug_str(v)
-      if v.is_a?(String) then "\"#{v}\""
+      if v.is_a?(FluxString) then "\"#{v}\""
       elsif v.is_a?(Numeric) then v
       elsif v.is_a?(Compiler::Chunk) then "\\#{v.name}"
       elsif v.is_a?(VM::Closure) then "λ"
-      elsif v.is_a?(Hash) then "{}:#{v.keys.count}"
-      elsif v.is_a?(Array) then "[]:#{v.size}"
+      elsif v.is_a?(FluxHash) then "{}:#{v.keys.count}"
+      elsif v.is_a?(FluxArray) then "[]:#{v.size}"
       else v.class
       end
     end
@@ -109,12 +110,12 @@ class VM
       case opcode
       when :LOADK then process_loadk(reg_idx, ins, frame);
       when :MOVE then process_move(reg_idx, ins, frame);
-      when :NEWHASH then process_newhash(reg_idx, ins, frame);
-      when :NEWSTRUCT then process_newstruct(reg_idx, ins, frame);
+      when :NEW_HASH then process_new_hash(reg_idx, ins, frame);
+      when :NEW_STRUCT then process_new_struct(reg_idx, ins, frame);
       when :SET_FIELD then process_set_field(reg_idx, ins, frame);
       when :SET_HASH then process_set_hash(reg_idx, ins, frame);
       when :SET_INDEX then process_set_index(reg_idx, ins, frame);
-      when :NEWLIST then process_newlist(reg_idx, ins, frame);
+      when :NEW_LIST then process_new_list(reg_idx, ins, frame);
       when :APPEND then process_append(reg_idx, ins, frame);
       when :CAST then process_cast(reg_idx, ins, frame);
       when :DEF_GLOBAL then process_def_global(reg_idx, ins, frame);
@@ -141,6 +142,7 @@ class VM
       when :THROW_IF_ERROR then process_throw_if_error(reg_idx, ins, frame);
       when :EXIT_PROGRAM then process_exit_program(reg_idx, ins, frame);
       when :FREEZE then process_freeze(reg_idx, ins, frame);
+      when :NEW_SLICE then process_new_slice(reg_idx, ins, frame);
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
@@ -184,22 +186,24 @@ class VM
     frame.registers[dest] = frame.registers[src]
   end
 
-  def process_newhash(reg_idx, ins, frame)
+  def process_new_hash(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    frame.registers[target] = Hash.new
+    frame.registers[target] = FluxHash.new
   end
 
-  def process_newstruct(reg_idx, ins, frame)
+  def process_new_struct(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
     struct_name = ins[2]
-    # We can implement Structs simply as Ruby Hashes for now
-    # You might want to store the struct_name in a special key like '__type'
-    frame.registers[target_reg] = { "__type" => struct_name }
+
+    # Create FluxHash
+    obj = FluxHash.new
+    obj["__type"] = struct_name.to_sym # Store type in hidden field to use in CAST
+    frame.registers[target_reg] = obj
   end
 
   def process_set_field(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
-    key = ins[2]
+    key = ins[2].to_sym
     val_reg = reg_idx[ins[3]]
 
     target = frame.registers[target_reg]
@@ -208,7 +212,7 @@ class VM
     if target.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
-    unless target.is_a?(Hash)
+    unless target.is_a?(FluxHash)
       raise "Runtime Error: Cannot set field '#{key}' on #{target.class}"
     end
 
@@ -217,14 +221,14 @@ class VM
 
   def process_set_hash(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    key = ins[2]
+    key = ins[2].to_sym
     val_reg = reg_idx[ins[3]]
     frame.registers[target][key] = frame.registers[val_reg]
   end
 
-  def process_newlist(reg_idx, ins, frame)
+  def process_new_list(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
-    frame.registers[target] = Array.new()
+    frame.registers[target] = FluxArray.new(nil, [])
   end
 
   def process_append(reg_idx, ins, frame)
@@ -243,25 +247,25 @@ class VM
 
   def process_cast(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
-    type_name = ins[2].to_s
+    type_name = ins[2].to_sym
     val = frame.registers[target_reg]
     schema = @structs[type_name] # Assuming @structs is the global registry
 
     # --- 1. PRIMITIVES / COERCION ---
-    if type_name == "String"
+    if type_name == :String
       frame.registers[target_reg] = val.to_s
       return
-    elsif type_name == "Number"
+    elsif type_name == :Number
       if val.is_a?(FluxByte)
         frame.registers[target_reg] = val.value
         return
       end
       raise "Cast Error: Cannot cast #{val.class} to Number" unless val.is_a?(Numeric)
       return
-    elsif type_name == "Bool"
+    elsif type_name == :Bool
       raise "Cast Error" unless (val == true || val == false)
       return
-    elsif type_name == "Byte"
+    elsif type_name == :Byte
       # NEW: Wrap Number -> Byte (or re-wrap Byte -> Byte)
       # We extract the raw integer value to be safe, then wrap it.
       if val.is_a?(Numeric)
@@ -274,7 +278,7 @@ class VM
       end
 
     # --- 3. ARRAY CASTING ---
-    elsif type_name.include?("[")
+    elsif type_name.to_s.include?("[")
       match = type_name.match(/^(\w+)\[(.*)\]$/)
 
       if match
@@ -303,7 +307,7 @@ class VM
 
     # --- 2. STRUCT CHECK ---
     # TODO: Why is Number in @structs ??
-    elsif @structs.key?(type_name.to_sym)
+    elsif @structs.key?(type_name)
       unless check_type(val, type_name.to_sym, @structs)
         raise "Runtime Error: Struct validation failed for '#{type_name}'"
       end
@@ -327,9 +331,9 @@ class VM
   end
 
   def process_def_struct(reg_idx, ins, frame)
-    name = ins[1]
+    name = ins[1].to_sym
     schema = ins[2] # The ruby hash from the compiler
-    @structs[name.to_sym] = schema
+    @structs[name] = schema
   end
 
   def process_closure(reg_idx, ins, frame)
@@ -356,7 +360,7 @@ class VM
   def process_call_func(reg_idx, ins, frame)
     # Format: [:CALL_FUNC, "R_target", "Operand", argc, "R_arg1"...]
     target_reg = reg_idx[ins[1]]
-    operand    = ins[2] # Can be "print" (Global) OR "R4" (Register)
+    operand = ins[2] # Can be "print" (Global) OR "R4" (Register)
 
     # 1. Resolve Arguments
     #    (Map directly from instruction -> register index -> value)
@@ -403,7 +407,7 @@ class VM
     # --- DISPATCH LOGIC ---
 
     # A. Native Methods (e.g. Array.map)
-    if obj.is_a?(Array) && method_name == "map"
+    if obj.is_a?(FluxArray) && method_name == "map"
       closure = args[0]
       new_list = obj.map do |item|
         execute_function(closure, [item])
@@ -414,7 +418,7 @@ class VM
 
     # B. Struct Field Call (e.g. h2.fun())
     #    This allows us to call a closure stored in a field
-    if obj.is_a?(Hash) && obj.key?(method_name)
+    if obj.is_a?(FluxHash) && obj.key?(method_name)
       func = obj[method_name]
 
       # Safety Check
@@ -481,7 +485,7 @@ class VM
     elsif lhs.is_a?(Numeric) && rhs.is_a?(FluxByte)
        frame.registers[target] = lhs + rhs.value
 
-    elsif lhs.is_a?(String) || rhs.is_a?(String)
+    elsif lhs.is_a?(FluxString) || rhs.is_a?(FluxString)
       # 2. String Path (Concat)
       # This handles "A" + "B", "A" + 1, and 1 + "A"
       frame.registers[target] = lhs.to_s + rhs.to_s
@@ -542,7 +546,7 @@ class VM
     result_reg = reg_idx[ins[1]]
     return_val = frame.registers[result_reg]
 
-    @frames.pop
+    pop_and_return(return_val)
 
     if @frames.empty?
      # This is the final program result.
@@ -583,10 +587,11 @@ class VM
     end
   end
 
+  # TODO: are these Hash or FluxHash
   def is_error?(val)
     # Assuming your errors are instances of a class (e.g., RuntimeError or a custom Struct)
     # Adjust this check to match your actual Error object type.
-    (val.is_a?(Hash) && val["__type"] == "Error") || val.is_a?(RuntimeError)
+    (val.is_a?(FluxHash) && val["__type"] == :Error) || val.is_a?(RuntimeError)
   end
 
   def process_jmp_true(reg_idx, ins, frame)
@@ -596,7 +601,7 @@ class VM
     val = frame.registers[cond_reg]
 
     # Is it an Error? If so, treat as FALSE (don't jump)
-    is_error = val.is_a?(Hash) && val["__type"] == "Error"
+    is_error = val.is_a?(FluxHash) && val["__type"] == :Error
 
     # Ruby semantics: false and nil are falsey. Everything else is true.
     if val != false && !val.nil? && !is_error?(val)
@@ -606,11 +611,11 @@ class VM
 
   def process_jmp_if_ok(reg_idx, ins, frame)
     # JMP_IF_OK R_val, target_ip
-    val_reg   = reg_idx[ins[1]]
+    val_reg = reg_idx[ins[1]]
     target_ip = ins[2]
     val = frame.registers[val_reg]
 
-    is_error = val.is_a?(Hash) && val["__type"] == "Error"
+    is_error = val.is_a?(FluxHash) && val["__type"] == :Error
 
     # If it is NOT an error, take the jump (skip the OR block)
     if !is_error
@@ -620,27 +625,27 @@ class VM
 
   def process_jmp_if_error(reg_idx, ins, frame)
     # JMP_IF_ERROR R_val, target_ip
-    val_reg   = reg_idx[ins[1]]
+    val_reg = reg_idx[ins[1]]
     target_ip = ins[2]
 
     val = frame.registers[val_reg]
 
     # Check if it is a Hash (Struct) and has the type "Error"
-    if val.is_a?(Hash) && val["__type"] == "Error"
+    if val.is_a?(FluxHash) && val["__type"] == :Error
       frame.ip = target_ip
     end
   end
 
   def process_get_index(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
-    list_reg   = reg_idx[ins[2]]
-    idx_reg    = reg_idx[ins[3]]
+    list_reg = reg_idx[ins[2]]
+    idx_reg = reg_idx[ins[3]]
 
     list = frame.registers[list_reg]
     index = frame.registers[idx_reg]
 
     # Basic error checking
-    unless list.is_a?(Array) || list.is_a?(FluxArray) || list.is_a?(String)
+    unless list.is_a?(FluxArray) || list.is_a?(String)
        raise "Runtime Error: Attempt to index a #{list.class}"
     end
 
@@ -660,7 +665,7 @@ class VM
     if target.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
-    unless target.is_a?(Array)
+    unless target.is_a?(FluxArray)
       raise "Runtime Error: Cannot set index '#{key}' on #{target.class}"
     end
 
@@ -670,13 +675,13 @@ class VM
 
   def process_get_field(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
-    obj_reg    = reg_idx[ins[2]]
-    field_name = ins[3] # This is a raw string from the bytecode
+    obj_reg = reg_idx[ins[2]]
+    field_name = ins[3].to_sym # This is a raw string from the bytecode
 
     obj = frame.registers[obj_reg]
 
     # Determine how to read the field based on the object type
-    if obj.is_a?(Hash)
+    if obj.is_a?(FluxHash)
       # For Structs/Maps implemented as Ruby Hashes
       frame.registers[target_reg] = obj[field_name] || obj[field_name.to_sym]
     else
@@ -704,8 +709,8 @@ class VM
     val = frame.registers[val_reg]
 
     # 2. Optional: If it's a String, print it to Stderr
-    if val.is_a?(String)
-      $stderr.puts(val)
+    if val.is_a?(FluxString)
+      $stderr.puts(val.to_s)
       val = 1 # Return generic error code
     end
 
@@ -716,8 +721,41 @@ class VM
   def process_freeze(reg_idx, ins, frame)
     target = reg_idx[ins[1]]
     val = frame.registers[target]
-    # Ruby's native freeze works on Arrays, Hashes, and Strings
-    val.freeze
+    val.respond_to?(:freeze!) ? val.freeze! # FluxObjects
+      : val.freeze # Native Ruby Objects - TODO: Should never happend
+  end
+
+  def process_new_slice(reg_idx, ins, frame)
+    target_reg = reg_idx[ins[1]]
+    owner_reg = reg_idx[ins[2]]
+    start_reg = reg_idx[ins[3]]
+    end_reg = reg_idx[ins[4]]
+
+    owner = frame.registers[owner_reg]
+    s_idx = frame.registers[start_reg]
+    e_idx = frame.registers[end_reg]
+
+    # Validate Inputs
+    unless s_idx.is_a?(Numeric) && e_idx.is_a?(Numeric)
+      raise "Runtime Error: Slice indices must be Integers"
+    end
+
+    # Numbers by default, need to cast to integers.
+    s_idx = frame.registers[start_reg].to_i
+    e_idx = frame.registers[end_reg].to_i
+
+    # Calculate Length (Inclusive Range: 0..1 has length 2)
+    len = e_idx - s_idx + 1
+
+    if len < 0
+      raise "Runtime Error: Invalid Slice range (End < Start)"
+    end
+
+    # Create the View
+    # Note: FluxView constructor checks owner.is_alive automatically!
+    view = FluxView.new(owner, s_idx, len)
+
+    frame.registers[target_reg] = view
   end
 
   def process_throw(reg_idx, ins, frame)
@@ -736,7 +774,7 @@ class VM
     $logger.debug("IN THROW_IF_ERROR: #{val} => #{val.class}")
 
     # Check if it is an Error Struct
-    if val.is_a?(Hash) && val["__type"] == "Error"
+    if val.is_a?(FluxHash) && val["__type"] == :Error
       # Stop execution and unwind to the nearest CATCH
       raise_error(val)
     end
@@ -750,7 +788,8 @@ class VM
     captures = closure.is_a?(Closure) ? closure.captures : []
 
     # 1. Create a new frame
-    frame = Frame.new(chunk)
+    current_mark = Arena.current.mark
+    frame = Frame.new(chunk, current_mark)
 
     # 2. Load Arguments into Registers R0...Rn
     args.each_with_index do |arg, i|
@@ -773,24 +812,24 @@ class VM
 
   def check_type(val, required_type, structs_registry)
     case required_type
-    when "Any" then return true;
-    when "Number" then return val.is_a?(Numeric);
-    when "String" then return val.is_a?(String);
-    when "Bool" then return (val == true || val == false);
+    when :Any then return true;
+    when :Number then return val.is_a?(Numeric);
+    when :String then return val.is_a?(FluxString);
+    when :Bool then return (val == true || val == false);
     else
       # Recursive Struct Check: Check against the schema registry
       if structs_registry.key?(required_type)
         schema = structs_registry[required_type]
 
-        # Must be a Hash (Runtime Struct)
-        return false unless val.is_a?(Hash)
+        # Must be a FluxHash (Runtime Struct)
+        return false unless val.is_a?(FluxHash)
 
         # Check every field recursively
         schema.each do |field, field_type|
           return false unless val.key?(field)
 
           # RECURSIVE CALL: Check the field's value against the field's required type
-          return false unless check_type(val[field], field_type, structs_registry)
+          return false unless check_type(val[field], field_type.to_sym, structs_registry)
         end
       return true # All fields checked out
       else
@@ -819,13 +858,31 @@ class VM
 
         return # Resume the run_loop where the IP is now the CATCH block
       else
-        # UNWINDING: Pop and Signal!
-        @frames.pop
+        pop_and_return(error_obj)
       end
     end
 
     # If the stack is empty, the error was unhandled
     abort "CRITICAL UNHANDLED ERROR: #{error_obj.inspect}"
+  end
+
+  # Unified logic for leaving a stack frame safely
+  # Returns the object so you can chain it if needed
+  def pop_and_return(keep_obj)
+    frame = @frames.last
+    return nil unless frame
+
+    # 1. RVO: Save the object from the upcoming purge
+    #    (If it's already promoted/safe, this is a no-op)
+    Arena.current.promote(keep_obj)
+
+    # 2. POISON: Kill everything allocated in this specific frame
+    Arena.current.rewind(frame.arena_mark)
+
+    # 3. POP: Remove the execution context
+    @frames.pop
+
+    return keep_obj
   end
 
   def run_code(code_str)

@@ -77,7 +77,11 @@ class Compiler
 
   class Scope
     attr_accessor :locals
-    def initialize; @locals = {}; end
+
+    def initialize
+      @locals = {}
+      @dependencies = {}
+    end
 
     def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil)
       @locals[name] = {
@@ -85,7 +89,9 @@ class Compiler
         type: type,
         mutable: is_mutable,
         rebindable: is_rebindable,
-        size: size
+        size: size,
+        valid: true,
+        invalid_reason: nil
       }
     end
 
@@ -111,6 +117,59 @@ class Compiler
 
     def is_immutable?(name)
       !is_mutable?(name)
+    end
+
+    def register_dependency(owner_name, dependent_name)
+      return unless @locals.key?(owner_name) # Only track local vars
+
+      @dependencies[owner_name] ||= []
+      @dependencies[owner_name] << dependent_name
+    end
+
+    def invalidate_dependents(owner_name)
+      return unless @dependencies[owner_name]
+
+      # Mark every view watching this owner as DEAD
+      @dependencies[owner_name].each do |view_name|
+        if @locals[view_name]
+          @locals[view_name][:valid] = false
+          @locals[view_name][:invalid_reason] = "The owner '#{owner_name}' was modified (resized or rebound), invalidating this view."
+        end
+      end
+
+      # Clear the list (the views are dead, no need to track them anymore)
+      @dependencies[owner_name] = []
+    end
+
+    def check_validity!(name)
+      entry = @locals[name]
+      return unless entry
+
+      if entry[:valid] == false
+        raise "Compile Error: Cannot use variable '#{name}'. Reason: #{entry[:invalid_reason]}"
+      end
+    end
+
+    def invalidate_size(name)
+      if @locals[name]
+        @locals[name][:size] = nil
+      end
+    end
+
+    def is_boxed?(name)
+      entry = @locals[name]
+      entry ? entry[:boxed] : false
+    end
+
+    def narrow_type(name, new_type)
+      return unless @locals[name]
+      current_type = @locals[name][:type]
+      if current_type == :Any
+        @locals[name][:type] = new_type
+        return true
+      end
+      # Simplified narrowing logic
+      return false
     end
   end
 
@@ -182,6 +241,7 @@ class Compiler
     when AST::Assert then compile_assert(node, target_reg);
     when AST::Raise then compile_raise(node, target_reg);
     when AST::DieNode then compile_exit_program(node, target_reg);
+    when AST::Slice then compile_slice(node, target_reg);
     end
   end
 
@@ -512,6 +572,19 @@ class Compiler
     end
   end
 
+  def compile_slice(node, target_reg)
+    with_temp_reg do |r_owner|
+      visit(node.target, r_owner)
+      with_temp_reg do |r_start|
+        visit(node.start, r_start)
+        with_temp_reg do |r_end|
+          visit(node.end, r_end)
+          @chunk.emit(node, :NEW_SLICE, "R#{target_reg}", "R#{r_owner}", "R#{r_start}", "R#{r_end}")
+        end
+      end
+    end
+  end
+
   def compile_print(node)
     args = compile_args(node.args)
     @chunk.emit(node, :PRINT, *args)
@@ -554,6 +627,7 @@ class Compiler
     final_type = coerced_type(node, r)
     handle_deep_freeze(node, r) # Run-time, probably not necessary
     known_size = get_known_size(node)
+    handle_view(node)
 
     if @scope_depth == 0
       # CASE A: GLOBAL
@@ -567,6 +641,16 @@ class Compiler
 
     current_scope.declare(node.name, r, final_type, node.mutable, known_size)
     return r
+  end
+
+  def handle_view(node)
+   if node.value.is_a?(AST::GetIndex) || node.value.is_a?(AST::Slice)
+       source_node = node.value.target
+
+       if source_node.is_a?(AST::Identifier)
+         current_scope.register_dependency(source_node.name, node.name)
+       end
+    end
   end
 
   def get_known_size(node)
@@ -931,6 +1015,11 @@ class Compiler
     val = node.value
     if node.type == :BYTE
       val = FluxByte.new(val)
+    elsif node.type == :STRING
+      # Do not register GLOBAL literals for deletion.
+      # Otherwise, errors messages (strings) will get wiped
+      # And cause dangling pointer / use after free errors.
+      val = FluxString.new(val, register: false)
     end
     k = @chunk.add_constant(val)
     @chunk.emit(node, :LOADK, "R#{target_reg}", "K#{k}")
@@ -1046,12 +1135,12 @@ class Compiler
       # or assume Vector[Any].
     end
 
-    @chunk.emit(node, :NEWLIST, "R#{target_reg}")
+    @chunk.emit(node, :NEW_LIST, "R#{target_reg}")
     node.items.each { |item| with_temp_reg { |r| visit(item, r); @chunk.emit(node, :APPEND, "R#{target_reg}", "R#{r}") } }
   end
 
   def compile_struct_lit(node, target_reg)
-    @chunk.emit(node, :NEWSTRUCT, "R#{target_reg}", node.name)
+    @chunk.emit(node, :NEW_STRUCT, "R#{target_reg}", node.name)
 
     def_fields = @struct_defs[node.name] || {} # Non-struct hashmaps have no schema
     final_fields = def_fields.transform_values { |v| v[:default] }.compact.merge(node.fields)
@@ -1072,15 +1161,17 @@ class Compiler
     @struct_defs[node.name] = node.fields
 
     # 2. Strip defaults for the VM (VM only wants { field => TypeString })
-    vm_schema = node.fields.transform_values { |info| info[:type] }
+    vm_schema = node.fields
+      .transform_values { |info| info[:type] }
+      .transform_keys(&:to_sym)
 
     # 3. Emit the simplified schema to the VM
     @chunk.emit(node, :DEF_STRUCT, node.name, vm_schema)
   end
 
   def compile_hash_lit(node, target_reg)
-    # Treat Hash like a Struct or List (for v0.1, let's use NEWSTRUCT for simplicity)
-    @chunk.emit(node, :NEWHASH, "R#{target_reg}")
+    # Treat Hash like a Struct or List (for v0.1, let's use NEW_STRUCT for simplicity)
+    @chunk.emit(node, :NEW_HASH, "R#{target_reg}")
     node.pairs.each do |k, v|
       with_temp_reg do |r|
         visit(v, r)

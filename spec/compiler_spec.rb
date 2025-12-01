@@ -543,14 +543,14 @@ RSpec.describe Compiler do
         ops = compile_ops(source)
 
         # 1. Find the Outer Hash creation
-        # It should be the first NEWHASH
-        outer_hash_op = ops.find { |op| op[0] == :NEWHASH }
+        # It should be the first NEW_HASH
+        outer_hash_op = ops.find { |op| op[0] == :NEW_HASH }
         outer_reg = outer_hash_op[1] # e.g. "R0"
 
         # 2. Find the Inner Hash creation
         # It should use a DIFFERENT register (usually R0 + 1)
         # We filter for NEWHASH, get the second one
-        inner_hash_op = ops.select { |op| op[0] == :NEWHASH }[1]
+        inner_hash_op = ops.select { |op| op[0] == :NEW_HASH }[1]
         inner_reg = inner_hash_op[1] # e.g. "R1"
 
         expect(inner_reg).to_not eq(outer_reg)
@@ -577,8 +577,8 @@ RSpec.describe Compiler do
         ops = compile_ops(source)
 
         # 1. Detect Hash and List creation
-        hash_op = ops.find { |op| op[0] == :NEWHASH }
-        list_op = ops.find { |op| op[0] == :NEWLIST }
+        hash_op = ops.find { |op| op[0] == :NEW_HASH }
+        list_op = ops.find { |op| op[0] == :NEW_LIST }
 
         hash_reg = hash_op[1]
         list_reg = list_op[1]
@@ -610,12 +610,12 @@ RSpec.describe Compiler do
         ops = compile_ops(source)
 
         # 1. Identify the Main List (The one that gets assigned to 'matrix')
-        # It's usually the first NEWLIST or the one passed to DEF_GLOBAL
+        # It's usually the first NEW_LIST or the one passed to DEF_GLOBAL
         def_op = ops.find { |op| op[0] == :DEF_GLOBAL }
         main_list_reg = def_op[2]
 
-        # 2. Count all NEWLIST instructions
-        new_lists = ops.select { |op| op[0] == :NEWLIST }
+        # 2. Count all NEW_LIST instructions
+        new_lists = ops.select { |op| op[0] == :NEW_LIST }
         expect(new_lists.size).to eq(3) # 1 Outer + 2 Inner
 
         # 3. Verify APPENDS to the Main List
@@ -645,8 +645,8 @@ RSpec.describe Compiler do
         ops = compile_ops(source)
 
         # 1. Find List and Hash creation
-        list_op = ops.find { |op| op[0] == :NEWLIST }
-        hash_op = ops.find { |op| op[0] == :NEWHASH }
+        list_op = ops.find { |op| op[0] == :NEW_LIST }
+        hash_op = ops.find { |op| op[0] == :NEW_HASH }
 
         list_reg = list_op[1]
         hash_reg = hash_op[1]
