@@ -6,6 +6,7 @@ require_relative "lexer"
 require_relative "parser"
 require_relative "compiler"
 require_relative "types"
+require_relative "memory_visualizer"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -159,7 +160,7 @@ class VM
         return val unless val.nil?
       end
 
-      $logger.debug(debug_str(ins, frame))
+      debug_instruction(ins, frame)
     end
     end
   end
@@ -178,6 +179,19 @@ class VM
 
 
     "[#{line_str}] #{ip}: #{op_str} | #{src_line}"
+  end
+
+  def debug_instruction(ins, frame)
+    return if $logger.level < Logger::DEBUG
+    $logger.debug(debug_str(ins, frame))
+  end
+
+  def debug_memory
+    return if $logger.level < Logger::DEBUG
+    viz = MemoryVisualizer.new(self)
+    $logger.debug("--- MERMAID GRAPH START ---")
+    $logger.debug(viz.generate_mermaid)
+    $logger.debug("--- MERMAID GRAPH END ---")
   end
 
   def process_loadk(reg_idx, ins, frame)
@@ -777,7 +791,6 @@ class VM
   end
 
   def process_throw(reg_idx, ins, frame)
-    $logger.debug("IN THROW")
     r_msg = reg_idx[ins[1]]
     error_obj = frame.registers[r_msg]
 
@@ -789,7 +802,6 @@ class VM
     # THROW_IF_ERROR R_val
     val_reg = reg_idx[ins[1]]
     val = frame.registers[val_reg]
-    $logger.debug("IN THROW_IF_ERROR: #{val} => #{val.class}")
 
     # Check if it is an Error Struct
     if val.is_a?(FluxHash) && val["__type"] == :Error
@@ -887,6 +899,7 @@ class VM
   # Unified logic for leaving a stack frame safely
   # Returns the object so you can chain it if needed
   def pop_and_return(keep_obj)
+    debug_memory()
     frame = @frames.last
     return nil unless frame
 
