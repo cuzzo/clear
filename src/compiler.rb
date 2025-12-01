@@ -500,13 +500,17 @@ class Compiler
     # We only verify signature if it is a NAME (String) and NOT a local variable.
     # We skip verification for Expressions (Case B) because we can't check them statically.
     # TODO...
+    signature_params = []
     if node.name.is_a?(String) && !local_reg
       verify_function_signature(node)
+      if @fn_signatures.dig(node.name, :params)
+        signature_params = @fn_signatures[node.name][:params]
+      end
     end
 
     is_local = node.name.is_a?(String) && current_scope.resolve_reg(node.name)
 
-    arg_regs = compile_args(node.args)
+    arg_regs = compile_args(node.args, signature_params, local_reg)
 
     # 3. Resolve the Function Target
     if node.name.is_a?(String)
@@ -610,11 +614,47 @@ class Compiler
     @reg_top -= real_args_regs.size
   end
 
-  def compile_args(args)
-    args.map do |arg|
+  def implicit_deref_coerce_arg(arg, r, signature_param, local_reg)
+    # Due to reasons, we cannot pass structs for local registered functions (and methods)
+    return visit(arg, r) if !local_reg.nil?
+
+    # Determine types
+    expected_type = signature_param ? signature_param[:type] : :Any
+    actual_type = infer_type(arg) # e.g., :Point
+
+    # LOGIC: If Function expects a Reference, but we have an Owner -> Take Ref
+    # You need a helper is_struct_type? (checks @struct_defs)
+    # You need to decide if :Any should auto-ref (usually unsafe) or copy.
+
+    # If signature explicitly asks for a Pointer/View...
+    # (Assuming you name your pointers like :PointPtr or have a flag)
+    # For now, let's assume if it expects :Any, we pass by value.
+    # If you implement strong View types, check that here.
+
+    # SIMPLE VIEW-FIRST STRATEGY:
+    # If it's a struct owner, and we are passing it to a function,
+    # we usually want to pass by reference unless forced otherwise.
+    return visit(arg, r) if !@struct_defs.key?(actual_type.to_s)
+
+    # A. Emit the Argument Expression into a temp register
+    with_temp_reg do |r_val|
+      visit(arg, r_val)
+
+      # B. Create the Pointer (View)
+      @chunk.emit(node, :TAKE_REF, "R#{r}", "R#{r_val}")
+
+      # C. Safety: Register Dependency
+      if arg.is_a?(AST::Identifier)
+        current_scope.register_dependency(arg.name, "implicit_ref_#{r}")
+      end
+    end
+  end
+
+  def compile_args(args, signature_params = [], local_reg = nil)
+    args.each_with_index.map do |arg, arg_idx|
       r = @reg_top
       @reg_top += 1
-      visit(arg, r)
+      implicit_deref_coerce_arg(arg, r, signature_params[arg_idx], local_reg)
       "R#{r}"
     end
   end

@@ -80,6 +80,13 @@ class VM
     end
   end
 
+  def resolve_val(val)
+    while val.is_a?(FluxView) || val.is_a?(FluxPtr)
+      val = val.deref
+    end
+    val
+  end
+
   def run(entry_chunk)
     # 1. Boot the VM with the top-level script
     @frames = [Frame.new(entry_chunk)]
@@ -143,6 +150,7 @@ class VM
       when :EXIT_PROGRAM then process_exit_program(reg_idx, ins, frame);
       when :FREEZE then process_freeze(reg_idx, ins, frame);
       when :NEW_SLICE then process_new_slice(reg_idx, ins, frame);
+      when :TAKE_REF then process_take_ref(reg_idx ins, frame);
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
@@ -206,7 +214,7 @@ class VM
     key = ins[2].to_sym
     val_reg = reg_idx[ins[3]]
 
-    target = frame.registers[target_reg]
+    target = resolve_val(frame.registers[target_reg])
     val = frame.registers[val_reg]
 
     if target.frozen?
@@ -402,7 +410,7 @@ class VM
     arg_regs = ins[4..-1].map { |r| reg_idx[r] }
     args = arg_regs.map { |r| frame.registers[r] }
 
-    obj = frame.registers[obj_reg]
+    obj = resolve_val(frame.registers[obj_reg])
 
     # --- DISPATCH LOGIC ---
 
@@ -412,7 +420,7 @@ class VM
       new_list = obj.map do |item|
         execute_function(closure, [item])
       end
-      frame.registers[res_reg] = new_list
+      frame.registers[res_reg] = FluxArray.new(nil, new_list)
       return
     end
 
@@ -645,7 +653,7 @@ class VM
     index = frame.registers[idx_reg]
 
     # Basic error checking
-    unless list.is_a?(FluxArray) || list.is_a?(String)
+    unless list.is_a?(FluxArray) || list.is_a?(FluxView) || list.is_a?(FluxString)
        raise "Runtime Error: Attempt to index a #{list.class}"
     end
 
@@ -678,7 +686,7 @@ class VM
     obj_reg = reg_idx[ins[2]]
     field_name = ins[3].to_sym # This is a raw string from the bytecode
 
-    obj = frame.registers[obj_reg]
+    obj = resolve_val(frame.registers[obj_reg])
 
     # Determine how to read the field based on the object type
     if obj.is_a?(FluxHash)
@@ -723,6 +731,16 @@ class VM
     val = frame.registers[target]
     val.respond_to?(:freeze!) ? val.freeze! # FluxObjects
       : val.freeze # Native Ruby Objects - TODO: Should never happend
+  end
+
+  def process_take_ref(reg_idx, ins, frame)
+    target = reg_idx[ins[1]]
+    src = reg_idx[ins[2]]
+
+    val = frame.registers[src]
+
+    # Create the View
+    frame.registers[target] = FluxPtr.new(val)
   end
 
   def process_new_slice(reg_idx, ins, frame)

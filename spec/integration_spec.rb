@@ -130,6 +130,18 @@ RSpec.describe "INTEGRATION" do
         expect(resp).to eq(output)
       end
     end
+
+    context "Array Views / Slices - Implicit Deref Coercion" do
+      let(:script) { 'view' }
+      it "runs" do
+        output = [
+          "STDOUT > View[2]",
+          "STDOUT > 10.0",
+          "0"
+        ]
+        expect(resp).to eq(output)
+      end
+    end
   end
 end
 

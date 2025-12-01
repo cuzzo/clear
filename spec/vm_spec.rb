@@ -525,7 +525,7 @@ RSpec.describe VM do
       vm = VM.new("MapTest")
       result = vm.run(chunk_main)
 
-      expect(result).to eq([1, 4, 9])
+      expect(result.data).to eq([1, 4, 9])
     end
   end
 
@@ -988,6 +988,52 @@ RSpec.describe VM do
 
       vm = VM.new
       expect { vm.run_code(code) }.to raise_error(/Memory Error: Dangling Pointer/)
+    end
+  end
+
+  context "Implicit Deref Coercion (View-First)" do
+    it "automatically converts a Struct Owner to a Pointer and dereferences it on access" do
+      code = <<~FLUX
+        STRUCT Point { x: Number, y: Number }
+
+        FN get_x %(p) ->
+          -- 'p' arrives as a FluxPtr (View)
+          -- accessing .x triggers the implicit deref in the VM
+          RETURN p.x;
+        END
+
+        VAR pt = %Point{ x: 42, y: 100 };
+
+        -- This call triggers 'implicit_deref_coerce_arg' in the compiler
+        RETURN get_x(pt);
+      FLUX
+
+      vm = VM.new
+      result, _ = vm.run_code(code)
+
+      expect(result).to eq(42)
+    end
+
+    it "allows mutation via the implicit pointer" do
+      # Note: This requires the object to be MUTABLE to pass the freeze check
+      code = <<~FLUX
+        STRUCT Box { val: Number }
+
+        FN set_val! %(MUTABLE b) ->
+          -- Implicit Deref allows SET_FIELD on a Pointer
+          SET b.val = 99;
+        END
+
+        MUTABLE box = %Box{ val: 0 };
+        set_val!(box);
+
+        RETURN box.val;
+      FLUX
+
+      vm = VM.new
+      result, _ = vm.run_code(code)
+
+      expect(result).to eq(99)
     end
   end
 end

@@ -121,6 +121,8 @@ class FluxArray < FluxObject
     max_size.nil? ? "<Dynamic[] #{@data.to_s}>" : "<Fixed[#{@max_size}] #{@data.to_s}>"
   end
 
+  def inspect; @data.to_s; end
+
   # Delegate other methods to @data if needed (each, map, etc)
   def method_missing(m, *args, &block)
     check_alive!
@@ -154,7 +156,7 @@ class FluxHash < FluxObject
   def keys; check_alive!; @data.keys; end
 
   def to_s; check_alive!; @data.to_s; end
-  def inspect; to_s; end
+  def inspect; @data.to_s; end
 
   def to_msgpack(packer=nil)
     check_alive!
@@ -245,7 +247,46 @@ class FluxView < FluxObject
     end
   end
 
+  def deref
+    check_alive!
+    @owner
+  end
+
   def inspect; to_s; end
+end
+
+class FluxPtr < FluxObject
+  attr_reader :owner
+
+  def initialize(owner)
+    super()
+    @owner = owner
+  end
+
+  def check_alive!
+    super # Check if the Pointer itself is valid
+
+    # Check if the thing we point to is still valid
+    if @owner.respond_to?(:is_alive) && !@owner.is_alive
+      raise "Memory Error: Dangling Pointer! Accessing a dead object."
+    end
+  end
+
+  # The dereference operator (*)
+  def deref
+    check_alive!
+    @owner
+  end
+
+  # Transparent printing
+  def to_s; "&(#{@owner})"; end
+  def inspect; to_s; end
+
+  # Serialize the value we point to (Deep Copy behavior on serialization)
+  def to_msgpack(packer=nil)
+    check_alive!
+    @owner.to_msgpack(packer)
+  end
 end
 
 ###
