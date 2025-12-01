@@ -84,9 +84,12 @@ Everyone else can CHEAT.
 ## Architecture
 
 **1. Arena-Based Memory & Isolation**
-  * CHEAT uses Arena-based memory management instead of a global Garbage Collector.
-  * Each function scope or spawned process gets its own memory arena. When the scope ends, the memory is freed instantly.
-  * *The Result:* Memory safety and high performance *WITHOUT* the unpredictable "Stop-the-World" jitter of Java or Go.
+
+  * CHEAT uses Arena-based memory instead of a global Garbage Collector.
+  * The "Handoff" Trick: When a function returns a large object (like a String or List), CHEAT does not copy the data.
+     * Instead, it performs Destination Passing: The compiler instructs the function to write the data directly into the Caller's memory.
+     * For dynamic data, it uses Page Handoffs: The memory page containing your data is detached from the dying function and stapled to the living Caller.
+  * *The Result:* You can return a 1GB video file from a function instantly ($O(1)$) *without* a generic Heap or "Stop-the-World" jitter of Java or Go.
 
 **2. Implicit "Railway" Error Handling**
   * CHEAT treats errors as data, but handles them via control flow.
@@ -104,10 +107,15 @@ Everyone else can CHEAT.
   * CHEAT is dynamic by default (using NaN-boxed values for ease of use) but supports optional "Systems Types" (`u8`, `u64`) and Struct definitions.
   * *The Result:* You can write scripts fast, then optimize hot paths into raw machine instructions, bridging the gap between Python/Ruby and Zig/C.
 
-**5. Shared-Nothing Concurrency**
+**5. Deterministic Shared-Memory for Concurrency**
   * Parallelism is achieved via `SPAWN`, which creates isolated execution contexts.
   * `SPAWN`ing a process creates a lightweight, isolated memory arena.
-  * Because memory is not shared between threads, CHEAT code is lock-free and thread-safe by default.
+  * Because memory is not shared between threads execpt Atomics (`^`), CHEAT code is lock-free and thread-safe by default.
+    * CHEAT avoids the latency spikes of a "Stop-the-World" Garbage Collector by using Reference Counting for Atomics.
+       * An Atomic dies the microsecond the last thread stops using it.
+    * The Law of Cycles: To make this work without leaks, CHEAT enforces a strict topology: An Atomic cannot hold a reference to another Atomic.
+       * This guarantees a Directed Acyclic Graph (DAG) of memory.
+       * *The Result:* You get the safety of Java/Go concurrency with the predictable latency of C++.
 
 **6. A Type system that *just works***
   * CHEAT is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference.
@@ -128,6 +136,26 @@ Everyone else can CHEAT.
     * You can auto-gen tests for PUBLIC functions for all permutations of POSSIBLE unexpected inputs.
       * This allows you to spot problems easily and arrive at robust, working code quickly.
 
+**9. Scoped Inlining (INSIDE) for Graphs**
+  * Traditional Arena languages struggle with recursive structures (Trees/Graphs) because children die when the function returns.
+  * CHEAT solves this with the INSIDE keyword (e.g., VAR x = INSIDE buildTree()).
+  * This allows a child function to borrow the *Parent's Arena* for allocation.
+  * *The Result:* You can build complex, pointer-heavy recursive data structures that exist contiguously in memory and are freed instantly when the root owner exits.
+
+## WHO IS CHEAT *NOT* FOR
+
+CHEAT is opinionated. The specific optimizations that make it fast and safe for 99% of Business Logic make it extremely hostile to 1% of Architectural patterns.
+
+1. You are building a Pointer-Heavy Engine (like a Graph Database).
+  * CHEAT prevents Memory Leaks by forbidding reference cycles in Atomics (Atomic A -> B, B -> A).
+  * If your architecture relies on a "Soup of Mutable Objects" where everything references everything else, CHEAT will fight you.
+  * *The Alternative:* Architect your data using IDs and centralized lookups (like a relational database), or use Rust/C++ for manual pointer management.
+
+2. You need to model Inherently Unsafe / Cyclic Relationships
+  * If your architecture relies on Rust-style "Weak Pointers" to manage reference cycles (A -> B -> A)
+     * OR if you need recursive fine-grained locking, you are strictly managing memory and deadlock risks manually.
+  * CHEAT guarantees safety by forbidding these patterns entirely.
+  * *The Alternative:* If you absolutely need a doubly-linked list or a cyclic graph with individual node locking, that is "Engine Code," not "Business Logic." Write that specific component in Zig (where you can manage the unsafe pointers yourself) and import it into CHEAT as a safe handle.
 
 ## CONTROVERSIAL CHOICES
 
