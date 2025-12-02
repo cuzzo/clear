@@ -191,5 +191,11 @@ module Value
   def self.is_byte?(val)
     get_tag(val) == TAG_BYTE
   end
+
+  def self.is_falsey?(val)
+    tag = get_tag(val)
+    return (tag == TAG_NIL) ||
+           (tag == TAG_BOOL && as_bool(val) == false)
+  end
 end
 

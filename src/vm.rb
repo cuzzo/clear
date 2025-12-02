@@ -37,7 +37,24 @@ class VM
 
     # Map raw operands (strings) to useful values based on the signature
     ins[1..-1].map.with_index do |operand, i|
-      case signature[i]
+      type = if i < signature.size
+               signature[i]
+             else
+               # We are deeper than the signature.
+               # If the signature ends with T_REST, treat this as T_REST.
+               if signature.last == OpCodes::T_REST
+                 OpCodes::T_REST
+               else
+                 # Should not happen if Compiler validates correctly
+                 raise "VM Error: Too many operands for #{opcode}"
+               end
+             end
+
+      # 2. Resolve T_REST -> T_REG_R
+      # T_REST is just a marker saying "The rest are Register Reads"
+      type = OpCodes::T_REG_R if type == OpCodes::T_REST
+
+      case type
       when OpCodes::T_REG_W
         # For Write, return the INDEX (integer)
         operand[1..-1].to_i
@@ -51,7 +68,7 @@ class VM
         frame.chunk.constants[idx]
       when OpCodes::T_STR
         operand.to_s # Return the raw string (e.g. "Point")
-      when OpCodes::T_RAW, OpCodes::T_UINT
+      when OpCodes::T_RAW, OpCodes::T_UINT, OpCodes::T_REST
         operand # Pass the raw instruction data (e.g. the Schema Hash, Int)
       else
         operand # Fallback
@@ -191,16 +208,6 @@ class VM
       when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
-      when :NOT then process_not(reg_idx, ins, frame);
-      when :CALL_NATIVE then process_call_native(reg_idx, ins, frame);
-      # TODO: Replace this with std wrapper to CALL_NATIVE
-      when :GET_INDEX then process_get_index(reg_idx, ins, frame);
-      when :GET_FIELD then process_get_field(reg_idx, ins, frame);
-      when :ASSERT then process_assert(reg_idx, ins, frame);
-      when :THROW then process_throw(reg_idx, ins, frame);
-      when :THROW_IF_ERROR then process_throw_if_error(reg_idx, ins, frame);
-      when :NEW_SLICE then process_new_slice(reg_idx, ins, frame);
-      when :TAKE_REF then process_take_ref(reg_idx ins, frame);
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
@@ -639,42 +646,23 @@ class VM
     frame.registers[target] = result
   end
 
-  def process_not(reg_idx, ins, frame)
-    # NOT Rtarget, Rsrc
-    target = reg_idx[ins[1]]
-    src = reg_idx[ins[2]]
-    val = frame.registers[src]
-
-    # 1. Determine Truthiness (Simulate System Logic)
-    #    In NanBoxing: nil and false have specific bit patterns. Everything else is true.
-    is_falsey = Value.is_nil?(val) || (Value.is_bool?(val) && Value.as_bool(val) == false)
-
-    # 2. Invert
-    result_bool = is_falsey # If it was falsey, NOT makes it true.
-
-    # 3. Box Result
-    frame.registers[target] = Value.box_bool(result_bool)
+  def process_not(target_reg, args, frame)
+    boxed_val = args[0]
+    is_falsey = Value.is_falsey?(boxed_val)
+    Value.box_bool(is_falsey)
   end
 
-  def process_call_native(reg_idx, ins, frame)
-    # CALL_NATIVE R_result, "ClassName", "method_name", R_arg1, ...
-    target_reg = reg_idx[ins[1]]
-    class_name = ins[2]
-    method_name = ins[3]
-    arg_regs   = ins[4..-1].map { |r| reg_idx[r] }
+  def process_call_native(target_reg, args, frame)
+    class_name = args[0]
+    method_name = args[1]
+    func_args = args[2..-1] # The rest are boxed values from registers
 
-    # 1. Collect Arguments
-    args = arg_regs.map { |r| frame.registers[r] }
-
-    # 2. Find the Ruby Class (Security Risk in prod, fun for dev!)
+    # 1. Find the Ruby Class (Security Risk in prod, fun for dev!)
     # Object.const_get("File") returns the actual Ruby File class
     ruby_class = Object.const_get(class_name)
 
-    # 3. Call the method via Ruby reflection
-    result = ruby_class.send(method_name, *args)
-
-    # 4. Store result
-    frame.registers[target_reg] = result
+    # 2. Call the method via Ruby reflection
+    return ruby_class.send(method_name, *func_args)
   end
 
   def process_print(target_reg, args, frame)
@@ -716,14 +704,7 @@ class VM
     boxed_val = args[0]
     target_ip = args[1]
 
-    # Check Truthiness (NaN Box Style)
-    tag = Value.get_tag(boxed_val)
-
-    # Falsey = NIL or BOOL(false)
-    is_falsey = (tag == Value::TAG_NIL) ||
-                (tag == Value::TAG_BOOL && Value.as_bool(boxed_val) == false)
-
-    if is_falsey
+    if Value.is_falsey?(boxed_val)
       frame.ip = target_ip
     end
 
@@ -734,18 +715,10 @@ class VM
     boxed_val = args[0]
     target_ip = args[1]
 
-    # Check Truthiness
-    tag = Value.get_tag(boxed_val)
-    is_falsey = (tag == Value::TAG_NIL) ||
-                (tag == Value::TAG_BOOL && Value.as_bool(boxed_val) == false)
+    return nil if is_error?(boxed_val)
+    return nil if Value.is_falsey?(boxed_val)
 
-    # Check Error (Errors act as False in OR chains)
-    is_err = is_error?(boxed_val)
-
-    # Jump if Truthy AND Not Error
-    if !is_falsey && !is_err
-      frame.ip = target_ip
-    end
+    frame.ip = target_ip
 
     nil
   end
@@ -773,35 +746,25 @@ class VM
   end
 
 
-  def process_get_index(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    list_reg = reg_idx[ins[2]]
-    idx_reg = reg_idx[ins[3]]
+  def process_get_index(target_reg, args, frame)
+    boxed_list  = args[0]
+    boxed_index = args[1]
 
-    # 1. Unbox (Do not Deref)
-    boxed_list = frame.registers[list_reg]
     list = Value.as_obj(boxed_list) # FluxArray, FluxString, OR FluxView
 
-    # 2. Unbox Index
-    boxed_idx = frame.registers[idx_reg]
-
-    idx_val = 0
-    if Value.get_tag(boxed_idx) == Value::TAG_NUMBER
-      idx_val = Value.as_number(boxed_idx).to_i
-    else
-      idx_val = Value.as_byte(boxed_idx)
-    end
+    tag = Value.get_tag(boxed_index)
+    idx_val = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
 
     # 3. Access
     result = list[idx_val]
 
-    # 4. Box Result
-    # If list is String or StringView, result is a raw String char -> Box it
-    # If list is Array or ArrayView, result is already a Boxed Value -> Keep it
-    if list.is_a?(FluxString) || (list.is_a?(FluxView) && list.owner.is_a?(FluxString))
-      frame.registers[target_reg] = Value.box_constant(result)
+   if list.is_a?(FluxString) || (list.is_a?(FluxView) && list.owner.is_a?(FluxString))
+      # TODO: Why is this special??
+      # Box the character string
+      Value.box_constant(result)
     else
-      frame.registers[target_reg] = result
+      # Already boxed
+      result
     end
   end
 
@@ -823,34 +786,28 @@ class VM
     nil
   end
 
-  def process_get_field(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    obj_reg = reg_idx[ins[2]]
-    field_name = ins[3].to_sym # This is a raw string from the bytecode
+  def process_get_field(target_reg, args, frame)
+    boxed_obj  = args[0]
+    field_name = args[1].to_sym
 
-    obj = resolve_val(frame.registers[obj_reg])
+    obj = resolve_val(boxed_obj)
 
-    # Determine how to read the field based on the object type
-    if obj.is_a?(FluxHash)
-      # For Structs/Maps implemented as Ruby Hashes
-      frame.registers[target_reg] = obj[field_name] || obj[field_name.to_sym]
-    else
+    if !obj.is_a?(FluxHash)
       raise "Runtime Error: Cannot get field '#{field_name}' from #{obj.class}"
     end
+
+    obj[field_name]
   end
 
-  def process_assert(reg_idx, ins, frame)
-    # ASSERT R_cond, K_message
-    cond_reg = reg_idx[ins[1]]
-    k_idx    = ins[2][1..-1].to_i
+  def process_assert(target_reg, args, frame)
+    boxed_cond = args[0]
+    msg = args[1]
 
-    val = frame.registers[cond_reg]
-    msg = frame.chunk.constants[k_idx]
-
-    # Use standard Ruby truthiness (false/nil fail)
-    if val == false || val.nil?
+    if Value.is_falsey?(boxed_con)
       raise "🛑 ASSERTION FAILED: #{msg}"
     end
+
+    nil
   end
 
   def process_exit_program(target_idx, args, frame)
@@ -881,55 +838,47 @@ class VM
     nil
   end
 
-  def process_take_ref(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
-    src = reg_idx[ins[2]]
-
-    val = frame.registers[src]
-
-    # Create the View
-    frame.registers[target] = FluxPtr.new(val)
+  def process_take_ref(target_reg, args, frame)
+    boxed_val = args[0]
+    ptr = FluxPtr.new(boxed_val)
+    Value.box_obj(ptr)
   end
 
-  def process_new_slice(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    owner_boxed = frame.registers[reg_idx[ins[2]]]
+  def process_new_slice(target_reg, args, frame)
+    boxed_owner = args[0]
+    boxed_start = args[1]
+    boxed_end = args[2]
 
-    s_idx = Value.unbox(frame.registers[reg_idx[ins[3]]]).to_i
-    e_idx = Value.unbox(frame.registers[reg_idx[ins[4]]]).to_i
+    s_idx = Value.unbox(boxed_start).to_i
+    e_idx = Value.unbox(boxed_end).to_i
 
     # Unbox, don't deref.
     # If owner_obj is a FluxView, the new FluxView will wrap it (View of View).
-    owner_obj = Value.as_obj(owner_boxed)
+    owner_obj = Value.as_obj(boxed_owner)
 
     len = e_idx - s_idx + 1
-
     if len < 0
       raise "Runtime Error: Invalid Slice range (End < Start)"
     end
 
     view = FluxView.new(owner_obj, s_idx, len)
-    frame.registers[target_reg] = Value.box_obj(view)
+    Value.box_obj(view)
   end
 
-  def process_throw(reg_idx, ins, frame)
-    r_msg = reg_idx[ins[1]]
-    error_obj = frame.registers[r_msg]
-
-    # Pass control to the unwinding mechanism
-    raise_error(error_obj)
+  def process_throw(target_reg, args, frame)
+    boxed_err = args[0]
+    raise_error(boxed_err)
+    nil
   end
 
-  def process_throw_if_error(reg_idx, ins, frame)
-    # THROW_IF_ERROR R_val
-    val_reg = reg_idx[ins[1]]
-    val = frame.registers[val_reg]
+  def process_throw_if_error(target_reg, args, frame)
+    boxed_val = args[0]
 
-    # Check if it is an Error Struct
-    if is_error?(val)
-      # Stop execution and unwind to the nearest CATCH
-      raise_error(val)
+    if is_error?(boxed_val)
+      raise_error(boxed_val)
     end
+
+    nil
   end
 
   # Helper to run a chunk synchronously and return its result

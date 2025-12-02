@@ -5,6 +5,8 @@ module OpCodes
   T_CONST = :const  # Constant Index          - e.g. "K0"
   T_STR   = :str    # Arbitrary String        - e.g. "main"
   T_RAW   = :raw    # Ruby Native Type        - e.g. {x: Integer} - for def struct
+  T_UINT  = :uint   # Raw Integer             - e.g. 25 - Jump Target
+  T_REST  = :rest   # Remaining raw args      - e.g. like splatting, for native_call
 
   DEFINITIONS = {
     # OPCODE      # PARAMS
@@ -22,5 +24,19 @@ module OpCodes
     PRINT:        [T_REG_R],
     FREEZE:       [T_REG_R],
     EXIT_PROGRAM: [T_REG_R],
+    JMP:          [T_UINT],
+    JMP_FALSE:    [T_REG_R, T_UINT],
+    JMP_TRUE:     [T_REG_R, T_UINT],
+    JMP_IF_ERROR: [T_REG_R, T_UINT],
+    JMP_IF_OK:    [T_REG_R, T_UINT],
+    GET_INDEX:    [T_REG_W, T_REG_R, T_REG_R],
+    GET_FIELD:    [T_REG_W, T_REG_R, T_STR],
+    ASSERT:       [T_REG_R, T_CONST],
+    THROW:        [T_REG_R],
+    THROW_IF_ERROR: [T_REG_R],
+    NOT:          [T_REG_W, T_REG_R],
+    CALL_NATIVE:  [T_REG_W, T_STR, T_STR, T_REST],
+    NEW_SLICE:    [T_REG_W, T_REG_R, T_REG_R, T_REG_R],
+    TAKE_REF:     [T_REG_W, T_REG_R],
   }
 end
