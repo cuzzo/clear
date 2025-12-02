@@ -212,7 +212,6 @@ class VM
       # 4. Execute (The Big Switch)
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
-      when :ADD then process_add(reg_idx, ins, frame);
       end
 
       debug_instruction(ins, frame)
@@ -469,10 +468,9 @@ class VM
     return invoke_function(func_obj, args, frame)
   end
 
-  def process_add(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
-    val_a = frame.registers[reg_idx[ins[2]]]
-    val_b = frame.registers[reg_idx[ins[3]]]
+  def process_add(target_reg, args, frame)
+    val_a = args[0]
+    val_b = args[1]
 
     tag_a = Value.get_tag(val_a)
     tag_b = Value.get_tag(val_b)
@@ -535,7 +533,7 @@ class VM
         raise "Runtime Error: Invalid operands for ADD: [#{tag_a}, #{tag_b}]"
       end
 
-    frame.registers[target] = result
+    result
   end
 
   def process_sendable_symbol(target_reg, args, frame, opcode)
