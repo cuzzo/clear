@@ -41,6 +41,10 @@ class VM
       when OpCodes::T_REG_W
         # For Write, return the INDEX (integer)
         operand[1..-1].to_i
+      when OpCodes::T_REG_R
+        # Read: Return the BOXED VALUE from the register (e.g. 0xFFFF000000...)
+        idx = operand[1..-1].to_i
+        frame.registers[idx]
       when OpCodes::T_CONST
         # For Const, return the ACTUAL VALUE from the chunk
         idx = operand[1..-1].to_i
@@ -165,7 +169,7 @@ class VM
         if signature && signature.first == OpCodes::T_REG_W
           target_reg = args.shift # Remove target from the list passed to logic
         end
-        result = send("process_#{opcode.to_s.downcase}", target_reg, args, frame)
+        result = send("process_#{opcode.to_s.downcase}", args, frame)
         if result == UNWIND_SIGNAL || result == EXIT_SIGNAL
           return result
         end
@@ -176,7 +180,6 @@ class VM
 
       # 4. Execute (The Big Switch)
       case opcode
-      when :MOVE then process_move(reg_idx, ins, frame);
       when :NEW_HASH then process_new_hash(reg_idx, ins, frame);
       when :NEW_STRUCT then process_new_struct(reg_idx, ins, frame);
       when :SET_FIELD then process_set_field(reg_idx, ins, frame);
@@ -253,14 +256,12 @@ class VM
     $logger.debug("--- MERMAID GRAPH END ---")
   end
 
-  def process_loadk(target_reg, args, frame)
+  def process_loadk(args, frame)
     Value.box_constant(args[0])
   end
 
-  def process_move(reg_idx, ins, frame)
-    dest = reg_idx[ins[1]]
-    src = reg_idx[ins[2]]
-    frame.registers[dest] = frame.registers[src]
+  def process_move(args, frame)
+    args[0]
   end
 
   def process_new_hash(reg_idx, ins, frame)
