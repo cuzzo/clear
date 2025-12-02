@@ -202,7 +202,7 @@ class VM
       # 4. Execute (The Big Switch)
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
-      when :CLOSURE then process_closure(reg_idx, ins, frame);
+      when :NEW_CLOSURE then process_new_closure(reg_idx, ins, frame);
       when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
       when :CALL_METHOD then process_call_method(reg_idx, ins, frame);
       when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
@@ -399,7 +399,7 @@ class VM
     nil
   end
 
-  def process_closure(reg_idx, ins, frame)
+  def process_new_closure(reg_idx, ins, frame)
     # CLOSURE Rtarget, Kfunc_chunk, Rcapture1, Rcapture2...
     target = reg_idx[ins[1]]
     k_idx = ins[2][1..-1].to_i

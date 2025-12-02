@@ -414,7 +414,7 @@ RSpec.describe VM do
       # Logic: Just calls Fail(). Has NO Handler info.
       # If the VM crashes here, it means it can't handle frames without handlers.
       chunk_mid = make_chunk("Middle", [
-        [:CLOSURE, "R0", "K0"],      # Load 'Fail' chunk
+        [:NEW_CLOSURE, "R0", "K0"],      # Load 'Fail' chunk
         [:CALL_CLOSURE, "R0", "Fail", 0], # Call it
         [:RETURN, "R0"]
       ], [chunk_fail])
@@ -422,7 +422,7 @@ RSpec.describe VM do
       # --- 3. The Main Function (The Catcher) ---
       # Logic: Calls Middle(). Has a Handler that returns "Recovered".
       chunk_main = make_chunk("Main", [
-        [:CLOSURE, "R0", "K0"],        # Load 'Middle' chunk
+        [:NEW_CLOSURE, "R0", "K0"],        # Load 'Middle' chunk
         [:CALL_CLOSURE, "R0", "Middle", 0], # Call it (It will blow up)
         [:RETURN, "R0"],               # (Should trigger Handler)
         # --- HANDLER CODE AT IP: 3 ---
@@ -472,7 +472,7 @@ RSpec.describe VM do
       ], [99])
 
       chunk_main = make_chunk("Main", [
-        [:CLOSURE, "R0", "K0"],         # Load Inner
+        [:NEW_CLOSURE, "R0", "K0"],         # Load Inner
         [:CALL_CLOSURE, "R0", "R0", 0], # Call Inner -> Result in R0
         [:RETURN, "R0"]                 # Return result
       ], [chunk_inner])
@@ -503,7 +503,7 @@ RSpec.describe VM do
       chunk_main = make_chunk("Main", [
         [:LOADK,   "R5", "K0"], # 10
         [:LOADK,   "R6", "K1"], # 20
-        [:CLOSURE, "R7", "K2"], # Adder Code
+        [:NEW_CLOSURE, "R7", "K2"], # Adder Code
 
         # This is the critical line:
         # Target: R0
@@ -541,7 +541,7 @@ RSpec.describe VM do
         [:LOADK, "R2", "K1"], [:APPEND, "R1", "R2"], # Add 2
         [:LOADK, "R2", "K2"], [:APPEND, "R1", "R2"], # Add 3
 
-        [:CLOSURE, "R2", "K3"], # Load Callback
+        [:NEW_CLOSURE, "R2", "K3"], # Load Callback
 
         # Call .map on the list
         [:CALL_METHOD, "R0", "R1", "map", "R2"],
@@ -949,7 +949,7 @@ RSpec.describe VM do
       # Args: base (R0)
       # Logic: Create closure capturing R0, return it.
       chunk_gen = make_chunk("Generator", [
-        [:CLOSURE, "R1", "K0", "R0"], # Create Inner, capture 'base' (R0)
+        [:NEW_CLOSURE, "R1", "K0", "R0"], # Create Inner, capture 'base' (R0)
         [:RETURN, "R1"]               # Return the closure
       ], [chunk_inner])
 

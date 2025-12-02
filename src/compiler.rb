@@ -1410,7 +1410,7 @@ class Compiler
 
   def emit_closure(node, target_reg, fn_chunk, captured_args)
     k_idx = @chunk.add_constant(fn_chunk)
-    @chunk.emit(node, :CLOSURE, "R#{target_reg}", "K#{k_idx}", *captured_args)
+    @chunk.emit(node, :NEW_CLOSURE, "R#{target_reg}", "K#{k_idx}", *captured_args)
   end
 
 private

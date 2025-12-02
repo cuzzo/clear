@@ -454,8 +454,8 @@ RSpec.describe Compiler do
       outer_reg = def_op[2] # e.g. "R0"
 
       # 2. Find the CLOSURE instruction
-      # Format: [:CLOSURE, TargetReg, ChunkConst, Capture1, Capture2...]
-      closure_op = ops.find { |op| op[0] == :CLOSURE }
+      # Format: [:NEW_CLOSURE, TargetReg, ChunkConst, Capture1, Capture2...]
+      closure_op = ops.find { |op| op[0] == :NEW_CLOSURE }
 
       expect(closure_op).to_not be_nil
 
