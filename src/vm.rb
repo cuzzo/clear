@@ -189,7 +189,6 @@ class VM
 
       # 3. Decode
       opcode = ins[0]
-      reg_idx = ->(r) { r[1..-1].to_i }
 
       if OpCodes::DEFINITIONS.include?(opcode)
         signature = OpCodes::DEFINITIONS[opcode]
@@ -207,11 +206,6 @@ class VM
         elsif target_reg
           frame.registers[target_reg] = result
         end
-      end
-
-      # 4. Execute (The Big Switch)
-      case opcode
-      when :CAST then process_cast(reg_idx, ins, frame);
       end
 
       debug_instruction(ins, frame)
@@ -315,64 +309,46 @@ class VM
     nil
   end
 
-  def process_cast(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    type_name = ins[2].to_sym
+  def process_cast(target_reg, args, frame)
+    type_name = args[0].to_sym
+
+    # 1. Read Input (In-place operation)
     val_boxed = frame.registers[target_reg]
     tag = Value.get_tag(val_boxed)
 
     if type_name == :String
       str = Value.unbox(val_boxed).to_s
-      frame.registers[target_reg] = Value.box_obj(FluxString.new(str))
-      return
+      return Value.box_obj(FluxString.new(str))
 
     elsif type_name == :Number
       if tag == Value::TAG_BYTE
+        # Promote Byte -> Number (Float)
         raw = Value.as_byte(val_boxed)
-        frame.registers[target_reg] = Value.box_number(raw)
-        return
+        return Value.box_number(raw)
       elsif tag == Value::TAG_NUMBER
-        return
+        return val_boxed # Already a Number
       end
       raise "Cast Error: Cannot cast #{tag} to Number"
 
     elsif type_name == :Byte
       if tag == Value::TAG_NUMBER
+        # Demote Number -> Byte (Truncate)
         raw = Value.as_number(val_boxed)
-        frame.registers[target_reg] = Value.box_byte(raw.to_i)
-        return
+        return Value.box_byte(raw.to_i)
       elsif tag == Value::TAG_BYTE
-        return
+        return val_boxed # Already a Byte
       end
       raise "Cast Error: Cannot cast #{tag} to Byte"
 
     elsif type_name == :Bool
-      raise "Cast Error" unless tag == Value::TAG_BOOL
-      return
+      if tag == Value::TAG_BOOL
+        return val_boxed
+      end
+      raise "Cast Error: Cannot cast #{tag} to Bool"
 
     elsif type_name.to_s.include?("[")
-      if tag == Value::TAG_OBJ
-         list_obj = Value.as_obj(val_boxed)
-         match = type_name.to_s.match(/^(\w+)\[(.*)\]$/)
+      return process_array_cast(val_boxed, type_name, tag)
 
-         if match
-           constraint = match[2]
-           if constraint =~ /^\d+$/
-             limit = constraint.to_i
-             if list_obj.size > limit
-               raise "Runtime Error: Array too large for fixed size #{limit}"
-             end
-             new_arr = FluxArray.new(limit, list_obj.data)
-             frame.registers[target_reg] = Value.box_obj(new_arr)
-             return
-           elsif constraint == "*"
-             new_arr = FluxArray.new(list_obj.size, list_obj.data)
-             frame.registers[target_reg] = Value.box_obj(new_arr)
-             return
-           end
-         end
-         return
-      end
 
     elsif @structs.key?(type_name)
       unless check_type(val_boxed, type_name, @structs)
@@ -380,6 +356,27 @@ class VM
       end
     else
       raise "Runtime Error: Unknown Type '#{type_name}'"
+    end
+  end
+
+  def process_array_cast(val_boxed, type_name, tag)
+    raise "ARRAY CAST ERROR" if tag != Value::TAG_OBJ
+    list_obj = Value.as_obj(val_boxed)
+    match = type_name.to_s.match(/^(\w+)\[(.*)\]$/)
+
+    raise "UNKNOWN ARRAY TYPE" if match.nil?
+
+    constraint = match[2]
+    if constraint =~ /^\d+$/
+      limit = constraint.to_i
+      if list_obj.size > limit
+        raise "Runtime Error: Array too large for fixed size #{limit}"
+      end
+      new_arr = FluxArray.new(limit, list_obj.data)
+      return Value.box_obj(new_arr)
+    elsif constraint == "*"
+      new_arr = FluxArray.new(list_obj.size, list_obj.data)
+      return Value.box_obj(new_arr)
     end
   end
 

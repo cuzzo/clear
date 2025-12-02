@@ -45,7 +45,8 @@ module OpCodes
     CALL_METHOD:  [T_REG_W, T_REG_R, T_STR, T_REST],
     CALL_FUNC:    [T_REG_W, T_STR, T_UINT, T_REST],
     RETURN:       [T_REG_R],
-    ADD:          [T_REG_W, T_REG_R, T_REG_R]
+    ADD:          [T_REG_W, T_REG_R, T_REG_R],
+    CAST:         [T_REG_W, T_STR],
   }
 
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|
