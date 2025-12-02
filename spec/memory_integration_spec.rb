@@ -36,20 +36,20 @@ RSpec.describe "Memory Integration (Types <-> Value <-> Arena)" do
   end
 
 
-  it "correctly handles FluxPtr (View) registration and dereferencing" do
+  it "correctly handles FluxHeapPtr (View) registration and dereferencing" do
     # 1. Create Owner
     owner = FluxString.new("Owner Data")
 
     # 2. Create Pointer
     # This should register the Pointer object in the Arena
-    ptr = FluxPtr.new(owner)
+    ptr = FluxHeapPtr.new(owner)
 
     # 3. Box the Pointer (simulating TAKE_REF result in register)
     boxed_ptr = Value.box_obj(ptr)
 
     # 4. Unbox the Pointer
     unboxed_ptr = Value.as_obj(boxed_ptr)
-    expect(unboxed_ptr).to be_a(FluxPtr)
+    expect(unboxed_ptr).to be_a(FluxHeapPtr)
     expect(unboxed_ptr).to eq(ptr)
 
     # 5. Dereference

@@ -44,14 +44,17 @@ class FluxObject
 end
 
 class FluxStackPtr < FluxObject
-  attr_reader :offset, :size
+  attr_reader :offset, :size, :container, :struct_type
 
-  def initialize(offset, size)
+  def initialize(offset, size, container, struct_type = nil)
     # Note: We don't register this in the Arena.
     # It is a temporary value that lives in a Register.
-    super(register: false)
+    # TODO: Fast said to register it, this seems wrong.
+    super(register: true)
     @offset = offset
     @size = size
+    @container = container
+    @struct_type = struct_type
   end
 
   def to_s; "StackPtr(#{@offset})"; end
@@ -381,7 +384,7 @@ class FluxView < FluxObject
   def inspect; to_s; end
 end
 
-class FluxPtr < FluxObject
+class FluxHeapPtr < FluxObject
   attr_reader :owner
 
   def initialize(owner)

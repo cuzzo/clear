@@ -221,6 +221,7 @@ class Compiler
   def current_scope; @scopes.last; end
   def with_temp_reg; r = @reg_top; @reg_top += 1; yield r; @reg_top -= 1; end
 
+  # Give me the value of THIS expression now (for THIS node), and put it here (target_reg)
   def visit(node, target_reg = nil, auto_throw_pipe: true)
     case node
     when AST::VarDecl then compile_var_declare(node, target_reg);
@@ -622,47 +623,12 @@ class Compiler
     @reg_top -= real_args_regs.size
   end
 
-  def implicit_deref_coerce_arg(arg, r, signature_param, local_reg)
-    # Due to reasons, we cannot pass structs for local registered functions (and methods)
-    return visit(arg, r) if !local_reg.nil?
-
-    # Determine types
-    expected_type = signature_param ? signature_param[:type] : :Any
-    actual_type = infer_type(arg) # e.g., :Point
-
-    # LOGIC: If Function expects a Reference, but we have an Owner -> Take Ref
-    # You need a helper is_struct_type? (checks @struct_defs)
-    # You need to decide if :Any should auto-ref (usually unsafe) or copy.
-
-    # If signature explicitly asks for a Pointer/View...
-    # (Assuming you name your pointers like :PointPtr or have a flag)
-    # For now, let's assume if it expects :Any, we pass by value.
-    # If you implement strong View types, check that here.
-
-    # SIMPLE VIEW-FIRST STRATEGY:
-    # If it's a struct owner, and we are passing it to a function,
-    # we usually want to pass by reference unless forced otherwise.
-    return visit(arg, r) if !@struct_defs.key?(actual_type.to_s)
-
-    # A. Emit the Argument Expression into a temp register
-    with_temp_reg do |r_val|
-      visit(arg, r_val)
-
-      # B. Create the Pointer (View)
-      @chunk.emit(node, :TAKE_REF, "R#{r}", "R#{r_val}")
-
-      # C. Safety: Register Dependency
-      if arg.is_a?(AST::Identifier)
-        current_scope.register_dependency(arg.name, "implicit_ref_#{r}")
-      end
-    end
-  end
-
   def compile_args(args, signature_params = [], local_reg = nil)
     args.each_with_index.map do |arg, arg_idx|
       r = @reg_top
       @reg_top += 1
-      implicit_deref_coerce_arg(arg, r, signature_params[arg_idx], local_reg)
+      visit(arg, r)
+      #implicit_deref_coerce_arg(arg, r, signature_params[arg_idx], local_reg)
       "R#{r}"
     end
   end
@@ -670,22 +636,32 @@ class Compiler
   def compile_var_declare(node, target_reg)
     r = @reg_top;
     @reg_top += 1
-    visit(node.value, r)
 
-    final_type = coerced_type(node, r)
-    handle_deep_freeze(node, r) # Run-time, probably not necessary
+    # If Struct -> ALLOCA, MOVE (Stack)
+    if node.value.is_a?(AST::StructLit)
+      struct_name = node.value.name
+      raise "ERROR: Struct not found" if !@struct_defs.key?(struct_name)
+      # TODO: determine if needs to be frozen, and why not.
+      with_temp_reg do |r_heap_temp|
+        visit(node.value, r_heap_temp)
+        # Allocate space on the stack
+        @chunk.emit(node, :ALLOCA, "R#{r}", struct_name)
+        # MOVE the Heap object to the stack - TODO: streamline
+        @chunk.emit(node, :MOVE_STRUCT, "R#{r}", "R#{r_heap_temp}")
+      end
+      final_type = struct_name.to_sym
+    # Otherwise -> VISIT
+    else
+      visit(node.value, r)
+      if @scope_depth == 0
+        @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{r}")
+      end
+      final_type = coerced_type(node, r)
+      handle_deep_freeze(node, r) # Run-time, probably not necessary
+    end
+
     known_size = get_known_size(node)
     handle_view(node)
-
-    if @scope_depth == 0
-      # CASE A: GLOBAL
-      # We must explicitly tell the VM to save this register into the Global Map.
-      @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{r}")
-    else
-      # CASE B: LOCAL
-      # We do NOTHING.
-      # The value is already sitting in Register 'r'.
-    end
 
     current_scope.declare(node.name, r, final_type, node.mutable, known_size)
     return r

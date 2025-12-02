@@ -217,7 +217,7 @@ module Value
     obj = Value.as_obj(boxed_val)
 
     # 3. Recursively Deref (View/Pointer -> Owner)
-    while obj.is_a?(FluxView) || obj.is_a?(FluxPtr)
+    while obj.is_a?(FluxView) || obj.is_a?(FluxHeapPtr)
       obj = obj.deref
     end
 

@@ -56,7 +56,7 @@ class MemoryVisualizer
           target_id = obj_map[val.object_id]
           if target_id
             # Dotted for Views, Solid for Owners
-            arrow = (val.is_a?(FluxView) || val.is_a?(FluxPtr)) ? "-.->" : "-->"
+            arrow = (val.is_a?(FluxView) || val.is_a?(FluxStackPtr)) ? "-.->" : "-->"
             lines << "    #{reg_node} #{arrow} #{target_id}"
           elsif val.is_a?(FluxObject)
              # Object is in register but NOT in Arena? (Maybe a constant?)

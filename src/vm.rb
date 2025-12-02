@@ -127,7 +127,7 @@ class VM
         idx = operand[1..].to_i
         case operand[0]
           when "R", "K"
-            v = Value.resolve_val(registers[idx])
+            v = Value.resolve_val(registers[idx]) rescue Value.resolve_val(@stack_blob[idx])
             reg_debug_str(operand.start_with?("R") ? v : @chunk.constants[idx])
           else
             operand # functions
@@ -285,7 +285,7 @@ class VM
        return [flux_obj, field_name]
 
     elsif flux_obj.is_a?(FluxArray) || flux_obj.is_a?(FluxStackPtr)
-      type_name = flux_obj.instance_variable_get(:@struct_type)
+      type_name = flux_obj.struct_type
       raise "Not a struct" unless type_name
 
       index = @struct_offsets[type_name][field_name]
@@ -295,7 +295,7 @@ class VM
 
       if flux_obj.is_a?(FluxStackPtr)
         index += flux_obj.offset
-        flux_obj = frame.stack_blob
+        flux_obj = flux_obj.container
       end
       return [flux_obj, index]
     end
@@ -822,7 +822,7 @@ class VM
 
   def process_take_ref(target_reg, args, frame)
     boxed_val = args[0]
-    ptr = FluxPtr.new(boxed_val)
+    ptr = FluxHeapPtr.new(boxed_val)
     Value.box_obj(ptr)
   end
 
@@ -866,21 +866,45 @@ class VM
   def process_alloca(target_reg, args, frame)
     struct_name = args[0].to_sym
 
-    # 1. Calculate Size
     schema = @structs[struct_name]
     size = schema.keys.size
 
-    # 2. Reserve space in the Stack Blob (Bump Pointer)
     offset = frame.alloca(size)
 
-    # 3. Create a Pointer to this location
-    ptr = FluxStackPtr.new(offset, size)
+    ptr = FluxStackPtr.new(offset, size, frame.stack_blob, struct_name)
 
-    # 4. We must "Tag" the pointer with the type so SET_FIELD knows the schema
-    ptr.instance_variable_set(:@struct_type, struct_name)
-
-    # 5. Store Pointer in Register
     Value.box_obj(ptr)
+  end
+
+  # TODO: Eventually, I should be able to write directly to heap
+  def process_move_struct(target_reg, args, frame)
+    boxed_dest_ptr = args[0]
+    boxed_src_obj = args[1]
+
+    dest_ptr = Value.as_obj(boxed_dest_ptr)
+    src_obj = Value.resolve_val(boxed_src_obj)
+
+    raise "Type Error: Dest must be StackPtr" unless dest_ptr.is_a?(FluxStackPtr)
+    raise "Type Error: Src must be FluxArray" unless src_obj.is_a?(FluxArray)
+
+    # Ensure sizes match
+    raise "Size mismatch" unless dest_ptr.size * 8 == src_obj.size
+
+    # Copy word by word (since both are :nanbox arrays)
+    # We know the size is in 64-bit words/slots (dest_ptr.size)
+    dest_container = frame.stack_blob
+    src_container = src_obj
+
+    dest_size = dest_ptr.size
+    dest_offset = dest_ptr.offset
+
+    # Loop copy from Heap[i] to Stack[offset + i]
+    dest_size.times do |i|
+      word = src_container[i]
+      dest_container[dest_offset + i] = word
+    end
+
+    nil
   end
 
   # Helper to run a function and handle the signal/unwind logic safely
