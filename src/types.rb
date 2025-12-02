@@ -43,6 +43,20 @@ class FluxObject
   end
 end
 
+class FluxStackPtr < FluxObject
+  attr_reader :offset, :size
+
+  def initialize(offset, size)
+    # Note: We don't register this in the Arena.
+    # It is a temporary value that lives in a Register.
+    super(register: false)
+    @offset = offset
+    @size = size
+  end
+
+  def to_s; "StackPtr(#{@offset})"; end
+end
+
 ###
 # PRIMITIVE TYPES - PASS BY VALUE - NO ARENA
 ##

@@ -88,11 +88,31 @@ class VM
   # A "Stack Frame" represents a running function
   class Frame
     attr_accessor :chunk, :ip, :registers, :arena_mark
+    attr_reader :stack_blob, :stack_pointer
+
     def initialize(chunk, arena_mark = 0) # Default 0 for main
       @chunk = chunk
       @ip = 0
       @registers = Array.new(256) # The 256 Registers
       @arena_mark = arena_mark
+
+      # Eventually, @stack_blob will take over @registers
+      # Items are either on the Heap (Arena) or the Stack
+      # For now -> the stack is EITHER @registers OR @stack_blob.
+      #
+      # @stack_blob is a 1KB binary scratchpad for this function execution.
+      # We use :nanbox mode so we can store Pointers and Numbers mixed.
+      @stack_blob = FluxArray.new(1024, nil, type: :nanbox, register: false)
+      @stack_pointer = 0
+    end
+
+    def alloca(size)
+      addr = @stack_pointer
+      @stack_pointer += size
+      if @stack_pointer > @stack_blob.max_size
+        raise "Stack Overflow: Frame scratchpad exceeded"
+      end
+      addr
     end
 
     def debug_str(ins)
@@ -260,21 +280,27 @@ class VM
     Value.box_obj(obj)
   end
 
-  def get_field_index(flux_obj, field_name)
+  def get_field_and_obj(flux_obj, field_name, frame)
     if flux_obj.is_a?(FluxHash)
-       return field_name
-    elsif flux_obj.is_a?(FluxArray)
+       return [flux_obj, field_name]
+
+    elsif flux_obj.is_a?(FluxArray) || flux_obj.is_a?(FluxStackPtr)
       type_name = flux_obj.instance_variable_get(:@struct_type)
       raise "Not a struct" unless type_name
-      index = @struct_offsets[type_name][field_name]
 
+      index = @struct_offsets[type_name][field_name]
       if index.nil?
         raise "Runtime Error: Cannot get field `#{key}` on `#{target_obj.class}`"
       end
-      return index
-    else
-      raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
+
+      if flux_obj.is_a?(FluxStackPtr)
+        index += flux_obj.offset
+        flux_obj = frame.stack_blob
+      end
+      return [flux_obj, index]
     end
+
+    raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
   end
 
   def process_set_field(target_reg, args, frame)
@@ -287,7 +313,7 @@ class VM
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    index = get_field_index(target_obj, key)
+    target_obj, index = get_field_and_obj(target_obj, key, frame)
     target_obj[index] = val_boxed
 
     nil
@@ -751,7 +777,7 @@ class VM
     key = args[1].to_sym
 
     target_obj = Value.resolve_val(boxed_obj)
-    index = get_field_index(target_obj, key)
+    target_obj, index = get_field_and_obj(target_obj, key, frame)
     target_obj[index]
   end
 
@@ -835,6 +861,26 @@ class VM
     end
 
     nil
+  end
+
+  def process_alloca(target_reg, args, frame)
+    struct_name = args[0].to_sym
+
+    # 1. Calculate Size
+    schema = @structs[struct_name]
+    size = schema.keys.size
+
+    # 2. Reserve space in the Stack Blob (Bump Pointer)
+    offset = frame.alloca(size)
+
+    # 3. Create a Pointer to this location
+    ptr = FluxStackPtr.new(offset, size)
+
+    # 4. We must "Tag" the pointer with the type so SET_FIELD knows the schema
+    ptr.instance_variable_set(:@struct_type, struct_name)
+
+    # 5. Store Pointer in Register
+    Value.box_obj(ptr)
   end
 
   # Helper to run a function and handle the signal/unwind logic safely
