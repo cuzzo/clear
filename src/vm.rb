@@ -203,7 +203,6 @@ class VM
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
       when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
-      when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
 
@@ -474,22 +473,20 @@ class VM
     raise "Runtime Error: Unknown method '#{method_name}' on #{obj.class}"
   end
 
-  def process_call_closure(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    closure_reg = reg_idx[ins[2]]
-    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
-    args = arg_regs.map { |r| frame.registers[r] }
+  def process_call_closure(target_reg, args, frame)
+    boxed_closure = args.shift()
+    arity = args.shift()
 
-    boxed_func = frame.registers[closure_reg]
-    func_obj = Value.as_obj(boxed_func)
+    func_obj = Value.as_obj(boxed_closure)
 
     unless func_obj.is_a?(FluxClosure)
       raise "Runtime Error: Value in R#{closure_reg} is not a Closure."
     end
 
+    # TODO: This seems wrong...
     result = execute_function(func_obj, args)
     return if result == UNWIND_SIGNAL
-    frame.registers[target_reg] = result
+    return result
   end
 
   def process_add(reg_idx, ins, frame)
