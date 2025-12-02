@@ -524,8 +524,9 @@ class Compiler
       # --- CASE A: Simple Name (e.g., "add", "myFunc") ---
       # Check if it is a Local Register or Global Name
       operand = local_reg ? "R#{local_reg}" : node.name
+      opcode = local_reg ? :CALL_CLOSURE : :CALL_FUNC
 
-      @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", operand, node.args.size, *arg_regs)
+      @chunk.emit(node, opcode, "R#{target_reg}", operand, node.args.size, *arg_regs)
     else
       # --- CASE B: Expression / Currying (e.g., "getFunc()(1)") ---
       # The target is an AST Node. We must compile it into a temp register first.
@@ -533,7 +534,7 @@ class Compiler
         visit(node.name, r_func) # Recurse: compiles the 'getFunc()' part
 
         # Now call the result stored in r_func
-        @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", "R#{r_func}", node.args.size, *arg_regs)
+        @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", "R#{r_func}", node.args.size, *arg_regs)
       end
     end
 

@@ -964,7 +964,7 @@ RSpec.describe VM do
         [:LOADK, "R3", "K1"],         # Load 1
         [:LOADK, "R4", "K2"],         # Load 2
         # CALL_FUNC with a Register operand ("R1") instead of a name
-        [:CALL_FUNC, "R0", "R1", 2, "R3", "R4"],
+        [:CALL_CLOSURE, "R0", "R1", 2, "R3", "R4"],
 
         [:RETURN, "R0"]
       ], [5, 1, 2, chunk_gen])

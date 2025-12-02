@@ -202,7 +202,6 @@ class VM
       # 4. Execute (The Big Switch)
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
-      when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
 
@@ -403,48 +402,29 @@ class VM
     Value.box_obj(closure)
   end
 
-  def process_call_func(reg_idx, ins, frame)
-    # Format: [:CALL_FUNC, "R_target", "Operand", argc, "R_arg1"...]
-    target_reg = reg_idx[ins[1]]
-    operand = ins[2] # Can be "print" (Global) OR "R4" (Register)
+  def process_call_func(target_reg, args, frame)
+    func_name = args.shift
+    arity = args.shift
 
-    # 1. Resolve Arguments
-    #    (Map directly from instruction -> register index -> value)
-    args = ins[4..-1].map { |r_str| frame.registers[reg_idx[r_str]] }
+    boxed_func = @globals[func_name]
 
-    # 2. Resolve Function
-    func = nil
+    func_obj = if boxed_func.is_a?(Compiler::Chunk)
+                 boxed_func
+               elsif boxed_func
+                 Value.as_obj(boxed_func)
+               else
+                 nil
+               end
 
-    if operand.start_with?("R")
-      # CASE A: Closure in a Register (e.g., "R4")
-      r = reg_idx[operand]
-      boxed_func = frame.registers[r]
-      # UNBOX
-      if Value.get_tag(boxed_func) == Value::TAG_OBJ
-        func = Value.as_obj(boxed_func)
-      end
-      raise "Runtime Error: Variable '#{operand}' is nil/not a function" if func.nil?
-    else
-      # CASE B: Global Name (e.g., "print", "cur")
-      boxed_func = @globals[operand]
-      if boxed_func.is_a?(Compiler::Chunk)
-        func = boxed_func
-      elsif boxed_func && Value.get_tag(boxed_func) == Value::TAG_OBJ
-        func = Value.as_obj(boxed_func)
-      end
-      raise "Runtime Error: Undefined function '#{operand}'" if func.nil?
+    if func_obj.nil?
+      raise "Runtime Error: Undefined function '#{func_name}'"
     end
 
     # 3. Execute
-    result = execute_function(func, args)
+    result = invoke_function(func_obj, args, frame)
     $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
 
-    # 4. Handle Unwinding (CRITICAL)
-    #    If the inner function threw an error/signal, propagate it up immediately.
-    return UNWIND_SIGNAL if result == UNWIND_SIGNAL
-
-    # 5. Store Result
-    frame.registers[target_reg] = result
+    return result
   end
 
   def process_call_method(target_reg, args, frame)
@@ -458,7 +438,7 @@ class VM
       closure_obj = Value.as_obj(boxed_closure)
 
       new_list = obj.map do |item_boxed|
-        execute_function(closure_obj, [item_boxed])
+        invoke_function(closure_obj, [item_boxed], frame) # TODO: What about errors?
       end
       result_obj = FluxArray.new(nil, new_list)
       return Value.box_obj(result_obj)
@@ -467,7 +447,7 @@ class VM
     elsif obj.is_a?(FluxHash) && obj.key?(method_name)
       func_boxed = obj[method_name]
       func_obj = Value.as_obj(func_boxed)
-      return execute_function(func_obj, args)
+      return invoke_function(func_obj, args, frame)
     end
 
     raise "Runtime Error: Unknown method '#{method_name}' on #{obj.class}"
@@ -483,10 +463,7 @@ class VM
       raise "Runtime Error: Value in R#{closure_reg} is not a Closure."
     end
 
-    # TODO: This seems wrong...
-    result = execute_function(func_obj, args)
-    return if result == UNWIND_SIGNAL
-    return result
+    return invoke_function(func_obj, args, frame)
   end
 
   def process_add(reg_idx, ins, frame)
@@ -849,6 +826,29 @@ class VM
     end
 
     nil
+  end
+
+  # Helper to run a function and handle the signal/unwind logic safely
+  def invoke_function(func_obj, args, caller_frame)
+    result = execute_function(func_obj, args)
+
+    # 1. Propagate Hard Exits (DIE)
+    return EXIT_SIGNAL if result == EXIT_SIGNAL
+
+    # 2. Handle Unwinding
+    if result == UNWIND_SIGNAL
+       # If the caller frame is still alive, the error was caught here.
+       # Swallow the signal and return nil.
+       if @frames.include?(caller_frame)
+         return nil
+       else
+         # Otherwise, the caller was popped. Keep unwinding.
+         return UNWIND_SIGNAL
+       end
+    end
+
+    # 3. Return Standard Result
+    result
   end
 
   # Helper to run a chunk synchronously and return its result

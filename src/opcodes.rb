@@ -41,5 +41,6 @@ module OpCodes
     NEW_CLOSURE:  [T_REG_W, T_CONST, T_REST],
     CALL_CLOSURE: [T_REG_W, T_REG_R, T_UINT, T_REST],
     CALL_METHOD:  [T_REG_W, T_REG_R, T_STR, T_REST],
+    CALL_FUNC:    [T_REG_W, T_STR, T_UINT, T_REST],
   }
 end
