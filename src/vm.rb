@@ -8,6 +8,7 @@ require_relative "compiler"
 require_relative "types"
 require_relative "memory_visualizer"
 require_relative "value"
+require_relative "opcodes"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -28,6 +29,26 @@ class VM
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
     @source_lines = code_str.lines
+  end
+
+  def decode_args(ins, frame)
+    opcode = ins[0]
+    signature = OpCodes::DEFINITIONS[opcode]
+
+    # Map raw operands (strings) to useful values based on the signature
+    ins[1..-1].map.with_index do |operand, i|
+      case signature[i]
+      when OpCodes::T_REG_W
+        # For Write, return the INDEX (integer)
+        operand[1..-1].to_i
+      when OpCodes::T_CONST
+        # For Const, return the ACTUAL VALUE from the chunk
+        idx = operand[1..-1].to_i
+        frame.chunk.constants[idx]
+      else
+        operand # Fallback
+      end
+    end
   end
 
   # A "Stack Frame" represents a running function
@@ -135,12 +156,26 @@ class VM
 
       # 3. Decode
       opcode = ins[0]
-      # Helper to get register index (e.g. "R2" -> 2)
       reg_idx = ->(r) { r[1..-1].to_i }
+
+      if OpCodes::DEFINITIONS.include?(opcode)
+        signature = OpCodes::DEFINITIONS[opcode]
+        args = decode_args(ins, frame)
+        target_reg = nil
+        if signature && signature.first == OpCodes::T_REG_W
+          target_reg = args.shift # Remove target from the list passed to logic
+        end
+        result = send("process_#{opcode.to_s.downcase}", target_reg, args, frame)
+        if result == UNWIND_SIGNAL || result == EXIT_SIGNAL
+          return result
+        end
+        if target_reg
+          frame.registers[target_reg] = result
+        end
+      end
 
       # 4. Execute (The Big Switch)
       case opcode
-      when :LOADK then process_loadk(reg_idx, ins, frame);
       when :MOVE then process_move(reg_idx, ins, frame);
       when :NEW_HASH then process_new_hash(reg_idx, ins, frame);
       when :NEW_STRUCT then process_new_struct(reg_idx, ins, frame);
@@ -218,12 +253,8 @@ class VM
     $logger.debug("--- MERMAID GRAPH END ---")
   end
 
-  def process_loadk(reg_idx, ins, frame)
-    # LOADK Rtarget, Kconst
-    target = reg_idx[ins[1]]
-    k_idx = ins[2][1..-1].to_i
-    val = frame.chunk.constants[k_idx]
-    frame.registers[target] = Value.box_constant(val)
+  def process_loadk(target_reg, args, frame)
+    Value.box_constant(args[0])
   end
 
   def process_move(reg_idx, ins, frame)

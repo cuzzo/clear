@@ -3,6 +3,7 @@ require 'byebug'
 
 require_relative "./ast"
 require_relative "./types"
+require_relative "./opcodes"
 
 # ==========================================
 # COMPILER
@@ -26,6 +27,12 @@ class Compiler
     end
 
     def emit(node, opcode, *operands)
+      signature = OpCodes::DEFINITIONS[opcode]
+      if signature
+        if operands.size != signature.size
+          raise "Compiler Error: #{opcode} expects #{signature.size} args, got #{operands.size}"
+        end
+      end
       line_number = node.nil? ? -1 : node.line
       @code << [opcode, *operands]
       @line_info << line_number
