@@ -203,7 +203,6 @@ class VM
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
       when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
-      when :CALL_METHOD then process_call_method(reg_idx, ins, frame);
       when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
       when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
@@ -449,18 +448,12 @@ class VM
     frame.registers[target_reg] = result
   end
 
-  def process_call_method(reg_idx, ins, frame)
-    res_reg = reg_idx[ins[1]]
-    obj_reg = reg_idx[ins[2]]
-    method_name = ins[3]
+  def process_call_method(target_reg, args, frame)
+    boxed_obj = args.shift()
+    method_name = args.shift()
 
-    arg_regs = ins[4..-1].map { |r| reg_idx[r] }
-    args = arg_regs.map { |r| frame.registers[r] }
+    obj = resolve_val(boxed_obj)
 
-    # 1. RESOLVE
-    obj = resolve_val(frame.registers[obj_reg])
-
-    # A. Native Methods (Map)
     if obj.is_a?(FluxArray) && method_name == "map"
       boxed_closure = args[0]
       closure_obj = Value.as_obj(boxed_closure)
@@ -469,18 +462,13 @@ class VM
         execute_function(closure_obj, [item_boxed])
       end
       result_obj = FluxArray.new(nil, new_list)
-      frame.registers[res_reg] = Value.box_obj(result_obj)
-      return
-    end
+      return Value.box_obj(result_obj)
 
     # B. Struct Field Function
-    if obj.is_a?(FluxHash) && obj.key?(method_name)
+    elsif obj.is_a?(FluxHash) && obj.key?(method_name)
       func_boxed = obj[method_name]
       func_obj = Value.as_obj(func_boxed)
-      result = execute_function(func_obj, args)
-      return UNWIND_SIGNAL if result == UNWIND_SIGNAL
-      frame.registers[res_reg] = result
-      return
+      return execute_function(func_obj, args)
     end
 
     raise "Runtime Error: Unknown method '#{method_name}' on #{obj.class}"

@@ -39,5 +39,6 @@ module OpCodes
     NEW_SLICE:    [T_REG_W, T_REG_R, T_REG_R, T_REG_R],
     TAKE_REF:     [T_REG_W, T_REG_R],
     NEW_CLOSURE:  [T_REG_W, T_CONST, T_REST],
+    CALL_METHOD:  [T_REG_W, T_REG_R, T_STR, T_REST],
   }
 end
