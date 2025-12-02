@@ -51,6 +51,8 @@ class VM
         frame.chunk.constants[idx]
       when OpCodes::T_STR
         operand.to_s # Return the raw string (e.g. "Point")
+      when OpCodes::T_RAW
+        operand # Pass the raw instruction data (e.g. the Schema Hash
       else
         operand # Fallback
       end
@@ -182,13 +184,7 @@ class VM
 
       # 4. Execute (The Big Switch)
       case opcode
-      when :SET_HASH then process_set_hash(reg_idx, ins, frame);
-      when :SET_INDEX then process_set_index(reg_idx, ins, frame);
-      when :NEW_LIST then process_new_list(reg_idx, ins, frame);
-      when :APPEND then process_append(reg_idx, ins, frame);
       when :CAST then process_cast(reg_idx, ins, frame);
-      when :DEF_GLOBAL then process_def_global(reg_idx, ins, frame);
-      when :DEF_STRUCT then process_def_struct(reg_idx, ins, frame);
       when :CLOSURE then process_closure(reg_idx, ins, frame);
       when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
       when :CALL_METHOD then process_call_method(reg_idx, ins, frame);
@@ -198,7 +194,6 @@ class VM
       when :NOT then process_not(reg_idx, ins, frame);
       when :CALL_NATIVE then process_call_native(reg_idx, ins, frame);
       # TODO: Replace this with std wrapper to CALL_NATIVE
-      when :PRINT then process_print(reg_idx, ins, frame);
       when :JMP then process_jmp(reg_idx, ins, frame);
       when :JMP_FALSE then process_jmp_false(reg_idx, ins, frame);
       when :JMP_TRUE then process_jmp_true(reg_idx, ins, frame);
@@ -209,8 +204,6 @@ class VM
       when :ASSERT then process_assert(reg_idx, ins, frame);
       when :THROW then process_throw(reg_idx, ins, frame);
       when :THROW_IF_ERROR then process_throw_if_error(reg_idx, ins, frame);
-      when :EXIT_PROGRAM then process_exit_program(reg_idx, ins, frame);
-      when :FREEZE then process_freeze(reg_idx, ins, frame);
       when :NEW_SLICE then process_new_slice(reg_idx, ins, frame);
       when :TAKE_REF then process_take_ref(reg_idx ins, frame);
 
@@ -293,43 +286,33 @@ class VM
     nil
   end
 
-  def process_set_hash(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    key = ins[2].to_sym
-    val_reg = reg_idx[ins[3]]
+  def process_set_hash(target_reg, args, frame)
+    boxed_hash = args[0]
+    key = args[1].to_sym
+    boxed_val = args[2]
 
-    # 1. UNBOX: Get the FluxHash
-    boxed_hash = frame.registers[target_reg]
     hash_obj = Value.as_obj(boxed_hash)
+    hash_obj[key] = boxed_val
 
-    # 2. Store the boxed value
-    val_boxed = frame.registers[val_reg]
-
-    hash_obj[key] = val_boxed
+    nil
   end
 
-  def process_new_list(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
-    obj = FluxArray.new(nil, [])
-    frame.registers[target] = Value.box_obj(obj)
+  def process_new_list(target_reg, args, frame)
+    Value.box_obj(FluxArray.new(nil, []))
   end
 
-  def process_append(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    val_reg = reg_idx[ins[2]]
+  def process_append(target_reg, args, frame)
+    boxed_list = args[0]
+    boxed_val = args[1]
 
-    # 1. UNBOX: Get the actual FluxArray from the register
-    boxed_list = frame.registers[target_reg]
     list = Value.as_obj(boxed_list)
-
-    # 2. Get the val (Keep it boxed! Arrays store boxed values)
-    val_boxed = frame.registers[val_reg]
-
     if list.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    list << val_boxed
+    list << boxed_val
+
+    nil
   end
 
   def process_cast(reg_idx, ins, frame)
@@ -400,22 +383,18 @@ class VM
     end
   end
 
-  def process_def_global(reg_idx, ins, frame)
-    # Format: [:DEF_GLOBAL, "func_name", "R_source"]
-    global_name = ins[1]
-    src_reg = reg_idx[ins[2]]
-
-    # Take the Closure/Value from the register
-    val = frame.registers[src_reg]
-
-    # Save it to the VM's global registry
-    @globals[global_name] = val
+  def process_def_global(target_reg, args, frame)
+    global_name = args[0]
+    boxed_val = args[1]
+    @globals[global_name] = boxed_val
+    nil
   end
 
-  def process_def_struct(reg_idx, ins, frame)
-    name = ins[1].to_sym
-    schema = ins[2] # The ruby hash from the compiler
+  def process_def_struct(target_reg, args, frame)
+    name = args[0].to_sym
+    schema = args[1] # The ruby hash from the compiler
     @structs[name] = schema
+    nil
   end
 
   def process_closure(reg_idx, ins, frame)
@@ -703,12 +682,11 @@ class VM
     frame.registers[target_reg] = result
   end
 
-  def process_print(reg_idx, ins, frame)
-    # PRINT Rval
-    val_reg = reg_idx[ins[1]]
-    val = frame.registers[val_reg]
-
-    puts "STDOUT > #{Value.unbox(val).inspect}"
+  def process_print(target_reg, args, frame)
+    boxed_val = args[0]
+    val = Value.unbox(boxed_val)
+    puts "STDOUT > #{val.inspect}"
+    nil
   end
 
   def process_return(reg_idx, ins, frame, start_depth)
@@ -835,28 +813,22 @@ class VM
     end
   end
 
-  def process_set_index(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    key_reg = reg_idx[ins[2]]
-    val_reg = reg_idx[ins[3]]
+  def process_set_index(target_reg, args, frame)
+    boxed_obj = args[0]
+    boxed_index = args[1]
+    boxed_val = args[2]
 
-    # 1. Unbox Target
-    boxed_target = frame.registers[target_reg]
-    target = Value.as_obj(boxed_target)
-
-    # 2. Unbox Key
-    boxed_key = frame.registers[key_reg]
-    # Assuming integer index for arrays
-    key = Value.get_tag(boxed_key) == Value::TAG_NUMBER ? Value.as_number(boxed_key).to_i : Value.as_byte(boxed_key)
-
-    val_boxed = frame.registers[val_reg]
-
+    target = Value.as_obj(boxed_obj)
     if target.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    # Target can be FluxArray OR FluxView (if view allows mutation)
-    target[key] = val_boxed
+    tag = Value.get_tag(boxed_index)
+    key = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
+
+    target[key] = boxed_val
+
+    nil
   end
 
   def process_get_field(reg_idx, ins, frame)
@@ -889,29 +861,32 @@ class VM
     end
   end
 
-  def process_exit_program(reg_idx, ins, frame)
-    # 1. Get the value (Number or String)
-    val_reg = reg_idx[ins[1]]
-    val = frame.registers[val_reg]
+  def process_exit_program(target_idx, args, frame)
+    boxed_val = args[0]
+    exit_code = 1 # Default error
 
-    if Value.get_tag(val) == Value::TAG_OBJ
-      obj = Value.as_obj(val)
+    tag = Value.get_tag(boxed_val)
+
+    if tag == Value::TAG_NUMBER
+      exit_code = Value.as_number(boxed_val).to_i
+    elsif tag == Value::TAG_OBJ
+      # If it's a string, print it to stderr
+      obj = Value.as_obj(boxed_val)
       if obj.is_a?(FluxString)
         $stderr.puts(obj.to_s)
-        val = Value.box_number(1) # Return generic error code
       end
     end
 
-    # 3. Kill the VM immediately
-    exit_code = (Value.get_tag(val) == Value::TAG_NUMBER) ? Value.as_number(val).to_i : 1
     throw EXIT_SIGNAL, exit_code
   end
 
-  def process_freeze(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
-    val = frame.registers[target]
-    val.respond_to?(:freeze!) ? val.freeze! # FluxObjects
-      : val.freeze # Native Ruby Objects - TODO: Should never happend
+  def process_freeze(target_id, args, frame)
+    boxed_val = args[0]
+    obj = Value.as_obj(boxed_val)
+    if obj.respond_to?(:freeze!)
+      obj.freeze!
+    end
+    nil
   end
 
   def process_take_ref(reg_idx, ins, frame)
