@@ -25,6 +25,8 @@ class VM
   UNWIND_SIGNAL = :__vm_unwind_signal__
   EXIT_SIGNAL = :__vm_program_exit__
 
+  ReturnSignal = Struct.new(:value)
+
   def initialize(code_str = "")
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
@@ -199,8 +201,10 @@ class VM
         result = send("process_#{opcode.to_s.downcase}", target_reg, args, frame)
         if result == UNWIND_SIGNAL || result == EXIT_SIGNAL
           return result
-        end
-        if target_reg
+        elsif result.is_a?(ReturnSignal)
+          # We finished this function call. Return the unpacked value to the Ruby caller.
+          return result.value
+        elsif target_reg
           frame.registers[target_reg] = result
         end
       end
@@ -209,13 +213,6 @@ class VM
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
-      #when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
-
-      # RETURN IS SPECIAL
-      # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
-      when :RETURN then
-        val = process_return(reg_idx, ins, frame, start_depth)
-        return val unless val.nil?
       end
 
       debug_instruction(ins, frame)
@@ -624,9 +621,8 @@ class VM
     nil
   end
 
-  def process_return(reg_idx, ins, frame, start_depth)
-    result_reg = reg_idx[ins[1]]
-    return_val = frame.registers[result_reg]
+  def process_return(target_reg, args, frame)
+    return_val = args[0]
 
     pop_and_return(return_val)
 
@@ -635,15 +631,7 @@ class VM
      throw EXIT_SIGNAL, return_val
    end
 
-    if @frames.size < start_depth
-      # If the stack is now smaller than when we started, this specific
-      # function call is complete. Return the value to the Ruby caller.
-      return return_val
-    end
-
-    # If this was a return within the run_loop's original scope,
-    # just continue to the next instruction in the caller's frame.
-    return nil
+    return ReturnSignal.new(return_val)
   end
 
   def process_jmp(target_reg, args, frame)
