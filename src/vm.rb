@@ -30,6 +30,7 @@ class VM
   def initialize(code_str = "")
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
+    @struct_offsets = {} # Cache for fast field->index lookup
     @source_lines = code_str.lines
   end
 
@@ -106,7 +107,8 @@ class VM
         idx = operand[1..].to_i
         case operand[0]
           when "R", "K"
-            reg_debug_str(operand.start_with?("R") ? registers[idx] : @chunk.constants[idx])
+            v = Value.resolve_val(registers[idx])
+            reg_debug_str(operand.start_with?("R") ? v : @chunk.constants[idx])
           else
             operand # functions
         end
@@ -128,6 +130,7 @@ class VM
       elsif v.is_a?(Compiler::Chunk) then "\\#{v.name}"
       elsif v.is_a?(FluxClosure) then "λ"
       elsif v.is_a?(FluxHash) then "{}:#{v.keys.count}"
+      elsif v.is_a?(FluxArray) && !v.struct_type.nil? then "{}:#{v.size}"
       elsif v.is_a?(FluxArray) then "[]:#{v.size}"
       else v.class
       end
@@ -142,26 +145,9 @@ class VM
     # 2. Unbox
     val = Value.as_obj(boxed_val)
 
-    # 3. Check Type
-    (val.is_a?(FluxHash) && val["__type"] == :Error) || val.is_a?(RuntimeError)
-  end
-
-  # TODO: Needs to work with NanBox
-  def resolve_val(boxed_val)
-    # 1. Check Tag: If it's not an Object, it cannot be dereferenced.
-    tag = Value.get_tag(boxed_val)
-    return boxed_val if tag != Value::TAG_OBJ
-
-    # 2. Unbox: Convert ID -> FluxObject
-    obj = Value.as_obj(boxed_val)
-
-    # 3. Recursively Deref (View/Pointer -> Owner)
-    while obj.is_a?(FluxView) || obj.is_a?(FluxPtr)
-      obj = obj.deref
-    end
-
-    # Return the raw FluxObject (FluxArray, FluxHash, FluxString)
-    obj
+    (val.is_a?(FluxArray) && val.struct_type == :Error) || # Standard Error
+      (val.is_a?(FluxHash) && val["__type"] == :Error) || # Test Code Error
+      val.is_a?(RuntimeError) # Internal Error - *should't* ever happen
   end
 
   def run(entry_chunk)
@@ -250,15 +236,45 @@ class VM
     args[0]
   end
 
+  # TODO: How to do structs where schema is unknown?
   def process_new_hash(target_reg, args, frame)
     Value.box_obj(FluxHash.new)
   end
 
   def process_new_struct(target_reg, args, frame)
     struct_name = args[0].to_sym
-    obj = FluxHash.new
-    obj["__type"] = struct_name # Store type in hidden field to use in CAST
+
+    # 1. Look up Schema to determine Size
+    schema = @structs[struct_name] # e.g. { x: :Number, y: :Number }
+    size = schema.keys.size
+
+    # 2. Allocate Binary Array (NanBoxed storage = :int64)
+    # This creates a flat binary blob of size * 8 bytes
+    obj = FluxArray.new(size, nil, type: :nanbox)
+
+    # 3. Store Metadata (We need to know it's a "Point", not just an Array)
+    # We can attach this to the object singleton, or wrap it.
+    # For a prototype, let's just monkey-patch the type name onto this instance.
+    obj.instance_variable_set(:@struct_type, struct_name)
+
     Value.box_obj(obj)
+  end
+
+  def get_field_index(flux_obj, field_name)
+    if flux_obj.is_a?(FluxHash)
+       return field_name
+    elsif flux_obj.is_a?(FluxArray)
+      type_name = flux_obj.instance_variable_get(:@struct_type)
+      raise "Not a struct" unless type_name
+      index = @struct_offsets[type_name][field_name]
+
+      if index.nil?
+        raise "Runtime Error: Cannot get field `#{key}` on `#{target_obj.class}`"
+      end
+      return index
+    else
+      raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
+    end
   end
 
   def process_set_field(target_reg, args, frame)
@@ -266,16 +282,13 @@ class VM
     key = args[1].to_sym
     val_boxed = args[2]
 
-    target_obj = resolve_val(target_boxed)
-
+    target_obj = Value.resolve_val(target_boxed)
     if target_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
-    unless target_obj.is_a?(FluxHash)
-      raise "Runtime Error: Cannot set field '#{key}' on #{target_obj.class}"
-    end
 
-    target_obj[key] = val_boxed
+    index = get_field_index(target_obj, key)
+    target_obj[index] = val_boxed
 
     nil
   end
@@ -292,7 +305,7 @@ class VM
   end
 
   def process_new_list(target_reg, args, frame)
-    Value.box_obj(FluxArray.new(nil, []))
+    Value.box_obj(FluxArray.new(nil, [], type: :obj))
   end
 
   def process_append(target_reg, args, frame)
@@ -366,16 +379,23 @@ class VM
 
     raise "UNKNOWN ARRAY TYPE" if match.nil?
 
+    base_type = match[1]
     constraint = match[2]
+
+    storage_type = :obj
+    storage_type = :int64 if base_type == "Int64"
+    storage_type = :byte if base_type == "Byte"
+    # TODO storage_type = :number if base_type == "Number"
+
     if constraint =~ /^\d+$/
       limit = constraint.to_i
       if list_obj.size > limit
         raise "Runtime Error: Array too large for fixed size #{limit}"
       end
-      new_arr = FluxArray.new(limit, list_obj.data)
+      new_arr = FluxArray.new(limit, list_obj.data, type: storage_type)
       return Value.box_obj(new_arr)
     elsif constraint == "*"
-      new_arr = FluxArray.new(list_obj.size, list_obj.data)
+      new_arr = FluxArray.new(list_obj.size, list_obj.data, type: storage_type)
       return Value.box_obj(new_arr)
     end
   end
@@ -391,6 +411,11 @@ class VM
     name = args[0].to_sym
     schema = args[1] # The ruby hash from the compiler
     @structs[name] = schema
+
+    offsets = {}
+    schema.keys.each_with_index { |k, i| offsets[k.to_sym] = i }
+    @struct_offsets[name] = offsets
+
     nil
   end
 
@@ -430,7 +455,7 @@ class VM
     boxed_obj = args.shift()
     method_name = args.shift()
 
-    obj = resolve_val(boxed_obj)
+    obj = Value.resolve_val(boxed_obj)
 
     if obj.is_a?(FluxArray) && method_name == "map"
       boxed_closure = args[0]
@@ -723,15 +748,11 @@ class VM
 
   def process_get_field(target_reg, args, frame)
     boxed_obj  = args[0]
-    field_name = args[1].to_sym
+    key = args[1].to_sym
 
-    obj = resolve_val(boxed_obj)
-
-    if !obj.is_a?(FluxHash)
-      raise "Runtime Error: Cannot get field '#{field_name}' from #{obj.class}"
-    end
-
-    obj[field_name]
+    target_obj = Value.resolve_val(boxed_obj)
+    index = get_field_index(target_obj, key)
+    target_obj[index]
   end
 
   def process_assert(target_reg, args, frame)

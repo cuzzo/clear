@@ -279,6 +279,18 @@ RSpec.describe VM do
       end
     end
 
+    context "Can create a list of Int64" do
+      let(:source) {
+        <<~FLUX
+          VAR l : Int64[*] = %[ 0, 1, 2, 3 ];
+          RETURN l[1];
+        FLUX
+      }
+
+      it "fails" do
+        expect(resp).to eq(1)
+      end
+    end
 
     context "condition goes to 7" do
       let(:source) {
@@ -625,6 +637,7 @@ RSpec.describe VM do
       # 4. Return result
 
       chunk = make_chunk("StructTest", [
+        [:DEF_STRUCT, "Point", {x: "Number", y: "Number"}],
         [:NEW_STRUCT, "R0", "Point"],   # R0 = %Point{}
 
         # Set x = 10

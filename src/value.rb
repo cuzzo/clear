@@ -9,6 +9,9 @@ module Value
   # 0xFFF0... ensures these bits represent a QNAN in IEEE 754
   QNAN_MASK = 0xFFF0000000000000
 
+  # 52-bit Integer Safe Limit (2^53 - 1)
+  MAX_SAFE_INTEGER = 9_007_199_254_740_991
+
   # Bit Shifts
   TAG_SHIFT = 48
 
@@ -35,9 +38,15 @@ module Value
   # ==========================================
 
   def self.box_number(num)
-    # Architecture Rule: Numbers are stored as raw Floats
-    raise "NaNBox Error: Expected Numeric" unless num.is_a?(Numeric)
-    num.to_f
+    # If it is a float, or a small integer, NanBox it
+    if num.is_a?(Float) || (num.is_a?(Integer) && num.abs <= MAX_SAFE_INTEGER)
+      num.to_f
+    elsif num.is_a?(Integer) && num.abs > MAX_SAFE_INTEGER
+      raise "NaNBox Error: Integer too large" unless num.is_a?(Numeric)
+      # box_obj(FluxInteger.new(num))
+    else
+      raise "NaNBox Error: Expected Numeric" unless num.is_a?(Numeric)
+    end
   end
 
   def self.box_byte(val)
@@ -100,6 +109,7 @@ module Value
 
   def self.as_number(val)
     raise "NaNBox Type Error: Expected Number (Float)" unless val.is_a?(Float)
+    # TODO: Show this as an intger if it is, for debugging
     val
   end
 
@@ -197,5 +207,23 @@ module Value
     return (tag == TAG_NIL) ||
            (tag == TAG_BOOL && as_bool(val) == false)
   end
+
+  def self.resolve_val(boxed_val)
+    # 1. Check Tag: If it's not an Object, it cannot be dereferenced.
+    tag = Value.get_tag(boxed_val)
+    return boxed_val if tag != Value::TAG_OBJ
+
+    # 2. Unbox: Convert ID -> FluxObject
+    obj = Value.as_obj(boxed_val)
+
+    # 3. Recursively Deref (View/Pointer -> Owner)
+    while obj.is_a?(FluxView) || obj.is_a?(FluxPtr)
+      obj = obj.deref
+    end
+
+    # Return the raw FluxObject (FluxArray, FluxHash, FluxString)
+    obj
+  end
+
 end
 

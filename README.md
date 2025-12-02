@@ -84,19 +84,19 @@ Everyone else can CHEAT.
 ## Architecture
 
 **1. Arena-Based Memory & Isolation**
-
   * CHEAT uses Arena-based memory instead of a global Garbage Collector.
   * The "Handoff" Trick: When a function returns a large object (like a String or List), CHEAT does not copy the data.
-     * Instead, it performs Destination Passing: The compiler instructs the function to write the data directly into the Caller's memory.
+     * Instead, it performs Return-Value Optimization via Destination Passing.
+       * The compiler instructs the function to write the data directly into the Caller's memory.
      * For dynamic data, it uses Page Handoffs: The memory page containing your data is detached from the dying function and stapled to the living Caller.
-  * *The Result:* You can return a 1GB video file from a function instantly ($O(1)$) *without* a generic Heap or "Stop-the-World" jitter of Java or Go.
+  * *The Result:* You can return a 1GB video file from a function instantly `O(1)` *without* a generic Heap or "Stop-the-World" jitter of Java or Go.
 
 **2. Implicit "Railway" Error Handling**
   * CHEAT treats errors as data, but handles them via control flow.
   * The `SMOOTH` operator `s>` (aka the `PIPE` or `|>` in Elixir, etc) acts as a guard.
-    * It automatically bubbles errors down the chain, to be handled elsewhere.
-  * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- while errors are handled explicitly at the boundaries.
-  * *The Result:* No if [err != nil]() boilerplate. No [Pyramid of Doom](). No [checkOk]() clutter.
+    * It automatically bubbles errors down the chain, to be handled elsewhere, or allows them to be handled inline elegantly.
+  * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- making it always clear what's desired vs what's the fallback.
+  * *The Result:* No if [err != nil]() boilerplate. No [Pyramid of Doom](). No [checkOk]() clutter. No `if .nil?` everywhere.
 
 **3. Register-Based Virtual Machine**
   * CHEAT runs on a custom Register-Based VM *OR* transpiles to Zig and runs natively.

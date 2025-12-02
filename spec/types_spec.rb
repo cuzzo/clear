@@ -1,5 +1,8 @@
 require 'rspec'
+require 'objspace'
+
 require_relative '../src/types'
+require_relative '../src/value'
 
 RSpec.describe "Flux Type System" do
   # Reset the Arena before every test so allocations don't leak
@@ -42,6 +45,54 @@ RSpec.describe "Flux Type System" do
       arr = FluxArray.new(nil, [1, 2, 3])
       # .first is not explicitly defined, so it hits method_missing
       expect(arr.first).to eq(1)
+    end
+
+    context "when type is :int64" do
+      it "allocates exactly 8 bytes per slot" do
+        # 10 items * 8 bytes = 80 bytes
+        arr = FluxArray.new(10, nil, type: :int64, register: false)
+
+        # Verify backing store is a String (Binary Blob), not an Array
+        expect(arr.data).to be_a(String)
+        expect(arr.data.bytesize).to eq(80)
+      end
+
+      it "stores 64-bit integers correctly" do
+        arr = FluxArray.new(1, nil, type: :int64, register: false)
+
+        # Max 64-bit signed integer
+        val = Value::MAX_SAFE_INTEGER - 1
+
+        # Use Value.box_number(val) if your setter expects boxes
+        # Assuming your VM loop boxes it before calling []=
+        boxed_val = Value.box_number(val)
+
+        arr[0] = boxed_val
+
+        # Read it back (Unbox happens inside [])
+        expect(arr[0]).to eq(val)
+      end
+    end
+
+    context "when type is :byte" do
+      it "allocates exactly 1 byte per slot" do
+        # 256 items * 1 byte = 256 bytes
+        arr = FluxArray.new(256, nil, type: :byte, register: false)
+
+        expect(arr.data).to be_a(String)
+        expect(arr.data.bytesize).to eq(256)
+      end
+
+      it "wraps values > 255" do
+        arr = FluxArray.new(1, nil, type: :byte, register: false)
+
+        # 300 % 256 = 44
+        boxed_val = Value.box_number(300)
+        arr[0] = boxed_val
+
+        # Expect the unboxed value to be wrapped
+        expect(Value.unbox(arr[0])).to eq(44)
+      end
     end
   end
 

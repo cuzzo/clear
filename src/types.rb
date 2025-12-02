@@ -97,20 +97,46 @@ class FluxClosure < FluxObject
 end
 
 class FluxArray < FluxObject
-  attr_reader :data, :max_size
+  attr_reader :data, :max_size, :struct_type
 
-  def initialize(max_size, initial_data, register: true)
+  # TYPE SCHEMA:
+  # :obj    -> Standard Array of Ruby native values
+  # :nanbox -> Packed NanBox String (8 bytes per item - can store Int52, Float64, Pointers to strings, etc)
+  # :int64  -> Packed Binary String (8 bytes per item)
+  # :byte   -> Packed Binary String (1 byte per item)
+  def initialize(max_size, initial_data, register: true, type: :obj, struct_type: nil)
     super(register: :register) # Register with Arena
 
+    @struct_type = struct_type
     @max_size = max_size
     @data = initial_data
+    @type = type
 
     # TODO: Fill remaining space with nil? Or just keep it empty but bounded?
     # "Fixed array" usually means you can't change the size (no push/pop).
+
+    if @type == :obj
+      @data = initial_data || []
+    else
+      # BINARY MODE: @data is a Byte String
+      # Initialize string of NULL bytes
+      bytes_per_item = (@type == :int64) ? 8 : 1
+      size = max_size || 0
+      @data = ("\x00" * (size * bytes_per_item)).force_encoding("BINARY")
+
+      # If we have initial data (literals), pack them now
+      if initial_data && !initial_data.empty?
+        initial_data.each_with_index { |v, i| self[i] = v }
+      end
+    end
   end
 
+  # Need to allow dynamic resize.
   def <<(val)
     check_alive!
+    if @type != :obj # TODO: Think about this
+      raise "Runtime Error: Cannot push/append to a Fixed Binary Array. Use index assignment."
+    end
     if @max_size && @data.size >= @max_size
       raise "Runtime Error: Cannot append to Fixed Array (Max size: #{@max_size})"
     end
@@ -119,15 +145,69 @@ class FluxArray < FluxObject
 
   def [](idx)
     check_alive!
-    @data[idx]
+    if @type == :obj
+      @data[idx]
+    elsif @type == :int64
+      # UNPACK: Extract 64-bit int
+      # offset = idx * 8
+      # 'q<' = 64-bit signed integer, little endian
+      raw = @data.byteslice(idx * 8, 8)
+      raise "Index out of bounds" unless raw
+
+      val = raw.unpack1('q<')
+
+      # RE-BOX: Convert raw 64-bit int back to NanBox/FluxInteger
+      Value.box_number(val)
+    elsif @type == :byte
+      # UNPACK: Extract 1 byte
+      byte_val = @data.getbyte(idx)
+      raise "Index out of bounds" unless byte_val
+      Value.box_byte(byte_val)
+    elsif @type == :nanbox
+      raw_bits = @data.byteslice(idx * 8, 8).unpack1('q<')
+
+      # 2. Check the NanBox Mask (Top 16 bits)
+      # Mask: 0xFFF0000000000000
+      # If these bits are set, it is a SPECIAL VALUE (Pointer, Bool, Nil).
+      # If not, it is a Standard Number (Float).
+      if (raw_bits & Value::QNAN_MASK) == Value::QNAN_MASK
+        return raw_bits # Return as Integer (Preserve the Tag)
+      else
+        # It's a Float! Re-interpret the bits as a Double.
+        return [raw_bits].pack('q<').unpack1('d')
+      end
+      return val # the value here is EITHER the double, or already boxed.
+    end
   end
 
-  def []=(idx, val)
+  # TODO: Need to keep set overflow error
+  def []=(idx, val_boxed)
     check_alive!
-    if @max_size && idx >= @max_size
-      raise "Runtime Error: Index #{idx} out of bounds for Fixed Array[#{@max_size}]"
+    if @type == :obj
+      @data[idx] = val_boxed
+    elsif @type == :int64
+      # PACK: Convert NanBox -> Raw Int64
+      val = Value.unbox(val_boxed).to_i # Handle Float or FluxInteger
+
+      # Replace 8 bytes at offset
+      # pack('q<') returns an 8-byte string
+      @data[idx * 8, 8] = [val].pack('q<')
+    elsif @type == :byte
+      val = Value.unbox(val_boxed)
+      unless val.is_a?(Numeric)
+        raise "Runtime Error: Cannot assign non-numeric to Byte array"
+      end
+      # Auto-truncate / Wrap to 0-255 (Standard C behavior)
+      @data.setbyte(idx, val.to_i % 256)
+    elsif @type == :nanbox
+      if val_boxed.is_a?(Float)
+        @data[idx * 8, 8] = [val_boxed].pack('d')
+      elsif val_boxed.is_a?(Integer)
+        @data[idx * 8, 8] = [val_boxed].pack('q<')
+      else
+        raise "Memory Error: Cannot store #{val_boxed.class} in NanBox Array"
+      end
     end
-    @data[idx] = val
   end
 
   def deep_copy
