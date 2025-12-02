@@ -49,6 +49,8 @@ class VM
         # For Const, return the ACTUAL VALUE from the chunk
         idx = operand[1..-1].to_i
         frame.chunk.constants[idx]
+      when OpCodes::T_STR
+        operand.to_s # Return the raw string (e.g. "Point")
       else
         operand # Fallback
       end
@@ -169,7 +171,7 @@ class VM
         if signature && signature.first == OpCodes::T_REG_W
           target_reg = args.shift # Remove target from the list passed to logic
         end
-        result = send("process_#{opcode.to_s.downcase}", args, frame)
+        result = send("process_#{opcode.to_s.downcase}", target_reg, args, frame)
         if result == UNWIND_SIGNAL || result == EXIT_SIGNAL
           return result
         end
@@ -180,9 +182,6 @@ class VM
 
       # 4. Execute (The Big Switch)
       case opcode
-      when :NEW_HASH then process_new_hash(reg_idx, ins, frame);
-      when :NEW_STRUCT then process_new_struct(reg_idx, ins, frame);
-      when :SET_FIELD then process_set_field(reg_idx, ins, frame);
       when :SET_HASH then process_set_hash(reg_idx, ins, frame);
       when :SET_INDEX then process_set_index(reg_idx, ins, frame);
       when :NEW_LIST then process_new_list(reg_idx, ins, frame);
@@ -256,58 +255,42 @@ class VM
     $logger.debug("--- MERMAID GRAPH END ---")
   end
 
-  def process_loadk(args, frame)
+  def process_loadk(target_reg, args, frame)
     Value.box_constant(args[0])
   end
 
-  def process_move(args, frame)
+  def process_move(target_reg, args, frame)
     args[0]
   end
 
-  def process_new_hash(reg_idx, ins, frame)
-    target = reg_idx[ins[1]]
-    obj = FluxHash.new
-    frame.registers[target] = Value.box_obj(obj)
+  def process_new_hash(target_reg, args, frame)
+    Value.box_obj(FluxHash.new)
   end
 
-  def process_new_struct(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    struct_name = ins[2]
-
-    # Create FluxHash
+  def process_new_struct(target_reg, args, frame)
+    struct_name = args[0].to_sym
     obj = FluxHash.new
-    obj["__type"] = struct_name.to_sym # Store type in hidden field to use in CAST
-    frame.registers[target_reg] = Value.box_obj(obj)
+    obj["__type"] = struct_name # Store type in hidden field to use in CAST
+    Value.box_obj(obj)
   end
 
-  def process_set_field(reg_idx, ins, frame)
-    target_reg = reg_idx[ins[1]]
-    key = ins[2].to_sym
-    val_reg = reg_idx[ins[3]]
+  def process_set_field(target_reg, args, frame)
+    target_boxed = args[0]
+    key = args[1].to_sym
+    val_boxed = args[2]
 
-    # 1. UNBOX (Auto-Deref included via resolve_val -> as_obj logic?)
-    # If resolve_val isn't updated for NaN Boxing yet, use as_obj for now.
-    target_boxed = frame.registers[target_reg]
-
-    # We need to unbox. If it's a Pointer (FluxPtr), as_obj returns the FluxPtr.
-    # We then deref.
-    target_obj = Value.as_obj(target_boxed)
-
-    if target_obj.is_a?(FluxPtr)
-      target_obj = target_obj.deref
-    end
-
-    val_boxed = frame.registers[val_reg]
+    target_obj = resolve_val(target_boxed)
 
     if target_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
-
     unless target_obj.is_a?(FluxHash)
       raise "Runtime Error: Cannot set field '#{key}' on #{target_obj.class}"
     end
 
     target_obj[key] = val_boxed
+
+    nil
   end
 
   def process_set_hash(reg_idx, ins, frame)
