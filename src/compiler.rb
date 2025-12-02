@@ -29,7 +29,7 @@ class Compiler
     def emit(node, opcode, *operands)
       signature = OpCodes::DEFINITIONS[opcode]
       if signature
-        if operands.size != signature.size
+        if operands.size != signature.size && signature.last != OpCodes::T_REST && operands.size != signature.size - 1
           raise "Compiler Error: #{opcode} expects #{signature.size} args, got #{operands.size}"
         end
       end

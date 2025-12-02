@@ -38,5 +38,6 @@ module OpCodes
     CALL_NATIVE:  [T_REG_W, T_STR, T_STR, T_REST],
     NEW_SLICE:    [T_REG_W, T_REG_R, T_REG_R, T_REG_R],
     TAKE_REF:     [T_REG_W, T_REG_R],
+    NEW_CLOSURE:  [T_REG_W, T_CONST, T_REST],
   }
 end

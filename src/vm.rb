@@ -202,7 +202,6 @@ class VM
       # 4. Execute (The Big Switch)
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
-      when :NEW_CLOSURE then process_new_closure(reg_idx, ins, frame);
       when :CALL_FUNC then process_call_func(reg_idx, ins, frame);
       when :CALL_METHOD then process_call_method(reg_idx, ins, frame);
       when :CALL_CLOSURE then process_call_closure(reg_idx, ins, frame);
@@ -399,26 +398,12 @@ class VM
     nil
   end
 
-  def process_new_closure(reg_idx, ins, frame)
-    # CLOSURE Rtarget, Kfunc_chunk, Rcapture1, Rcapture2...
-    target = reg_idx[ins[1]]
-    k_idx = ins[2][1..-1].to_i
-    fn_chunk = frame.chunk.constants[k_idx]
-
-    # 1. Identify which registers in the CURRENT frame we need to capture
-    # ins[3..-1] contains strings like ["R2", "R5"]
-    captured_values = ins[3..-1].map do |reg_str|
-      r = reg_idx[reg_str] # Convert "R2" -> 2
-      frame.registers[r] # Grab the actual value (e.g., 10)
-    end
-
-    # 2. Create the Closure Object
-    closure = FluxClosure.new(fn_chunk, captured_values)
-
-    # 3. Store it in the target register
-    frame.registers[target] = Value.box_obj(closure)
+  def process_new_closure(target_reg, args, frame)
+    fn_chunk = args.shift()
+    captures = args
+    closure = FluxClosure.new(fn_chunk, captures)
+    Value.box_obj(closure)
   end
-
 
   def process_call_func(reg_idx, ins, frame)
     # Format: [:CALL_FUNC, "R_target", "Operand", argc, "R_arg1"...]
