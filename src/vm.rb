@@ -51,8 +51,8 @@ class VM
         frame.chunk.constants[idx]
       when OpCodes::T_STR
         operand.to_s # Return the raw string (e.g. "Point")
-      when OpCodes::T_RAW
-        operand # Pass the raw instruction data (e.g. the Schema Hash
+      when OpCodes::T_RAW, OpCodes::T_UINT
+        operand # Pass the raw instruction data (e.g. the Schema Hash, Int)
       else
         operand # Fallback
       end
@@ -194,11 +194,6 @@ class VM
       when :NOT then process_not(reg_idx, ins, frame);
       when :CALL_NATIVE then process_call_native(reg_idx, ins, frame);
       # TODO: Replace this with std wrapper to CALL_NATIVE
-      when :JMP then process_jmp(reg_idx, ins, frame);
-      when :JMP_FALSE then process_jmp_false(reg_idx, ins, frame);
-      when :JMP_TRUE then process_jmp_true(reg_idx, ins, frame);
-      when :JMP_IF_OK then process_jmp_if_ok(reg_idx, ins, frame);
-      when :JMP_IF_ERROR then process_jmp_if_error(reg_idx, ins, frame);
       when :GET_INDEX then process_get_index(reg_idx, ins, frame);
       when :GET_FIELD then process_get_field(reg_idx, ins, frame);
       when :ASSERT then process_assert(reg_idx, ins, frame);
@@ -711,75 +706,72 @@ class VM
     return nil
   end
 
-  def process_jmp(reg_idx, ins, frame)
-    # JMP target_ip
-    # Unconditionally jump to a specific instruction index
-    target_ip = ins[1]
+  def process_jmp(target_reg, args, frame)
+    target_ip = args[0]
     frame.ip = target_ip
+    nil
   end
 
-  def process_jmp_false(reg_idx, ins, frame)
-    # JMP_FALSE Rcond, target_ip
-    # If the value in Rcond is "falsey", jump to target.
-    # Otherwise, do nothing (and let the loop increment ip naturally).
-    cond_reg = reg_idx[ins[1]]
-    target_ip = ins[2]
-    val = frame.registers[cond_reg]
+  def process_jmp_false(target_reg, args, frame)
+    boxed_val = args[0]
+    target_ip = args[1]
 
-    # Truthiness Logic for NanBoxing:
-    # Only TAG_NIL and TAG_BOOL(false) are falsey.
-    tag = Value.get_tag(val)
+    # Check Truthiness (NaN Box Style)
+    tag = Value.get_tag(boxed_val)
 
+    # Falsey = NIL or BOOL(false)
     is_falsey = (tag == Value::TAG_NIL) ||
-                (tag == Value::TAG_BOOL && Value.as_bool(val) == false)
+                (tag == Value::TAG_BOOL && Value.as_bool(boxed_val) == false)
 
     if is_falsey
       frame.ip = target_ip
     end
+
+    nil
   end
 
-  def process_jmp_true(reg_idx, ins, frame)
-    # JMP_TRUE Rcond, target_ip
-    cond_reg = reg_idx[ins[1]]
-    target_ip = ins[2]
-    val = frame.registers[cond_reg]
+  def process_jmp_true(target_reg, args, frame)
+    boxed_val = args[0]
+    target_ip = args[1]
 
-    tag = Value.get_tag(val)
+    # Check Truthiness
+    tag = Value.get_tag(boxed_val)
     is_falsey = (tag == Value::TAG_NIL) ||
-                (tag == Value::TAG_BOOL && Value.as_bool(val) == false)
-    is_error  = is_error?(val) # This helper now handles boxing
+                (tag == Value::TAG_BOOL && Value.as_bool(boxed_val) == false)
 
-    if !is_falsey && !is_error
+    # Check Error (Errors act as False in OR chains)
+    is_err = is_error?(boxed_val)
+
+    # Jump if Truthy AND Not Error
+    if !is_falsey && !is_err
       frame.ip = target_ip
     end
+
+    nil
   end
 
-  def process_jmp_if_ok(reg_idx, ins, frame)
-    # JMP_IF_OK R_val, target_ip
-    val_reg = reg_idx[ins[1]]
-    target_ip = ins[2]
-    val = frame.registers[val_reg]
+  def process_jmp_if_error(target_reg, args, frame)
+    boxed_val = args[0]
+    target_ip = args[1]
 
-    is_error = val.is_a?(FluxHash) && val["__type"] == :Error
-
-    # If it is NOT an error, take the jump (skip the OR block)
-    if !is_error
+    if is_error?(boxed_val)
       frame.ip = target_ip
     end
+
+    nil
   end
 
-  def process_jmp_if_error(reg_idx, ins, frame)
-    # JMP_IF_ERROR R_val, target_ip
-    val_reg = reg_idx[ins[1]]
-    target_ip = ins[2]
+  def process_jmp_if_ok(target_reg, args, frame)
+    boxed_val = args[0]
+    target_ip = args[1]
 
-    val = frame.registers[val_reg]
-
-    # Check if it is a Hash (Struct) and has the type "Error"
-    if val.is_a?(FluxHash) && val["__type"] == :Error
+    unless is_error?(boxed_val)
       frame.ip = target_ip
     end
+
+    nil
   end
+
 
   def process_get_index(reg_idx, ins, frame)
     target_reg = reg_idx[ins[1]]
