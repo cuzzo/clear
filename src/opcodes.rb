@@ -1,3 +1,5 @@
+require_relative "./ast"
+
 module OpCodes
   # Parameter Types
   T_REG_W = :reg_w  # Register Write (Target) - e.g. "R0"
@@ -43,4 +45,8 @@ module OpCodes
     CALL_METHOD:  [T_REG_W, T_REG_R, T_STR, T_REST],
     CALL_FUNC:    [T_REG_W, T_STR, T_UINT, T_REST],
   }
+
+  AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|
+    DEFINITIONS[op] = [T_REG_W, T_REG_R, T_REG_R]
+  end
 end

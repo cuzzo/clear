@@ -76,6 +76,12 @@ class VM
     end
   end
 
+  AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|
+    define_method("process_#{op.to_s.downcase}") do |target_reg, args, frame|
+      process_sendable_symbol(target_reg, args, frame, op)
+    end
+  end
+
   # A "Stack Frame" represents a running function
   class Frame
     attr_accessor :chunk, :ip, :registers, :arena_mark
@@ -203,7 +209,7 @@ class VM
       case opcode
       when :CAST then process_cast(reg_idx, ins, frame);
       when :ADD then process_add(reg_idx, ins, frame);
-      when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
+      #when *(AST::OP_CODE_SENDABLE_SYMS.keys) then process_sendable_symbol(reg_idx, ins, frame, opcode);
 
       # RETURN IS SPECIAL
       # IT MUST BE DIRECTLY IN MAIN_LOOP TO BREAK IT
@@ -535,14 +541,13 @@ class VM
     frame.registers[target] = result
   end
 
-  def process_sendable_symbol(reg_idx, ins, frame, opcode)
-    target = reg_idx[ins[1]]
-    val_a  = frame.registers[reg_idx[ins[2]]]
-    val_b  = frame.registers[reg_idx[ins[3]]]
+  def process_sendable_symbol(target_reg, args, frame, opcode)
+    val_a = args[0]
+    val_b = args[1]
 
     tag_a = Value.get_tag(val_a)
     tag_b = Value.get_tag(val_b)
-    sym   = AST::OP_CODE_SENDABLE_SYMS[opcode]
+    sym = AST::OP_CODE_SENDABLE_SYMS[opcode]
 
     # Helper to decide how to box the result
     is_comparison = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE].include?(opcode)
@@ -590,7 +595,7 @@ class VM
               end
             end
 
-    frame.registers[target] = result
+    result
   end
 
   def process_not(target_reg, args, frame)
