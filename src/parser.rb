@@ -288,9 +288,7 @@ class Parser
   def parse_function_def
     consume(:KEYWORD, 'FN')
     name = consume(:VAR_ID).value
-    consume(:PERCENT, '%')
 
-    # 1. Parse Params
     params = parse_argument_list
 
     # 2. Parse USE() UpValues

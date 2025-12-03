@@ -1,4 +1,4 @@
-FN cur %() ->
+FN cur() ->
   RETURN %(a, b) -> a + b;
 END
 

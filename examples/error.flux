@@ -8,7 +8,7 @@ STRUCT Error {
 }
 
 -- Helper to make raising errors easier
-FN make_error %(msg, context, snapshot) ->
+FN make_error(msg, context, snapshot) ->
   RETURN %Error{ message: msg, context: context, snapshot: snapshot };
 END
 
@@ -16,7 +16,7 @@ END
 -- MOCK BUSINESS LOGIC
 -- ==========================================
 
-FN fetch_user %(id) ->
+FN fetch_user(id) ->
   print("1. Fetching User ID: " + id);
 
   IF id == 1 THEN
@@ -28,18 +28,18 @@ FN fetch_user %(id) ->
   END
 END
 
-FN parse_json %(json) ->
+FN parse_json(json) ->
   -- This print proves this function is running
   print("2. Parsing JSON...");
   RETURN "UserObject(" + json + ")";
 END
 
-FN enrich_data %(user) ->
+FN enrich_data(user) ->
   print("3. Enriching Data...");
   RETURN user + " + [Permissions]";
 END
 
-FN get_resp %(user) ->
+FN get_resp(user) ->
   VAR resp = fetch_user(user) OR EXIT "NOT OKAY"
     s> parse_json()
     s> enrich_data();

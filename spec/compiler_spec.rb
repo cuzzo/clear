@@ -440,7 +440,7 @@ RSpec.describe Compiler do
     let(:source) {
       <<~FLUX
         VAR outer = 10;
-        FN inner %() USE(outer) ->
+        FN inner() USE(outer) ->
           RETURN outer;
         END
       FLUX
@@ -468,7 +468,7 @@ RSpec.describe Compiler do
     let(:source) {
       <<~FLUX
         VAR outer = 10;
-        FN inner %() ->
+        FN inner() ->
           RETURN outer; -- Missing USE(outer)
         END
       FLUX

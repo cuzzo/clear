@@ -2,12 +2,12 @@ STRUCT Config { debug: Number }
 
 -- TODO: WHAT TYPE IS VOID and NULL?
 -- TODO: RETURNS Bool
-FN main %(s=5) RETURNS Number ->
+FN main(s=5) RETURNS Number ->
   VAR json = %{ debug: 1 };
 
   VAR multiple = 100;
 
-  FN test %() USE(multiple) RETURNS String ->
+  FN test() USE(multiple) RETURNS String ->
     --
     -- SET multiple = 1;
     RETURN "HI";

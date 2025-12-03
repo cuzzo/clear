@@ -149,7 +149,7 @@ RSpec.describe VM do
     context "Assigment of default function argument" do
       let(:source) {
         <<~FLUX
-          FN mut %(x) -> SET x = 0; END
+          FN mut(x) -> SET x = 0; END
           VAR z = 0;
           mut(x);
         FLUX
@@ -165,7 +165,7 @@ RSpec.describe VM do
     context "Cannot create a MUTABLE func without `!` suffix" do
       let(:source) {
         <<~FLUX
-          FN mut %(MUTABLE x) -> SET x = 0; END
+          FN mut(MUTABLE x) -> SET x = 0; END
           VAR z = 0;
           mut(z);
         FLUX
@@ -181,7 +181,7 @@ RSpec.describe VM do
     context "Cannot pass a VAR as a MUTABLE into a func" do
       let(:source) {
         <<~FLUX
-          FN mut! %(MUTABLE x) -> SET x = 0; END
+          FN mut!(MUTABLE x) -> SET x = 0; END
           VAR z = 0;
           mut!(z);
         FLUX
@@ -197,7 +197,7 @@ RSpec.describe VM do
     context "MUTABLE primitives are not allowed as parameters" do
       let(:source) {
         <<~FLUX
-          FN mut! %(MUTABLE x: Number) -> SET x = 0; END
+          FN mut!(MUTABLE x: Number) -> SET x = 0; END
           VAR z = 0;
           mut!(z);
         FLUX
@@ -213,7 +213,7 @@ RSpec.describe VM do
     context "Can pass a MUTABLE as a MUTABLE into a MUTABLE func" do
       let(:source) {
         <<~FLUX
-          FN mut! %(MUTABLE x) -> SET x.p = 0; END
+          FN mut!(MUTABLE x) -> SET x.p = 0; END
           MUTABLE z = %{ p: 42 };
           mut!(z);
           RETURN z.p;
@@ -313,7 +313,7 @@ RSpec.describe VM do
     context "named function returns 'Hello World'" do
       let(:source) {
         <<~FLUX
-          FN x %() -> RETURN "Hello World"; END
+          FN x() -> RETURN "Hello World"; END
           RETURN x();
         FLUX
       }
@@ -339,11 +339,11 @@ RSpec.describe VM do
 
     context "SMOOTH passes the result of the previous function as the first argument to the next" do
       let(:source) { <<~FLUX
-        FN step1 %() -> RETURN 10; END
-        FN step2 %(n) -> RETURN n * 2; END
-        FN step3 %(n) -> RETURN n + 5; END
+        FN step1() -> RETURN 10; END
+        FN step2(n) -> RETURN n * 2; END
+        FN step3(n) -> RETURN n + 5; END
 
-        FN main %() ->
+        FN main() ->
           -- Should be ((10 * 2) + 5) = 25
           RETURN step1() s> step2 s> step3;
         END
@@ -938,7 +938,7 @@ RSpec.describe VM do
   describe 'VM: Higher-Order Functions & Currying' do
     it "handles immediate invocation of a returned function: myGen(5)(1, 2)" do
       # SOURCE:
-      # FN adder_gen %(base) ->
+      # FN adder_gen(base) ->
       #   RETURN %(x, y) USE(base) -> base + x + y;
       # END
       #
@@ -1018,7 +1018,7 @@ RSpec.describe VM do
   context "Memory Management" do
     it "crashes when accessing a View after the Owner has returned (popped stack)" do
       code = <<~FLUX
-        FN get_dangling_view %() ->
+        FN get_dangling_view() ->
           VAR list = %[10, 20, 30];
           -- Create a view of local list
           VAR v = list[0..1];
@@ -1040,7 +1040,7 @@ RSpec.describe VM do
       code = <<~FLUX
         STRUCT Point { x: Number, y: Number }
 
-        FN get_x %(p) ->
+        FN get_x(p) ->
           -- 'p' arrives as a FluxPtr (View)
           -- accessing .x triggers the implicit deref in the VM
           RETURN p.x;
@@ -1063,7 +1063,7 @@ RSpec.describe VM do
       code = <<~FLUX
         STRUCT Box { val: Number }
 
-        FN set_val! %(MUTABLE b) ->
+        FN set_val!(MUTABLE b) ->
           -- Implicit Deref allows SET_FIELD on a Pointer
           SET b.val = 99;
         END

@@ -8,7 +8,7 @@ STRUCT Error {
 }
 
 -- Helper to make raising errors easier
-FN make_error %(msg, context = "", snapshot = "") ->
+FN make_error(msg, context = "", snapshot = "") ->
   RETURN %Error{ message: msg, context: context, snapshot: snapshot };
 END
 
@@ -16,7 +16,7 @@ END
 -- MOCK BUSINESS LOGIC
 -- ==========================================
 
-FN fetch_user %(id) ->
+FN fetch_user(id) ->
   print("1. Fetching User ID: " + id);
 
   IF id == 1 THEN
@@ -29,11 +29,11 @@ FN fetch_user %(id) ->
   END
 END
 
-FN parse %(str) ->
+FN parse(str) ->
   RETURN "parsed";
 END
 
-FN smooth %() ->
+FN smooth() ->
   VAR err = 999
     s> fetch_user OR EXIT "Parsing Phase Failed"
     s> parse;

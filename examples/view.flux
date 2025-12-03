@@ -1,7 +1,7 @@
 VAR list = %[10, 20, 30];
 VAR view = list[0..1]; -- Creates FluxView
 
-FN print_first %(v) ->
+FN print_first(v) ->
   -- VM receives FluxView.
   -- print() calls v.inspect.
   -- If v is a FluxView, it should print the content of the owner.
