@@ -346,9 +346,12 @@ MUTABLE list : UInt64[100] = %[1, 2, 3]; -- compiler error, don't assign a DYNAM
 ### Type Inference for Arrays
 ```
 VAR fixed = [1, 2, 3];        -- Type: UInt64[3] (fixed size)
+MUTABLE fixed = [1, 2, 3];    -- Type: UInt64[3] (fixed size)
 MUTABLE dynamic = %[1, 2, 3]; -- Type: UInt64[] (dynamic size)
 
-VAR fixed = [2, 1.0, 3];     -- Type: Float64[3] (fixed size)
+VAR fixed = [2, 1.0, 3] ;     -- Type: Float64[3] (fixed size)
+
+VAR dynamic = %[1, 2, 3];     -- Type: UInt64[] (dynamic size, on heap, slow, doesn't really make sense, but allowed)
 ```
 
 **NOTE:** The default type for array values IS NOT Number
@@ -369,7 +372,7 @@ STRUCT Person {
 }
 
 -- Instantiation
-VAR p = Point{{ x: 1.0, y: 2.0 }};
+VAR p = Point{ x: 1.0, y: 2.0 }; -- created on STACK
 
 -- Note well: a struct is always fixed-size in the stack
 -- Even if some of it's data `scores` is on the HEAP.
@@ -378,6 +381,21 @@ VAR person = Person{{
   age: 30,
   scores: %[100, 95, 87, 92, 88]
 }};
+
+VAR p2 = %Point{ x: 2.0, y: 3.0 }; -- created on HEAP, necessary for recursive structures!
+
+-- Imagine this binary tree node
+STRUCT Node {
+  left: %Node, -- OK: Recursive structures MUST exist on the HEAP, otherwise instant OOM
+  right: %Node
+}
+
+STRUCT Node {
+  left: Node, -- COMPILER ERROR: Recursive structures MUST exist on the HEAP!
+  right: Node
+}
+
+
 ```
 
  * Structs are designed for cache locality.
@@ -389,6 +407,177 @@ VAR person = Person{{
 - ❌ Dynamic arrays inline: `T[]` (unknown size)
 - ❌ Variable size inline: `T[*]` (unknown size)
 
+
+### Function Returns: HEAP vs STACK: `GIVE`
+
+CHEAT handles memory gracefully, by wiping clean the memory used by a function after it completes.
+
+ * This presents a problem, if you want to return a HEAP object.
+ * The HEAP object will die when the function completes.
+   * You cannot return it, otherwise you'd return a pointer to garbage.
+ * Therefore, you must SAVE the return object.
+   * However, you can't just SAVE it forever. That would be a memory leak.
+ * You must TRANSFER it to the callee, who will automatically destroy it when done.
+   * `GIVE` handles this.
+
+```
+-- Must prefix HEAP returns with `%` for consistency
+FN %stringCypherMaker(limit : Int64) -> %String[]
+  MUTABLE s = %"";
+  FOR i IN (1..=limit) DO
+    s.concat!((i XOR 5).to_s);
+  END
+
+  -- We are transferring OWNERSHIP of the heap memory to the caller.
+  -- 'GIVE' prevents the automatic cleanup that usually happens here.
+  RETURN GIVE s;
+END
+-- SCOPE END: Because we used GIVE, 's' is NOT freed.
+-- It survives and moves to the caller.
+
+VAR myHeapStr = %stringCypherMaker(10_000_000); -- it is clear you have a HEAP object, and that ownership was accepted.
+```
+
+Let's see what would happen without `GIVE`:
+
+```
+FN stringCypherMaker(limit : Int64) -> %String[]
+  MUTABLE s = %"";
+  FOR i IN (1..=limit) DO
+    s.concat!((i XOR 5).to_s)
+  END
+  RETURN s; -- COMPILER ERROR: Not allowed
+END
+-- SCOPE END: death
+-- `s` would be a pointer to nothing (dangling pointer / use after free).
+-- This would be a run-time error, NOT ALLOWED!
+
+
+VAR stackStr = stringCypherMaker(10_000_000); -- I want a stack object, but was given a (dangling) pointer to a heap object.
+print(stackStr); -- Run-time error, NOT ALLOWED!
+```
+
+### Function Inputs: HEAP vs STACK: `TAKES`
+
+CHEAT treats pointers like an interpreted language (e.g., Ruby or Python).
+
+ * **Pass by Reference:** When you call a function with a large object, you do not `COPY` the data. You pass a `Pointer` to it.
+   * In C, this is a `Pointer`. In Rust, this is a `Borrow`.
+   * In CHEAT, this happens automatically behind the scenes.
+ * **The Ownership Problem:** By default, the function can read/write the object, but the CALLER keeps "Ownership" (responsibility to free it).
+ * **The Data Structure Dilemma:**
+   * If a function inserts an object into a Tree or List, that Tree needs to *own* the object.
+   * If the **caller** *also* still owns it, the **caller* will destroy it when its scope ends.
+   * The Tree would then hold a pointer to dead memory.
+     * *Dead memory means runtime errors, and runtime errors are NOT allowed!*
+ * **The Solution:** You must SURRENDER the object to the function.
+   * `TAKES` handles this in the function definition.
+   * `GIVE` handles this at the call site.
+
+```
+-- 'TAKES' warns the compiler: "I am assuming full responsibility for this memory."
+FN addChild!(MUTABLE parent: Node, TAKES child: %Node) ->
+  parent.list << child;
+  -- function ends.
+  -- We do NOT free 'child' here, because it is now part of 'parent'.
+  -- When 'parent' eventually dies, it will kill 'child'.
+END
+
+MUTABLE root = %Node{};
+MUTABLE leaf = %Node{};
+
+-- We must use GIVE to satisfy the TAKES requirement
+addChild!(root, GIVE leaf);  -- COMPILER ERROR: leaf.print(); -- Variable 'leaf' is dead. You GAVE it away!
+```
+
+Let's see what would happen without `TAKES`:
+
+```
+FN addChild!(MUTABLE parent: Node, child: Node) ->
+  -- No TAKES
+   parent.list << child;
+  -- Function ends. The function was just "borrowing" child.
+END
+-- SCOPE END: death.
+-- 'leaf' was owned by this block. It is now destroyed (freed).
+
+
+MUTABLE root = %Node{};
+MUTABLE leaf = %Node{};
+addChild!(root, leaf);
+-- 'root' now contains a pointer to the memory where 'leaf' USED to be.
+root.printChildren(); -- Run-time error (Use After Free). NOT ALLOWED!
+```
+
+In CHEAT, functions do not specify whether they acccept HEAP objects or STACK objects.
+
+  * 99% of the time, your function will work with either (a pointer/borrow).
+  * If your function needs to `TAKE` ownership, it *must* take a HEAP object.
+    * *Why?* You cannot "take" a stack object because it is physically bound to the caller's stack frame. It cannot survive the caller.
+
+```
+
+FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
+  -- COMPILER ERROR: You can only `TAKE` HEAP objects.
+END
+
+FN addChild!(MUTABLE parent: Node, TAKES child: %Node) ->
+  -- OK
+END
+```
+
+#### Why `GIVE` is explicit?
+
+CHEAT could infer that a CALLER must GIVE based on the function signature. But this would lead to confusion:
+
+```
+MUTABLE root = %Node{};
+MUTABLE leaf = %Node{};
+
+addChild!(root, leaf);
+
+print(leaf.name); -- COMPILER ERROR: Variable `leaf` is dead. You GAVE it away!
+-- USER: What??? I didn't GIVE anything away!
+```
+
+Compare to:
+
+```
+MUTABLE root = %Node{};
+MUTABLE leaf = %Node{};
+
+addChild!(root, GIVE leaf);
+
+print(leaf.name); -- COMPILER ERROR: Variable `leaf` is dead. You GAVE it away!
+-- USER: Oh, right. I see that on the line above.
+```
+
+#### What happens when you want to GIVE a STACK object?
+
+If you have a stack object but need to pass it to a function that TAKES ownership, you must promote it to the Heap using the `%` sigil AND `COPY` it.
+
+```
+FN saveToDatabase(TAKES val: %String) ...
+
+VAR tinyStackStr = "alice";
+
+-- Error: specific types don't match (Stack vs Heap)
+saveToDatabase(GIVE tinyStackStr);
+
+-- OK: We create a heap copy on the fly
+saveToDatabase(GIVE %COPY(tinyStackStr));
+
+print(tinyStackStr); -- OK: You created a COPY
+```
+
+ * Again, the `COPY` keyword *could* be inferred.
+ * However, in CHEAT, we prefer the user to expressly be aware of memory.
+   * We pass-by-reference implicitly so that you don't COPY implicitly.
+   * Therefore, when `GIVING` stack objects, we also do not want to implicitly copy them.
+   * Therefore, you must `GIVE %COPY()`
+   * `COPY` by default would return a STACK object - just as a `""` and `[]` by default are STACK objects.
+   * `%COPY` returns a HEAP object.
+
 ---
 
 ## Slices and Borrowing
@@ -399,7 +588,7 @@ VAR person = Person{{
 ### Creating Slices
 ```
 VAR data = [0, 1, 2, 3, 4, 5];
-VAR slice = &data[1..<3];       -- Immutable slice: [1, 2]
+VAR slice = &data[1..<3];        -- Immutable slice: [1, 2]
 MUTABLE slice = &data[1..<3];    -- COMPILER ERROR: You cannot create a MUTABLE view of an IMMUTABLE object.
 
 MUTABLE data = %[0, 1, 2, 3, 4, 5];
@@ -536,7 +725,7 @@ END
 FOR (i=0; i < 10; i++) DO
   PRINT(i);
 END
--- Note that for speed for loop variables (`i`) are of type **Number**
+-- Note that for speed for loop variables (`i`) are of type **Int64**
 
 -- For loop with array
 VAR items = %[1, 2, 3];
@@ -544,14 +733,14 @@ FOR item IN items DO
   PRINT(item);
 END
 
--- While loop
+-- WHILE loop
 MUTABLE i = 0;
 WHILE i < 10 DO
   PRINT(i);
   SET i = i + 1;
 END
 
--- Break and Continue
+-- BREAK and CONTINUE
 FOR i IN (1..=100) DO
   IF i == 50 THEN BREAK; END
   IF i % 2 == 0 THEN CONTINUE; END
@@ -767,11 +956,64 @@ END
 
 ### The `%` HEAP Allocator
 ```
-VAR x = 5;                                -- No allocation (scalar)
-MUTABLE list = %[1, 2, 3];                -- Allocates dynamic array
-MUTABLE string = %"";                     -- Allocates dynamic string
-MUTABLE myObj = %MyClass{};               -- Compiler error, structs are fixed size - they cannot be allocated on the HEAP, remove the `%` sigil.
+VAR x = 5;                                -- No allocation (scalar / primitive)
+VAR x = %5;                               -- COMPILER ERROR: Don't create primitives on the HEAP. Remove the `%` sigil.
+VAR x^ = %5;                              -- OK: Atomics MUST be on the HEAP, see section above.
+MUTABLE list = %[1, 2, 3];                -- Allocates dynamic, mutable HEAP array
+VAR list = %[1, 2, 3];                    -- Allocates fixed, immutable HEAP array
+MUTABLE string = %"";                     -- Allocates dynamic, mutable HEAP string
+VAR string = %"";                         -- Allocates fixed, immutable HEAP string
+VAR myObj = %MyClass{};                   -- Allocates an immutable struct on the HEAP
+MUTABLE myObj = %MyClass{};               -- Allocates an mutable struct on the HEAP.
 ```
+
+### Safe Navigator
+
+What happens if you want to do something like:
+
+```
+VAR result = arr[4].get("my key").items[10] OR PASS;
+```
+
+ * **Problem:** If arr[4] fails, you still try to call .get() on... what? The error?
+   * That would be a compiler error. It doesn't make sense.
+   * But it *is* how we like to write code.
+
+You'd have to write this:
+
+```
+VAR step1 = arr[4] OR PASS;
+IF step1 THEN
+   VAR step2 = step1.get("my key") OR PASS;
+   IF step2 THEN
+     VAR result = step2.items[10] OR PASS;
+   END
+END
+```
+
+No thanks! We can safe navigate `?.` like we SMOOTH operate `s>`:
+
+```
+VAR result = arr[4]?.get("my key")?.items[10] OR PASS;
+```
+
+This could be expressed as a SMOOTH operation, but save navigation is more efficient here:
+
+```
+VAR result = arr
+  s> get(4)
+  s> get("my key")
+  s> get_items -- ONLY if exists
+  s> get(10) OR PASS;
+```
+
+**Verdict**
+ * `?.` is likely what you want to traverse *through* an object.
+   * `users[10]?.address?.city`
+ * `s>` is likely what you want for a multi-step transformation.
+   * `input s> parse s> fetch s> respond`
+
+Since there are no result objects, like the SMOOTH operator, the Safe Navigator has: Zero overhead, zero allocations, total safety.
 
 ---
 
@@ -780,7 +1022,7 @@ MUTABLE myObj = %MyClass{};               -- Compiler error, structs are fixed s
 | Sigil | Meaning | Example |
 |-------|---------|---------|
 | `%` | Allocate memory on the heap | `%[1, 2, 3]` |
-| `&` | Borrow memory | %data[1..=10] |
+| `&` | Borrow memory | &data[1..=10] |
 | `^` | Atomic (thread-safe) | `counter^.increment!()` |
 | `@` | Pipeline binding | `s> process AS @p` |
 | `!` | Mutation suffix | `list.push!(item)` |
@@ -800,6 +1042,22 @@ MUTABLE myObj = %MyClass{};               -- Compiler error, structs are fixed s
 | `s>` | SMOOTH Pipeline | `data s> map s> filter` |
 | `?.` | Save Navigate | `data?.items?.count` |
 | `OR` | Error handling | `x.get(i) OR default` |
+
+## Quick Reference: Memory Ownership Table
+
+| Syntax | Ownership | Lifetime | Can Escape? | Notes |
+|--------|-----------|----------|-------------|-------|
+| `VAR x = 5` | Caller | Function scope | ✅ (copied) | Scalar values are copied on return |
+| `VAR x = [1,2,3]` | Caller | Function scope | ✅ (copied) | Fixed-size stack arrays are copied |
+| `VAR x = %[1,2,3]` | Caller | Arena | ❌ (arena-bound) | Heap arrays die when arena is wiped |
+| `VAR x = &arr[..]` | Borrowed | Until borrow ends | ❌ (borrowed) | Slice cannot outlive source |
+| `VAR x^ = %0` | Ref-counted | Ref count → 0 | ✅ (ref-counted) | Atomics use reference counting |
+| `RETURN x` | Caller | Caller's arena | ✅ (moved) | Value written to caller's arena |
+| `RETURN GIVE %x` | Caller | Caller's arena | ✅ (transferred) | Heap ownership transferred to caller |
+| `FN f(TAKES x)` | Callee | Callee's control | ✅ (taken) | Caller surrenders ownership |
+| `MUTABLE x = %[]` | Caller | Arena | ❌ (arena-bound) | Mutable heap data still arena-bound |
+| `VAR x = %Point{}` | Caller | Arena | ❌ (arena-bound) | Heap-allocated struct (for recursion) |
+| `GLOBAL x^ = %0` | Global | Program lifetime | ✅ (global) | Global atomics live until program ends |
 
 
 ## Quick Reference: Higher-Order Functions
@@ -852,8 +1110,7 @@ FN countWords(text : String) -> WordCount[] ->
 
   words
     s> PARALLEL each(%(word) -> {
-      VAR current = counts^.get(word) OR 0;
-      counts^.set!(word, current + 1);
+      counts^.incrementKey!(word);
     });
 
   RETURN counts^
