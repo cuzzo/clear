@@ -36,6 +36,7 @@ Everyone else can CHEAT.
    * Understanding what a function is *supposed* to do should not be bogged down by it's error handling logic.
      * Like test code, error handling code should be separate as much as possible.
      * Read it as an addendum IFF you care.
+   * Implicit behavior / magic *can* make things *harder* to understand.
 3. You should be able to test anything, and it should be EASY.
    * There should be ZERO test code in production code.
      * Java @visibleForTesting is nice, but it shouldn't be necessary at all.
@@ -44,18 +45,18 @@ Everyone else can CHEAT.
    * You should not always have to `checkOk`.
      * We can *assume* okay, and look to the bottom to see what happens when not okay, if we ever care.
    * The easier it is to handle errors, the more likely you are to handle them correctly!
-5. If your code compiles in `STRICT` mode, it will not produce a Run-time Error unless the system explicitly encounters a resource boundary, the program executes an operation whose inputs are logically impossible to resolve correctly.
+5. If your code compiles in `STRICT` mode, it will not produce a Run-time Error unless the system explicitly encounters a resource boundary, or the program executes an operation whose inputs are logically impossible to resolve correctly.
    * TODO: Investigate Type Coercion Failure claims.
      * Currently not implemented, but on the roadmap.
    * TODO: Investigate claims of all errors being handled *somewhere*.
 6. Compiler errors should tell you *exactly* what's wrong, how to fix it, and be easy to understand.
 7. Types should be your friend, helping you write working code *faster*, not an enemy that is constantly slowing you down.
 8. 90% of your time should be spent writing the code you need, and 10% debugging, handling errors, fighting compilers - not the other way around.
-9. Writing efficient code should be *incredibly* easy.
+9. Writing efficient code should be the default, and the default should be easy.
    * Writing ineffiecent code should be *obviously* wrong.
 10. Anything that *can* be 1-line *should* be!
-    * Readability beats cleverness -- unless direly critical to performance.
-    * The constructs and syntax of a language should lend itself to one-liners, as it is easier to *UNDERSTAND*.
+    * Readability and understandability beat cleverness -- unless direly critical to performance.
+    * The constructs and syntax of a language should lend itself to one-liners, as they are often easier to *UNDERSTAND*.
 11. Code should be as declaractive as possible.
     * Every function should look like a clean chain of exactly what it *should* be doing.
       * It should not look like a nested mess of *how* it's handling errors and undesirable states.
@@ -64,6 +65,10 @@ Everyone else can CHEAT.
     * Unless you're a rocket scientist, the right compiler can figure it out better than you can.
     * A good SQL engine beats all but the absolute most elite programmers.
     * A good compiler can also take an easy language and beat all but the most elite programmers (see LuaJIT).
+    * CHEAT *does* ask you think about *WHERE* an object lives.
+      * Cache locality is literally 100x faster. If you wrote something cache-locality optimized in Ruby, it would crush a pointer cache miss in C.
+      * Therefore, CHEAT is designed around making it as easy as possible to ensure you DON'T cache miss unless you absolutely must.
+        * This means you do need to think about if you want something on the STACK (default, fast) or the HEAP (slow, but sometimes required).
 13. You should not need to worry about a Global-Interpreter-Lock (GIL).
     * Code *should* be able to run in parallel or concurrently *EFFICIENTLY* by default.
 14. Code should be as left-sided as possible.
@@ -153,8 +158,8 @@ CHEAT is opinionated. The specific optimizations that make it fast and safe for 
 
 2. You need to model Inherently Unsafe / Cyclic Relationships
   * If your architecture relies on Rust-style "Weak Pointers" to manage reference cycles (A -> B -> A)
-     * OR if you need recursive fine-grained locking, you are strictly managing memory and deadlock risks manually.
-  * CHEAT guarantees safety by forbidding these patterns entirely.
+     * OR if you need recursive fine-grained locking, and you are strictly managing memory and deadlock risks manually.
+  * CHEAT guarantees safety by forbidding these patterns entirely! They're rare!
   * *The Alternative:* If you absolutely need a doubly-linked list or a cyclic graph with individual node locking, that is "Engine Code," not "Business Logic." Write that specific component in Zig (where you can manage the unsafe pointers yourself) and import it into CHEAT as a safe handle.
 
 ## CONTROVERSIAL CHOICES
