@@ -244,48 +244,68 @@ increment!(x);                -- x is now 6
 
 ### Arrays
 
-**The `%` sigil means "allocate memory":**
+**The `%` sigil means "allocate memory on the *HEAP*":**
 
- * *exception: strings allocate objects on the heap, but don't require `%`.
+ * *dyanmic strings require `%`.
 
 ```
 -- Fixed-size immutable array
-VAR coords = %[1, 2, 3];
+VAR coords = [1, 2, 3];
 coords.push!(4);              -- COMPILER ERROR: immutable and fixed
 
 -- Dynamic mutable array
-MUTABLE items = %[1, 2, 3];
-items.push!(4);               -- OK: can grow
+MUTABLE items = [1, 2, 3];
+items.push!(4);               -- COMPILER ERROR: items is MUTABLE, not dynamic
 items.set!(0, 99);            -- OK: can mutate elements
+
+MUTABLE items = %[1, 2, 3];
+items.push!(4);               -- OK: items is dynamic, it can grow
+items.set!(0, 99);            -- OK: can mutate elements
+
+VAR items = %[1, 2, 3];       -- COMPILER ERROR: You cannot create an immutable DYNAMIC object. Use `MUTABLE` for a dynamic object, or get rid of the `%` for a fixed-sized object.
+
+VAR str = "hello, worl";
+str.concat!(0, "d");          -- COMPILER ERROR: immutable and fixed
+
+MUTABLE str = "hello, worl";
+str.concat!(0, "d");          -- COMPILER ERROR: str is MUTABLE, not dynamic
+
+MUTABLE str = %"hello, worl";
+str.concat!(0, "d");          -- OKAY
+
+VAR str = %"hello, worl";     -- COMPILER ERROR: You cannot create an immutable DYNAMIC object. Use `MUTABLE` for a dynamic object, or get rid of the `%` for a fixed-sized object.
 ```
 
 ### Array Types
 ```
 T[n]     -- Fixed size n (exact)
 T[*]     -- Fixed size, determined at runtime
-T[]      -- Dynamic size (can grow/shrink)
+T[]      -- Dynamic size (can grow/shrink - not applicable to IMMUTABLE VAR)
 ```
 
 **Examples:**
 ```
 -- Fixed size, immutable binding
-VAR coords : Float64[3] = %[0.0, 1.0, 2.0];
+VAR coords : Float64[3] = [0.0, 1.0, 2.0];
 
 -- Fixed capacity, mutable binding
-MUTABLE buffer : UInt8[100] = %[];
-buffer.push!(1);              -- Can grow up to capacity
+MUTABLE buffer : UInt8[100] = [];
+buffer.push!(1);                   -- Can grow up to capacity
 
 -- Dynamic size, mutable binding
 MUTABLE list : UInt64[] = %[1, 2, 3];
-list.push!(4);                -- Can grow indefinitely
+list.push!(4);                     -- Can grow indefinitely
+
+
+MUTABLE list : UInt64[100] = %[1, 2, 3]; -- compiler error, don't assign a DYNAMIC list to a fixed-size list. Either change the fixed-size from [100] to Dynamic [], or remove the `%` sigil -- which signifies a dynamic heap object.
 ```
 
 ### Type Inference for Arrays
 ```
-VAR fixed = %[1, 2, 3];       -- Type: UInt64[3] (fixed size)
+VAR fixed = [1, 2, 3];        -- Type: UInt64[3] (fixed size)
 MUTABLE dynamic = %[1, 2, 3]; -- Type: UInt64[] (dynamic size)
 
-VAR fixed = %[2, 1.0, 3];     -- Type: Float64[3] (fixed size)
+VAR fixed = [2, 1.0, 3];     -- Type: Float64[3] (fixed size)
 ```
 
 **NOTE:** The default type for array values IS NOT Number
@@ -306,17 +326,19 @@ STRUCT Person {
 }
 
 -- Instantiation
-VAR p = %Point { x: 1.0, y: 2.0 };
-VAR person = %Person {
+VAR p = Point{{ x: 1.0, y: 2.0 }};
+
+-- Note well: a struct is always fixed-size in the stack
+-- Even if some of it's data `scores` is on the HEAP.
+VAR person = Person{{
   name: "Alice",
   age: 30,
   scores: %[100, 95, 87, 92, 88]
-};
+}};
 ```
 
  * Structs are designed for cache locality.
- * It is strongly advised not to store unsized Arrays (including String type) in Structs.
-   * Otherwise, cache locality will be destroyed.
+ * No `%` means no cache miss!
 
 **Struct Restrictions:**
 - ✅ Fixed-size arrays: `T[n]`
@@ -330,22 +352,24 @@ VAR person = %Person {
 
 **The `&` sigil means "borrow/reference":**
 
+
 ### Creating Slices
 ```
-VAR data = %[0, 1, 2, 3, 4, 5];
-VAR slice = data&[1..<3];     -- Immutable slice: [1, 2]
+VAR data = [0, 1, 2, 3, 4, 5];
+VAR slice = &data[1..<3];       -- Immutable slice: [1, 2]
+MUTABLE slice = &data[1..<3];    -- COMPILER ERROR: You cannot create a MUTABLE view of an IMMUTABLE object.
 
 MUTABLE data = %[0, 1, 2, 3, 4, 5];
-MUTABLE slice = data&[0..=3]; -- Mutable slice: [0, 1, 2, 3]
+MUTABLE slice = &data[0..=3];    -- Mutable slice: [0, 1, 2, 3]
 ```
 
 ### Slice Syntax
 ```
-arr[0..<5]    -- Elements 0-4 (exclusive: less than 5)
-arr[0..=5]    -- Elements 0-5 (inclusive: equals 5)
-arr[..<5]     -- Start to 4
-arr[5..]      -- 5 to end
-arr[..]       -- Entire array
+&arr[0..<5]    -- Elements 0-4 (exclusive: less than 5)
+&arr[0..=5]    -- Elements 0-5 (inclusive: equals 5)
+&arr[..<5]     -- Start to 4
+&arr[5..]      -- 5 to end
+&arr[..]       -- Entire array
 ```
 
 **Mnemonic:** Read the symbols!
@@ -356,17 +380,19 @@ arr[..]       -- Entire array
 
 **Rust-style borrow rules:**
 ```
-VAR data = %[1, 2, 3];
-VAR slice1 = data&[0..<2];    -- Immutable borrow
-VAR slice2 = data&[1..<3];    -- OK: multiple immutable borrows
+VAR data = [1, 2, 3];
+VAR slice1 = &data[0..<2];     -- Immutable borrow
+VAR slice2 = &data[1..<3];     -- OK: multiple immutable borrows
 
 MUTABLE data = %[1, 2, 3];
-VAR slice = data&[0..<2];     -- Immutable borrow
-SET data = %[4, 5, 6];        -- COMPILER ERROR: data is borrowed
+VAR slice = &data[0..<2];      -- Immutable borrow
+SET data = [4, 5, 6];         -- COMPILER ERROR: data is borrowed
+FREE slice;
+SET data = [4, 5, 6];         -- OKAY
 
 MUTABLE data = %[1, 2, 3];
-MUTABLE slice = data&[0..<2]; -- Exclusive mutable borrow
-VAR slice2 = data&[1..<3];    -- COMPILER ERROR: already mutably borrowed
+MUTABLE slice = &data[0..<2];  -- Exclusive mutable borrow
+VAR slice2 = &data[1..<3];     -- COMPILER ERROR: already mutably borrowed
 ```
 
 **Key Rules:**
@@ -375,8 +401,12 @@ VAR slice2 = data&[1..<3];    -- COMPILER ERROR: already mutably borrowed
 - Slices cannot outlive their source (arena-based)
 
 ### Function Parameters with Slices
+
+* Implicitly, any function that takes an array can take a Slice.
+* You don't need to do anything to be able to accept the real array or a Slice (or a Stream).
+
 ```
-FN sum(numbers& : UInt64[*]) -> UInt64 ->
+FN sum(numbers : UInt64[*]) -> UInt64 ->
   VAR total = 0;
   FOR num IN numbers ->
     SET total = total + num;
@@ -384,9 +414,9 @@ FN sum(numbers& : UInt64[*]) -> UInt64 ->
   RETURN total;
 END
 
-VAR data = %[1, 2, 3, 4, 5];
-VAR result = sum(data&);      -- Pass slice
-VAR partial = sum(data&[0..<3]); -- Pass sub-slice
+VAR data = [1, 2, 3, 4, 5];
+VAR result = sum(data);          -- Passes a pointer / slice by default
+VAR partial = sum(data[0..<3]);  -- Explicitly pass a slice - OKAY
 ```
 
 ---
@@ -397,8 +427,10 @@ VAR partial = sum(data&[0..<3]); -- Pass sub-slice
 
 ### Creating Atomics
 ```
-VAR counter^ = %0;           -- Atomic integer
+VAR counter^ = %0;           -- Atomic integer - note the %0 - this integer is special, it lives on the HEAP
 GLOBAL totalRequests^ = %0;  -- Global atomic
+
+VAR counter = %0             -- COMPILER ERROR, you cannot create a primitive on the HEAP. If you don't know what the HEAP is, you probably want to remove the `%` sigil. If you want to create an `Atomic`, use the `^` suffix.
 ```
 
 ### Atomic Operations
@@ -552,7 +584,7 @@ END
 
 ### Parallel Loops
 ```
-VAR data = %[1, 2, 3, 4, 5];
+VAR data = [1, 2, 3, 4, 5];
 
 PARALLEL FOR item IN data ->
   process(item);              -- Each iteration runs in parallel
@@ -583,7 +615,7 @@ END
 
 ### Atomic Captures
 ```
-FN parallelProcess(data&) ->
+FN parallelProcess(data) ->
   VAR progress^ = %0;
 
   PARALLEL FOR item IN data ->
@@ -656,7 +688,7 @@ VAR result = SYNC stream;
 };
 ```
 
- * Note the `%`. Lambdas are created as memory on the heap.
+ * Note the `%`. Lambdas are created as memory on the HEAP.
 
 ---
 
@@ -667,10 +699,10 @@ VAR result = SYNC stream;
 Every function has its own memory arena:
 ```
 FN outer() ->
-  VAR data = %[1, 2, 3];      -- Allocated in outer's arena
+  VAR data = [1, 2, 3];       -- Allocated in outer's arena
 
   FN inner() ->
-    VAR temp = %[4, 5, 6];    -- Allocated in inner's arena
+    VAR temp = [4, 5, 6];     -- Allocated in inner's arena
   END
 
   inner();
@@ -684,18 +716,18 @@ END
 
 ✅ **Can escape:**
 - Atomics (`^`) - reference counted
-- Return values (copied or moved to caller's arena)
+- Return values (written directly to caller's arena)
 
 ❌ **Cannot escape:**
-- Slices (`&`) - must not outlive source
+- Slices - must not outlive source
 - Regular allocated values (arena-bound)
 
-### The `%` Allocator
+### The `%` HEAP Allocator
 ```
-VAR x = 5;                             -- No allocation (scalar)
-VAR list = %[1, 2, 3];                 -- Allocates array
-VAR point = %Point { x: 1.0, y: 2.0 }; -- Allocates struct
-VAR builder = %StringBuilder();        -- Allocates builder
+VAR x = 5;                                -- No allocation (scalar)
+MUTABLE list = %[1, 2, 3];                -- Allocates dynamic array
+MUTABLE string = %"";                     -- Allocates dynamic string
+MUTABLE myObj = %MyClass{};               -- Compiler error, structs are fixed size - they cannot be allocated on the HEAP, remove the `%` sigil.
 ```
 
 ---
@@ -704,8 +736,8 @@ VAR builder = %StringBuilder();        -- Allocates builder
 
 | Sigil | Meaning | Example |
 |-------|---------|---------|
-| `%` | Allocate memory | `%[1, 2, 3]` |
-| `&` | Borrow/slice | `data&[0..<5]` |
+| `%` | Allocate memory on the heap | `%[1, 2, 3]` |
+| `&` | Borrow memory | %data[1..=10] |
 | `^` | Atomic (thread-safe) | `counter^.increment!()` |
 | `@` | Pipeline binding | `s> process AS @p` |
 | `!` | Mutation suffix | `list.push!(item)` |
@@ -732,10 +764,12 @@ VAR builder = %StringBuilder();        -- Allocates builder
 * CHEAT prefers SQL-like syntax where possible
 
 ```
-SELECT    -- Transform/project (like map)
-WHERE     -- Filter (like filter)
-UNNEST    -- Flatten (like flatMap)
-EACH      -- Iterate with side effects (like forEach)
+SELECT     -- Transform/project (like map)
+WHERE      -- Filter (like filter)
+UNNEST     -- Flatten (like flatMap)
+EACH       -- Iterate with side effects (like forEach)
+INDEX      -- GROUP BY / turn into a HashMap
+SORT       -- ...
 ```
 
 These give you placeholder values and create an implicit lambda:
@@ -781,11 +815,15 @@ FN countWords(text : String) -> WordCount[] ->
 
   RETURN counts^
     s> entries AS @pairs
-    s> SELECT %WordCount {
+    s> SELECT WordCount {
          word: _.key,
          count: _.value
        }
-    s> sort(%(a, b) -> b.count - a.count);
+    s> SORT(a, b) -> a.count - b.count; -- NOTE that SORT does not take a lambda `%`.
+
+-- SQL-like HIGHER-ORDER Array functions DO NOT have the overhead of creating arenas.
+-- No searching through the heap, chasing pointers.
+-- They are made for *speed*.
 END
 
 -- Usage

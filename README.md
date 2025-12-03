@@ -196,12 +196,10 @@ CHEAT is opinionated. The specific optimizations that make it fast and safe for 
 ### The "53-Bit" Lie (NaN Boxing)
   * **The Controversy:** By default, every number in CHEAT is a 64-bit Float (Double).
     * This means generic Integers are limited to 53 bits of precision (safe range up to ~9 quadrillion).
-  * **The Trade-off:** If you need a raw `Int64` or `u64` for bitwise pointer math, you have to explicitly ask for it (and it's slower in the interpreter because it has to be "boxed" or allocated).
+  * **The Trade-off:** If you need a raw `Int64` or `u64` for bitwise pointer math, you have to explicitly ask for it. However, CHEAT natively supports value types, so there is no performance cost.
   * **The Defense:**
       * **99% Case:** You are counting loops, array indices, or database IDs. 53 bits handles this effortlessly.
-      * **The 1% Case:** If you are doing Cryptography or matrix multiplication, you shouldn't be doing it in a hot loop in a dynamic language anyway.
-      * **The Cheat Code:** CHEAT assumes that if you need high-performance math, you will use a `Vector` (SIMD optimized) or a specialized Struct. We prioritize the speed of dynamic typing over the purity of 64-bit integers.
-
+      * **The 1% Case:** If you are doing Cryptography, matrix multiplication, or care about exact 64-bit Integer limits - you can specify a type.
 
 ### Death to the Garbage Collector
    * **The Controversy:** CHEAT does not have a general-purpose Garbage Collector. It uses Arena Allocation.
@@ -229,14 +227,14 @@ CHEAT is opinionated. The specific optimizations that make it fast and safe for 
 
 ### Different IMPLICIT default `collect` behavior at the end of stream chains
   * **The Controversy:** If you assign a stream to a variable, the compiler *assumes* you want to do it sync and wait til finished to collect
- * **The Catch:** The same statment *WITHOUT* an assignment, will immediately execute the next line without finishing.
- * **The Defense:** CHEAT is supposed to be intuitive, if you assign `VAR x = myList s> reduce( ... )` on the next line, you assume x to be a val, not a stream.
-   * If you DON'T explicitly assign, it assumes it can be run in the background.
-   * You must either use `AWAIT` at the beginning or ` s> collect` at the end.
-   * In the majority of cases, it will either be a background task OR have a callback.
-   * A pipeline that ends in ` s> callback(myFn)` should almost always be async.
-   * The compiler will *WARN* but not reject if you don't prefix with ASYNC or AWAIT when not assigning
-   * If you want to assign to a stream and/or `RETURN` the stream later, you simply prefix with `ASYNC`
+  * **The Catch:** The same statment *WITHOUT* an assignment, will immediately execute the next line without finishing.
+  * **The Defense:** CHEAT is supposed to be intuitive, if you assign `VAR x = myList s> reduce( ... )` on the next line, you assume x to be a val, not a stream.
+    * If you DON'T explicitly assign, it assumes it can be run in the background.
+    * You must either use `AWAIT` at the beginning or ` s> collect` at the end.
+    * In the majority of cases, it will either be a background task OR have a callback.
+    * A pipeline that ends in ` s> callback(myFn)` should almost always be async.
+    * The compiler will *WARN* but not reject if you don't prefix with ASYNC or AWAIT when not assigning
+    * If you want to assign to a stream and/or `RETURN` the stream later, you simply prefix with `ASYNC`
 
 
 ## EXAMPLES
