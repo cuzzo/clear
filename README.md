@@ -162,6 +162,313 @@ CHEAT is opinionated. The specific optimizations that make it fast and safe for 
   * CHEAT guarantees safety by forbidding these patterns entirely! They're rare!
   * *The Alternative:* If you absolutely need a doubly-linked list or a cyclic graph with individual node locking, that is "Engine Code," not "Business Logic." Write that specific component in Zig (where you can manage the unsafe pointers yourself) and import it into CHEAT as a safe handle.
 
+## WHY CHEAT
+
+If you already know Logic (Javascript/Python), the only thing stopping you from writing System-Level code is Memory.
+
+ * In Ruby/Python/JavaScript, Memory is "Magic."
+ * In C, it's an incomprehensible arcana.
+ * In CHEAT, Memory is "Physics."
+
+Here are the 7 Rules of Physics in CHEAT that don't exist in the simplest languages like Ruby.
+
+### 1. Physics of change: `MUTABLE` vs `IMMUTABLE` (Default)
+
+In Ruby or Python, you can change the value of any variable by default (the behave as `MUTABLE`).
+
+```ruby
+name = "Bob"
+name = "Alice"
+```
+
+If you didn't know, in Ruby, you can make it `IMMUTABLE`:
+
+```ruby
+name = "Bob"
+name.freeze
+name = "Alice"             -- RUN-TIME ERROR!
+```
+
+In CHEAT, there are no run-time errors!
+
+You can only change the value of `MUTABLE` variables.
+
+```
+VAR name = "Bob";
+SET name = "Alice";         -- COMPILER ERROR! `x` is immutable.
+```
+
+ * `VAR x` = **READ** Only.
+ * `MUTABLE x` = **READ/WRITE**.
+
+**The "Gotcha":** If you want to modify a variable, it must be `MUTABLE`.
+
+```
+MUTABLE name = "Bob";
+SET name = "Alice";         -- OK
+```
+
+ * If you want to pass an object to a function that modifies it, that function must accept `MUTABLE`.
+ * All functions that mutate/change something *must* end in a `!`.
+
+Let's look at Strings:
+
+```ruby
+x = "MISSISSIPPI"
+x.gsub!("I", "S")            -- OK: "MSSSSSSSPPS"
+```
+
+```
+VAR x = "MISSISSPPI";
+x.gsub!("I", "S");           -- COMPILER ERROR! `x` is immutable.
+
+MUTABLE x = "MISSISSPPI";
+x.gsub!("I", "S");           -- OK: "MSSSSSSSPPS"
+```
+
+### 2. Physics of SHAPE (or size pt 1): TYPES
+
+In Ruby and other *easier* languages, variables do not have types.
+
+```ruby
+name = "Bob"
+name = 1                     -- OK
+```
+
+But this presents a laundry list of run-time errors. And run-time errors are NOT OKAY!
+
+```ruby
+name = "Bob"
+name = 1
+name.gsub!("o", "b")         -- RUN-TIME ERROR: missing method `gsub` on `name`.
+```
+
+In CHEAT, this is a compile time error (2x):
+
+```
+MUTABLE name = "Bob";
+SET name = 1;                -- COMPILER ERROR: `name` is a String[], cannot assign to the Number `1`.
+```
+
+```
+MUTABLE name = 1;
+name.gsub!("o", "b")         -- COMPILER ERROR: missing method: `name` is a Number, and Number does not have a method `gsub`.
+```
+
+This pushes run-time errors to compile time errors so you can fix them BEFORE testing your code. Additionally, it allows your code to execute *much* faster. You'll see why after the next lesson.
+
+### 3. Physics of Size pt 2: FIXED vs. DYNAMIC
+
+In Ruby, lists are DYNAMIC by default. A list can hold 1 item or 1 million items, and Ruby handles the messy details in the background.
+
+ * The Cost: This magic makes Ruby slow.
+
+In CHEAT, you choose the physics you need.
+
+ * **FIXED** Size: Like a U.S. phone number (always 10 digits).
+ * **DYNAMIC** Size: Like a chat log (grows indefinitely).
+
+Why the distinction? Because of where the data lives.
+
+### 4. The Two Worlds: STACK vs. HEAP
+
+In Ruby, everything floats in a magic cloud (the HEAP).
+
+ * The Problem: The HEAP is typically 100x slower than the Stack.
+ * The Solution: CHEAT lets you use the fast lane.
+
+#### The STACK (Default)
+
+Think of this as your **Backpack**.
+
+ * Pros: Instant access (L1 Cache). *Blazing* fast.
+ * Cons: Itty-bitty space. Fixed size.
+ * Behavior: When you finish a task (Function returns), you dump your backpack into the incinerator. Everything inside is gone. *POOF*.
+
+#### The HEAP (The `%` Sigil)
+
+Think of this as a **Warehouse**.
+
+ * Pros: (nearly) Unlimited space. Can grow/shrink.
+ * Cons: You have to drive there to get stuff (Slower).
+ * The Rule: If you don't know how big it will get, OR if you know it IS big, it belongs on the HEAP.
+
+#### How to Choose
+
+You tell the compiler which world to store your variables with the `%` sigil.
+
+ * `VAR x = [1,2]` → In your Backpack. Fast. Cannot grow, must be small.
+ * `VAR x = %[1,2]` → In the Warehouse. Slower. Can grow, can be huge.
+
+#### The Why
+
+Because the STACK is physically just a block of memory mapped to your function, it cannot grow (efficiently). You cannot shove an elephant into a backpack that is already full.
+
+ * No `%` (STACK): The size is fixed at birth.
+   * `VAR list = [1, 2, 3]` → This list will be length 3 forever.
+ * With `%` (HEAP): The Warehouse has forklifts. It can expand.
+   * `VAR list = %[1, 2, 3]` → This list can grow to 1,000,000 items.
+
+The "Gotcha": If you try to `.push!` or `.pop!` to a STACK array (fixed-size), the compiler will yell at you.
+
+  * It’s not being mean; it’s telling you that physics forbids it.
+
+```
+VAR x = [1, 2, 3];
+-- ... do something, now I need to add to `x`, what do I do?
+x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
+```
+
+You can make the list Dynamic on the HEAP (not recommended):
+
+```
+MUTABLE x = %[1, 2, 3];
+-- ...
+x.append!(4);                  -- OK
+```
+
+For this example, this is needlessly slow. You can also specify the size (to bigger than its birth size) AND keep it *fast* on the STACK.
+
+ * See the full WALKTHROUGH for more details.
+
+If variables were un-typed, it would be impossible to guarantee no run-time errors, and you wouldn't be able to put hardly anything on the STACK.
+
+ * CHEAT thinks it's pretty easy to be aware of 3 properties for data
+   * If you are, we believe you'll arive at working code *much* faster.
+   * As a by-product, that code will also be *easier* to understand *AND* run *much* faster, too.
+
+### 4. The Physics of Sight (SCOPES)
+
+In JavasSript, functions can see variables outside of them (Closures are implicit). Figuring out what a variable can see is a dark art.
+
+```
+x = 10;
+function add() {
+  return x + 5;
+}
+x = 8;
+add(x);                         // WTF?
+```
+
+In CHEAT, functions are simple!
+
+A function can ONLY see what is explicitly passed into it:
+
+```
+VAR x = 10;
+FN add() ->
+  RETURN x + 5;                 -- COMPILER ERROR: I don't know what 'x' is.
+END
+```
+
+Let's say you want to create a function that always takes some variable, and you don't want to always pass it in. You do this with `UpValues` with the `USE` keyword:
+
+```
+VAR x = 10;
+FN add(n) USE (x) ->
+  RETURN n + x;                 -- OK
+END
+
+add(5);                         -- 15
+add(x);                         -- 20;
+add(x);                         -- 20;
+```
+
+The first example with JavaScript is particularly confusing because the value is changed after the function is defined. It's not clear what the function will do.
+
+In CHEAT, you cannot pass a `MUTABLE` as an UpValue:
+
+```
+MUTABLE x = 10
+FN add(n) USE (x) ->            -- COMPILER ERROR, UpValues cannot be mutable.
+-- ...
+```
+
+ * There is a type of object that can be used for this, but this is rarely needed.
+   * See the WALKTHROUGH for more details.
+
+### 5. Physics of Time: The ARENA (Lifetimes)
+
+In JavaScript/Python/Ruby, variables live as long as someone is looking at them (Reference Counting/GC). But there are *many* problems with this.
+
+ * In C, variables live until you shoot yourself in the foot.
+ * In Rust, variables live in accordance with (nearly) incomprehensible laws.
+
+In CHEAT, variable lifetimes are arguably the simplest of all! They follow a simple birth/death cycle:
+
+ * They live as long as the Function they were born in.
+
+#### The ARENA Rule:
+
+When a function starts, it opens a clean ARENA (A bank of memory).
+
+ * Any variable you create (VAR x, VAR y) lives in this ARENA.
+ * When the function hits END (or RETURN), the entire ARENA is wiped. *POOF*.
+
+You don't need to free memory. It happens automatically when the function ends.
+
+ * Zig makes this *nearly* as easy with `defer`, but you have to call it every time you create something on the HEAP.
+ * CHEAT makes this easy and just does it automatically, because you *almost* always want to do it.
+
+### 6. Cheating Death: The `GIVE` Keyword
+
+If everything dies when the function ends, how do you return a result?! That's a pretty important thing for a function to do!
+
+When you're returning a fixed-size object (STACK), this is easy.
+
+ * The calling function knows what it will get back, and it knows how big it is.
+ * It gives the called function a magic tunnel to write that data directly into its backpack.
+
+But this magic tunnel doesn't work for HEAP objects, they're special. The called function CANNOT write these directly into your backpack (STACK) - they're on the HEAP for a reason.
+
+You have to `GIVE` heap objects to the caller.
+
+ * The Problem: If you have a box in the Warehouse (HEAP Object), and your function ends. The box is incinerated. There's nothing left to GIVE/RETURN.
+ * The Fix: `GIVE` that HEAP object to the caller, save it from death.
+
+```
+FN makeUser() -> %User
+  VAR u = %User{name: "Neo"}; -- Created in my Arena
+  RETURN GIVE u;              -- I surrender ownership. It lives on in another function.
+END
+```
+
+### 7. Cheating Death pt 2: The `TAKES` Keyword
+
+There's always a GIVE and TAKE!
+
+In 99% of cases, when you pass a variable to a function, you are just letting that function Borrow it.
+
+ * You let `print(user)` look at the user.
+ * You let `update!(user)` modify the user.
+ * But **YOU** still own the user. When your function ends, the user is incinerated.
+
+99% of the time, this is what you want and fine. But what if you want to put that User into a List or a Tree that lives longer than you?
+
+If you just let the List "borrow" the User, and then your function ends... *POOF.* The User is incinerated. The List is now holding a pointer to ash. This is the notorious Dangling Pointer / Use-after-Free / Segfault problem.
+
+**The Solution:** The receiving function must explicitely say: "I am TAKING responsibility for this memory."
+
+-- This function promises to adopt the 'child'
+FN addChild(TAKES child: %Node) ->
+  -- I now own 'child'.
+  -- When you end, the child must live on, because I will attach it to something that *might* live longer than you.
+END
+
+**The Consequence:** If a function TAKES something, you must GIVE it. And once you GIVE it, you can never touch it again.
+
+```
+VAR node = %Node{};
+
+addChild(GIVE node);          -- I surrender ownership.
+
+node.print();                 -- COMPILER ERROR: Variable 'node' is dead. You GAVE it away!
+```
+
+This is a dramatically simplified version of Rust's notirously difficult lifetypes and borrow checker.
+
+  * If you're confused, don't worry! These last two topics are *rarely* necessary unless you're doing something pretty advanced.
+
 ## CONTROVERSIAL CHOICES
 
 ### The *SMOOTH* operator
@@ -247,10 +554,10 @@ CHEAT is opinionated. The specific optimizations that make it fast and safe for 
 ### The *SMOOTH* operator
 
 ```
-VAR bill = users AS @u
+VAR bill = users AS @u                      -- AS binds @variables to be used later in SMOOTH operations
   s> UNNEST _.orders
   s> SELECT _.price * @u.discount
-  s> reduce(0, %(acc, x) -> acc + x )
+  s> REDUCE(0, (acc, x) -> acc + x );
 
 -- The above is equal to the below
 
@@ -258,388 +565,38 @@ VAR bill = users AS @u
   s> flatmap( %(x) -> x.orders )
   s> map( %(x) -> x.price * @u.discount )
   s> reduce(0, %(acc, x) -> acc + x )
+
+-- Though SQL-like commands are substantially faster (built-into the VM/language) and preferred.
 ```
 
-### Handling Array Access
-```
-VAR x = getMyVector();
-VAR y = x[10]; -- compiler error!
-VAR y = x[10] OR ELSE 0; -- OKAY!
-
-
-VAR x: Int(10) = getMyVector();
-VAR y = x[9]; -- OKAY!
-VAR z = x[10]; -- compiler error!
-VAR zz = x[10] OR ELSE 0; -- OKAY, with a strong *WARNING*
-
-FN myVectorGetterDoer %(v) ->
-  -- preferred to use a GUARD clause
-  z = GUARD v.size >= 56 OR ELSE CAST(v AS Int(56)); -- TODO: Is this too hard for the compiler to know?
-
-  VAR x = v[10]; -- OKAY, proven >10
-  VAR y = v[23]; -- OKAY, proven >23
-  VAR z = v[55]; -- OKAY, proven >55
-  RETURN x + y - z + 5;
-END
-
-
-FN myVectorGetterDoer %(v) ->
-  VAR x = v[10];
-  VAR y = v[23];
-  VAR z = v[55];
-  RETURN x + y - z + 5;
-CATCH
-  RETURN 0;  -- OKAY, caught here, returning a value
-END
-
-FN myVectorGetterAdder %(v) ->
-  VAR x = v[10] OR RETURN 5; -- OKAY, IFF you return a value, not the error.
-  VAR x = v[10] OR RETURN v[0]; -- OBVIOUSLY NOT OKAY!
-  RETURN x + 5;
-END
-
--- here v is a DYNAMIC Vector.
-FN myVectorGetterWhichTakesADynamicArrayAndResizes %(v) ->
-  -- ... do a bunch of stuff
-
-  VAR x: Int(10) = v; -- compiler error!
-  VAR xx: Int(10) = TRUNCATE(v); -- OKAY, acknolwedge you *could* be losing data.
-
-  VAR y = xx[9]; -- OKAY, it will be 0 by default, if v was < 10 items.
-
-  -- ... do a bunch of stuff
-  RETURN x + 5;
-END
-
--- here v is a FIXED Vector of size 1.
-FN myVectorGetterWhichTakesADynamicArrayAndResizes %(v) ->
-  -- ... do a bunch of stuff
-
-  VAR x: Int(10) = v; -- OKAY, perhaps surprisingly, you're allowed to upsize, no harm no foul
-  VAR y = x[9]; -- OKAY, it will be 0 by default, if v was < 10 items.
-
-  -- ... do a bunch of stuff
-  RETURN x + 5;
-END
-```
-
-### Handling Division by Zero
+### Combine with in-line error handling
 
 ```
-FN myDivider(x, y) ->
-  SET y = GAURD y != 0 OR ELSE 1; -- OKAY, if y is MUTABLE
-  RETURN x / y;
-end
+FN myFunc(a, b, c) ->
+  val = fetchData(a, b, c) OR RAISE         -- immediately stop, raise the error to the calling function
+   s> parseHeader OR EXIT "Invalid Header"  -- immediately stop, handle below
+   s> parseBody OR EXIT "Invalid Body"      -- immediately stop, handle below
+   s> fetchUser
+      s> RECOVER(DefaultUser())             -- handle error in place, and continue
+   s> saveToDb(a, b, c, %%)
 
--- this is fine in a function
-
-FN typicalFunc(myObj) ->
-  VAR health = GUARD myObj.health != 0 OR ELSE 1;
-  -- Do a bunch of stuff
-  RETURN myObj.strength / myObj.health;
-end
-
--- Say you had a complex formula with lots of division
--- You might not want to have
-
-FN typicalFunc(myObj) ->
-  VAR health = GUARD myObj.health != 0 OR ELSE 1;
-  -- 10 more guards, needing to use local variables below
-  -- Do a bunch of stuff
-  -- RETURN <your equation with a bunch of division>
-end
-
--- Instead you can do:
-
-FN typicalFunc(myObj) ->
-  -- RETURN <your equation with a bunch of division>
-CATCH
-  RETURN -1;
-end
-
--- HOWEVER - there is no such option for code outside of a function.
--- You can do:
-
-FN main()
-  -- Good design, no code execution outside of main
-  -- In here, you do do all kind of division
-CATCH
-  -- Handle however you want, except with code that raises an uncaught error
-END
-
--- If you just have a script like:
-
-VAR x = readSomeFileGetSomeNumber();
-VAR y = 10;
-callSomeFunc(y / x);
-
--- You'll get a DivisionByZero error, so you must do:
-
-
-VAR x = GUARD readSomeFileGetSomeNumber() != 0 OR ELSE 1;
-VAR y = 10
-callSomeFunc(y / x);
-```
-
-
-### ASYNC/AWAIT/COLLECT
-
-```
-listOfUsers
-  s> FILTER %.isActive
-  s> COLLECT                 -- Converts Stream<User> to List<User>
-  s> map(%(x) -> x.size > 5); -- Operates on the List<User> object
-
--- Did not prefix with AWAIT -> *assumes* intentend ASYNC -> immediately starts next step
-
-file_paths
-  s> concurrentRead
-  s> COLLECT             -- Wait for ALL files to be fetched/materialized.
-  s> aggregate;          -- Start aggregation only on the complete set.
-
-
--- Did not prefix with AWAIT -> *assumes* intentend ASYNC -> immediately starts next step
-
-file_paths
-  s> concurrentRead
-  s> COLLECT             -- Wait for ALL files to be fetched/materialized.
-  s> aggregate
-  s> COLLECT;            -- waits until THIS finishes to resume (which may happen before the other two finish)
-
--- The above is *nearly* equivalent to:
-
-AWAIT file_paths
-  s> concurrentRead
-  s> COLLECT             -- Wait for ALL files to be fetched/materialized.
-  s> aggregate;
-
--- This is preferred, but not enforced.
--- Ending in COLLECT will convert from Stream<T> to List<T> -> even if it's not assigned to anything.
-```
-
-### MUTABILITY vs IMMUTABILITY
-
-```
-VAR user = %{ name: "Alice", active: false }
-SET user.active = true; -- Error!
-SET user = %{ name: "Alice", active: true} -- Error!!
-
-VAR user = %{ name: "Alice", active: false }
-VAR upDatedUser = user MUTATE { active: true } -- No error!
-
-VAR x = 5;
-SET x += 10; -- ERROR!
-
-MUTABLE x = 5;
-SET x += 10;
-```
-
-Example compiler errors:
-```
-Error: Cannot SET field 'active' on 'user' to true.
-     : This is a READ-ONLY VIEW of memory owned by 'DatabaseQueryResult'.
-     : To modify, use:
-     :
-     : VAR newUser = user MUTATE { active: true };
-     :
-     : Or, if you want to modify it later, you might want it to be MUTABLE, use:
-     :
-     : MUTABLE VAR newUser = DEEP_COPY(user_data);
-     : SET newUser.active = true;
-     :
-     : You can SET fields on MUTABLE data.
-
-
-Error: Cannot SET 'x' to 5.
-     : x is IMMUTABLE.
-     :
-     : You can create a new variable:
-     :
-     : VAR newX = x + 5;
-     :
-     : Or, if you want to modify it later, you might want it to be MUTABLE, use:
-     :
-     : MUTABLE VAR newX = x;
-     : SET newX = 5;
-```
-
-
-
-## THE CONFUSING TYPES
-
-### Errors
-
-* You don't need to check for errors by default or specify them in your return types.
-* The Compiler and the SMOOTH operator takes care of this for you.
-
-```
-FN myCarelessFn %(myList) ->
-  myList
-   s> fetchData -- this could return an error!
-   s> parseData -- this could return an error!
-   s> renderPage; -- this could return an error!
-
--- It's fine to not catch any of them here!
--- You're allowed to pass on the problem to your end user!
-END
-
-FN mySomewhatCarefullFn %(myList) ->
-  myList
-   s> fetchData -- this could return an error!
-   s> parseData -- this could return an error!
-   s> renderPage; -- this could return an error!
-
-CATCH -- anything
-  -- No matter what I want my users to get the default page.
-  RETURN makeDefaultPage();
-END
-
-FN myMoreCarefullFn %(myList) ->
-  myList
-   s> fetchData -- doesn't ever throw an error!
-   s> parseData -- doesn't ever throw an error!
-   s> renderPage; -- doesn't ever throw an error!
-
-CATCH -- anything
-  -- This is still allowed, since no matter what you can OOM
-  RETURN makeDefaultPage();
-END
-
-FN myQuiteCarefullFn %(myList) ->
-  myList
-   s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) -- OTHERWISE only happens if an error happend, and this may raise error, it's fine!
-   s> parseData -- this could return an error!
-   s> renderPage; -- this could return an error!
-
-CATCH -- anything EXCEPT fetchData error -> It was already handled inline
-  RETURN makeDefaultPage();
-END
-
-FN myReallyCarefullFn %(myList) ->
-  myList
-   s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
-   s> parseData -- this could return an error!
-   s> renderPage; -- this could return an error!
-
-CATCH -- anything
-  -- EXCEPT fetchData error -> It was already handled inline
-  -- EXCEPT fetchFromBackup -> It was already handled inline
-  RETURN makeDefaultPage();
-END
-
-FN myVeryCarefullFn %(myList) ->
-  myList
-   s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
-   s> parseData OR EXIT -- Don't proceed any further, but try to pass this to a catch block below
-   s> renderPage; -- this could return an error!
-
-CATCH -- anything
-  -- EXCEPT fetchData error -> It was already handled inline
-  -- EXCEPT fetchFromBackup -> It was already handled inline
-  -- DOES CATCH parseData (and renderPage) errors
-  RETURN makeDefaultPage();
-END
-
-FN myExtremelyCarefullFn %(myList) ->
-  myList
-   s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
-   s> parseData OR GOTO_RECOVER -- Don't proceed any further, JUMP to the first RECOVER down the chain
-   s> renderPage -- this could return an error!
-   s> RECOVER(makeDefaultPage());
-
-CATCH -- anything
-  -- EXCEPT fetchData error -> It was already handled inline
-  -- EXCEPT fetchFromBackup -> It was already handled inline
-  -- DOES CATCH parseData (and renderPage) errors
-  RETURN makeDefaultPage();
-END
-
-
-FN myMostCarefulFn %(myList) ->
-  myList
-   s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
-   s> parseData OR GOTO_RECOVER -- Don't proceed any further, JUMP to the first RECOVER down the chain
-   s> renderPage OR EXIT "RenderPage failed"
-   s> RECOVER(makeDefaultPage()) OR EXIT "RenderBackupPageFailed";
-
-CATCH -- anything
-  -- Here, there might be two RenderPage errors
-  -- Down here, we might want to do two different things based on the same Error (with the context string from above)
-  -- In both cases, we have acccess to the Error object `%e`
-  -- With %e.message and %e.snapshot (whatever went into the pipe) set.
+CATCH ParseError WITH("Invalid Header")  -- ParseError does not acutally exist, that's the string error.type
+  -- CATCH sets %e to the as a local Error variable e
+  -- All errors have a context ("Invalid Header") set above
+  -- All errors also have a `snapshot`
+  -- That contains the value piped into the function that caused the error.
+  logInvalidHeader(%e.snapshot.header());
+  RETURN defaultPage();
+CATCH ParseError WITH("Invalid Body")    -- Errors can contain :: namespacing `Network::IOError`, for example
+  -- Since we want to handle the same Error `ParseError` in 2 different ways
+  -- That is way we set the context above (after the `?` operator)
   --
-  -- WARNING: To operate on %e.snapshot, you must cast it from Any to Whatever it is.
-  -- This is dangerous, as it could itself raise an error.
-  -- If this something like this is not acceptable, CHEAT is not for you.
-  --
-  -- You CAN log it without issue (with a default limit to how big the string is)
-  -- Though, that could contain PII, so unless you control the parent, and can ensure it's safe for logging
-  -- Do so at your own risk
-
-  RETURN makeDefaultPage();
-END
-
--- Testing Error handling is easy!
-TEST "MyFn handles errors gracefully" ->
-   VAR result = ERROR("Boom") s> myFn;
-   ASSERT result == defaultPage; -- Success!
+  -- If we wanted to handle both errors the same
+  -- We wouldn't need to set a context
+  raise %e -- We EXPLICITLY bubble this up to the user
+DEFAULT
+  logUnknownError(%e)
+  raise %e
 END
 ```
 
-
-### Strings Vs Bytes
-String by default.
-
-```
-VAR s = "😊";                     -- String (Immutable)
-MUTABLE s = "😊";                 -- String (Mutable, enforces UTF-8 on write)
-VAR s: String[10] = "😊";         -- String (Immutable, fixed size UTF-8 buffer, very uncommon use case -> mainly for cache locality, not beginner need)
-MUTABLE s: String[10] = "😊";     -- String (Mutable, fixed size UTF-8 buffer, more common use case, but not beginner)
-
-VAR b: UInt8[*] = %[0, 10, 255];  -- Buffer (Immutable -> common / default use case for non-beginners)
-MUTABLE b: UInt8[] = %[0, 10];    -- Buffer (Mutable, Dynamic -> common use case)
-VAR b: UInt8[10] = ...;           -- Buffer (Immutable, Fixed Size -> you might want for cache locality)
-MUTABLE b: UInt8[10] = ...;       -- Buffer (Mutable, Fixed Size -> common use case)
-```
-
-### Lists vs Streams
-
-```
-VAR users = db.all s> filter; -- LIST, default
-VAR users = db.all s> filter s> COLLECT; -- LIST, default, superfluous
-VAR users = AWAIT db.all s> filter; -- LIST, default, superfluous
-
-VAR userCursor: Stream = db.all s> filter; -- STREAM, not-default due to EXPLICIT type
-VAR userCursor = db.all s> filter s> ITER; -- STREAM, not-default due to EXPLICIT ITER
-VAR userCursor = ASYNC db.all s> filter;   -- STREAM, not-default due to EXPLICIT ASYNC
-```
-
-### Streams are handles, not data
-
-* A stream is an *immutable* pointer to a *mutable* partition data (the stream / flow where x is `COLLECT`ing).
-* However, you can have an *mutable* pointer.
-
-Therefore:
-
-```
-MUTABLE VAR source: Stream = primary_db.users; -- OKAY
-
-TRY
-  source.peek(); -- Check connection
-CATCH
-  -- I need to reassign the variable to the backup stream!
-  source = backup_db.users;
-END
-
-source s> map...
-
--- ...
-
-MUTABLE VAR s: Stream = db.all s> ... ; -- OKAY
-MUTABLE VAR s: Stream(10) = db.all s> ... ; -- Compiler error, `... returns a single Stream, not a Vector of Streams`.
-```
