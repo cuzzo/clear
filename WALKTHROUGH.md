@@ -249,20 +249,51 @@ increment!(x);                -- x is now 6
  * *dyanmic strings require `%`.
 
 ```
--- Fixed-size immutable array
+-- Fixed-size immutable array (on STACK)
 VAR coords = [1, 2, 3];
 coords.push!(4);              -- COMPILER ERROR: immutable and fixed
 
--- Dynamic mutable array
+-- Fixed-size mutable array (on STACK)
 MUTABLE items = [1, 2, 3];
 items.push!(4);               -- COMPILER ERROR: items is MUTABLE, not dynamic
 items.set!(0, 99);            -- OK: can mutate elements
+items.set!(4, 99);            -- COMPILER ERROR: cannot set an index larger than the size of a fixed array
+items.set!(4, 99) OR PASS;    -- COMPILER ERROR: 4 > 3, this will ALWAYS error, and NEVER pass.
+items.set!(getIdx(), 99);     -- COMPILER ERROR: Out of bounds (potentiall).
+items.set!(getIdx(), 99) OR PASS; -- OK: will do something if getIdx() returns BEWTEEN 0 AND 2.
 
-MUTABLE items = %[1, 2, 3];
-items.push!(4);               -- OK: items is dynamic, it can grow
-items.set!(0, 99);            -- OK: can mutate elements
+-- Dynamic mutable array (on HEAP)
+MUTABLE items = %[1, 2, 3];   -- Created on HEAP => Slower than stack, but (nearly) unbound in size.
+items.push!(4);               -- OK: size becomes 4. This **CAN** run-time error on Out-of-Memory. BEWARE!
+items.set!(0, 99);            -- OK: can mutate elements of determined size
+items.set!(10, 99);           -- COMPILER ERROR: Out of bounds.
+items.set!(getIndex(), 99);   -- COMPILER ERROR: Out of bounds (potentially).
 
-VAR items = %[1, 2, 3];       -- COMPILER ERROR: You cannot create an immutable DYNAMIC object. Use `MUTABLE` for a dynamic object, or get rid of the `%` for a fixed-sized object.
+-- Fixed-size mutable array (on HEAP)
+MUTABLE items : Number[*] = %[1, 2, 3]; -- Created on HEAP => needlessly slow for the given size, but okay
+
+-- Dynamic mutable array (on STACK)
+MUTABLE items : Number[] = [];  -- Dynamic List, created on STACK => FAST but VERY limited in size.
+items << 1;                    -- COMPILER ERROR: stack overflow (possible)
+items << 1 OR PASS;            -- OK: will succeed
+
+FOR i IN (1..=2**64) DO
+  items << i OR PASS;          -- OK: **BUT** you'll only end up with 2**14 or so items.
+END
+
+-- Dynamic by default
+MUTABLE items = %[];           -- Created on HEAP => SLOW but (nearly) unlimited in size.
+FOR i IN (1..=2**64) DO
+  items << i;                  -- OK: you'll end up with all your items
+END
+
+MUTABLE items = %[];           -- Created on HEAP => SLOW but (nearly) unlimited in size.
+FOR i IN (1..=2**1000) DO
+  items << i;                  -- OK: but you'll probably OOM
+END
+-- The Compiler protects the STACK (Logic Integrity).
+-- The OS protects the HEAP (Resource Availability).
+
 
 VAR str = "hello, worl";
 str.concat!(0, "d");          -- COMPILER ERROR: immutable and fixed
@@ -271,10 +302,22 @@ MUTABLE str = "hello, worl";
 str.concat!(0, "d");          -- COMPILER ERROR: str is MUTABLE, not dynamic
 
 MUTABLE str = %"hello, worl";
-str.concat!(0, "d");          -- OKAY
+str.concat!(0, "d");          -- OK: on heap, *could* OOM - BEWARE!
 
-VAR str = %"hello, worl";     -- COMPILER ERROR: You cannot create an immutable DYNAMIC object. Use `MUTABLE` for a dynamic object, or get rid of the `%` for a fixed-sized object.
+
+MUTABLE str : String[] = "";  -- Dynamic string, created on STACK => FAST but VERY limited in size.
+FOR i IN (1..=2**64) DO
+  str.concat!("x") OR PASS;   -- OK: but you'll only end up with 2**14 or so chars in your string.
+END
+
+
+VAR str = %"hello, worl";     -- OKAY, but needless slow, as it's created on the heap, rather than the stack.
 ```
+
+**Key takeaways**
+
+ * Heap arrays are *DYNAMIC* by default.
+ * Stack arrays are *FIXED* (to size at initialization) by default.
 
 ### Array Types
 ```
