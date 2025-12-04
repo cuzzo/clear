@@ -4,6 +4,7 @@ require "byebug"
 require_relative "../src/types"
 require_relative "../src/value"
 require_relative "../src/vm"
+require_relative "../src/chunk"
 require_relative "support/ast_matchers"
 
 RSpec.configure do |c|
@@ -23,7 +24,7 @@ RSpec.describe VM do
 
   def run_bytecode(constants, instructions)
     # 1. Create a raw Chunk
-    chunk = Compiler::Chunk.new("unit_test")
+    chunk = Chunk.new("unit_test")
     chunk.constants = constants
     chunk.code = instructions
 
@@ -36,7 +37,7 @@ RSpec.describe VM do
   end
 
   def make_chunk(name, ops, constants=[])
-    c = Compiler::Chunk.new(name)
+    c = Chunk.new(name)
     c.code = ops
     c.constants = constants
     c.line_info = Array.new(ops.size, 1)

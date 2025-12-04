@@ -9,6 +9,7 @@ require_relative "types"
 require_relative "memory_visualizer"
 require_relative "value"
 require_relative "opcodes"
+require_relative "chunk"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -147,7 +148,7 @@ class VM
     def reg_debug_str(v)
       if v.is_a?(FluxString) then "\"#{v}\""
       elsif v.is_a?(Numeric) then v
-      elsif v.is_a?(Compiler::Chunk) then "\\#{v.name}"
+      elsif v.is_a?(Chunk) then "\\#{v.name}"
       elsif v.is_a?(FluxClosure) then "λ"
       elsif v.is_a?(FluxHash) then "{}:#{v.keys.count}"
       elsif v.is_a?(FluxArray) && !v.struct_type.nil? then "{}:#{v.size}"
@@ -458,7 +459,7 @@ class VM
 
     boxed_func = @globals[func_name]
 
-    func_obj = if boxed_func.is_a?(Compiler::Chunk)
+    func_obj = if boxed_func.is_a?(Chunk)
                  boxed_func
                elsif boxed_func
                  Value.as_obj(boxed_func)
@@ -1076,7 +1077,7 @@ class VM
   def print_all_chunks(chunk)
     chunk.disassemble
     chunk.constants.each do |const|
-      if const.is_a?(Compiler::Chunk)
+      if const.is_a?(Chunk)
         print_all_chunks(const)
       end
     end
