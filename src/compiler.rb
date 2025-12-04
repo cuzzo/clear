@@ -470,33 +470,13 @@ class Compiler
 
     storage = node.value.storage rescue :stack
     final_type = infer_type(node.value)
-    known_size = nil
-    move_op = nil
+    known_size = get_known_size(node)
 
-    if node.value.is_a?(AST::StructLit)
-      struct_name = node.value.name
-      raise "ERROR: Struct not found" if !@struct_defs.key?(struct_name)
-      final_type = struct_name.to_sym
-      move_op = :MOVE_STRUCT if storage == :stack
-    elsif node.value.is_a?(AST::ListLit)
-      known_size = get_known_size(node)
-      if storage == :stack && known_size.nil?
-        raise "Cannot have Dynamic Lists on the STACK. Use a `%` sigil to move it on the HEAP, or specify a size."
-      end
-      move_op = :MOVE_LIST if storage == :stack
-    end
-
-    # IF STACK -> VISIT, ALLOCA, MOVE_
-    if storage == :stack && !move_op.nil?
-      with_temp_reg do |r_heap_temp|
-        visit(node.value, r_heap_temp)
-        @chunk.emit(node, :ALLOCA, "R#{r}", final_type.to_s)
-        @chunk.emit(node, move_op, "R#{r}", "R#{r_heap_temp}")
-      end
+    if storage == :stack && (node.value.is_a?(AST::ListLit) || node.value.is_a?(AST::StructLit))
+      compile_stack_literal(node.value, final_type, r)
+      # TODO: possibly short-cut, but what about global
     else
-      # If HEAP -> VISIT
       visit(node.value, r)
-      handle_deep_freeze(node, r) # Run-time, probably not necessary
     end
 
     if @scope_depth == 0
@@ -512,6 +492,48 @@ class Compiler
 
     current_scope.declare(node.name, r, final_type, node.mutable, known_size, storage)
     return r
+  end
+
+  # TODO: To work with strings, they follow the list-lit path
+  # TODO: Stack strings are Int32! %b"" is a Byte string
+  def compile_stack_literal(node, final_type, target_reg)
+    @chunk.emit(node, :ALLOCA, "R#{target_reg}", final_type.to_s)
+
+    # B. INITIALIZATION (The "Fill" Step)
+    if node.is_a?(AST::ListLit)
+      # Loop by Index
+      node.items.each_with_index do |item, idx|
+        with_temp_reg do |r_val|
+          visit(item, r_val)
+          # Optimization: If item is a constant, we could emit specialized opcode,
+          # but generic SET_INDEX works fine.
+          with_temp_reg do |r_idx|
+             k = @chunk.add_constant(idx)
+             @chunk.emit(node, :LOADK, "R#{r_idx}", "K#{k}")
+             @chunk.emit(node, :SET_INDEX, "R#{target_reg}", "R#{r_idx}", "R#{r_val}")
+          end
+        end
+      end
+
+    elsif literal_node.is_a?(AST::StructLit)
+      # Loop by Field
+      # 1. Merge Defaults (Crucial for Structs!)
+      def_fields = @struct_defs[literal_node.name] || {}
+
+      # We iterate over the DEFINITION order to ensure we fill gaps with defaults
+      def_fields.each do |field_name, info|
+        val_node = literal_node.fields[field_name] || info[:default]
+
+        if val_node.nil?
+           raise "Compile Error: Missing value for field '#{field_name}' in struct '#{literal_node.name}'"
+        end
+
+        with_temp_reg do |r_val|
+           visit(val_node, r_val)
+           @chunk.emit(literal_node, :SET_FIELD, "R#{target_reg}", field_name, "R#{r_val}")
+        end
+      end
+    end
   end
 
   # TODO: Do I need to raise an error here?

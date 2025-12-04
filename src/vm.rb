@@ -157,7 +157,7 @@ class VM
     src_line = (line_num && line_num > 0 && @source_lines.length >= line_num) ?
                @source_lines[line_num - 1].strip : ""
     src_line = src_line.length > 30 ? src_line[0..27] + "..." : src_line
-    ip = frame.ip.to_s.rjust(5, "0")
+    ip = frame.ip.to_s.rjust(4, "0")
     indent = "  " * (@frames.size - 1)
     op_str = "#{indent}#{ins.first} -> #{frame.debug_str(ins)}".ljust(40)
 
@@ -211,41 +211,45 @@ class VM
   end
 
   # TODO: Make this work with stack arrays
-  def get_field_and_obj(flux_obj, field_name, frame)
-    if flux_obj.is_a?(FluxHash)
+  def get_field_and_obj(flux_obj, field_name)
+    flux_obj = Value.resolve_val(flux_obj)
+
+    if flux_obj.is_a?(FluxHash) # HASH -> not struct
        return [flux_obj, field_name]
-
-    elsif flux_obj.is_a?(FluxArray) || flux_obj.is_a?(FluxStackPtr)
-      type_name = flux_obj.struct_type
-      raise "Not a struct" unless type_name
-
-      index = @struct_offsets[type_name][field_name]
-      if index.nil?
-        raise "Runtime Error: Cannot get field `#{key}` on `#{target_obj.class}`"
-      end
-
-      if flux_obj.is_a?(FluxStackPtr)
-        index += flux_obj.offset
-        flux_obj = flux_obj.container
-      end
-      return [flux_obj, index]
     end
 
-    raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
+    if !flux_obj.is_a?(FluxArray) # Structs are arrays.
+      raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
+    end
+
+    type_name = flux_obj.struct_type
+    raise "Not a struct" unless type_name
+
+    index = @struct_offsets[type_name][field_name]
+    if index.nil?
+      raise "Runtime Error: Cannot get field `#{key}` on `#{target_obj.class}`"
+    end
+
+    # Only Unwrap if it is a StackPtr
+    if flux_obj.is_a?(FluxStackPtr)
+      index += flux_obj.offset
+      flux_obj = flux_obj.container
+    end
+
+    return [flux_obj, index]
   end
 
   def process_set_field(target_reg, args, frame)
-    target_boxed = args[0]
+    boxed_obj = args[0]
     key = args[1].to_sym
-    val_boxed = args[2]
+    boxed_val = args[2]
 
-    target_obj = Value.resolve_val(target_boxed)
-    if target_obj.frozen?
+    hash_obj, index = get_field_and_obj(boxed_obj, key)
+    if hash_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    target_obj, index = get_field_and_obj(target_obj, key, frame)
-    target_obj[index] = val_boxed
+    hash_obj[index] = boxed_val
 
     nil
   end
@@ -671,19 +675,11 @@ class VM
 
 
   def process_get_index(target_reg, args, frame)
-    boxed_list  = args[0]
+    boxed_list = args[0]
     boxed_index = args[1]
 
-    tag = Value.get_tag(boxed_index)
-    idx_val = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
-
-    list_obj = Value.resolve_val(boxed_list) # FluxArray, FluxString, OR FluxView
-    if list_obj.is_a?(FluxStackPtr)
-      idx_val += list_obj.offset
-      list_obj = list_obj.container
-    end
-
-    result = list_obj[idx_val]
+    list_obj, index = get_index_and_obj(boxed_list, boxed_index)
+    result = list_obj[index]
 
     if list_obj.is_a?(FluxString) || (list_obj.is_a?(FluxView) && list_obj.owner.is_a?(FluxString))
       # TODO: Why is this special??
@@ -696,30 +692,38 @@ class VM
   end
 
   def process_set_index(target_reg, args, frame)
-    boxed_obj = args[0]
+    boxed_list = args[0]
     boxed_index = args[1]
     boxed_val = args[2]
 
-    target = Value.as_obj(boxed_obj)
-    if target.frozen?
+    list_obj, index = get_index_and_obj(boxed_list, boxed_index)
+    if list_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    tag = Value.get_tag(boxed_index)
-    key = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
-
-    target[key] = boxed_val
+    list_obj[index] = boxed_val
 
     nil
   end
 
+  def get_index_and_obj(boxed_list, boxed_index)
+    tag = Value.get_tag(boxed_index)
+    idx_val = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
+
+    list_obj = Value.resolve_val(boxed_list) # FluxArray, FluxString, OR FluxView
+    if list_obj.is_a?(FluxStackPtr)
+      idx_val += list_obj.offset
+      list_obj = list_obj.container
+    end
+    [list_obj, idx_val]
+  end
+
   def process_get_field(target_reg, args, frame)
-    boxed_obj  = args[0]
+    boxed_obj = args[0]
     key = args[1].to_sym
 
-    target_obj = Value.resolve_val(boxed_obj)
-    target_obj, index = get_field_and_obj(target_obj, key, frame)
-    target_obj[index]
+    hash_obj, index = get_field_and_obj(boxed_obj, key)
+    hash_obj[index]
   end
 
   def process_assert(target_reg, args, frame)
@@ -810,7 +814,7 @@ class VM
     struct_name = nil # TODO???
 
     # If any non-struct types have size > 1, this needs updated.
-    if type_str.include?(":")
+    if type_str.include?("[")
       type_str, size = type_str.split("[", 2)
       type_size = @structs.has_key?(type_str.to_sym) ?
         type_size = @structs[type_str.to_sym].keys.size :
@@ -828,42 +832,6 @@ class VM
 
     Value.box_obj(ptr)
   end
-
-  def process_move_struct(target_reg, args, frame)
-    boxed_dest_ptr = args[0]
-    boxed_src_obj = args[1]
-
-    dest_ptr = Value.as_obj(boxed_dest_ptr)
-    src_obj = Value.resolve_val(boxed_src_obj)
-
-    raise "Type Error: Dest must be StackPtr" unless dest_ptr.is_a?(FluxStackPtr)
-    raise "Type Error: Src must be FluxArray" unless src_obj.is_a?(FluxArray)
-
-    # Ensure sizes match
-    raise "Size mismatch" unless dest_ptr.size * 8 == src_obj.size
-
-    # Copy word by word (since both are :nanbox arrays)
-    # We know the size is in 64-bit words/slots (dest_ptr.size)
-    dest_container = frame.stack_blob
-    src_container = src_obj
-
-    dest_size = dest_ptr.size
-    dest_offset = dest_ptr.offset
-
-    # Loop copy from Heap[i] to Stack[offset + i]
-    dest_size.times do |i|
-      word = src_container[i]
-      dest_container[dest_offset + i] = word
-    end
-
-    nil
-  end
-
-  # Structs ARE dynamic lists.
-  def process_move_list(target_reg, args, frame)
-    process_move_struct(target_reg, args, frame)
-  end
-
 
   # Helper to run a function and handle the signal/unwind logic safely
   def invoke_function(func_obj, args, caller_frame)
