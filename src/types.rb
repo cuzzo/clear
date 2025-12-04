@@ -3,6 +3,26 @@ require "forwardable"
 
 require_relative "./arena"
 
+module Formatter
+  def self.to_native(val)
+    # FIX: Use bitwise mask to check for NanBox tags.
+    # Ruby handles 2's complement logic for negative integers automatically in bitwise ops.
+    if val.is_a?(Integer) && defined?(Value) && (val & Value::QNAN_MASK) == Value::QNAN_MASK
+       return Value.unbox(val)
+    end
+
+    return val if val.is_a?(Numeric) || val.is_a?(String) || val.nil?
+
+    if val.is_a?(FluxStackPtr) || val.is_a?(FluxArray)
+      return val.to_s
+    end
+
+    return Value.to_native(val) if defined?(Value) && Value.respond_to?(:to_native)
+
+    val
+  end
+end
+
 ###
 # TYPES
 ##
@@ -56,7 +76,36 @@ class FluxStackPtr < FluxObject
     @struct_type = struct_type
   end
 
-  def to_s; "StackPtr(#{@offset})"; end
+  def to_native_a
+    if @container.is_a?(FluxArray)
+      @container.slice_to_native(@offset, @size)
+    elsif @container.is_a?(String)
+      FluxArray.decode_binary_blob(@container, @offset, @size, :nanbox)
+    else
+      []
+    end
+  end
+
+  def to_s
+    # If it's a byte array, print as string. Else print as list.
+    arr = to_native_a
+    # Heuristic: If it looks like a byte array, join it
+    if @struct_type.to_s.include?("Byte")
+      arr.map do |x|
+        val = x.is_a?(Numeric) ? x.to_i : x
+        val.is_a?(Integer) ? val.chr : val.to_s
+      end.join
+    else
+      arr.to_s
+    end
+  end
+
+  def inspect
+    content = to_s
+    # If it printed as a string, quote it. Otherwise leave as list.
+    content = "\"#{content}\"" if @struct_type.to_s.start_with?("Byte")
+    "StackPtr<#{@struct_type}>#{content}"
+  end
 end
 
 ###
@@ -113,7 +162,8 @@ class FluxClosure < FluxObject
 end
 
 class FluxArray < FluxObject
-  attr_reader :data, :max_size, :struct_type
+  attr_reader :data, :max_size, :type
+  attr_accessor :struct_type # Accessible for VM monkey-patching
 
   # TYPE SCHEMA:
   # :obj    -> Standard Array of Ruby native values
@@ -128,19 +178,22 @@ class FluxArray < FluxObject
     @data = initial_data
     @type = type
 
-    # TODO: Fill remaining space with nil? Or just keep it empty but bounded?
-    # "Fixed array" usually means you can't change the size (no push/pop).
-
     if @type == :obj
       @data = initial_data || []
+      # Ensure size matches max_size if strict
+      if @max_size && @data.size < @max_size
+        @data.fill(nil, @data.size...@max_size)
+      end
     else
       # BINARY MODE: @data is a Byte String
       # Initialize string of NULL bytes
-      bytes_per_item = (@type == :int64) ? 8 : 1
+      bytes_per_item = (@type == :byte) ? 1 : 8
       size = max_size || 0
+
+      # 1. Allocate Binary Blob
       @data = ("\x00" * (size * bytes_per_item)).force_encoding("BINARY")
 
-      # If we have initial data (literals), pack them now
+      # 2. Fill if data provided
       if initial_data && !initial_data.empty?
         initial_data.each_with_index { |v, i| self[i] = v }
       end
@@ -150,7 +203,7 @@ class FluxArray < FluxObject
   # Need to allow dynamic resize.
   def <<(val)
     check_alive!
-    if @type != :obj # TODO: Think about this
+    if @type != :obj
       raise "Runtime Error: Cannot push/append to a Fixed Binary Array. Use index assignment."
     end
     if @max_size && @data.size >= @max_size
@@ -165,14 +218,9 @@ class FluxArray < FluxObject
       @data[idx]
     elsif @type == :int64
       # UNPACK: Extract 64-bit int
-      # offset = idx * 8
-      # 'q<' = 64-bit signed integer, little endian
       raw = @data.byteslice(idx * 8, 8)
       raise "Index out of bounds" unless raw
-
       val = raw.unpack1('q<')
-
-      # RE-BOX: Convert raw 64-bit int back to NanBox/FluxInteger
       Value.box_number(val)
     elsif @type == :byte
       # UNPACK: Extract 1 byte
@@ -182,38 +230,30 @@ class FluxArray < FluxObject
     elsif @type == :nanbox
       raw_bits = @data.byteslice(idx * 8, 8).unpack1('q<')
 
-      # 2. Check the NanBox Mask (Top 16 bits)
-      # Mask: 0xFFF0000000000000
-      # If these bits are set, it is a SPECIAL VALUE (Pointer, Bool, Nil).
-      # If not, it is a Standard Number (Float).
-      if (raw_bits & Value::QNAN_MASK) == Value::QNAN_MASK
+      # Check Mask
+      if defined?(Value) && (raw_bits & Value::QNAN_MASK) == Value::QNAN_MASK
         return raw_bits # Return as Integer (Preserve the Tag)
       else
         # It's a Float! Re-interpret the bits as a Double.
         return [raw_bits].pack('q<').unpack1('d')
       end
-      return val # the value here is EITHER the double, or already boxed.
+      return val
     end
   end
 
-  # TODO: Need to keep set overflow error
   def []=(idx, val_boxed)
     check_alive!
     if @type == :obj
       @data[idx] = val_boxed
     elsif @type == :int64
       # PACK: Convert NanBox -> Raw Int64
-      val = Value.unbox(val_boxed).to_i # Handle Float or FluxInteger
-
-      # Replace 8 bytes at offset
-      # pack('q<') returns an 8-byte string
+      val = Value.unbox(val_boxed).to_i
       @data[idx * 8, 8] = [val].pack('q<')
     elsif @type == :byte
       val = Value.unbox(val_boxed)
       unless val.is_a?(Numeric)
         raise "Runtime Error: Cannot assign non-numeric to Byte array"
       end
-      # Auto-truncate / Wrap to 0-255 (Standard C behavior)
       @data.setbyte(idx, val.to_i % 256)
     elsif @type == :nanbox
       if val_boxed.is_a?(Float)
@@ -228,30 +268,94 @@ class FluxArray < FluxObject
 
   def deep_copy
     check_alive!
-    # Creates a new allocation in the current scope
     FluxArray.new(@max_size, @data.dup)
   end
 
-  # size and each are not expressly necessary due to method missing below.
-  # here for performance and rspec oddities.
-  def size; check_alive!; @data.size; end
+  def size; check_alive!; @type == :obj ? @data.size : (@data.size / ((@type == :byte) ? 1 : 8)); end
   def each(&block); check_alive!; @data.each(&block); end
 
-  # MessagePack Support
   def to_msgpack(packer=nil)
     check_alive!
-    # We need to serialize the constraint too!
-    # We can pack as a custom type or just a hash for now.
     { "max" => @max_size, "data" => @data }.to_msgpack(packer)
   end
 
-  def to_s
-    max_size.nil? ? "<Dynamic[] #{@data.to_s}>" : "<Fixed[#{@max_size}] #{@data.to_s}>"
+  def self.decode_binary_blob(blob, offset, count, type)
+    results = []
+    count.times do |i|
+      if type == :byte
+        byte = blob.getbyte(offset + i)
+        results << byte # Return native Int
+      elsif type == :int64
+        val = blob.byteslice((offset + i) * 8, 8)&.unpack1('q<') || 0
+        results << val
+      elsif type == :nanbox
+        raw_bits = blob.byteslice((offset + i) * 8, 8)&.unpack1('q<') || 0
+
+        if defined?(Value) && (raw_bits & Value::QNAN_MASK) == Value::QNAN_MASK
+          results << Formatter.to_native(raw_bits)
+        else
+          val = [raw_bits].pack('q<').unpack1('d')
+          results << val
+        end
+      end
+    end
+    results
   end
 
-  def inspect; @data.to_s; end
+  def slice_to_native(offset, count)
+    check_alive!
+    if @type == :obj
+      @data[offset, count].map { |v| Formatter.to_native(v) }
+    else
+      byte_offset = (@type == :byte) ? offset : offset * 8
+      FluxArray.decode_binary_blob(@data, byte_offset, count, @type)
+    end
+  end
 
-  # Delegate other methods to @data if needed (each, map, etc)
+  def to_a_native
+    slice_to_native(0, size)
+  end
+
+  # --- FORMATTING LOGIC ---
+
+  def to_s
+    check_alive!
+    native_list = to_a_native
+
+    # Heuristic: If explicitly byte or Struct Type implies byte
+    if @type == :byte || (@struct_type && @struct_type.to_s.include?("Byte"))
+      # Map integers to chars and join
+      native_list.map do |x|
+        val = x.is_a?(Numeric) ? x.to_i : x
+        val.is_a?(Integer) ? val.chr : val.to_s
+      end.join
+    else
+      # Standard list output: [1, 2, 3]
+      native_list.to_s
+    end
+  end
+
+  def inspect
+    check_alive!
+
+    lbl = if @struct_type
+      @struct_type.to_s
+    else
+      case @type
+      when :byte then "Byte"
+      when :nanbox then "NanBox"
+      when :int64 then "Int64"
+      else "Obj"
+      end
+    end
+
+    if @struct_type
+      "#{lbl}{#{size}}"
+    else
+      "#{lbl}[#{size}]"
+    end
+  end
+
   def method_missing(m, *args, &block)
     check_alive!
     if @data.respond_to?(m)
@@ -284,7 +388,7 @@ class FluxHash < FluxObject
   def keys; check_alive!; @data.keys; end
 
   def to_s; check_alive!; @data.to_s; end
-  def inspect; @data.to_s; end
+  def inspect; check_alive!; "Hash{#{data.size}}"; end
 
   def to_msgpack(packer=nil)
     check_alive!
@@ -315,10 +419,7 @@ class FluxString < FluxObject
   end
 end
 
-###
-# VIEW TYPES - ZERO-COPY SLICES - MUST BE INVALIDATED BY COMPILER FOR SAFETY!!
-##
-
+# ... View Types and Serialization Registry remain the same ...
 class FluxView < FluxObject
   attr_reader :owner, :offset, :len
 
@@ -330,10 +431,7 @@ class FluxView < FluxObject
   end
 
   def check_alive!
-    super # Check if the View itself is valid (in scope)
-
-    # CRITICAL: Check if the OWNER is still valid
-    # If the owner was poisoned (popped stack), the view must fail.
+    super
     unless @owner.is_alive
       raise "Memory Error: Dangling Pointer! View accessed after Owner died."
     end
@@ -341,22 +439,15 @@ class FluxView < FluxObject
 
   def [](idx)
     check_alive!
-    if idx >= @len
-      raise "Runtime Error: View index out of bounds"
-    end
+    raise "Runtime Error: View index out of bounds" if idx >= @len
 
-    # Implicit Deref: Forward to owner
-    # Note: Strings and Arrays handle [] differently in Ruby
     if @owner.is_a?(FluxString)
-      # String Slice
       @owner.data[@offset + idx]
     else
-      # Array Access
       @owner[@offset + idx]
     end
   end
 
-  # Convert View -> Owner (Implicit Promotion)
   def to_string_copy
     check_alive!
     if @owner.is_a?(FluxString)
@@ -375,58 +466,29 @@ class FluxView < FluxObject
     end
   end
 
-  def deref
-    check_alive!
-    @owner
-  end
-
+  def deref; check_alive!; @owner; end
   def inspect; to_s; end
 end
 
 class FluxHeapPtr < FluxObject
   attr_reader :owner
-
-  def initialize(owner)
-    super()
-    @owner = owner
-  end
-
+  def initialize(owner); super(); @owner = owner; end
   def check_alive!
-    super # Check if the Pointer itself is valid
-
-    # Check if the thing we point to is still valid
+    super
     if @owner.respond_to?(:is_alive) && !@owner.is_alive
       raise "Memory Error: Dangling Pointer! Accessing a dead object."
     end
   end
-
-  # The dereference operator (*)
-  def deref
-    check_alive!
-    @owner
-  end
-
-  # Transparent printing
+  def deref; check_alive!; @owner; end
   def to_s; "&(#{@owner})"; end
   def inspect; to_s; end
-
-  # Serialize the value we point to (Deep Copy behavior on serialization)
-  def to_msgpack(packer=nil)
-    check_alive!
-    @owner.to_msgpack(packer)
-  end
+  def to_msgpack(packer=nil); check_alive!; @owner.to_msgpack(packer); end
 end
-
-###
-# SERIALIZAITON REGISTRY
-##
 
 MessagePack::DefaultFactory.register_type(
   1,
   FluxByte,
-  # PACKER: Convert FluxByte -> String (Raw binary byte)
   packer: ->(obj) { obj.value.chr },
-  # UNPACKER: Convert String -> FluxByte
   unpacker: ->(data) { VM::FluxByte.new(data.ord) }
 )
 

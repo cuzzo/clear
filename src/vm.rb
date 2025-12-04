@@ -414,7 +414,7 @@ class VM
 
     # 3. Execute
     result = invoke_function(func_obj, args, frame)
-    $logger.debug("Call returned: #{result.inspect} -> Writing to R#{target_reg}")
+    $logger.debug("Call returned: #{Value.to_native(result)} -> Writing to R#{target_reg}")
 
     return result
   end
@@ -604,8 +604,8 @@ class VM
 
   def process_print(target_reg, args, frame)
     boxed_val = args[0]
-    val = Value.unbox(boxed_val)
-    puts "STDOUT > #{val.inspect}"
+    val = Formatter.to_native(boxed_val)
+    puts "STDOUT > #{val}"
     nil
   end
 
@@ -816,6 +816,8 @@ class VM
     # If any non-struct types have size > 1, this needs updated.
     if type_str.include?("[")
       type_str, size = type_str.split("[", 2)
+      struct_name = type_str.to_sym
+
       type_size = @structs.has_key?(type_str.to_sym) ?
         type_size = @structs[type_str.to_sym].keys.size :
         1
@@ -977,11 +979,8 @@ class VM
 
     vm = VM.new(code_str)
     resp = vm.run(chunk)
-
-    # Clean-up Resp -- necesarry because there's no true integer system yet.
-    if resp.is_a?(Float) && resp == 0.0
-      resp = 0.to_i
-    end
+    resp = Formatter.to_native(resp)
+    resp = resp.is_a?(Float) ? resp.to_i : resp
 
     [resp, chunk]
   end

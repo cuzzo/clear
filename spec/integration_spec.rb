@@ -13,9 +13,9 @@ RSpec.describe "INTEGRATION" do
       let(:script) { 'smooth-error' }
       it "runs" do
         output = [
-          "STDOUT > \"1. Fetching User ID: 999.0\"",
-          "STDOUT > \"ELSE\"",
-          "STDOUT > \"404 Not Found\"",
+          "STDOUT > 1. Fetching User ID: 999.0",
+          "STDOUT > ELSE",
+          "STDOUT > 404 Not Found",
           "0"
         ]
         expect(resp).to eq(output)
@@ -26,10 +26,10 @@ RSpec.describe "INTEGRATION" do
       let(:script) { 'boolean-logic' }
       it "runs" do
          output = [
-           "STDOUT > \"1\"",
+           "STDOUT > 1",
            "STDOUT > false",
            "STDOUT > true",
-           "STDOUT > \"1\"",
+           "STDOUT > 1",
            "0"
          ]
          expect(resp).to eq(output)
@@ -65,7 +65,7 @@ RSpec.describe "INTEGRATION" do
         output = [
            "STDOUT > 1.0",
            "STDOUT > true",
-           "STDOUT > nil",
+           "STDOUT > ",
            "0"
         ]
         expect(resp).to eq(output)
@@ -87,7 +87,7 @@ RSpec.describe "INTEGRATION" do
       it "runs" do
         output = [
           "STDOUT > 10.0",
-          "STDOUT > \"HI\"",
+          "STDOUT > HI",
           "0"
         ]
         expect(resp).to eq(output)
@@ -99,7 +99,7 @@ RSpec.describe "INTEGRATION" do
       it "runs" do
         output = [
           "STDOUT > 100.0",
-          "STDOUT > \"HI\"",
+          "STDOUT > HI",
           "STDOUT > 5.0",
           "STDOUT > [100.0, 200.0, 300.0]",
           "0"

@@ -225,5 +225,31 @@ module Value
     obj
   end
 
+  def self.to_native(boxed_val)
+    # 1. Fast Path: It's already a native Float
+    return boxed_val if boxed_val.is_a?(Float)
+
+    # 2. Check the Tag
+    tag = get_tag(boxed_val)
+
+    case tag
+    when TAG_NUMBER
+      # It's a Float stored in an Integer container (rare in standard NanBox, but possible)
+      as_number(boxed_val)
+    when TAG_BOOL
+      # Compare against your TRUE constant
+      # (Assuming you store TRUE as a specific bit pattern)
+      unbox(boxed_val) != 0
+    when TAG_BYTE
+      # Return the Integer (e.g. 104)
+      unbox(boxed_val)
+    when TAG_OBJ
+      # Return the actual Flux Object (FluxString, FluxStackPtr, etc.)
+      as_obj(boxed_val)
+    else
+      # Fallback: It might be nil, or a raw integer
+      boxed_val
+    end
+  end
 end
 

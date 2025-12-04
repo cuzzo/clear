@@ -314,13 +314,13 @@ RSpec.describe VM do
     context "named function returns 'Hello World'" do
       let(:source) {
         <<~FLUX
-          FN x() -> RETURN "Hello World"; END
+          FN x() -> RETURN %"Hello World"; END
           RETURN x();
         FLUX
       }
 
       it "is 'Hello World'" do
-        expect(Value.unbox(resp).to_s).to eq("Hello World")
+        expect(resp).to eq("Hello World")
       end
     end
 
@@ -328,13 +328,13 @@ RSpec.describe VM do
     context "lambda returns 'Hello World'" do
       let(:source) {
         <<~FLUX
-          VAR x = %(y)-> "Hello World";
+          VAR x = %(y)-> %"Hello World";
           RETURN x(1);
         FLUX
       }
 
       it "is 'Hello World'" do
-        expect(Value.unbox(resp).to_s).to eq("Hello World")
+        expect(resp).to eq("Hello World")
       end
     end
 
@@ -408,7 +408,7 @@ RSpec.describe VM do
         ]
 
         result = run_bytecode(consts, ops)
-        expect(Value.unbox(result)).to eq(100)
+        expect(result).to eq(100)
       end
     end
   end
@@ -1056,7 +1056,7 @@ RSpec.describe VM do
       vm = VM.new
       result, _ = vm.run_code(code)
 
-      expect(Value.unbox(result)).to eq(42)
+      expect(result).to eq(42)
     end
 
     it "allows mutation via the implicit pointer" do
@@ -1078,7 +1078,7 @@ RSpec.describe VM do
       vm = VM.new
       result, _ = vm.run_code(code)
 
-      expect(Value.unbox(result)).to eq(99)
+      expect(result).to eq(99)
     end
   end
 end

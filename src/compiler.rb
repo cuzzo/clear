@@ -464,6 +464,12 @@ class Compiler
     end
   end
 
+  def is_stack_candidate?(node)
+    node.is_a?(AST::ListLit) ||
+      node.is_a?(AST::StructLit) ||
+      (node.is_a?(AST::Literal) && node.type == :STRING)
+  end
+
   def compile_var_declare(node, target_reg)
     r = @reg_top;
     @reg_top += 1
@@ -472,9 +478,8 @@ class Compiler
     final_type = infer_type(node.value)
     known_size = get_known_size(node)
 
-    if storage == :stack && (node.value.is_a?(AST::ListLit) || node.value.is_a?(AST::StructLit))
+    if storage == :stack && is_stack_candidate?(node.value)
       compile_stack_literal(node.value, final_type, r)
-      # TODO: possibly short-cut, but what about global
     else
       visit(node.value, r)
     end
@@ -500,9 +505,13 @@ class Compiler
     @chunk.emit(node, :ALLOCA, "R#{target_reg}", final_type.to_s)
 
     # B. INITIALIZATION (The "Fill" Step)
-    if node.is_a?(AST::ListLit)
+    if node.is_a?(AST::ListLit) || (node.is_a?(AST::Literal) && node.type == :STRING)
+      items = node.is_a?(AST::ListLit) ?
+        node.items :
+        node.value.bytes.map { |b| AST::Literal.new(node.line, :BYTE, b, :stack) } # TODO: SLOW!
+
       # Loop by Index
-      node.items.each_with_index do |item, idx|
+      items.each_with_index do |item, idx|
         with_temp_reg do |r_val|
           visit(item, r_val)
           # Optimization: If item is a constant, we could emit specialized opcode,
@@ -515,22 +524,22 @@ class Compiler
         end
       end
 
-    elsif literal_node.is_a?(AST::StructLit)
+    elsif node.is_a?(AST::StructLit)
       # Loop by Field
       # 1. Merge Defaults (Crucial for Structs!)
-      def_fields = @struct_defs[literal_node.name] || {}
+      def_fields = @struct_defs[node.name] || {}
 
       # We iterate over the DEFINITION order to ensure we fill gaps with defaults
       def_fields.each do |field_name, info|
-        val_node = literal_node.fields[field_name] || info[:default]
+        val_node = node.fields[field_name] || info[:default]
 
         if val_node.nil?
-           raise "Compile Error: Missing value for field '#{field_name}' in struct '#{literal_node.name}'"
+           raise "Compile Error: Missing value for field '#{field_name}' in struct '#{node.name}'"
         end
 
         with_temp_reg do |r_val|
            visit(val_node, r_val)
-           @chunk.emit(literal_node, :SET_FIELD, "R#{target_reg}", field_name, "R#{r_val}")
+           @chunk.emit(node, :SET_FIELD, "R#{target_reg}", field_name, "R#{r_val}")
         end
       end
     end
@@ -569,7 +578,6 @@ class Compiler
     declared_type = node.type.to_sym # TODO: Shouldn't have to do this.
 
     final_type = :Any
-
     if declared_type == :Any || actual_type == :Any
       # We don't know enough to complain. Let it pass.
       final_type = (declared_type == :Any) ? actual_type : declared_type
@@ -904,7 +912,7 @@ class Compiler
   def compile_literal(node, target_reg)
     val = node.value
     if node.type == :BYTE
-      val = Value.box_byte(val) # Immediate
+      val = node.storage == :heap ? Value.box_byte(val) : val
     elsif node.type == :STRING
       # Register as Static so it survives Arena.reset! and is found by ID
       val = FluxString.new(val, register: :static)
@@ -1274,10 +1282,7 @@ private
   def infer_type(node)
     case node
     when AST::Literal
-      return :Number if node.type == :NUMBER
-      return :String if node.type == :STRING
-      return :Bool if node.type == :BOOL
-      return :Byte if node.type == :BYTE
+      return literal_type(node)
 
     # TODO: Test if this works recursively
     when AST::ListLit
@@ -1313,6 +1318,18 @@ private
     end
 
     return :Any # Fallback if we don't know
+  end
+
+  def literal_type(node)
+    return :Nil if node.type == :NIL # TODO: Where is this?
+    return :Number if node.type == :NUMBER
+    return :Bool if node.type == :BOOLEAN
+    return :Byte if node.type == :BYTE
+    if node.type == :STRING
+      return "String[]".to_sym if node.storage == :heap
+      return "Byte[#{node.value.length}]".to_sym if node.storage == :stack
+    end
+    raise "Unrecognized literal: #{node.type}"
   end
 end
 

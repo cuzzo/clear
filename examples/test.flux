@@ -1,4 +1,3 @@
-MUTABLE x = %{ y: 42 };
-SET x.y = 7;
-RETURN x.y;
+FN x() -> RETURN %"Hello World"; END
+RETURN x();
 

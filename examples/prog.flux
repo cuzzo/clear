@@ -7,10 +7,10 @@ FN main(s=5) RETURNS Number ->
 
   VAR multiple = 100;
 
-  FN test() USE(multiple) RETURNS String ->
+  FN test() USE(multiple) RETURNS String[] ->
     --
     -- SET multiple = 1;
-    RETURN "HI";
+    RETURN %"HI";
   END
 
   print(multiple);

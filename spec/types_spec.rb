@@ -197,3 +197,117 @@ RSpec.describe "Flux Type System" do
   end
 end
 
+RSpec.describe "VM Type Formatting" do
+
+  describe FluxArray do
+    context "when it is a basic Object Array" do
+      # VM Workflow: process_new_list usually inits with empty data
+      let(:arr) { FluxArray.new(10, [], type: :obj) }
+
+      before do
+        # VM Workflow: process_append or process_set_index fills it
+        arr[0] = 1
+        arr[1] = 2
+        arr[2] = 3
+        # Indices 3-9 remain nil
+      end
+
+      it "inspects as Obj[Size]" do
+        expect(arr.inspect).to eq("Obj[10]")
+      end
+
+      it "to_s returns a human readable list with padding" do
+        expect(arr.to_s).to eq("[1, 2, 3, nil, nil, nil, nil, nil, nil, nil]")
+      end
+    end
+
+    context "when it is a Typed Array (Int64)" do
+      # VM Workflow: process_array_cast or alloca creates empty binary blob
+      let(:arr) { FluxArray.new(4, nil, type: :int64) }
+
+      before do
+        # VM Workflow: process_set_index passes BOXED values
+        # We assume Value.box_number handles int64 boxing
+        arr[0] = Value.box_number(100)
+        arr[1] = Value.box_number(200)
+      end
+
+      it "inspects as Int64[Size]" do
+        expect(arr.inspect).to eq("Int64[4]")
+      end
+
+      it "to_s returns a human readable list" do
+        # Expect the 2 values we added, plus 2 empty slots (0)
+        expect(arr.to_s).to eq("[100, 200, 0, 0]")
+      end
+    end
+
+    context "when it is a Struct (via process_new_struct)" do
+      # VM Workflow: process_new_struct creates :nanbox array with nil data
+      let(:arr) { FluxArray.new(5, nil, type: :nanbox) }
+
+      before do
+        # VM Workflow: monkey-patches type
+        arr.struct_type = "MyStruct"
+
+        # VM Workflow: process_set_field passes BOXED values
+        arr[0] = Value.box_number(1)
+        arr[1] = Value.box_number(1)
+        # Indices 2,3,4 are 0.0 (or 0) because of binary init
+      end
+
+      it "inspects using Curly Braces {Size}" do
+        expect(arr.inspect).to eq("MyStruct{5}")
+      end
+
+      it "to_s still returns list content" do
+        # NanBox 0 unboxes to float 0.0 or int 0 depending on bit pattern
+        # Default \x00 is 0.0 in double precision usually, or 0 int.
+        # Let's match typical NanBox behavior (double 0.0)
+        expect(arr.to_s).to match(/\[1(\.0)?, 1(\.0)?, 0(\.0)?, 0(\.0)?, 0(\.0)?\]/)
+        #expect(arr.to_s).to match(/\[1, 1, 0(\.0)?, 0(\.0)?, 0(\.0)?\]/)
+      end
+    end
+
+    context "when it is a Byte Array Struct (ByteArray)" do
+      # VM Workflow: process_new_struct with name "ByteArray"
+      let(:arr) { FluxArray.new(5, nil, type: :nanbox) }
+
+      before do
+        arr.struct_type = "ByteArray"
+        # VM Workflow: set_index with Boxed Numbers
+        bytes = [72, 101, 108, 108, 111] # Hello
+        bytes.each_with_index { |b, i| arr[i] = Value.box_number(b) }
+      end
+
+      it "inspects as ByteArray{Size}" do
+        expect(arr.inspect).to eq("ByteArray{5}")
+      end
+
+      it "to_s converts the integers to a string" do
+        expect(arr.to_s).to eq("Hello")
+      end
+    end
+
+    context "when it is a native :byte type (via Cast)" do
+      # VM Workflow: process_array_cast can create :byte type
+      let(:arr) { FluxArray.new(3, nil, type: :byte) }
+
+      before do
+        # VM passes boxed numbers, Array converts to byte
+        arr[0] = Value.box_number(65)
+        arr[1] = Value.box_number(66)
+        arr[2] = Value.box_number(67)
+      end
+
+      it "inspects as Byte[Size]" do
+        expect(arr.inspect).to eq("Byte[3]")
+      end
+
+      it "to_s converts to string" do
+        expect(arr.to_s).to eq("ABC")
+      end
+    end
+  end
+end
+

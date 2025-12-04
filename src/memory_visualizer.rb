@@ -40,31 +40,59 @@ class MemoryVisualizer
       lines << "  subgraph #{frame_id} [Stack Frame #{f_idx}: #{func_name}]"
       lines << "    direction TB"
 
-      frame.registers.each_with_index do |val, r_idx|
-        next if val.nil? # Skip empty registers
+      frame.registers.each_with_index do |val_boxed, r_idx|
+        next if val_boxed.nil?
 
         reg_node = "#{frame_id}_R#{r_idx}"
 
-        if is_primitive?(val)
-          # Primitives live ON the stack
-          lines << "    #{reg_node}[\"R#{r_idx}: #{val}\"]"
+        # 1. CHECK THE TAG (The source of truth)
+        tag = defined?(Value) ? Value.get_tag(val_boxed) : Value::TAG_OBJ
+
+        # === CASE A: STACK DATA (Numbers, Bools, Bytes, Nils) ===
+        if tag != Value::TAG_OBJ
+          # Unbox to native (Int/Float/Bool)
+          native_val = Formatter.to_native(val_boxed)
+
+          # Format nicely (e.g. 0xAF for bytes)
+          display = if tag == Value::TAG_BYTE
+             "Byte(#{native_val})"
+          else
+             native_val.inspect
+          end
+
+          # RENDER AS RECTANGLE [ ]
+          lines << "    #{reg_node}[\"R#{r_idx}: #{display}\"]"
+
+        # === CASE B: HEAP POINTERS (Objects, Strings, Arrays) ===
         else
-          # References point TO the Arena
+          # It is a pointer. It gets a CIRCLE node.
           lines << "    #{reg_node}((\"R#{r_idx}\"))"
 
-          # Draw Arrow
-          target_id = obj_map[val.object_id]
-          if target_id
-            # Dotted for Views, Solid for Owners
-            arrow = (val.is_a?(FluxView) || val.is_a?(FluxStackPtr)) ? "-.->" : "-->"
+          # Now, where does it point?
+          # We need the actual Ruby object the pointer represents.
+          actual_obj = Value.as_obj(val_boxed)
+
+          # 1. Is it in the Arena? (Dynamic Heap Object)
+          if obj_map.key?(actual_obj.object_id)
+            target_id = obj_map[actual_obj.object_id]
+            # Solid Arrow for Owners, Dotted for Views
+            arrow = (actual_obj.is_a?(FluxView) || actual_obj.is_a?(FluxStackPtr)) ? "-.->" : "-->"
             lines << "    #{reg_node} #{arrow} #{target_id}"
-          elsif val.is_a?(FluxObject)
-             # Object is in register but NOT in Arena? (Maybe a constant?)
-             lines << "    #{reg_node} -.-> CONST_#{val.object_id}[\"Constant: #{safe_inspect(val)}\"]"
+
+          # 2. Is it a Constant/Static? (Not in Arena Map)
+          else
+            # Create a "floating" node for Constants so we see them clearly
+            const_id = "CONST_#{actual_obj.object_id}"
+
+            # Format the content
+            content = safe_inspect(actual_obj)
+
+            # Render a special Hexagon node for Constants/Statics
+            lines << "    #{const_id}{{ #{content} }}"
+            lines << "    #{reg_node} -.-> #{const_id}"
           end
         end
       end
-      lines << "  end"
     end
 
     lines.join("\n")
@@ -78,7 +106,7 @@ class MemoryVisualizer
 
   def safe_inspect(obj)
     # Escape quotes for Mermaid
-    obj.to_s.gsub('"', "'").gsub('<', '&lt;').gsub('>', '&gt;')
+    obj.inspect.gsub('"', "'").gsub('<', '&lt;').gsub('>', '&gt;')
   end
 end
 
