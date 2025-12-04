@@ -469,37 +469,46 @@ class Compiler
     @reg_top += 1
 
     storage = node.value.storage rescue :stack
+    known_size = nil
+    final_type = nil
+    move_op = nil
 
-    # If Struct -> ALLOCA, MOVE (Stack)
     if node.value.is_a?(AST::StructLit)
       struct_name = node.value.name
       raise "ERROR: Struct not found" if !@struct_defs.key?(struct_name)
-      if storage == :heap
-        visit(node.value, r)
-      else
-        with_temp_reg do |r_heap_temp|
-          visit(node.value, r_heap_temp)
-          # Allocate space on the stack
-          @chunk.emit(node, :ALLOCA, "R#{r}", struct_name)
-          @chunk.emit(node, :MOVE_STRUCT, "R#{r}", "R#{r_heap_temp}")
-        end
-      end
       final_type = struct_name.to_sym
-    # Otherwise -> VISIT
-    else
-      visit(node.value, r)
-      if @scope_depth == 0
-        @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{r}")
+      move_op = :MOVE_STRUCT if storage == :stack
+    elsif node.value.is_a?(AST::ListLit)
+      known_size = get_known_size(node)
+      if storage == :stack && known_size.nil?
+        raise "Cannot have Dynamic Lists on the STACK. Use a `%` sigil to move it on the HEAP, or specify a size."
       end
-      final_type = coerced_type(node, r)
+      move_op = :MOVE_LIST if storage == :stack
+    end
+
+    # IF STACK -> VISIT, ALLOCA, MOVE_
+    if storage == :stack && !move_op.nil?
+      with_temp_reg do |r_heap_temp|
+        visit(node.value, r_heap_temp)
+        @chunk.emit(node, :ALLOCA, "R#{r}", struct_name)
+        @chunk.emit(node, move_op, "R#{r}", "R#{r_heap_temp}")
+      end
+    else
+      # If HEAP -> VISIT
+      visit(node.value, r)
       handle_deep_freeze(node, r) # Run-time, probably not necessary
     end
 
-    if storage == :heap && AST::PRIMITIVE_TYPES.include?(final_type)
-      raise "Compiler Error: Do not allocate primitives on the heap. Remove the `%` sigil."
+    if @scope_depth == 0
+      @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{r}")
     end
 
-    known_size = get_known_size(node)
+    final_type ||= coerce_type!(node, r) # Must occur after visiting node.
+    if storage == :heap && AST::PRIMITIVE_TYPES.include?(final_type)
+      raise "Compiler Error: Do not allocate primitives on the HEAP. Remove the `%` sigil."
+    end
+
+
     handle_view(node)
 
     current_scope.declare(node.name, r, final_type, node.mutable, known_size, storage)
@@ -534,7 +543,7 @@ class Compiler
     @chunk.emit(node, :FREEZE, "R#{r}")
   end
 
-  def coerced_type(node, r)
+  def coerce_type!(node, r)
     actual_type = infer_type(node.value)
     declared_type = node.type.to_sym # TODO: Shouldn't have to do this.
 
