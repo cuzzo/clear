@@ -19,7 +19,7 @@ module OpCodes
     SET_FIELD:    [T_REG_R, T_STR, T_REG_R],
     SET_HASH:     [T_REG_R, T_STR, T_REG_R],
     SET_INDEX:    [T_REG_R, T_REG_R, T_REG_R],
-    NEW_LIST:     [T_REG_W],
+    NEW_LIST:     [T_REG_W, T_UINT],
     APPEND:       [T_REG_R, T_REG_R],
     DEF_GLOBAL:   [T_STR, T_REG_R],
     DEF_STRUCT:   [T_STR, T_RAW],
@@ -49,6 +49,7 @@ module OpCodes
     CAST:         [T_REG_W, T_STR],
     ALLOCA:       [T_REG_W, T_STR],
     MOVE_STRUCT:  [T_REG_R, T_REG_R], # Destination Pointer (Stack), Source Pointer (Heap)
+    MOVE_LIST:    [T_REG_R, T_REG_R], # Destination Pointer (Stack), Source Pointer (Heap)
   }
 
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|

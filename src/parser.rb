@@ -529,7 +529,7 @@ class Parser
     rule ||= @@primary_rules[[current.type, nil]]
     return instance_exec(&rule) if rule
     return parse_unary() if current.value == '-' || current.value == '!'
-    lit = parse_literals(:stack)
+    lit = parse_lit(:stack)
     return lit if !lit.nil?
     raise "Unexpected token #{current.value} (#{current.type}) line #{current.line}"
   end

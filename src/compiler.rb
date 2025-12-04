@@ -469,8 +469,8 @@ class Compiler
     @reg_top += 1
 
     storage = node.value.storage rescue :stack
+    final_type = infer_type(node.value)
     known_size = nil
-    final_type = nil
     move_op = nil
 
     if node.value.is_a?(AST::StructLit)
@@ -490,7 +490,7 @@ class Compiler
     if storage == :stack && !move_op.nil?
       with_temp_reg do |r_heap_temp|
         visit(node.value, r_heap_temp)
-        @chunk.emit(node, :ALLOCA, "R#{r}", struct_name)
+        @chunk.emit(node, :ALLOCA, "R#{r}", final_type.to_s)
         @chunk.emit(node, move_op, "R#{r}", "R#{r_heap_temp}")
       end
     else
@@ -503,12 +503,11 @@ class Compiler
       @chunk.emit(node, :DEF_GLOBAL, node.name, "R#{r}")
     end
 
-    final_type ||= coerce_type!(node, r) # Must occur after visiting node.
     if storage == :heap && AST::PRIMITIVE_TYPES.include?(final_type)
       raise "Compiler Error: Do not allocate primitives on the HEAP. Remove the `%` sigil."
     end
 
-
+    coerce_type(node, r)
     handle_view(node)
 
     current_scope.declare(node.name, r, final_type, node.mutable, known_size, storage)
@@ -543,7 +542,7 @@ class Compiler
     @chunk.emit(node, :FREEZE, "R#{r}")
   end
 
-  def coerce_type!(node, r)
+  def coerce_type(node, r)
     actual_type = infer_type(node.value)
     declared_type = node.type.to_sym # TODO: Shouldn't have to do this.
 
@@ -560,21 +559,19 @@ class Compiler
     elsif declared_type == :Number && actual_type == :Byte
       # We know this is safe, but the VM representation needs to change.
       # So we emit the instruction to help the user.
-      @chunk.emit(node, :CAST, "R#{r}", "Number")
       final_type = :Number
+      @chunk.emit(node, :CAST, "R#{r}", "Number")
 
     elsif declared_type == :Byte && actual_type == :Number
       # We allow this too (wrapping).
-      @chunk.emit(node, :CAST, "R#{r}", "Byte")
       final_type = :Byte
+      @chunk.emit(node, :CAST, "R#{r}", "Byte")
 
-    else
-      raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
-    end
-
-    if declared_type.to_s.include?("[")
+    elsif declared_type.to_s.include?("[")
       handle_array_type(node, r, declared_type, actual_type)
       final_type = declared_type
+    else
+      raise "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}"
     end
 
     return final_type
@@ -1004,8 +1001,22 @@ class Compiler
       # or assume Vector[Any].
     end
 
-    @chunk.emit(node, :NEW_LIST, "R#{target_reg}")
-    node.items.each { |item| with_temp_reg { |r| visit(item, r); @chunk.emit(node, :APPEND, "R#{target_reg}", "R#{r}") } }
+    # TODO: GET ACTUAL TYPE SIZE!
+    fixed_size = node.storage == :stack ? node.items.size * 8 : nil
+    @chunk.emit(node, :NEW_LIST, "R#{target_reg}", fixed_size)
+
+    node.items.each_with_index do |item, index|
+      with_temp_reg do |r| visit(item, r)
+        if node.storage == :stack
+          with_temp_reg do |key_reg|
+            @chunk.emit(node, :LOADK, "R#{key_reg}", index) # TODO: This requires a literal
+            @chunk.emit(node, :SET_INDEX, "R#{target_reg}", "R#{key_reg}", "R#{r}")
+          end
+        else
+          @chunk.emit(node, :APPEND, "R#{target_reg}", "R#{r}")
+        end
+      end
+    end
   end
 
   def compile_struct_lit(node, target_reg)
@@ -1245,6 +1256,12 @@ private
       return :String if node.type == :STRING
       return :Bool if node.type == :BOOL
       return :Byte if node.type == :BYTE
+
+    # TODO: Test if this works recursively
+    when AST::ListLit
+      base_type = infer_type(node.items.first).to_s
+      size = node.items.size
+      return "#{base_type}[#{size}]".to_sym
 
     when AST::Identifier
       # Look up the variable in the current scope

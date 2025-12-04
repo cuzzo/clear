@@ -10,6 +10,7 @@ require_relative "memory_visualizer"
 require_relative "value"
 require_relative "opcodes"
 require_relative "chunk"
+require_relative "frame"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -83,78 +84,6 @@ class VM
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|
     define_method("process_#{op.to_s.downcase}") do |target_reg, args, frame|
       process_sendable_symbol(target_reg, args, frame, op)
-    end
-  end
-
-  # A "Stack Frame" represents a running function
-  class Frame
-    attr_accessor :chunk, :ip, :registers, :arena_mark
-    attr_reader :stack_blob, :stack_pointer
-
-    def initialize(chunk, arena_mark = 0) # Default 0 for main
-      @chunk = chunk
-      @ip = 0
-      @registers = Array.new(256) # The 256 Registers
-      @arena_mark = arena_mark
-
-      # Eventually, @stack_blob will take over @registers
-      # Items are either on the Heap (Arena) or the Stack
-      # For now -> the stack is EITHER @registers OR @stack_blob.
-      #
-      # @stack_blob is a 1KB binary scratchpad for this function execution.
-      # We use :nanbox mode so we can store Pointers and Numbers mixed.
-      @stack_blob = FluxArray.new(1024, nil, type: :nanbox, register: false)
-      @stack_pointer = 0
-    end
-
-    def alloca(size)
-      addr = @stack_pointer
-      @stack_pointer += size
-      if @stack_pointer > @stack_blob.max_size
-        raise "Stack Overflow: Frame scratchpad exceeded"
-      end
-      addr
-    end
-
-    def debug_str(ins)
-      ins[1..]
-        .map { |operand| operand_data(operand) }
-        .zip(ins[1..]).map { |data, operand| joined_str(data, operand) }
-        .join(" ")
-    end
-
-    def operand_data(operand)
-      if operand.is_a?(String)
-        idx = operand[1..].to_i
-        case operand[0]
-          when "R", "K"
-            v = Value.resolve_val(registers[idx]) rescue Value.resolve_val(@stack_blob[idx])
-            reg_debug_str(operand.start_with?("R") ? v : @chunk.constants[idx])
-          else
-            operand # functions
-        end
-      else
-        operand
-      end
-    end
-
-    def joined_str(data, operand)
-      case data == operand # instruction pointer (jmp target, etc)
-        when true then operand.is_a?(Numeric) ? "IP: #{operand}" : "##{operand}";
-        when false then "#{operand}(#{data})";
-      end
-    end
-
-    def reg_debug_str(v)
-      if v.is_a?(FluxString) then "\"#{v}\""
-      elsif v.is_a?(Numeric) then v
-      elsif v.is_a?(Chunk) then "\\#{v.name}"
-      elsif v.is_a?(FluxClosure) then "λ"
-      elsif v.is_a?(FluxHash) then "{}:#{v.keys.count}"
-      elsif v.is_a?(FluxArray) && !v.struct_type.nil? then "{}:#{v.size}"
-      elsif v.is_a?(FluxArray) then "[]:#{v.size}"
-      else v.class
-      end
     end
   end
 
@@ -281,6 +210,7 @@ class VM
     Value.box_obj(obj)
   end
 
+  # TODO: Make this work with stack arrays
   def get_field_and_obj(flux_obj, field_name, frame)
     if flux_obj.is_a?(FluxHash)
        return [flux_obj, field_name]
@@ -332,7 +262,14 @@ class VM
   end
 
   def process_new_list(target_reg, args, frame)
-    Value.box_obj(FluxArray.new(nil, [], type: :obj))
+    if args.first.nil?
+      type = :obj
+      size = nil
+    else
+      type = :nanbox
+      size = args.first
+    end
+    Value.box_obj(FluxArray.new(size, [], type: type))
   end
 
   def process_append(target_reg, args, frame)
@@ -737,15 +674,18 @@ class VM
     boxed_list  = args[0]
     boxed_index = args[1]
 
-    list = Value.as_obj(boxed_list) # FluxArray, FluxString, OR FluxView
-
     tag = Value.get_tag(boxed_index)
     idx_val = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
 
-    # 3. Access
-    result = list[idx_val]
+    list_obj = Value.resolve_val(boxed_list) # FluxArray, FluxString, OR FluxView
+    if list_obj.is_a?(FluxStackPtr)
+      idx_val += list_obj.offset
+      list_obj = list_obj.container
+    end
 
-   if list.is_a?(FluxString) || (list.is_a?(FluxView) && list.owner.is_a?(FluxString))
+    result = list_obj[idx_val]
+
+    if list_obj.is_a?(FluxString) || (list_obj.is_a?(FluxView) && list_obj.owner.is_a?(FluxString))
       # TODO: Why is this special??
       # Box the character string
       Value.box_constant(result)
@@ -864,11 +804,23 @@ class VM
     nil
   end
 
+  # TODO: Support multi-dimensional arrays
   def process_alloca(target_reg, args, frame)
-    struct_name = args[0].to_sym
+    type_str = args[0]
+    struct_name = nil # TODO???
 
-    schema = @structs[struct_name]
-    size = schema.keys.size
+    # If any non-struct types have size > 1, this needs updated.
+    if type_str.include?(":")
+      type_str, size = type_str.split("[", 2)
+      type_size = @structs.has_key?(type_str.to_sym) ?
+        type_size = @structs[type_str.to_sym].keys.size :
+        1
+      size = size.to_i * type_size
+    else
+      struct_name = type_str.to_sym
+      schema = @structs[struct_name]
+      size = schema.keys.size
+    end
 
     offset = frame.alloca(size)
 
@@ -877,7 +829,6 @@ class VM
     Value.box_obj(ptr)
   end
 
-  # TODO: Eventually, I should be able to write directly to heap
   def process_move_struct(target_reg, args, frame)
     boxed_dest_ptr = args[0]
     boxed_src_obj = args[1]
@@ -907,6 +858,12 @@ class VM
 
     nil
   end
+
+  # Structs ARE dynamic lists.
+  def process_move_list(target_reg, args, frame)
+    process_move_struct(target_reg, args, frame)
+  end
+
 
   # Helper to run a function and handle the signal/unwind logic safely
   def invoke_function(func_obj, args, caller_frame)

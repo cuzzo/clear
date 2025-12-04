@@ -49,7 +49,6 @@ class FluxStackPtr < FluxObject
   def initialize(offset, size, container, struct_type = nil)
     # Note: We don't register this in the Arena.
     # It is a temporary value that lives in a Register.
-    # TODO: Fast said to register it, this seems wrong.
     super(register: true)
     @offset = offset
     @size = size
