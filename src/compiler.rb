@@ -90,11 +90,12 @@ class Compiler
       @dependencies = {}
     end
 
-    def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil)
+    def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack)
       @locals[name] = {
         reg: reg,
         type: type,
         mutable: is_mutable,
+        storage: storage,
         rebindable: is_rebindable,
         size: size,
         valid: true,
@@ -124,6 +125,11 @@ class Compiler
 
     def is_immutable?(name)
       !is_mutable?(name)
+    end
+
+    def is_on_heap?(name)
+      entry = @locals[name]
+      entry ? entry[:storage] == :heap : false
     end
 
     def register_dependency(owner_name, dependent_name)
@@ -243,7 +249,7 @@ class Compiler
     when AST::Identifier then compile_identifier(node, target_reg);
     when AST::FuncCall then compile_func_call(node, target_reg);
     when AST::MethodCall then compile_method_call(node, target_reg);
-    when AST::Lambda then compile_lambda(node, target_reg);
+    when AST::LambdaLit then compile_lambda_lit(node, target_reg);
     when AST::FunctionDef then compile_function_def(node, target_reg);
     when AST::ReturnNode then compile_return_node(node, target_reg);
     when AST::Assert then compile_assert(node, target_reg);
@@ -637,17 +643,21 @@ class Compiler
     r = @reg_top;
     @reg_top += 1
 
+    storage = node.value.storage rescue :stack
+
     # If Struct -> ALLOCA, MOVE (Stack)
     if node.value.is_a?(AST::StructLit)
       struct_name = node.value.name
       raise "ERROR: Struct not found" if !@struct_defs.key?(struct_name)
-      # TODO: determine if needs to be frozen, and why not.
-      with_temp_reg do |r_heap_temp|
-        visit(node.value, r_heap_temp)
-        # Allocate space on the stack
-        @chunk.emit(node, :ALLOCA, "R#{r}", struct_name)
-        # MOVE the Heap object to the stack - TODO: streamline
-        @chunk.emit(node, :MOVE_STRUCT, "R#{r}", "R#{r_heap_temp}")
+      if storage == :heap
+        visit(node.value, r)
+      else
+        with_temp_reg do |r_heap_temp|
+          visit(node.value, r_heap_temp)
+          # Allocate space on the stack
+          @chunk.emit(node, :ALLOCA, "R#{r}", struct_name)
+          @chunk.emit(node, :MOVE_STRUCT, "R#{r}", "R#{r_heap_temp}")
+        end
       end
       final_type = struct_name.to_sym
     # Otherwise -> VISIT
@@ -660,21 +670,24 @@ class Compiler
       handle_deep_freeze(node, r) # Run-time, probably not necessary
     end
 
+    if storage == :heap && AST::PRIMITIVE_TYPES.include?(final_type)
+      raise "Compiler Error: Do not allocate primitives on the heap. Remove the `%` sigil."
+    end
+
     known_size = get_known_size(node)
     handle_view(node)
 
-    current_scope.declare(node.name, r, final_type, node.mutable, known_size)
+    current_scope.declare(node.name, r, final_type, node.mutable, known_size, storage)
     return r
   end
 
+  # TODO: Do I need to raise an error here?
   def handle_view(node)
-   if node.value.is_a?(AST::GetIndex) || node.value.is_a?(AST::Slice)
-       source_node = node.value.target
+   return if !node.value.is_a?(AST::GetIndex) && !node.value.is_a?(AST::Slice)
+   source_node = node.value.target
 
-       if source_node.is_a?(AST::Identifier)
-         current_scope.register_dependency(source_node.name, node.name)
-       end
-    end
+   return if !source_node.is_a?(AST::Identifier)
+   current_scope.register_dependency(source_node.name, node.name)
   end
 
   def get_known_size(node)
@@ -1221,7 +1234,7 @@ class Compiler
     end
   end
 
-  def compile_lambda(node, target_reg)
+  def compile_lambda_lit(node, target_reg)
     # 1. Setup Child Compiler (Anonymous name)
     fn_compiler = Compiler.new("lambda", :Any)
     fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)

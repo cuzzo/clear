@@ -4,21 +4,21 @@
 module AST
   Program     = Struct.new(:line, :statements)
   FunctionDef = Struct.new(:line, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var)
-  VarDecl     = Struct.new(:line, :name, :type, :value, :mutable)
+  StructDef   = Struct.new(:line, :name, :fields)
+  VarDecl     = Struct.new(:line, :name, :type, :value, :mutable,)
   Assignment  = Struct.new(:line, :name, :value)
   BinaryOp    = Struct.new(:line, :left, :op, :right)
   UnaryOp     = Struct.new(:line, :op, :right)
-  Literal     = Struct.new(:line, :type, :value)
   Identifier  = Struct.new(:line, :name)
-  ListLit     = Struct.new(:line, :items)
-  HashLit     = Struct.new(:line, :pairs)
-  StructLit   = Struct.new(:line, :name, :fields)
-  StructDef   = Struct.new(:line, :name, :fields)
+  Literal     = Struct.new(:line, :type, :value, :storage)
+  ListLit     = Struct.new(:line, :items, :storage)
+  HashLit     = Struct.new(:line, :pairs, :storage)
+  StructLit   = Struct.new(:line, :name, :fields, :storage)
+  LambdaLit   = Struct.new(:line, :params, :captures, :body, :storage)
   IfStatement = Struct.new(:line, :condition, :then_branch, :else_branch)
   WhileLoop   = Struct.new(:line, :condition, :do_branch)
   BreakNode   = Struct.new(:line)
   ContinueNode = Struct.new(:line)
-  Lambda      = Struct.new(:line, :params, :captures, :body)
   FuncCall    = Struct.new(:line, :name, :args)
   MethodCall  = Struct.new(:line, :object, :method, :args)
   GetField    = Struct.new(:line, :target, :field)
@@ -33,7 +33,7 @@ module AST
 
   UNARY_OPS = ['-', '!', '~']
 
-  PRIMITIVE_TYPES = [:Number, :Bool, :String, :Byte]
+  PRIMITIVE_TYPES = [:Number, :Bool, :Byte]
 
   PRECEDENCE_MAP = {
     8 => { ops: ['**'], assoc: :right },

@@ -68,9 +68,9 @@ class Parser
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
 
   # Primaries
-  primary(:NUMBER) { AST::Literal.new(current.line, :NUMBER, consume(:NUMBER).value) }
-  primary(:STRING) { AST::Literal.new(current.line, :STRING, consume(:STRING).value) }
-  primary(:BYTE) { AST::Literal.new(current.line, :BYTE, consume(:BYTE).value) }
+  primary(:NUMBER) { AST::Literal.new(current.line, :NUMBER, consume(:NUMBER).value, :stack) }
+  primary(:STRING) { AST::Literal.new(current.line, :STRING, consume(:STRING).value, :stack) }
+  primary(:BYTE) { AST::Literal.new(current.line, :BYTE, consume(:BYTE).value, :stack) }
   primary(:VAR_ID) { parse_var_id }
 
   primary(:KEYWORD, 'TRUE') { consume(:KEYWORD); AST::Literal.new(current.line, :BOOLEAN, true) }
@@ -529,28 +529,40 @@ class Parser
     rule ||= @@primary_rules[[current.type, nil]]
     return instance_exec(&rule) if rule
     return parse_unary() if current.value == '-' || current.value == '!'
+    lit = parse_literals(:stack)
+    return lit if !lit.nil?
     raise "Unexpected token #{current.value} (#{current.type}) line #{current.line}"
   end
 
-  def parse_sigil_construct
-    consume(:PERCENT)
+  def parse_lit(storage)
     if match?(:TYPE_ID)
       name = consume(:TYPE_ID).value
       fields = parse_comma_seq(:CHAR, '{', '}') do
         k = consume(:VAR_ID).value; consume(:CHAR, ':'); v = parse_expression
         [k, v]
       end
-      return AST::StructLit.new(current.line, name, fields.to_h)
+      return AST::StructLit.new(current.line, name, fields.to_h, storage)
     elsif match?(:CHAR, '[')
       items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
-      return AST::ListLit.new(current.line, items)
+      return AST::ListLit.new(current.line, items, storage)
     elsif match?(:CHAR, '{')
       pairs = parse_comma_seq(:CHAR, '{', '}') do
         k = parse_expression; consume(:CHAR, ':'); v = parse_expression
         [k, v]
       end
-      return AST::HashLit.new(current.line, pairs.to_h)
-    elsif match?(:CHAR, '(')
+      return AST::HashLit.new(current.line, pairs.to_h, storage)
+    elsif match?(:STRING)
+      # TODO: Should only ever happen in parse_sigil
+      return AST::Literal.new(current.line, :STRING, consume(:STRING).value, storage)
+    end
+    return nil
+  end
+
+  def parse_sigil_construct
+    consume(:PERCENT)
+    lit = parse_lit(:heap)
+    return lit if !lit.nil?
+    if match?(:CHAR, '(')
       params = parse_argument_list
       captures = []
       if match!(:KEYWORD, 'USE')
@@ -561,7 +573,8 @@ class Parser
       body = parse_expression
       # TODO: Parse
       # consume(:CHAR, ';')
-      return AST::Lambda.new(current.line, params, captures, body)
+      # TODO: Is this accurate?
+      return AST::LambdaLit.new(current.line, params, captures, body, :heap)
     end
   end
 
