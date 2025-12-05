@@ -183,16 +183,19 @@ RSpec.describe "Flux Type System" do
     it "allows RVO via promote" do
       mark = Arena.current.mark
 
-      obj = FluxArray.new(nil, [1])
+      boxed_val = Value.box_number(1)
+      obj = FluxArray.new(nil, [boxed_val])
 
       # Save 'obj' from the upcoming purge
-      Arena.current.promote(obj)
+      survivors = Arena.current.promote(obj)
 
       # Rewind
       Arena.current.rewind(mark)
 
+      survivors.each { |s| Arena.current.register(s) }
+
       # It should still be alive!
-      expect(obj[0]).to eq(1)
+      expect(obj[0]).to eq(boxed_val)
     end
   end
 end
@@ -308,6 +311,34 @@ RSpec.describe "VM Type Formatting" do
         expect(arr.to_s).to eq("ABC")
       end
     end
+  end
+end
+
+RSpec.describe "Hypothesis Verification: Mixed-Key Recursion" do
+  it "successfully serializes the specific nested structure of Constant 4" do
+    # 1. SETUP: The exact structure retrieved from your debug output
+    # Outer key "chunks" is a String.
+    # Inner keys :name, :code, :constants are Symbols.
+    # Deepest key "number" is a String.
+    failing_structure = {
+      "chunks" => {
+        :name => "test",
+        :code => [
+          [:LOADK, "R2", "K0"],
+          [:RETURN, "R2"],
+          [:JMP, 3],
+          [:RETURN, "R0"]
+        ],
+        :constants => [
+          { "number" => nil }
+        ]
+      }
+    }
+
+    # 2. ACT & ASSERT: Attempt to pack it
+    # If this fails with the same error, the structure/mixing of keys is the root cause.
+    # If this PASSES, I am wrong, and the issue is not the structure itself.
+    expect { failing_structure.to_msgpack }.not_to raise_error
   end
 end
 

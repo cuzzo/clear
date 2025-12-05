@@ -2,7 +2,7 @@ STRUCT Config { debug: Number }
 
 -- TODO: WHAT TYPE IS VOID and NULL?
 -- TODO: RETURNS Bool
-FN main(s=5) RETURNS Number ->
+FN main(s=5) RETURNS Number[3] ->
   VAR json = %{ debug: 1 };
 
   VAR multiple = 100;
@@ -25,7 +25,7 @@ FN main(s=5) RETURNS Number ->
     .map( %(x) USE(multiple) -> x * multiple )
      s> print;
 
-  RETURN 1;
+  RETURN list;
 END
 
-main();
+print(main());

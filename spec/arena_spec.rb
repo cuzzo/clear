@@ -144,3 +144,4 @@ RSpec.describe Arena do
     end
   end
 end
+

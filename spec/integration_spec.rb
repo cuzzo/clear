@@ -102,6 +102,7 @@ RSpec.describe "INTEGRATION" do
           "STDOUT > HI",
           "STDOUT > 5.0",
           "STDOUT > [100.0, 200.0, 300.0]",
+          "STDOUT > [1.0, 2.0, 3.0]",
           "0"
         ]
         expect(resp).to eq(output)

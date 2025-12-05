@@ -1083,3 +1083,332 @@ RSpec.describe VM do
   end
 end
 
+
+describe "VM Memory Safety: pop_and_return" do
+
+  # Helper to build chunks easily
+  def make_chunk(name, instructions, constants=[])
+    c = Chunk.new(name)
+    c.code = instructions
+    c.constants = constants
+    c.line_info = Array.new(instructions.size, 1)
+    c
+  end
+
+  before(:each) do
+    Arena.reset!
+  end
+
+  context "Heap Object Survival (RVO)" do
+    it "poison!s local objects that are NOT returned (Garbage Collection verification)" do
+      # 1. Setup: Create a list, but don't return it. Return something else (or nothing).
+      #    We simulate a function that makes a list then discards it.
+
+      # Since we need to inspect the "dead" object, we can't easily do it via VM return.
+      # We have to inspect the Arena directly after execution.
+
+      # Code:
+      # R0 = NEW_LIST(0)
+      # RETURN R0
+
+      chunk = make_chunk("LocalDeath", [
+        [:NEW_LIST, 0, 0],         # R0 = [] (This will be returned and survive)
+        [:NEW_LIST, 1, 0],         # R1 = [] (This is waste, should die)
+        [:RETURN, "R0"]
+      ])
+
+      vm = VM.new
+      result_ref = vm.run(chunk)
+
+      # The Survivor
+      survivor = Value.as_obj(result_ref)
+      expect(survivor).to be_a(FluxArray)
+      expect(survivor.is_alive?).to be(true) # The returned object must be alive
+
+      # The Victim
+      # We have to look inside the Arena's live_objects to ensure R1 is GONE.
+      # Or, if we held a reference (which we can't easily in the VM flow), check poison.
+      # Ideally, the Arena allocation count should only reflect the survivor.
+
+      # Current Mark should be 1 (The survivor), not 2.
+      expect(Arena.current.mark).to eq(1)
+    end
+
+    it "successfully returns a HEAP LIST preventing Use-After-Free" do
+      # This explicitly tests pop_and_return logic:
+      # 1. promote(list)
+      # 2. rewind(stack) -> list is NOT in stack, so it isn't poisoned
+      # 3. register(list) -> list is back on top
+
+      chunk = make_chunk("HeapListReturn", [
+        [:NEW_LIST, 0, 0],      # R0 = []
+        [:RETURN, "R0"]         # Return the list
+      ])
+
+      vm = VM.new
+      result_ref = vm.run(chunk)
+      result_obj = Value.as_obj(result_ref)
+
+      expect(result_obj).to be_a(FluxArray)
+      expect(result_obj.is_alive?).to be(true)
+    end
+
+    it "preserves data inside the returned HEAP LIST" do
+      # Code:
+      # R0 = []
+      # R1 = "Hello"
+      # APPEND(R0, R1)
+      # RETURN R0
+
+      chunk = make_chunk("ListContent", [
+        [:NEW_LIST, "R0", nil],      # R0 = []
+        [:LOADK,    "R1", "K0"],      # R1 = "Hello" (Const index 0)
+        [:APPEND,   "R0", "R1"],# R0 << R1
+        [:RETURN,   "R0"]
+      ], ["Hello"])
+
+      vm = VM.new
+      result_ref = vm.run(chunk)
+      list = Value.as_obj(result_ref)
+
+      expect(list.is_alive?).to be(true)
+      expect(list.size).to eq(1)
+
+      # Verify content
+      content_ref = list[0]
+      content_obj = Value.as_obj(content_ref)
+      expect(content_obj.to_s).to eq("Hello")
+    end
+  end
+
+  context "Nested Stack Frames" do
+    it "promotes an object correctly across stack frames" do
+      # 1. Start State
+      Arena.reset!
+      frame_start_mark = Arena.current.mark # 0
+
+      # 2. Allocate "Local" Object in Frame
+      local_list = FluxArray.new(nil, [])
+
+      expect(local_list.is_alive?).to be(true)
+      expect(Arena.current.mark).to eq(1) # [local_list]
+
+      # 3. Simulate pop_and_return(local_list)
+      #    We manually invoke the Arena logic that VM uses
+
+      # A. PROMOTE
+      survivors = Arena.current.promote(local_list)
+      expect(survivors).to be_a(Array)
+      expect(survivors).to include(local_list)
+
+      # At this exact moment, list is removed from allocations, so mark drops
+      expect(Arena.current.mark).to eq(0)
+
+      # B. REWIND (POISON)
+      # Rewind to where the frame started.
+      Arena.current.rewind(frame_start_mark)
+      # Since list was promoted (removed), rewind catches nothing.
+      expect(local_list.is_alive?).to be(true)
+
+      # C. REGISTER (Push back to caller scope)
+      survivors.each { |s| Arena.current.register(s) }
+
+      expect(Arena.current.mark).to eq(1)
+      expect(local_list.is_alive?).to be(true)
+    end
+
+    it "poisons objects that were NOT promoted during a frame pop" do
+      Arena.reset!
+      frame_start_mark = Arena.current.mark
+
+      # 1. Allocate Survivor
+      survivor_list = FluxArray.new(nil, [])
+
+      # 2. Allocate Victim (Local garbage)
+      victim_list = FluxArray.new(nil, [])
+
+      expect(Arena.current.mark).to eq(2)
+
+      # 3. Execute VM Logic: pop_and_return(survivor)
+
+      # A. Promote Survivor
+      Arena.current.promote(survivor_list) # Removes survivor from list
+
+      # B. Rewind (Should catch Victim)
+      Arena.current.rewind(frame_start_mark)
+
+      # C. Register Survivor
+      Arena.current.register(survivor_list)
+
+      # Assertions
+      expect(survivor_list.is_alive?).to be(true)
+      expect(victim_list.is_alive?).to be(false)
+      expect(Arena.current.mark).to eq(1) # Only survivor remains
+    end
+  end
+
+  context "Edge Cases" do
+    it "handles returning nil/constants (Primitives) without crashing" do
+      # Primitives usually don't need promotion logic, but the method shouldn't crash.
+      # If pop_and_return is passed a constant, promote returns nil, registers nothing?
+      # Let's check the logic:
+      # promote(int) -> returns nil.
+      # register(nil) -> crashes? The VM code says: `Arena.current.register(survivor) if survivor`
+
+      chunk = make_chunk("ReturnConst", [
+        [:LOADK, "R0", "K0"],
+        [:RETURN, "R0"]
+      ], ["ConstantString"])
+
+      vm = VM.new
+      result = vm.run(chunk)
+      # Should run without error
+      expect(Value.unbox(result)).to eq("ConstantString")
+    end
+  end
+end
+
+RSpec.describe "RVO (Return Value Optimization) & Heap Safety" do
+  def run(source)
+    VM.new(source).run_code(source).first
+  end
+
+  describe "Level 1: Simple Heap Objects" do
+    it "safely returns a String (Heap Object) from a function" do
+      source = <<~FLUX
+        FN get_str() ->
+          VAR s = %"I survived the stack unwind!";
+          RETURN s;
+        END
+        RETURN get_str();
+      FLUX
+      expect(run(source)).to eq("I survived the stack unwind!")
+    end
+
+    it "safely returns a Mutable String modified inside the function" do
+      source = <<~FLUX
+        FN make_str() ->
+          MUTABLE s = %"Part 1";
+          SET s = s + " and Part 2";
+          RETURN s;
+        END
+        RETURN make_str();
+      FLUX
+      expect(run(source)).to eq("Part 1 and Part 2")
+    end
+  end
+
+  describe "Level 2: Shallow Containers (Primitives)" do
+    it "safely returns a Heap List of Numbers" do
+      source = <<~FLUX
+        FN get_list() ->
+          VAR l = %[ 10, 20, 30 ];
+          RETURN l;
+        END
+        VAR res = get_list();
+        RETURN res[1];
+      FLUX
+      expect(run(source)).to eq(20)
+    end
+
+    #it "safely returns a Heap List that was dynamically appended to" do
+    #  source = <<~FLUX
+    #    FN build_list() ->
+    #      MUTABLE l = %[ 1 ];
+    #      SET l = l << 2;
+    #      SET l = l << 3;
+    #      RETURN l;
+    #    END
+    #    VAR res = build_list();
+    #    RETURN res[2];
+    #  FLUX
+    #  expect(run(source)).to eq(3)
+    #end
+  end
+
+  # THIS IS LIKELY WHERE YOUR CURRENT CODE FAILS
+  describe "Level 3: Deep Containers (Nested Heap Objects)" do
+    it "safely returns a List containing Heap Strings" do
+      source = <<~FLUX
+        FN get_str_list() ->
+          -- The List is on the Heap. The Strings inside are ALSO on the Heap.
+          -- If RVO is shallow, the List survives but the Strings die.
+          RETURN %[ %"Alive", %"Dead?" ];
+        END
+        VAR res = get_str_list();
+        RETURN res[0];
+      FLUX
+      expect(run(source)).to eq("Alive")
+    end
+
+    it "safely returns a Nested List (List of Lists)" do
+      source = <<~FLUX
+        FN get_matrix() ->
+          VAR row1 = %[ 1, 2 ];
+          VAR row2 = %[ 3, 4 ];
+          RETURN %[ row1, row2 ];
+        END
+        VAR mat = get_matrix();
+        VAR r2 = mat[1];
+        RETURN r2[0];
+      FLUX
+      expect(run(source)).to eq(3)
+    end
+
+    it "safely returns a Struct containing a String" do
+      source = <<~FLUX
+        STRUCT User { name: String }
+        FN make_user() ->
+          RETURN %User { name: %"FluxUser" };
+        END
+        VAR u = make_user();
+        RETURN u.name;
+      FLUX
+      expect(run(source)).to eq("FluxUser")
+    end
+  end
+
+  describe "Level 4: Closures & Captures" do
+    it "returns a Closure that captures a Heap Value" do
+      source = <<~FLUX
+        FN make_greeter() ->
+          VAR name = %"World";
+          -- The closure captures 'name' (a Heap String).
+          -- Both the Closure AND 'name' must survive.
+          RETURN %(prefix) USE(name) -> prefix + %" " + name;
+        END
+        VAR greet = make_greeter();
+        RETURN greet("Hello");
+      FLUX
+      expect(run(source)).to eq("Hello World")
+    end
+
+    #it "returns a Closure that captures a Mutable Heap List" do
+    #  source = <<~FLUX
+    #    FN make_pusher() ->
+    #      MUTABLE list = %[ 1 ];
+    #      RETURN %(val) USE(list) -> list << val;
+    #    END
+    #    VAR push = make_pusher();
+    #    push(2);
+    #    VAR res_list = push(3); -- Returns the list [1, 2, 3]
+    #    RETURN res_list[2];
+    #  FLUX
+    #  expect(run(source)).to eq(3)
+    #end
+  end
+
+  describe "Level 5: The Gauntlet (Chained Stack Unwinding)" do
+    it "survives passing a heap object up multiple stack frames" do
+      source = <<~FLUX
+        FN level_3() -> RETURN %[ %"Deep" ]; END
+        FN level_2() -> RETURN level_3(); END
+        FN level_1() -> RETURN level_2(); END
+
+        VAR res = level_1();
+        RETURN res[0];
+      FLUX
+      expect(run(source)).to eq("Deep")
+    end
+  end
+end

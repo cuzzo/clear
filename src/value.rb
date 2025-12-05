@@ -78,7 +78,7 @@ module Value
 
     # We use the object_id as the "Pointer Address"
     # We ensure it fits in 48 bits (Ruby object_ids usually do)
-    address = obj.object_id & OBJ_PAYLOAD_MASK
+    address = obj.flux_id & OBJ_PAYLOAD_MASK
 
     QNAN_MASK | (ID_OBJ << TAG_SHIFT) | address
   end

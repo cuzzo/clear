@@ -63,8 +63,19 @@ class Chunk
       name: @name,
       code: @code,
       constants: @constants.map do |c|
-        v = c.is_a?(Chunk) ? c.to_h : c
-        k = c.is_a?(Chunk) ? "chunks" : c.is_a?(String) ? "string" : "number"
+        if c.is_a?(Chunk)
+          v = c.to_h
+          k = "chunks"
+        elsif c.is_a?(FluxString) || c.is_a?(String)
+          v = c.to_s
+          k = "string"
+        elsif c.nil?
+          v = nil
+          k = "nil" # Or whatever your serializer expects for nulls
+        else
+          v = c
+          k = "number"
+        end
         { k => v }
       end
     }

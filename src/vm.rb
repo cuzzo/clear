@@ -390,7 +390,8 @@ class VM
   def process_new_closure(target_reg, args, frame)
     fn_chunk = args.shift()
     captures = args
-    closure = FluxClosure.new(fn_chunk, captures)
+    registration = captures.empty? ? :static : true
+    closure = FluxClosure.new(fn_chunk, captures, register: registration)
     Value.box_obj(closure)
   end
 
@@ -949,7 +950,7 @@ class VM
   end
 
   # Unified logic for leaving a stack frame safely
-  # Returns the object so you can chain it if needed
+  # Returns the object to chain later if needed
   def pop_and_return(keep_obj)
     debug_memory()
     frame = @frames.last
@@ -957,12 +958,17 @@ class VM
 
     # 1. RVO: Save the object from the upcoming purge
     #    (If it's already promoted/safe, this is a no-op)
-    Arena.current.promote(keep_obj)
+    survivors = Arena.current.promote(keep_obj)
 
     # 2. POISON: Kill everything allocated in this specific frame
     Arena.current.rewind(frame.arena_mark)
 
-    # 3. POP: Remove the execution context
+    # 3. RE-STACK: Place the survivor back on the top of the stack (Caller's scope)
+    #    Arena.register adds it to the END of @allocations.
+    #    Since we just rewound, the "End" is now the top of the Caller's frame
+    survivors.each { |s| Arena.current.register(s) }
+
+    # 4. POP: Remove the execution context
     @frames.pop
 
     return keep_obj

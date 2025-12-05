@@ -28,17 +28,23 @@ end
 ##
 
 class FluxObject
-  attr_reader :is_alive
+  attr_reader :is_alive, :flux_id
 
   def initialize(register: true)
     @is_alive = true
     @is_frozen = false
+
+    @flux_id = Arena.allocate_id
 
     if register == :static
       Arena.register_static(self)
     elsif register
       Arena.current.register(self)
     end
+  end
+
+  def ==(other)
+    equal?(other)
   end
 
   def freeze!
@@ -53,6 +59,13 @@ class FluxObject
     unless @is_alive
       raise "Memory Error: Use After Free! Object accessed after its scope ended."
     end
+  end
+
+  def is_alive?
+    @is_alive
+  end
+  def is_poisoned?
+    !@is_alive
   end
 
   def poison!
