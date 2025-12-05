@@ -477,7 +477,7 @@ RSpec.describe Compiler do
     it 'raises a Compile Error for undefined variables' do
       expect {
         compile(source)
-      }.to raise_error(RuntimeError, /Undefined variable 'outer'/)
+      }.to raise_error(CompilerError, /Undefined variable 'outer'/)
     end
   end
 

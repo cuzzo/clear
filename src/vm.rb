@@ -1043,7 +1043,7 @@ class VM
     tokens = Lexer.new(code_str).tokenize
     ast = Parser.new(tokens).parse
 
-    compiler = Compiler.new("main")
+    compiler = Compiler.new("main", :Number, code_str)
 
     chunk = compiler.compile(ast)
     optimizer = Optimizer.new()

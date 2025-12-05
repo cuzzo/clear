@@ -71,7 +71,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /'x' is immutable/)
+        }.to raise_error(CompilerError, /'x' is immutable/)
       end
     end
 
@@ -100,7 +100,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Cannot modify index of immutable list 'x'/)
+        }.to raise_error(CompilerError, /Cannot modify index of immutable list 'x'/)
       end
     end
 
@@ -129,7 +129,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Cannot modify/)
+        }.to raise_error(CompilerError, /Cannot modify/)
       end
     end
 
@@ -159,7 +159,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Variable 'x' is immutable/)
+        }.to raise_error(CompilerError, /Variable 'x' is immutable/)
       end
     end
 
@@ -175,7 +175,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Its name must end in/)
+        }.to raise_error(CompilerError, /Its name must end in/)
       end
     end
 
@@ -191,7 +191,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Argument 1 .* is MUTABLE/)
+        }.to raise_error(CompilerError, /Argument 1 .* is MUTABLE/)
       end
     end
 
@@ -207,7 +207,7 @@ RSpec.describe VM do
       it "raises failure" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Argument 1 .* is MUTABLE/)
+        }.to raise_error(CompilerError, /Argument 1 .* is MUTABLE/)
       end
     end
 
@@ -276,7 +276,7 @@ RSpec.describe VM do
       it "fails" do
         expect {
           resp
-        }.to raise_error(RuntimeError, /Cannot initialize array of size 4 to fixed-size/)
+        }.to raise_error(CompilerError, /Cannot initialize array of size 4 to fixed-size/)
       end
     end
 
