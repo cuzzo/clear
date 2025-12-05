@@ -373,11 +373,15 @@ class Compiler
     return_type = :Any
 
     # We only look up signatures for static names (not closures/expressions)
-    if node.name.is_a?(String) && !local_reg && @fn_signatures.key?(node.name)
-      sig = @fn_signatures[node.name]
-      signature_params = sig[:params]
-      return_type = sig[:return_type]
-      verify_function_signature(node)
+    if node.name.is_a?(String) && !local_reg
+      if @fn_signatures.key?(node.name)
+        sig = @fn_signatures[node.name]
+        signature_params = sig[:params]
+        return_type = sig[:return_type]
+        verify_function_signature(node)
+      else
+        error!(node, :MISSING_FUNCTION, node.name)
+      end
     end
 
     # We only look up signatures for static names (not closures/expressions)
@@ -451,7 +455,7 @@ class Compiler
     # A. Arity Check (Count)
     if given_args < min_args || given_args > max_args
       if min_args == max_args
-        error!(node, :ARITY_MISMATCH, node.name, min_args, max_args)
+        error!(node, :ARITY_MISMATCH, node.name, min_args, given_args)
       else
         error!(node, :ARITY_MISMATCH_RANGE, node.name, min_args, max_args, given_args)
       end
@@ -497,7 +501,8 @@ class Compiler
       end
 
       unless match
-        error!(arg_node, :ARGUMENT_TYPE_ERROR, arg_node.name, i+1, param[:name], expected, actual)
+        arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
+        error!(arg_node, :ARGUMENT_TYPE_ERROR, arg_name, i+1, param[:name], expected, actual)
       end
     end
   end
@@ -581,7 +586,7 @@ class Compiler
     coerce_type(node, r)
     handle_view(node)
 
-    current_scope.declare(node.name, r, final_type, node.mutable, known_size, storage)
+    current_scope.declare(node.name, r, final_type, node.mutable, false, known_size, storage)
     return r
   end
 
@@ -798,10 +803,6 @@ class Compiler
       # It's a Local Variable (in a Register)
       @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{val_reg}")
 
-    elsif @chunk.globals_include?(var_name) # Assuming you track globals
-      # It's a Global Variable (Needs explicit SET_GLOBAL if your VM supports it)
-      # If your VM maps globals to registers in main, this might need adjustment.
-      @chunk.emit(node, :SET_GLOBAL, var_name, "R#{val_reg}")
     else
       # 4. Error if not found
       error!(node, :SET_UNDECLARED_VAR, var_name)
@@ -1230,7 +1231,7 @@ class Compiler
     actual_type = infer_type(node.value)
     if @expected_return && @expected_return != :Any
       if actual_type != :Any && actual_type != @expected_return
-        error!(node, :RETURN_MISMTACH, @expected_return, actual_type)
+        error!(node, :RETURN_MISMATCH, @expected_return, actual_type)
       end
     end
 
@@ -1380,7 +1381,7 @@ class Compiler
       # 1. Find the register in the CURRENT (Outer) scope
       outer_reg = current_scope.resolve_reg(cap_name)
       unless outer_reg
-        error!(node, ILLEGAL_UPVALUE, cap_name)
+        error!(node, :ILLEGAL_UPVALUE, cap_name)
       end
 
       # 2. Add to the list for the CLOSURE opcode (e.g., "R5")

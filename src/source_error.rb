@@ -34,10 +34,10 @@ module ErrorDefinitions
     ARITY_MISMATCH: "Function '%s' expects %d arguments, got %d.",
     ARITY_MISMATCH_RANGE: "Function '%s' expects between %d and %d arguments, got %d.",
     ARGUMENT_TYPE_ERROR: "Type Error: Function '%s' argument %d expects %s, got %s",
-    PRIMITIVE_PASS_AS_MUTABLE: "Parameter '%s' is MUTABLE but has primitive type '%s'. Primitives are passed by value, so mutating them locally has no effect on the caller.",
+    PRIMITIVE_PASSED_AS_MUTABLE: "Parameter '%s' is MUTABLE but has primitive type '%s'. Primitives are passed by value, so mutating them locally has no effect on the caller.",
     IMMUTABLE_ARG_PASSED_AS_MUTABLE: "Argument %d ('%s') is MUTABLE, but you passed immutable variable '%s'.",
-    IMMUTABLE_ARG_PASSED_AS_EXPRESION: "Argument %d ('%s') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.",
-    ILLEGAL_UPVALE: "Cannot capture '%s' - undefined in outer scope.",
+    IMMUTABLE_ARG_PASSED_AS_EXPRESSION: "Argument %d ('%s') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.",
+    ILLEGAL_UPVALUE: "Cannot capture '%s' - undefined in outer scope.",
     RETURN_MISMATCH: "Type Error: Function expected to return '%s', but returned '%s'",
   }
 end

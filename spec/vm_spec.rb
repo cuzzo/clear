@@ -1425,3 +1425,192 @@ RSpec.describe "RVO (Return Value Optimization) & Heap Safety" do
     end
   end
 end
+
+RSpec.describe "Compiler Error Coverage" do
+  def run(source)
+    vm = VM.new(source)
+    vm.run_code(source)
+  end
+
+  # =========================================================
+  # 1. CONTROL FLOW ERRORS
+  # =========================================================
+
+  describe "Control Flow" do
+    it "raises ILLEGAL_BREAK when used outside a loop" do
+      source = "BREAK;"
+      expect { run(source) }.to raise_error(CompilerError, /outside of a loop/)
+    end
+
+    it "raises ILLEGAL_CONTINUE when used outside a loop" do
+      source = "CONTINUE;"
+      expect { run(source) }.to raise_error(CompilerError, /outside of a loop/)
+    end
+  end
+
+  # =========================================================
+  # 2. VARIABLE & ALLOCATION ERRORS
+  # =========================================================
+
+  describe "Variables & Allocation" do
+    it "raises HEAP_PRIMITIVE when putting a primitive on the heap explicitly" do
+      # Using `%` sigil on a number
+      source = "VAR x = %10;"
+      expect { run(source) }.to raise_error(ParserError) #, /primitive.*Cannot allocate on HEAP/)
+    end
+
+    it "raises UNDEFINED_VAR when accessing a non-existent variable" do
+      source = "RETURN x;"
+      expect { run(source) }.to raise_error(CompilerError, /Undefined variable 'x'/)
+    end
+
+    it "raises SET_UNDECLARED_VAR when setting a non-existent variable" do
+      source = "SET x = 10;"
+      expect { run(source) }.to raise_error(CompilerError, /Cannot SET 'x' because it has not been declared/)
+    end
+
+    # TODO: Implement rebinding logic.
+    #it "raises VARIABLE_REBIND when piping into an existing immutable variable" do
+    #  # 'x' is immutable, so '10 |> x' (bind var) should fail
+    #  source = <<~FLUX
+    #    STRUCT S { x: Number }
+    #    MUTABLE s1 = S{ x: 10 };
+    #    SET s1 = S{ x: 12 };
+    #  FLUX
+    #  expect { run(source) }.to raise_error(CompilerError, /Cannot rebind immutable variable 'x'/)
+    #end
+  end
+
+  # =========================================================
+  # 3. TYPE & ASSIGNMENT ERRORS
+  # =========================================================
+
+  describe "Types & Assignment" do
+    it "raises VARIABLE_ASSIGNMENT_TYPE_ERROR on declaration mismatch" do
+      source = 'VAR x : Number = "String";'
+      expect { run(source) }.to raise_error(CompilerError, /declared as Number/)
+    end
+
+    it "raises LIST_TYPE_MISMATCH when list items are not homogeneous" do
+      source = 'VAR x = %[ 1, "2" ];'
+      expect { run(source) }.to raise_error(CompilerError, /List contains mixed types/)
+    end
+
+    it "raises IMMUTABLE_FIELD_ASSIGNMENT when setting a field on an immutable struct" do
+      source = <<~FLUX
+        STRUCT Point { x: Number }
+        VAR p = %Point{ x: 1 };
+        SET p.x = 2;
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /Cannot modify field 'x' of immutable/)
+    end
+  end
+
+  # =========================================================
+  # 4. ARRAY & STRUCT ERRORS
+  # =========================================================
+
+  describe "Arrays & Structs" do
+    it "raises FIXED_ARRAY_SIZE_AS_DYNAMIC when assigning a dynamic list to a [*] type" do
+      # 'dyn' size is unknown at compile time, so we can't infer [*]
+      source = <<~FLUX
+        VAR dyn : Number[] = %[1, 2];
+        VAR fix : Number[1] = dyn;
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /Cannot initialize array of size 2/)
+    end
+
+    it "raises MISSING_REQUIRED_STRUCT_FIELD for Heap Structs" do
+      source = <<~FLUX
+        STRUCT Point { x: Number, y: Number }
+        VAR p = %Point{ x: 1 }; -- Missing y
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /Missing required field 'y'/)
+    end
+
+    it "raises MISSING_FIELD_VALUE for Stack Structs" do
+      # The error path for stack allocation is slightly different in compiler.rb
+      source = <<~FLUX
+        STRUCT Point { x: Number, y: Number }
+        -- No % sigil, allocated on stack, triggers compile_stack_literal
+        VAR p : Point = Point{ x: 1 };
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /Missing value for field 'y'/)
+    end
+  end
+
+  # =========================================================
+  # 5. FUNCTION & CALL ERRORS
+  # =========================================================
+
+  describe "Functions" do
+    it "raises MISSING_FUNCTION when calling an undefined function" do
+      source = "ghost_func();"
+      expect { run(source) }.to raise_error(CompilerError, /Missing function 'ghost_func'/)
+    end
+
+    it "raises ARITY_MISMATCH when arguments count is wrong" do
+      source = <<~FLUX
+        FN add(a, b) -> RETURN a + b; END
+        add(1);
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /expects 2 arguments, got 1/)
+    end
+
+    it "raises ARGUMENT_TYPE_ERROR when passing wrong type" do
+      source = <<~FLUX
+        FN inc(a: Number) -> RETURN a + 1; END
+        inc("string");
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /argument 1 expects a/)
+    end
+
+    it "raises RETURN_MISMATCH when return type doesn't match signature" do
+      source = <<~FLUX
+        FN get_num() RETURNS Number ->
+          RETURN "Not a number";
+        END
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /expected to return 'Number'/)
+    end
+  end
+
+  # =========================================================
+  # 6. MUTABILITY & CLOSURE ERRORS
+  # =========================================================
+
+  describe "Mutability & Closures" do
+    it "raises IMMUTABLE_ARG_PASSED_AS_EXPRESSION when passing a literal to a MUTABLE param" do
+      source = <<~FLUX
+        FN change!(MUTABLE n: Number) -> SET n = 0; END
+        change!(5); -- 5 is a literal, not a variable
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /You cannot pass a value\/expression/)
+    end
+
+    it "raises ILLEGAL_UPVALUE when capturing an undefined variable" do
+      source = <<~FLUX
+        -- 'z' is not defined here
+        VAR lam = %(x) USE(z) -> x + z;
+      FLUX
+      expect { run(source) }.to raise_error(CompilerError, /Cannot capture 'z' - undefined/)
+    end
+  end
+
+  # =========================================================
+  # 7. NATIVE CALLS
+  # =========================================================
+
+  describe "Native Calls" do
+    it "raises NATIVE_CALL_ERROR if arguments are not static strings" do
+      source = 'native_call(1, 2);'
+      expect { run(source) }.to raise_error(CompilerError, /arg 1 must be a static String/)
+    end
+
+    it "raises NATIVE_CALL_ERROR if not enough arguments" do
+      source = 'native_call("Class");'
+      expect { run(source) }.to raise_error(CompilerError, /native_call requires 'Class' and 'Method'/)
+    end
+  end
+end
+
