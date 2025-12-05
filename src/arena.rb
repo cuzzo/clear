@@ -57,7 +57,7 @@ class Arena
 
     dead_objects.each do |obj|
       obj.poison!
-      id = obj.object_id & ID_MASK
+      id = obj.flux_id & ID_MASK
       @live_objects.delete(id)
     end
   end

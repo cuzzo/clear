@@ -1411,4 +1411,17 @@ RSpec.describe "RVO (Return Value Optimization) & Heap Safety" do
       expect(run(source)).to eq("Deep")
     end
   end
+
+  describe "SRVO test" do
+    it "returns correctly" do
+      source = <<~FLUX
+        STRUCT Vec { x: Number, y: Number, z: Number }
+        FN make_opt() RETURNS Vec ->
+          RETURN Vec{ x: 10, y: 10, z: 10 };
+        END
+        RETURN make_opt().x;
+      FLUX
+      expect(run(source)).to eq(10)
+    end
+  end
 end

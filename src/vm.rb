@@ -218,7 +218,7 @@ class VM
        return [flux_obj, field_name]
     end
 
-    if !flux_obj.is_a?(FluxArray) # Structs are arrays.
+    if !flux_obj.is_a?(FluxArray) && !flux_obj.is_a?(FluxStackPtr) # Structs are arrays or SRVO pointers.
       raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
     end
 
@@ -426,6 +426,7 @@ class VM
 
     obj = Value.resolve_val(boxed_obj)
 
+    # TODO: Fix
     if obj.is_a?(FluxArray) && method_name == "map"
       boxed_closure = args[0]
       closure_obj = Value.as_obj(boxed_closure)
@@ -836,6 +837,69 @@ class VM
     Value.box_obj(ptr)
   end
 
+  def process_mem_copy(target_reg, args, frame)
+    dest_ptr = Value.resolve_val(args[0])
+    src_obj = Value.resolve_val(args[1]) # Could be Ptr or Heap Object
+    size = args[2]
+
+    # 1. Validate Destination (Must be Stack Memory)
+    unless dest_ptr.is_a?(FluxStackPtr)
+      raise "Runtime Error: MEM_COPY destination must be a Stack Pointer."
+    end
+
+    # 2. Handle Source Types
+    if src_obj.is_a?(FluxStackPtr)
+      # --- CASE A: Stack -> Stack Copy (Fastest) ---
+      if dest_ptr.container.type == :obj
+        (0...size).each do |i|
+          dest_ptr.container[dest_ptr.offset + i] = src_obj.container[src_obj.offset + i]
+        end
+      else
+        # Binary Copy logic...
+        byte_width = (dest_ptr.container.type == :byte) ? 1 : 8
+        raw_bytes = src_obj.container.data.byteslice(src_obj.offset * byte_width, size * byte_width)
+        dest_ptr.container.data[dest_ptr.offset * byte_width, size * byte_width] = raw_bytes
+      end
+
+    elsif src_obj.is_a?(FluxArray)
+      # --- CASE B: Heap -> Stack Copy (Flexible) ---
+      # This enables returning %[1,2,3] from a function expecting Number[3]
+
+      # Safety Check
+      if src_obj.size < size
+        raise "Runtime Error: Cannot copy Heap Array of size #{src_obj.size} into Stack slot of size #{size}"
+      end
+
+      if dest_ptr.container.type == :obj
+        (0...size).each do |i|
+          # Read from Heap (src_obj[i]), Write to Stack
+          dest_ptr.container[dest_ptr.offset + i] = src_obj[i]
+        end
+      else
+        # Binary Copy (NanBox/Byte)
+        # FluxArray stores data in @data. If it's :nanbox/:int64, @data is a String.
+        if src_obj.data.is_a?(String)
+          # Bulk Byte Copy
+          byte_width = (dest_ptr.container.type == :byte) ? 1 : 8
+          raw_bytes = src_obj.data.byteslice(0, size * byte_width)
+          dest_ptr.container.data[dest_ptr.offset * byte_width, size * byte_width] = raw_bytes
+        else
+          # Slow loop fallback (if Heap is :obj but Stack is :nanbox - rare/weird)
+          (0...size).each do |i|
+            # We might need to unbox/rebox here depending on types
+            val = src_obj[i]
+            dest_ptr.container[dest_ptr.offset + i] = val
+          end
+        end
+      end
+
+    else
+      raise "Runtime Error: MEM_COPY source must be StackPtr or HeapArray. Got #{src_obj.class}"
+    end
+
+    nil
+  end
+
   # Helper to run a function and handle the signal/unwind logic safely
   def invoke_function(func_obj, args, caller_frame)
     result = execute_function(func_obj, args)
@@ -911,21 +975,21 @@ class VM
 
         schema = structs_registry[required_type]
 
-        schema.each do |field, field_type|
-          return false unless val.key?(field)
-          return false unless check_type(val[field], field_type.to_sym, structs_registry)
-        end
-        return true
-      else
-        return false
-      end
-    end
-  end
+         schema.each do |field, field_type|
+           return false unless val.key?(field)
+           return false unless check_type(val[field], field_type.to_sym, structs_registry)
+         end
+         return true
+       else
+         return false
+       end
+     end
+   end
 
-  def raise_error(error_obj)
-    # 1. Loop through the frame stack (unwind from deepest function)
-    while @frames.any?
-      frame = @frames.last
+   def raise_error(error_obj)
+     # 1. Loop through the frame stack (unwind from deepest function)
+     while @frames.any?
+       frame = @frames.last
 
       # 2. Check current function's chunk for a handler
       handler = frame.chunk.handler_info

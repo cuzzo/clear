@@ -4,16 +4,9 @@ require_relative '../src/types' # Needed for FluxObject
 
 # A helper class to track poisoning status without complex logic
 class TestObject < FluxObject
-  attr_reader :poisoned
-
   def initialize(register: true)
     super(register: register)
     @poisoned = false
-  end
-
-  def poison!
-    super
-    @poisoned = true
   end
 end
 
@@ -27,7 +20,7 @@ RSpec.describe Arena do
       obj = TestObject.new
 
       # Calculate expected address using the mask
-      expected_addr = obj.object_id & Arena::ID_MASK
+      expected_addr = obj.flux_id & Arena::ID_MASK
 
       found = Arena.current.find_object_by_address(expected_addr)
       expect(found).to eq(obj)
@@ -35,7 +28,7 @@ RSpec.describe Arena do
 
     it "does not find objects that were never registered" do
       obj = TestObject.new(register: false)
-      addr = obj.object_id & Arena::ID_MASK
+      addr = obj.flux_id & Arena::ID_MASK
 
       found = Arena.current.find_object_by_address(addr)
       expect(found).to be_nil
@@ -46,7 +39,7 @@ RSpec.describe Arena do
     it "registers static objects that persist across resets" do
       # 1. Register a static object
       static_obj = TestObject.new(register: :static)
-      static_addr = static_obj.object_id & Arena::ID_MASK
+      static_addr = static_obj.flux_id & Arena::ID_MASK
 
       # 2. Reset the Arena (Simulate new VM run)
       Arena.reset!
@@ -73,12 +66,12 @@ RSpec.describe Arena do
       Arena.current.rewind(mark)
 
       # Root should be alive
-      expect(root_obj.poisoned).to be false
-      expect(Arena.current.find_object_by_address(root_obj.object_id & Arena::ID_MASK)).to eq(root_obj)
+      expect(root_obj.is_alive?).to be(true)
+      expect(Arena.current.find_object_by_address(root_obj.flux_id & Arena::ID_MASK)).to eq(root_obj)
 
       # Local should be dead and removed from registry
-      expect(local_obj.poisoned).to be true
-      expect(Arena.current.find_object_by_address(local_obj.object_id & Arena::ID_MASK)).to be_nil
+      expect(local_obj.is_poisoned?).to be(true)
+      expect(Arena.current.find_object_by_address(local_obj.flux_id & Arena::ID_MASK)).to be_nil
     end
 
     it "handles nested stack frames correctly" do
@@ -90,12 +83,12 @@ RSpec.describe Arena do
 
       # Rewind inner frame
       Arena.current.rewind(mark2)
-      expect(obj2.poisoned).to be true
-      expect(obj1.poisoned).to be false
+      expect(obj2.is_poisoned?).to be(true)
+      expect(obj1.is_alive?).to be(true)
 
       # Rewind outer frame
       Arena.current.rewind(mark1)
-      expect(obj1.poisoned).to be true
+      expect(obj1.is_poisoned?).to be(true)
     end
   end
 
@@ -114,13 +107,13 @@ RSpec.describe Arena do
       Arena.current.rewind(mark)
 
       # Result should survive
-      expect(result_obj.poisoned).to be false
-      expect(result_obj.is_alive).to be true
+      expect(result_obj.is_alive?).to be(true)
+      expect(result_obj.is_alive?).to be(true)
       # Registry lookup should still work
-      expect(Arena.current.find_object_by_address(result_obj.object_id & Arena::ID_MASK)).to eq(result_obj)
+      expect(Arena.current.find_object_by_address(result_obj.flux_id & Arena::ID_MASK)).to eq(result_obj)
 
       # Garbage should be dead
-      expect(garbage_obj.poisoned).to be true
+      expect(garbage_obj.is_poisoned?).to be(true)
     end
   end
 
@@ -130,7 +123,7 @@ RSpec.describe Arena do
       # but we can verify the mask constant exists and is applied.
 
       obj = TestObject.new
-      raw_id = obj.object_id
+      raw_id = obj.flux_id
       masked_id = raw_id & Arena::ID_MASK
 
       # Verify internal storage uses masked key

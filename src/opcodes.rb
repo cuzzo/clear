@@ -48,8 +48,7 @@ module OpCodes
     ADD:          [T_REG_W, T_REG_R, T_REG_R],
     CAST:         [T_REG_W, T_STR],
     ALLOCA:       [T_REG_W, T_STR],
-    #MOVE_STRUCT:  [T_REG_R, T_REG_R], # Destination Pointer (Stack), Source Pointer (Heap)
-    #MOVE_LIST:    [T_REG_R, T_REG_R], # Destination Pointer (Stack), Source Pointer (Heap)
+    MEM_COPY:     [T_REG_R, T_REG_R, T_UINT], # Even though we are WRITING, first arg is T_REG_R
   }
 
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|

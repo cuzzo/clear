@@ -217,20 +217,46 @@ class Compiler
   end
 
   def compile_function_def(node, target_reg)
+    # 1. SAVE PREVIOUS STATE
+    # We push the current state onto the stack (local vars) so we can restore it later.
+    prev_return_type = @current_fn_return_type
+    prev_is_stack_rvo = @current_fn_is_stack_rvo
+
+    # 2. SET NEW STATE
+    @current_fn_return_type = node.return_type
+
+    # It is RVO if the return type is a Struct or Fixed Array
+    @current_fn_is_stack_rvo = is_stack_type?(node.return_type)
+
+    # TODO: why do params & return type need symbolized?
     signature = {
-        params: node.params.map { |p| { name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable] } },
-        return_type: node.return_type
+        params: node.params.map { |p| { name: p[:name], type: p[:type].to_sym, required: p[:default].nil?, mutable: p[:mutable] } },
+        return_type: node.return_type.to_sym
       }
     @fn_signatures[node.name] = signature
 
     validate_mutability(node)
 
     fn_compiler = Compiler.new(node.name, node.return_type)
+
+    if @current_fn_is_stack_rvo
+      # We inject '__ret_ptr' as the first argument (R0).
+      # It is a :StackPtr (Pointer to Caller's Stack).
+      node.params.unshift({
+        name: "__ret_ptr",
+        type: :StackPtr,
+        mutable: true, # Pointers must be mutable to write to them
+        default: nil
+      })
+    end
+
     fn_compiler.reg_top = node.params.size
 
     fn_compiler.instance_variable_set(:@scope_depth, @scope_depth + 1)
     fn_compiler.instance_variable_set(:@struct_defs, @struct_defs)
     fn_compiler.instance_variable_set(:@fn_signatures, @fn_signatures)
+    fn_compiler.instance_variable_set(:@current_fn_return_type, @current_fn_return_type)
+    fn_compiler.instance_variable_set(:@current_fn_is_stack_rvo, @current_fn_is_stack_rvo)
 
     # 2. Register Parameters in Child Scope
     node.params.each_with_index do |p, i|
@@ -302,6 +328,9 @@ class Compiler
     # Cleanup: since we added a reg in step 6
     # We should not decrement @reg_top here, as the register holds the function value
 
+    @current_fn_return_type = prev_return_type
+    @current_fn_is_stack_rvo = prev_is_stack_rvo
+
     # Note: The main compiler loop assumes 'visit' handles @reg_top,
     # but since we did it manually, the register is now "used."
     # We return the register index where the function is stored.
@@ -322,56 +351,88 @@ class Compiler
   end
 
   def compile_func_call(node, target_reg)
-    # 1. Handle Intrinsics (Only applies if the name is a static String)
+    # 1. Handle Intrinsics (unchanged)
     if node.name.is_a?(String)
       return compile_print(node) if node.name == "print"
       return compile_native_call(node, target_reg) if node.name == "native_call"
     end
 
-    # 2. Determine Call Type
-    # We capture the register index immediately if it's local
+    # 2. Resolve Local Register (Is this a Closure variable?)
     local_reg = nil
     if node.name.is_a?(String)
       local_reg = current_scope.resolve_reg(node.name)
     end
 
-    # 3. Validation Logic
-    # We only verify signature if it is a NAME (String) and NOT a local variable.
-    # We skip verification for Expressions (Case B) because we can't check them statically.
-    # TODO...
+    # 3. Resolve Function Signature & Return Type
     signature_params = []
-    if node.name.is_a?(String) && !local_reg
+    return_type = :Any
+
+    # We only look up signatures for static names (not closures/expressions)
+    if node.name.is_a?(String) && !local_reg && @fn_signatures.key?(node.name)
+      sig = @fn_signatures[node.name]
+      signature_params = sig[:params]
+      return_type = sig[:return_type]
       verify_function_signature(node)
-      if @fn_signatures.dig(node.name, :params)
-        signature_params = @fn_signatures[node.name][:params]
-      end
     end
 
-    is_local = node.name.is_a?(String) && current_scope.resolve_reg(node.name)
+    # We only look up signatures for static names (not closures/expressions)
+    if node.name.is_a?(String) && !local_reg && @fn_signatures.key?(node.name)
+      sig = @fn_signatures[node.name]
+      signature_params = sig[:params]
+      return_type = sig[:return_type]
 
-    arg_regs = compile_args(node.args, signature_params, local_reg)
+      # Run your existing validation logic
+      verify_function_signature(node)
+    end
 
-    # 3. Resolve the Function Target
-    if node.name.is_a?(String)
-      # --- CASE A: Simple Name (e.g., "add", "myFunc") ---
-      # Check if it is a Local Register or Global Name
-      operand = local_reg ? "R#{local_reg}" : node.name
-      opcode = local_reg ? :CALL_CLOSURE : :CALL_FUNC
+    if is_stack_type?(return_type) && !local_reg
+      # --- STACK RVO CALLER PATH ---
 
-      @chunk.emit(node, opcode, "R#{target_reg}", operand, node.args.size, *arg_regs)
+      # A. Allocate Space in Current Frame (Caller)
+      #    We use 'target_reg' as the pointer to the allocated struct/array.
+      size = get_type_slot_size(return_type)
+      @chunk.emit(node, :ALLOCA, "R#{target_reg}", return_type.to_s)
+
+      # B. Prepare Arguments list starting with the Hidden Pointer
+      #    This corresponds to '__ret_ptr' in the callee.
+      args_regs = ["R#{target_reg}"]
+
+      # C. Compile the User's Arguments
+      #    We pass 'signature_params' so defaults/coercions work correctly.
+      user_args_regs = compile_args(node.args, signature_params, local_reg)
+      args_regs.concat(user_args_regs)
+
+      # D. Emit the Call
+      #    Note: The Arity includes the hidden pointer!
+      #    The return value register will technically hold 'nil' (void),
+      #    but your data is safe in 'target_reg' (the pointer).
+      @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", node.name, args_regs.size, *args_regs)
+
+      # Clean up the user arguments from the temp register stack
+      @reg_top -= user_args_regs.size
+
     else
-      # --- CASE B: Expression / Currying (e.g., "getFunc()(1)") ---
-      # The target is an AST Node. We must compile it into a temp register first.
-      with_temp_reg do |r_func|
-        visit(node.name, r_func) # Recurse: compiles the 'getFunc()' part
+      # --- STANDARD CALL PATH ---
 
-        # Now call the result stored in r_func
-        @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", "R#{r_func}", node.args.size, *arg_regs)
+      # A. Compile Arguments (Standard)
+      args_regs = compile_args(node.args, signature_params, local_reg)
+
+      # B. Emit Call
+      if node.name.is_a?(String)
+         # Named Call (Global or Local Closure)
+         operand = local_reg ? "R#{local_reg}" : node.name
+         opcode = local_reg ? :CALL_CLOSURE : :CALL_FUNC
+         @chunk.emit(node, opcode, "R#{target_reg}", operand, node.args.size, *args_regs)
+      else
+         # Expression Call (e.g. get_callback()(1))
+         with_temp_reg do |r_func|
+           visit(node.name, r_func)
+           @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", "R#{r_func}", node.args.size, *arg_regs)
+         end
       end
-    end
 
-    # 4. Cleanup Argument Registers
-    @reg_top -= arg_regs.size
+      @reg_top -= args_regs.size
+    end
   end
 
   def verify_function_signature(node)
@@ -1031,8 +1092,8 @@ class Compiler
       # or assume Vector[Any].
     end
 
-    # TODO: GET ACTUAL TYPE SIZE!
-    fixed_size = node.storage == :stack ? node.items.size * 8 : nil
+    type_name = infer_type(node)
+    fixed_size = node.storage == :stack ? get_type_slot_size(type_name) : nil
     @chunk.emit(node, :NEW_LIST, "R#{target_reg}", fixed_size)
 
     node.items.each_with_index do |item, index|
@@ -1135,6 +1196,10 @@ class Compiler
   end
 
   def compile_return_node(node, target_reg)
+    if @current_fn_is_stack_rvo
+      return compile_stack_rvo_return_node(node, target_reg)
+    end
+
     # 1. Check type
     actual_type = infer_type(node.value)
     if @expected_return && @expected_return != :Any
@@ -1149,6 +1214,85 @@ class Compiler
       visit(node.value, r)
       # 4. Emit the instruction
       @chunk.emit(node, :RETURN, "R#{r}")
+    end
+  end
+
+  def compile_stack_rvo_return_node(node, target_reg)
+    # The hidden return pointer is ALWAYS in Register 0 (if we injected it first)
+    r_ret_ptr = 0
+
+    # OPTIMIZATION: Anonymous RVO (Direct Construction)
+    # Only if the literal is meant for the stack!
+    # (Check if it has storage == :stack)
+    is_stack_literal = (node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::ListLit)) &&
+                       node.value.storage == :stack
+
+    if is_stack_literal
+      # Call a specialized method that DOES NOT allocate, but fills R0
+      compile_literal_into_ptr(node.value, r_ret_ptr)
+
+    # Named Variable
+    elsif node.value.is_a?(AST::Identifier)
+      src_reg = current_scope.resolve_reg(node.value.name)
+      raise "Compile Error: Undefined variable #{node.value.name}" unless src_reg
+
+      size = get_type_slot_size(@current_fn_return_type)
+      @chunk.emit(node, :MEM_COPY, "R#{r_ret_ptr}", "R#{src_reg}", size)
+
+    # CASE 3: Fallback (Complex Expression OR Heap Literal)
+    else
+      with_temp_reg do |r_src|
+        visit(node.value, r_src)
+        # We must copy from local 'x' to 'caller slot'
+        size = get_type_slot_size(@current_fn_return_type)
+        @chunk.emit(node, :MEM_COPY, "R#{r_ret_ptr}", "R#{r_src}", size)
+      end
+    end
+
+    # Return Void (The data is already in the caller's frame)
+    k_nil = @chunk.add_constant(nil)
+    @chunk.emit(node, :RETURN, "R0")
+  end
+
+  def compile_literal_into_ptr(node, ptr_reg)
+    if node.is_a?(AST::StructLit)
+      # 1. Merge Defaults
+      def_fields = @struct_defs[node.name] || {}
+
+      # Iterate over the DEFINITION order to ensure we fill the memory linearly
+      # (Important for binary compatibility)
+      def_fields.each do |field_name, info|
+        val_node = node.fields[field_name] || info[:default]
+
+        raise "Compile Error: Missing field #{field_name}" unless val_node
+
+        # 2. Compile the Value (e.g., "10" or "x + y")
+        with_temp_reg do |r_val|
+          visit(val_node, r_val)
+
+          # 3. DIRECT WRITE to Caller's Stack
+          # ptr_reg holds the __ret_ptr.
+          # The VM will resolve this pointer and write to the Caller's blob.
+          @chunk.emit(node, :SET_FIELD, "R#{ptr_reg}", field_name, "R#{r_val}")
+        end
+      end
+
+    elsif node.is_a?(AST::ListLit)
+      # Fixed Array Logic
+      node.items.each_with_index do |item, idx|
+        with_temp_reg do |r_val|
+          visit(item, r_val)
+
+          # We need a register for the index
+          with_temp_reg do |r_idx|
+            k_idx = @chunk.add_constant(idx)
+            @chunk.emit(node, :LOADK, "R#{r_idx}", "K#{k_idx}")
+
+            # DIRECT WRITE
+            @chunk.emit(node, :SET_INDEX, "R#{ptr_reg}", "R#{r_idx}", "R#{r_val}")
+          end
+        end
+      end
     end
   end
 
@@ -1284,19 +1428,29 @@ private
     when AST::Literal
       return literal_type(node)
 
-    # TODO: Test if this works recursively
+    when AST::StructLit
+      return node.name.to_sym
+
     when AST::ListLit
+      return "Any[]".to_sym if node.items.empty?
+
+      # 2. Recursive Step
+      # If node is [[1,2], [3,4]]:
+      #   a. Recurse on [1,2] -> returns "Number[2]"
+      #   b. base_type becomes "Number[2]"
+      #   c. Returns "Number[2][2]"
       base_type = infer_type(node.items.first).to_s
       size = node.items.size
+
       return "#{base_type}[#{size}]".to_sym
 
     when AST::Identifier
       # Look up the variable in the current scope
-      return current_scope.resolve_type(node.name)
+      return current_scope.resolve_type(node.name).to_sym
 
     when AST::BinaryOp
       # Simple inference: if it's math, it's a Number
-      if ['+', '-', '*', '/'].include?(node.op)
+      if ['+', '-', '*', '/', 'MOD', '**', '&', '|', '^', '<<', '>>'].include?(node.op)
         return :Number
       end
       # If it's comparison, it's a Bool
@@ -1330,6 +1484,66 @@ private
       return "Byte[#{node.value.length}]".to_sym if node.storage == :stack
     end
     raise "Unrecognized literal: #{node.type}"
+  end
+
+  def is_stack_type?(type_sym)
+    str = type_sym.to_s
+    # It's a stack type if it's a known Struct or a Fixed Array
+    return true if @struct_defs.key?(str)
+    return true if str.include?("[") && !str.include?("[]") # Fixed size like [3]
+    false
+  end
+
+
+  # Returns size in slots
+  def get_type_slot_size(type_name)
+    type_str = type_name.to_s
+
+    # CASE A: Primitive / Reference (1 Slot = 8 Bytes)
+    # Number, Byte, Bool, Any, StackPtr, or any Heap Object (String, List)
+    # These all take up exactly 1 register/stack slot (64-bit).
+    if AST::PRIMITIVE_TYPES.include?(type_name) ||
+       type_name == :Any ||
+       type_name == :StackPtr ||
+       type_name == :String || # Strings are heap pointers
+       type_name.to_s.start_with?("List") # Heap Lists are pointers
+      return 1
+    end
+
+    # CASE B: Fixed Array "Type[N]"
+    # Recursive Size = N * SizeOf(Type)
+    if type_str.include?("[")
+      match = type_str.match(/^(\w+)\[(\d+)\]$/)
+      if match
+        base_type = match[1].to_sym
+        count = match[2].to_i
+
+        base_size = get_type_slot_size(base_type)
+        return count * base_size
+      end
+
+      # If it is "Type[]" (Dynamic) or "Type[*]" (Inferred but allocated on Heap),
+      # it is just a Pointer (8 bytes).
+      return 1
+    end
+
+    # CASE C: Struct
+    # Size = Sum(SizeOf(Fields))
+    if @struct_defs.key?(type_str)
+      schema = @struct_defs[type_str] # This is the hash of fields { x: {type: ...}, ...}
+
+      total_bytes = 0
+      schema.each do |field_name, field_info|
+        # Recursively calculate size of each field
+        total_bytes += get_type_slot_size(field_info[:type])
+      end
+      return total_bytes
+    end
+
+    # Fallback / Error
+    # If we don't know what it is, assume it's a pointer/value fitting in 1 register.
+    # Or raise an error if you want strictness.
+    return 1
   end
 end
 

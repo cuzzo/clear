@@ -667,42 +667,158 @@ RSpec.describe Compiler do
     end
   end
 
-  def compile_if_statement(node, target_reg)
-    # Assuming target_reg is the register for the overall result
-    # (though IF is likely treated as a statement here)
-
-    # 1. Compile the Condition (R_cond)
-    # We use target_reg for the condition's result
-    r_cond = visit(node.condition, target_reg)
-
-    # 2. JUMP A: JMP_FALSE to the ELSE block's address (Placeholder 0)
-    # The 'false_jump' instruction needs patching later.
-    false_jump_ip = @chunk.emit_with_index(:JMP_FALSE, "R#{r_cond}", 0)
-
-    # 3. THEN Block Compilation
-    node.then_branch.each { |stmt| visit(stmt) }
-
-    # Get the address right after the THEN block (Start of ELSE)
-    else_start_ip = @chunk.code.length
-
-    # 4. JUMP B: JMP unconditionally over the ELSE block (Placeholder 0)
-    # The 'end_jump' instruction needs patching later.
-    end_jump_ip = @chunk.emit_with_index(:JMP, 0)
-
-    # 5. Patch JUMP A
-    # JMP_FALSE should jump to the instruction right after JUMP B (IP 4 in example)
-    @chunk.patch(false_jump_ip, else_start_ip)
-
-    # 6. ELSE Block Compilation (if present)
-    if node.else_branch.any?
-      node.else_branch.each { |stmt| visit(stmt) }
+  describe 'SRVO (Stack Return Value Optimization)' do
+    # Helper to find a specific inner function chunk
+    def find_function_chunk(main_chunk, fn_name)
+      # Find the index of the string name (if stored) or just look for the Closure opcode
+      # Usually: NEW_CLOSURE R_target, K_chunk_index
+      # We iterate constants to find the Chunk with the matching name
+      main_chunk.constants.find { |c| c.is_a?(Chunk) && c.name == fn_name }
     end
 
-    # Get the address right after the ELSE block
-    end_ip = @chunk.code.length
+    context 'Anonymous RVO: RETURN Vec{...} = FAST' do
+      let(:source) {
+        <<~FLUX
+          STRUCT Vec { x: Number }
+          FN make_opt() RETURNS Vec ->
+            RETURN Vec{ x: 10 };
+          END
+        FLUX
+      }
 
-    # 7. Patch JUMP B
-    @chunk.patch(end_jump_ip, end_ip)
+      it 'compiles into Direct Writes (SET_FIELD R0) with NO allocation or copy' do
+        main_chunk = Compiler.new.compile(Parser.new(Lexer.new(source).tokenize).parse)
+        fn_chunk = find_function_chunk(main_chunk, "make_opt")
+        ops = fn_chunk.code
+
+        # 1. It should load the value 10
+        load_op = ops.find { |op| op[0] == :LOADK }
+        # (Assuming 10 is the first constant, logic might vary slightly based on const pool order)
+        val_reg = load_op[1] # e.g. "R1"
+
+        # 2. CRITICAL: It must write DIRECTLY to R0 (The hidden return pointer)
+        #    Format: SET_FIELD Target(R0) Field("x") Value(R_val)
+        write_op = ops.find { |op| op[0] == :SET_FIELD && op[1] == "R0" && op[2] == "x" }
+
+        expect(write_op).to_not be_nil, "Expected direct write to R0, found none"
+        expect(write_op[3]).to eq(val_reg)
+
+        # 3. It should NOT contain MEM_COPY
+        expect(ops.flatten).to_not include(:MEM_COPY)
+
+        # 4. It should NOT contain ALLOCA (except maybe for temp vars, but not for the result)
+        #    (Strictly speaking, it shouldn't allocate a "Vec")
+        alloca_vec = ops.find { |op| op[0] == :ALLOCA && op[2] == "Vec" }
+        expect(alloca_vec).to be_nil
+      end
+    end
+
+
+    context 'Anonymous RVO: RETURN %Vec{...} = SLOW' do
+      let(:source) {
+        <<~FLUX
+          STRUCT Vec { x: Number }
+          FN make_opt() RETURNS Vec ->
+            RETURN %Vec{ x: 10 };
+          END
+        FLUX
+      }
+
+      it 'compiles into Direct Writes (SET_FIELD R0) with NO allocation or copy' do
+        main_chunk = Compiler.new.compile(Parser.new(Lexer.new(source).tokenize).parse)
+        fn_chunk = find_function_chunk(main_chunk, "make_opt")
+        ops = fn_chunk.code
+
+        # 1. It should load the value 10
+        load_op = ops.find { |op| op[0] == :LOADK }
+        # (Assuming 10 is the first constant, logic might vary slightly based on const pool order)
+        val_reg = load_op[1] # e.g. "R1"
+
+        # 2. CRITICAL: It cannot write DIRECTLY to R0 (The hidden return pointer)
+        #    Format: SET_FIELD Target(R0) Field("x") Value(R_val)
+        write_op = ops.find { |op| op[0] == :SET_FIELD && op[1] == "R0" && op[2] == "x" }
+
+        expect(write_op).to be_nil, "Expected no direct write to R0, found one"
+
+        # 3. It should contain MEM_COPY => HEAP to STACK
+        expect(ops.flatten).to include(:MEM_COPY)
+
+        # 4. It should NOT contain ALLOCA (except maybe for temp vars, but not for the result)
+        #    (Strictly speaking, it shouldn't allocate a "Vec")
+        alloca_vec = ops.find { |op| op[0] == :ALLOCA && op[2] == "Vec" }
+        expect(alloca_vec).to be_nil
+      end
+    end
+
+    context 'Named RVO Fallback: VAR v ... RETURN v' do
+      let(:source) {
+        <<~FLUX
+          STRUCT Vec { x: Number }
+          FN make_slow() RETURNS Vec ->
+            VAR v = Vec{ x: 20 };
+            RETURN v;
+          END
+        FLUX
+      }
+
+      it 'compiles into Local Allocation + MEM_COPY' do
+        main_chunk = Compiler.new.compile(Parser.new(Lexer.new(source).tokenize).parse)
+        fn_chunk = find_function_chunk(main_chunk, "make_slow")
+        ops = fn_chunk.code
+
+        # 1. It MUST allocate the local variable 'v'
+        alloca_op = ops.find { |op| op[0] == :ALLOCA && op[2] == "Vec" }
+        expect(alloca_op).to_not be_nil
+        local_reg = alloca_op[1] # e.g. "R1"
+
+        # 2. It MUST use MEM_COPY to move Local -> R0 (Hidden Ptr)
+        #    Format: MEM_COPY Dest(R0), Src(local_reg), Size
+        copy_op = ops.find { |op| op[0] == :MEM_COPY && op[1] == "R0" }
+
+        expect(copy_op).to_not be_nil, "Expected MEM_COPY for named return"
+        expect(copy_op[2]).to eq(local_reg)
+      end
+    end
+
+    context 'Caller Behavior' do
+      let(:source) {
+        <<~FLUX
+          STRUCT Vec { x: Number }
+          FN make() RETURNS Vec ->
+            RETURN %Vec{ x: 10 };
+          END
+
+          FN main() ->
+            VAR result = make();
+          END
+        FLUX
+      }
+
+      it 'ALLOCATES space in the Caller frame before calling' do
+        main_chunk = Compiler.new.compile(Parser.new(Lexer.new(source).tokenize).parse)
+        fn_chunk = find_function_chunk(main_chunk, "main")
+        ops = fn_chunk.code
+
+        # 1. Find the Call
+        call_idx = ops.find_index { |op| op[0] == :CALL_FUNC && op[2] == "make" }
+        expect(call_idx).to_not be_nil
+
+        # 2. Look backwards for the ALLOCA
+        #    Format: ALLOCA R_ptr, "Vec"
+        #    This pointer must be passed as the first arg to CALL_FUNC
+
+        # Get the first arg passed to call (R_ptr)
+        call_op = ops[call_idx]
+        # CALL_FUNC Target, Name, Arity, Arg0, Arg1...
+        # We passed 1 argument (the hidden ptr), so Arity should be 1
+        expect(call_op[3]).to eq(1)
+        ptr_reg = call_op[4] # The first argument register
+
+        # Ensure that specific register was Allocated as a Vec
+        alloca_op = ops.find { |op| op[0] == :ALLOCA && op[1] == ptr_reg && op[2] == "Vec" }
+        expect(alloca_op).to_not be_nil, "Caller did not allocate stack space for the return value"
+      end
+    end
   end
 end
 
