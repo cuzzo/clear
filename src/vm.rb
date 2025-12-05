@@ -11,6 +11,7 @@ require_relative "value"
 require_relative "opcodes"
 require_relative "chunk"
 require_relative "frame"
+require_relative "optimizer"
 
 if $logger.nil?
   $logger = Logger.new(STDOUT)
@@ -1045,6 +1046,9 @@ class VM
     compiler = Compiler.new("main")
 
     chunk = compiler.compile(ast)
+    optimizer = Optimizer.new($logger)
+    chunk = optimizer.optimize(chunk)
+
     print_all_chunks(chunk)
 
     vm = VM.new(code_str)
