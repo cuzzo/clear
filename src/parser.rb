@@ -5,6 +5,8 @@ require_relative "./source_error"
 # PARSER
 # ==========================================
 class Parser
+  include ErrorHelper
+
   @@stmt_rules = {}
   @@primary_rules = {}
   @@suffix_rules = {}
@@ -56,11 +58,6 @@ class Parser
 
   def peek
     @tokens[@pos + 1] || Token.new(:EOF, "", current.line, current.column)
-  end
-
-  def error!(token, message)
-    target = token || current
-    raise ParserError.new(target, message, @source_code)
   end
 
   # COMMANDS

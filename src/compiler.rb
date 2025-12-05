@@ -12,6 +12,8 @@ require_relative "./source_error"
 # COMPILER
 # ==========================================
 class Compiler
+  include ErrorHelper
+
   attr_accessor :chunk, :reg_top
   def initialize(name = "main", return_type = :Any, source_code = "")
     @chunk = Chunk.new(name)
@@ -24,12 +26,6 @@ class Compiler
     @expected_return = return_type
     @source_code = source_code # Store it!
     @logger = $logger || Logger.new(STDOUT)
-  end
-
-  def error!(node_or_token, message)
-    # Extract token whether it's an AST Node or a raw Token
-    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
-    raise CompilerError.new(token, message, @source_code)
   end
 
   def compile(ast)
@@ -168,7 +164,7 @@ class Compiler
 
       # Check mutability if you implemented that feature
       if current_scope.is_immutable?(var_name)
-         error!(node, "Cannot rebind immutable variable '#{var_name}'.")
+         error!(node, :VARIABLE_REBIND, var_name)
       end
 
       @chunk.emit(node, :MOVE, "R#{existing_reg}", "R#{target_reg}")
@@ -355,7 +351,7 @@ class Compiler
 
     # Ensure no mutable parameter is a primitive
     if mutable_params.any? { |p| AST::PRIMITIVE_TYPES.include?(p[:type]) }
-      error!(node, "Parameter '#{p[:name]}' is MUTABLE but has primitive type '#{p[:type]}'. Primitives are passed by value, so mutating them locally has no effect on the caller.")
+      error!(node, :PRIMITIVE_PASSED_AS_MUTABLE, p[:name], p[:type])
     end
   end
 
@@ -445,7 +441,7 @@ class Compiler
   end
 
   def verify_function_signature(node)
-    error!(node, "Missing function.") if !@fn_signatures.key?(node.name)
+    error!(node, :MISSING_FUNCTION, node.name) if !@fn_signatures.key?(node.name)
 
     params = @fn_signatures[node.name][:params]
     min_args = params.count { |param| param[:required] }
@@ -455,9 +451,9 @@ class Compiler
     # A. Arity Check (Count)
     if given_args < min_args || given_args > max_args
       if min_args == max_args
-        error!(node, "Function '#{node.name}' expects #{min_args} arguments, got #{given_args}.")
+        error!(node, :ARITY_MISMATCH, node.name, min_args, max_args)
       else
-        error!(node, "Compile Error: Function '#{node.name}' expects between #{min_args} and #{max_args} arguments, got #{given_args}.")
+        error!(node, :ARITY_MISMATCH_RANGE, node.name, min_args, max_args, given_args)
       end
     end
 
@@ -467,13 +463,13 @@ class Compiler
       if param[:mutable]
         # Rule 1: Must be a Variable (Identifier), not a literal/expression
         if !arg_node.is_a?(AST::Identifier)
-          error!(node, "Compile Error: Argument #{i+1} ('#{param[:name]}') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.")
+          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, i+1, param[:name])
         end
 
         # Rule 2: The Variable being passed must be MUTABLE
         # We check the scope to see if the user declared it with 'MUTABLE'
         if current_scope.is_immutable?(arg_node.name)
-           error!(node, "Argument #{i+1} ('#{param[:name]}') is MUTABLE, but you passed immutable variable '#{arg_node.name}'.")
+           error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, i+1, param[:name], arg_node.name)
         end
       end
 
@@ -501,7 +497,7 @@ class Compiler
       end
 
       unless match
-        error!(node, "Type Error: Function '#{node.name}' argument #{i+1} expects #{expected}, got #{actual}")
+        error!(arg_node, :ARGUMENT_TYPE_ERROR, arg_node.name, i+1, param[:name], expected, actual)
       end
     end
   end
@@ -527,13 +523,13 @@ class Compiler
 
   def compile_native_call(node, target_reg)
     if node.args.size < 2
-      error!(node, "native_call requires 'Class' and 'Method' string literals.")
+      error!(node, :NATIVE_CALL_ERROR)
     end
 
     class_node, method_node = node.args[0], node.args[1]
 
     unless class_node.is_a?(AST::Literal) && class_node.type == :STRING
-      error!("native_call arg 1 must be a static String (Class Name)")
+      error!(class_node, "native_call arg 1 must be a static String (Class Name)")
     end
 
     # Compile the ACTUAL arguments (skipping Class/Method strings)
@@ -579,7 +575,7 @@ class Compiler
     end
 
     if storage == :heap && AST::PRIMITIVE_TYPES.include?(final_type)
-      error!(node, "Do not allocate primitives on the HEAP. Remove the `%` sigil.")
+      error!(node, :HEAP_PRIMITIVE, node.name)
     end
 
     coerce_type(node, r)
@@ -624,7 +620,7 @@ class Compiler
         val_node = node.fields[field_name] || info[:default]
 
         if val_node.nil?
-           error!(node, "Missing value for field '#{field_name}' in struct '#{node.name}'")
+           error!(node, :MISSING_FIELD_VALUE, field_name, node.name)
         end
 
         with_temp_reg do |r_val|
@@ -691,7 +687,7 @@ class Compiler
       handle_array_type(node, r, declared_type, actual_type)
       final_type = declared_type
     else
-      error!(node, "Type Error: Variable '#{node.name}' declared as #{declared_type} but assigned #{actual_type}")
+      error!(node, :VARIABLE_ASSIGNMENT_TYPE_ERROR, node.name, declared_type, actual_type)
     end
 
     return final_type
@@ -716,7 +712,7 @@ class Compiler
 
     elsif constraint == "*"
       if node.value.is_a?(AST::Identifier) && current_scope.get_size(node.value.name).nil?
-        error!(node, "Cannot initialize a fixed-array to an unknown size. You must TRUNCATE to a specific size, or use `[]` to create a dynamic array.")
+        error!(node, :FIXED_ARRAY_SIZE_AS_DYNAMIC, node.name)
       end
       # Case: Number[*] (Fixed Inferred)
       # Convert to Fixed Array with size = current length
@@ -742,7 +738,7 @@ class Compiler
       # If check_size is nil, it means the value is dynamic (unknown),
       # so we MUST fall back to the Runtime Check.
       if check_size && check_size > limit
-         error!(node, "Cannot initialize array of size #{check_size} to fixed-size '#{declared_type}'")
+         error!(node, :FIXED_ARRAY_SIZE_MISMATCH, check_size, declared_type)
       end
 
       # COMPILE-TIME SIZE CHECK
@@ -750,7 +746,7 @@ class Compiler
       if node.value.is_a?(AST::ListLit)
         current_size = node.value.items.size
         if current_size > limit
-          error!(node, "Cannot initialize array of size #{current_size} to fixed-size '#{declared_type}'")
+          error!(node, :FIXED_ARRAY_SIZE_MISMATCH, current_size, declared_type)
         end
       end
 
@@ -791,7 +787,7 @@ class Compiler
 
     # 1. Check Mutability (Optional feature)
     if current_scope.is_immutable?(var_name)
-      error!(node, "Compile Error: Variable '#{var_name}' is immutable.")
+      error!(node, :IMMUTABLE_ASSIGNMENT, var_name)
     end
 
     # 2. Resolve the Register for this variable
@@ -808,14 +804,14 @@ class Compiler
       @chunk.emit(node, :SET_GLOBAL, var_name, "R#{val_reg}")
     else
       # 4. Error if not found
-      error!(node, "Cannot SET '#{var_name}' because it has not been declared with VAR.")
+      error!(node, :SET_UNDECLARED_VAR, var_name)
     end
   end
 
   def compile_field_set(node, val_reg)
     # 1. Check Mutability
     if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
-      error!(node, "Cannot modify field '#{node.field}' of immutable object '#{node.target.name}'.")
+      error!(node, :IMMUTABLE_FIELD_ASSIGNMENT, node.field, node.target.name)
     end
 
     # node is the AST::GetField(target, field)
@@ -830,7 +826,7 @@ class Compiler
   def compile_index_set(node, val_reg)
     # 1. Check Mutability
     if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
-      error!(node, "Cannot modify index of immutable list '#{node.target.name}'.")
+      error!(node, :IMMUTABLE_LIST_ASSIGNMENT, node.target.name)
     end
 
     # node is the AST::GetIndex(target, index)
@@ -1079,7 +1075,7 @@ class Compiler
 
   def compile_break(node)
     if @loop_stack.empty?
-      error!(node, "'BREAK' used outside of a loop.")
+      error!(node, :ILLEGAL_BREAK)
     end
 
     # Emit a JMP to 0 (Placeholder).
@@ -1092,7 +1088,7 @@ class Compiler
 
   def compile_continue(node)
     if @loop_stack.empty?
-      error!(node, "'CONTINUE' used outside of a loop.")
+      error!(node, :ILLEGAL_CONTINUE)
     end
 
     # Simple JMP to the start of the current loop
@@ -1109,7 +1105,7 @@ class Compiler
       node.items.each_with_index do |item, idx|
         current_type = infer_type(item)
         if current_type != expected_type
-           error!(node, "List contains mixed types. Item #{idx} is #{current_type}, expected #{expected_type}.")
+           error!(node, :LIST_TYPE_MISMATCH, idx, current_type, expected_type)
         end
       end
     else
@@ -1149,7 +1145,7 @@ class Compiler
     # Check if the Struct definition requires something we don't have yet.
     def_fields.each do |key, info|
       unless final_fields.key?(key)
-        error!(node, "Missing required field '#{key}' in instantiation of '%#{node.name}'")
+        error!(node, :MISSING_REQUIRED_STRUCT_FIELD, key, node.name)
       end
     end
 
@@ -1186,7 +1182,7 @@ class Compiler
 
   def compile_identifier(node, target_reg)
     r = current_scope.resolve_reg(node.name)
-    error!(node, "Undefined variable '#{node.name}'") unless r
+    error!(node, :UNDEFINED_VAR, node.name) unless r
     @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
   end
 
@@ -1234,7 +1230,7 @@ class Compiler
     actual_type = infer_type(node.value)
     if @expected_return && @expected_return != :Any
       if actual_type != :Any && actual_type != @expected_return
-        error!(node, "Type Error: Function expected to return #{@expected_return}, but returned #{actual_type}")
+        error!(node, :RETURN_MISMTACH, @expected_return, actual_type)
       end
     end
 
@@ -1264,7 +1260,7 @@ class Compiler
     # Named Variable
     elsif node.value.is_a?(AST::Identifier)
       src_reg = current_scope.resolve_reg(node.value.name)
-      error!(node, "Compile Error: Undefined variable #{node.value.name}") unless src_reg
+      error!(node, :UNDEFINED_VAR, node.value.name) unless src_reg
 
       size = get_type_slot_size(@current_fn_return_type)
       @chunk.emit(node, :MEM_COPY, "R#{r_ret_ptr}", "R#{src_reg}", size)
@@ -1294,7 +1290,7 @@ class Compiler
       def_fields.each do |field_name, info|
         val_node = node.fields[field_name] || info[:default]
 
-        error!(node, "Missing field #{field_name}") unless val_node
+        error!(node, :MISSING_REQUIRED_STRUCT_FIELD, field_name, node.name) unless val_node
 
         # 2. Compile the Value (e.g., "10" or "x + y")
         with_temp_reg do |r_val|
@@ -1384,7 +1380,7 @@ class Compiler
       # 1. Find the register in the CURRENT (Outer) scope
       outer_reg = current_scope.resolve_reg(cap_name)
       unless outer_reg
-        error!(node, "Cannot capture '#{cap_name}' - undefined in outer scope.")
+        error!(node, ILLEGAL_UPVALUE, cap_name)
       end
 
       # 2. Add to the list for the CLOSURE opcode (e.g., "R5")
@@ -1513,7 +1509,7 @@ private
       return "String[]".to_sym if node.storage == :heap
       return "Byte[#{node.value.length}]".to_sym if node.storage == :stack
     end
-    error!(node, "Unrecognized literal: #{node.type}")
+    error!(node, :UNRECOGNIZED_LITERAL, node.type)
   end
 
   def is_stack_type?(type_sym)
