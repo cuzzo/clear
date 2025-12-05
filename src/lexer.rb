@@ -1,13 +1,10 @@
 require 'strscan'
+require 'set'
 
-# ==========================================
-# 2. LEXER
-# ==========================================
 class Lexer
-  Token = Struct.new(:type, :value, :line)
+  Token = Struct.new(:type, :value, :line, :column)
 
   # We use a hash for O(1) lookups
-  # TODO: Should MOD be a keyword ???
   KEYWORDS = %w[
       VAR MUTABLE SET
       FN RETURN RETURNS USE
@@ -17,108 +14,116 @@ class Lexer
       STRUCT TRUE FALSE NIL
       ASSERT RAISE CATCH EXIT DIE
       MOD OR
-    ].map { |k| [k, true] }.to_h
+    ].to_set
 
   def initialize(source)
     @s = StringScanner.new(source)
     @line = 1
+    @column = 1
     @tokens = []
   end
 
   def tokenize
     until @s.eos?
+      # 1. Snapshot start column before scanning
+      start_col = @column
+
       case
-      when @s.scan(/\s+/)
-        @line += @s.matched.count("\n")
+      # --- SKIPPABLE (No Token Generated) = MANUAL ADVANCE!!!
+      when @s.scan(/\s+/) then advance_pos(@s.matched)
+      when @s.scan(/--.*$/) then advance_pos(@s.matched)
 
-      when @s.scan(/--.*$/)
-        # Comment - ignore
-
+      # --- TOKENS (Auto-advance via add) ---
       # TODO: Change range syntax to ..< and ..=
-      when @s.scan(/\.\./) then add(:RANGE, '..')
-      when @s.scan(/->/) then add(:ARROW, '->')
-      when @s.scan(/s>/) then add(:SMOOTH, 's>')
-      when @s.scan(/OR/) then add(:OR_RESCUE, 'OR')
-      when @s.scan(/==/) then add(:CHAR, '==')
-      when @s.scan(/>=/) then add(:CHAR, '>=')
-      when @s.scan(/<=/) then add(:CHAR, '<=')
-      when @s.scan(/!=/) then add(:CHAR, '!=')
-      when @s.scan(/&&/) then add(:CHAR, '&&')
-      when @s.scan(/\*\*/) then add(:CHAR, '**')
-      when @s.scan(/\|\|/) then add(:CHAR, '||')
+      when @s.scan(/\.\./) then add(:RANGE, '..', start_col)
+      when @s.scan(/->/) then add(:ARROW, '->', start_col)
+      when @s.scan(/s>/) then add(:SMOOTH, 's>', start_col)
+      when @s.scan(/OR/) then add(:OR_RESCUE, 'OR', start_col)
+      when @s.scan(/==/) then add(:CHAR, '==', start_col)
+      when @s.scan(/>=/) then add(:CHAR, '>=', start_col)
+      when @s.scan(/<=/) then add(:CHAR, '<=', start_col)
+      when @s.scan(/!=/) then add(:CHAR, '!=', start_col)
+      when @s.scan(/&&/) then add(:CHAR, '&&', start_col)
+      when @s.scan(/\*\*/) then add(:CHAR, '**', start_col)
+      when @s.scan(/\|\|/) then add(:CHAR, '||', start_col)
 
-      # Triple Quote Strings (Multiline)
-      # Match """ then anything (non-greedy) until the next """
-      # Must come before the match for single quotes below
       when @s.scan(/"""((?:.|\n)*?)"""/)
-        # 1. Extract content (strip the surrounding """)
+        # Extract content, but 'add' will use @s.matched to count lines correctly
         content = @s.matched[3..-4]
+        add(:STRING, content, start_col)
 
-        # 2. Update line counter (Crucial for error messages!)
-        # We count how many newlines were inside the string
-        @line += content.count("\n")
-
-        add(:STRING, content)
-
-      # Operators and Punctuation
       when @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:]/)
-        add(:CHAR, @s.matched)
+        add(:CHAR, @s.matched, start_col)
 
       when @s.scan(/%/)
-        add(:PERCENT, '%')
+        add(:PERCENT, '%', start_col)
 
-      # Identifiers (The logic here is critical)
       when @s.scan(/[a-zA-Z_@]\w*(!(?!=))?/)
         word = @s.matched
-        if KEYWORDS[word]
-          add(:KEYWORD, word)
+        if KEYWORDS.include?(word)
+          add(:KEYWORD, word, start_col)
         elsif word =~ /^[A-Z]/
-          add(:TYPE_ID, word) # Uppercase start = Type
+          add(:TYPE_ID, word, start_col)
         else
-          add(:VAR_ID, word)  # Lowercase start = Var
+          add(:VAR_ID, word, start_col)
         end
 
-      # Hexadecimal (0xFF) - MUST come before generic number
       when @s.scan(/0x[0-9a-fA-F]+/)
-        val = @s.matched.to_i(16) # Ruby handles the hex conversion
-        # TODO: Handle size at assignment, not here.
-        if val > 255
-          raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
-        end
-        add(:BYTE, val)
+        val = @s.matched.to_i(16)
+        raise_if_byte_overflow(val)
+        add(:BYTE, val, start_col)
 
-      # Octal (0o77)
-      when @s.scan(/0b[0-7]+/)
+      when @s.scan(/0o[0-7]+/)
         val = @s.matched.to_i(8)
-        if val > 255
-          raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
-        end
-        add(:BYTE, val)
+        raise_if_byte_overflow(val)
+        add(:BYTE, val, start_col)
 
-      # Binary (0b101)
       when @s.scan(/0b[0-1]+/)
         val = @s.matched.to_i(2)
-        if val > 255
-          raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
-        end
-        add(:BYTE, val)
+        raise_if_byte_overflow(val)
+        add(:BYTE, val, start_col)
 
       when @s.scan(/\d+(\.(?!\.)\d*)?/)
-        add(:NUMBER, @s.matched.to_f)
+        add(:NUMBER, @s.matched.to_f, start_col)
 
       when @s.scan(/"[^"]*"/)
-        add(:STRING, @s.matched[1..-2])
+        add(:STRING, @s.matched[1..-2], start_col)
 
       else
-        raise "Unexpected char: #{@s.peek(1)} on line #{@line}"
+        raise "Unexpected char: #{@s.peek(1)} on line #{@line}:#{@column}"
       end
     end
-    add(:EOF, nil)
+
+    # Manually push EOF (don't use add() here as there is nothing matched)
+    @tokens << Token.new(:EOF, nil, @line, @column)
     @tokens
   end
 
-  def add(type, val)
-    @tokens << Token.new(type, val, @line)
+  private # ============================
+
+  def add(type, val, col)
+    @tokens << Token.new(type, val, @line, col)
+    # Automatically update position based on the last matched string
+    advance_pos(@s.matched)
+  end
+
+  def advance_pos(str)
+    return unless str # Guard clause for safety
+
+    newlines = str.count("\n")
+    if newlines > 0
+      @line += newlines
+      last_newline_index = str.rindex("\n")
+      @column = (str.length - last_newline_index)
+    else
+      @column += str.length
+    end
+  end
+
+  def raise_if_byte_overflow(val)
+    if val > 255
+      raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
+    end
   end
 end
 
