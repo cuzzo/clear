@@ -49,6 +49,7 @@ module OpCodes
     CAST:         [T_REG_W, T_STR],
     ALLOCA:       [T_REG_W, T_STR],
     MEM_COPY:     [T_REG_R, T_REG_R, T_UINT], # Even though we are WRITING, first arg is T_REG_R
+    TAIL_CALL:    [T_STR, T_UINT, T_REST]
   }
 
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|

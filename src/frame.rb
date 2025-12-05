@@ -1,6 +1,6 @@
 # A "Stack Frame" represents a running function
 class Frame
-  attr_accessor :chunk, :ip, :registers, :arena_mark
+  attr_accessor :chunk, :ip, :registers, :arena_mark, :stack_pointer
   attr_reader :stack_blob, :stack_pointer
 
   def initialize(chunk, arena_mark = 0) # Default 0 for main

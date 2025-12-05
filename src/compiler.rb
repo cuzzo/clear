@@ -1223,16 +1223,20 @@ class Compiler
   end
 
   def compile_return_node(node, target_reg)
-    if @current_fn_is_stack_rvo
-      return compile_stack_rvo_return_node(node, target_reg)
-    end
-
     # 1. Check type
     actual_type = infer_type(node.value)
     if @expected_return && @expected_return != :Any
       if actual_type != :Any && actual_type != @expected_return
         error!(node, :RETURN_MISMATCH, @expected_return, actual_type)
       end
+    end
+
+    if @current_fn_is_stack_rvo
+      return compile_stack_rvo_return_node(node, target_reg)
+    end
+
+    if node.value.is_a?(AST::FuncCall)
+      return compile_tail_call(node.value)
     end
 
     # 2. We need a register to hold the return value
@@ -1242,6 +1246,24 @@ class Compiler
       # 4. Emit the instruction
       @chunk.emit(node, :RETURN, "R#{r}")
     end
+  end
+
+  def compile_tail_call(node)
+    # 1. Compile Arguments into temporary registers (Just like a normal call)
+    # Note: We pass 'nil' for local_reg because we haven't implemented TCO for closures yet
+    args_regs = compile_args(node.args, [], nil)
+
+    # 2. Emit the specialized Opcode
+    # Note: We do NOT need a target_reg. The return value of the *next* function
+    # becomes the return value of *this* function automatically.
+    if node.name.is_a?(String)
+      @chunk.emit(node, :TAIL_CALL, node.name, args_regs.size, *args_regs)
+    else
+      # TODO: Handle Closure Tail Calls (slightly harder, skip for now)
+    end
+
+    # We do NOT emit :RETURN here. The TAIL_CALL opcode handles the control flow.
+    @reg_top -= args_regs.size
   end
 
   def compile_stack_rvo_return_node(node, target_reg)

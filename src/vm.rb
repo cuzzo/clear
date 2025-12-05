@@ -901,6 +901,100 @@ class VM
     nil
   end
 
+  def process_tail_call(target_reg, args, frame)
+    func_name = args.shift
+    arity = args.shift
+
+    # 2. Resolve the Function Object
+    boxed_func = @globals[func_name]
+
+    func_obj = if boxed_func.is_a?(Chunk)
+                 boxed_func
+               elsif boxed_func
+                 Value.as_obj(boxed_func)
+               else
+                 nil
+               end
+
+    if func_obj.nil?
+      raise "Runtime Error: Undefined function '#{func_name}'"
+    end
+
+    # 3. Unwrap Closure vs Chunk
+    if func_obj.is_a?(FluxClosure)
+      next_chunk = func_obj.chunk
+      captures = func_obj.captures
+    else
+      next_chunk = func_obj
+      captures = []
+    end
+
+    # =========================================================
+    # 4. GARBAGE COLLECTION (Arena Rewind)
+    # =========================================================
+    # We are about to wipe the memory of the current frame.
+    # We must ensure the things we need for the NEXT frame survive.
+
+    # What must survive?
+    # A. The Arguments for the next function
+    # B. The Captures for the next function
+    # C. The Closure Object itself (if it was created in this scope)
+    roots = args + captures
+    roots << func_obj if func_obj.is_a?(FluxClosure)
+
+    # A. Promote: Move roots to safety (Caller's heap space)
+    survivors = []
+    roots.each do |root|
+      # promote returns the survivor (or nil if it wasn't in the arena)
+      s = Arena.current.promote(root)
+      survivors << s if s
+    end
+    survivors.flatten!
+
+    # B. Rewind: Kill all local variables allocated in this frame
+    Arena.current.rewind(frame.arena_mark)
+
+    # C. Register: Add survivors back to the live set
+    #    This ensures the new function doesn't overwrite our args
+    #    when it starts allocating its own objects.
+    survivors.each { |s| Arena.current.register(s) }
+
+    # =========================================================
+    # 5. MUTATE THE CURRENT FRAME (TCO)
+    # =========================================================
+    # Instead of pushing a new frame, we repurpose the current one.
+
+    # A. Overwrite Arguments
+    # We write the new argument values into the registers starting at 0.
+    # Since 'args' contains values already read from the old registers,
+    # we don't have to worry about overwriting a source register before reading it.
+    args.each_with_index do |arg_val, i|
+      frame.registers[i] = arg_val
+    end
+
+    # B. Overwrite Captures
+    # If the new function is a closure, it expects captures after the args.
+    offset = args.size
+    captures.each_with_index do |cap_val, i|
+      frame.registers[offset + i] = cap_val
+    end
+
+    # C. Reset Stack Scratchpad
+    # CRITICAL: We are restarting the frame, so we wipe the scratchpad allocation.
+    # The new function gets the full 1KB blob to work with.
+    frame.stack_pointer = 0
+
+    # C. Swap the Code
+    frame.chunk = next_chunk
+
+    # D. Reset Instruction Pointer
+    # The run_loop does `ins = chunk[ip]; ip += 1`.
+    # By setting it to 0 here, the NEXT iteration of the loop will
+    # read instruction 0 of the NEW chunk.
+    frame.ip = 0
+    nil
+  end
+
   # Helper to run a function and handle the signal/unwind logic safely
   def invoke_function(func_obj, args, caller_frame)
     result = execute_function(func_obj, args)

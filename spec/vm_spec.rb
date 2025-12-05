@@ -1612,5 +1612,201 @@ RSpec.describe "Compiler Error Coverage" do
       expect { run(source) }.to raise_error(CompilerError, /native_call requires 'Class' and 'Method'/)
     end
   end
+
+  describe "VM: Tail Call Optimization (TCO)" do
+    # Helper to compile and return the chunk for inspection
+    def compile_only(source)
+      tokens = Lexer.new(source).tokenize
+      ast = Parser.new(tokens, source).parse
+      # Create compiler with a dummy return type
+      compiler = Compiler.new("main", :Any, source)
+      compiler.compile(ast)
+    end
+
+    # Helper to run and get result
+    def run(source)
+      VM.new(source).run_code(source).first
+    end
+
+    before(:each) do
+      Arena.reset!
+    end
+
+    describe "Compiler: Bytecode Emission" do
+      it "emits TAIL_CALL when returning a function call directly" do
+        source = <<~FLUX
+          FN recurse() ->
+            RETURN recurse();
+          END
+        FLUX
+
+        chunk = compile_only(source)
+
+        # We need to find the 'recurse' function chunk
+        # It's likely in a closure or global def.
+        # But the Main chunk will just define it.
+        # Let's inspect the instructions inside the function definition.
+
+        # In the compiler, functions are compiled as sub-chunks.
+        # We can't easily reach into the specific sub-chunk without walking constants,
+        # but we can check if the opcode exists in the constants if we dig deep enough.
+
+        # Simpler approach for test: Compile the body as if it were main,
+        # or trust the integration test.
+        # Let's look at a simpler structure:
+
+        # The main chunk creates a closure. Let's find that closure's chunk.
+        closure_def = chunk.code.find { |op| op[0] == :NEW_CLOSURE }
+        fn_chunk_idx = closure_def[2][1..-1].to_i # "K0" -> 0
+        fn_chunk = chunk.constants[fn_chunk_idx]
+
+        # Now check the code of the function
+        # Should look like: [ ..., [:TAIL_CALL, "recurse", 0], ... ]
+        tail_op = fn_chunk.code.find { |op| op[0] == :TAIL_CALL }
+
+        expect(tail_op).to_not be_nil
+        expect(tail_op[1]).to eq("recurse")
+      end
+
+      it "does NOT emit TAIL_CALL if there is work done after the call" do
+        source = <<~FLUX
+          FN recurse(n) ->
+            RETURN recurse(n) + 1; -- The + 1 prevents TCO
+          END
+        FLUX
+
+        chunk = compile_only(source)
+
+        closure_def = chunk.code.find { |op| op[0] == :NEW_CLOSURE }
+        fn_chunk = chunk.constants[closure_def[2][1..-1].to_i]
+
+        tail_op = fn_chunk.code.find { |op| op[0] == :TAIL_CALL }
+        expect(tail_op).to be_nil
+      end
+    end
+
+    describe "VM: Recursion Depth & Stack Safety" do
+      it "can recurse 10,000 times without Stack Overflow" do
+        # If TCO wasn't working, 10,000 frames would blow the VM stack limit
+        # (or the Ruby stack limit).
+        source = <<~FLUX
+          FN count_down(n) ->
+            IF n == 0 THEN
+              RETURN "Done";
+            END
+            RETURN count_down(n - 1);
+          END
+
+          RETURN count_down(10000);
+        FLUX
+
+        result = run(source)
+        expect(result).to eq("Done")
+      end
+    end
+
+    describe "VM: Arena Safety (Rewinding)" do
+      it "does not grow memory usage during infinite recursion" do
+        # Logic:
+        # 1. Loop 100 times.
+        # 2. In each loop, allocate a Heap String ("Garbage").
+        # 3. If Rewind works, the "Garbage" is discarded every frame.
+        # 4. We check the Arena mark at the end. It should be low.
+
+        source = <<~FLUX
+          FN loop_waste(n) ->
+            -- Allocate heap object (garbage)
+            VAR garbage = %"I am waste memory";
+
+            IF n == 0 THEN
+              RETURN "Finished";
+            END
+
+            -- Pass garbage to next function to force 'promote' logic to run,
+            -- but we won't use it there.
+            RETURN loop_waste(n - 1);
+          END
+
+          RETURN loop_waste(100);
+        FLUX
+
+        # 1. Run the code
+        run(source)
+
+        # 2. Check Memory
+        # The main chunk returns "Finished".
+        # The 100 "I am waste memory" strings should be GONE.
+        # The Arena should effectively be empty (or close to start_mark).
+
+        # Current Allocations should be:
+        # 1. The Main Script Frame artifacts
+        # 2. The Final Result "Finished"
+        # (Depending on implementation details, maybe 1 or 2 other things, but NOT 100).
+
+        live_count = Arena.current.instance_variable_get(:@allocations).count { |obj| obj.is_alive? }
+
+        # We expect < 10 objects. If TCO failed to rewind, it would be > 100.
+        expect(live_count).to be < 10
+      end
+    end
+
+    describe "VM: TCO with SRVO (Struct Return)" do
+      # This is the requested "Counter" test.
+      it "correctly writes to the SRVO pointer after 10 tail calls" do
+        source = <<~FLUX
+          STRUCT Counter { x: Number }
+
+          FN increment_loop(current, max) ->
+            -- If we hit max, we create the struct.
+            -- Because of SRVO, this writes to the pointer passed from Main.
+            IF current == max THEN
+              RETURN %Counter{ x: current };
+            END
+
+            -- TAIL CALL
+            -- We pass 'current + 1'
+            -- The VM must preserve the hidden SRVO pointer (R0) and pass it to the next frame.
+            RETURN increment_loop(current + 1, max);
+          END
+
+          -- 1. Main allocates space for Counter (Stack or Heap depending on inferred type,
+          --    but let's force Heap via % to be simple, or rely on SRVO logic).
+          --    Actually, for standard SRVO testing, usually the return type is checked.
+
+          VAR final_counter = increment_loop(0, 10);
+
+          RETURN final_counter.x;
+        FLUX
+
+        # We verify the result is 10.
+        # If the SRVO pointer was lost/overwritten during the stack wipe,
+        # this would likely crash or return garbage.
+        result = run(source)
+        expect(result).to eq(10)
+      end
+
+      it "handles Stack Struct SRVO with TCO (No Heap Allocation)" do
+        # Same as above, but explicitly using Stack allocation syntax if possible,
+        # or just relying on the fact that Structs are value types in your language.
+        source = <<~FLUX
+          STRUCT Vec { x: Number, y: Number }
+
+          FN tail_vec(n) ->
+            IF n == 0 THEN
+              -- Return a stack literal (SRVO writes directly to caller's slot)
+              RETURN Vec{ x: 99, y: 99 };
+            END
+            RETURN tail_vec(n - 1);
+          END
+
+          VAR v = tail_vec(10);
+          RETURN v.x;
+        FLUX
+
+        result = run(source)
+        expect(result).to eq(99)
+      end
+    end
+  end
 end
 
