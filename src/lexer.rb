@@ -86,8 +86,9 @@ class Lexer
       when @s.scan(/\d+(\.(?!\.)\d*)?/)
         add(:NUMBER, @s.matched.to_f, start_col)
 
-      when @s.scan(/"[^"]*"/)
-        add(:STRING, @s.matched[1..-2], start_col)
+      when @s.scan(/"/)
+        advance_pos(@s.matched) # Advance past the opening quote
+        read_interpolated_string(start_col)
 
       else
         raise "Unexpected char: #{@s.peek(1)} on line #{@line}:#{@column}"
@@ -99,7 +100,105 @@ class Lexer
     @tokens
   end
 
-  private # ============================
+  private
+
+  def read_interpolated_string(start_col)
+    buffer = ""
+    chunk_start_col = start_col # Track where the *current* text buffer started
+
+    loop do
+      # Scan until we hit a quote or the start of interpolation
+      text = @s.scan(/[^"%]+/)
+      if text
+        buffer << text
+        advance_pos(text)
+      end
+
+      # Check what stopped us
+      if @s.peek(1) == '"'
+        # End of String
+        @s.getch # Consume "
+        advance_pos('"')
+        # Use chunk_start_col, not start_col
+        @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
+        break
+
+      elsif @s.peek(2) == '%{'
+        # Interpolation Start
+        # 1. Emit current buffer using the current chunk start
+        @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
+        buffer = ""
+
+        # 2. Consume %{
+        @s.getch; @s.getch
+        advance_pos('%{')
+
+        # 3. Inject Connector
+        @tokens << Token.new(:CHAR, '+', @line, @column)
+        @tokens << Token.new(:CHAR, '(', @line, @column)
+
+        # 4. Extract Expression
+        expr_source = extract_balanced_brace_content
+
+        # Sub-lexer for the expression
+        sub_lexer = Lexer.new(expr_source)
+        sub_tokens = sub_lexer.tokenize
+        sub_tokens.pop if sub_tokens.last.type == :EOF
+        @tokens.concat(sub_tokens)
+
+        # 5. Inject Closer
+        @tokens << Token.new(:CHAR, ')', @line, @column)
+        @tokens << Token.new(:CHAR, '+', @line, @column)
+
+        # CRITICAL FIX:
+        # We just finished an interpolation. The next char is the start
+        # of the next string segment. Update our tracker to the CURRENT column.
+        chunk_start_col = @column
+
+      elsif @s.peek(1) == '%'
+        buffer << @s.getch
+        advance_pos('%')
+      else
+        if @s.eos?
+          raise "Lexer Error: Unclosed string starting at line #{start_col}"
+        end
+        buffer << @s.getch
+        advance_pos('"')
+      end
+    end
+  end
+
+  def extract_balanced_brace_content
+    content = ""
+    depth = 1
+
+    until @s.eos?
+      # Scan safe chars
+      text = @s.scan(/[^\{\}]+/)
+      if text
+        content << text
+        advance_pos(text)
+      end
+
+      if @s.peek(1) == '{'
+        depth += 1
+        content << @s.getch
+        advance_pos('{')
+      elsif @s.peek(1) == '}'
+        depth -= 1
+        if depth == 0
+          @s.getch # Consume final closing brace
+          advance_pos('}')
+          return content
+        else
+          content << @s.getch
+          advance_pos('}')
+        end
+      end
+    end
+
+    raise "Lexer Error: Unclosed interpolation %{...}"
+  end
 
   def add(type, val, col)
     @tokens << Token.new(type, val, @line, col)

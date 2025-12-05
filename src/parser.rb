@@ -88,6 +88,14 @@ class Parser
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:PERCENT, '%') { parse_sigil_construct }
 
+  # Expression Grouping
+  primary(:CHAR, '(') do
+    consume(:CHAR, '(')
+    expr = parse_expression
+    consume(:CHAR, ')')
+    expr
+  end
+
   # Array Indexing: arr[index]
   suffix(:CHAR, '[') do |lhs|
     start_token = consume(:CHAR, '[')

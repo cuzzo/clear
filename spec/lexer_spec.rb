@@ -153,4 +153,113 @@ RSpec.describe Lexer do
       expect_token(tokens[4], :VAR_ID, "y", 1, 5)
     end
   end
+
+  describe "String Interpolation" do
+    it "interpolates a variable in the middle of a string" do
+      # Source: "Hello %{name}!"
+      # Logic:  "Hello " + (name) + "!"
+      lexer = Lexer.new('"Hello %{name}!"')
+      tokens = lexer.tokenize
+
+      # 1. First String Part
+      expect_token(tokens[0], :STRING, "Hello ", 1, 1)
+
+      # 2. Injection: + (
+      expect(tokens[1].type).to eq(:CHAR); expect(tokens[1].value).to eq("+")
+      expect(tokens[2].type).to eq(:CHAR); expect(tokens[2].value).to eq("(")
+
+      # 3. The Variable inside
+      # Note: Inner tokens will reset to Line 1 Col 1 because of the sub-lexer
+      expect(tokens[3].type).to eq(:VAR_ID)
+      expect(tokens[3].value).to eq("name")
+
+      # 4. Injection: ) +
+      expect(tokens[4].type).to eq(:CHAR); expect(tokens[4].value).to eq(")")
+      expect(tokens[5].type).to eq(:CHAR); expect(tokens[5].value).to eq("+")
+
+      # 5. The Final String Part
+      expect_token(tokens[6], :STRING, "!", 1, 15) # Columns resume correctly after advance_pos
+    end
+
+    it "handles interpolation at the start (forces empty string prefix)" do
+      # Source: "%{x}"
+      # Logic:  "" + (x) + ""
+      # We need that initial "" so the VM treats it as String Concatenation, not Math.
+      lexer = Lexer.new('"%{x}"')
+      tokens = lexer.tokenize
+
+      # 1. Empty String Prefix
+      expect_token(tokens[0], :STRING, "", 1, 1)
+
+      # 2. Connector
+      expect(tokens[1].value).to eq("+")
+
+      # 3. Variable
+      expect(tokens[3].value).to eq("x")
+
+      # 4. Trailing Empty String (Standard for this lexer logic)
+      expect(tokens.last.type).to eq(:EOF)
+      expect(tokens[-2].type).to eq(:STRING)
+      expect(tokens[-2].value).to eq("")
+    end
+
+    it "handles complex expressions inside interpolation" do
+      # Source: "Result: %{x + 10}"
+      # Logic:  "Result: " + (x + 10) + ""
+      lexer = Lexer.new('"Result: %{x + 10}"')
+      tokens = lexer.tokenize
+
+      # Validate the stream structure
+      types = tokens.map(&:type)
+      expect(types).to eq([
+        :STRING,          # "Result: "
+        :CHAR, :CHAR,     # + (
+        :VAR_ID, :CHAR, :NUMBER, # x + 10 (The expression)
+        :CHAR, :CHAR,     # ) +
+        :STRING,          # ""
+        :EOF
+      ])
+
+      expect(tokens[5].value).to eq(10.0)
+    end
+
+    it "handles multiple interpolations" do
+      # Source: "A %{x} B %{y}"
+      # Logic:  "A " + (x) + " B " + (y) + ""
+      lexer = Lexer.new('"A %{x} B %{y}"')
+      tokens = lexer.tokenize
+
+      # Filter to just the strings and vars to verify order
+      meaningful = tokens.select { |t| [:STRING, :VAR_ID].include?(t.type) }
+      values = meaningful.map(&:value)
+
+      expect(values).to eq(["A ", "x", " B ", "y", ""])
+    end
+
+    it "ignores literal percent signs" do
+      # Source: "100% Correct"
+      lexer = Lexer.new('"100% Correct"')
+      tokens = lexer.tokenize
+
+      expect(tokens.size).to eq(2) # STRING + EOF
+      expect(tokens[0].type).to eq(:STRING)
+      expect(tokens[0].value).to eq("100% Correct")
+    end
+
+    it "handles nested braces (hashes) inside interpolation" do
+      # Source: "Map: %{ {a:1} }"
+      # The lexer must be smart enough to match the OUTER closing brace
+      lexer = Lexer.new('"Map: %{ {a:1} }"')
+      tokens = lexer.tokenize
+
+      # Just check that it parsed the whole thing without erroring on the first '}'
+      str_token = tokens[0]
+      expect(str_token.value).to eq("Map: ")
+
+      # Check we got the chars inside
+      inner_content = tokens[3..-4] # Skip prefix/suffix tokens
+      inner_values = inner_content.map(&:value)
+      expect(inner_values).to include("{", "a", ":", 1.0, "}")
+    end
+  end
 end

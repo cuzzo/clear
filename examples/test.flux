@@ -1,3 +1,3 @@
-FN x() -> RETURN %"Hello World"; END
-RETURN x();
-
+VAR x = "BOBBY";
+VAR y = "JOANNE";
+print("Hello, there, %{x}. I'm %{y}");
