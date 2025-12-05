@@ -1,4 +1,5 @@
 require_relative "./ast"
+require_relative "./source_error"
 
 # ==========================================
 # PARSER
@@ -39,7 +40,11 @@ class Parser
     @@suffix_rules[[type, value]] = block
   end
 
-  def initialize(tokens); @tokens = tokens; @pos = 0; end
+  def initialize(tokens, source_code = "")
+    @tokens = tokens
+    @pos = 0
+    @source_code = source_code
+  end
 
   def parse
     stmts = []
@@ -47,11 +52,16 @@ class Parser
     AST::Program.new(current, stmts)
   end
 
+  private
+
   def peek
     @tokens[@pos + 1] || Token.new(:EOF, "", current.line, current.column)
   end
 
-  private
+  def error!(token, message)
+    target = token || current
+    raise ParserError.new(target, message, @source_code)
+  end
 
   # COMMANDS
   stmt(:KEYWORD, 'VAR', AST::VarDecl, ['VAR', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [false])
@@ -188,7 +198,7 @@ class Parser
     # 2. Validate it matches what we expect
     if (token.type == type) || (value && token.value == value)
       if value && token.value != value
-         raise "Expected value '#{value}', got '#{token.value}'"
+         error!(token, "Expected value '#{value}', got '#{token.value}'")
       end
 
       # 3. Advance the pointer
@@ -197,7 +207,7 @@ class Parser
       # 4. RETURN THE CAPTURED TOKEN (Not 'current', which is now the next one!)
       token
     else
-      raise "Expected #{value || type}, got #{token.value} (#{token.type}) line #{token.line}"
+      error!(token, "Expected #{value || type}, got #{token.value} (#{token.type}) line #{token.line}")
     end
   end
 
@@ -233,7 +243,7 @@ class Parser
     unless target.is_a?(AST::Identifier) ||
            target.is_a?(AST::GetField) ||
            target.is_a?(AST::GetIndex)
-       raise "Syntax Error: Invalid assignment target on line #{current.line}"
+       error!(target, "Syntax Error: Invalid assignment target on line #{current.line}")
     end
 
     consume(:CHAR, '=')
@@ -371,7 +381,7 @@ class Parser
 
         # Validate it is an Identifier (not a function call foo() or array arr[0])
         unless rhs.is_a?(AST::Identifier)
-          raise "Syntax Error: Expected identifier after 'AS', got #{rhs.class}"
+          error!(rhs, "Syntax Error: Expected identifier after 'AS', got #{rhs.class}")
         end
 
         lhs = AST::BinaryOp.new(op_token, lhs, :BIND_VAR, rhs)
@@ -401,7 +411,7 @@ class Parser
 
       # Guard against forgotten operators
       if op_sym.nil?
-        raise "Parser Error: Unknown operator '#{op_val}'"
+        error!(op_token, "Parser Error: Unknown operator '#{op_val}'")
       end
 
       # Wrap the tree (Left-Growing)
@@ -541,7 +551,7 @@ class Parser
     return parse_unary() if current.value == '-' || current.value == '!'
     lit = parse_lit(:stack)
     return lit if !lit.nil?
-    raise "Unexpected token #{current.value} (#{current.type}) line #{current.line}"
+    error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")
   end
 
   def parse_lit(storage)
@@ -610,7 +620,7 @@ class Parser
         inner = "[#{size}]"
 
       else
-        raise "Syntax Error: Expected ']', '*', or size in array type."
+        error!(current, "Syntax Error: Expected ']', '*', or size in array type.")
       end
     end
 

@@ -1041,7 +1041,7 @@ class VM
 
   def run_code(code_str)
     tokens = Lexer.new(code_str).tokenize
-    ast = Parser.new(tokens).parse
+    ast = Parser.new(tokens, code_str).parse
 
     compiler = Compiler.new("main", :Number, code_str)
 

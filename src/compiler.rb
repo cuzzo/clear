@@ -6,7 +6,7 @@ require_relative "./types"
 require_relative "./opcodes"
 require_relative "./scope"
 require_relative "./chunk"
-require_relative "./compiler_error"
+require_relative "./source_error"
 
 # ==========================================
 # COMPILER
