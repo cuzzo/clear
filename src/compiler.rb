@@ -469,10 +469,30 @@ class Compiler
       end
 
       # C. Type Check
-      expected_type = param[:type]
-      actual_type = infer_type(arg_node)
-      if expected_type != :Any && actual_type != :Any && expected_type != actual_type
-        raise "Type Error: Function '#{node.name}' argument #{i+1} expects #{expected_type}, got #{actual_type}"
+      expected = param[:type]
+      actual = infer_type(arg_node)
+
+      match = false
+
+      # Case 1: Exact Match or Any
+      if expected == :Any || actual == :Any || expected == actual
+        match = true
+
+      # Case 2: Slice Coercion
+      # Allow "Number[3]" (Stack) to pass into "Number[]" (View)
+      elsif expected.to_s.end_with?("[]")
+        # Extract base type: "Number[]" -> "Number"
+        base_expected = expected.to_s.chomp("[]")
+
+        # Check if actual type starts with "Number["
+        # This matches "Number[3]", "Number[*]", etc.
+        if actual.to_s.start_with?(base_expected + "[")
+           match = true
+        end
+      end
+
+      unless match
+        raise "Type Error: Function '#{node.name}' argument #{i+1} expects #{expected}, got #{actual}"
       end
     end
   end
