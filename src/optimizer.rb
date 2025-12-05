@@ -3,32 +3,31 @@ require "set"
 
 class Optimizer
   def initialize(logger = nil)
-    @logger = logger || $logger || Logger.new(STDOUT)
+    @logger = $logger || logger || Logger.new(STDOUT)
   end
 
   def optimize(chunk)
     original_size = chunk.code.size
 
     # PRE-PASS: Identify Jump Targets
-    # We need to know which instructions are jumped TO, so we don't delete them
-    # even if they look unreachable (e.g. following a RETURN).
     jump_targets = Set.new
     chunk.code.each do |ins|
       opcode = ins[0]
       if [:JMP, :JMP_FALSE, :JMP_TRUE, :JMP_IF_ERROR, :JMP_IF_OK].include?(opcode)
-        # JMP target is idx 1, Conditional Jumps target is idx 2
         target = (opcode == :JMP) ? ins[1] : ins[2]
         jump_targets.add(target)
       end
     end
 
     new_code = []
-    # Map old instruction pointer (index) to new instruction pointer
-    # Used to fix Jumps later.
     addr_map = {}
 
     # State for Dead Code Elimination
     reachable = true
+
+    # State for Constant Propagation
+    # Maps Register Name (String) -> Constant Value (String)
+    constants = {}
 
     i = 0
     while i < chunk.code.size
@@ -36,32 +35,28 @@ class Optimizer
       next_ins = chunk.code[i+1]
 
       # 1. Reachability Check
-      # If this index is a target of a jump, it becomes reachable again!
       if jump_targets.include?(i)
         reachable = true
+        # Optimization Logic: Clear constant tracking at jump targets
+        # We don't know where we came from, so we can't assume register states.
+        constants.clear
       end
 
       unless reachable
-        # Skip Dead Code
-        # We map it to the current size (the next valid instruction) so jumps landing here are valid
         addr_map[i] = new_code.size
         i += 1
         next
       end
 
-      # Record mapping for this instruction
       addr_map[i] = new_code.size
 
       # Optimization 1: Redundant Jump to Next
-      # Pattern: JMP (i+1)
       if ins[0] == :JMP && ins[1] == i + 1
-        # Skip this instruction
         i += 1
         next
       end
 
       # Optimization 2: Redundant Return Elimination
-      # Pattern: MOVE R1 R0 -> RETURN R1
       if ins[0] == :MOVE && next_ins && next_ins[0] == :RETURN
         move_dest = ins[1]
         move_src  = ins[2]
@@ -71,17 +66,51 @@ class Optimizer
           new_code << [:RETURN, move_src]
           addr_map[i+1] = new_code.size - 1
           i += 2
-
-          # Return is a terminator
           reachable = false
           next
         end
       end
 
-      # No optimization applied, copy instruction
+      # Optimization 3: Redundant LOADK
+      # Pattern: LOADK R_dest K_const
+      # Logic: If K_const is already in R_src, replace with MOVE R_dest R_src
+      if ins[0] == :LOADK
+        dest = ins[1]
+        const = ins[2]
+
+        if existing_reg = constants.key(const)
+          # We found the constant in another register! Optimize to MOVE.
+          ins = [:MOVE, dest, existing_reg]
+        end
+      end
+
+      # Track Register State (Constant Propagation)
+      opcode = ins[0]
+      if opcode == :LOADK
+        constants[ins[1]] = ins[2]
+      elsif opcode == :MOVE
+        # If we know what is in src, we know what is in dest.
+        # Otherwise, we moved garbage into dest, so we forget dest.
+        src_reg = ins[2]
+        if constants.has_key?(src_reg)
+          constants[ins[1]] = constants[src_reg]
+        else
+          constants.delete(ins[1])
+        end
+      elsif [:JMP, :JMP_FALSE, :JMP_TRUE, :JMP_IF_ERROR, :JMP_IF_OK, :RETURN, :EXIT, :THROW].include?(opcode)
+        # Control flow does not overwrite registers
+      else
+        # Heuristic: Assume any other instruction writes to the register at index 1
+        # e.g., ADD R1 R2 R3 overwrites R1.
+        target_reg = ins[1]
+        if target_reg.is_a?(String) && target_reg.start_with?("R")
+          constants.delete(target_reg)
+        end
+      end
+
       new_code << ins
 
-      # Check Terminator to turn off reachability
+      # Check Terminator
       if [:RETURN, :JMP, :EXIT, :THROW].include?(ins[0])
         reachable = false
       end
@@ -94,10 +123,9 @@ class Optimizer
       patch_jumps(ins, addr_map)
     end
 
-    # Update Chunk
     chunk.code = new_code
 
-    # Update Line Info (Simple approximation)
+    # Fix line info mapping (optional, keeping basic impl)
     new_lines = []
     chunk.code.each_with_index { |_, idx| new_lines << (chunk.line_info[idx] || 1) }
     chunk.line_info = new_lines
@@ -125,6 +153,7 @@ class Optimizer
     return unless target_idx
 
     old_target = ins[target_idx]
+    # If the target was optimized away, map to the next available instruction
     new_target = map[old_target] || map.values.last + 1
 
     ins[target_idx] = new_target
