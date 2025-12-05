@@ -1046,7 +1046,7 @@ class VM
     compiler = Compiler.new("main")
 
     chunk = compiler.compile(ast)
-    optimizer = Optimizer.new($logger)
+    optimizer = Optimizer.new()
     chunk = optimizer.optimize(chunk)
 
     print_all_chunks(chunk)
