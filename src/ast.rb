@@ -2,34 +2,40 @@
 # AST
 # ==========================================
 module AST
-  Program     = Struct.new(:line, :statements)
-  FunctionDef = Struct.new(:line, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var)
-  StructDef   = Struct.new(:line, :name, :fields)
-  VarDecl     = Struct.new(:line, :name, :type, :value, :mutable,)
-  Assignment  = Struct.new(:line, :name, :value)
-  BinaryOp    = Struct.new(:line, :left, :op, :right)
-  UnaryOp     = Struct.new(:line, :op, :right)
-  Identifier  = Struct.new(:line, :name)
-  Literal     = Struct.new(:line, :type, :value, :storage)
-  ListLit     = Struct.new(:line, :items, :storage)
-  HashLit     = Struct.new(:line, :pairs, :storage)
-  StructLit   = Struct.new(:line, :name, :fields, :storage)
-  LambdaLit   = Struct.new(:line, :params, :captures, :body, :storage)
-  IfStatement = Struct.new(:line, :condition, :then_branch, :else_branch)
-  WhileLoop   = Struct.new(:line, :condition, :do_branch)
-  BreakNode   = Struct.new(:line)
-  ContinueNode = Struct.new(:line)
-  FuncCall    = Struct.new(:line, :name, :args)
-  MethodCall  = Struct.new(:line, :object, :method, :args)
-  GetField    = Struct.new(:line, :target, :field)
-  GetIndex    = Struct.new(:line, :target, :index)
-  Cast        = Struct.new(:line, :value, :target)
-  ReturnNode  = Struct.new(:line, :value)
-  Assert      = Struct.new(:line, :condition, :message)
-  Raise       = Struct.new(:line, :message_expr)
-  ThrowNode   = Struct.new(:line, :value)
-  DieNode     = Struct.new(:line, :status)
-  Slice       = Struct.new(:line, :target, :start, :end)
+  module Locatable
+    def line; token.line; end
+    def column; token.column; end
+    def token_value; token.value; end
+  end
+
+  Program      = Struct.new(:token, :statements) { include Locatable }
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var) { include Locatable }
+  StructDef    = Struct.new(:token, :name, :fields) { include Locatable }
+  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
+  Assignment   = Struct.new(:token, :name, :value) { include Locatable }
+  BinaryOp     = Struct.new(:token, :left, :op, :right) { include Locatable }
+  UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
+  Identifier   = Struct.new(:token, :name) { include Locatable }
+  Literal      = Struct.new(:token, :type, :value, :storage) { include Locatable }
+  ListLit      = Struct.new(:token, :items, :storage) { include Locatable }
+  HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
+  StructLit    = Struct.new(:token, :name, :fields, :storage) { include Locatable }
+  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage) { include Locatable }
+  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch) { include Locatable }
+  WhileLoop    = Struct.new(:token, :condition, :do_branch) { include Locatable }
+  BreakNode    = Struct.new(:token) { include Locatable }
+  ContinueNode = Struct.new(:token) { include Locatable }
+  FuncCall     = Struct.new(:token, :name, :args) { include Locatable }
+  MethodCall   = Struct.new(:token, :object, :method, :args) { include Locatable }
+  GetField     = Struct.new(:token, :target, :field) { include Locatable }
+  GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
+  Cast         = Struct.new(:token, :value, :target) { include Locatable }
+  ReturnNode   = Struct.new(:token, :value) { include Locatable }
+  Assert       = Struct.new(:token, :condition, :message) { include Locatable }
+  Raise        = Struct.new(:token, :message_expr) { include Locatable }
+  ThrowNode    = Struct.new(:token, :value) { include Locatable }
+  DieNode      = Struct.new(:token, :status) { include Locatable }
+  Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
 
   UNARY_OPS = ['-', '!', '~']
 

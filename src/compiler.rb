@@ -589,7 +589,7 @@ class Compiler
     if node.is_a?(AST::ListLit) || (node.is_a?(AST::Literal) && node.type == :STRING)
       items = node.is_a?(AST::ListLit) ?
         node.items :
-        node.value.bytes.map { |b| AST::Literal.new(node.line, :BYTE, b, :stack) } # TODO: SLOW!
+        node.value.bytes.map { |b| AST::Literal.new(node.token, :BYTE, b, :stack) } # TODO: SLOW!
 
       # Loop by Index
       items.each_with_index do |item, idx|
@@ -1335,10 +1335,10 @@ class Compiler
     # RETURN temp;
 
     # 1. Compile the message expression (or NIL literal if no message)
-    msg_node = node.message_expr || AST::Literal.new(node.line, :NIL, nil)
+    msg_node = node.message_expr || AST::Literal.new(node.token, :NIL, nil)
 
     # 2. Build the AST node for the function call: make_error(msg_node)
-    error_call_node = AST::FuncCall.new(node.line, "make_error", [msg_node])
+    error_call_node = AST::FuncCall.new(node.token, "make_error", [msg_node])
 
     # 3. Compile the function call result (the Error Struct) into a register
     with_temp_reg do |r_err|
