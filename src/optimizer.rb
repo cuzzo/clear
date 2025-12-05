@@ -84,6 +84,38 @@ class Optimizer
         end
       end
 
+      # =========================================================
+      # Optimization 4: Constant Folding (Math on Literals)
+      # Pattern: OP R_dest R_src1 R_src2
+      # Logic: If src1 and src2 are known constants, do math now.
+      # =========================================================
+      if [:ADD, :SUB, :MUL, :DIV, :MOD].include?(ins[0])
+        dest_reg = ins[1]
+        src1_reg = ins[2]
+        src2_reg = ins[3]
+
+        # Check if we know the constants for both inputs
+        if constants.key?(src1_reg) && constants.key?(src2_reg)
+          val1 = get_const_value(chunk, constants[src1_reg])
+          val2 = get_const_value(chunk, constants[src2_reg])
+
+          # Attempt to calculate result (returns nil if unsafe/impossible)
+          folded_result = calculate_fold(ins[0], val1, val2)
+
+          if folded_result != nil
+            # Success! Add new constant to chunk
+            k_idx = chunk.add_constant(folded_result)
+            k_key = "K#{k_idx}"
+
+            # Replace opcode with LOADK
+            ins = [:LOADK, dest_reg, k_key]
+
+            # Update our tracking so subsequent instructions see the new value!
+            # (The logic below will handle the actual map update)
+          end
+        end
+      end
+
       # Track Register State (Constant Propagation)
       opcode = ins[0]
       if opcode == :LOADK
@@ -138,6 +170,35 @@ class Optimizer
   end
 
   private
+
+  def get_const_value(chunk, k_key)
+    # k_key is "K0", "K10", etc.
+    idx = k_key[1..-1].to_i
+    chunk.constants[idx]
+  end
+
+  def calculate_fold(op, v1, v2)
+    # Only fold Primitives (Numbers/Floats)
+    return nil unless v1.is_a?(Numeric) && v2.is_a?(Numeric)
+
+    begin
+      case op
+      when :ADD then v1 + v2
+      when :SUB then v1 - v2
+      when :MUL then v1 * v2
+      when :DIV
+        return nil if v2 == 0 # Safety check
+        v1 / v2
+      when :MOD
+        return nil if v2 == 0
+        v1 % v2
+      else nil
+      end
+    rescue => e
+      # If anything goes wrong (e.g. overflow, type error), abort fold
+      nil
+    end
+  end
 
   def patch_jumps(ins, map)
     opcode = ins[0]
