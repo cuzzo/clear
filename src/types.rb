@@ -184,7 +184,7 @@ class FluxArray < FluxObject
   # :int64  -> Packed Binary String (8 bytes per item)
   # :byte   -> Packed Binary String (1 byte per item)
   def initialize(max_size, initial_data, register: true, type: :obj, struct_type: nil)
-    super(register: :register) # Register with Arena
+    super(register: register) # Register with Arena
 
     @struct_type = struct_type
     @max_size = max_size

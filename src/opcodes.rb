@@ -22,6 +22,7 @@ module OpCodes
     NEW_LIST:     [T_REG_W, T_UINT],
     APPEND:       [T_REG_R, T_REG_R],
     DEF_GLOBAL:   [T_STR, T_REG_R],
+    GET_GLOBAL:   [T_REG_W, T_STR],
     DEF_STRUCT:   [T_STR, T_RAW],
     PRINT:        [T_REG_R],
     FREEZE:       [T_REG_R],

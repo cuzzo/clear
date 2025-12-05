@@ -30,11 +30,22 @@ class VM
 
   ReturnSignal = Struct.new(:value)
 
-  def initialize(code_str = "")
+  def initialize(code_str = "", args = [])
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
     @struct_offsets = {} # Cache for fast field->index lookup
     @source_lines = code_str.lines
+
+
+    flux_str_args = args.map do |arg|
+      Value.box_obj(FluxString.new(arg, register: :static))
+    end
+
+    # 2. Create a FluxArray (Boxed)
+    #    Type :obj because it holds Pointers (to Strings), not raw bytes
+    argv_obj = FluxArray.new(nil, flux_str_args, type: :obj, register: :static)
+
+    @globals["argv"] = Value.box_obj(argv_obj)
   end
 
   def decode_args(ins, frame)
@@ -374,6 +385,17 @@ class VM
     boxed_val = args[1]
     @globals[global_name] = boxed_val
     nil
+  end
+
+  def process_get_global(target_reg, args, frame)
+    name = args[0]
+    val = @globals[name]
+
+    if val.nil?
+      raise "Runtime Error: Undefined Global '#{name}'"
+    end
+
+    val
   end
 
   def process_def_struct(target_reg, args, frame)
@@ -1145,8 +1167,7 @@ class VM
 
     print_all_chunks(chunk)
 
-    vm = VM.new(code_str)
-    resp = vm.run(chunk)
+    resp = run(chunk)
     resp = Formatter.to_native(resp)
     resp = resp.is_a?(Float) ? resp.to_i : resp
 
@@ -1154,7 +1175,7 @@ class VM
   end
 
   def run_file(fname)
-    code = File.open(ARGV.first).read()
+    code = File.open(fname).read()
     $logger.debug("==== CODE =====")
     $logger.debug("\n" + code.lines.each_with_index.map { |l, idx| "L:#{(idx + 1).to_s.rjust(4, '0')}: #{l}" }.join())
 

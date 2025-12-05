@@ -1,5 +1,6 @@
 require 'logger'
 require 'byebug'
+require 'set'
 
 require_relative "./ast"
 require_relative "./types"
@@ -13,6 +14,8 @@ require_relative "./source_error"
 # ==========================================
 class Compiler
   include ErrorHelper
+
+  KNOWN_GLOBALS = %w[argv].to_set
 
   attr_accessor :chunk, :reg_top
   def initialize(name = "main", return_type = :Any, source_code = "")
@@ -1183,8 +1186,13 @@ class Compiler
 
   def compile_identifier(node, target_reg)
     r = current_scope.resolve_reg(node.name)
-    error!(node, :UNDEFINED_VAR, node.name) unless r
-    @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
+    if r
+      @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r}") if target_reg != r # TODO: shouldn't need check
+    elsif KNOWN_GLOBALS.include?(node.name)
+      @chunk.emit(node, :GET_GLOBAL, "R#{target_reg}", node.name)
+    else
+      error!(node, :UNDEFINED_VAR, node.name) unless r
+    end
   end
 
   def compile_method_call(node, target_reg)
