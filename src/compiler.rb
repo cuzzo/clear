@@ -203,27 +203,15 @@ class Compiler
   end
 
   def _compile_func_with_args(node, r_snapshot, target_reg, args_regs)
-    # A. Emit the Call
-    # This overwrites 'target_reg' with the Result (or new Error)
     func_name = node.right.name
 
-    if func_name == "print"
-       @chunk.emit(node, :PRINT, *args_regs)
-    elsif func_name == "native_call"
-       error("Cannot pipe to native_call directly.")
-    else
-       @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", func_name, args_regs.size, *args_regs)
-    end
+    # 1. Emit the Call (Delegated to Helper)
+    #    This handles PRINT, RVO, and Standard CALL_FUNC
+    emit_named_func_call(node, func_name, args_regs, target_reg)
 
-    # B. Error Enrichment (Snapshot)
-    # 1. If result is OK, jump over the enrichment logic
+    # 2. Error Enrichment (Snapshot)
     ok_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
-
-    # 2. If we are here, it IS an Error. Attach snapshot.
-    # TODO: ERROR FIELD
     @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
-
-    # 3. Patch the jump
     @chunk.patch(ok_jump, @chunk.current_address, 2)
   end
 
@@ -363,91 +351,90 @@ class Compiler
   end
 
   def compile_func_call(node, target_reg)
-    # 1. Handle Intrinsics (unchanged)
-    if node.name.is_a?(String)
-      return compile_print(node) if node.name == "print"
-      return compile_native_call(node, target_reg) if node.name == "native_call"
+    # 1. Handle Native Calls (Special Argument Parsing)
+    if node.name == "native_call"
+      return compile_native_call(node, target_reg)
     end
 
-    # 2. Resolve Local Register (Is this a Closure variable?)
+    # 2. Resolve Local Register (Closure Call)
     local_reg = nil
     if node.name.is_a?(String)
       local_reg = current_scope.resolve_reg(node.name)
     end
 
-    # 3. Resolve Function Signature & Return Type
-    signature_params = []
-    return_type = :Any
+    # 3. Standard Argument Compilation
+    #    (We pass empty signature/local_reg for now, as validation
+    #     is handled mostly at runtime or separate pass)
+    args_regs = compile_args(node.args)
 
-    # We only look up signatures for static names (not closures/expressions)
-    if node.name.is_a?(String) && !local_reg
-      if @fn_signatures.key?(node.name)
-        sig = @fn_signatures[node.name]
-        signature_params = sig[:params]
-        return_type = sig[:return_type]
-        verify_function_signature(node)
-      else
-        error!(node, :MISSING_FUNCTION, node.name)
+    if local_reg
+      # --- CLOSURE CALL ---
+      # Closures don't support RVO in this version (dynamic return type)
+      operand = "R#{local_reg}"
+      @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", operand, node.args.size, *args_regs)
+    elsif node.name.is_a?(String)
+      # --- NAMED FUNCTION CALL (Uses Helper) ---
+      emit_named_func_call(node, node.name, args_regs, target_reg)
+    else
+      # --- EXPRESSION CALL ---
+      # e.g. get_callback()(args)
+      with_temp_reg do |r_func|
+        visit(node.name, r_func)
+        @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", "R#{r_func}", node.args.size, *args_regs)
       end
     end
+    @reg_top -= args_regs.size
+  end
 
-    # We only look up signatures for static names (not closures/expressions)
-    if node.name.is_a?(String) && !local_reg && @fn_signatures.key?(node.name)
-      sig = @fn_signatures[node.name]
-      signature_params = sig[:params]
-      return_type = sig[:return_type]
+  def emit_named_func_call(node, func_name, args_regs, target_reg)
+    # 1. Handle Intrinsics
+    if func_name == "print"
+      @chunk.emit(node, :PRINT, *args_regs)
+      return
+    elsif func_name == "native_call"
+      # native_call requires special parsing in compile_func_call,
+      # so if we hit it here (e.g. via pipe), it's an error.
+      error!(node, "Cannot pipe to native_call directly.")
+    end
 
-      # Run your existing validation logic
+    if !@fn_signatures.key?(func_name)
+      error!(node, :MISSING_FUNCTION, func_name)
+    end
+
+    if node.is_a?(AST::FuncCall)
       verify_function_signature(node)
     end
 
-    if is_stack_type?(return_type) && !local_reg
-      # --- STACK RVO CALLER PATH ---
+    # 2. Look up Signature for RVO
+    return_type = :Any
+    if @fn_signatures.key?(func_name)
+      return_type = @fn_signatures[func_name][:return_type]
+    end
 
-      # A. Allocate Space in Current Frame (Caller)
-      #    We use 'target_reg' as the pointer to the allocated struct/array.
-      size = get_type_slot_size(return_type)
-      @chunk.emit(node, :ALLOCA, "R#{target_reg}", return_type.to_s)
+    # 3. RVO PATH (Hidden Pointer Injection)
+    #    If the function returns a Stack Type, we must allocate space
+    #    in the Caller's frame and pass the pointer as the first arg.
+    if is_stack_type?(return_type)
+       with_temp_reg do |r_ptr|
+         # A. Allocate Stack Space
+         size = get_type_slot_size(return_type)
+         @chunk.emit(node, :ALLOCA, "R#{r_ptr}", return_type.to_s)
 
-      # B. Prepare Arguments list starting with the Hidden Pointer
-      #    This corresponds to '__ret_ptr' in the callee.
-      args_regs = ["R#{target_reg}"]
+         # B. Inject Pointer as Arg 0
+         args_regs.unshift("R#{r_ptr}")
 
-      # C. Compile the User's Arguments
-      #    We pass 'signature_params' so defaults/coercions work correctly.
-      user_args_regs = compile_args(node.args, signature_params, local_reg)
-      args_regs.concat(user_args_regs)
-
-      # D. Emit the Call
-      #    Note: The Arity includes the hidden pointer!
-      #    The return value register will technically hold 'nil' (void),
-      #    but your data is safe in 'target_reg' (the pointer).
-      @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", node.name, args_regs.size, *args_regs)
-
-      # Clean up the user arguments from the temp register stack
-      @reg_top -= user_args_regs.size
-
-    else
-      # --- STANDARD CALL PATH ---
-
-      # A. Compile Arguments (Standard)
-      args_regs = compile_args(node.args, signature_params, local_reg)
-
-      # B. Emit Call
-      if node.name.is_a?(String)
-         # Named Call (Global or Local Closure)
-         operand = local_reg ? "R#{local_reg}" : node.name
-         opcode = local_reg ? :CALL_CLOSURE : :CALL_FUNC
-         @chunk.emit(node, opcode, "R#{target_reg}", operand, node.args.size, *args_regs)
-      else
-         # Expression Call (e.g. get_callback()(1))
-         with_temp_reg do |r_func|
-           visit(node.name, r_func)
-           @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", "R#{r_func}", node.args.size, *arg_regs)
+         # C. Emit Call (Result is Void/Nil)
+         with_temp_reg do |r_void|
+            @chunk.emit(node, :CALL_FUNC, "R#{r_void}", func_name, args_regs.size, *args_regs)
          end
-      end
 
-      @reg_top -= args_regs.size
+         # D. The "Real" Result is the Pointer we allocated
+         @chunk.emit(node, :MOVE, "R#{target_reg}", "R#{r_ptr}")
+       end
+
+    # 4. STANDARD PATH
+    else
+       @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", func_name, args_regs.size, *args_regs)
     end
   end
 
@@ -869,9 +856,57 @@ class Compiler
       visit(node.left, r1)
       with_temp_reg do |r2|
         visit(node.right, r2)
-        @chunk.emit(node, node.op, "R#{target_reg}", "R#{r1}", "R#{r2}")
+        if node.op == :ADD then compile_add(node, target_reg, r1, r2)
+        else @chunk.emit(node, node.op, "R#{target_reg}", "R#{r1}", "R#{r2}") end
       end
     end
+  end
+
+  def compile_add(node, target_reg, lhs, rhs)
+    opcode = compile_add_autocast_and_get_opcode(node, lhs, rhs)
+    @chunk.emit(node, opcode, "R#{target_reg}", "R#{lhs}", "R#{rhs}")
+  end
+
+  def compile_add_autocast_and_get_opcode(node, lhs, rhs)
+    type_left = infer_type(node.left)
+    type_right = infer_type(node.right)
+
+    if type_left == :Int64 && type_right == :Int64
+      return :ADD_INT64
+    elsif type_left == :Number
+      if type_right == :Number
+        return :ADD_NAN
+      elsif type_right == :Int64
+        # TODO: AUTOCAST, RETURN
+      end
+    elsif type_right == :Number
+      if type_left == :Number
+        return :ADD_NAN
+      elsif type_left == :Int64
+        # TODO: AUTOCAST, RETURN
+      end
+    end
+
+    type_left_str = is_string_type?(type_left)
+    type_right_str = is_string_type?(type_right)
+
+    if type_left_str && type_right_str
+      return :CONCAT_STR
+    elsif type_left_str && is_safe_to_autocast_str?(type_right)
+      @chunk.emit(node, :CAST, "R#{rhs}", "String")
+      return :CONCAT_STR
+    elsif is_safe_to_autocast_str?(type_left) && type_right_str
+      @chunk.emit(node, :CAST, "R#{lhs}", "String")
+      return :CONCAT_STR
+
+    # Since String[] is the type for a String array,
+    # This *MUST* come after the string comparison
+    elsif type_left.to_s.include?("[") && type_right.to_s.include?("[")
+      return :CONCAT_ARR
+    end
+
+
+    error!(node, "Type Error: Cannot add type: #{type_left} and #{type_right}")
   end
 
   def compile_logical_or(node, target_reg)
@@ -1574,12 +1609,11 @@ private
       return current_scope.resolve_type(node.name).to_sym
 
     when AST::BinaryOp
-      # Simple inference: if it's math, it's a Number
-      if ['+', '-', '*', '/', 'MOD', '**', '&', '|', '^', '<<', '>>'].include?(node.op)
+      if node.op == :ADD
+        return infer_binary_op_add_type(node)
+      elsif AST::NUMBER_RESULT_OPS.include?(node.op)
         return :Number
-      end
-      # If it's comparison, it's a Bool
-      if ['==', '!=', '<', '>'].include?(node.op)
+      elsif AST::BOOL_RESULT_OPS.include?(node.op)
         return :Bool
       end
 
@@ -1594,6 +1628,23 @@ private
       if name && @fn_signatures.key?(name)
         return @fn_signatures[name][:return_type]
       end
+
+    when AST::GetIndex
+      target_type = infer_type(node.target).to_s
+
+      # 2. Extract Element Type
+      #    "Number[]"  -> "Number"
+      #    "Number[4]" -> "Number"
+      if target_type =~ /^(\w+)\[.*\]$/
+        return $1.to_sym
+      end
+
+      # Special Case: Strings
+      if target_type == "String"
+        return :String # Or :Byte, depending on your language semantics
+      end
+
+      return :Any
     end
 
     return :Any # Fallback if we don't know
@@ -1604,6 +1655,7 @@ private
     return :Number if node.type == :NUMBER
     return :Bool if node.type == :BOOLEAN
     return :Byte if node.type == :BYTE
+    return :Int64 if node.type == :INT64
     if node.type == :STRING
       return "String[]".to_sym if node.storage == :heap
       return "Byte[#{node.value.length}]".to_sym if node.storage == :stack
@@ -1687,6 +1739,36 @@ private
     end
 
     index
+  end
+
+  # TODO: Cleanup Node.type vs user-defined types
+  def is_string_type?(type)
+    t = type.to_s
+    return true if t == "String" || t == "STRING"
+    # Matches "String[]" (Heap String) and "Byte[...]" (Stack String)
+    return true if t.start_with?("String") || t.start_with?("Byte")
+    false
+  end
+
+  def infer_binary_op_add_type(node)
+    t_left = infer_type(node.left)
+    t_right = infer_type(node.right)
+
+    # 1. String Propagation (Fixes your bug)
+    # If we are adding strings, the result is a String
+    return :String if is_string_type?(t_left) || is_string_type?(t_right)
+
+    # 2. Int64 Propagation
+    return :Int64 if t_left == :INT64 && t_right == :INT64
+
+    # 3. Array Propagation
+    return t_left if t_left.to_s.include?("[")
+
+    return :Number
+  end
+
+  def is_safe_to_autocast_str?(type)
+    [:Number, :INT64, :Bool, :Byte].include?(type)
   end
 end
 

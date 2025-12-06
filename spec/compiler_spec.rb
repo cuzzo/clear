@@ -219,6 +219,7 @@ RSpec.describe Compiler do
     context 'Argument Injection: 10 s> add(5)' do
       let(:source) {
         <<~FLUX
+          FN add(x, y) -> RETURN 1; END
           -- Should compile to add(10, 5)
           VAR x = 10 s> add(5);
         FLUX
@@ -244,6 +245,8 @@ RSpec.describe Compiler do
 
     let(:source) {
       <<~FLUX
+        FN fail_task(x) -> RETURN 1; END
+        FN recover_task(x) -> RETURN 1; END
         VAR x = %[1, 2, 3];
         x s> fail_task OR EXIT "NOK" s> recover_task;
       FLUX
@@ -251,7 +254,7 @@ RSpec.describe Compiler do
 
     it 'parses into the correct AST structure (Left-Associative)' do
       program = parse(source)
-      stmt = program.statements[1] # The pipe statement (index 1)
+      smooth_stmt = program.statements[3]
 
       ast_str = <<~AST
         Smooth(
@@ -263,7 +266,7 @@ RSpec.describe Compiler do
         )
       AST
 
-      expect(stmt).to match_ast(ast_str)
+      expect(smooth_stmt).to match_ast(ast_str)
     end
 
     it 'compiles into the correct Bytecode flow' do
@@ -304,7 +307,13 @@ RSpec.describe Compiler do
     end
 
     it 'handles Context Strings: OR EXIT "Message"' do
-      source_with_context = 'VAR x = 1; x s> fail OR EXIT "Bad Thing" s> next;'
+      source_with_context = <<~FLUX
+        FN fail(a) -> RETURN 1; END
+        FN next(a) -> RETURN 1; END
+        VAR x = 1;
+        x s> fail OR EXIT "Bad Thing" s> next;
+      FLUX
+
       chunk = compile(source_with_context)
       code = chunk.code
 

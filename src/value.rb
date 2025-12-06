@@ -251,5 +251,32 @@ module Value
       boxed_val
     end
   end
+
+  # Helper to get raw Ruby String from Heap or Stack
+  def self.resolve_string_data(boxed_val)
+    obj = Value.resolve_val(boxed_val)
+
+    if obj.is_a?(FluxString)
+      return obj.data
+    elsif obj.is_a?(MemorySlice)
+      # Uses the optimization we just added to MemorySlice#to_s
+      return obj.to_s
+    end
+
+    raise "Runtime Error: Expected String or Slice, got #{obj.class}"
+  end
+
+  # Helper to get raw Array Data from Heap or Stack
+  def self.resolve_array_data(boxed_val)
+    obj = Value.resolve_val(boxed_val)
+
+    if obj.is_a?(FluxArray)
+      return obj.to_boxed_a # Reuse your helper
+    elsif obj.is_a?(MemorySlice)
+      return obj.to_boxed_a
+    end
+
+    raise "Runtime Error: Expected Array or Slice, got #{obj.class}"
+  end
 end
 

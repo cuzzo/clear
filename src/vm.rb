@@ -293,7 +293,7 @@ class VM
 
     if type_name == :String
       str = Value.unbox(val_boxed).to_s
-      return Value.box_obj(FluxString.new(str))
+      return Value.box_obj(FluxString.new(str, register: true))
 
     elsif type_name == :Number
       if tag == Value::TAG_BYTE
@@ -469,7 +469,7 @@ class VM
     return invoke_function(func_obj, args, frame)
   end
 
-  def process_add(target_reg, args, frame)
+  def process_add_nan(target_reg, args, frame)
     val_a = args[0]
     val_b = args[1]
 
@@ -498,43 +498,50 @@ class VM
       when [Value::TAG_BYTE, Value::TAG_NUMBER]
         Value.box_number(Value.as_byte(val_a) + Value.as_number(val_b))
 
-      # 4. String Concatenation (LHS is String Object)
-      when [Value::TAG_OBJ, Value::TAG_NUMBER],
-           [Value::TAG_OBJ, Value::TAG_BYTE],
-           [Value::TAG_OBJ, Value::TAG_OBJ]
-
-        obj_a = Value.as_obj(val_a)
-
-        unless obj_a.is_a?(FluxString)
-          raise "Runtime Error: Cannot ADD object type #{obj_a.class}"
-        end
-
-        # FluxString#+ handles coercion of the RHS argument automatically
-        # We simply unbox the RHS to get the raw value (Int/Float/FluxString)
-        rhs_unboxed = Value.unbox(val_b)
-
-        Value.box_obj(obj_a + rhs_unboxed)
-
-      # 5. String Concatenation (RHS is String Object)
-      when [Value::TAG_NUMBER, Value::TAG_OBJ],
-           [Value::TAG_BYTE, Value::TAG_OBJ]
-
-        obj_b = Value.as_obj(val_b)
-        unless obj_b.is_a?(FluxString)
-          raise "Runtime Error: Cannot ADD object type #{obj_b.class}"
-        end
-
-        # Convert LHS primitive to string, create new FluxString, then concat
-        lhs_str = Value.unbox(val_a).to_s
-        new_str = FluxString.new(lhs_str) + obj_b
-
-        Value.box_obj(new_str)
-
       else
         raise "Runtime Error: Invalid operands for ADD: [#{tag_a}, #{tag_b}]"
       end
 
     result
+  end
+
+  # 2. INT64 MATH (Heap Pointers)
+  def process_add_i64(target, args, frame)
+    ptr_a = args[0]
+    ptr_b = args[1]
+
+    # Deref
+    obj_a = Value.as_obj(ptr_a)
+    obj_b = Value.as_obj(ptr_b)
+
+    # Math
+    new_obj = obj_a + obj_b
+
+    # Box Pointer
+    Value.box_obj(new_obj)
+  end
+
+  def process_concat_str(target, args, frame)
+    # 1. Extract raw strings (handles Stack vs Heap automatically)
+    str_a = Value.resolve_string_data(args[0])
+    str_b = Value.resolve_string_data(args[1])
+
+    # 2. Combine and Allocate new Heap String
+    new_str = FluxString.new(str_a + str_b, register: true)
+
+    Value.box_obj(new_str)
+  end
+
+  def process_concat_arr(target, args, frame)
+    arr_a = Value.resolve_array_data(args[0])
+    arr_b = Value.resolve_array_data(args[1])
+
+    # 2. Combine and Allocate new HEAP Array
+    # For now, default to HEAP objects.
+    # TODO: Do this efficiently.
+    new_arr = FluxArray.new(nil, arr_a + arr_b, type: :obj)
+
+    Value.box_obj(new_arr)
   end
 
   def process_sendable_symbol(target_reg, args, frame, opcode)
@@ -957,6 +964,12 @@ class VM
     captures.each_with_index do |cap_val, i|
       frame.registers[offset + i] = cap_val
     end
+
+    # May need to do this, in Crystal / Zig, this would just be memset.
+    #start_wipe = offset + captures.size
+    #(start_wipe...256).each do |i|
+    #  frame.registers[i] = nil
+    #end
 
     # C. Reset Stack Scratchpad
     # CRITICAL: We are restarting the frame, so we wipe the scratchpad allocation.

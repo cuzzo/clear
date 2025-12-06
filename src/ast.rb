@@ -70,6 +70,9 @@ module AST
     :BITWISE_NOT => :~,
   }
 
+  NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD]
+  BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
+
   # TODO: Make these symbols
   OP_TO_OP_CODE = {
     '+' => :ADD,

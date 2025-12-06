@@ -47,11 +47,16 @@ module OpCodes
     CALL_METHOD:  [T_REG_W, T_REG_R, T_STR, T_REST],
     CALL_FUNC:    [T_REG_W, T_STR, T_UINT, T_REST],
     RETURN:       [T_REG_R],
-    ADD:          [T_REG_W, T_REG_R, T_REG_R],
     CAST:         [T_REG_W, T_STR],
     ALLOCA:       [T_REG_W, T_STR],
     MEM_COPY:     [T_REG_R, T_REG_R, T_UINT], # Even though we are WRITING, first arg is T_REG_R
-    TAIL_CALL:    [T_STR, T_UINT, T_REST]
+    TAIL_CALL:    [T_STR, T_UINT, T_REST],
+
+    # Value Type Operations
+    ADD_NAN:      [T_REG_W, T_REG_R, T_REG_R],
+    ADD_INT64:    [T_REG_W, T_REG_R, T_REG_R],
+    CONCAT_STR:   [T_REG_W, T_REG_R, T_REG_R],
+    CONCAT_ARR:   [T_REG_W, T_REG_R, T_REG_R],
   }
 
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|

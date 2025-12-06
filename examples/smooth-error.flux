@@ -16,7 +16,7 @@ END
 -- MOCK BUSINESS LOGIC
 -- ==========================================
 
-FN fetch_user(id) ->
+FN fetch_user(id : Number) ->
   print("1. Fetching User ID: " + id);
 
   IF id == 1 THEN

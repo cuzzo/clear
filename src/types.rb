@@ -112,6 +112,22 @@ class FluxByte
   def inspect; to_s; end
 end
 
+class FluxInt64 < FluxObject
+  attr_reader :value
+
+  def initialize(val)
+    super(register: true)
+    @value = val.to_i
+  end
+
+  # Value semantics: Operations return NEW objects
+  def +(other)
+    FluxInt64.new(@value + other.value)
+  end
+
+  def to_s; "#{@value}_i64"; end
+end
+
 ###
 # HEAP TYPES - PASS BY REFERENCE - ARENA MANAGED
 ##

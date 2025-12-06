@@ -342,8 +342,8 @@ RSpec.describe VM do
     context "SMOOTH passes the result of the previous function as the first argument to the next" do
       let(:source) { <<~FLUX
         FN step1() -> RETURN 10; END
-        FN step2(n) -> RETURN n * 2; END
-        FN step3(n) -> RETURN n + 5; END
+        FN step2(n : Number) -> RETURN n * 2; END
+        FN step3(n : Number) -> RETURN n + 5; END
 
         FN main() ->
           -- Should be ((10 * 2) + 5) = 25
@@ -504,7 +504,7 @@ RSpec.describe VM do
       # Params: a (R0), b (R1)
       # Logic: R2 = R0 + R1; RETURN R2
       chunk_add = make_chunk("Adder", [
-        [:ADD, "R2", "R0", "R1"],
+        [:ADD_NAN, "R2", "R0", "R1"],
         [:RETURN, "R2"]
       ], [])
 
@@ -955,8 +955,8 @@ RSpec.describe VM do
         [:LOADK, "R3", "K0"],   # R3 = "Inner" (debug name)
 
         # Stack: R0=x, R1=y, R2=captured_base
-        [:ADD,   "R4", "R2", "R0"], # R4 = base + x
-        [:ADD,   "R5", "R4", "R1"], # R5 = (base + x) + y
+        [:ADD_NAN, "R4", "R2", "R0"], # R4 = base + x
+        [:ADD_NAN, "R5", "R4", "R1"], # R5 = (base + x) + y
         [:RETURN, "R5"]
       ], ["Inner"])
 
@@ -1373,10 +1373,10 @@ RSpec.describe "RVO (Return Value Optimization) & Heap Safety" do
     it "returns a Closure that captures a Heap Value" do
       source = <<~FLUX
         FN make_greeter() ->
-          VAR name = %"World";
+          VAR name : String[] = %"World";
           -- The closure captures 'name' (a Heap String).
           -- Both the Closure AND 'name' must survive.
-          RETURN %(prefix) USE(name) -> prefix + %" " + name;
+          RETURN %(prefix: String[]) USE(name: String[]) -> prefix + %" " + name;
         END
         VAR greet = make_greeter();
         RETURN greet("Hello");
@@ -1552,7 +1552,7 @@ RSpec.describe "Compiler Error Coverage" do
 
     it "raises ARITY_MISMATCH when arguments count is wrong" do
       source = <<~FLUX
-        FN add(a, b) -> RETURN a + b; END
+        FN add(a : Number, b : Number) -> RETURN a + b; END
         add(1);
       FLUX
       expect { run(source) }.to raise_error(CompilerError, /expects 2 arguments, got 1/)
@@ -1671,7 +1671,7 @@ RSpec.describe "Compiler Error Coverage" do
 
       it "does NOT emit TAIL_CALL if there is work done after the call" do
         source = <<~FLUX
-          FN recurse(n) ->
+          FN recurse(n : Number) RETURNS Number ->
             RETURN recurse(n) + 1; -- The + 1 prevents TCO
           END
         FLUX
@@ -1757,7 +1757,7 @@ RSpec.describe "Compiler Error Coverage" do
         source = <<~FLUX
           STRUCT Counter { x: Number }
 
-          FN increment_loop(current, max) RETURNS Counter ->
+          FN increment_loop(current : Number, max : Number) RETURNS Counter ->
             -- If we hit max, we create the struct.
             -- Because of SRVO, this writes to the pointer passed from Main.
             IF current == max THEN
