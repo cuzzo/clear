@@ -36,6 +36,7 @@ module AST
   ThrowNode    = Struct.new(:token, :value) { include Locatable }
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
+  Require      = Struct.new(:token, :path) { include Locatable }
 
   UNARY_OPS = ['-', '!', '~']
 

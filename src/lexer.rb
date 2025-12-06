@@ -14,6 +14,7 @@ class Lexer
       STRUCT TRUE FALSE NIL
       ASSERT RAISE CATCH EXIT DIE
       MOD OR
+      REQUIRE
     ].to_set
 
   def initialize(source)

@@ -87,6 +87,7 @@ class Parser
   primary(:KEYWORD, 'NIL') { t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:PERCENT, '%') { parse_sigil_construct }
+  primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
 
   # Expression Grouping
   primary(:CHAR, '(') do

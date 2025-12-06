@@ -445,16 +445,16 @@ class VM
 
   def process_call_method(target_reg, args, frame)
     boxed_obj = args.shift()
-    method_name = args.shift()
+    method_name = args.shift().to_sym
 
     obj = Value.resolve_val(boxed_obj)
 
     # TODO: Fix
-    if obj.is_a?(FluxArray) && method_name == "map"
+    if obj.is_a?(FluxArray) && method_name == :map
       boxed_closure = args[0]
       closure_obj = Value.as_obj(boxed_closure)
 
-      new_list = obj.map do |item_boxed|
+      new_list = obj.to_a.map do |item_boxed|
         invoke_function(closure_obj, [item_boxed], frame) # TODO: What about errors?
       end
       result_obj = FluxArray.new(nil, new_list)
@@ -464,6 +464,10 @@ class VM
     elsif obj.is_a?(FluxHash) && obj.key?(method_name)
       func_boxed = obj[method_name]
       func_obj = Value.as_obj(func_boxed)
+      # Safety: Check if it is callable
+      unless func_obj.is_a?(FluxClosure) || func_obj.is_a?(Chunk)
+        raise "Runtime Error: Property '#{method_name}' is not a function."
+      end
       return invoke_function(func_obj, args, frame)
     end
 
@@ -1155,11 +1159,11 @@ class VM
     return keep_obj
   end
 
-  def run_code(code_str)
+  def run_code(code_str, fname)
     tokens = Lexer.new(code_str).tokenize
     ast = Parser.new(tokens, code_str).parse
 
-    compiler = Compiler.new("main", :Number, code_str)
+    compiler = Compiler.new("main", :Number, code_str, fname)
 
     chunk = compiler.compile(ast)
     optimizer = Optimizer.new()
@@ -1179,7 +1183,7 @@ class VM
     $logger.debug("==== CODE =====")
     $logger.debug("\n" + code.lines.each_with_index.map { |l, idx| "L:#{(idx + 1).to_s.rjust(4, '0')}: #{l}" }.join())
 
-    resp, chunk = run_code(code)
+    resp, chunk = run_code(code, fname)
 
     File.binwrite(ARGV.first + 'c', chunk.to_h.to_msgpack)  # Fast, compact
 

@@ -18,7 +18,7 @@ class Compiler
   KNOWN_GLOBALS = %w[argv].to_set
 
   attr_accessor :chunk, :reg_top
-  def initialize(name = "main", return_type = :Any, source_code = "")
+  def initialize(name = "main", return_type = :Any, source_code = "", source_path = Dir.pwd)
     @chunk = Chunk.new(name)
     @scopes = [Scope.new]
     @reg_top = 0
@@ -27,7 +27,9 @@ class Compiler
     @struct_defs = {}
     @fn_signatures = {}
     @expected_return = return_type
-    @source_code = source_code # Store it!
+    @source_code = source_code
+    @source_path = source_path
+    @imported_files = {}
     @logger = $logger || Logger.new(STDOUT)
   end
 
@@ -88,6 +90,7 @@ class Compiler
     when AST::Raise then compile_raise(node, target_reg);
     when AST::DieNode then compile_exit_program(node, target_reg);
     when AST::Slice then compile_slice(node, target_reg);
+    when AST::Require then compile_require(node, target_reg)
     end
   end
 
@@ -1472,6 +1475,47 @@ class Compiler
     # 5. Name the Chunk (for debugging)
     fn_chunk = fn_compiler.instance_variable_get(:@chunk)
     fn_chunk.name = node.name
+  end
+
+  def compile_require(node, target_reg)
+    # 1. Resolve Path (Relative to current file)
+    current_dir = File.dirname(@source_path)
+
+    full_path = File.expand_path(node.path, current_dir)
+
+    unless File.exist?(full_path)
+      error!(node, "Import Error: File not found: #{full_path}")
+    end
+
+    # 2. Read Source
+    code = File.read(full_path)
+
+    # 3. Compile the File (Recursively!)
+    # We create a new Compiler for the imported file.
+    # It gets its own Scope, Registers, etc.
+    sub_lex = Lexer.new(code)
+    sub_parser = Parser.new(sub_lex.tokenize, code)
+    sub_ast = sub_parser.parse
+
+    # Note: We pass full_path so it can handle its own relative imports
+    sub_compiler = Compiler.new("module:#{File.basename(full_path)}", :Any, code, full_path)
+    module_chunk = sub_compiler.compile(sub_ast)
+
+    # 4. Embed the Module as a Constant
+    # We treat the entire file as a Function that we are about to call.
+    k_idx = @chunk.add_constant(module_chunk)
+
+    # 5. Emit Instructions to Execute the Module
+    # LOADK R_temp, <ModuleChunk>
+    # NEW_CLOSURE R_closure, R_temp
+    # CALL_CLOSURE R_target, R_closure
+
+
+    # Wrap chunk in closure (0 upvalues because imports are isolated)
+    with_temp_reg do |r_closure|
+      @chunk.emit(node, :NEW_CLOSURE, "R#{r_closure}", "R#{k_idx}") # No captures
+      @chunk.emit(node, :CALL_CLOSURE, "R#{target_reg}", "R#{r_closure}", 0)
+    end
   end
 
   def emit_closure(node, target_reg, fn_chunk, captured_args)
