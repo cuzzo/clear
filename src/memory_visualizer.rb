@@ -76,7 +76,7 @@ class MemoryVisualizer
           if obj_map.key?(actual_obj.object_id)
             target_id = obj_map[actual_obj.object_id]
             # Solid Arrow for Owners, Dotted for Views
-            arrow = (actual_obj.is_a?(FluxView) || actual_obj.is_a?(FluxStackPtr)) ? "-.->" : "-->"
+            arrow = (actual_obj.is_a?(MemorySlice)) ? "-.->" : "-->"
             lines << "    #{reg_node} #{arrow} #{target_id}"
 
           # 2. Is it a Constant/Static? (Not in Arena Map)

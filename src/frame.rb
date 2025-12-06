@@ -6,15 +6,13 @@ class Frame
   def initialize(chunk, arena_mark = 0) # Default 0 for main
     @chunk = chunk
     @ip = 0
-    @registers = Array.new(256) # The 256 Registers
     @arena_mark = arena_mark
 
-    # Eventually, @stack_blob will take over @registers
-    # Items are either on the Heap (Arena) or the Stack
-    # For now -> the stack is EITHER @registers OR @stack_blob.
-    #
-    # @stack_blob is a 1KB binary scratchpad for this function execution.
-    # We use :nanbox mode so we can store Pointers and Numbers mixed.
+    # The 256 8-byte Registers, Value types, HOT Stack
+    @registers = Array.new(256)
+
+    # The 1024 8-byte Stack Blob, to store structs, stack arrays, the COLD Stack
+    # The COLD Stack is still cache-friendly and SUBSTANTIALLY faster than the HEAP.
     @stack_blob = FluxArray.new(1024, nil, type: :nanbox, register: false)
     @stack_pointer = 0
   end

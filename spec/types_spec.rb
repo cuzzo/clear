@@ -116,28 +116,28 @@ RSpec.describe "Flux Type System" do
     end
   end
 
-  describe FluxView do
+  describe MemorySlice do
     it "reads from the owner without copying" do
       owner = FluxArray.new(nil, [10, 20, 30, 40])
       # View starting at index 1, length 2
-      view = FluxView.new(owner, 1, 2)
+      view = MemorySlice.new(owner, 1, 2)
 
-      expect(view[0]).to eq(20) # owner[1]
-      expect(view[1]).to eq(30) # owner[2]
+      expect(view.read_at(0)).to eq(20) # owner[1]
+      expect(view.read_at(1)).to eq(30) # owner[2]
 
       # Bounds check
-      expect { view[2] }.to raise_error(/View index out of bounds/)
+      expect { view.read_at(2) }.to raise_error(/View index out of bounds/)
     end
 
     it "reflects changes in the owner" do
       owner = FluxArray.new(nil, [10, 20])
-      view = FluxView.new(owner, 0, 1)
+      view = MemorySlice.new(owner, 0, 1)
 
       # Mutate owner
-      owner[0] = 99
+      owner.write_at(0, 99)
 
       # View sees the change (Pass by Reference behavior)
-      expect(view[0]).to eq(99)
+      expect(view.read_at(0)).to eq(99)
     end
   end
 
@@ -168,7 +168,7 @@ RSpec.describe "Flux Type System" do
 
       # Create View OUTSIDE the scope (simulate return or promotion)
       # We manually promote it or create it in a way that survives rewind.
-      view = FluxView.new(owner, 0, 1)
+      view = MemorySlice.new(owner, 0, 1)
       Arena.current.promote(view) # This causes survival after rewind
 
       # Kill the stack frame
@@ -176,7 +176,7 @@ RSpec.describe "Flux Type System" do
 
       # Accessing the view should fail because the Owner is dead
       expect {
-        view[0]
+        view.read_at(0)
       }.to raise_error(/Memory Error: Dangling Pointer/)
     end
 

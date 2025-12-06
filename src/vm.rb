@@ -216,21 +216,9 @@ class VM
     # 3. Store Metadata (We need to know it's a "Point", not just an Array)
     # We can attach this to the object singleton, or wrap it.
     # For a prototype, let's just monkey-patch the type name onto this instance.
-    obj.instance_variable_set(:@struct_type, struct_name)
+    obj.struct_type = struct_name
 
     Value.box_obj(obj)
-  end
-
-  def get_field_and_obj(flux_obj, index)
-    flux_obj = Value.resolve_val(flux_obj)
-
-    if flux_obj.is_a?(FluxStackPtr)
-      return [flux_obj.container, flux_obj.offset + index]
-    elsif flux_obj.is_a?(FluxArray)
-      return [flux_obj, index]
-    end
-
-    raise "Runtime Error: Cannot get field."
   end
 
   def process_set_field(target_reg, args, frame)
@@ -238,12 +226,12 @@ class VM
     boxed_val = args[1]
     index = args[2]
 
-    struct_obj, index = get_field_and_obj(boxed_obj, index)
+    struct_obj = Value.resolve_val(boxed_obj)
     if struct_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    struct_obj[index] = boxed_val
+    struct_obj.write_at(index, boxed_val)
 
     nil
   end
@@ -439,15 +427,14 @@ class VM
     obj = Value.resolve_val(boxed_obj)
 
     is_heap_arr = obj.is_a?(FluxArray)
-    is_stack_arr = obj.is_a?(FluxStackPtr)
+    is_stack_arr = obj.is_a?(MemorySlice)
 
-    # TODO: Fix
     if (is_heap_arr || is_stack_arr) && method_name == :map
       boxed_closure = args[0]
       closure_obj = Value.as_obj(boxed_closure)
 
       # Result is on the heap, even for stack as of now.
-      data = is_stack_arr ? obj.to_a : obj.data
+      data = obj.respond_to?(:to_boxed_a) ? obj.to_boxed_a : obj.data
 
       new_list = data.map do |item_boxed|
         invoke_function(closure_obj, [item_boxed], frame) # TODO: What about errors?
@@ -699,55 +686,35 @@ class VM
 
 
   def process_get_index(target_reg, args, frame)
-    boxed_list = args[0]
+    boxed_seq = args[0]
     boxed_index = args[1]
 
-    list_obj, index = get_index_and_obj(boxed_list, boxed_index)
-    result = list_obj[index]
-
-    if list_obj.is_a?(FluxString) || (list_obj.is_a?(FluxView) && list_obj.owner.is_a?(FluxString))
-      # TODO: Why is this special??
-      # Box the character string
-      Value.box_constant(result)
-    else
-      # Already boxed
-      result
-    end
+    index = Value.unbox(boxed_index)
+    seq = Value.resolve_val(boxed_seq)
+    seq.read_at(index)
   end
 
   def process_set_index(target_reg, args, frame)
-    boxed_list = args[0]
+    boxed_seq = args[0]
     boxed_index = args[1]
     boxed_val = args[2]
 
-    list_obj, index = get_index_and_obj(boxed_list, boxed_index)
-    if list_obj.frozen?
+    seq = Value.resolve_val(boxed_seq)
+    if seq.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    list_obj[index] = boxed_val
+    index = Value.unbox(boxed_index)
+    seq.write_at(index, boxed_val)
 
     nil
-  end
-
-  def get_index_and_obj(boxed_list, boxed_index)
-    tag = Value.get_tag(boxed_index)
-    idx_val = (tag == Value::TAG_NUMBER) ? Value.as_number(boxed_index).to_i : Value.as_byte(boxed_index)
-
-    list_obj = Value.resolve_val(boxed_list) # FluxArray, FluxString, OR FluxView
-    if list_obj.is_a?(FluxStackPtr)
-      idx_val += list_obj.offset
-      list_obj = list_obj.container
-    end
-    [list_obj, idx_val]
   end
 
   def process_get_field(target_reg, args, frame)
     boxed_obj = args[0]
     index = args[1]
-
-    struct_obj, index = get_field_and_obj(boxed_obj, index)
-    struct_obj[index]
+    obj = Value.resolve_val(boxed_obj)
+    obj.read_at(index)
   end
 
   def process_assert(target_reg, args, frame)
@@ -789,6 +756,7 @@ class VM
     nil
   end
 
+  # Unused
   def process_take_ref(target_reg, args, frame)
     boxed_val = args[0]
     ptr = FluxHeapPtr.new(boxed_val)
@@ -804,7 +772,7 @@ class VM
     e_idx = Value.unbox(boxed_end).to_i
 
     # Unbox, don't deref.
-    # If owner_obj is a FluxView, the new FluxView will wrap it (View of View).
+    # If owner_obj is a MemorySlice, the new MemorySlice will wrap it (View of View).
     owner_obj = Value.as_obj(boxed_owner)
 
     len = e_idx - s_idx + 1
@@ -812,8 +780,8 @@ class VM
       raise "Runtime Error: Invalid Slice range (End < Start)"
     end
 
-    view = FluxView.new(owner_obj, s_idx, len)
-    Value.box_obj(view)
+    slice = MemorySlice.new(owner_obj, s_idx, len)
+    Value.box_obj(slice)
   end
 
   def process_throw(target_reg, args, frame)
@@ -854,70 +822,60 @@ class VM
 
     offset = frame.alloca(size)
 
-    ptr = FluxStackPtr.new(offset, size, frame.stack_blob, struct_name)
+    ptr = MemorySlice.new(frame.stack_blob, offset, size)
 
     Value.box_obj(ptr)
   end
 
   def process_mem_copy(target_reg, args, frame)
-    dest_ptr = Value.resolve_val(args[0])
-    src_obj = Value.resolve_val(args[1]) # Could be Ptr or Heap Object
+    dest_slice = Value.resolve_val(args[0])
+    src_obj = Value.resolve_val(args[1]) # Could be MemorySlice or Heap Object
     size = args[2]
 
     # 1. Validate Destination (Must be Stack Memory)
-    unless dest_ptr.is_a?(FluxStackPtr)
+    unless dest_slice.is_a?(MemorySlice)
       raise "Runtime Error: MEM_COPY destination must be a Stack Pointer."
     end
 
-    # 2. Handle Source Types
-    if src_obj.is_a?(FluxStackPtr)
-      # --- CASE A: Stack -> Stack Copy (Fastest) ---
-      if dest_ptr.container.type == :obj
-        (0...size).each do |i|
-          dest_ptr.container[dest_ptr.offset + i] = src_obj.container[src_obj.offset + i]
-        end
-      else
-        # Binary Copy logic...
-        byte_width = (dest_ptr.container.type == :byte) ? 1 : 8
-        raw_bytes = src_obj.container.data.byteslice(src_obj.offset * byte_width, size * byte_width)
-        dest_ptr.container.data[dest_ptr.offset * byte_width, size * byte_width] = raw_bytes
-      end
+    # 2. OPTIMIZATION: Bulk Binary Copy
+    # Only possible if BOTH are binary blobs (Strings).
+    # We check if underlying storage is a String.
+    dest_blob = dest_slice.container.data
+    src_blob  = src_obj.is_a?(MemorySlice) ? src_obj.container.data : src_obj.data
 
-    elsif src_obj.is_a?(FluxArray)
-      # --- CASE B: Heap -> Stack Copy (Flexible) ---
-      # This enables returning %[1,2,3] from a function expecting Number[3]
+    if dest_blob.is_a?(String) && src_blob.is_a?(String)
+      # Calculate byte offsets
+      # If type is :byte, multiplier is 1. If :nanbox/:int64, multiplier is 8.
+      dest_mult = (dest_slice.container.type == :byte) ? 1 : 8
+      src_mult  = (src_obj.respond_to?(:container) && src_obj.container.type == :byte) ? 1 : 8
 
-      # Safety Check
-      if src_obj.size < size
-        raise "Runtime Error: Cannot copy Heap Array of size #{src_obj.size} into Stack slot of size #{size}"
-      end
+      # Handle Source Offset (0 if it's a raw Array, .offset if it's a Slice)
+      src_offset_idx = src_obj.is_a?(MemorySlice) ? src_obj.offset : 0
 
-      if dest_ptr.container.type == :obj
-        (0...size).each do |i|
-          # Read from Heap (src_obj[i]), Write to Stack
-          dest_ptr.container[dest_ptr.offset + i] = src_obj[i]
-        end
-      else
-        # Binary Copy (NanBox/Byte)
-        # FluxArray stores data in @data. If it's :nanbox/:int64, @data is a String.
-        if src_obj.data.is_a?(String)
-          # Bulk Byte Copy
-          byte_width = (dest_ptr.container.type == :byte) ? 1 : 8
-          raw_bytes = src_obj.data.byteslice(0, size * byte_width)
-          dest_ptr.container.data[dest_ptr.offset * byte_width, size * byte_width] = raw_bytes
-        else
-          # Slow loop fallback (if Heap is :obj but Stack is :nanbox - rare/weird)
-          (0...size).each do |i|
-            # We might need to unbox/rebox here depending on types
-            val = src_obj[i]
-            dest_ptr.container[dest_ptr.offset + i] = val
-          end
-        end
-      end
+      # Perform low-level string copy
+      bytes_to_copy = size * src_mult
+      raw_bytes = src_blob.byteslice(src_offset_idx * src_mult, bytes_to_copy)
 
-    else
-      raise "Runtime Error: MEM_COPY source must be StackPtr or HeapArray. Got #{src_obj.class}"
+      # Write to dest
+      dest_blob[dest_slice.offset * dest_mult, bytes_to_copy] = raw_bytes
+
+      return nil
     end
+
+    # 3. FALLBACK: The Unified Loop (Polymorphic)
+    # This handles ALL other cases:
+    # - Copying :obj Array -> :nanbox Stack
+    # - Copying :nanbox Stack -> :obj Array
+    # - Copying Strings, etc.
+
+    (0...size).each do |i|
+      # read_at handles the source offset logic internally
+      val = src_obj.read_at(i)
+
+      # write_at handles the dest offset logic internally
+      dest_slice.write_at(i, val)
+    end
+
 
     nil
   end

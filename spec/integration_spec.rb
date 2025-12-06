@@ -136,7 +136,7 @@ RSpec.describe "INTEGRATION" do
       let(:script) { 'view' }
       it "runs" do
         output = [
-          "STDOUT > View[2]",
+          "STDOUT > [10.0, 20.0]",
           "STDOUT > 10.0",
           "0"
         ]

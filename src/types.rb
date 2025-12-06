@@ -13,7 +13,7 @@ module Formatter
 
     return val if val.is_a?(Numeric) || val.is_a?(String) || val.nil?
 
-    if val.is_a?(FluxStackPtr) || val.is_a?(FluxArray)
+    if val.is_a?(MemorySlice) || val.is_a?(FluxArray)
       return val.to_s
     end
 
@@ -73,55 +73,6 @@ class FluxObject
     # Help Ruby GC clean up the heavy data
     @data = nil
     @owner = nil
-  end
-end
-
-class FluxStackPtr < FluxObject
-  attr_reader :offset, :size, :container, :struct_type
-
-  def initialize(offset, size, container, struct_type = nil)
-    # Note: We don't register this in the Arena.
-    # It is a temporary value that lives in a Register.
-    super(register: true)
-    @offset = offset
-    @size = size
-    @container = container
-    @struct_type = struct_type
-  end
-
-  def to_native_a
-    if @container.is_a?(FluxArray)
-      @container.slice_to_native(@offset, @size)
-    elsif @container.is_a?(String)
-      FluxArray.decode_binary_blob(@container, @offset, @size, :nanbox)
-    else
-      []
-    end
-  end
-
-  def to_a
-    (0...size).map { |i| container[offset + i] }
-  end
-
-  def to_s
-    # If it's a byte array, print as string. Else print as list.
-    arr = to_native_a
-    # Heuristic: If it looks like a byte array, join it
-    if @struct_type.to_s.include?("Byte")
-      arr.map do |x|
-        val = x.is_a?(Numeric) ? x.to_i : x
-        val.is_a?(Integer) ? val.chr : val.to_s
-      end.join
-    else
-      arr.to_s
-    end
-  end
-
-  def inspect
-    content = to_s
-    # If it printed as a string, quote it. Otherwise leave as list.
-    content = "\"#{content}\"" if @struct_type.to_s.start_with?("Byte")
-    "StackPtr<#{@struct_type}>#{content}"
   end
 end
 
@@ -333,6 +284,25 @@ class FluxArray < FluxObject
     slice_to_native(0, size)
   end
 
+  def read_at(index)
+    self[index]
+  end
+
+  def write_at(index,value)
+    self[index] = value
+  end
+
+  def to_boxed_a
+    # If it's :obj, data is already boxed.
+    # If it's :byte/:nanbox, we need to convert internal buffer to boxed array
+    if @type == :obj
+      @data
+    else
+      # Convert binary blob to array of boxed values
+      (0...size).map { |i| self[i] }
+    end
+  end
+
   # --- FORMATTING LOGIC ---
 
   def to_s
@@ -427,6 +397,16 @@ class FluxString < FluxObject
     FluxString.new(@data + other_str, register: true)
   end
 
+  def read_at(index)
+    @data[index]
+  end
+
+  def write_at(index, value)
+    raise "Can only write char" if !value.is_a?(String)
+    raise "Can only write char" if !value.len == 1
+    @data[index] = value
+  end
+
   def to_s; check_alive!; @data.to_s; end
   def inspect; @data.inspect; end
 
@@ -437,56 +417,102 @@ class FluxString < FluxObject
 end
 
 # ... View Types and Serialization Registry remain the same ...
-class FluxView < FluxObject
-  attr_reader :owner, :offset, :len
+class MemorySlice < FluxObject
+  attr_reader :container, :offset, :size, :kind
 
-  def initialize(owner, offset, len)
-    super()
-    @owner = owner
-    @offset = offset
-    @len = len
-  end
+  def initialize(container, offset, size, kind = nil)
+    # We do NOT register slices in the Arena usually,
+    # unless they are stored in a Register (which they are).
+    super(register: true)
 
-  def check_alive!
-    super
-    unless @owner.is_alive
-      raise "Memory Error: Dangling Pointer! View accessed after Owner died."
-    end
-  end
-
-  def [](idx)
-    check_alive!
-    raise "Runtime Error: View index out of bounds" if idx >= @len
-
-    if @owner.is_a?(FluxString)
-      @owner.data[@offset + idx]
+    # If we take a slice of a slice, point to the original container.
+    if container.is_a?(MemorySlice)
+      @container = container.container
+      @offset = container.offset + offset
+      @kind = kind || container.kind # Inherit if nested
     else
-      @owner[@offset + idx]
+      @container = container
+      @offset = offset
+      @kind = kind
     end
+
+    @size = size
   end
 
-  def to_string_copy
-    check_alive!
-    if @owner.is_a?(FluxString)
-      FluxString.new(@owner.data[@offset, @len])
-    else
-      raise "Cast Error: Cannot convert Array View to String"
+  def deref
+    @container
+  end
+
+  # --- THE UNIFIED INTERFACE ---
+
+  def read_at(index)
+    if @container.is_a?(FluxObject) && !@container.is_alive
+      raise "Memory Error: Dangling Pointer! MemorySlice accessed after container died."
     end
+    if index < 0 || index >= @size
+      raise "Runtime Error: View index out of bounds"
+    end
+    @container.read_at(@offset + index)
+  end
+
+  def write_at(index, value)
+    if index < 0 || index >= @size
+      raise "Runtime Error: View index out of bounds"
+    end
+    @container.write_at(@offset + index, value)
+  end
+
+  # For Iteration (map, etc)
+  def to_boxed_a
+    (0...@size).map { |i| read_at(i) }
+  end
+
+  # For Debugging
+  def to_native_a
+    to_boxed_a.map { |x| Formatter.to_native(x) }
   end
 
   def to_s
-    check_alive!
-    if @owner.is_a?(FluxString)
-      @owner.data[@offset, @len]
-    else
-      "View[#{@len}]"
+    if is_string_like?
+      # OPTIMIZATION: If the container is actually a String wrapper,
+      # use Ruby's native slicing (Fast)
+      if @container.is_a?(FluxString)
+        return @container.data[@offset, @size]
+      end
+
+      # FALLBACK: Stack Strings / Byte Arrays
+      # Unbox the integers, convert to Char, and join.
+      return to_boxed_a.map { |v| Value.unbox(v).to_i.chr }.join
     end
+
+    # Default: Print as a list [10, 20, 30]
+    to_native_a.to_s
   end
 
-  def deref; check_alive!; @owner; end
-  def inspect; to_s; end
+  def inspect
+    content = to_s
+    content = "\"#{content}\"" if is_string_like?
+    "Slice<#{@size}>#{content}"
+  end
+
+  private
+
+  def is_string_like?
+    # 1. Is the container explicitly a String? (Heap String View)
+    return true if @container.is_a?(FluxString)
+
+    # 2. Was this slice created with a Type Hint? (Stack String / ALLOCA)
+    #    e.g. kind="String" or kind="Byte[10]"
+    return true if @kind.to_s.include?("Byte") || @kind.to_s == "String"
+
+    # 3. Is the container a Byte Array? (Heap Byte Array View)
+    return true if @container.is_a?(FluxArray) && @container.type == :byte
+
+    false
+  end
 end
 
+# Unused
 class FluxHeapPtr < FluxObject
   attr_reader :owner
   def initialize(owner); super(); @owner = owner; end

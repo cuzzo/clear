@@ -216,8 +216,8 @@ module Value
     # 2. Unbox: Convert ID -> FluxObject
     obj = Value.as_obj(boxed_val)
 
-    # 3. Recursively Deref (View/Pointer -> Owner)
-    while obj.is_a?(FluxView) || obj.is_a?(FluxHeapPtr)
+    # 3. Recursively Deref (HeapPointer -> Owner)
+    while obj.is_a?(FluxHeapPtr)
       obj = obj.deref
     end
 
@@ -244,7 +244,7 @@ module Value
       # Return the Integer (e.g. 104)
       unbox(boxed_val)
     when TAG_OBJ
-      # Return the actual Flux Object (FluxString, FluxStackPtr, etc.)
+      # Return the actual Flux Object (FluxString, MemorySlice, etc.)
       as_obj(boxed_val)
     else
       # Fallback: It might be nil, or a raw integer
