@@ -84,6 +84,27 @@ class Lexer
         raise_if_byte_overflow(val)
         add(:BYTE, val, start_col)
 
+      when @s.scan(/(\d+)_([a-zA-Z0-9]+)/)
+        val_str = @s[1]
+        suffix = @s[2]
+        val = val_str.to_i
+
+        case suffix
+        when 'i64'
+          # Direct mapping to your new FluxInt64
+          add(:INT64, val, start_col)
+
+        when 'u8'
+          # Maps to your existing Byte type
+          raise_if_byte_overflow(val)
+          add(:BYTE, val, start_col)
+
+        # when 'i32' ...
+        # when 'f32' ...
+        else
+          raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
+        end
+
       when @s.scan(/\d+(\.(?!\.)\d*)?/)
         add(:NUMBER, @s.matched.to_f, start_col)
 

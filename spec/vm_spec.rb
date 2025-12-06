@@ -357,6 +357,16 @@ RSpec.describe VM do
         expect(resp).to eq(25)
       end
     end
+
+    describe "Int64" do
+      let(:source) { <<~FLUX
+          RETURN 0_i64 + 10_i64;
+        FLUX
+      }
+      it "flows" do
+        expect(resp.value).to eq(10)
+      end
+    end
   end
 
   describe "VM OpCode: JMP_IF_ERROR" do

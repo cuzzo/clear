@@ -1055,6 +1055,8 @@ class Compiler
     elsif node.type == :STRING
       # Register as Static so it survives Arena.reset! and is found by ID
       val = FluxString.new(val, register: :static)
+    elsif node.type == :INT64
+      val = FluxInt64.new(node.value, register: :static)
     end
     k = @chunk.add_constant(val)
     @chunk.emit(node, :LOADK, "R#{target_reg}", "K#{k}")

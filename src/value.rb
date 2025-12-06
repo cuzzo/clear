@@ -90,6 +90,7 @@ module Value
     when TrueClass, FalseClass then box_bool(const)
     when NilClass then box_nil
     when FluxByte then box_byte(const)
+    when FluxInt64 then box_obj(const)
     when FluxObject then box_obj(const)
     when String
       # Wrap legacy strings for constant pool

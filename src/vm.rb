@@ -506,7 +506,7 @@ class VM
   end
 
   # 2. INT64 MATH (Heap Pointers)
-  def process_add_i64(target, args, frame)
+  def process_add_int64(target, args, frame)
     ptr_a = args[0]
     ptr_b = args[1]
 

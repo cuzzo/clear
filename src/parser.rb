@@ -78,7 +78,7 @@ class Parser
 
   # Primaries
   primary(:NUMBER) { t = consume(:NUMBER); AST::Literal.new(t, :NUMBER, t.value, :stack) }
-  primary(:INT64) { t = consume(:INT64); AST::Literal.new(t, :INT64, t.value, :stack) }
+  primary(:INT64) { t = consume(:INT64); AST::Literal.new(t, :INT64, t.value, :heap) }
   primary(:STRING) { t = consume(:STRING); AST::Literal.new(t, :STRING, t.value, :stack) }
   primary(:BYTE) { t = consume(:BYTE); AST::Literal.new(t, :BYTE, t.value, :stack) }
   primary(:VAR_ID) { parse_var_id }

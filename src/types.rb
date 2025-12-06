@@ -115,8 +115,8 @@ end
 class FluxInt64 < FluxObject
   attr_reader :value
 
-  def initialize(val)
-    super(register: true)
+  def initialize(val, register: true)
+    super(register: register)
     @value = val.to_i
   end
 
@@ -126,6 +126,7 @@ class FluxInt64 < FluxObject
   end
 
   def to_s; "#{@value}_i64"; end
+  def inspect; "#{@value}_i64"; end
 end
 
 ###
@@ -549,5 +550,11 @@ MessagePack::DefaultFactory.register_type(
   FluxByte,
   packer: ->(obj) { obj.value.chr },
   unpacker: ->(data) { VM::FluxByte.new(data.ord) }
+)
+MessagePack::DefaultFactory.register_type(
+  2, # Use a unique ID (FluxByte is 1)
+  FluxInt64,
+  packer: ->(obj) { [obj.value].pack('q>') }, # Serialize to 8-byte string
+  unpacker: ->(data) { FluxInt64.new(data.unpack1('q>')) } # Deserialize back to Object
 )
 
