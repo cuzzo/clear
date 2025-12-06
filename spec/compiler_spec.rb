@@ -526,7 +526,7 @@ RSpec.describe Compiler do
       set_op = ops.find { |op| op[0] == :SET_FIELD }
 
       expect(set_op).to_not be_nil
-      expect(set_op[2]).to eq("x")
+      expect(set_op[3]).to eq(0)
     end
   end
 
@@ -558,7 +558,7 @@ RSpec.describe Compiler do
         # 3. Verify the Link
         # Look for the SET_HASH that attaches the inner to the outer
         # SET_HASH OuterReg, Key, InnerReg
-        link_op = ops.find { |op| op[0] == :SET_HASH && op[1] == outer_reg && op[3] == inner_reg }
+        link_op = ops.find { |op| op[0] == :SET_HASH && op[1] == outer_reg && op[2] == inner_reg }
 
         expect(link_op).to_not be_nil, "Failed to find SET_HASH linking #{outer_reg} and #{inner_reg}"
       end
@@ -593,7 +593,7 @@ RSpec.describe Compiler do
 
         # 4. Verify the Link (SET_HASH)
         # SET_HASH HashReg, "tags", ListReg
-        link_op = ops.find { |op| op[0] == :SET_HASH && op[1] == hash_reg && op[3] == list_reg }
+        link_op = ops.find { |op| op[0] == :SET_HASH && op[1] == hash_reg && op[2] == list_reg }
         expect(link_op).to_not be_nil
       end
     end
@@ -698,10 +698,10 @@ RSpec.describe Compiler do
 
         # 2. CRITICAL: It must write DIRECTLY to R0 (The hidden return pointer)
         #    Format: SET_FIELD Target(R0) Field("x") Value(R_val)
-        write_op = ops.find { |op| op[0] == :SET_FIELD && op[1] == "R0" && op[2] == "x" }
+        write_op = ops.find { |op| op[0] == :SET_FIELD && op[1] == "R0" && op[3] == 0 }
 
         expect(write_op).to_not be_nil, "Expected direct write to R0, found none"
-        expect(write_op[3]).to eq(val_reg)
+        expect(write_op[2]).to eq(val_reg)
 
         # 3. It should NOT contain MEM_COPY
         expect(ops.flatten).to_not include(:MEM_COPY)

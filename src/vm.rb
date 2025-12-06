@@ -33,7 +33,6 @@ class VM
   def initialize(code_str = "", args = [])
     @globals = {} # To store global structs/functions
     @structs = {} # Stores "Name" => { "field" => "Type" }
-    @struct_offsets = {} # Cache for fast field->index lookup
     @source_lines = code_str.lines
 
 
@@ -222,59 +221,54 @@ class VM
     Value.box_obj(obj)
   end
 
-  # TODO: Make this work with stack arrays
-  def get_field_and_obj(flux_obj, field_name)
+  def get_field_and_obj(flux_obj, index)
     flux_obj = Value.resolve_val(flux_obj)
 
-    if flux_obj.is_a?(FluxHash) # HASH -> not struct
-       return [flux_obj, field_name]
-    end
-
-    if !flux_obj.is_a?(FluxArray) && !flux_obj.is_a?(FluxStackPtr) # Structs are arrays or SRVO pointers.
-      raise "Runtime Error: Attempting to get a field `#{field_name}` on `#{flux_obj.class}`"
-    end
-
-    type_name = flux_obj.struct_type
-    raise "Not a struct" unless type_name
-
-    index = @struct_offsets[type_name][field_name]
-    if index.nil?
-      raise "Runtime Error: Cannot get field `#{key}` on `#{target_obj.class}`"
-    end
-
-    # Only Unwrap if it is a StackPtr
     if flux_obj.is_a?(FluxStackPtr)
-      index += flux_obj.offset
-      flux_obj = flux_obj.container
+      return [flux_obj.container, flux_obj.offset + index]
+    elsif flux_obj.is_a?(FluxArray)
+      return [flux_obj, index]
     end
 
-    return [flux_obj, index]
+    raise "Runtime Error: Cannot get field."
   end
 
   def process_set_field(target_reg, args, frame)
     boxed_obj = args[0]
-    key = args[1].to_sym
-    boxed_val = args[2]
+    boxed_val = args[1]
+    index = args[2]
 
-    hash_obj, index = get_field_and_obj(boxed_obj, key)
-    if hash_obj.frozen?
+    struct_obj, index = get_field_and_obj(boxed_obj, index)
+    if struct_obj.frozen?
       raise "Runtime Error: Cannot modify immutable object."
     end
 
-    hash_obj[index] = boxed_val
+    struct_obj[index] = boxed_val
 
     nil
   end
 
   def process_set_hash(target_reg, args, frame)
     boxed_hash = args[0]
-    key = args[1].to_sym
-    boxed_val = args[2]
+    boxed_val = args[1]
+    key = args[2].to_sym
 
     hash_obj = Value.as_obj(boxed_hash)
+    if hash_obj.frozen?
+      raise "Runtime Error: Cannot modify immutable object."
+    end
+
     hash_obj[key] = boxed_val
 
     nil
+  end
+
+  def process_get_hash(target_reg, args, frame)
+    boxed_hash = args[0]
+    key = args[1].to_sym
+
+    hash_obj = Value.as_obj(boxed_hash)
+    hash_obj[key]
   end
 
   def process_new_list(target_reg, args, frame)
@@ -402,11 +396,6 @@ class VM
     name = args[0].to_sym
     schema = args[1] # The ruby hash from the compiler
     @structs[name] = schema
-
-    offsets = {}
-    schema.keys.each_with_index { |k, i| offsets[k.to_sym] = i }
-    @struct_offsets[name] = offsets
-
     nil
   end
 
@@ -449,12 +438,18 @@ class VM
 
     obj = Value.resolve_val(boxed_obj)
 
+    is_heap_arr = obj.is_a?(FluxArray)
+    is_stack_arr = obj.is_a?(FluxStackPtr)
+
     # TODO: Fix
-    if obj.is_a?(FluxArray) && method_name == :map
+    if (is_heap_arr || is_stack_arr) && method_name == :map
       boxed_closure = args[0]
       closure_obj = Value.as_obj(boxed_closure)
 
-      new_list = obj.to_a.map do |item_boxed|
+      # Result is on the heap, even for stack as of now.
+      data = is_stack_arr ? obj.to_a : obj.data
+
+      new_list = data.map do |item_boxed|
         invoke_function(closure_obj, [item_boxed], frame) # TODO: What about errors?
       end
       result_obj = FluxArray.new(nil, new_list)
@@ -749,10 +744,10 @@ class VM
 
   def process_get_field(target_reg, args, frame)
     boxed_obj = args[0]
-    key = args[1].to_sym
+    index = args[1]
 
-    hash_obj, index = get_field_and_obj(boxed_obj, key)
-    hash_obj[index]
+    struct_obj, index = get_field_and_obj(boxed_obj, index)
+    struct_obj[index]
   end
 
   def process_assert(target_reg, args, frame)
@@ -1159,7 +1154,7 @@ class VM
     return keep_obj
   end
 
-  def run_code(code_str, fname)
+  def run_code(code_str, fname = "")
     tokens = Lexer.new(code_str).tokenize
     ast = Parser.new(tokens, code_str).parse
 

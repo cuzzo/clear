@@ -99,6 +99,10 @@ class FluxStackPtr < FluxObject
     end
   end
 
+  def to_a
+    (0...size).map { |i| container[offset + i] }
+  end
+
   def to_s
     # If it's a byte array, print as string. Else print as list.
     arr = to_native_a

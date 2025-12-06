@@ -23,7 +23,7 @@ FN main(s=5) RETURNS Number[3] ->
   -- This is a heap list, returned as a STACK list
   -- inefficient, it should just be created on the STACK
   -- but prooves it is possible.
-  VAR list = %[1, 2, 3];
+  VAR list = [1, 2, 3];
   list
     .map( %(x) USE(multiple) -> x * multiple )
      s> print;

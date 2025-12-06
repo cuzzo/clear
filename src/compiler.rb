@@ -220,6 +220,7 @@ class Compiler
     ok_jump = @chunk.emit_with_index(node, :JMP_IF_OK, "R#{target_reg}", 0)
 
     # 2. If we are here, it IS an Error. Attach snapshot.
+    # TODO: ERROR FIELD
     @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "snapshot", "R#{r_snapshot}")
 
     # 3. Patch the jump
@@ -636,7 +637,9 @@ class Compiler
 
         with_temp_reg do |r_val|
            visit(val_node, r_val)
-           @chunk.emit(node, :SET_FIELD, "R#{target_reg}", field_name, "R#{r_val}")
+           type = infer_type(node)
+           field_idx = resolve_struct_field_index(node, type, field_name)
+           @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "R#{r_val}", field_idx)
         end
       end
     end
@@ -777,11 +780,11 @@ class Compiler
       l_value = node.name
 
       case l_value
-      when AST::GetField then compile_field_set(l_value, val_reg)
-      when AST::GetIndex then compile_index_set(l_value, val_reg)
-      when AST::Identifier then compile_var_set(l_value, val_reg)
+      when AST::GetField then compile_set_field(l_value, val_reg)
+      when AST::GetIndex then compile_set_index(l_value, val_reg)
+      when AST::Identifier then compile_set_var(l_value, val_reg)
       # Legacy support for raw strings
-      when String then compile_var_set(l_value, val_reg)
+      when String then compile_set_var(l_value, val_reg)
       else
         error!(node, "Invalid assignment target: #{target.class}")
       end
@@ -793,7 +796,7 @@ class Compiler
     end
   end
 
-  def compile_var_set(node, val_reg)
+  def compile_set_var(node, val_reg)
     var_name = node.is_a?(AST::Identifier) ? node.name : node
 
     # 1. Check Mutability (Optional feature)
@@ -815,22 +818,25 @@ class Compiler
     end
   end
 
-  def compile_field_set(node, val_reg)
+  def compile_set_field(node, val_reg)
     # 1. Check Mutability
     if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
       error!(node, :IMMUTABLE_FIELD_ASSIGNMENT, node.field, node.target.name)
     end
 
-    # node is the AST::GetField(target, field)
     with_temp_reg do |obj_reg|
-      visit(node.target, obj_reg) # Compile 'obj'
-
-      # Emit: SET_FIELD R_obj, "field_name", R_val
-      @chunk.emit(node, :SET_FIELD, "R#{obj_reg}", node.field, "R#{val_reg}")
+      visit(node.target, obj_reg)
+      type = infer_type(node.target)
+      if type == :HashMap
+        @chunk.emit(node, :SET_HASH, "R#{obj_reg}", "R#{val_reg}", node.field)
+      else
+        field_idx = resolve_struct_field_index(node, type, node.field)
+        @chunk.emit(node, :SET_FIELD, "R#{obj_reg}", "R#{val_reg}", field_idx)
+      end
     end
   end
 
-  def compile_index_set(node, val_reg)
+  def compile_set_index(node, val_reg)
     # 1. Check Mutability
     if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
       error!(node, :IMMUTABLE_LIST_ASSIGNMENT, node.target.name)
@@ -925,6 +931,7 @@ class Compiler
 
           # 2. Set the Context Field on the Error
           # target_reg currently holds the Error object
+          # TODO: ERROR FIELD
           @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "context", "R#{r_ctx}")
         end
       end
@@ -991,9 +998,13 @@ class Compiler
     # x.name
     with_temp_reg do |r_target|
       visit(node.target, r_target)
-      # We assume field names are static strings for now
-      # Emit GET_FIELD R_result, R_target, "field_name"
-      @chunk.emit(node, :GET_FIELD, "R#{target_reg}", "R#{r_target}", node.field)
+      type = infer_type(node.target)
+      if type == :HashMap
+        @chunk.emit(node, :GET_HASH, "R#{target_reg}", "R#{r_target}", node.field)
+      else
+        field_idx = resolve_struct_field_index(node, type, node.field)
+        @chunk.emit(node, :GET_FIELD, "R#{target_reg}", "R#{r_target}", field_idx)
+      end
     end
   end
 
@@ -1156,7 +1167,14 @@ class Compiler
       end
     end
 
-    node.fields.each { |k,v| with_temp_reg { |r| visit(v, r); @chunk.emit(node, :SET_FIELD, "R#{target_reg}", k, "R#{r}") } }
+    type = infer_type(node)
+    node.fields.each do |field, val_node|
+      field_idx = resolve_struct_field_index(node, type, field)
+      with_temp_reg do |r|
+        visit(val_node, r)
+        @chunk.emit(node, :SET_FIELD, "R#{target_reg}", "R#{r}", field_idx)
+      end
+    end
   end
 
   def compile_struct_def(node, target_reg)
@@ -1176,13 +1194,13 @@ class Compiler
     # Treat Hash like a Struct or List (for v0.1, let's use NEW_STRUCT for simplicity)
     @chunk.emit(node, :NEW_HASH, "R#{target_reg}")
     node.pairs.each do |k, v|
-      with_temp_reg do |r|
-        visit(v, r)
+      with_temp_reg do |val_reg|
+        visit(v, val_reg)
         # Assuming keys are strings/identifiers
         # If 'k' is an expression, you'd need to visit it too.
         # For v0.1 simple string keys:
         key_name = k.is_a?(AST::Literal) ? k.value : k.name
-        @chunk.emit(node, :SET_HASH, "R#{target_reg}", key_name, "R#{r}")
+        @chunk.emit(node, :SET_HASH, "R#{target_reg}", "R#{val_reg}", key_name)
       end
     end
   end
@@ -1333,7 +1351,10 @@ class Compiler
           # 3. DIRECT WRITE to Caller's Stack
           # ptr_reg holds the __ret_ptr.
           # The VM will resolve this pointer and write to the Caller's blob.
-          @chunk.emit(node, :SET_FIELD, "R#{ptr_reg}", field_name, "R#{r_val}")
+
+          type = infer_type(node)
+          field_idx = resolve_struct_field_index(node, type, field_name)
+          @chunk.emit(node, :SET_FIELD, "R#{ptr_reg}", "R#{r_val}", field_idx)
         end
       end
 
@@ -1532,6 +1553,9 @@ private
     when AST::StructLit
       return node.name.to_sym
 
+    when AST::HashLit
+      return :HashMap
+
     when AST::ListLit
       return "Any[]".to_sym if node.items.empty?
 
@@ -1645,6 +1669,24 @@ private
     # If we don't know what it is, assume it's a pointer/value fitting in 1 register.
     # Or raise an error if you want strictness.
     return 1
+  end
+
+  # TODO: Symbolize struct names
+  def resolve_struct_field_index(node, type_name, field_name)
+    schema = @struct_defs[type_name.to_s]
+    if schema.nil?
+      error!(node, :ILLEGAL_FIELD_LOOKUP, field_name, type_name)
+    end
+
+    # 2. Find the index of the field in the keys
+    # IMPORTANT: Ruby hashes preserve insertion order, which matches your memory layout
+    index = schema.keys.index(field_name)
+
+    if index.nil?
+      error!(node, :STRUCT_FIELD_UNRESOLVABLE, field_name, type_name)
+    end
+
+    index
   end
 end
 

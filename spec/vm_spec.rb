@@ -214,8 +214,9 @@ RSpec.describe VM do
     context "Can pass a MUTABLE as a MUTABLE into a MUTABLE func" do
       let(:source) {
         <<~FLUX
-          FN mut!(MUTABLE x) -> SET x.p = 0; END
-          MUTABLE z = %{ p: 42 };
+          STRUCT Sx { p: Number }
+          FN mut!(MUTABLE x : Sx) -> SET x.p = 0; END
+          MUTABLE z = %Sx{ p: 42 };
           mut!(z);
           RETURN z.p;
         FLUX
@@ -642,15 +643,15 @@ RSpec.describe VM do
         [:NEW_STRUCT, "R0", "Point"],   # R0 = %Point{}
 
         # Set x = 10
-        [:LOADK,     "R1", "K0"],      # R1 = 10
-        [:SET_FIELD,  "R0", "x", "R1"], # R0["x"] = 10
+        [:LOADK, "R1", 0],              # R1 = 10
+        [:SET_FIELD,  "R0", "R1", 0],   # R0["x"] = 10
 
         # Set y = 20 (Just to ensure we can have multiple fields)
-        [:LOADK,     "R1", "K1"],      # R1 = 20
-        [:SET_FIELD,  "R0", "y", "R1"], # R0["y"] = 20
+        [:LOADK, "R1", 1],              # R1 = 20
+        [:SET_FIELD,  "R0", "R1", 1],   # R0["y"] = 20
 
         # Get x
-        [:GET_FIELD, "R2", "R0", "x"], # R2 = R0["x"]
+        [:GET_FIELD, "R2", "R0", 0],    # R2 = R0["x"]
 
         [:RETURN,    "R2"]
       ], [10, 20])
@@ -673,10 +674,10 @@ RSpec.describe VM do
         [:NEW_HASH, "R0"],              # R0 = {}
 
         [:LOADK,   "R1", "K0"],        # R1 = "active"
-        [:SET_HASH, "R0", "status", "R1"], # R0["status"] = "active"
+        [:SET_HASH, "R0", "R1", "status"], # R0["status"] = "active"
 
-        # In your VM, GET_FIELD reads hash keys if the object is a Hash
-        [:GET_FIELD, "R2", "R0", "status"],
+        # In your VM, GET_HASH reads hash keys if the object is a Hash
+        [:GET_HASH, "R2", "R0", "status"],
 
         [:RETURN, "R2"]
       ], ["active"])
@@ -1041,7 +1042,7 @@ RSpec.describe VM do
       code = <<~FLUX
         STRUCT Point { x: Number, y: Number }
 
-        FN get_x(p) ->
+        FN get_x(p : Point) ->
           -- 'p' arrives as a FluxPtr (View)
           -- accessing .x triggers the implicit deref in the VM
           RETURN p.x;
@@ -1064,7 +1065,7 @@ RSpec.describe VM do
       code = <<~FLUX
         STRUCT Box { val: Number }
 
-        FN set_val!(MUTABLE b) ->
+        FN set_val!(MUTABLE b : Box) ->
           -- Implicit Deref allows SET_FIELD on a Pointer
           SET b.val = 99;
         END
@@ -1358,7 +1359,7 @@ RSpec.describe "RVO (Return Value Optimization) & Heap Safety" do
     it "safely returns a Struct containing a String" do
       source = <<~FLUX
         STRUCT User { name: String }
-        FN make_user() ->
+        FN make_user() RETURNS User ->
           RETURN %User { name: %"FluxUser" };
         END
         VAR u = make_user();
@@ -1756,7 +1757,7 @@ RSpec.describe "Compiler Error Coverage" do
         source = <<~FLUX
           STRUCT Counter { x: Number }
 
-          FN increment_loop(current, max) ->
+          FN increment_loop(current, max) RETURNS Counter ->
             -- If we hit max, we create the struct.
             -- Because of SRVO, this writes to the pointer passed from Main.
             IF current == max THEN
@@ -1791,7 +1792,7 @@ RSpec.describe "Compiler Error Coverage" do
         source = <<~FLUX
           STRUCT Vec { x: Number, y: Number }
 
-          FN tail_vec(n) ->
+          FN tail_vec(n) RETURNS Vec ->
             IF n == 0 THEN
               -- Return a stack literal (SRVO writes directly to caller's slot)
               RETURN Vec{ x: 99, y: 99 };

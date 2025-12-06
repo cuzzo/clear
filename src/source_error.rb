@@ -27,7 +27,8 @@ module ErrorDefinitions
     IMMUTABLE_FIELD_ASSIGNMENT: "Cannot modify field '%s' of immutable object '%s'.",
     IMMUTABLE_LIST_ASSIGNMENT: "Cannot modify index of immutable list '%s'.",
     LIST_TYPE_MISMATCH: "List contains mixed types. Item %d is '%s', expected '%s'.",
-
+    ILLEGAL_FIELD_LOOKUP: "Type Error: Cannot determine struct type for field access '%s'. Object is '%s'.",
+    STRUCT_FIELD_UNRESOLVABLE: "Type Error: Struct '%s' has no field '%s'",
 
     # FUNCTION ERRORS
     MISSING_FUNCTION: "Missing function '%s'.",
