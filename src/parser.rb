@@ -119,15 +119,15 @@ class Parser
   # Dot Access: obj.field OR obj.method()
   suffix(:CHAR, '.') do |lhs|
     dot_token = consume(:CHAR, '.')
-    name = consume(:VAR_ID).value
+    name_token = consume(:VAR_ID)
 
     if match?(:CHAR, '(')
       # Method Call
       _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-      AST::MethodCall.new(dot_token, lhs, name, args)
+      AST::MethodCall.new(name_token, lhs, name_token.value, args)
     else
       # Field Access
-      AST::GetField.new(dot_token, lhs, name)
+      AST::GetField.new(name_token, lhs, name_token.value)
     end
   end
 
@@ -295,13 +295,13 @@ class Parser
       p_type = :Any
 
       if match!(:CHAR, ":")
-        p_type = parse_type_annotation
+        p_type = parse_type_annotation()
       end
 
       # TODO: This shouldn't be allowed for function calls
       default_val = nil
       if match!(:CHAR, '=')
-        default_val = parse_expression
+        default_val = parse_expression()
       end
 
       { name: p_name, type: p_type, default: default_val, mutable: is_mutable }
@@ -322,9 +322,9 @@ class Parser
     end
 
     # 3. Parse optional RETURNS
-    return_type = :Any
+    return_type = nil
     if match!(:KEYWORD, 'RETURNS')
-      return_type = parse_type_annotation.to_sym
+      return_type = parse_type_annotation()
     end
 
     consume(:ARROW, '->')
@@ -538,11 +538,11 @@ class Parser
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name = consume(:VAR_ID).value
       consume(:CHAR, ':')
-      type = parse_type_annotation
+      type = parse_type_annotation()
 
       default_val = nil
       if match!(:CHAR, '=')
-        default_val = parse_expression
+        default_val = parse_expression()
       end
 
       # Store as a hash containing both type and default
@@ -591,10 +591,10 @@ class Parser
     lit = parse_lit(:heap)
     return lit if !lit.nil?
     if match?(:CHAR, '(')
-      params = parse_argument_list
+      params = parse_argument_list()
       captures = []
       if match!(:KEYWORD, 'USE')
-        captures = parse_argument_list
+        captures = parse_argument_list()
       end
       consume(:ARROW, '->')
       # TODO - Lambdas can be multiple statements...
@@ -607,6 +607,13 @@ class Parser
   end
 
   def parse_type_annotation
+    if match?(:PERCENT)
+      consume(:PERCENT)
+      prefix = "%"
+    else
+      prefix = ""
+    end
+
     base = consume(:TYPE_ID).value
     inner = ""
 
@@ -631,7 +638,7 @@ class Parser
       end
     end
 
-    "#{base}#{inner}"
+    "#{prefix}#{base}#{inner}".to_sym
   end
 
   def parse_comma_seq(type, open, close)

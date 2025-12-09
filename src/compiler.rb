@@ -165,14 +165,6 @@ class Compiler
     existing_reg = current_scope.resolve_reg(var_name)
 
     if existing_reg
-      # === ASSIGNMENT CASE ===
-      # The variable exists. We just move the value into its register.
-
-      # Check mutability if you implemented that feature
-      if current_scope.is_immutable?(var_name)
-         error!(node, :VARIABLE_REBIND, var_name)
-      end
-
       @chunk.emit(node, :MOVE, "R#{existing_reg}", "R#{target_reg}")
 
     else
@@ -228,15 +220,10 @@ class Compiler
     @current_fn_is_stack_rvo = is_stack_type?(node.return_type)
 
     # TODO: why do params & return type need symbolized?
-    signature = {
-        params: node.params.map { |p| { name: p[:name], type: p[:type].to_sym, required: p[:default].nil?, mutable: p[:mutable] } },
-        return_type: node.return_type.to_sym
-      }
+    signature = node.resolved_type
     @fn_signatures[node.name] = signature
 
-    validate_mutability(node)
-
-    fn_compiler = Compiler.new(node.name, node.return_type, @source_code)
+    fn_compiler = Compiler.new(node.name, signature[:return_type], @source_code)
 
     if @current_fn_is_stack_rvo
       # We inject '__ret_ptr' as the first argument (R0).
@@ -337,19 +324,6 @@ class Compiler
     return target_reg
   end
 
-  def validate_mutability(node)
-    mutable_params = node.params.select { |p| p[:mutable] }
-    return if mutable_params.empty?
-    if !node.name.end_with?("!")
-      error!(node, "Style Error: Function '#{node.name}' has MUTABLE parameters (side-effects). Its name must end in '!' (e.g. '#{node.name}!')")
-    end
-
-    # Ensure no mutable parameter is a primitive
-    if mutable_params.any? { |p| AST::PRIMITIVE_TYPES.include?(p[:type]) }
-      error!(node, :PRIMITIVE_PASSED_AS_MUTABLE, p[:name], p[:type])
-    end
-  end
-
   def compile_func_call(node, target_reg)
     # 1. Handle Native Calls (Special Argument Parsing)
     if node.name == "native_call"
@@ -401,10 +375,6 @@ class Compiler
       error!(node, :MISSING_FUNCTION, func_name)
     end
 
-    if node.is_a?(AST::FuncCall)
-      verify_function_signature(node)
-    end
-
     # 2. Look up Signature for RVO
     return_type = :Any
     if @fn_signatures.key?(func_name)
@@ -435,69 +405,6 @@ class Compiler
     # 4. STANDARD PATH
     else
        @chunk.emit(node, :CALL_FUNC, "R#{target_reg}", func_name, args_regs.size, *args_regs)
-    end
-  end
-
-  def verify_function_signature(node)
-    error!(node, :MISSING_FUNCTION, node.name) if !@fn_signatures.key?(node.name)
-
-    params = @fn_signatures[node.name][:params]
-    min_args = params.count { |param| param[:required] }
-    max_args = params.size
-    given_args = node.args.size
-
-    # A. Arity Check (Count)
-    if given_args < min_args || given_args > max_args
-      if min_args == max_args
-        error!(node, :ARITY_MISMATCH, node.name, min_args, given_args)
-      else
-        error!(node, :ARITY_MISMATCH_RANGE, node.name, min_args, max_args, given_args)
-      end
-    end
-
-    node.args.each_with_index do |arg_node, i|
-      param = params[i]
-      # B. Check mutability
-      if param[:mutable]
-        # Rule 1: Must be a Variable (Identifier), not a literal/expression
-        if !arg_node.is_a?(AST::Identifier)
-          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, i+1, param[:name])
-        end
-
-        # Rule 2: The Variable being passed must be MUTABLE
-        # We check the scope to see if the user declared it with 'MUTABLE'
-        if current_scope.is_immutable?(arg_node.name)
-           error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, i+1, param[:name], arg_node.name)
-        end
-      end
-
-      # C. Type Check
-      expected = param[:type]
-      actual = infer_type(arg_node)
-
-      match = false
-
-      # Case 1: Exact Match or Any
-      if expected == :Any || actual == :Any || expected == actual
-        match = true
-
-      # Case 2: Slice Coercion
-      # Allow "Number[3]" (Stack) to pass into "Number[]" (View)
-      elsif expected.to_s.end_with?("[]")
-        # Extract base type: "Number[]" -> "Number"
-        base_expected = expected.to_s.chomp("[]")
-
-        # Check if actual type starts with "Number["
-        # This matches "Number[3]", "Number[*]", etc.
-        if actual.to_s.start_with?(base_expected + "[")
-           match = true
-        end
-      end
-
-      unless match
-        arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-        error!(arg_node, :ARGUMENT_TYPE_ERROR, arg_name, i+1, param[:name], expected, actual)
-      end
     end
   end
 
@@ -560,7 +467,7 @@ class Compiler
     @reg_top += 1
 
     storage = node.value.storage rescue :stack
-    final_type = infer_type(node.value)
+    final_type = infer_type(node.value) #node.resolved_type
     known_size = get_known_size(node)
 
     if storage == :stack && is_stack_candidate?(node.value)
@@ -578,7 +485,7 @@ class Compiler
     end
 
     coerce_type(node, r)
-    handle_view(node)
+    handle_view(node) # TODO: Move to the annotator
 
     current_scope.declare(node.name, r, final_type, node.mutable, false, known_size, storage)
     return r
@@ -619,7 +526,7 @@ class Compiler
         val_node = node.fields[field_name] || info[:default]
 
         if val_node.nil?
-           error!(node, :MISSING_FIELD_VALUE, field_name, node.name)
+          error!(node, :MISSING_FIELD_VALUE, field_name, node.name)
         end
 
         with_temp_reg do |r_val|
@@ -634,11 +541,11 @@ class Compiler
 
   # TODO: Do I need to raise an error here?
   def handle_view(node)
-   return if !node.value.is_a?(AST::GetIndex) && !node.value.is_a?(AST::Slice)
-   source_node = node.value.target
+    return if !node.value.is_a?(AST::GetIndex) && !node.value.is_a?(AST::Slice)
+    source_node = node.value.target
 
-   return if !source_node.is_a?(AST::Identifier)
-   current_scope.register_dependency(source_node.name, node.name)
+    return if !source_node.is_a?(AST::Identifier)
+    current_scope.register_dependency(source_node.name, node.name)
   end
 
   def get_known_size(node)
@@ -661,98 +568,9 @@ class Compiler
   end
 
   def coerce_type(node, r)
-    actual_type = infer_type(node.value)
-    declared_type = node.type.to_sym # TODO: Shouldn't have to do this.
-
-    final_type = :Any
-    if declared_type == :Any || actual_type == :Any
-      # We don't know enough to complain. Let it pass.
-      final_type = (declared_type == :Any) ? actual_type : declared_type
-
-    elsif declared_type == actual_type
-      final_type = declared_type
-
-    # === ALLOWED IMPLICIT CONVERSIONS ===
-    elsif declared_type == :Number && actual_type == :Byte
-      # We know this is safe, but the VM representation needs to change.
-      # So we emit the instruction to help the user.
-      final_type = :Number
-      @chunk.emit(node, :CAST, "R#{r}", "Number")
-
-    elsif declared_type == :Byte && actual_type == :Number
-      # We allow this too (wrapping).
-      final_type = :Byte
-      @chunk.emit(node, :CAST, "R#{r}", "Byte")
-
-    elsif declared_type.to_s.include?("[")
-      handle_array_type(node, r, declared_type, actual_type)
-      final_type = declared_type
-    else
-      error!(node, :VARIABLE_ASSIGNMENT_TYPE_ERROR, node.name, declared_type, actual_type)
-    end
-
-    return final_type
-  end
-
-  def handle_array_type(node, reg_idx, declared_type, actual_type)
-    # Extract Base Type and Constraint
-    # regex matches: "Type" and "[something]"
-    match = declared_type.to_s.match(/^(\w+)\[(.*)\]$/)
-    return unless match # Should catch via other checks if invalid
-
-    base_type = match[1]
-    constraint = match[2]
-
-    # 1. Check Content Types (Optional: verify list items are Numbers)
-    #    (Skipping for brevity, requires checking AST::ListLit items)
-
-    # 2. Handle Constraints
-    if constraint == ""
-      # Case: Number[] (Dynamic)
-      # No-op: It's already a List.
-
-    elsif constraint == "*"
-      if node.value.is_a?(AST::Identifier) && current_scope.get_size(node.value.name).nil?
-        error!(node, :FIXED_ARRAY_SIZE_AS_DYNAMIC, node.name)
-      end
-      # Case: Number[*] (Fixed Inferred)
-      # Convert to Fixed Array with size = current length
-      @chunk.emit(node, :CAST, "R#{reg_idx}", "#{base_type}[*]")
-
-    else
-      # Case: Number[10] (Fixed Explicit)
-      limit = constraint.to_i
-
-      check_size = nil
-
-      # A. Is it a Literal?
-      if node.value.is_a?(AST::ListLit)
-        check_size = node.value.items.size
-
-      # B. Is it a Variable?
-      elsif node.value.is_a?(AST::Identifier)
-        # Look up the size we stored previously
-        check_size = current_scope.get_size(node.value.name)
-      end
-
-      # C. The Check
-      # If check_size is nil, it means the value is dynamic (unknown),
-      # so we MUST fall back to the Runtime Check.
-      if check_size && check_size > limit
-         error!(node, :FIXED_ARRAY_SIZE_MISMATCH, check_size, declared_type)
-      end
-
-      # COMPILE-TIME SIZE CHECK
-      # Only possible if assigning a Literal
-      if node.value.is_a?(AST::ListLit)
-        current_size = node.value.items.size
-        if current_size > limit
-          error!(node, :FIXED_ARRAY_SIZE_MISMATCH, current_size, declared_type)
-        end
-      end
-
-      # Emit CAST to seal it at runtime
-      @chunk.emit(node, :CAST, "R#{reg_idx}", declared_type)
+    new_type = node.value.coerced_type
+    if new_type && new_type != node.value.resolved_type
+      @chunk.emit(node, :CAST, "R#{r}", new_type.to_s)
     end
   end
 
@@ -786,11 +604,6 @@ class Compiler
   def compile_set_var(node, val_reg)
     var_name = node.is_a?(AST::Identifier) ? node.name : node
 
-    # 1. Check Mutability (Optional feature)
-    if current_scope.is_immutable?(var_name)
-      error!(node, :IMMUTABLE_ASSIGNMENT, var_name)
-    end
-
     # 2. Resolve the Register for this variable
     target_reg = current_scope.resolve_reg(var_name)
 
@@ -806,11 +619,6 @@ class Compiler
   end
 
   def compile_set_field(node, val_reg)
-    # 1. Check Mutability
-    if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
-      error!(node, :IMMUTABLE_FIELD_ASSIGNMENT, node.field, node.target.name)
-    end
-
     with_temp_reg do |obj_reg|
       visit(node.target, obj_reg)
       type = infer_type(node.target)
@@ -824,11 +632,6 @@ class Compiler
   end
 
   def compile_set_index(node, val_reg)
-    # 1. Check Mutability
-    if node.target.is_a?(AST::Identifier) and current_scope.is_immutable?(node.target.name)
-      error!(node, :IMMUTABLE_LIST_ASSIGNMENT, node.target.name)
-    end
-
     # node is the AST::GetIndex(target, index)
     with_temp_reg do |obj_reg|
       visit(node.target, obj_reg) # Compile array/hash
@@ -904,7 +707,6 @@ class Compiler
     elsif type_left.to_s.include?("[") && type_right.to_s.include?("[")
       return :CONCAT_ARR
     end
-
 
     error!(node, "Type Error: Cannot add type: #{type_left} and #{type_right}")
   end
@@ -1129,10 +931,6 @@ class Compiler
   end
 
   def compile_break(node)
-    if @loop_stack.empty?
-      error!(node, :ILLEGAL_BREAK)
-    end
-
     # Emit a JMP to 0 (Placeholder).
     # We save this index into the current loop context to patch later.
     idx = @chunk.emit_with_index(node, :JMP, 0)
@@ -1142,36 +940,12 @@ class Compiler
   end
 
   def compile_continue(node)
-    if @loop_stack.empty?
-      error!(node, :ILLEGAL_CONTINUE)
-    end
-
     # Simple JMP to the start of the current loop
     target = @loop_stack.last[:start]
     @chunk.emit(node, :JMP, target)
   end
 
   def compile_list_lit(node, target_reg)
-    # 1. Homogeneity Check (Compile Time)
-    if node.items.any?
-      # Guess type of first item (e.g. :Number)
-      expected_type = infer_type(node.items.first)
-
-      node.items.each_with_index do |item, idx|
-        current_type = infer_type(item)
-        if current_type != expected_type
-           error!(node, :LIST_TYPE_MISMATCH, idx, current_type, expected_type)
-        end
-      end
-    else
-      # TODO - next, add optional type annotations to initializations
-      # Then - if not declared when empty, raise error
-
-      # Edge Case: Empty List %[]
-      # You either force a type annotation (VAR x: Vector[Number] = %[])
-      # or assume Vector[Any].
-    end
-
     type_name = infer_type(node)
     fixed_size = node.storage == :stack ? get_type_slot_size(type_name) : nil
     @chunk.emit(node, :NEW_LIST, "R#{target_reg}", fixed_size)
@@ -1291,13 +1065,9 @@ class Compiler
   def compile_return_node(node, target_reg)
     # 1. Check type
     actual_type = infer_type(node.value)
-    if @expected_return && @expected_return != :Any
-      if actual_type != :Any && actual_type != @expected_return
-        error!(node, :RETURN_MISMATCH, @expected_return, actual_type)
-      end
-    end
 
     if @current_fn_is_stack_rvo
+      byebug
       return compile_stack_rvo_return_node(node, target_reg)
     end
 
@@ -1332,6 +1102,7 @@ class Compiler
     @reg_top -= args_regs.size
   end
 
+  # TODO: This is copy on return, not SRVO
   def compile_stack_rvo_return_node(node, target_reg)
     # The hidden return pointer is ALWAYS in Register 0 (if we injected it first)
     r_ret_ptr = 0
@@ -1583,87 +1354,34 @@ class Compiler
 
 private
   def infer_type(node)
-    case node
-    when AST::Literal
-      return literal_type(node)
-
-    when AST::StructLit
-      return node.name.to_sym
-
-    when AST::HashLit
-      return :HashMap
-
-    when AST::ListLit
-      return "Any[]".to_sym if node.items.empty?
-
-      # 2. Recursive Step
-      # If node is [[1,2], [3,4]]:
-      #   a. Recurse on [1,2] -> returns "Number[2]"
-      #   b. base_type becomes "Number[2]"
-      #   c. Returns "Number[2][2]"
-      base_type = infer_type(node.items.first).to_s
-      size = node.items.size
-
-      return "#{base_type}[#{size}]".to_sym
-
-    when AST::Identifier
-      # Look up the variable in the current scope
-      return current_scope.resolve_type(node.name).to_sym
-
-    when AST::BinaryOp
-      if node.op == :ADD
-        return infer_binary_op_add_type(node)
-      elsif AST::NUMBER_RESULT_OPS.include?(node.op)
-        return :Number
-      elsif AST::BOOL_RESULT_OPS.include?(node.op)
-        return :Bool
-      end
-
-    when AST::Cast
-      # CAST(x AS T) -> The type is T
-      return node.target.to_sym
-
-    when AST::FuncCall
-      # 1. Check if we know the function
-      name = node.name.is_a?(String) ? node.name : nil
-
-      if name && @fn_signatures.key?(name)
-        return @fn_signatures[name][:return_type]
-      end
-
-    when AST::GetIndex
-      target_type = infer_type(node.target).to_s
-
-      # 2. Extract Element Type
-      #    "Number[]"  -> "Number"
-      #    "Number[4]" -> "Number"
-      if target_type =~ /^(\w+)\[.*\]$/
-        return $1.to_sym
-      end
-
-      # Special Case: Strings
-      if target_type == "String"
-        return :String # Or :Byte, depending on your language semantics
-      end
-
-      return :Any
-    end
-
-    return :Any # Fallback if we don't know
+    node.resolved_type
   end
 
-  def literal_type(node)
-    return :Nil if node.type == :NIL # TODO: Where is this?
-    return :Number if node.type == :NUMBER
-    return :Bool if node.type == :BOOLEAN
-    return :Byte if node.type == :BYTE
-    return :Int64 if node.type == :INT64
-    if node.type == :STRING
-      return "String[]".to_sym if node.storage == :heap
-      return "Byte[#{node.value.length}]".to_sym if node.storage == :stack
-    end
-    error!(node, :UNRECOGNIZED_LITERAL, node.type)
+  def infer_binary_op_add_type(node)
+    t_left = infer_type(node.left)
+    t_right = infer_type(node.right)
+
+    # 1. String Propagation (Fixes your bug)
+    # If we are adding strings, the result is a String
+    return :String if is_string_type?(t_left) || is_string_type?(t_right)
+
+    # 2. Int64 Propagation
+    return :Int64 if t_left == :INT64 && t_right == :INT64
+
+    # 3. Array Propagation
+    return t_left if t_left.to_s.include?("[")
+
+    return :Number
   end
+
+  def is_string_type?(type)
+    t = type.to_s
+    return true if t == "String" || t == "STRING"
+    # Matches "String[]" (Heap String) and "Byte[...]" (Stack String)
+    return true if t.start_with?("String") || t.start_with?("Byte")
+    false
+  end
+  # --- OLD IFT ---
 
   def is_stack_type?(type_sym)
     str = type_sym.to_s
@@ -1672,7 +1390,6 @@ private
     return true if str.include?("[") && !str.include?("[]") # Fixed size like [3]
     false
   end
-
 
   # Returns size in slots
   def get_type_slot_size(type_name)
@@ -1741,32 +1458,6 @@ private
     end
 
     index
-  end
-
-  # TODO: Cleanup Node.type vs user-defined types
-  def is_string_type?(type)
-    t = type.to_s
-    return true if t == "String" || t == "STRING"
-    # Matches "String[]" (Heap String) and "Byte[...]" (Stack String)
-    return true if t.start_with?("String") || t.start_with?("Byte")
-    false
-  end
-
-  def infer_binary_op_add_type(node)
-    t_left = infer_type(node.left)
-    t_right = infer_type(node.right)
-
-    # 1. String Propagation (Fixes your bug)
-    # If we are adding strings, the result is a String
-    return :String if is_string_type?(t_left) || is_string_type?(t_right)
-
-    # 2. Int64 Propagation
-    return :Int64 if t_left == :INT64 && t_right == :INT64
-
-    # 3. Array Propagation
-    return t_left if t_left.to_s.include?("[")
-
-    return :Number
   end
 
   def is_safe_to_autocast_str?(type)

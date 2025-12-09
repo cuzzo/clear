@@ -6,6 +6,42 @@ module AST
     def line; token.line; end
     def column; token.column; end
     def token_value; token.value; end
+    attr_accessor :full_type
+    attr_accessor :coerced_type
+
+    def resolved_type
+      # function_signature
+      if full_type.is_a?(Hash)
+        ft = full_type[:return_type]
+      # Lambda
+      elsif full_type.is_a?(Array)
+        ft = full_type[2]
+      else
+        ft = full_type
+      end
+
+      if ft[0] == "%"
+        full_type[1..].to_sym
+      else
+        full_type
+      end
+    end
+
+    def storage
+      full_type[0] == "%" ? :heap : :stack
+    end
+
+    def metatype
+      return :lambda if self.is_a?(LambdaLit)
+      return :named_function if self.is_a?(FunctionDef)
+      return nil if resolved_type.nil?
+      return :hashmap if resolved_type == :HashMap
+      return :void if resolved_type == :Void
+      return :die if resolved_type == :NoReturn
+      return :array if resolved_type.to_s.end_with?("]")
+      return :struct if !PRIMITIVE_TYPES.include?(resolved_type)
+      return :primitive
+    end
   end
 
   Program      = Struct.new(:token, :statements) { include Locatable }
@@ -26,7 +62,7 @@ module AST
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }
   FuncCall     = Struct.new(:token, :name, :args) { include Locatable }
-  MethodCall   = Struct.new(:token, :object, :method, :args) { include Locatable }
+  MethodCall   = Struct.new(:token, :object, :name, :args) { include Locatable }
   GetField     = Struct.new(:token, :target, :field) { include Locatable }
   GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
   Cast         = Struct.new(:token, :value, :target) { include Locatable }

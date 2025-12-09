@@ -4,6 +4,7 @@ class Scope
   def initialize
     @locals = {}
     @dependencies = {}
+    @types = {}
   end
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack)
@@ -19,6 +20,22 @@ class Scope
     }
   end
 
+  def declare_type(name, schema)
+    @types[name] = {
+      schema: schema,
+      # Might add metadata here later (e.g., is_packed, alignment)
+    }
+  end
+
+  def resolve_type_definition(name)
+    entry = @types[name]
+    entry ? entry[:schema] : nil
+  end
+
+  def is_known_type?(name)
+    @types.key?(name)
+  end
+
   def get_size(name)
     entry = @locals[name]
     entry ? entry[:size] : nil
@@ -27,6 +44,15 @@ class Scope
   def resolve_reg(name)
     entry = @locals[name]
     entry ? entry[:reg] : nil
+  end
+
+  # TODO: Hack, types are registered as a single string, need to be registered as a struct
+  def resolve_full_type(name)
+    entry = @locals[name]
+    return :Any if entry.nil?
+    return entry[:type] if !entry[:type].is_a?(Symbol)
+    prefix = entry[:storage] == :heap ? "%" : ""
+    :"#{prefix}#{entry[:type]}"
   end
 
   def resolve_type(name)

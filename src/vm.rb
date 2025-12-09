@@ -4,6 +4,7 @@ require "logger"
 
 require_relative "lexer"
 require_relative "parser"
+require_relative "annotator"
 require_relative "compiler"
 require_relative "types"
 require_relative "memory_visualizer"
@@ -42,7 +43,7 @@ class VM
 
     # 2. Create a FluxArray (Boxed)
     #    Type :obj because it holds Pointers (to Strings), not raw bytes
-    argv_obj = FluxArray.new(nil, flux_str_args, type: :obj, register: :static)
+    argv_obj = FluxArray.new(flux_str_args.size, flux_str_args, type: :obj, register: :static)
 
     @globals["argv"] = Value.box_obj(argv_obj)
   end
@@ -264,10 +265,9 @@ class VM
       type = :obj
       size = nil
     else
-      type = :nanbox
       size = args.first
     end
-    Value.box_obj(FluxArray.new(size, [], type: type))
+    Value.box_obj(FluxArray.new(size, nil, type: type))
   end
 
   def process_append(target_reg, args, frame)
@@ -1064,7 +1064,7 @@ class VM
 
          schema.each do |field, field_type|
            return false unless val.key?(field)
-           return false unless check_type(val[field], field_type.to_sym, structs_registry)
+           return false unless check_type(val[field], field_type.to_sym, structs_registry)  # TODO: CHECK .to_sym
          end
          return true
        else
@@ -1128,6 +1128,8 @@ class VM
   def run_code(code_str, fname = "")
     tokens = Lexer.new(code_str).tokenize
     ast = Parser.new(tokens, code_str).parse
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
 
     compiler = Compiler.new("main", :Number, code_str, fname)
 

@@ -25,7 +25,7 @@ FN main(s=5) RETURNS Number[3] ->
   -- but prooves it is possible.
   VAR list = [1, 2, 3];
   list
-    .map( %(x) USE(multiple) -> x * multiple )
+    .map( %(x: Number) USE(multiple: Number) -> x * multiple )
      s> print;
 
   RETURN list;

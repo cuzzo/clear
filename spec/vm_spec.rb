@@ -152,7 +152,7 @@ RSpec.describe VM do
         <<~FLUX
           FN mut(x) -> SET x = 0; END
           VAR z = 0;
-          mut(x);
+          mut(z);
         FLUX
       }
 
@@ -167,7 +167,7 @@ RSpec.describe VM do
       let(:source) {
         <<~FLUX
           FN mut(MUTABLE x) -> SET x = 0; END
-          VAR z = 0;
+          MUTABLE z = 0;
           mut(z);
         FLUX
       }
@@ -1624,11 +1624,14 @@ RSpec.describe "Compiler Error Coverage" do
     end
   end
 
+  # TODO: Move to compiler test
   describe "VM: Tail Call Optimization (TCO)" do
     # Helper to compile and return the chunk for inspection
     def compile_only(source)
       tokens = Lexer.new(source).tokenize
       ast = Parser.new(tokens, source).parse
+      annotator = Annotator.new
+      annotator.annotate!(ast)
       # Create compiler with a dummy return type
       compiler = Compiler.new("main", :Any, source)
       compiler.compile(ast)
