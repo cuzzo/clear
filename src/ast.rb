@@ -28,6 +28,10 @@ module AST
       end
     end
 
+    def base_type
+       resolved_type.to_s.sub(/\[.*\]$/, "").to_sym
+    end
+
     def storage
       full_type[0] == "%" ? :heap : :stack
     end

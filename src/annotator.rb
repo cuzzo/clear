@@ -18,7 +18,6 @@ class SemanticAnnotator
     # Generic/Polymorphic Functions:
     # value is a Proc that takes (argument_nodes, analyzer_instance)
     "map"  => ->(args, analyzer, node) { analyzer.send(:infer_map_return_type, args, node) },
-    "append" => ->(args, analyzer, node) { analyzer.send(:infer_append_return_type, args, node) },
   }
 
   def initialize
@@ -748,7 +747,7 @@ private
     node.items.each { |item| visit(item) }
 
     if node.items.empty?
-      node.full_type = :Any
+      node.full_type = :"Any[]"
       return
     end
 
@@ -1027,36 +1026,6 @@ private
   # ==========================================
   # BUILT-IN INFERENCE LOGIC
   # ==========================================
-
-  def infer_append_return_type(args, node)
-    if args.size != 2
-      error!(node, "append requires 2 arguments, #{args.size} given.")
-    end
-
-    list_node = args[0]
-    item_node = args[1]
-
-    list_type = list_node.resolved_type.to_s
-
-    # 1. Verify the first argument is actually a List
-    unless list_type.end_with?("]")
-      # Using a generic error helper if available, or just returning Any implies failure/dynamic
-      return :Any
-    end
-
-    # 2. Extract Base Type (Number[] -> Number)
-    # Handle both fixed "Number[3]" and dynamic "Number[]"
-    base_type = list_type.sub(/\[.*\]$/, "").to_sym
-
-    # 3. Verify Item Type matches List Base Type
-    # Allow safe casting (e.g. appending Int64 to Number[])
-    unless is_safe_autocast?(item_node.resolved_type, base_type)
-      error!(node, "CAST ERROR, append.")
-    end
-
-    # Return the List type (allows chaining: list.append(1).append(2))
-    return list_node.resolved_type
-  end
 
   def infer_map_return_type(args, node)
     # map(list, function)

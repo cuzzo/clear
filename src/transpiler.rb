@@ -3,6 +3,7 @@
 require 'bundler/setup' # so `bundle exec` not needed
 require "optparse"
 require "logger"
+require "byebug"
 
 require_relative "./lexer"
 require_relative "./parser"
@@ -67,6 +68,14 @@ class ZigTranspiler
 private
 
   def visit(node)
+    code = visit_node(node)
+    if node.respond_to?(:coerced_type) && node.coerced_type && node.coerced_type != node.full_type
+      code = transpile_cast(code, node.full_type, node.coerced_type)
+    end
+    code
+  end
+
+  def visit_node(node)
     case node
     when AST::Program
       node.statements.map { |stmt| visit(stmt) }.join("\n\n")
@@ -216,28 +225,13 @@ private
       #    Zig: rt.getAt(list, i)
       "rt.getAt(#{target}, #{index})"
 
-    when AST::MethodCall
-      # 1. Check if it's a builtin list method
-      if ["append"].include?(node.name)
-        # 2. Determine Allocator
-        #    This relies on the Annotator having marked the node!
-        allocator = node.object.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
-
-        # 3. Generate Zig
-        receiver = visit(node.object)
-        arg = visit(node.args.first)
-        "try #{receiver}.append(#{allocator}, #{arg});"
-      else
-        # ... standard function call ...
-      end
-
     when AST::IfStatement
       # 1. Transpile Condition
       #    Zig idiomatic: if (cond) { ... }
       cond = visit(node.condition)
 
       # 2. Transpile THEN Block
-      then_body = transpile_block(then_branch)
+      then_body = transpile_block(node.then_branch)
 
       # 3. Construct Base Statement
       zig_code = "if (#{cond}) {\n    #{then_body}\n    }"
@@ -382,7 +376,7 @@ private
 
     #    {alloc} -> determine allocator automatically
     if pattern.include?("{alloc}")
-      alloc = node.object&.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
+      alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
       pattern = pattern.gsub("{alloc}", alloc)
     end
 
@@ -414,6 +408,32 @@ private
     when "Void"            then "void"
     else t # Fallback for Struct names (e.g. "User")
     end
+  end
+
+  # TODO: from_type/to_type may need to be simplified
+  def transpile_cast(code, from_type, to_type)
+    from = from_type
+    to = to_type
+
+    # A. Int -> Float (e.g. i64 -> f64)
+    if [:Int64, :Byte].include?(from) && to == :Number
+      return "@floatFromInt(#{code})"
+    end
+
+    # B. Float -> Int (e.g. f64 -> i64)
+    if from == :Number && to == :Int64
+      return "@intFromFloat(#{code})"
+    end
+
+    # C. Int Widening (e.g. u8 -> i64)
+    if from == :Byte && to == :Int64
+      return "@intCast(#{code})"
+    end
+
+    # Fallback: Zig's generic cast (often works for simple types)
+    # e.g. @as(f64, 10.5)
+    zig_to = transpile_type(to)
+    return "@as(#{zig_to}, #{code})"
   end
 
   def get_zig_format(flux_type)

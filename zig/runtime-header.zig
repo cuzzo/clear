@@ -78,6 +78,50 @@ pub const Runtime = struct {
         return try std.mem.concat(allocator, u8, &.{s1, s2});
     }
 
+    // Polymorphic Length (Strings or Lists)
+    pub fn len(self: *Runtime, container: anytype) i64 {
+        _ = self;
+        // If it has .items (ArrayList), use that. Otherwise assume it's a Slice.
+        if (@hasField(@TypeOf(container), "items")) {
+            return @intCast(container.items.len);
+        } else {
+            return @intCast(container.len);
+        }
+    }
+
+    // FILE
+
+    // Read File (Allocates on HEAP)
+    pub fn readFile(self: *Runtime, path: []const u8) ![]const u8 {
+        // 1. Open File
+        // Note: We use the absolute path or CWD.
+        var dir = std.fs.cwd();
+        var file = try dir.openFile(path, .{});
+        defer file.close();
+
+        // 2. Stat size to allocate exact buffer
+        const stat = try file.stat();
+
+        // 3. Alloc buffer in Heap Arena (Survivor)
+        const buffer = try self.heapAlloc().alloc(u8, stat.size);
+
+        // 4. Read
+        _ = try file.readAll(buffer);
+        return buffer;
+    }
+
+    // Write File
+    pub fn writeFile(self: *Runtime, path: []const u8, content: []const u8) !void {
+        _ = self;
+        var dir = std.fs.cwd();
+        // Create or Overwrite
+        var file = try dir.createFile(path, .{});
+        defer file.close();
+
+        try file.writeAll(content);
+
+    }
+
     // String Lib
 
     // Used to make HEAP strings
@@ -85,11 +129,11 @@ pub const Runtime = struct {
         return try std.fmt.allocPrint(allocator, "{s}", .{text});
     }
 
-    pub fn substr(self: *Runtime, allocator: std.mem.Allocator, str: []const u8, start: i64, len: i64) ![]const u8 {
+    pub fn substr(self: *Runtime, allocator: std.mem.Allocator, str: []const u8, start: i64, length: i64) ![]const u8 {
         _ = self;
         // Basic safety checks (Zig panics on slice OOB, but clean errors are better)
         const u_start: usize = @intCast(start);
-        const u_len: usize = @intCast(len);
+        const u_len: usize = @intCast(length);
 
         if (u_start + u_len > str.len) return error.OutOfBounds;
 
@@ -98,6 +142,45 @@ pub const Runtime = struct {
 
         // We must COPY it to the new allocator (usually Heap) so it survives
         return allocator.dupe(u8, slice);
+    }
+
+    // String Equality (Content check)
+    pub fn eql(self: *Runtime, s1: []const u8, s2: []const u8) bool {
+        _ = self;
+        return std.mem.eql(u8, s1, s2);
+    }
+
+    // Parse String to Int
+    pub fn toInt(self: *Runtime, str: []const u8) !i64 {
+        _ = self;
+        // trim whitespace automatically for convenience
+        const clean = std.mem.trim(u8, str, &std.ascii.whitespace);
+        return try std.fmt.parseInt(i64, clean, 10);
+    }
+
+    // Split: String -> List
+    pub fn split(self: *Runtime, allocator: std.mem.Allocator, str: []const u8, delimiter: []const u8) !std.ArrayListUnmanaged([]const u8) {
+        _ = self;
+        var list = std.ArrayListUnmanaged([]const u8){};
+
+        // splitSequence handles string delimiters (e.g. ", ")
+        var iter = std.mem.splitSequence(u8, str, delimiter);
+
+        while (iter.next()) |part| {
+            // Important: Make a copy of the part in the new allocator (Heap)
+            // so the list doesn't point to stack memory that might die.
+            const part_copy = try allocator.dupe(u8, part);
+            try list.append(allocator, part_copy);
+        }
+        return list;
+    }
+
+    // Join: List -> String (technically an array function)
+    pub fn join(self: *Runtime, allocator: std.mem.Allocator, list: anytype, delimiter: []const u8) ![]const u8 {
+        _ = self;
+        // Support both ArrayListUnmanaged and raw Slices
+        const items = if (@hasField(@TypeOf(list), "items")) list.items else list;
+        return std.mem.join(allocator, delimiter, items);
     }
 };
 

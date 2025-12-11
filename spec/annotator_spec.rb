@@ -121,7 +121,7 @@ RSpec.describe SemanticAnnotator do
 
       it "correctly handles print (returns Nil/Void)" do
         # Assuming print is defined as returning :Nil or :Void in builtins
-        expect(result).to eq(:Nil)
+        expect(result).to eq(:Void)
       end
     end
 
@@ -1137,7 +1137,7 @@ RSpec.describe SemanticAnnotator do
         it "defaults to Any[]" do
           expect { ast }.not_to raise_error
           # Assuming logic maps [] to Any[]
-          expect(result).to eq(:Any)
+          expect(result).to eq(:"Any[]")
         end
       end
     end
