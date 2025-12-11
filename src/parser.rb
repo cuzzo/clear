@@ -111,6 +111,7 @@ class Parser
       AST::Slice.new(range_token, lhs, first, last)
     else
       # INDEX: list[0]
+      # INDEX: hash["OK"]
       consume(:CHAR, ']')
       AST::GetIndex.new(start_token, lhs, first)
     end

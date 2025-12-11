@@ -53,6 +53,8 @@ pub const Runtime = struct {
         return ptr;
     }
 
+    // List / Dynamic Array
+
     pub fn makeList(self: *Runtime, comptime T: type, allocator: std.mem.Allocator, items: []const T) !std.ArrayListUnmanaged(T) {
         _ = self;
         var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, items.len);
@@ -73,6 +75,20 @@ pub const Runtime = struct {
         }
     }
 
+    // Works for Lists and Slices because it modifies the memory the slice points to.
+    pub fn setAt(self: *Runtime, container: anytype, index: anytype, value: anytype) void {
+        _ = self;
+        const i: usize = @intCast(index);
+
+        if (@hasField(@TypeOf(container), "items")) {
+            // ArrayListUnmanaged
+            container.items[i] = value;
+        } else {
+            // Standard Slice
+            container[i] = value;
+        }
+    }
+
     pub fn concat(self: *Runtime, allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
         _ = self;
         return try std.mem.concat(allocator, u8, &.{s1, s2});
@@ -87,6 +103,40 @@ pub const Runtime = struct {
         } else {
             return @intCast(container.len);
         }
+    }
+
+    // HashMap / Associative Map
+
+    // Usage: var map = try rt.makeMap(i64, rt.heapAlloc());
+    pub fn makeHashMap(self: *Runtime, comptime V: type, allocator: std.mem.Allocator) !std.StringHashMapUnmanaged(V) {
+        _ = self;
+        _ = allocator;
+        // Start empty. Unmanaged maps don't alloc until you put().
+        return std.StringHashMapUnmanaged(V){};
+    }
+
+    // Usage: try rt.mapPut(i64, rt.heapAlloc(), &map, "key", 100);
+    pub fn mapPut(self: *Runtime, comptime V: type, allocator: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
+        _ = self;
+        // Critical: We must duplicate the key to the Heap because the Map keeps a pointer to it.
+        // If we don't, and 'key' is a stack string that dies, the map breaks.
+        const key_copy = try allocator.dupe(u8, key);
+        try map.put(allocator, key_copy, value);
+    }
+
+    // Usage: rt.mapGet(i64, map, "key")
+    pub fn mapGet(self: *Runtime, comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) V {
+        _ = self;
+        // Return value or Default (0/null).
+        // For v0.1 scripting, returning 0/empty is often friendlier than crashing.
+        if (map.get(key)) |val| {
+            return val;
+        }
+
+        // Default values based on type
+        if (V == i64 or V == f64) return 0;
+        if (V == []const u8) return "";
+        return undefined; // Should ideally handle this better
     }
 
     // FILE
@@ -148,14 +198,6 @@ pub const Runtime = struct {
     pub fn eql(self: *Runtime, s1: []const u8, s2: []const u8) bool {
         _ = self;
         return std.mem.eql(u8, s1, s2);
-    }
-
-    // Parse String to Int
-    pub fn toInt(self: *Runtime, str: []const u8) !i64 {
-        _ = self;
-        // trim whitespace automatically for convenience
-        const clean = std.mem.trim(u8, str, &std.ascii.whitespace);
-        return try std.fmt.parseInt(i64, clean, 10);
     }
 
     // Split: String -> List

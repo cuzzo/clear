@@ -4,6 +4,13 @@ HEAP_STRING_TYPE = "%String[]".to_sym
 STD_LIB = {
   # Method Name => { args: [Type...], return: Type, zig: Pattern }
 
+  # NOT SUPPORTED YET IN TRANSPILATION
+  "map" => {
+    args: :Varargs,
+    return: :infer_map_return_type,
+    zig: :macro_map
+  },
+
   "append" => {
     args: [:"Any[]", :Any],
     return: :Void, # Zig's append returns !void, so chaining isn't supported yet
@@ -40,19 +47,19 @@ STD_LIB = {
     zig: "rt.eql({0}, {1})"
   },
 
-  # 4. Parse Int
-  "toInt" => {
-    args: [STRING_TYPE],
-    return: :Int64,
-    zig: "try rt.toInt({0})"
-  },
+  # toInt() (Overloaded)
+  "toInt" => [
+    { args: [STRING_TYPE], return: :Int64, zig: "try rt.toInt({0})" },
+    { args: [:Number], return: :Int64, zig: "@intFromFloat({0})" },
+    { args: [:Int64], return: :Int64, zig: "{0}" }
+  ],
 
-  # 4b. Parse Float "2.5" -> 12.5
-  "toFloat" => {
-    args: [STRING_TYPE],
-    return: :Number, # f64
-    zig: "try std.fmt.parseFloat(f64, {0})"
-  },
+  # toFloat() (Overloaded)
+  "toFloat" => [
+    { args: [STRING_TYPE], return: :Number, zig: "try std.fmt.parseFloat(f64, {0})" },
+    { args: [:Int64],      return: :Number, zig: "@floatFromInt({0})" },
+    { args: [:Number],     return: :Number, zig: "{0}" }
+  ],
 
   # 5. print()
   "print" => {

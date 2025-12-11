@@ -40,10 +40,10 @@ module AST
       return :lambda if self.is_a?(LambdaLit)
       return :named_function if self.is_a?(FunctionDef)
       return nil if resolved_type.nil?
-      return :hashmap if resolved_type == :HashMap
       return :void if resolved_type == :Void
       return :die if resolved_type == :NoReturn
       return :array if resolved_type.to_s.end_with?("]")
+      return :hashmap if resolved_type.to_s.start_with?("HashMap")
       return :struct if !PRIMITIVE_TYPES.include?(resolved_type)
       return :primitive
     end

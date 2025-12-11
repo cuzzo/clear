@@ -12,14 +12,6 @@ class SemanticAnnotator
   STRING_TYPE = "String[]".to_sym
   HEAP_STRING_TYPE = "%String[]".to_sym
 
-  BUILTINS = {
-    "time"  => :Number,
-
-    # Generic/Polymorphic Functions:
-    # value is a Proc that takes (argument_nodes, analyzer_instance)
-    "map"  => ->(args, analyzer, node) { analyzer.send(:infer_map_return_type, args, node) },
-  }
-
   def initialize
     # We start with a global scope
     @scope_stack = [Scope.new]
@@ -37,23 +29,8 @@ class SemanticAnnotator
 private
 
   def setup_builtins
-    BUILTINS.each do |name, definition|
-      # We declare them in the global scope.
-      # For generic functions (Procs), we store a special type marker :Intrinsic
-      type = definition.is_a?(Proc) ? :Intrinsic : definition
-
-      current_scope.declare(
-        name,
-        nil,     # No register needed for transpilation
-        type,    # The return type (or :Intrinsic)
-        false,   # Immutable
-        false,
-        nil,
-        :stack
-      )
-      STD_LIB.each do |name, config|
-        current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
-      end
+    STD_LIB.each do |name, config|
+      current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
     end
 
     # Setup Globals
@@ -434,17 +411,46 @@ private
   end
 
   def visit_IntrinsicFunc(node, args)
-    if handler = BUILTINS[node.name]
-      node.full_type = handler.call(args, self, node)
-    elsif config = STD_LIB[node.name]
-      # Need to pass this to verify function, to verify types, coerce, etc
-      if config[:args] != :Varargs && args.size != config[:args].size
-        error!(node, "Arity Mismatch for #{node.name}")
+    definitions = STD_LIB[node.name]
+    definitions = [definitions] if definitions.is_a?(Hash)
+
+    matched_def = definitions.find do |config|
+      # A. Arity Check
+      next false if config[:args] != :Varargs && args.size != config[:args].size
+
+      # B. Type Check
+      match = true
+      if config[:args] != :Varargs
+        args.each_with_index do |arg, i|
+          expected = config[:args][i]
+          actual = arg.resolved_type
+
+          # Use your existing safe casting check
+          unless is_safe_autocast?(actual, expected)
+            match = false
+            break
+          end
+        end
       end
-      node.full_type = config[:return]
-      node.zig_pattern = config[:zig]
+      match
+    end
+
+    # 3. Apply Result or Error
+    if matched_def
+      ret = matched_def[:return]
+
+      if ret.is_a?(Symbol) && respond_to?(ret, true)
+        node.full_type = send(ret, args, node)
+      else
+        node.full_type = ret
+      end
+
+      node.zig_pattern = matched_def[:zig]
     else
-      error!(node, "Unknown intrinsic")
+      # Build a nice error message listing expected signatures
+      sigs = definitions.map { |d| "(#{d[:args].join(', ')})" }.join(" or ")
+      arg_types = args.map { |a| a.resolved_type }.join(", ")
+      error!(node, "No overload for '#{node.name}' matches arguments (#{arg_types}).\nCandidates: #{sigs}")
     end
   end
 
@@ -455,8 +461,8 @@ private
     final_type = (node.type == :Any) ? inferred_type : node.type
 
     # 1. Check Conflicts
-    if node.type != inferred_type
-      if node.type != :Any && !is_safe_autocast?(inferred_type, node.type)
+    if node.type != inferred_type && node.type != :Any
+      if !is_safe_autocast?(inferred_type, node.type)
         if check_array_type_mismatch!(node, inferred_type, node.type)
           ;
         else
@@ -640,17 +646,33 @@ private
 
     target_type = node.target.full_type.to_s
 
-    # Case 1: Array Access "Number[]" -> :Number
-    if match = target_type.match(/^(\w+)\[.*\]$/)
-      node.full_type = match[1].to_sym
+    # Case 1: HashMap Access
+    if node.target.metatype == :hashmap
+      # Extract "Int64" from "HashMap<Int64>"
+      match = target_type.match(/HashMap<(.+)>/)
+      if match
+        node.full_type = match[1].to_sym
+      else
+        node.full_type = :Any
+      end
 
-    # Case 2: String Access "String" -> :Byte
-    # (Matches Compiler logic handling Strings as byte arrays)
-    elsif target_type == "String" || target_type.start_with?("Byte[")
-      node.full_type = :Byte
+      # Validate Key Type
+      # Allow String (stack), %String[] (heap), or Byte[] (raw)
+      index_type = node.index.full_type
+      is_string_key = index_type == :String ||
+                      index_type.to_s == "%String[]" ||
+                      index_type.to_s.start_with?("Byte[")
+
+      unless is_string_key
+         error!(node, "Map keys must be Strings, got #{index_type}")
+      end
+
+    # Case 2: Array Access "Number[]" -> :Number
+    elsif node.target.metatype == :array || node.target.metatype == :struct
+      node.full_type = node.target.base_type
 
     else
-      node.full_type = :Any
+      error!(node, "Unsupported Index")
     end
   end
 
@@ -659,16 +681,12 @@ private
 
     type = node.target.resolved_type
 
-    if type == :HashMap
-      node.full_type = :Any # HashMaps are dynamic
+    # Struct Field Lookup
+    schema = lookup_type_schema(type)
+    if schema && schema[node.field]
+      node.full_type = schema[node.field]
     else
-      # Struct Field Lookup
-      schema = lookup_type_schema(type)
-      if schema && schema[node.field]
-        node.full_type = schema[node.field]
-      else
-        error!(node, :ILLEGAL_FIELD_LOOKUP, node.field, type)
-      end
+      error!(node, :ILLEGAL_FIELD_LOOKUP, node.field, type)
     end
   end
 
@@ -704,13 +722,28 @@ private
   # LITERALS & BINARY OPS
   # ==========================================
   def visit_HashLit(node)
-    # 1. Analyze values
+    # 1. Analyze values to find the Value Type (V)
+    #    Assumption: Maps are homogeneous for now (e.g. all Int64)
+    if node.pairs.empty?
+      node.full_type = :"HashMap<Any>"
+      return
+    end
+
+    # Analyze all values
     node.pairs.each { |k, v| visit(v) }
 
-    # 2. Simple inference
-    node.full_type = :HashMap
-    node.storage = :heap  # TODO: see if this needs to be set.
-    node.metatype = :hashmap
+    # Infer Type from first value
+    first_val_type = node.pairs.values.first.resolved_type
+
+    # Simple check: Ensure all values match
+    node.pairs.each do |k, v|
+      if v.resolved_type != first_val_type
+        error!(node, "HashMap must have all values by the same time")
+      end
+    end
+
+    node.full_type = :"HashMap<#{first_val_type}>"
+    node.storage = :heap
   end
 
   def visit_StructLit(node)

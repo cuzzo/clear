@@ -161,6 +161,33 @@ private
           node.name
         elsif node.name.is_a?(AST::Identifier)
           node.name.name
+        elsif node.name.is_a?(AST::GetField)
+          target = visit(node.name.target)
+          field  = node.name.field
+          value  = visit(node.value)
+          return "#{target}.#{field} = #{value};"
+        elsif node.name.is_a?(AST::GetIndex)
+          # Check if target is a Map
+          target_node = node.name.target
+          if target_node.metatype == :hashmap
+             # Generate mapPut
+
+             # TODO: Helper
+             inner_type = target_node.full_type.to_s.match(/HashMap<(.+)>/)[1]
+             zig_type = transpile_type(inner_type)
+
+             map_ref = visit(target_node)
+             key_ref = visit(node.name.index)
+             val_ref = visit(node.value)
+
+             # Pass &map_ref because Put modifies the map struct
+             return "try rt.mapPut(#{zig_type}, rt.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+          end
+          arr_ref = visit(target_node)
+          idx_ref = visit(node.name.index)
+          val_ref = visit(node.value)
+
+          return "rt.setAt(#{arr_ref}, #{idx_ref}, #{val_ref});"
         else
           # Recursive visit for things like 'user.id' or 'list[0]'
           visit(node.name)
@@ -216,14 +243,37 @@ private
       #    Result: try rt.makeList(i64, rt.stackAlloc(), &.{ 1, 2, 3 })
       "try rt.makeList(#{zig_type}, #{allocator}, #{items_slice})"
 
+
+    when AST::HashLit
+      # 1. Extract Value Type (V)
+      #    "HashMap<Int64>" -> "i64"
+      type_str = node.full_type.to_s
+      inner_type = type_str.match(/HashMap<(.+)>/)[1]
+      zig_type = transpile_type(inner_type)
+
+      # 2. Generate Creation
+      #    var map = try rt.makeHashMap(i64, rt.heapAlloc());
+      creation = "try rt.makeHashMap(#{zig_type}, rt.heapAlloc())"
+
+      # 3. Generate Initializers (Block Expression)
+      #    Zig doesn't have a simple Map Literal syntax, so we stick to creation-only
+      #    for the expression, or use a block if we want to populate immediately.
+      #    For v0.1, let's just return the empty map creation and let users use 'set'.
+      creation
+
     when AST::GetIndex
       # 1. Resolve Target and Index
       target = visit(node.target)
-      index  = visit(node.index)
+      index = visit(node.index)
 
-      # 2. Generate Universal Accessor
-      #    Zig: rt.getAt(list, i)
-      "rt.getAt(#{target}, #{index})"
+      if node.target.metatype == :hashmap
+        inner_type = node.target.full_type.match(/HashMap<(.+)>/)[1]
+        zig_type = transpile_type(inner_type)
+
+        "rt.mapGet(#{zig_type}, #{target}, #{index})"
+      else
+        "rt.getAt(#{target}, #{index})"
+      end
 
     when AST::IfStatement
       # 1. Transpile Condition
@@ -399,6 +449,22 @@ private
 
   def transpile_type(type)
     t = type.to_s.gsub("%", "") # Strip explicit heap marker if present
+
+    # 1. SPECIAL CASE: "String[]" is the atomic "Text" type
+    #    We map this directly to Zig's string slice.
+    #    This prevents "String[][]" from becoming a 3D array.
+    if t == "String[]"
+      return "[]const u8"
+    end
+
+    # 2. Handle Generic Array Recursion
+    #    e.g. "String[][]" -> "[]" + transpile("String[]") -> "[][]const u8"
+    #    e.g. "Int64[]"    -> "[]" + transpile("Int64")    -> "[]i64"
+    if t.end_with?("[]")
+      base = t[0...-2]
+      zig_base = transpile_type(base)
+      return "[]#{zig_base}"
+    end
 
     case t
     when "Number"          then "f64"
