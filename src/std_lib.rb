@@ -137,5 +137,11 @@ STD_LIB = {
     return: :Number,
     zig: "@abs({0})"
   },
+
+  "shell" => {
+    args: [STRING_TYPE],
+    return: HEAP_STRING_TYPE, # Returns %String[] (Heap String)
+    zig: "try rt.shell({alloc}, {0})"
+  },
 }
 

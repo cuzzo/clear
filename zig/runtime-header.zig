@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const Runtime = struct {
     // THE STACK ARENA (Scratchpad)
@@ -223,6 +224,37 @@ pub const Runtime = struct {
         // Support both ArrayListUnmanaged and raw Slices
         const items = if (@hasField(@TypeOf(list), "items")) list.items else list;
         return std.mem.join(allocator, delimiter, items);
+    }
+
+    // shell
+
+    pub fn shell(self: *Runtime, allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
+        _ = self;
+
+        // 1. Prepare Command (Wrap in sh -c to support pipes/globbing)
+        //    Note: For Windows support, you'd check builtin.os.tag and use "cmd", "/C"
+        const argv = if (builtin.os.tag == .windows)
+            &[_][]const u8{ "cmd", "/C", cmd }
+        else
+            &[_][]const u8{ "/bin/sh", "-c", cmd };
+
+        // 2. Initialize Process
+        var child = std.process.Child.init(argv, allocator);
+        child.stdout_behavior = .Pipe;    // Capture StdOut
+        child.stderr_behavior = .Inherit; // Print StdErr to console (helpful for debugging)
+
+        // 3. Run
+        try child.spawn();
+
+        // 4. Read Output
+        //    readToEndAlloc will allocate exactly enough memory for the output.
+        //    We set a safety limit (e.g., 10MB) to prevent crashing on massive output.
+        const stdout = try child.stdout.?.readToEndAlloc(allocator, 10 * 1024 * 1024);
+
+        // 5. Cleanup
+        _ = try child.wait(); // Wait for finish
+
+        return stdout;
     }
 };
 
