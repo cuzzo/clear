@@ -1067,7 +1067,6 @@ class Compiler
     actual_type = infer_type(node.value)
 
     if @current_fn_is_stack_rvo
-      byebug
       return compile_stack_rvo_return_node(node, target_reg)
     end
 

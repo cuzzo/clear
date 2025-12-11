@@ -77,10 +77,10 @@ class Parser
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
 
   # Primaries
-  primary(:NUMBER) { t = consume(:NUMBER); AST::Literal.new(t, :NUMBER, t.value, :stack) }
-  primary(:INT64) { t = consume(:INT64); AST::Literal.new(t, :INT64, t.value, :heap) }
-  primary(:STRING) { t = consume(:STRING); AST::Literal.new(t, :STRING, t.value, :stack) }
-  primary(:BYTE) { t = consume(:BYTE); AST::Literal.new(t, :BYTE, t.value, :stack) }
+  primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
+  primary(:INT64) { parse_literal(:INT64, :heap) }
+  primary(:STRING) { parse_literal(:STRING, :stack) }
+  primary(:BYTE) { parse_literal(:BYTE, :stack) }
   primary(:VAR_ID) { parse_var_id }
 
   primary(:KEYWORD, 'TRUE') { t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }
@@ -138,6 +138,12 @@ class Parser
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
     # FIX: Pass 'lhs' (the node), not 'lhs.name'
     AST::FuncCall.new(start_token, lhs, args)
+  end
+
+  def parse_literal(type, storage)
+    token = consume(type)
+    node = AST::Literal.new(token, type, token.value, storage)
+    parse_suffixes(node)
   end
 
   ## START PATTERN DSL
@@ -464,7 +470,7 @@ class Parser
 
   def parse_unary
     v = current.value
-    if AST::UNARY_OPS.include?(v)
+    if current.type == :CHAR && AST::UNARY_OPS.include?(v)
       op_token = consume(:CHAR)
       # Recursively parse the thing being negated (handles --5)
       right = parse_unary
@@ -561,7 +567,7 @@ class Parser
     rule = @@primary_rules[[current.type, current.value]]
     rule ||= @@primary_rules[[current.type, nil]]
     return instance_exec(&rule) if rule
-    return parse_unary() if current.value == '-' || current.value == '!'
+    return parse_unary() if current.type == :CHAR && AST::UNARY_OPS.include?(current.value)
     lit = parse_lit(:stack)
     return lit if !lit.nil?
     error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")

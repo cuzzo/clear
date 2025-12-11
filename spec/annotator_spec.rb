@@ -54,7 +54,6 @@ RSpec.describe SemanticAnnotator do
         FLUX
      }
 
-
      it "validates arity correctly (1 implicit + 1 explicit)" do
        expect(result).to eq(:Number)
      end
@@ -1493,6 +1492,187 @@ RSpec.describe SemanticAnnotator do
       it "raises a semantic error for accessing uncaptured variable" do
          # Note: Adjust error message to match your specific compiler error
         expect { run(code) }.to raise_error(/Undefined variable/i)
+      end
+    end
+  end
+
+  # ============================================================================
+  # 1. Standard Library & Intrinsics
+  # ============================================================================
+  describe "Standard Library Intrinsics" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "String Manipulation (split)" do
+      let(:code) {
+        <<~FLUX
+          VAR data = "a,b,c";
+          -- split returns a List of Strings (String[][])
+          VAR parts = data.split(",");
+        FLUX
+      }
+      it "resolves split to a List of Strings" do
+        expect(result).to eq(:"%String[][]")
+      end
+    end
+
+    context "String Manipulation (join)" do
+      let(:code) {
+        <<~FLUX
+          VAR parts = ["a", "b"];
+          -- join takes a List of Strings and returns a Heap String
+          VAR s = parts.join("-");
+        FLUX
+      }
+      it "resolves join to a Heap String" do
+        expect(result).to eq(:"%String[]")
+      end
+    end
+
+    context "String Manipulation (trim & chaining)" do
+      let(:code) {
+        <<~FLUX
+          -- trim returns a String slice (String[])
+          VAR clean = "  abc  ".trim();
+        FLUX
+      }
+      it "resolves trim to a String slice" do
+        expect(result).to eq(:"String[]")
+      end
+    end
+
+    context "Polymorphic Conversion (toInt)" do
+      context "when parsing a String" do
+        let(:code) { 'VAR i = "123".toInt();' }
+        it "resolves to Int64" do
+          expect(result).to eq(:Int64)
+        end
+      end
+
+      context "when casting a Float" do
+        let(:code) { 'VAR i = 12.5.toInt();' }
+        it "resolves to Int64" do
+          expect(result).to eq(:Int64)
+        end
+      end
+    end
+
+    context "Polymorphic Conversion (toFloat)" do
+      let(:code) { 'VAR f = "12.5".toFloat();' }
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "Collection Utilities (length/len)" do
+      let(:code) {
+        <<~FLUX
+          VAR list = [1, 2, 3];
+          VAR l = length(list);
+        FLUX
+      }
+      it "resolves length of a list to Int64" do
+        expect(result).to eq(:Int64)
+      end
+    end
+
+    context "Collection Utilities (append)" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE list = [1, 2];
+          -- append returns Void, usually used as statement
+          list.append(3);
+        FLUX
+      }
+      it "resolves append to Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+  end
+
+  # ============================================================================
+  # 2. Higher-Order Functions & SELECT
+  # ============================================================================
+  describe "Higher-Order Syntax (SELECT)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic Projection: list s> SELECT _.method()" do
+      let(:code) {
+        <<~FLUX
+          VAR words = [%"a", %"bb", %"ccc"];
+          -- Project List<String> -> List<Int64> using .length()
+          VAR lengths = words s> SELECT _.length();
+        FLUX
+      }
+
+      it "infers the resulting list type based on the projection body" do
+        # _.length() returns Int64, so result is Int64[]
+        expect(result).to eq(:"%Int64[]")
+      end
+    end
+
+    context "Chained Pipe: string s> split s> SELECT" do
+      let(:code) {
+        <<~FLUX
+          VAR raw = "apple,banana";
+          -- 1. split returns String[][]
+          -- 2. SELECT iterates Strings
+          -- 3. _.length() returns Int64
+          VAR lengths = raw s> split(",") s> SELECT _.length();
+        FLUX
+      }
+
+      it "correctly resolves types through the chain" do
+        expect(result).to eq(:"%Int64[]")
+      end
+    end
+
+    context "Struct/Hash Projection: list s> SELECT %{...}" do
+      let(:code) {
+        <<~FLUX
+          VAR nums = [10, 20];
+
+          -- Create a List of HashMaps
+          VAR complex = nums s> SELECT %{
+            "original": _,
+            "doubled": _ * 2
+          };
+        FLUX
+      }
+
+      it "infers a List of HashMaps" do
+        # The Hash contains Int64s (since _ is Int and 2 is Int inferred)
+        # So it is HashMap<Int64>[]
+        expect(result).to eq(:"%HashMap<Number>[]")
+      end
+    end
+
+    context "Array Projection: list s> SELECT [_]" do
+      let(:code) {
+        <<~FLUX
+          VAR nums = [1_i64, 2_i64];
+          -- Wrap each item in a list -> [[1], [2]]
+          VAR nested = nums s> SELECT [_];
+        FLUX
+      }
+
+      it "infers a List of Lists (2D Array)" do
+        # Inner is Int64[1] (Stack array), wrapped in Heap Array
+        # The annotator usually generalizes stack arrays to [] in higher types
+        expect(result.to_s).to include("Int64")
+        expect(result.to_s).to end_with("][]") # Int64[][] roughly
+      end
+    end
+
+    context "Error Handling: Selecting on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> SELECT _ + 1;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot SELECT from non-list type/)
       end
     end
   end

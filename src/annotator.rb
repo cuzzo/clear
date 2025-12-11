@@ -489,7 +489,11 @@ private
       storage
     )
 
-    node.full_type = final_type
+    if storage == :heap
+      node.full_type = :"%#{final_type}"
+    else
+      node.full_type = final_type
+    end
   end
 
   def visit_Identifier(node)
@@ -738,7 +742,8 @@ private
     # Simple check: Ensure all values match
     node.pairs.each do |k, v|
       if v.resolved_type != first_val_type
-        error!(node, "HashMap must have all values by the same time")
+        byebug
+        error!(node, "HashMap must have all values be the same type")
       end
     end
 
@@ -856,9 +861,9 @@ private
 
     if node.right.is_a?(AST::SelectOp)
       if node.left.metatype != :array
-        error!(node.left, "Cannot SELECT from non-list type #{list_type}")
+        error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")
       end
-      item_type = node.left.resolved_type.to_s.gsub(/\[(\d+|\*)?\]$/, "")
+      item_type = node.left.resolved_type.to_s.gsub(/\[(\d+|\*)?\]$/, "").to_sym
 
       # B. Create a temporary Scope for the SELECT body
       with_new_scope do
@@ -870,7 +875,7 @@ private
       end
 
       # D. Set Result Type (It returns a List of the Body's result)
-      result_base = node.right.expression.resolved_type
+      result_base = node.right.expression.full_type
       node.full_type = :"%#{result_base}[]"
 
     elsif node.right.is_a?(AST::FuncCall)
