@@ -1,11 +1,41 @@
 #! /usr/bin/env ruby
 
+require 'bundler/setup' # so `bundle exec` not needed
+require "optparse"
+require "logger"
+
 require_relative "./lexer"
 require_relative "./parser"
 require_relative "./ast"
 require_relative "./annotator"
 
 class ZigTranspiler
+  ZIG_OPS = {
+    :ADD => "+",
+    :SUB => "-",
+    :MUL => "*",
+    :DIV => "/",     # Note: Integer division in Zig
+    :MOD => "%",     # Zig uses % for Modulo
+
+    :EQ  => "==",
+    :NEQ => "!=",
+    :LT  => "<",
+    :LTE => "<=",
+    :GT  => ">",
+    :GTE => ">=",
+
+    # Zig-specific logic keywords
+    :AND => "and",
+    :OR  => "or",
+    :NOT => "!",
+
+    # Bitwise
+    :BITWISE_NOT => "~",
+
+    # Special AST nodes you might map to operators
+    #:OR_RESCUE   => "orelse"
+  }
+
   def compile(cheat_code)
     # 1. Parse
     tokens = Lexer.new(cheat_code).tokenize
@@ -67,10 +97,17 @@ class ZigTranspiler
     when AST::FunctionDef
       # CHEAT: FN test() RETURNS User ->
       # ZIG:   pub fn test(rt: *Runtime) !User {
-      return_type = transpile_type(node.return_type || :Void)
+      base_type = transpile_type(node.return_type || :Void)
+
+      # 2. Check if it's a Struct (Simple heuristic: not a primitive)
+      #    Primitives: i64, f64, bool, void, and slices ([]...)
+      is_struct = !["i64", "f64", "bool", "void"].include?(base_type) && !base_type.start_with?("[]")
+
+      # 3. If Struct, return Pointer (*User)
+      final_type = is_struct ? "*#{base_type}" : base_type
 
       # We inject 'rt' into every function signature
-      signature = "pub fn #{node.name}(rt: *Runtime) !#{return_type}"
+      signature = "pub fn #{node.name}(rt: *Runtime) !#{final_type}"
 
       body = node.body.map { |stmt| visit(stmt) }.join("\n    ")
 
@@ -90,9 +127,14 @@ class ZigTranspiler
       is_mutable = node.respond_to?(:mutable) && node.mutable
       keyword = is_mutable ? "var" : "const"
 
+      zig_type = transpile_type(node.full_type)
+      is_primitive = ["i64", "f64", "bool", "void"].include?(zig_type)
+
+      annotation = is_primitive ? ": #{zig_type}" : ""
+
       # 2. Generate Declaration
       #    var u = ...;
-      decl = "#{keyword} #{node.name} = #{visit(node.value)};"
+      decl = "#{keyword} #{node.name}#{annotation} = #{visit(node.value)};"
 
       # 3. Generate Suppression
       #    _ = &u;  <-- If mutable, we take address to silence "never mutated" check
@@ -102,14 +144,88 @@ class ZigTranspiler
 
       "#{decl} #{suppression}"
 
+    when AST::Assignment
+      # 1. Resolve the Target string
+      #    The target might be a simple String ("i") or a complex Node (GetField/GetIndex)
+      target_str =
+        if node.name.is_a?(String)
+          node.name
+        elsif node.name.is_a?(AST::Identifier)
+          node.name.name
+        else
+          # Recursive visit for things like 'user.id' or 'list[0]'
+          visit(node.name)
+        end
+
+      # 2. Resolve the Value
+      value_str = visit(node.value)
+
+      # 3. Output Zig Code
+      "#{target_str} = #{value_str};"
+
     when AST::StructLit
       # CHEAT: User{ id: 1 }
       # ZIG:   User{ .id = 1 }
-      field_inits = node.fields.map do |name, val|
-        ".#{name} = #{visit(val)}"
-      end.join(", ")
 
-      "#{node.name}{ #{field_inits} }"
+      # ... field init logic ...
+      field_inits = node.fields.map { |k,v| ".#{k} = #{visit(v)}" }.join(", ")
+      struct_init = "#{node.name}{ #{field_inits} }"
+
+      if node.storage == :heap # You set this in the Annotator!
+        # The 2-step Zig dance
+        # We use a block expression usually, or a helper function
+        # For simplicity, we can use a helper: try rt.newHeap(User, User{...})
+        "try rt.allocCopy(#{node.name}, #{struct_init})"
+      else
+        struct_init
+      end
+
+    when AST::ListLit
+      # 1. Determine the Zig Type (T)
+      #    The Annotator sets 'full_type' (e.g. :Number[] or :%User[])
+      #    We strip the brackets and % to get the base type.
+      effective_type = node.coerced_type || node.full_type
+      type_str = effective_type.to_s
+
+      base_type_sym = type_str.gsub(/[\[\]%]/, '')
+      zig_type = transpile_type(base_type_sym)
+
+      # 2. Determine Allocator
+      #    The Annotator sets 'storage' (:heap or :stack)
+      allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
+
+      # 3. Generate Items Slice
+      #    Zig syntax for an array literal slice is: &.{ item1, item2 }
+      if node.items.empty?
+        items_slice = "&.{}"
+      else
+        items_list = node.items.map { |item| visit(item) }.join(", ")
+        items_slice = "&.{ #{items_list} }"
+      end
+
+      # 4. Generate the Call
+      #    Result: try rt.makeList(i64, rt.stackAlloc(), &.{ 1, 2, 3 })
+      "try rt.makeList(#{zig_type}, #{allocator}, #{items_slice})"
+
+    when AST::MethodCall
+      # 1. Check if it's a builtin list method
+      if ["append"].include?(node.name)
+        # 2. Determine Allocator
+        #    This relies on the Annotator having marked the node!
+        allocator = node.object.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
+
+        # 3. Generate Zig
+        receiver = visit(node.object)
+        arg = visit(node.args.first)
+        "try #{receiver}.append(#{allocator}, #{arg});"
+      else
+        # ... standard function call ...
+      end
+
+    when AST::WhileLoop
+      cond = visit(node.condition)
+      body = node.do_branch.map { |s| visit(s) }.join("\n")
+      "while (#{cond}) {\n #{body} \n}"
 
     when AST::FuncCall
       # Special case for 'print'
@@ -132,7 +248,48 @@ class ZigTranspiler
       node.name
 
     when AST::Literal
-      node.value.to_s
+      case node.type
+      when :STRING
+        "\"#{node.value}\""  # Add quotes!
+      when :NUMBER, :INT64
+        node.value.to_i.to_s # Force Integer for Zig i64 compatibility
+      when :BOOLEAN
+        node.value.to_s      # "true"/"false" is fine
+      else
+        node.value.to_s
+      end
+
+    when AST::UnaryOp
+      right = visit(node.right)
+      case node.op
+      when :NOT, "!"
+        "!#{right}"
+      when :SUB, "-"
+        "-#{right}"
+      when :BITWISE_NOT, "~"
+        "~#{right}"
+      else
+        raise "Transpiler Error: Unknown Unary Operator '#{node.op}'"
+      end
+
+    when AST::BinaryOp
+      left = visit(node.left)
+      right = visit(node.right)
+
+      if node.op == :POW
+        # Assuming i64 for now.
+        # If types are float, you might need std.math.pow(f64, ...)
+        return "std.math.pow(i64, #{left}, #{right})"
+      end
+
+      # Standard Operators
+      op_str = ZIG_OPS[node.op]
+
+      unless op_str
+        raise "Transpiler Error: Unknown or Unsupported Binary Operator '#{node.op}'"
+      end
+
+      "(#{left} #{op_str} #{right})"
 
     else
       raise "Unknown Node: #{node.class}"
@@ -140,30 +297,49 @@ class ZigTranspiler
   end
 
   def transpile_type(type)
-    case type.to_s
-    when "Number" then "f64" # Mapping Number -> f64 for simplicity
-    when "Void"   then "void"
-    else type.to_s
+    t = type.to_s.gsub("%", "") # Strip explicit heap marker if present
+
+    case t
+    when "Number"          then "f64"
+    when "Int64"           then "i64" # Or f64, depending on your preference
+    when "String"          then "[]const u8"  # TODO: String isn't used
+    when "String[]"        then "[]const u8"
+    when "Void"            then "void"
+    else t # Fallback for Struct names (e.g. "User")
     end
   end
 end
 
 # --- RUN IT ---
 
-code = <<~CHEAT
-  STRUCT User { id: Number }
 
-  FN cheatMain() RETURNS User ->
-    VAR u = User{ id: 1 };
-    print(u.id);
-    RETURN u;
-  END
-CHEAT
-
-# Assuming you have runtime.zig in zig/runtime.zig
-if !File.exist?("zig/runtime.zig")
-  puts "Please ensure zig/runtime.zig exists (from your prompt)!"
-  exit
+$logger = Logger.new(STDOUT)
+$logger.level = Logger::INFO
+$logger.formatter = proc do |severity, datetime, progname, msg|
+  "[#{severity}] #{msg}\n"
 end
 
-puts ZigTranspiler.new.compile(code)
+OptionParser.new do |opts|
+  opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
+    $logger.level = Logger.const_get(level.upcase)
+  end
+end.parse!
+
+
+if __FILE__ == $0
+  # Assuming you have runtime.zig in zig/runtime.zig
+  if !File.exist?("zig/runtime.zig")
+    puts "Please ensure zig/runtime.zig exists (from your prompt)!"
+    exit
+  end
+
+  script_file = ARGV.first
+  if script_file
+    code = File.read(script_file)
+    puts ZigTranspiler.new.compile(code)
+  else
+    $stderr.puts "Usage: ruby transpiler.rb <script.ct>"
+  end
+end
+
+

@@ -1,5 +1,4 @@
 require "byebug"
-require "optparse"
 require "logger"
 
 require_relative "lexer"
