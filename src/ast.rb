@@ -8,6 +8,7 @@ module AST
     def token_value; token.value; end
     attr_accessor :full_type
     attr_accessor :coerced_type
+    attr_accessor :zig_pattern
 
     def resolved_type
       # function_signature

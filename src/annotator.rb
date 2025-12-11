@@ -1,6 +1,7 @@
 require_relative "./source_error"
 require_relative "./scope"
 require_relative "./parser"
+require_relative "./std_lib"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -12,7 +13,6 @@ class SemanticAnnotator
   HEAP_STRING_TYPE = "%String[]".to_sym
 
   BUILTINS = {
-    "print" => :Nil,
     "time"  => :Number,
 
     # Generic/Polymorphic Functions:
@@ -52,6 +52,9 @@ private
         nil,
         :stack
       )
+      STD_LIB.each do |name, config|
+        current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
+      end
     end
 
     # Setup Globals
@@ -384,9 +387,7 @@ private
 
     # 3. Determine Return Type
     if func_type == :Intrinsic
-      # It's a special built-in (like map). Run its custom logic.
-      handler = BUILTINS[node.name]
-      node.full_type = handler.call(node.args, self, node)
+      visit_IntrinsicFunc(node, node.args)
     elsif func_type.is_a?(Hash) # Named Function (Rich Signature)
       verify_function_signature(node, func_type)
       node.full_type = func_type[:return_type]
@@ -419,33 +420,32 @@ private
     func_type = scope.resolve_type(method_name)
 
     # 4. Validate types using the synthesized argument list
+    ufcs_args = [node.object] + node.args
     if func_type == :Intrinsic
-      # For UCFS (list.map), we treat the object (list) as the first argument.
-      handler = BUILTINS[method_name]
-
-      # Combine [Receiver, Arg1, Arg2...]
-      combined_args = [node.object] + node.args
-
-      # Call the lambda defined in BUILTINS
-      node.full_type = handler.call(combined_args, self, node)
-
+      visit_IntrinsicFunc(node, ufcs_args)
     elsif func_type.is_a?(Hash) # Named Function
-
-      # Construct a lightweight wrapper to reuse verify_function_signature
-      # This ensures x.add(y) is validated EXACTLY like add(x, y)
-      # We create a struct that quacks like AST::FuncCall
-      fake_call_node = Struct.new(:token, :name, :args).new(node.token, method_name, [node.object] + node.args)
-
+      fake_call_node = Struct.new(:token, :name, :args).new(node.token, method_name, ufcs_args)
       verify_function_signature(fake_call_node, func_type)
       node.full_type = func_type[:return_type]
-
     elsif func_type.is_a?(Array) && func_type[0] == :Proc
-      # Lambda/Proc: [:Proc, [ArgTypes], ReturnType]
       node.full_type = func_type[2]
-
     else
-      # If we found the name but it's not a function (e.g. a variable), error out
       error!(node, "Property '#{method_name}' is not a function")
+    end
+  end
+
+  def visit_IntrinsicFunc(node, args)
+    if handler = BUILTINS[node.name]
+      node.full_type = handler.call(args, self, node)
+    elsif config = STD_LIB[node.name]
+      # Need to pass this to verify function, to verify types, coerce, etc
+      if config[:args] != :Varargs && args.size != config[:args].size
+        error!(node, "Arity Mismatch for #{node.name}")
+      end
+      node.full_type = config[:return]
+      node.zig_pattern = config[:zig]
+    else
+      error!(node, "Unknown intrinsic")
     end
   end
 

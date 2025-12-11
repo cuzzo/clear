@@ -36,6 +36,8 @@ class ZigTranspiler
     #:OR_RESCUE   => "orelse"
   }
 
+  ZIG_PRIMITIVES = ["i64", "f64", "bool", "void", "[]const u8"]
+
   def transpile(cheat_code)
     # 1. Parse
     tokens = Lexer.new(cheat_code).tokenize
@@ -47,7 +49,7 @@ class ZigTranspiler
     # We output the Runtime preamble + Transpiled Code + Main
     <<~ZIG
       // [RUNTIME BEGIN] ---------------------------------------------------------
-      #{File.read("./zig/runtime.zig").split("// 2. User Types").first}
+      #{File.read("./zig/runtime-header.zig")}
       // [RUNTIME END] -----------------------------------------------------------
 
       // -------------------------------------------------------------------------
@@ -58,20 +60,11 @@ class ZigTranspiler
       // -------------------------------------------------------------------------
       // 3. Main Entry (Test Harness)
       // -------------------------------------------------------------------------
-      pub fn main() !void {
-          var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-          const allocator = gpa.allocator();
-          var rt = try Runtime.init(allocator, 1024 * 1024);
-          defer rt.deinit(allocator);
-
-          // Call the function defined in CHEAT
-          const result = try cheatMain(&rt);
-          std.debug.print("Result ID: {d}\\n", .{result.id});
-      }
+      #{File.read("./zig/runtime-footer.zig")}
     ZIG
   end
 
-  private
+private
 
   def visit(node)
     case node
@@ -116,11 +109,7 @@ class ZigTranspiler
       all_params = ["rt: *Runtime"] + params_zig
       signature = "pub fn #{node.name}(#{all_params.join(', ')}) !#{final_type}"
 
-      body = node.body.map do |stmt|
-        code = visit(stmt)
-        code += ";" unless code.end_with?(";") || code.end_with?("}")
-        code
-      end.join("\n    ")
+      body = transpile_block(node.body)
 
       <<~ZIG
         #{signature} {
@@ -139,7 +128,7 @@ class ZigTranspiler
       keyword = is_mutable ? "var" : "const"
 
       zig_type = transpile_type(node.full_type)
-      is_primitive = ["i64", "f64", "bool", "void"].include?(zig_type)
+      is_primitive = ZIG_PRIMITIVES.include?(zig_type)
 
       annotation = is_primitive ? ": #{zig_type}" : ""
 
@@ -248,14 +237,14 @@ class ZigTranspiler
       cond = visit(node.condition)
 
       # 2. Transpile THEN Block
-      then_body = node.then_branch.map { |stmt| visit(stmt) }.join("\n    ")
+      then_body = transpile_block(then_branch)
 
       # 3. Construct Base Statement
       zig_code = "if (#{cond}) {\n    #{then_body}\n    }"
 
       # 4. Transpile ELSE Block (Optional)
       if node.else_branch && !node.else_branch.empty?
-        else_body = node.else_branch.map { |stmt| visit(stmt) }.join("\n    ")
+        else_body = transpile_block(node.else_branch)
         zig_code += " else {\n    #{else_body}\n    }"
       end
 
@@ -263,25 +252,11 @@ class ZigTranspiler
 
     when AST::WhileLoop
       cond = visit(node.condition)
-      body = node.do_branch.map { |s| visit(s) }.join("\n")
+      body = transpile_block(node.do_branch)
       "while (#{cond}) {\n #{body} \n}"
 
-    when AST::FuncCall
-      # Special case for 'print'
-      if node.name == "print"
-        # 1. Build Format String (e.g. "{d} {s}")
-        #    We map over arguments and ask "What format code does this type need?"
-        formats = node.args.map do |arg|
-          get_zig_format(arg.full_type)
-        end.join(" ") # Space separated
-
-        # 2. Build Value List (e.g. "x, y")
-        values = node.args.map { |a| visit(a) }.join(", ")
-
-        # 3. Generate Zig Print
-        #    We append \n automatically for convenience
-        return "std.debug.print(\"#{formats}\\n\", .{#{values}});"
-      end
+    when AST::FuncCall, AST::MethodCall
+      return transpile_Intrinsic(node) if !node.zig_pattern.nil?
       # Standard call (pass rt)
       args = ["rt"] + node.args.map { |a| visit(a) }
       "try #{node.name}(#{args.join(', ')})"
@@ -321,7 +296,7 @@ class ZigTranspiler
       end
 
     when AST::BinaryOp
-      return visit_Smooth(node) if node.op == :SMOOTH
+      return transpile_Smooth(node) if node.op == :SMOOTH
 
       left = visit(node.left)
       right = visit(node.right)
@@ -359,7 +334,7 @@ class ZigTranspiler
     end
   end
 
-  def visit_Smooth(node)
+  def transpile_Smooth(node)
     lhs = node.left
     rhs = node.right
 
@@ -383,6 +358,49 @@ class ZigTranspiler
 
     # Visit the fake node as if it were in the original source
     visit(synthetic_call)
+  end
+
+  def transpile_Intrinsic(node)
+    # Special Builtins that can't be handled 1-1 mapping
+    return send(node.zig_pattern, node) if node.zig_pattern.is_a?(Symbol)
+
+    # 1. Gather Arguments
+    #    Arg 0 is receiver (for methods), Args 1..N are params
+    #    We must transpile them first.
+
+    # TODO: Annotator should do this
+    args_zig =
+      if node.is_a?(AST::MethodCall)
+        [visit(node.object)] + node.args.map { |a| visit(a) }
+      else
+        node.args.map { |a| visit(a) }
+      end
+
+    # 2. Resolve Placeholders
+    #    {0} -> args_zig[0], {1} -> args_zig[1]
+    pattern = node.zig_pattern
+
+    #    {alloc} -> determine allocator automatically
+    if pattern.include?("{alloc}")
+      alloc = node.object&.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
+      pattern = pattern.gsub("{alloc}", alloc)
+    end
+
+    args_zig.each_with_index do |val, i|
+      pattern = pattern.gsub("{#{i}}", val)
+    end
+
+    pattern
+  end
+
+  # Semi-colon helper
+  def transpile_block(statements)
+    statements.map do |stmt|
+      code = visit(stmt)
+      # Add ; if it's not a block ending (}) and doesn't have one yet
+      code += ";" unless code.end_with?(";") || code.end_with?("}")
+      code
+    end.join("\n    ")
   end
 
   def transpile_type(type)
@@ -414,6 +432,23 @@ class ZigTranspiler
     else
       "{any}" # Fallback for Structs/Objects (Debug print)
     end
+  end
+
+  ### ---- STD LIB MACROS ---
+
+  # [MACRO] Generates type-safe Zig print statements
+  # Called automatically via :macro_print in STD_LIB
+  def macro_print(node)
+    # 1. Build Format String (e.g. "{d} {s}")
+    formats = node.args.map do |arg|
+      get_zig_format(arg.full_type)
+    end.join(" ")
+
+    # 2. Build Value List
+    values = node.args.map { |a| visit(a) }.join(", ")
+
+    # 3. Output
+    "std.debug.print(\"#{formats}\\n\", .{#{values}});"
   end
 end
 
