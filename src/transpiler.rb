@@ -36,7 +36,7 @@ class ZigTranspiler
     #:OR_RESCUE   => "orelse"
   }
 
-  def compile(cheat_code)
+  def transpile(cheat_code)
     # 1. Parse
     tokens = Lexer.new(cheat_code).tokenize
     ast = Parser.new(tokens, cheat_code).parse
@@ -106,10 +106,21 @@ class ZigTranspiler
       # 3. If Struct, return Pointer (*User)
       final_type = is_struct ? "*#{base_type}" : base_type
 
-      # We inject 'rt' into every function signature
-      signature = "pub fn #{node.name}(rt: *Runtime) !#{final_type}"
+      params_zig = node.params.map do |param|
+        p_name = param[:name]
+        p_type = transpile_type(param[:type])
+        "#{p_name}: #{p_type}"
+      end
 
-      body = node.body.map { |stmt| visit(stmt) }.join("\n    ")
+      # We inject 'rt' into every function signature
+      all_params = ["rt: *Runtime"] + params_zig
+      signature = "pub fn #{node.name}(#{all_params.join(', ')}) !#{final_type}"
+
+      body = node.body.map do |stmt|
+        code = visit(stmt)
+        code += ";" unless code.end_with?(";") || code.end_with?("}")
+        code
+      end.join("\n    ")
 
       <<~ZIG
         #{signature} {
@@ -161,7 +172,7 @@ class ZigTranspiler
       value_str = visit(node.value)
 
       # 3. Output Zig Code
-      "#{target_str} = #{value_str};"
+      "#{target_str} = #{value_str}"
 
     when AST::StructLit
       # CHEAT: User{ id: 1 }
@@ -207,6 +218,15 @@ class ZigTranspiler
       #    Result: try rt.makeList(i64, rt.stackAlloc(), &.{ 1, 2, 3 })
       "try rt.makeList(#{zig_type}, #{allocator}, #{items_slice})"
 
+    when AST::GetIndex
+      # 1. Resolve Target and Index
+      target = visit(node.target)
+      index  = visit(node.index)
+
+      # 2. Generate Universal Accessor
+      #    Zig: rt.getAt(list, i)
+      "rt.getAt(#{target}, #{index})"
+
     when AST::MethodCall
       # 1. Check if it's a builtin list method
       if ["append"].include?(node.name)
@@ -222,6 +242,25 @@ class ZigTranspiler
         # ... standard function call ...
       end
 
+    when AST::IfStatement
+      # 1. Transpile Condition
+      #    Zig idiomatic: if (cond) { ... }
+      cond = visit(node.condition)
+
+      # 2. Transpile THEN Block
+      then_body = node.then_branch.map { |stmt| visit(stmt) }.join("\n    ")
+
+      # 3. Construct Base Statement
+      zig_code = "if (#{cond}) {\n    #{then_body}\n    }"
+
+      # 4. Transpile ELSE Block (Optional)
+      if node.else_branch && !node.else_branch.empty?
+        else_body = node.else_branch.map { |stmt| visit(stmt) }.join("\n    ")
+        zig_code += " else {\n    #{else_body}\n    }"
+      end
+
+      zig_code
+
     when AST::WhileLoop
       cond = visit(node.condition)
       body = node.do_branch.map { |s| visit(s) }.join("\n")
@@ -230,13 +269,22 @@ class ZigTranspiler
     when AST::FuncCall
       # Special case for 'print'
       if node.name == "print"
-        # Naive: assume we are printing an integer for this demo
-        arg = visit(node.args.first)
-        return "std.debug.print(\"{d}\\n\", .{#{arg}});"
+        # 1. Build Format String (e.g. "{d} {s}")
+        #    We map over arguments and ask "What format code does this type need?"
+        formats = node.args.map do |arg|
+          get_zig_format(arg.full_type)
+        end.join(" ") # Space separated
+
+        # 2. Build Value List (e.g. "x, y")
+        values = node.args.map { |a| visit(a) }.join(", ")
+
+        # 3. Generate Zig Print
+        #    We append \n automatically for convenience
+        return "std.debug.print(\"#{formats}\\n\", .{#{values}});"
       end
       # Standard call (pass rt)
-      args = ["&rt"] + node.args.map { |a| visit(a) }
-      "try #{node.name}(#{args.join(', ')});"
+      args = ["rt"] + node.args.map { |a| visit(a) }
+      "try #{node.name}(#{args.join(', ')})"
 
     when AST::ReturnNode
       "return #{visit(node.value)};"
@@ -273,8 +321,23 @@ class ZigTranspiler
       end
 
     when AST::BinaryOp
+      return visit_Smooth(node) if node.op == :SMOOTH
+
       left = visit(node.left)
       right = visit(node.right)
+
+      if node.op == :ADD || node.op == "+"
+        # Check if we are operating on Strings
+        # Annotator ensures full_type is set (e.g. "String[]" or "%String[]")
+        t_left = node.left.full_type.to_s
+        t_right = node.right.full_type.to_s
+
+        if t_left.include?("String") || t_right.include?("String")
+          # Generate call to runtime helper
+          # We use heapAlloc to ensure the result survives (safe default)
+          return "try rt.concat(rt.heapAlloc(), #{left}, #{right})"
+        end
+      end
 
       if node.op == :POW
         # Assuming i64 for now.
@@ -296,16 +359,60 @@ class ZigTranspiler
     end
   end
 
+  def visit_Smooth(node)
+    lhs = node.left
+    rhs = node.right
+
+    # We construct a synthetic node that looks like the resulting function call.
+    # This delegates all complexity (rt injection, print formatting, recursion)
+    # to the existing visit_FuncCall handler.
+
+    synthetic_call = if rhs.is_a?(AST::Identifier)
+       # Pattern: x s> f  -->  f(x)
+       AST::FuncCall.new(rhs.token, rhs.name, [lhs])
+
+    elsif rhs.is_a?(AST::FuncCall)
+       # Pattern: x s> f(y) --> f(x, y)
+       # We inject the LHS as the *first* argument
+       new_args = [lhs] + rhs.args
+       AST::FuncCall.new(rhs.token, rhs.name, new_args)
+
+    else
+       raise "Transpiler Error: Invalid Pipe Destination #{rhs.class}"
+    end
+
+    # Visit the fake node as if it were in the original source
+    visit(synthetic_call)
+  end
+
   def transpile_type(type)
     t = type.to_s.gsub("%", "") # Strip explicit heap marker if present
 
     case t
     when "Number"          then "f64"
-    when "Int64"           then "i64" # Or f64, depending on your preference
+    when "Int64"           then "i64"
     when "String"          then "[]const u8"  # TODO: String isn't used
     when "String[]"        then "[]const u8"
     when "Void"            then "void"
     else t # Fallback for Struct names (e.g. "User")
+    end
+  end
+
+  def get_zig_format(flux_type)
+    # 1. Clean the type string (remove % heap marker)
+    t = flux_type.to_s.gsub("%", "")
+
+    # 2. Handle Strings explicitly
+    #    Flux might call it "String" or "String[]" depending on where it came from
+    return "{s}" if t.include?("String")
+
+    # 3. Handle Primitives
+    case t
+    when "Number", "Int64", "Byte" then "{d}" # Decimal
+    when "Bool"                    then "{}"  # Auto (true/false)
+    when "Void"                    then "{}"  # Void
+    else
+      "{any}" # Fallback for Structs/Objects (Debug print)
     end
   end
 end
@@ -336,7 +443,7 @@ if __FILE__ == $0
   script_file = ARGV.first
   if script_file
     code = File.read(script_file)
-    puts ZigTranspiler.new.compile(code)
+    puts ZigTranspiler.new.transpile(code)
   else
     $stderr.puts "Usage: ruby transpiler.rb <script.ct>"
   end

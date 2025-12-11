@@ -1014,7 +1014,7 @@ private
       if t_left != t_right
         # We could allow Number[] + Number[3], but result is Number[]
         # For now, simplistic check:
-        node.rull_type = t_left
+        node.full_type = t_left
       else
         node.full_type = t_left
       end

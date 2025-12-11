@@ -64,6 +64,24 @@ pub const Runtime = struct {
         return list;
     }
 
+    // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
+    // Also handles casting the index to usize automatically.
+    pub fn getAt(self: *Runtime, container: anytype, index: anytype) @TypeOf(if (@hasField(@TypeOf(container), "items")) container.items[0] else container[0]) {
+        _ = self;
+        const i: usize = @intCast(index); // Auto-cast i64 -> usize
+
+        if (@hasField(@TypeOf(container), "items")) {
+            return container.items[i];
+        } else {
+            return container[i];
+        }
+    }
+
+    pub fn concat(self: *Runtime, allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
+        _ = self;
+        return try std.mem.concat(allocator, u8, &.{s1, s2});
+    }
+
     // Used to make HEAP strings
     pub fn makeString(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
         return try std.fmt.allocPrint(allocator, "{s}", .{text});
