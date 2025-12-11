@@ -18,19 +18,10 @@ STD_LIB = {
   },
 
   # 1. String.length()
-  "length" => {
-    args: [STRING_TYPE],
-    return: :Int64,
-    zig: "{0}.len"  # {0} is the receiver/first arg
-  },
-
-  # TODO: allow overloading
-  # 1b. Array.length()
-  "count" => {
-    args: [:"Any[]"],   # TODO: Get this to work
-    return: :Int64,
-    zig: "rt.len({0})"
-  },
+  "length" => [
+    { args: [STRING_TYPE], return: :Int64, zig: "rt.len({0})" },
+    { args: [:"Any[]"], return: :Int64, zig: "rt.len({0})" }
+  ],
 
   # 2. String.substr(start, len)
   "substr" => {

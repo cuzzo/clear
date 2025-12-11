@@ -8,7 +8,7 @@ FN cheatMain() RETURNS User ->
 
   -- Manual Loop (For loop next!)
   MUTABLE i = 0_i64;
-  WHILE i < words.count() DO
+  WHILE i < words.length() DO
     VAR w = words[i];
     VAR current = counts[w]; -- mapGet (defaults to 0)
     SET counts[w] = current + 1_i64; -- mapPut

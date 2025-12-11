@@ -15,6 +15,7 @@ class Lexer
       ASSERT RAISE CATCH EXIT DIE
       MOD OR
       REQUIRE
+      SELECT
     ].to_set
 
   def initialize(source)
@@ -47,6 +48,7 @@ class Lexer
       when @s.scan(/&&/) then add(:CHAR, '&&', start_col)
       when @s.scan(/\*\*/) then add(:CHAR, '**', start_col)
       when @s.scan(/\|\|/) then add(:CHAR, '||', start_col)
+      when @s.scan(/_/) then add(:VAR_ID, '_', start_col)
 
       when @s.scan(/"""((?:.|\n)*?)"""/)
         # Extract content, but 'add' will use @s.matched to count lines correctly

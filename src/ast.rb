@@ -78,6 +78,8 @@ module AST
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
   Require      = Struct.new(:token, :path) { include Locatable }
+  SelectOp     = Struct.new(:token, :expression) { include Locatable }
+  Placeholder  = Struct.new(:token) { include Locatable }
 
   UNARY_OPS = ['-', '!', '~']
 

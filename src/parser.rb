@@ -89,6 +89,7 @@ class Parser
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:PERCENT, '%') { parse_sigil_construct }
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
+  primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do
@@ -179,9 +180,13 @@ class Parser
 
   # Helpers for the literals (Keywords or Chars)
   def consume_literal(val)
-    # Heuristic: Letters = Keyword, Symbols = Char
-    type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
-    consume(type, val)
+    if val == '_'
+      consume(:UNDERSCORE)
+    elsif val.match?(/[a-zA-Z]/)
+      consume(:KEYWORD, val)
+    else
+      consume(:CHAR, val)
+    end
   end
 
   def match_literal!(val)

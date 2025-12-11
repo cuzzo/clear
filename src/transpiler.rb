@@ -312,6 +312,11 @@ private
       "#{visit(node.target)}.#{node.field}"
 
     when AST::Identifier
+      # [FIX] Handle '_' Identifier acting as a Placeholder
+      if node.name == "_" && @placeholder_name
+        return @placeholder_name
+      end
+
       node.name
 
     when AST::Literal
@@ -382,6 +387,11 @@ private
     lhs = node.left
     rhs = node.right
 
+    # Check Higher-Order functions
+    if node.right.is_a?(AST::SelectOp)
+      return transpile_select_projection(node.left, node.right.expression)
+    end
+
     # We construct a synthetic node that looks like the resulting function call.
     # This delegates all complexity (rt injection, print formatting, recursion)
     # to the existing visit_FuncCall handler.
@@ -400,8 +410,60 @@ private
        raise "Transpiler Error: Invalid Pipe Destination #{rhs.class}"
     end
 
+    # TODO: Clone rhs??
+    if rhs.respond_to?(:zig_pattern)
+      synthetic_call.zig_pattern = rhs.zig_pattern
+    end
+    if rhs.respond_to?(:full_type)
+      synthetic_call.full_type = rhs.full_type
+    end
+    if rhs.respond_to?(:coerced_type)
+      synthetic_call.coerced_type = rhs.coerced_type
+    end
+
     # Visit the fake node as if it were in the original source
     visit(synthetic_call)
+  end
+
+  # --- HIGHER ORDER FUNCTIONS ---
+  def transpile_select_projection(list_node, expression_node)
+    # 1. Setup Types
+    #    We need the Result Type to create the new List
+    result_flux_type = expression_node.full_type
+    result_zig_type  = transpile_type(result_flux_type)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+
+    # 3. Handle the '_' placeholder
+    #    We tell the Transpiler: "When you see _, print 'it'"
+    #    We can use a temporary instance variable or a context stack.
+    @placeholder_name = "it"
+    expr_code = visit(expression_node)
+    @placeholder_name = nil
+
+    # 4. Generate Inline Loop
+    #    We use a Zig block: { ... break :blk list; }
+    <<~ZIG
+      blk: {
+          const src_list = #{list_code};
+          var res_list = try rt.makeList(#{result_zig_type}, rt.heapAlloc(), &.{});
+
+          // Handle both ArrayList and Slice
+          const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
+
+          for (items) |it| {
+              const val = #{expr_code};
+              try res_list.append(rt.heapAlloc(), val);
+          }
+          break :blk res_list;
+      }
+    ZIG
+  end
+
+  def visit_Placeholder(node)
+    # Return the name of the loop variable
+    @placeholder_name || (raise "Use of '_' outside of SELECT context")
   end
 
   def transpile_Intrinsic(node)
@@ -464,6 +526,16 @@ private
       base = t[0...-2]
       zig_base = transpile_type(base)
       return "[]#{zig_base}"
+    end
+
+    # 3. Handle HashMaps
+    #    HashMap<Int64> -> std.StringHashMapUnmanaged(i64)
+    if t.start_with?("HashMap")
+      if match = t.match(/HashMap<(.+)>/)
+        inner_flux = match[1]
+        inner_zig = transpile_type(inner_flux)
+        return "std.StringHashMapUnmanaged(#{inner_zig})"
+      end
     end
 
     case t

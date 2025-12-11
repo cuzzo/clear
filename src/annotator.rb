@@ -854,7 +854,26 @@ private
     # 1. Visit the Left (Input) FIRST
     visit(node.left)
 
-    if node.right.is_a?(AST::FuncCall)
+    if node.right.is_a?(AST::SelectOp)
+      if node.left.metatype != :array
+        error!(node.left, "Cannot SELECT from non-list type #{list_type}")
+      end
+      item_type = node.left.resolved_type.to_s.gsub(/\[(\d+|\*)?\]$/, "")
+
+      # B. Create a temporary Scope for the SELECT body
+      with_new_scope do
+        # Declare '_' with the specific item type
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+
+        # C. Analyze the Body (e.g., _["count"])
+        visit(node.right.expression)
+      end
+
+      # D. Set Result Type (It returns a List of the Body's result)
+      result_base = node.right.expression.resolved_type
+      node.full_type = :"%#{result_base}[]"
+
+    elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)
       # We intentionally modify the AST temporarily to leverage visit_FuncCall's
       # existing validation logic (arity, type checks, intrinsics).
@@ -946,6 +965,11 @@ private
     end
 
     @smooth_depth -= 1
+  end
+
+  def visit_Placeholder(node)
+    # Just resolve it like an identifier
+    visit_Identifier(AST::Identifier.new(node.token, "_"))
   end
 
   # =========================================================
