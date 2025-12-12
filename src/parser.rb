@@ -89,7 +89,9 @@ class Parser
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:PERCENT, '%') { parse_sigil_construct }
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
+
   primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :expression])
+  primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do

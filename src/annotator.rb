@@ -742,7 +742,6 @@ private
     # Simple check: Ensure all values match
     node.pairs.each do |k, v|
       if v.resolved_type != first_val_type
-        byebug
         error!(node, "HashMap must have all values be the same type")
       end
     end
@@ -785,7 +784,11 @@ private
     node.items.each { |item| visit(item) }
 
     if node.items.empty?
-      node.full_type = :"Any[]"
+      if node.storage == :heap
+        node.full_type = :"%Any[]"
+      else
+        node.full_type = :"Any[]"
+      end
       return
     end
 
@@ -859,7 +862,7 @@ private
     # 1. Visit the Left (Input) FIRST
     visit(node.left)
 
-    if node.right.is_a?(AST::SelectOp)
+    if node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp)
       if node.left.metatype != :array
         error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")
       end
@@ -872,11 +875,19 @@ private
 
         # C. Analyze the Body (e.g., _["count"])
         visit(node.right.expression)
+
+        if node.right.is_a?(AST::WhereOp) && node.right.expression.resolved_type != :Bool
+          error!(node.right, "WHERE clause must evaluate to Bool")
+        end
       end
 
       # D. Set Result Type (It returns a List of the Body's result)
-      result_base = node.right.expression.full_type
-      node.full_type = :"%#{result_base}[]"
+      if node.right.is_a?(AST::SelectOp)
+        result_base = node.right.expression.full_type
+        node.full_type = :"%#{result_base}[]"
+      elsif node.right.is_a?(AST::WhereOp)
+        node.full_type = :"%#{item_type}[]"
+      end
 
     elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)

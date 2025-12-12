@@ -15,7 +15,7 @@ class Lexer
       ASSERT RAISE CATCH EXIT DIE
       MOD OR
       REQUIRE
-      SELECT
+      SELECT WHERE
     ].to_set
 
   def initialize(source)
