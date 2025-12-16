@@ -11,10 +11,11 @@ pub const Runtime = struct {
     // THE HEAP ARENA (Survivor/Request)
     // We use a standard ArenaAllocator. It wraps the OS allocator (page_allocator)
     // and frees everything at once when we call deinit().
+    // TODO: probably want this to be a gpa allocator
     heap_arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: std.mem.Allocator, stack_size: usize) !Runtime {
-        // Alloc raw memory for the stack (1MB or whatever passed)
+        // Alloc raw memory for the frame (1MB or whatever passed)
         const stack_mem = try allocator.alloc(u8, stack_size);
 
         return Runtime{
@@ -39,7 +40,7 @@ pub const Runtime = struct {
         self.stack_fba.end_index = mark;
     }
 
-    // Helper to get the Allocator interfaces
+    // TODO: Rename -> frameAlloc
     pub fn stackAlloc(self: *Runtime) std.mem.Allocator {
         return self.stack_fba.allocator();
     }
@@ -256,5 +257,85 @@ pub const Runtime = struct {
 
         return stdout;
     }
+
+    // Threading
+
+    pub fn spawnThread(stack_size: usize, comptime func: anytype, args: anytype) !std.Thread {
+        // We don't call 'func' directly. We call the wrapper.
+        // We pass the config + the function + the args TO the wrapper.
+        return std.Thread.spawn(.{}, threadWrapper, .{ stack_size, func, args });
+    }
+
+    // THE INTERNAL WRAPPER
+    // This runs INSIDE the new thread. It handles the boilerplate.
+    fn threadWrapper(stack_size: usize, comptime func: anytype, args: anytype) !void {
+        // 1. BOILERPLATE: Setup Allocator
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+
+        // 2. BOILERPLATE: Setup Runtime
+        var rt = try Runtime.init(allocator, stack_size);
+        defer rt.deinit(allocator);
+
+        // 3. MAGIC: Call the user function
+        // We assume your worker functions always take 'rt' as the first argument.
+        // We use '++' to concatenate the Runtime pointer with the user's arguments.
+        const type_info = @typeInfo(@TypeOf(func));
+        if (type_info == .@"fn" or type_info == .Fn) {
+            try @call(.auto, func, .{&rt} ++ args);
+        }
+        //if (@typeInfo(@TypeOf(func)) == .Fn) {
+        //     try @call(.auto, func, .{&rt} ++ args);
+        //}
+    }
 };
+
+// -------------------------------------------------------------------------
+// Concurrency Primitives (Locked<T>)
+// -------------------------------------------------------------------------
+
+pub fn Locked(comptime T: type) type {
+    return struct {
+        // The mutex protects the data below
+        mutex: std.Thread.Mutex = .{},
+        data: T,
+
+        const Self = @This();
+
+        // 1. Init: Create the object (unlocked)
+        pub fn init(val: T) Self {
+            return .{ .data = val };
+        }
+
+        // 2. Acquire: Blocks until lock is obtained.
+        // Returns a "Guard" that gives access to data.
+        pub fn acquire(self: *Self) Guard {
+            self.mutex.lock();
+            return Guard{ .parent = self };
+        }
+
+        // The Guard Pattern:
+        // Holds the pointer to the parent.
+        // Releases the lock automatically when usage is done (if you defer release).
+        pub const Guard = struct {
+            parent: *Self,
+
+            // Get mutable pointer to the inner data
+            pub fn get(self: *Guard) *T {
+                return &self.parent.data;
+            }
+
+            // Get const pointer (read-only)
+            pub fn getConst(self: *Guard) *const T {
+                return &self.parent.data;
+            }
+
+            // Release the lock
+            pub fn release(self: *Guard) void {
+                self.parent.mutex.unlock();
+            }
+        };
+    };
+}
 
