@@ -42,6 +42,9 @@ test "Runtime Spawn & Mutex Verify" {
     // 1. Setup Test Allocator (Global Heap)
     const allocator = std.testing.allocator;
 
+    var global_ctx = rt.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
     // 2. Create Shared State (Locked<i32>)
     // Must be on the heap so all threads can see it safely.
     const shared_state = try allocator.create(rt.Locked(i32));
@@ -65,6 +68,8 @@ test "Runtime Spawn & Mutex Verify" {
         //  3. Initializes a new Runtime instance
         //  4. Passes &rt + your args to the function
         const t = try rt.Runtime.spawnThread(
+            allocator,
+            &global_ctx,
             64 * 1024,           // Stack Size
             testWorker,          // Function
             .{ i, loops_per_thread, shared_state } // Args (Tuple)
@@ -107,8 +112,6 @@ fn increaseScore(user: *User, amount: i32) void {
 }
 
 fn mvccWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, loops: usize, shared_user: *rt.Shared(User)) !void {
-    _ = trt;
-
     var i: usize = 0;
     while (i < loops) : (i += 1) {
 
@@ -116,64 +119,311 @@ fn mvccWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, loops: usize, shar
         // Notice: No Lock. No Blocking.
         // We pass the allocator because we might need to create a new version.
         try shared_user.update(
+            trt,
             allocator,       // Use the global/arena allocator for persistent data
             increaseScore,   // The logic to run
             .{ 1 }           // Arguments (increase by 1)
         );
+
+        // THE CLEANUP: Run GC occasionally (e.g., every 50 loops)
+        if (i % 50 == 0) {
+             trt.ebr.context.reclaim(allocator);
+        }
 
         // Simulate work
         std.Thread.yield() catch {};
     }
 }
 
-test "MVCC Leaky Implementation" {
+test "MVCC Implementation" {
     // 1. Use a GPA so we can SEE the leaks at the end
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     // Note: We intentionally DO NOT defer deinit() here if we want to suppress the error,
     // but usually you want to see it to prove the leak happened.
     const allocator = gpa.allocator();
 
-    // 2. Create Shared User (Gen 0)
-    // We allocate the 'Shared' container itself on the heap
-    const shared_container = try allocator.create(rt.Shared(User));
-    shared_container.* = try rt.Shared(User).init(allocator, User{
-        .id = 1,
-        .score = 0,
-        .name = "Original",
-    });
+    // Start a scope
+    // This ensures all defers inside execute BEFORE we reach the leak check below.
+    {
+        var global_ctx = rt.EbrContext{};
+        defer global_ctx.deinit(allocator);
 
-    // 3. Spawn Threads
-    const thread_count = 5;
-    const loops = 100;
+        // 2. Create Shared User (Gen 0)
+        // We allocate the 'Shared' container itself on the heap
+        const shared_container = try allocator.create(rt.Shared(User));
+        shared_container.* = try rt.Shared(User).init(allocator, User{
+            .id = 1,
+            .score = 0,
+            .name = "Original",
+        });
 
-    var threads = std.ArrayListUnmanaged(std.Thread){};
-    defer threads.deinit(allocator);
+        defer {
+            shared_container.deinit(allocator); // Frees the 'User' struct (Gen 500)
+            allocator.destroy(shared_container); // Frees the 'Shared' wrapper
+        }
 
-    var i: usize = 0;
-    while (i < thread_count) : (i += 1) {
-        const t = try rt.Runtime.spawnThread(
-            64*1024,
-            mvccWorker,
-            .{ allocator, loops, shared_container }
-        );
-        try threads.append(allocator, t);
-    }
+        // 3. Spawn Threads
+        const thread_count = 5;
+        const loops = 100;
 
-    for (threads.items) |t| {
-        t.join();
-    }
+        var threads = std.ArrayListUnmanaged(std.Thread){};
+        defer threads.deinit(allocator);
 
-    // 4. Verify
-    const final_user = shared_container.read();
-    std.debug.print("\nFinal Score: {d}\n", .{final_user.score});
+        var i: usize = 0;
+        while (i < thread_count) : (i += 1) {
+            const t = try rt.Runtime.spawnThread(
+                allocator,
+                &global_ctx,
+                64*1024,
+                mvccWorker,
+                .{ allocator, loops, shared_container }
+            );
+            try threads.append(allocator, t);
+        }
 
-    // 500 total updates
-    try std.testing.expectEqual(@as(i32, 500), final_user.score);
+        for (threads.items) |t| {
+            t.join();
+        }
+
+        // 4. Verify Read works with new Guard API
+        // We need a dummy runtime to read from the main thread (since we aren't inside spawnThread)
+        // In a real app, main thread would also be an "EBR Thread".
+        const main_ebr = rt.ThreadLocalEbr{ .context = &global_ctx };
+        var main_rt = rt.Runtime{
+            .ebr = main_ebr,
+            .stack_backing = undefined,
+            .stack_fba = undefined,
+            .heap_arena = undefined
+        };
+
+        var guard = shared_container.read(&main_rt);
+        defer guard.release();
+
+        const final_user = guard.get();
+        std.debug.print("\nFinal Score: {d}\n", .{final_user.score});
+
+        // 500 total updates
+        try std.testing.expectEqual(@as(i32, 500), final_user.score);
+
+    } // <--- End the scope. All 'defer' statements above run now.
 
     // THE LEAK CHECK
-    // If you uncomment this, the test will FAIL with "Memory leaks detected".
-    // This proves that all the intermediate versions (score=1, score=2...) are still in RAM.
-    // _ = gpa.deinit();
+    const check = gpa.deinit();
+    if (check == .leak) @panic("Memory leaks detected");
+}
+
+test "EBR Step 1: Storage & Automatic Cleanup" {
+    // 1. Setup GPA (General Purpose Allocator) to strictly track memory leaks.
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer {
+        const check = gpa.deinit();
+        if (check == .leak) @panic("Memory Leak Detected! The 'limbo' logic failed.");
+    }
+    const allocator = gpa.allocator();
+
+    // Setup a Dummy Context (Needed for compilation now)
+    var dummy_ctx = rt.EbrContext{};
+    defer dummy_ctx.deinit(allocator);
+
+    // 2. Initialize our EBR Storage
+    var ebr = rt.ThreadLocalEbr{ .context = &dummy_ctx, .limbo_list =.{} };
+    // Note: We do NOT defer ebr.deinit() yet. We need to manually empty it first
+    // to prove we can access and free the pointers correctly.
+
+    // 3. Create "Garbage" of different types
+
+    // Type A: A simple Integer
+    const num_ptr = try allocator.create(i32);
+    num_ptr.* = 12345;
+
+    // Type B: A Complex Struct
+    const Player = struct { score: i32, health: f32 };
+    const player_ptr = try allocator.create(Player);
+    player_ptr.* = .{ .score = 100, .health = 99.9 };
+
+    // 4. "Retire" them (Throw them into the generic limbo list)
+    try ebr.retire(allocator, num_ptr);
+    try ebr.retire(allocator, player_ptr);
+
+    // Verify they are actually in the list
+    try std.testing.expectEqual(@as(usize, 2), ebr.limbo_list.items.len);
+
+    // 5. Cleanup the container
+    ebr.deinit(allocator);
+
+    // 6. Success!
+    // When the test ends, 'gpa.deinit()' will run.
+    // If we failed to free the objects properly in step 5, the test will crash.
+}
+
+test "EBR Step 2: Signaling" {
+    const allocator = std.testing.allocator;
+
+    // 1. Create the GLOBAL Context
+    var global_ctx = rt.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    // 2. Create the LOCAL Thread State
+    // Notice we must now link it to the global context
+    var local_ebr = rt.ThreadLocalEbr{ .context = &global_ctx, .limbo_list = .{} };
+    defer local_ebr.deinit(allocator);
+
+    // Register it (Simulating thread startup)
+    try global_ctx.register(allocator, &local_ebr);
+
+    // 3. Verify Initial State
+    try std.testing.expectEqual(false, local_ebr.is_active.load(.seq_cst));
+    try std.testing.expectEqual(@as(u32, 0), local_ebr.local_epoch.load(.seq_cst));
+
+    // 4. Simulate: Global Time Advances to Epoch 5
+    global_ctx.global_epoch.store(5, .seq_cst);
+
+    // 5. Simulate: Thread enters critical section
+    local_ebr.enter();
+
+    // VERIFY: Thread should be active and synced to Epoch 5
+    try std.testing.expectEqual(true, local_ebr.is_active.load(.seq_cst));
+    try std.testing.expectEqual(@as(u32, 5), local_ebr.local_epoch.load(.seq_cst));
+
+    // 6. Simulate: Thread exits
+    local_ebr.exit();
+
+    // VERIFY: Thread is inactive
+    try std.testing.expectEqual(false, local_ebr.is_active.load(.seq_cst));
+}
+
+// Use-after-Free / Thread Death
+const AtomicFlag = std.atomic.Value(bool);
+
+fn scavengerWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, stop_flag: *AtomicFlag) !void {
+    _ = trt;
+    // furious allocation loop to overwrite freed memory
+    var trash_bag = std.ArrayListUnmanaged(*i32){};
+    defer trash_bag.deinit(allocator);
+
+    while (!stop_flag.load(.monotonic)) {
+        // Allocate a new integer (hopefully reusing the spot the Writer just freed)
+        const ptr = try allocator.create(i32);
+
+        // POISON THE MEMORY
+        // If the Reader is looking at this address, it will now see this garbage
+        ptr.* = -999999;
+
+        // Keep it for a microsecond so we hold the slot
+        try trash_bag.append(allocator, ptr);
+
+        if (trash_bag.items.len > 100) {
+            // Free half to keep churning memory
+            for (0..50) |_| {
+                const p = trash_bag.pop().?;
+                allocator.destroy(p);
+            }
+        }
+
+        std.Thread.yield() catch {};
+    }
+
+    // Cleanup remainder
+    for (trash_bag.items) |p| allocator.destroy(p);
+}
+
+fn uafWriter(trt: *rt.Runtime, allocator: std.mem.Allocator, shared_int: *rt.Shared(i32), reader_ready: *AtomicFlag) !void {
+    // 1. Wait for reader to grab the pointer
+    while (!reader_ready.load(.seq_cst)) {
+        std.Thread.yield() catch {};
+    }
+
+    // 2. Update (This retires the old pointer '42')
+    try shared_int.update(trt, allocator, struct{
+        fn f(ptr: *i32) void { ptr.* = 100; }
+    }.f, .{});
+
+    // 3. DIE IMMEDIATELY
+    // Buggy behavior: rt.deinit() -> ebr.deinit() -> frees '42' immediately.
+    // The Scavenger thread is waiting to snatch this memory address!
+}
+
+fn uafReader(trt: *rt.Runtime, shared_int: *rt.Shared(i32), reader_ready: *AtomicFlag, writer_dead: *AtomicFlag) !void {
+    // 1. Grab Read Lock
+    var guard = shared_int.read(trt);
+    defer guard.release();
+
+    // 2. Tell Writer we are ready
+    reader_ready.store(true, .seq_cst);
+
+    // 3. Wait for Writer to die (and free the memory)
+    while (!writer_dead.load(.seq_cst)) {
+        std.Thread.yield() catch {};
+    }
+
+    // 4. Wait a bit for the Scavenger to overwrite the memory
+    // (Busy wait to be portable)
+    var k: usize = 0;
+    while (k < 50_000_000) : (k += 1) {
+        std.mem.doNotOptimizeAway(k);
+    }
+
+    // 5. READ THE VALUE
+    const val = guard.get().*;
+
+    // If the bug exists, 'val' will be -999999 (from scavenger) or crash.
+    // If the fix works, 'val' will be 42 (safe).
+    std.debug.print("\n[Reader] Value at address {*}: {d}\n", .{guard.get(), val});
+
+    if (val != 42) {
+        @panic("CRITICAL ERROR: Data corruption detected! Read garbage instead of 42.");
+    }
+}
+
+test "PROOF: No Use-After-Free with Scavenger" {
+    // We use the GPA because it is good at reusing slots quickly
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    // We wrap everything in a block so defers run BEFORE the leak check
+    {
+        var global_ctx = rt.EbrContext{};
+        defer global_ctx.deinit(allocator);
+
+        // Shared Int starts at 42
+        const shared_int = try allocator.create(rt.Shared(i32));
+        shared_int.* = try rt.Shared(i32).init(allocator, 42);
+        // Cleanup manually since we haven't implemented the graveyard yet
+        defer {
+            shared_int.deinit(allocator);
+            allocator.destroy(shared_int);
+        }
+
+        var reader_ready = AtomicFlag.init(false);
+        var writer_dead = AtomicFlag.init(false);
+        var scavenger_stop = AtomicFlag.init(false);
+
+        // 1. Spawn Scavenger (The "Chaos Monkey")
+        const t_scav = try rt.Runtime.spawnThread(allocator, &global_ctx, 64*1024, scavengerWorker, .{ allocator, &scavenger_stop });
+
+        // 2. Spawn Reader
+        const t_read = try rt.Runtime.spawnThread(allocator, &global_ctx, 64*1024, uafReader, .{ shared_int, &reader_ready, &writer_dead });
+
+        // 3. Spawn Writer
+        const t_write = try rt.Runtime.spawnThread(allocator, &global_ctx, 64*1024, uafWriter, .{ allocator, shared_int, &reader_ready });
+
+        // 4. Wait for Writer to die
+        t_write.join();
+        writer_dead.store(true, .seq_cst); // Tell reader the writer is gone
+
+        // 5. Wait for Reader (This triggers the check)
+        t_read.join();
+
+        // 6. Stop Scavenger
+        scavenger_stop.store(true, .seq_cst);
+        t_scav.join();
+    }
+    // --- SCOPE END ---
+    // All 'defers' above (global_ctx, shared_int) have now executed.
+
+    // NOW we check for leaks
+    const check = gpa.deinit();
+    if (check == .leak) @panic("Memory leaks detected");
 }
 
 // -------------------------------------------------------------------------
@@ -227,6 +477,9 @@ fn rwWorker(trt: *rt.Runtime, id: usize, loops: usize, shared_config: *rt.RwLock
 test "RwLock Many Readers One Writer" {
     const allocator = std.testing.allocator;
 
+    var global_ctx = rt.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
     // 1. Create on Heap
     const shared_state = try allocator.create(rt.RwLock(GameConfig));
     shared_state.* = rt.RwLock(GameConfig).init(.{
@@ -245,6 +498,8 @@ test "RwLock Many Readers One Writer" {
     var i: usize = 0;
     while (i < thread_count) : (i += 1) {
         const t = try rt.Runtime.spawnThread(
+            allocator,
+            &global_ctx,
             64*1024,
             rwWorker,
             .{ i, loops, shared_state }

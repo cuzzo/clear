@@ -7,6 +7,7 @@ pub const Runtime = struct {
     // It is backed by a raw slice of memory.
     stack_backing: []u8,
     stack_fba: std.heap.FixedBufferAllocator,
+    ebr: ThreadLocalEbr,
 
     // THE HEAP ARENA (Survivor/Request)
     // We use a standard ArenaAllocator. It wraps the OS allocator (page_allocator)
@@ -14,18 +15,22 @@ pub const Runtime = struct {
     // TODO: probably want this to be a gpa allocator
     heap_arena: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: std.mem.Allocator, stack_size: usize) !Runtime {
+    pub fn init(allocator: std.mem.Allocator, stack_size: usize, global_ctx: *EbrContext) !Runtime {
         // Alloc raw memory for the frame (1MB or whatever passed)
         const stack_mem = try allocator.alloc(u8, stack_size);
+
+        const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .{} };
 
         return Runtime{
             .stack_backing = stack_mem,
             .stack_fba = std.heap.FixedBufferAllocator.init(stack_mem),
             .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .ebr = local_ebr,
         };
     }
 
     pub fn deinit(self: *Runtime, allocator: std.mem.Allocator) void {
+        self.ebr.deinit(allocator);
         self.heap_arena.deinit();
         allocator.free(self.stack_backing);
     }
@@ -260,34 +265,33 @@ pub const Runtime = struct {
 
     // Threading
 
-    pub fn spawnThread(stack_size: usize, comptime func: anytype, args: anytype) !std.Thread {
+    pub fn spawnThread(sys_allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_size: usize, comptime func: anytype, args: anytype) !std.Thread {
         // We don't call 'func' directly. We call the wrapper.
         // We pass the config + the function + the args TO the wrapper.
-        return std.Thread.spawn(.{}, threadWrapper, .{ stack_size, func, args });
+        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, global_ctx, stack_size, func, args });
     }
 
     // THE INTERNAL WRAPPER
     // This runs INSIDE the new thread. It handles the boilerplate.
-    fn threadWrapper(stack_size: usize, comptime func: anytype, args: anytype) !void {
-        // 1. BOILERPLATE: Setup Allocator
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const allocator = gpa.allocator();
-
-        // 2. BOILERPLATE: Setup Runtime
-        var rt = try Runtime.init(allocator, stack_size);
+    fn threadWrapper(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_size: usize, comptime func: anytype, args: anytype) !void {
+        // 1. BOILERPLATE: Setup Runtime
+        var rt = try Runtime.init(allocator, stack_size, global_ctx);
         defer rt.deinit(allocator);
 
-        // 3. MAGIC: Call the user function
+        // IMPORTANT: Register this thread with the global context now that `rt` is stable on the stack.
+        try global_ctx.register(allocator, &rt.ebr);
+
+        // This runs FIRST (before deinit): Remove from global registry
+        // so the GC doesn't try to look at our dead stack.
+        defer global_ctx.unregister(&rt.ebr);
+
+        // 2. MAGIC: Call the user function
         // We assume your worker functions always take 'rt' as the first argument.
         // We use '++' to concatenate the Runtime pointer with the user's arguments.
         const type_info = @typeInfo(@TypeOf(func));
         if (type_info == .@"fn" or type_info == .Fn) {
             try @call(.auto, func, .{&rt} ++ args);
         }
-        //if (@typeInfo(@TypeOf(func)) == .Fn) {
-        //     try @call(.auto, func, .{&rt} ++ args);
-        //}
     }
 };
 
@@ -358,18 +362,44 @@ pub fn Shared(comptime T: type) type {
             return Self{ .ptr = std.atomic.Value(*T).init(node) };
         }
 
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            // Load the current pointer and destroy it
+            const current_ptr = self.ptr.load(.seq_cst);
+            allocator.destroy(current_ptr);
+        }
+
         // 2. Read: Just load the pointer.
         // This is Wait-Free, Lock-Free, and insanely fast.
-        // DANGER: We assume the pointer never dies (Leaky).
-        pub fn read(self: *Self) *T {
-            // monotonic is enough because we only care about the pointer address validity
-            return self.ptr.load(.monotonic);
+        pub fn read(self: *Self, trt: *Runtime) Guard {
+            // A. Signal start
+            trt.ebr.enter();
+
+            // B. Load pointer (Safe because we are in the epoch)
+            const val = self.ptr.load(.monotonic);
+
+            return Guard{
+                .ptr = val,
+                .rt = trt
+            };
         }
+
+        // The Read Guard
+        pub const Guard = struct {
+            ptr: *T,
+            rt: *Runtime,
+
+            pub fn get(self: *Guard) *T { return self.ptr; }
+
+            pub fn release(self: *Guard) void {
+                // C. Signal done
+                self.rt.ebr.exit();
+            }
+        };
 
         // 3. Write: Copy-On-Write with CAS (Compare And Swap)
         // This is the "Transaction" logic.
         // func: A lambda/function that takes (*NewData) and modifies it.
-        pub fn update(self: *Self, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) !void {
+        pub fn update(self: *Self, trt: *Runtime, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) !void {
 
             // OPTIMISTIC LOOP
             while (true) {
@@ -397,21 +427,201 @@ pub fn Shared(comptime T: type) type {
                 );
 
                 if (result == null) {
-                    // SUCCESS!
-                    // The old_ptr is now "floating garbage".
-                    // We DO NOT free it. This is the leak.
-                    // Readers might still be looking at it.
+                    // Schedule this ptr for deletion
+                    try trt.ebr.retire(allocator, old_ptr);
                     return;
                 } else {
-                    // FAILURE! Someone else updated it first.
-                    // We must destroy our 'new_ptr' because it is invalid history now.
-                    // We loop again and try to branch off the NEW version.
                     allocator.destroy(new_ptr);
                 }
             }
         }
     };
 }
+
+// EBR
+pub const RetiredPtr = struct {
+    ptr: *anyopaque,
+    // We need a function pointer to know how to free this specific type later
+    deinit_fn: *const fn(allocator: std.mem.Allocator, ptr: *anyopaque) void,
+
+    // We must store the epoch so we know WHEN it was deleted
+    epoch: u32,
+
+    // Helper to wrap the type-erasure
+    pub fn create(comptime T: type, ptr: *T, epoch: u32) RetiredPtr {
+        return .{
+            .ptr = ptr,
+            .epoch = epoch,
+            .deinit_fn = struct {
+                fn call(allocator: std.mem.Allocator, p: *anyopaque) void {
+                    const typed: *T = @ptrCast(@alignCast(p));
+                    allocator.destroy(typed);
+                }
+            }.call,
+        };
+    }
+};
+
+pub const EbrContext = struct {
+    // The Global Clock (0, 1, 2...)
+    global_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    // A registry so the memory reclaimer can find all active threads
+    registry_lock: std.Thread.Mutex = .{},
+    registry: std.ArrayListUnmanaged(*ThreadLocalEbr) = .{},
+
+    // The Graveyard for dead threads' garbage
+    orphans: std.ArrayListUnmanaged(RetiredPtr) = .{},
+
+    pub fn deinit(self: *EbrContext, allocator: std.mem.Allocator) void {
+        self.registry.deinit(allocator);
+        for (self.orphans.items) |item| {
+            item.deinit_fn(allocator, item.ptr);
+        }
+        self.orphans.deinit(allocator);
+    }
+
+    // Register a new thread (We will call this when threads start)
+    pub fn register(self: *EbrContext, allocator: std.mem.Allocator, local: *ThreadLocalEbr) !void {
+        self.registry_lock.lock();
+        defer self.registry_lock.unlock();
+        try self.registry.append(allocator, local);
+    }
+
+    pub fn unregister(self: *EbrContext, local: *ThreadLocalEbr) void {
+        self.registry_lock.lock();
+        defer self.registry_lock.unlock();
+
+        // Find the pointer and remove it
+        for (self.registry.items, 0..) |item, i| {
+            if (item == local) {
+                // swapRemove is O(1) - it moves the last item to this spot
+                _ = self.registry.swapRemove(i);
+                return;
+            }
+        }
+    }
+
+    pub fn dumpTrash(self: *EbrContext, allocator: std.mem.Allocator, trash: []RetiredPtr) !void {
+        self.registry_lock.lock();
+        defer self.registry_lock.unlock();
+        try self.orphans.appendSlice(allocator, trash);
+    }
+
+    // You can call this periodically (e.g., every 1000 updates, or on a timer).
+    pub fn reclaim(self: *EbrContext, allocator: std.mem.Allocator) void {
+        // 1. TRY TO ADVANCE GLOBAL EPOCH
+        // We need to see if any threads are lagging behind.
+        self.registry_lock.lock();
+        defer self.registry_lock.unlock();
+
+        const current_global = self.global_epoch.load(.seq_cst);
+        var can_advance = true;
+
+        for (self.registry.items) |thread_local| {
+            // If a thread is ACTIVE, it must have caught up to the current epoch.
+            if (thread_local.is_active.load(.seq_cst)) {
+                const t_epoch = thread_local.local_epoch.load(.seq_cst);
+                if (t_epoch != current_global) {
+                    can_advance = false;
+                    break;
+                }
+            }
+        }
+
+        if (can_advance) {
+            // Move time forward!
+            // Now 'current_global' becomes 'past'.
+            self.global_epoch.store(current_global + 1, .seq_cst);
+
+            // 2. SWEEP TRASH
+            // Now that time has moved, we check every thread's limbo list.
+            // Any item from (Global - 2) or older is safe to free.
+            const safe_threshold = if (current_global > 1) current_global - 1 else 0;
+
+            for (self.registry.items) |thread_local| {
+                // We operate on the list tail-backwards or swap-remove to be efficient
+                var i: usize = 0;
+                while (i < thread_local.limbo_list.items.len) {
+                    const item = thread_local.limbo_list.items[i];
+
+                    if (item.epoch < safe_threshold) {
+                        // SAFE TO FREE!
+                        item.deinit_fn(allocator, item.ptr);
+
+                        // Remove from list (swap with last to be O(1))
+                        _ = thread_local.limbo_list.swapRemove(i);
+                        // Don't increment 'i' because we just swapped a new item into this slot
+                    } else {
+                        // Keep it, check next
+                        i += 1;
+                    }
+                }
+            }
+
+            var i: usize = 0;
+            while (i < self.orphans.items.len) {
+                const item = self.orphans.items[i];
+                if (item.epoch < safe_threshold) {
+                    item.deinit_fn(allocator, item.ptr);
+                    _ = self.orphans.swapRemove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+};
+
+pub const ThreadLocalEbr = struct {
+    // Things I have deleted but not freed
+    limbo_list: std.ArrayList(RetiredPtr) = .{},
+
+    // local_epoch: "The time I saw when I started reading"
+    local_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    // is_active: "I am currently holding a pointer inside a critical section"
+    is_active: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    // link to the global world
+    context: *EbrContext,
+
+    pub fn deinit(self: *ThreadLocalEbr, allocator: std.mem.Allocator) void {
+        if (self.limbo_list.items.len > 0) {
+            // Try to move to global orphans
+            self.context.dumpTrash(allocator, self.limbo_list.items) catch {
+                // Fallback: If OOM, we must force free to avoid leaks.
+                for (self.limbo_list.items) |node| {
+                    node.deinit_fn(allocator, node.ptr);
+                }
+            };
+        }
+        self.limbo_list.deinit(allocator);
+    }
+
+    pub fn retire(self: *ThreadLocalEbr, allocator: std.mem.Allocator, ptr: anytype) !void {
+        const T = @TypeOf(ptr.*);
+        const current_time = self.local_epoch.load(.monotonic);
+        const node = RetiredPtr.create(T, ptr, current_time);
+        try self.limbo_list.append(allocator, node);
+    }
+
+    // Signal that we are starting a read
+    pub fn enter(self: *ThreadLocalEbr) void {
+        // 1. Mark active
+        self.is_active.store(true, .seq_cst);
+
+        // 2. Snap to global time
+        // We must load global AFTER marking active to ensure we don't miss an epoch change.
+        const global = self.context.global_epoch.load(.seq_cst);
+        self.local_epoch.store(global, .seq_cst);
+    }
+
+    // Signal that we are done
+    pub fn exit(self: *ThreadLocalEbr) void {
+        self.is_active.store(false, .seq_cst);
+    }
+};
 
 // -------------------------------------------------------------------------
 // Concurrency Primitives (RwLock<T>)
