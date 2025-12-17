@@ -339,3 +339,140 @@ pub fn Locked(comptime T: type) type {
     };
 }
 
+// -------------------------------------------------------------------------
+// Concurrency Primitives (Shared<T> - LEAKY VERSION)
+// -------------------------------------------------------------------------
+
+pub fn Shared(comptime T: type) type {
+    return struct {
+        // The Atomic Pointer to the current version.
+        // We use *T because we are swapping the entire object.
+        ptr: std.atomic.Value(*T),
+
+        const Self = @This();
+
+        // 1. Init: Allocate the first version on the heap
+        pub fn init(allocator: std.mem.Allocator, val: T) !Self {
+            const node = try allocator.create(T);
+            node.* = val;
+            return Self{ .ptr = std.atomic.Value(*T).init(node) };
+        }
+
+        // 2. Read: Just load the pointer.
+        // This is Wait-Free, Lock-Free, and insanely fast.
+        // DANGER: We assume the pointer never dies (Leaky).
+        pub fn read(self: *Self) *T {
+            // monotonic is enough because we only care about the pointer address validity
+            return self.ptr.load(.monotonic);
+        }
+
+        // 3. Write: Copy-On-Write with CAS (Compare And Swap)
+        // This is the "Transaction" logic.
+        // func: A lambda/function that takes (*NewData) and modifies it.
+        pub fn update(self: *Self, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) !void {
+
+            // OPTIMISTIC LOOP
+            while (true) {
+                // A. Snapshot the world
+                const old_ptr = self.ptr.load(.monotonic);
+
+                // B. Create the Future (Allocation)
+                const new_ptr = try allocator.create(T);
+
+                // C. Copy History (Clone old data to new)
+                new_ptr.* = old_ptr.*;
+
+                // D. Apply Changes (Run the user's logic on the PRIVATE new copy)
+                //    We use @call to pass arguments to the update function
+                @call(.auto, func, .{new_ptr} ++ args);
+
+                // E. The Commit (Compare and Swap)
+                // "If ptr is still old_ptr, replace it with new_ptr."
+                // ordering: .release to ensure writes to new_ptr are visible before the swap
+                const result = self.ptr.cmpxchgWeak(
+                    old_ptr,
+                    new_ptr,
+                    .release,
+                    .monotonic
+                );
+
+                if (result == null) {
+                    // SUCCESS!
+                    // The old_ptr is now "floating garbage".
+                    // We DO NOT free it. This is the leak.
+                    // Readers might still be looking at it.
+                    return;
+                } else {
+                    // FAILURE! Someone else updated it first.
+                    // We must destroy our 'new_ptr' because it is invalid history now.
+                    // We loop again and try to branch off the NEW version.
+                    allocator.destroy(new_ptr);
+                }
+            }
+        }
+    };
+}
+
+// -------------------------------------------------------------------------
+// Concurrency Primitives (RwLock<T>)
+// -------------------------------------------------------------------------
+
+pub fn RwLock(comptime T: type) type {
+    return struct {
+        lock: std.Thread.RwLock = .{},
+        data: T,
+
+        const Self = @This();
+
+        pub fn init(val: T) Self {
+            return .{ .data = val };
+        }
+
+        // 1. Read Access
+        // Allows multiple concurrent readers. Blocks if a Writer is active.
+        pub fn read(self: *Self) ReadGuard {
+            self.lock.lockShared();
+            return ReadGuard{ .parent = self };
+        }
+
+        // 2. Write Access
+        // Exclusive access. Blocks until all Readers AND Writers are gone.
+        pub fn write(self: *Self) WriteGuard {
+            self.lock.lock();
+            return WriteGuard{ .parent = self };
+        }
+
+        pub const ReadGuard = struct {
+            parent: *Self,
+
+            // CRITICAL: We only return a CONST pointer here.
+            // This prevents the user from accidentally modifying data inside a read lock.
+            pub fn get(self: *ReadGuard) *const T {
+                return &self.parent.data;
+            }
+
+            pub fn release(self: *ReadGuard) void {
+                self.parent.lock.unlockShared();
+            }
+        };
+
+        pub const WriteGuard = struct {
+            parent: *Self,
+
+            // Mutable pointer allowed here.
+            pub fn get(self: *WriteGuard) *T {
+                return &self.parent.data;
+            }
+
+            // You can also get const if you want
+            pub fn getConst(self: *WriteGuard) *const T {
+                return &self.parent.data;
+            }
+
+            pub fn release(self: *WriteGuard) void {
+                self.parent.lock.unlock();
+            }
+        };
+    };
+}
+
