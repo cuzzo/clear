@@ -13,11 +13,13 @@ STRUCT Cache {
 
 FN insert(cache: Cache, id: String, account: TAKES Account) ->
   sharedAccount = Locked.new(account);
-  WITH sharedItems AS MUT items { items.insert(id, GIVE sharedAccount); }
+  WITH sharedItems AS MUT items {
+    items.insert(id, GIVE sharedAccount);
+  }
 END
 
 FN get(cache: Cache, id: String) RETURNS Locked<Account> ->
-  WITH sharedItems AS MUT items { RETURN LOAN(items.get(id)); }
+  RETURN LOAN(items.get(id));
 END
 
 FN transact(cache: Cache) ->
