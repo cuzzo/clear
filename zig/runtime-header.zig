@@ -98,7 +98,7 @@ pub const Runtime = struct {
 
     pub fn concat(self: *Runtime, allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
         _ = self;
-        return try std.mem.concat(allocator, u8, &.{s1, s2});
+        return try std.mem.concat(allocator, u8, &.{ s1, s2 });
     }
 
     // Polymorphic Length (Strings or Lists)
@@ -176,7 +176,6 @@ pub const Runtime = struct {
         defer file.close();
 
         try file.writeAll(content);
-
     }
 
     // String Lib
@@ -246,7 +245,7 @@ pub const Runtime = struct {
 
         // 2. Initialize Process
         var child = std.process.Child.init(argv, allocator);
-        child.stdout_behavior = .Pipe;    // Capture StdOut
+        child.stdout_behavior = .Pipe; // Capture StdOut
         child.stderr_behavior = .Inherit; // Print StdErr to console (helpful for debugging)
 
         // 3. Run
@@ -377,10 +376,7 @@ pub fn Shared(comptime T: type) type {
             // B. Load pointer (Safe because we are in the epoch)
             const val = self.ptr.load(.monotonic);
 
-            return Guard{
-                .ptr = val,
-                .rt = trt
-            };
+            return Guard{ .ptr = val, .rt = trt };
         }
 
         // The Read Guard
@@ -388,7 +384,9 @@ pub fn Shared(comptime T: type) type {
             ptr: *T,
             rt: *Runtime,
 
-            pub fn get(self: *Guard) *T { return self.ptr; }
+            pub fn get(self: *Guard) *T {
+                return self.ptr;
+            }
 
             pub fn release(self: *Guard) void {
                 // C. Signal done
@@ -419,12 +417,7 @@ pub fn Shared(comptime T: type) type {
                 // E. The Commit (Compare and Swap)
                 // "If ptr is still old_ptr, replace it with new_ptr."
                 // ordering: .release to ensure writes to new_ptr are visible before the swap
-                const result = self.ptr.cmpxchgWeak(
-                    old_ptr,
-                    new_ptr,
-                    .release,
-                    .monotonic
-                );
+                const result = self.ptr.cmpxchgWeak(old_ptr, new_ptr, .release, .monotonic);
 
                 if (result == null) {
                     // Schedule this ptr for deletion
@@ -442,7 +435,7 @@ pub fn Shared(comptime T: type) type {
 pub const RetiredPtr = struct {
     ptr: *anyopaque,
     // We need a function pointer to know how to free this specific type later
-    deinit_fn: *const fn(allocator: std.mem.Allocator, ptr: *anyopaque) void,
+    deinit_fn: *const fn (allocator: std.mem.Allocator, ptr: *anyopaque) void,
 
     // We must store the epoch so we know WHEN it was deleted
     epoch: u32,
@@ -686,3 +679,120 @@ pub fn RwLock(comptime T: type) type {
     };
 }
 
+// Fibers
+// The registers we need to save.
+// This layout matches the assembly exactly.
+pub const Context = extern struct {
+    sp: u64, // Stack Pointer
+
+    // Callee-saved registers for x86_64
+    rbx: u64 = 0,
+    rbp: u64 = 0,
+    r12: u64 = 0,
+    r13: u64 = 0,
+    r14: u64 = 0,
+    r15: u64 = 0,
+};
+
+// 1. Declare the external symbol
+// Zig will look for this in the .s file we just created.
+extern fn switch_context_asm(from: *Context, to: *Context) callconv(.c) void;
+
+// 2. Public Wrapper
+pub fn switchContext(from: *Context, to: *Context) void {
+    switch_context_asm(from, to);
+}
+
+pub const Stack = struct {
+    // The raw slice of memory we own
+    memory: []align(4096) u8,
+
+    // The usable size (excluding the guard page)
+    usable_len: usize,
+
+    // How big we want the guard to be (usually 4KB, one OS page)
+    const PAGE_SIZE: usize = 4096;
+
+    pub fn init(size: usize) !Stack {
+        // 1. Round up to page size to keep the OS happy
+        const total_size = std.mem.alignForward(usize, size + PAGE_SIZE, PAGE_SIZE);
+
+        // 2. Ask OS for memory
+        // PROT_READ | PROT_WRITE: We can read and write
+        // MAP_PRIVATE | MAP_ANONYMOUS: Private memory, not backed by a file
+        const ptr = try std.posix.mmap(
+            null,
+            total_size,
+            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+            -1,
+            0,
+        );
+        const slice = ptr[0..total_size];
+
+        // 3. The Magic: "Poison" the bottom page
+        // We tell the OS: "If anyone touches the first 4KB, kill the process."
+        // This is our hardware stack-overflow protection.
+        try std.posix.mprotect(slice[0..PAGE_SIZE], std.posix.PROT.NONE // No permissions at all
+        );
+
+        return Stack{
+            .memory = slice,
+            .usable_len = total_size - PAGE_SIZE,
+        };
+    }
+
+    pub fn deinit(self: *Stack) void {
+        // Return memory to OS
+        std.posix.munmap(self.memory);
+    }
+
+    // CRITICAL: Stacks grow DOWN (High -> Low).
+    // So the "Start" of the stack is actually the END of the memory block.
+    // We return a pointer slightly offset from the top to be safe.
+    pub fn getStackTop(self: *Stack) usize {
+        const top = @intFromPtr(self.memory.ptr) + self.memory.len;
+        // Align to 16 bytes (x64 requirement) and back off a tiny bit
+        return (top & ~@as(usize, 15)) - 16;
+    }
+};
+
+pub const Fiber = struct {
+    stack: Stack,
+    ctx: Context,
+    parent_ctx: *Context, // Who to jump back to when we yield/finish
+
+    pub fn init(stack_size: usize, entry_fn: usize) !Fiber {
+        var stack = try Stack.init(stack_size);
+        const stack_top = stack.getStackTop();
+
+        // THE TRAMPOLINE:
+        // We simulate a "Return Address" on the top of the stack.
+        // When switchContext executes 'ret', it will pop this address and jump to it.
+        const ptr = @as(*usize, @ptrFromInt(stack_top));
+        ptr.* = entry_fn;
+
+        return Fiber{
+            .stack = stack,
+            // Point SP to the address we just wrote.
+            // When 'ret' runs, it pops the value AT this pointer.
+            .ctx = Context{ .sp = stack_top },
+            .parent_ctx = undefined,
+        };
+    }
+
+    pub fn deinit(self: *Fiber) void {
+        self.stack.deinit();
+    }
+
+    // Switch FROM parent TO this fiber
+    pub fn switchTo(self: *Fiber, parent: *Context) void {
+        self.parent_ctx = parent;
+        switchContext(parent, &self.ctx);
+    }
+
+    // Switch FROM this fiber BACK to parent
+    pub fn yield(self: *Fiber) void {
+        switchContext(&self.ctx, self.parent_ctx);
+    }
+};

@@ -1,94 +1,6 @@
 const std = @import("std");
-
-// -------------------------------------------------------------------------
-// 1. The Runtime (Memory Management)
-// -------------------------------------------------------------------------
-
-pub const Runtime = struct {
-    // THE STACK ARENA (Scratchpad)
-    // We use a FixedBufferAllocator to simulate the linear stack.
-    // It is backed by a raw slice of memory.
-    stack_backing: []u8,
-    stack_fba: std.heap.FixedBufferAllocator,
-
-    // THE HEAP ARENA (Survivor/Request)
-    // We use a standard ArenaAllocator. It wraps the OS allocator (page_allocator)
-    // and frees everything at once when we call deinit().
-    heap_arena: std.heap.ArenaAllocator,
-
-    pub fn init(allocator: std.mem.Allocator, stack_size: usize) !Runtime {
-        // Alloc raw memory for the stack (1MB or whatever passed)
-        const stack_mem = try allocator.alloc(u8, stack_size);
-
-        return Runtime{
-            .stack_backing = stack_mem,
-            .stack_fba = std.heap.FixedBufferAllocator.init(stack_mem),
-            .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-        };
-    }
-
-    pub fn deinit(self: *Runtime, allocator: std.mem.Allocator) void {
-        self.heap_arena.deinit();
-        allocator.free(self.stack_backing);
-    }
-
-    // Stack Helper: Get current Mark (Offset)
-    pub fn saveStackMark(self: *Runtime) usize {
-        return self.stack_fba.end_index;
-    }
-
-    // Stack Helper: Reset to Mark (O(1) Free)
-    pub fn restoreStackMark(self: *Runtime, mark: usize) void {
-        self.stack_fba.end_index = mark;
-    }
-
-    // Helper to get the Allocator interfaces
-    pub fn stackAlloc(self: *Runtime) std.mem.Allocator {
-        return self.stack_fba.allocator();
-    }
-
-    pub fn heapAlloc(self: *Runtime) std.mem.Allocator {
-        return self.heap_arena.allocator();
-    }
-
-    pub fn allocCopy(self: *Runtime, comptime T: type, value: T) !*T {
-        const ptr = try self.heapAlloc().create(T);
-        ptr.* = value;
-        return ptr;
-    }
-
-    pub fn makeList(self: *Runtime, comptime T: type, allocator: std.mem.Allocator, items: []const T) !std.ArrayListUnmanaged(T) {
-        _ = self;
-        var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, items.len);
-        list.appendSliceAssumeCapacity(items);
-        return list;
-    }
-
-    // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
-    // Also handles casting the index to usize automatically.
-    pub fn getAt(self: *Runtime, container: anytype, index: anytype) @TypeOf(if (@hasField(@TypeOf(container), "items")) container.items[0] else container[0]) {
-        _ = self;
-        const i: usize = @intCast(index); // Auto-cast i64 -> usize
-
-        if (@hasField(@TypeOf(container), "items")) {
-            return container.items[i];
-        } else {
-            return container[i];
-        }
-    }
-
-    pub fn concat(self: *Runtime, allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
-        _ = self;
-        return try std.mem.concat(allocator, u8, &.{s1, s2});
-    }
-
-    // Used to make HEAP strings
-    pub fn makeString(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-        return try std.fmt.allocPrint(allocator, "{s}", .{text});
-    }
-};
-
-
+const Runtime = @import("runtime-header.zig").Runtime;
+const EbrContext = @import("runtime-header.zig").EbrContext;
 
 
 // -------------------------------------------------------------------------
@@ -145,7 +57,8 @@ pub fn createUser(rt: *Runtime) !*User {
 
     //    Promote String: Copy "Brian" into Heap Arena
     //    (Using a static literal would be faster, but demonstrating allocation)
-    const heap_name = try makeString(rt.heapAlloc(), "Brian");
+
+    const heap_name = try Runtime.makeString(rt.heapAlloc(), "Brian");
 
     heap_user.* = User{
         .id = 999,
@@ -178,7 +91,11 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Init Runtime (1MB Stack)
-    var rt = try Runtime.init(allocator, 1024 * 1024);
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 1024 * 1024, &global_ctx);
     defer rt.deinit(allocator);
 
     std.debug.print("Start Stack Offset: {d}\n", .{rt.stack_fba.end_index});
