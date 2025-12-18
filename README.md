@@ -193,7 +193,7 @@ In CHEAT, there are no run-time errors!
 
 You can only change the value of `MUTABLE` variables.
 
-```
+```ruby
 VAR name = "Bob";
 SET name = "Alice";         -- COMPILER ERROR! `x` is immutable.
 ```
@@ -203,7 +203,7 @@ SET name = "Alice";         -- COMPILER ERROR! `x` is immutable.
 
 **The "Gotcha":** If you want to modify a variable, it must be `MUTABLE`.
 
-```
+```ruby
 MUTABLE name = "Bob";
 SET name = "Alice";         -- OK
 ```
@@ -218,7 +218,7 @@ x = "MISSISSIPPI"
 x.gsub!("I", "S")            -- OK: "MSSSSSSSPPS"
 ```
 
-```
+```ruby
 VAR x = "MISSISSPPI";
 x.gsub!("I", "S");           -- COMPILER ERROR! `x` is immutable.
 
@@ -245,7 +245,7 @@ name.gsub!("o", "b")         -- RUN-TIME ERROR: missing method `gsub` on `name`.
 
 In CHEAT, this is a compile time error (2x):
 
-```
+```ruby
 MUTABLE name = "Bob";
 SET name = 1;                -- COMPILER ERROR: `name` is a String[], cannot assign to the Number `1`.
 ```
@@ -313,7 +313,7 @@ The "Gotcha": If you try to `.push!` or `.pop!` to a STACK array (fixed-size), t
 
   * It’s not being mean; it’s telling you that physics forbids it.
 
-```
+```ruby
 VAR x = [1, 2, 3];
 -- ... do something, now I need to add to `x`, what do I do?
 x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
@@ -321,7 +321,7 @@ x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
 
 You can make the list Dynamic on the HEAP (not recommended):
 
-```
+```ruby
 MUTABLE x = %[1, 2, 3];
 -- ...
 x.append!(4);                  -- OK
@@ -341,7 +341,7 @@ If variables were un-typed, it would be impossible to guarantee no run-time erro
 
 In JavasSript, functions can see variables outside of them (Closures are implicit). Figuring out what a variable can see is a dark art.
 
-```
+```ruby
 x = 10;
 function add() {
   return x + 5;
@@ -354,7 +354,7 @@ In CHEAT, functions are simple!
 
 A function can ONLY see what is explicitly passed into it:
 
-```
+```ruby
 VAR x = 10;
 FN add() ->
   RETURN x + 5;                 -- COMPILER ERROR: I don't know what 'x' is.
@@ -363,7 +363,7 @@ END
 
 Let's say you want to create a function that always takes some variable, and you don't want to always pass it in. You do this with `UpValues` with the `USE` keyword:
 
-```
+```ruby
 VAR x = 10;
 FN add(n) USE (x) ->
   RETURN n + x;                 -- OK
@@ -378,7 +378,7 @@ The first example with JavaScript is particularly confusing because the value is
 
 In CHEAT, you cannot pass a `MUTABLE` as an UpValue:
 
-```
+```ruby
 MUTABLE x = 10
 FN add(n) USE (x) ->            -- COMPILER ERROR, UpValues cannot be mutable.
 -- ...
@@ -426,7 +426,7 @@ You have to `GIVE` heap objects to the caller.
  * The Problem: If you have a box in the Warehouse (HEAP Object), and your function ends. The box is incinerated. There's nothing left to GIVE/RETURN.
  * The Fix: `GIVE` that HEAP object to the caller, save it from death.
 
-```
+```ruby
 FN makeUser() -> %User
   VAR u = %User{name: "Neo"}; -- Created in my Arena
   RETURN GIVE u;              -- I surrender ownership. It lives on in another function.
@@ -457,7 +457,7 @@ END
 
 **The Consequence:** If a function TAKES something, you must GIVE it. And once you GIVE it, you can never touch it again.
 
-```
+```ruby
 VAR node = %Node{};
 
 addChild(GIVE node);          -- I surrender ownership.
@@ -553,7 +553,7 @@ This is a dramatically simplified version of Rust's notirously difficult lifetyp
 
 ### The *SMOOTH* operator
 
-```
+```ruby
 VAR bill = users AS @u                      -- AS binds @variables to be used later in SMOOTH operations
   s> UNNEST _.orders
   s> SELECT _.price * @u.discount
@@ -571,7 +571,7 @@ VAR bill = users AS @u
 
 ### Combine with in-line error handling
 
-```
+```ruby
 FN myFunc(a, b, c) ->
   val = fetchData(a, b, c) OR RAISE         -- immediately stop, raise the error to the calling function
    s> parseHeader OR EXIT "Invalid Header"  -- immediately stop, handle below
