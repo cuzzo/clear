@@ -31,8 +31,16 @@ FN transact(cache: Cache) ->
 END
 ```
 
- * What can go wrong? Nothing.
+ * What can go wrong? Not deadlock, not memory corruption.
  * What is confusing? If you have minimal database experience (the vast majority of programmers in the world), nothing.
+
+CHEAT makes illegal states impossible at the concurrency level **while** being easy and ergonomic.
+
+You might ask - what about *nested* locks, like for granular locking of a tree?
+
+  * IFF you have *nested* locks, CHEAT - at the compiler-level - makes you handle a *possible* run-time error.
+  * At the run-time level, CHEAT adds minimal overhead to check if a deadlock would occur
+    * Rather than definitely deadlocking your program, CHEAT throws an error that you were forced to handle at the compiler level.
 
 ## Rust - This is Safe?
 
@@ -127,7 +135,9 @@ fn unsafeTransfer(cache: Cache) {
 }
 
 // SAFE PATTERN: Always acquire locks in same order
-fn transfer(from: &Arc<RwLock<i32>>, to: &Arc<RwLock<i32>>, amount: i32) {
+// Note the `&Arc<RwLock<Account>>` in the function signature.
+// If you had local accounts, you couldn't use this function.
+fn transfer(from: &Arc<RwLock<Account>>, to: &Arc<RwLock<Account>>, amount: i32) {
     // Use pointer addresses to create consistent ordering
     let (first, second, swap) = if Arc::as_ptr(from) < Arc::as_ptr(to) {
         (from, to, false)
@@ -139,14 +149,72 @@ fn transfer(from: &Arc<RwLock<i32>>, to: &Arc<RwLock<i32>>, amount: i32) {
     let mut second_lock = second.write().unwrap();
 
     if swap {
-        *second_lock += amount;
-        *first_lock -= amount;
+        second_lock.balance += amount;
+        first_lock.balance -= amount;
     } else {
-        *first_lock -= amount;
-        *second_lock += amount;
+        first_lock.balance -= amount;
+        second_lock.balance += amount;
+    }
+}
+
+// But what if we wanted to do some validation here?
+// And be able to re-use that for local AND shared objects?
+fn process_transaction(to: &mut Account, from: &mut Account, amount: i32) {
+    if (from.balance < amount) {
+        panic!("Insufficient funds!");
+    }
+    to.balance += amount;
+    from.balance -= amount;
+}
+
+fn local_transfer() {
+    let mut acc1 = Account { balance: 100.0 };
+    let mut acc2 = Account { balance: 50.0 };
+
+    // Works perfectly, looks like symbol soup
+    // Requires all non-sequential developers to know about sequential code
+    // Since most things *can* be sequential, you can't really avoid this in Rust
+    process_transaction(&mut acc1, &mut acc2, 10);
+}
+
+fn shared_transfer(from: &Arc<RwLock<Account>>, to: &Arc<RwLock<Account>>, amount: i32) {
+    // Use pointer addresses to create consistent ordering
+    let (first, second, swap) = if Arc::as_ptr(from) < Arc::as_ptr(to) {
+        (from, to, false)
+    } else {
+        (to, from, true)
+    };
+
+    let mut guard_a = first.write().unwrap();
+    let mut guard_b = second.write().unwrap();
+
+    if swap {
+        process_transaction(&mut *guard_b, &mut *guard_a, amount);
+    } else {
+        process_transaction(&mut *guard_a, &mut *guard_b, amount);
     }
 }
 ```
+
+### The Safety Gap
+
+ * Rust guarantees you will not have a data race (memory corruption).
+ * It does not guarantee you will avoid a deadlock (program halt).
+ * In high-reliability contexts (avionics, medical devices, Ada's turf), a program that halts forever is often just as fatal as one that crashes.
+
+Rust & everyone else pushes the *complexity* of concurrency up to the developer's cognitive load rather than solving it in the runtime, because everyone else is optimizing either:
+
+  * *Ease* of writing **unsafe** code.
+  * Or, in Rust's case, optimizing single-thread CPU instructions (not the bottleneck for most people) and predictable cost (fair, but at the cost of scaling, and at the expense of **liveness safety**).
+
+Memory safety is table stakes.
+
+  * Liveness Safety (deadlock-freedom, invariant preservation) is the real unsolved problem.
+  * Rust says, that's out of scope, instruction count is more important, the developer should just be smarter, perfect even.
+  * CHEAT says, I'll go ahead and take care of that for you - with a minimal overhead in the run-time, so you can sleep at night.
+
+Rust spends its complexity budget on memory correctness and zero-cost abstractions, when the real problem for most people is maximizing core usage. Rust leaves liveness and coordination correctness and scalability up to the user (the real hard part).
+
 
 ## Swift - This is Ergonomic?
 
@@ -244,6 +312,18 @@ func transfer(from: Cache.Item, to: Cache.Item, amount: Double) {
 }
 ```
 
+### The Ergonomics Gap
+
+ * The "Actor" Defense: Swift proponents will shout, "Use Actors!" Actors are great for UI, but they introduce Reentrancy.
+   * If you await inside an actor, the actor unlocks.
+   * While you are waiting, the state of your actor can change underneath you.
+   * You trade Deadlocks (program stops) for Logic Races (program corrupts data while running).
+     * This *might* be a better trade, but how about neither, and how about eaiser, too!?
+ * The Boilerplate: To get standard, safe, synchronous locking (what 90% of backend systems need), you have to write C-style wrapper classes.
+   * If you get anything wrong, in the wrong order, you compile, but you have deadlocks and/or dataraces.
+
+Swift is ergonomic for the consumer of the API (the UI developer), but it is hostile to the author of the system (the backend/library developer). It forces you to write 50 lines of boilerplate to do what CHEAT does in 3 words: WITH MUT items.
+
 ## Go - This is Simple?
 ```go
 import (
@@ -326,6 +406,36 @@ func SafeTransfer(a, b *Account) {
 }
 ```
 
+### The Simplicity Trap
+
+ * The "Copy" Foot-Gun: Go loves "pass by value," but it treats Mutexes as just another struct.
+   * If you assign a struct with a mutex to a new variable, or pass it to a function without a pointer, you copy the mutex.
+   * You now have two completely different locks. You think you are safe, but you are protecting nothing.
+   * The compiler is like, sure, it's your code, do whatever! The runtime is like, YOLO!
+     * You only find out when your production data is corrupted.
+ * The "Unsafe" Irony: Go prides itself on memory safety and not needing "magic."
+   * Yet, to write the standard, deadlock-free locking pattern (ordering locks by memory address), you must import unsafe.
+   * A language that forces you to leave its safety guarantees just to write a basic `transfer` function is not "simple"—it is incomplete.
+ * The Channel Dogma: Go proponents say, "Don't communicate by sharing memory."
+   * This is great advice until you need a Cache, a Registry, or a Database Connection Pool.
+   * Then, you must share memory. And Go becomes C 2.0.
+
+Go's whole story is:
+
+  * Being easy and simple matters (true)
+  * Single-thread performance doesn't matter anymore (true)
+  * We can distribute your work across cores better than anyone else with our runtime (true)
+  * Do everything in Go routines, and we'll take care of the rest (true)
+    * Except everything is unsafe (oh, wait...)
+    * And also hard and not simple (hmm...)
+
+Go is:
+  * Simple to do things it's not particularly good at (single-thread).
+    * Writing a CLI tool in Go is easy, but it's easier in Ruby or Python.
+    * Writing a fast CLI tool in Go is easy, but it's going to be slow compared to Swift or Rust and not much easier.
+  * Hard to do things it is good at (maximizing your cores).
+    * And when it does maximize your cores, it's both **memory unsafe** and **liveness unsafe**...
+
 ## C - YOLO
 ```c
 #include <pthread.h>
@@ -403,3 +513,15 @@ void disaster_scenario(Cache* c) {
     pthread_mutex_lock(&a->lock);
 }
 ```
+
+CHEAT rests its case.
+
+It is both:
+
+  * The *simplest* language
+  * And the only *liveness safe* language
+
+The cherry-on-top unfair advantage is that - **in addition**:
+
+  * It maximizes your cores *nearly* as well as Go
+  * And it maximizes your single-core perforamnce *nearly* as well as Rust
