@@ -9,6 +9,11 @@ pub const Runtime = struct {
     stack_fba: std.heap.FixedBufferAllocator,
     ebr: ThreadLocalEbr,
 
+    owns_stack_memory: bool,
+
+    // For green fibers, how long until this DIES? (0 = No timeout - deal with it)
+    deadline: i64 = 0,
+
     // THE HEAP ARENA (Survivor/Request)
     // We use a standard ArenaAllocator. It wraps the OS allocator (page_allocator)
     // and frees everything at once when we call deinit().
@@ -26,13 +31,99 @@ pub const Runtime = struct {
             .stack_fba = std.heap.FixedBufferAllocator.init(stack_mem),
             .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .ebr = local_ebr,
+            .owns_stack_memory = true, // We allocated it, we must free it.
+            .deadline = 0,
+        };
+    }
+
+    pub fn initFromSlice(slice: []u8, global_ctx: *EbrContext, timeout_ms: u64) !Runtime {
+        const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .{} };
+
+        var deadline: i64 = 0;
+        if (timeout_ms > 0) {
+            deadline = std.time.milliTimestamp() + @as(i64, @intCast(timeout_ms));
+        }
+
+        return Runtime{
+            .stack_backing = slice,
+            .stack_fba = std.heap.FixedBufferAllocator.init(slice),
+            .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .ebr = local_ebr,
+            .owns_stack_memory = false, // DO NOT FREE THIS in deinit.
+            .deadline = deadline,
         };
     }
 
     pub fn deinit(self: *Runtime, allocator: std.mem.Allocator) void {
         self.ebr.deinit(allocator);
         self.heap_arena.deinit();
-        allocator.free(self.stack_backing);
+
+        // IMPORTANT: Only free stack IF WE OWN IT!
+        if (self.owns_stack_memory) {
+            allocator.free(self.stack_backing);
+        }
+    }
+
+    // For green fibers
+    pub fn checkpoint(self: *Runtime) !void {
+        if (self.deadline > 0) {
+            const now = std.time.milliTimestamp();
+            if (now > self.deadline) {
+                return error.Timeout;
+            }
+        }
+        // Optional: Auto-yield every N calls to prevent CPU hogging?
+        // For now, just checking time is enough.
+    }
+
+    // For green fibers
+    pub fn sleep(_: *Runtime, ms: u64) void {
+        const sched = active_scheduler;
+        const task = sched.getCurrent();
+
+        // Calculate wake time
+        const now = std.time.milliTimestamp();
+        const wake_time = now + @as(i64, @intCast(ms));
+
+        // Tell scheduler to hold us
+        sched.sleepTask(task, wake_time);
+
+        // Yield (The scheduler will put us in the sleeping_queue, NOT ready_queue)
+        task.base.yield();
+    }
+
+    // Mostly for green fibers
+    // Read from a non-blocking socket
+    pub fn read(_: *Runtime, fd: i32, buffer: []u8) !usize {
+        const sched = active_scheduler;
+        const task = sched.getCurrent();
+
+        while (true) {
+            // 1. Try to read directly
+            const rc = std.posix.read(fd, buffer.ptr, buffer.len) catch |err| {
+                 // Check if it's EAGAIN (Would Block)
+                 if (err == error.WouldBlock) {
+                     // 2. Register with Epoll
+                     // Note: Ideally we register once when opening, but safe to re-arm or check here.
+                     // For simplicity, we assume user registered FD or we do it lazily.
+                     // Let's do lazy registration inside scheduler for now or assume it's done.
+
+                     // Register this task to be woken up when FD is readable
+                     // (We need a way to tell Scheduler "Task is blocked on FD X")
+                     try sched.registerFd(fd, task);
+
+                     task.status = .Blocked;
+                     task.base.yield();
+
+                     // When we wake up, loop back and try read() again!
+                     continue;
+                 }
+                 return err;
+            };
+
+            // Success
+            return rc;
+        }
     }
 
     // Stack Helper: Get current Mark (Offset)
@@ -568,7 +659,7 @@ pub const EbrContext = struct {
 
 pub const ThreadLocalEbr = struct {
     // Things I have deleted but not freed
-    limbo_list: std.ArrayList(RetiredPtr) = .{},
+    limbo_list: std.ArrayListUnmanaged(RetiredPtr) = .{},
 
     // local_epoch: "The time I saw when I started reading"
     local_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
@@ -795,4 +886,373 @@ pub const Fiber = struct {
     pub fn yield(self: *Fiber) void {
         switchContext(&self.ctx, self.parent_ctx);
     }
+
+    // Reset the stack pointer and put the entry function back at the top.
+    pub fn reset(self: *Fiber, entry_fn: usize) void {
+        const stack_top = self.stack.getStackTop();
+
+        // 1. Rewrite the Trampoline (Return Address)
+        const ptr = @as(*usize, @ptrFromInt(stack_top));
+        ptr.* = entry_fn;
+
+        // 2. Reset the Context Stack Pointer
+        self.ctx.sp = stack_top;
+
+        // No need to clear registers; they get overwritten on switchContext
+    }
 };
+
+
+pub const TaskStatus = enum {
+    Ready,    // Run me again
+    Finished, // Recycle me
+    Blocked,  // Don't run me, I'm waiting on something
+};
+
+pub const TaskConfig = struct {
+    timeout_ms: u64 = 0,
+};
+
+pub const Task = struct {
+    base: Fiber,
+    user_fn: *const fn (*Runtime) anyerror!void,
+    status: TaskStatus = .Ready,
+    config: TaskConfig = .{},
+    wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
+};
+
+pub const Scheduler = struct {
+    // 1. The Manager State
+    fiber_pool: std.ArrayListUnmanaged(*Task) = .{},
+    ready_queue: std.ArrayListUnmanaged(*Task) = .{},
+    sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
+
+    // 2. IO & Memory
+    allocator: std.mem.Allocator,
+    global_ebr: *EbrContext,
+    poller: Poller,
+
+    // 3. Main Thread Context (To return to OS)
+    main_ctx: Context,
+    current_task: ?*Task,
+
+    // Buffer for epoll events (reused)
+    // Max of 128 for now, likely want to increase
+    // Only works on Linux
+    epoll_events: [128]std.os.linux.epoll_event = undefined,
+
+    active_tasks: usize = 0,
+
+    pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext) Scheduler {
+        const p = Poller.init() catch unreachable;
+
+        return Scheduler{
+            .fiber_pool = .{},
+            .ready_queue = .{},
+            .sleeping_queue = .{},
+            .allocator = allocator,
+            .global_ebr = global_ebr,
+            .poller = p,
+            .main_ctx = undefined,
+            .current_task = null,
+        };
+    }
+
+    pub fn deinit(self: *Scheduler) void {
+        // Cleanup all memory
+        for (self.fiber_pool.items) |task| {
+            task.base.deinit();
+            self.allocator.destroy(task);
+        }
+        self.fiber_pool.deinit(self.allocator);
+
+        for (self.ready_queue.items) |task| {
+            task.base.deinit();
+            self.allocator.destroy(task);
+        }
+        self.ready_queue.deinit(self.allocator);
+
+        for (self.sleeping_queue.items) |task| {
+            task.base.deinit();
+            self.allocator.destroy(task);
+        }
+        self.sleeping_queue.deinit(self.allocator);
+
+        self.poller.deinit();
+    }
+
+    // THE BRIDGE: Connects Fibers to your MVCC Runtime
+    pub fn spawn(self: *Scheduler, config: TaskConfig, user_fn: *const fn (*Runtime) anyerror!void) !void {
+        var task: *Task = undefined;
+
+        if (self.fiber_pool.items.len > 0) {
+            task = self.fiber_pool.pop().?;
+
+            // IMPORTANT: Reset the stack pointer so we start fresh!
+            task.base.reset(@intFromPtr(&entryWrapper));
+
+            task.status = .Ready;
+        } else {
+            // Alloc new Task container
+            task = try self.allocator.create(Task);
+
+            // Safety: Handle error if Fiber init fails
+            errdefer self.allocator.destroy(task);
+
+            // Alloc 8MB Virtual Stack, pointing to OUR Bootstrap function
+            task.base = try Fiber.init(8 * 1024 * 1024, @intFromPtr(&entryWrapper));
+
+            task.status = .Ready;
+        }
+
+        // Store the user's function so the wrapper can find it later
+        task.user_fn = user_fn;
+        task.config = config;
+
+        self.active_tasks += 1;
+        try self.ready_queue.append(self.allocator, task);
+    }
+
+    pub fn run(self: *Scheduler) void {
+       while (true) {
+            // Look for beautiful sleeping tasks to wake up
+            if (self.sleeping_queue.items.len > 0) {
+                const now = std.time.milliTimestamp();
+                var i: usize = 0;
+                while (i < self.sleeping_queue.items.len) {
+                    const task = self.sleeping_queue.items[i];
+                    if (now >= task.wake_time) {
+                        // WAKE UP, Sleeping Beauty! It's me, your scheduler!
+                        // Remove from sleeping queue (O(1) swap remove)
+                        _ = self.sleeping_queue.swapRemove(i);
+
+                        // Add to ready queue
+                        task.status = .Ready;
+                        self.ready_queue.append(self.allocator, task) catch unreachable;
+
+                        // Don't increment 'i' because we just swapped a new item here
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+
+            // Look for tasks ready to start:
+            if (self.ready_queue.items.len > 0) {
+                const task = self.ready_queue.orderedRemove(0);
+                self.current_task = task;
+
+                // 1. Switch to the Task
+                // The task will resume inside 'entryWrapper' (if new)
+                // or wherever it yielded (if old).
+                task.base.switchTo(&self.main_ctx);
+
+                switch (task.status) {
+                    .Finished => {
+                        // Recycle
+                        self.active_tasks -= 1;
+                        self.fiber_pool.append(self.allocator, task) catch unreachable;
+                    },
+                    .Ready => {
+                        // It yielded, but wants to run again. Put back in queue.
+                        self.ready_queue.append(self.allocator, task) catch unreachable;
+                    },
+                    .Blocked => {
+                        // Do nothing! It is now owned by the WaitGroup/Mutex/Etc.
+                        // It will be added back to ready_queue by someone else later.
+                    }
+                }
+                continue; // Keep looping if we have work!
+            }
+
+            if (self.active_tasks == 0) {
+                break;
+            }
+
+            // IF IDLE: Poll for IO
+            // Determine timeout based on next timer
+            // If we have a sleeper in 50ms, poll(50). If empty, poll(-1) [Wait Forever].
+            var timeout: i32 = -1;
+            if (self.sleeping_queue.items.len > 0) {
+                // Simplification: Just poll for 1ms if we have timers pending
+                timeout = 1;
+            }
+
+            const count = self.poller.poll(&self.epoll_events, timeout);
+
+            if (count > 0) {
+                // Wake up tasks waiting on IO!
+                for (self.epoll_events[0..count]) |event| {
+                    const task_ptr = event.data.ptr;
+                    const task = @as(*Task, @ptrFromInt(task_ptr));
+
+                    // Add back to ready queue
+                    task.status = .Ready;
+                    self.ready_queue.append(self.allocator, task) catch unreachable;
+                }
+            }
+
+            // If no IO and no Tasks and no Sleepers -> Break
+            if (count == 0 and self.ready_queue.items.len == 0 and self.sleeping_queue.items.len == 0) {
+                break;
+            }
+        }
+    }
+
+    // Helper to wake a specific fiber
+    pub fn schedule(self: *Scheduler, task: *Task) void {
+        self.ready_queue.append(self.allocator, task) catch unreachable;
+    }
+
+    // Helper to get current task
+    pub fn getCurrent(self: *Scheduler) *Task {
+        return self.current_task.?;
+    }
+
+    // Lay this beautiful task to rest until a specific time
+    pub fn sleepTask(self: *Scheduler, task: *Task, wake_time: i64) void {
+        task.wake_time = wake_time;
+        task.status = .Blocked;
+        self.sleeping_queue.append(self.allocator, task) catch unreachable;
+    }
+
+    // Helper to do IO
+    pub fn registerFd(self: *Scheduler, fd: i32, task: *Task) !void {
+        // We cast the task pointer to usize to store it in epoll user_data
+        try self.poller.register(fd, @intFromPtr(task));
+    }
+};
+
+pub const WaitGroup = struct {
+    counter: usize = 0,
+    waiting_task: ?*Task = null,
+
+    // We need the scheduler to wake people up
+    sched: *Scheduler,
+
+    pub fn init(sched: *Scheduler) WaitGroup {
+        return .{ .sched = sched };
+    }
+
+    pub fn add(self: *WaitGroup, count: usize) void {
+        self.counter += count;
+    }
+
+    pub fn done(self: *WaitGroup) void {
+        self.counter -= 1;
+        if (self.counter == 0) {
+            if (self.waiting_task) |task| {
+                // Wake up the waiter!
+                self.sched.schedule(task);
+                self.waiting_task = null;
+            }
+        }
+    }
+
+    // This is a blocking call!
+    pub fn wait(self: *WaitGroup) void {
+        if (self.counter == 0) return;
+
+        var task = self.sched.getCurrent();
+
+        // 1. Mark status as Blocked
+        task.status = .Blocked;
+        self.waiting_task = task;
+
+        // 2. Yield. The scheduler will see .Blocked and NOT re-queue us.
+        task.base.yield();
+
+        // 3. We are back! Reset status for safety
+        task.status = .Ready;
+    }
+};
+
+// Poller lets us make IO & other sys calls without blocking
+// Without this, green fibers are pretty much useless
+// This only works on Linux for now
+pub const Poller = struct {
+    epoll_fd: i32,
+
+    // This only works on Linux for now
+    pub fn init() !Poller {
+        // Create epoll instance
+        // flags=0 is standard
+        const fd = try std.posix.epoll_create1(0);
+        return Poller{ .epoll_fd = fd };
+    }
+
+    pub fn deinit(self: *Poller) void {
+        std.posix.close(self.epoll_fd);
+    }
+
+    // Register a file descriptor (socket) to watch for READ events
+    // user_data: We will store the *Task pointer here so we know who to wake up
+    // Only works on Linux
+    pub fn register(self: *Poller, fd: i32, user_data: usize) !void {
+        var event = std.os.linux.epoll_event{
+            .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET, // Read + Edge Triggered
+            .data = .{ .ptr = user_data },
+        };
+        try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event);
+    }
+
+    // Wait for events. Returns the number of events ready.
+    // events: A slice to store the results
+    // timeout_ms: How long to sleep if nothing happens (-1 = forever, 0 = return immediately)
+    // Only works on Linux
+    pub fn poll(self: *Poller, events: []std.os.linux.epoll_event, timeout_ms: i32) usize {
+        const count = std.os.linux.epoll_wait(self.epoll_fd, events.ptr, @intCast(events.len), timeout_ms);
+        return count;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// THE BOOTSTRAP / WRAPPER
+// This is a global function (or static method).
+// -----------------------------------------------------------------------------
+
+// We need a global pointer to the active scheduler so the wrapper can find context.
+// In a real threaded app, this would be thread-local storage.
+pub var active_scheduler: *Scheduler = undefined;
+
+fn entryWrapper() void {
+    // 1. Get the current task info
+    const sched = active_scheduler;
+    const task = sched.current_task.?;
+
+    // 2. THE FIX: Skip the first 4KB (Guard Page)
+    // We cannot write to index 0. We must start at 4096.
+    const guard_offset = 4096;
+    const scratchpad_size = 1024 * 1024; // 1MB
+
+    // 3. Initialize Runtime
+    // Optimization: We carve 1MB off the bottom of the Fiber's OWN stack
+    // to use as the Runtime's scratchpad. No malloc needed!
+    const full_stack_memory = task.base.stack.memory;
+    const scratchpad_slice = full_stack_memory[guard_offset .. guard_offset + scratchpad_size];
+
+    var rt = Runtime.initFromSlice(scratchpad_slice, sched.global_ebr, task.config.timeout_ms) catch unreachable;
+    defer rt.deinit(sched.allocator);
+
+    // 3. EXECUTE USER CODE
+    if (task.user_fn(&rt)) {
+        // Success
+    } else |err| {
+        // Failure / Timeout
+        // Later, we'll store this error in the Task so the parent can see it.
+        // For now, we just print and die safely.
+        if (err == error.Timeout) {
+             std.debug.print("\n[Scheduler] Task Timed Out! Killing it.\n", .{});
+        } else {
+             std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
+        }
+    }
+
+    // 4. Mark as finished before yielding back
+    task.status = .Finished;
+
+    // 5. Cleanup & Yield
+    // When we yield here, we go back to Scheduler.run loop.
+    task.base.yield();
+}
+

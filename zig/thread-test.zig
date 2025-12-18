@@ -531,3 +531,77 @@ test "RwLock Many Readers One Writer" {
     }
 }
 
+// IO Test, i.e., this is starting to get useful
+
+// Helper to set a socket to Non-Blocking mode
+// We MUST do this, otherwise the OS will block the thread before our Runtime can yield.
+fn setNonBlocking(fd: i32) !void {
+    const flags = try std.posix.fcntl(fd, std.posix.F_GETFL, 0);
+    _ = try std.posix.fcntl(fd, std.posix.F_SETFL, flags | std.posix.O_NONBLOCK);
+}
+
+// Global sockets for the test
+var read_fd: i32 = undefined;
+var write_fd: i32 = undefined;
+
+// Task A: Tries to read. It should BLOCK (Yield) initially because there is no data.
+fn readerTask(rt: *rt_header.Runtime) !void {
+    std.debug.print("\n[Reader] Starting. Trying to read...", .{});
+
+    var buf: [128]u8 = undefined;
+
+    // This call will:
+    // 1. See no data (EAGAIN)
+    // 2. Register FD with Epoll
+    // 3. Yield to Scheduler
+    // ... Time Passes ...
+    // 4. Wake up when WriterTask writes data
+    const n = try rt.read(read_fd, &buf);
+
+    std.debug.print("\n[Reader] Woke up! Received: {s}", .{buf[0..n]});
+}
+
+// Task B: Sleeps, then writes data.
+fn writerTask(rt: *rt_header.Runtime) !void {
+    std.debug.print("\n[Writer] Sleeping 100ms...", .{});
+    rt.sleep(100);
+
+    std.debug.print("\n[Writer] Waking up and writing 'Hello'...", .{});
+    _ = try std.posix.write(write_fd, "Hello Fiber!");
+}
+
+test "Async I/O with Epoll" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var global_ctx = rt_header.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var sched = rt_header.Scheduler.init(allocator, &global_ctx);
+    defer sched.deinit();
+    rt_header.active_scheduler = &sched;
+
+    // 1. Setup Socket Pair (Simulates Client/Server connection)
+    var fds: [2]i32 = undefined;
+    try std.posix.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
+    read_fd = fds[0];
+    write_fd = fds[1];
+
+    // CRITICAL: Set Non-Blocking!
+    try setNonBlocking(read_fd);
+    try setNonBlocking(write_fd);
+
+    defer std.posix.close(read_fd);
+    defer std.posix.close(write_fd);
+
+    std.debug.print("\n\n--- Start I/O Test ---", .{});
+
+    // 2. Spawn Tasks
+    try sched.spawn(.{}, readerTask);
+    try sched.spawn(.{}, writerTask);
+
+    sched.run();
+
+    std.debug.print("\n--- End I/O Test ---\n", .{});
+}
+
