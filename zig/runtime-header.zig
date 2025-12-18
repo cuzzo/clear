@@ -2,14 +2,14 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const Runtime = struct {
-    // THE STACK ARENA (Scratchpad)
+    // THE FRAME (Scratchpad)
     // We use a FixedBufferAllocator to simulate the linear stack.
     // It is backed by a raw slice of memory.
-    stack_backing: []u8,
-    stack_fba: std.heap.FixedBufferAllocator,
+    frame_backing: []u8,
+    frame_fba: std.heap.FixedBufferAllocator,
     ebr: ThreadLocalEbr,
 
-    owns_stack_memory: bool,
+    owns_frame_memory: bool,
 
     // For green fibers, how long until this DIES? (0 = No timeout - deal with it)
     deadline: i64 = 0,
@@ -20,18 +20,18 @@ pub const Runtime = struct {
     // TODO: probably want this to be a gpa allocator
     heap_arena: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: std.mem.Allocator, stack_size: usize, global_ctx: *EbrContext) !Runtime {
+    pub fn init(allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext) !Runtime {
         // Alloc raw memory for the frame (1MB or whatever passed)
-        const stack_mem = try allocator.alloc(u8, stack_size);
+        const frame_mem = try allocator.alloc(u8, frame_size);
 
         const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .{} };
 
         return Runtime{
-            .stack_backing = stack_mem,
-            .stack_fba = std.heap.FixedBufferAllocator.init(stack_mem),
+            .frame_backing = frame_mem,
+            .frame_fba = std.heap.FixedBufferAllocator.init(frame_mem),
             .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .ebr = local_ebr,
-            .owns_stack_memory = true, // We allocated it, we must free it.
+            .owns_frame_memory = true, // We allocated it, we must free it.
             .deadline = 0,
         };
     }
@@ -45,11 +45,11 @@ pub const Runtime = struct {
         }
 
         return Runtime{
-            .stack_backing = slice,
-            .stack_fba = std.heap.FixedBufferAllocator.init(slice),
+            .frame_backing = slice,
+            .frame_fba = std.heap.FixedBufferAllocator.init(slice),
             .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .ebr = local_ebr,
-            .owns_stack_memory = false, // DO NOT FREE THIS in deinit.
+            .owns_frame_memory = false, // DO NOT FREE THIS in deinit.
             .deadline = deadline,
         };
     }
@@ -58,9 +58,9 @@ pub const Runtime = struct {
         self.ebr.deinit(allocator);
         self.heap_arena.deinit();
 
-        // IMPORTANT: Only free stack IF WE OWN IT!
-        if (self.owns_stack_memory) {
-            allocator.free(self.stack_backing);
+        // IMPORTANT: Only free frame IF WE OWN IT!
+        if (self.owns_frame_memory) {
+            allocator.free(self.frame_backing);
         }
     }
 
@@ -94,51 +94,53 @@ pub const Runtime = struct {
 
     // Mostly for green fibers
     // Read from a non-blocking socket
+    // Only works on Linux
     pub fn read(_: *Runtime, fd: i32, buffer: []u8) !usize {
         const sched = active_scheduler;
         const task = sched.getCurrent();
 
         while (true) {
             // 1. Try to read directly
-            const rc = std.posix.read(fd, buffer.ptr, buffer.len) catch |err| {
-                 // Check if it's EAGAIN (Would Block)
-                 if (err == error.WouldBlock) {
-                     // 2. Register with Epoll
-                     // Note: Ideally we register once when opening, but safe to re-arm or check here.
-                     // For simplicity, we assume user registered FD or we do it lazily.
-                     // Let's do lazy registration inside scheduler for now or assume it's done.
+            const rc = std.os.linux.read(fd, buffer.ptr, buffer.len);
+            const errno = std.posix.errno(rc);
 
-                     // Register this task to be woken up when FD is readable
-                     // (We need a way to tell Scheduler "Task is blocked on FD X")
+            switch (errno) {
+                .SUCCESS => {
+                    // Success! rc is the bytes read.
+                    return rc;
+                },
+                .AGAIN => { // (This handles EAGAIN / EWOULDBLOCK)
+                     // 3. Register with Epoll
                      try sched.registerFd(fd, task);
 
+                     // 4. Yield (Block)
                      task.status = .Blocked;
                      task.base.yield();
 
                      // When we wake up, loop back and try read() again!
                      continue;
-                 }
-                 return err;
-            };
-
-            // Success
-            return rc;
+                },
+                else => {
+                    // Real Error
+                    return std.posix.unexpectedErrno(errno);
+                }
+            }
         }
     }
 
     // Stack Helper: Get current Mark (Offset)
-    pub fn saveStackMark(self: *Runtime) usize {
-        return self.stack_fba.end_index;
+    // TODO: rename FRAME
+    pub fn saveFrameMark(self: *Runtime) usize {
+        return self.frame_fba.end_index;
     }
 
     // Stack Helper: Reset to Mark (O(1) Free)
-    pub fn restoreStackMark(self: *Runtime, mark: usize) void {
-        self.stack_fba.end_index = mark;
+    pub fn restoreFrameMark(self: *Runtime, mark: usize) void {
+        self.frame_fba.end_index = mark;
     }
 
-    // TODO: Rename -> frameAlloc
-    pub fn stackAlloc(self: *Runtime) std.mem.Allocator {
-        return self.stack_fba.allocator();
+    pub fn frameAlloc(self: *Runtime) std.mem.Allocator {
+        return self.frame_fba.allocator();
     }
 
     pub fn heapAlloc(self: *Runtime) std.mem.Allocator {
@@ -217,7 +219,7 @@ pub const Runtime = struct {
     pub fn mapPut(self: *Runtime, comptime V: type, allocator: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
         _ = self;
         // Critical: We must duplicate the key to the Heap because the Map keeps a pointer to it.
-        // If we don't, and 'key' is a stack string that dies, the map breaks.
+        // If we don't, and 'key' is a frame string that dies, the map breaks.
         const key_copy = try allocator.dupe(u8, key);
         try map.put(allocator, key_copy, value);
     }
@@ -307,7 +309,7 @@ pub const Runtime = struct {
 
         while (iter.next()) |part| {
             // Important: Make a copy of the part in the new allocator (Heap)
-            // so the list doesn't point to stack memory that might die.
+            // so the list doesn't point to frame memory that might die.
             const part_copy = try allocator.dupe(u8, part);
             try list.append(allocator, part_copy);
         }
@@ -355,24 +357,24 @@ pub const Runtime = struct {
 
     // Threading
 
-    pub fn spawnThread(sys_allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_size: usize, comptime func: anytype, args: anytype) !std.Thread {
+    pub fn spawnThread(sys_allocator: std.mem.Allocator, global_ctx: *EbrContext, frame_size: usize, comptime func: anytype, args: anytype) !std.Thread {
         // We don't call 'func' directly. We call the wrapper.
         // We pass the config + the function + the args TO the wrapper.
-        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, global_ctx, stack_size, func, args });
+        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, global_ctx, frame_size, func, args });
     }
 
     // THE INTERNAL WRAPPER
     // This runs INSIDE the new thread. It handles the boilerplate.
-    fn threadWrapper(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_size: usize, comptime func: anytype, args: anytype) !void {
+    fn threadWrapper(allocator: std.mem.Allocator, global_ctx: *EbrContext, frame_size: usize, comptime func: anytype, args: anytype) !void {
         // 1. BOILERPLATE: Setup Runtime
-        var rt = try Runtime.init(allocator, stack_size, global_ctx);
+        var rt = try Runtime.init(allocator, frame_size, global_ctx);
         defer rt.deinit(allocator);
 
-        // IMPORTANT: Register this thread with the global context now that `rt` is stable on the stack.
+        // IMPORTANT: Register this thread with the global context now that `rt` is stable on the frame.
         try global_ctx.register(allocator, &rt.ebr);
 
         // This runs FIRST (before deinit): Remove from global registry
-        // so the GC doesn't try to look at our dead stack.
+        // so the GC doesn't try to look at our dead frame.
         defer global_ctx.unregister(&rt.ebr);
 
         // 2. MAGIC: Call the user function
@@ -1213,7 +1215,7 @@ pub const Poller = struct {
 
 // We need a global pointer to the active scheduler so the wrapper can find context.
 // In a real threaded app, this would be thread-local storage.
-pub var active_scheduler: *Scheduler = undefined;
+pub threadlocal var active_scheduler: *Scheduler = undefined;
 
 fn entryWrapper() void {
     // 1. Get the current task info

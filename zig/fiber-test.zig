@@ -80,10 +80,10 @@ test "Context Switching" {
 // (In your real app, manage this carefully)
 
 fn userTask1(rt: *Runtime) !void {
-    std.debug.print("\n[Task 1] Hello! My stack offset is: {d}", .{rt.stack_fba.end_index});
+    std.debug.print("\n[Task 1] Hello! My stack offset is: {d}", .{rt.frame_fba.end_index});
 
     // Simulate some work using the Runtime
-    const ptr = rt.stack_fba.allocator().create(u64) catch unreachable;
+    const ptr = rt.frame_fba.allocator().create(u64) catch unreachable;
     ptr.* = 12345;
     std.debug.print("\n[Task 1] Allocated data on fiber heap: {d}", .{ptr.*});
 }
@@ -289,4 +289,137 @@ test "Non-Blocking Sleep" {
     // Assert it ran in parallel (took less than sum of sleeps)
     try std.testing.expect(duration < 390);
     try std.testing.expect(duration >= 300);
+}
+
+// IO Test, i.e., this is starting to get useful
+
+// Helper to set a socket to Non-Blocking mode
+// We MUST do this, otherwise the OS will block the thread before our Runtime can yield.
+// Only works on Linux
+fn setNonBlocking(fd: i32) !void {
+    const flags = try std.posix.fcntl(fd, std.os.linux.F.GETFL, 0);
+    _ = try std.posix.fcntl(fd, std.os.linux.F.SETFL, flags | std.os.linux.SOCK.NONBLOCK);
+}
+
+// Global sockets for the test
+var read_fd: i32 = undefined;
+var write_fd: i32 = undefined;
+
+// Task A: Tries to read. It should BLOCK (Yield) initially because there is no data.
+fn readerTask(rt: *crt.Runtime) !void {
+    std.debug.print("\n[Reader] Starting. Trying to read...", .{});
+
+    var buf: [128]u8 = undefined;
+
+    // This call will:
+    // 1. See no data (EAGAIN)
+    // 2. Register FD with Epoll
+    // 3. Yield to Scheduler
+    // ... Time Passes ...
+    // 4. Wake up when WriterTask writes data
+    const n = try rt.read(read_fd, &buf);
+
+    std.debug.print("\n[Reader] Woke up! Received: {s}", .{buf[0..n]});
+}
+
+// Task B: Sleeps, then writes data.
+fn writerTask(rt: *crt.Runtime) !void {
+    std.debug.print("\n[Writer] Sleeping 100ms...", .{});
+    rt.sleep(100);
+
+    std.debug.print("\n[Writer] Waking up and writing 'Hello'...", .{});
+    _ = try std.posix.write(write_fd, "Hello Fiber!");
+}
+
+// Only works on Linux
+test "Async I/O with Epoll" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var global_ctx = crt.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var sched = crt.Scheduler.init(allocator, &global_ctx);
+    defer sched.deinit();
+    crt.active_scheduler = &sched;
+
+    // 1. Setup Socket Pair (Simulates Client/Server connection)
+    var fds: [2]i32 = undefined;
+    _ = std.os.linux.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
+    read_fd = fds[0];
+    write_fd = fds[1];
+
+    // CRITICAL: Set Non-Blocking!
+    try setNonBlocking(read_fd);
+    try setNonBlocking(write_fd);
+
+    defer std.posix.close(read_fd);
+    defer std.posix.close(write_fd);
+
+    std.debug.print("\n\n--- Start I/O Test ---", .{});
+
+    // 2. Spawn Tasks
+    try sched.spawn(.{}, readerTask);
+    try sched.spawn(.{}, writerTask);
+
+    sched.run();
+
+    std.debug.print("\n--- End I/O Test ---\n", .{});
+}
+
+
+// Multi-threaded Fiber Pools
+
+// A heavy task to simulate work
+fn heavyTask(rt: *crt.Runtime) !void {
+    const thread_id = std.Thread.getCurrentId();
+    std.debug.print("\n[Thread {d}] Task Started.", .{thread_id});
+
+    // Sleep to prove we are running concurrently with other threads
+    rt.sleep(100);
+
+    std.debug.print("\n[Thread {d}] Task Finished.", .{thread_id});
+}
+
+// The Entry Point for each OS Thread
+fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *crt.EbrContext) !void {
+    // 1. Initialize Thread-Local Scheduler
+    var sched = crt.Scheduler.init(allocator, global_ctx);
+    defer sched.deinit();
+
+    // 2. Set the thread-local pointer
+    crt.active_scheduler = &sched;
+
+    // 3. Spawn Fibers (These stay on THIS thread)
+    try sched.spawn(.{}, heavyTask);
+    try sched.spawn(.{}, heavyTask);
+
+    // 4. Run Loop
+    sched.run();
+}
+
+test "Multi-Threaded Shared Nothing" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var global_ctx = crt.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    std.debug.print("\n\n--- Start Multi-Thread Test ---", .{});
+
+    // Spawn 3 OS Threads
+    var threads: [3]std.Thread = undefined;
+    for (0..3) |i| {
+        threads[i] = try std.Thread.spawn(.{}, threadEntryPoint, .{allocator, &global_ctx});
+    }
+
+    // Also run a scheduler on the Main Thread (Thread 4)
+    try threadEntryPoint(allocator, &global_ctx);
+
+    // Wait for others
+    for (threads) |t| {
+        t.join();
+    }
+
+    std.debug.print("\n--- End Multi-Thread Test ---\n", .{});
 }
