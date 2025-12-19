@@ -23,7 +23,7 @@ FN get(cache: Cache, id: String) RETURNS Locked<Account> ->
 END
 
 FN transact(cache: Cache) ->
-  -- Lock order automatically sorted
+  -- Lock order automatically sorted, prevents "Deadly Embrace"
   WITH cache.get("a") AS MUT a, cache.get("b") AS MUT b {
     a.balance += 10;
     b.balance -= 10;
