@@ -14,13 +14,13 @@ pub const Runtime = struct {
     // For green fibers, how long until this DIES? (0 = No timeout - deal with it)
     deadline: i64 = 0,
 
-    // THE HEAP ARENA (Survivor/Request)
-    // We use a standard ArenaAllocator. It wraps the OS allocator (page_allocator)
-    // and frees everything at once when we call deinit().
-    // TODO: probably want this to be a gpa allocator
-    heap_arena: std.heap.ArenaAllocator,
+    // The Hot Heap (Global/Shared)
+    // Survivors, "Persistent data... shared mutability."
+    // This allows the fiber to allocate data that OUTLIVES the function (and fiber).
+    // This must be thread-safe (GPA).
+    global_allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext) !Runtime {
+    pub fn init(allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, global_alloc: std.mem.Allocator) !Runtime {
         // Alloc raw memory for the frame (1MB or whatever passed)
         const frame_mem = try allocator.alloc(u8, frame_size);
 
@@ -29,14 +29,14 @@ pub const Runtime = struct {
         return Runtime{
             .frame_backing = frame_mem,
             .frame_fba = std.heap.FixedBufferAllocator.init(frame_mem),
-            .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .global_allocator = global_alloc,
             .ebr = local_ebr,
             .owns_frame_memory = true, // We allocated it, we must free it.
             .deadline = 0,
         };
     }
 
-    pub fn initFromSlice(slice: []u8, global_ctx: *EbrContext, timeout_ms: u64) !Runtime {
+    pub fn initFromSlice(slice: []u8, global_ctx: *EbrContext, global_alloc: std.mem.Allocator, timeout_ms: u64) !Runtime {
         const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .{} };
 
         var deadline: i64 = 0;
@@ -47,20 +47,21 @@ pub const Runtime = struct {
         return Runtime{
             .frame_backing = slice,
             .frame_fba = std.heap.FixedBufferAllocator.init(slice),
-            .heap_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .global_allocator = global_alloc,
             .ebr = local_ebr,
             .owns_frame_memory = false, // DO NOT FREE THIS in deinit.
             .deadline = deadline,
         };
     }
 
-    pub fn deinit(self: *Runtime, allocator: std.mem.Allocator) void {
-        self.ebr.deinit(allocator);
-        self.heap_arena.deinit();
+    pub fn deinit(self: *Runtime) void {
+        self.ebr.deinit(self.global_allocator);
+
+        // We DO NOT free global_allocator (it's shared)
 
         // IMPORTANT: Only free frame IF WE OWN IT!
         if (self.owns_frame_memory) {
-            allocator.free(self.frame_backing);
+            self.global_allocator.free(self.frame_backing);
         }
     }
 
@@ -143,8 +144,8 @@ pub const Runtime = struct {
         return self.frame_fba.allocator();
     }
 
-    pub fn heapAlloc(self: *Runtime) std.mem.Allocator {
-        return self.heap_arena.allocator();
+    pub fn globalAlloc(self: *Runtime) std.mem.Allocator {
+        return self.global_allocator;
     }
 
     pub fn allocCopy(self: *Runtime, comptime T: type, value: T) !*T {
@@ -357,18 +358,18 @@ pub const Runtime = struct {
 
     // Threading
 
-    pub fn spawnThread(sys_allocator: std.mem.Allocator, global_ctx: *EbrContext, frame_size: usize, comptime func: anytype, args: anytype) !std.Thread {
+    pub fn spawnThread(sys_allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, global_alloc: std.mem.Allocator, comptime func: anytype, args: anytype) !std.Thread {
         // We don't call 'func' directly. We call the wrapper.
         // We pass the config + the function + the args TO the wrapper.
-        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, global_ctx, frame_size, func, args });
+        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, frame_size, global_ctx, global_alloc, func, args });
     }
 
     // THE INTERNAL WRAPPER
     // This runs INSIDE the new thread. It handles the boilerplate.
-    fn threadWrapper(allocator: std.mem.Allocator, global_ctx: *EbrContext, frame_size: usize, comptime func: anytype, args: anytype) !void {
+    fn threadWrapper(allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, global_alloc: std.mem.Allocator, comptime func: anytype, args: anytype) !void {
         // 1. BOILERPLATE: Setup Runtime
-        var rt = try Runtime.init(allocator, frame_size, global_ctx);
-        defer rt.deinit(allocator);
+        var rt = try Runtime.init(allocator, frame_size, global_ctx, global_alloc);
+        defer rt.deinit();
 
         // IMPORTANT: Register this thread with the global context now that `rt` is stable on the frame.
         try global_ctx.register(allocator, &rt.ebr);
@@ -1233,8 +1234,8 @@ fn entryWrapper() void {
     const full_stack_memory = task.base.stack.memory;
     const scratchpad_slice = full_stack_memory[guard_offset .. guard_offset + scratchpad_size];
 
-    var rt = Runtime.initFromSlice(scratchpad_slice, sched.global_ebr, task.config.timeout_ms) catch unreachable;
-    defer rt.deinit(sched.allocator);
+    var rt = Runtime.initFromSlice(scratchpad_slice, sched.global_ebr, sched.allocator, task.config.timeout_ms) catch unreachable;
+    defer rt.deinit();
 
     // 3. EXECUTE USER CODE
     if (task.user_fn(&rt)) {

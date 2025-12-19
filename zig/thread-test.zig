@@ -69,8 +69,9 @@ test "Runtime Spawn & Mutex Verify" {
         //  4. Passes &rt + your args to the function
         const t = try rt.Runtime.spawnThread(
             allocator,
-            &global_ctx,
             64 * 1024,           // Frame Size
+            &global_ctx,
+            allocator,
             testWorker,          // Function
             .{ i, loops_per_thread, shared_state } // Args (Tuple)
         );
@@ -173,8 +174,9 @@ test "MVCC Implementation" {
         while (i < thread_count) : (i += 1) {
             const t = try rt.Runtime.spawnThread(
                 allocator,
-                &global_ctx,
                 64*1024,
+                &global_ctx,
+                allocator,
                 mvccWorker,
                 .{ allocator, loops, shared_container }
             );
@@ -193,7 +195,7 @@ test "MVCC Implementation" {
             .ebr = main_ebr,
             .frame_backing = undefined,
             .frame_fba = undefined,
-            .heap_arena = undefined,
+            .global_allocator = undefined,
             .owns_frame_memory = true,
             .deadline = 0
         };
@@ -401,13 +403,13 @@ test "PROOF: No Use-After-Free with Scavenger" {
         var scavenger_stop = AtomicFlag.init(false);
 
         // 1. Spawn Scavenger (The "Chaos Monkey")
-        const t_scav = try rt.Runtime.spawnThread(allocator, &global_ctx, 64*1024, scavengerWorker, .{ allocator, &scavenger_stop });
+        const t_scav = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, scavengerWorker, .{ allocator, &scavenger_stop });
 
         // 2. Spawn Reader
-        const t_read = try rt.Runtime.spawnThread(allocator, &global_ctx, 64*1024, uafReader, .{ shared_int, &reader_ready, &writer_dead });
+        const t_read = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, uafReader, .{ shared_int, &reader_ready, &writer_dead });
 
         // 3. Spawn Writer
-        const t_write = try rt.Runtime.spawnThread(allocator, &global_ctx, 64*1024, uafWriter, .{ allocator, shared_int, &reader_ready });
+        const t_write = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator,  uafWriter, .{ allocator, shared_int, &reader_ready });
 
         // 4. Wait for Writer to die
         t_write.join();
@@ -501,8 +503,9 @@ test "RwLock Many Readers One Writer" {
     while (i < thread_count) : (i += 1) {
         const t = try rt.Runtime.spawnThread(
             allocator,
-            &global_ctx,
             64*1024,
+            &global_ctx,
+            allocator,
             rwWorker,
             .{ i, loops, shared_state }
         );
