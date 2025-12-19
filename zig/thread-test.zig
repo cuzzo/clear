@@ -33,7 +33,11 @@ fn testWorker(trt: *rt.Runtime, id: usize, loops: usize, shared_counter: *rt.Loc
         } // Lock releases HERE (scope end)
 
         // 3. Reset frame
-        trt.restoreFrameMark(0);
+        const zero_mark = rt.Runtime.FrameMark{
+            .stack_index = 0,
+            .overflow_mark = .{ .block_index = 0, .cursor = 0 },
+        };
+        trt.restoreFrameMark(zero_mark);
     }
     std.debug.print("<- Thread {d} done\n", .{id});
 }
@@ -71,6 +75,7 @@ test "Runtime Spawn & Mutex Verify" {
             allocator,
             64 * 1024,           // Frame Size
             &global_ctx,
+            allocator,
             allocator,
             testWorker,          // Function
             .{ i, loops_per_thread, shared_state } // Args (Tuple)
@@ -129,6 +134,7 @@ fn mvccWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, loops: usize, shar
         // THE CLEANUP: Run GC occasionally (e.g., every 50 loops)
         if (i % 50 == 0) {
              trt.ebr.context.reclaim(allocator);
+             trt.ebr.reclaimLocal(allocator);
         }
 
         // Simulate work
@@ -177,6 +183,7 @@ test "MVCC Implementation" {
                 64*1024,
                 &global_ctx,
                 allocator,
+                allocator,
                 mvccWorker,
                 .{ allocator, loops, shared_container }
             );
@@ -197,8 +204,12 @@ test "MVCC Implementation" {
             .frame_fba = undefined,
             .global_allocator = undefined,
             .owns_frame_memory = true,
-            .deadline = 0
+            .deadline = 0,
+            .local_allocator = undefined,
+            .overflow_arena = undefined,
+            .smart_allocator = undefined,
         };
+        main_rt.wireAllocator();
 
         var guard = shared_container.read(&main_rt);
         defer guard.release();
@@ -403,13 +414,13 @@ test "PROOF: No Use-After-Free with Scavenger" {
         var scavenger_stop = AtomicFlag.init(false);
 
         // 1. Spawn Scavenger (The "Chaos Monkey")
-        const t_scav = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, scavengerWorker, .{ allocator, &scavenger_stop });
+        const t_scav = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, scavengerWorker, .{ allocator, &scavenger_stop });
 
         // 2. Spawn Reader
-        const t_read = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, uafReader, .{ shared_int, &reader_ready, &writer_dead });
+        const t_read = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafReader, .{ shared_int, &reader_ready, &writer_dead });
 
         // 3. Spawn Writer
-        const t_write = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator,  uafWriter, .{ allocator, shared_int, &reader_ready });
+        const t_write = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafWriter, .{ allocator, shared_int, &reader_ready });
 
         // 4. Wait for Writer to die
         t_write.join();
@@ -505,6 +516,7 @@ test "RwLock Many Readers One Writer" {
             allocator,
             64*1024,
             &global_ctx,
+            allocator,
             allocator,
             rwWorker,
             .{ i, loops, shared_state }
