@@ -1,14 +1,23 @@
 const std = @import("std");
-const rt = @import("runtime-header.zig");
+const CheatLib = @import("runtime-header.zig").CheatLib;
+const Runtime = @import("runtime.zig").Runtime;
+const sm = @import("shared-memory.zig");
+const fp = @import("fiber-pool.zig");
+const EbrContext = @import("ebr.zig").EbrContext;
+const ThreadLocalEbr = @import("ebr.zig").ThreadLocalEbr;
+const Locked = sm.Locked;
+const Shared = sm.Shared;
+const RwLocked = sm.RwLocked;
+const Scheduler = fp.Scheduler;
 
 // -------------------------------------------------------------------------
 // Locked<T> Testing
 // -------------------------------------------------------------------------
 
-fn testWorker(trt: *rt.Runtime, id: usize, loops: usize, shared_counter: *rt.Locked(i32)) !void {
+fn testWorker(rt: *Runtime, id: usize, loops: usize, shared_counter: *Locked(i32)) !void {
     // Prove we have a working local runtime by using the frame
     // This would crash if the helper didn't bootstrap the frame correctly.
-    const msg = try rt.Runtime.makeString(trt.frameAlloc(), "I am alive");
+    const msg = try CheatLib.makeString(rt.frameAlloc(), "I am alive");
 
     // Print start (outside lock)
     std.debug.print("{s} -> Thread {d} started\n", .{msg, id});
@@ -33,11 +42,11 @@ fn testWorker(trt: *rt.Runtime, id: usize, loops: usize, shared_counter: *rt.Loc
         } // Lock releases HERE (scope end)
 
         // 3. Reset frame
-        const zero_mark = rt.Runtime.FrameMark{
+        const zero_mark = Runtime.FrameMark{
             .stack_index = 0,
             .overflow_mark = .{ .block_index = 0, .cursor = 0 },
         };
-        trt.restoreFrameMark(zero_mark);
+        rt.restoreFrameMark(zero_mark);
     }
     std.debug.print("<- Thread {d} done\n", .{id});
 }
@@ -46,13 +55,13 @@ test "Runtime Spawn & Mutex Verify" {
     // 1. Setup Test Allocator (Global Heap)
     const allocator = std.testing.allocator;
 
-    var global_ctx = rt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
     // 2. Create Shared State (Locked<i32>)
     // Must be on the heap so all threads can see it safely.
-    const shared_state = try allocator.create(rt.Locked(i32));
-    shared_state.* = rt.Locked(i32).init(0);
+    const shared_state = try allocator.create(Locked(i32));
+    shared_state.* = Locked(i32).init(0);
     defer allocator.destroy(shared_state);
 
     // 3. Spawn Threads
@@ -71,7 +80,7 @@ test "Runtime Spawn & Mutex Verify" {
         //  2. Allocates a 64KB frame for it
         //  3. Initializes a new Runtime instance
         //  4. Passes &rt + your args to the function
-        const t = try rt.Runtime.spawnThread(
+        const t = try CheatLib.spawnThread(
             allocator,
             64 * 1024,           // Frame Size
             &global_ctx,
@@ -117,7 +126,7 @@ fn increaseScore(user: *User, amount: i32) void {
     user.score += amount;
 }
 
-fn mvccWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, loops: usize, shared_user: *rt.Shared(User)) !void {
+fn mvccWorker(rt: *Runtime, allocator: std.mem.Allocator, loops: usize, shared_user: *Shared(User)) !void {
     var i: usize = 0;
     while (i < loops) : (i += 1) {
 
@@ -125,7 +134,7 @@ fn mvccWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, loops: usize, shar
         // Notice: No Lock. No Blocking.
         // We pass the allocator because we might need to create a new version.
         try shared_user.update(
-            trt,
+            rt,
             allocator,       // Use the global/arena allocator for persistent data
             increaseScore,   // The logic to run
             .{ 1 }           // Arguments (increase by 1)
@@ -133,8 +142,8 @@ fn mvccWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, loops: usize, shar
 
         // THE CLEANUP: Run GC occasionally (e.g., every 50 loops)
         if (i % 50 == 0) {
-             trt.ebr.context.reclaim(allocator);
-             trt.ebr.reclaimLocal(allocator);
+             rt.ebr.context.reclaim(allocator);
+             rt.ebr.reclaimLocal(allocator);
         }
 
         // Simulate work
@@ -152,13 +161,13 @@ test "MVCC Implementation" {
     // Start a scope
     // This ensures all defers inside execute BEFORE we reach the leak check below.
     {
-        var global_ctx = rt.EbrContext{};
+        var global_ctx = EbrContext{};
         defer global_ctx.deinit(allocator);
 
         // 2. Create Shared User (Gen 0)
         // We allocate the 'Shared' container itself on the heap
-        const shared_container = try allocator.create(rt.Shared(User));
-        shared_container.* = try rt.Shared(User).init(allocator, User{
+        const shared_container = try allocator.create(Shared(User));
+        shared_container.* = try Shared(User).init(allocator, User{
             .id = 1,
             .score = 0,
             .name = "Original",
@@ -178,7 +187,7 @@ test "MVCC Implementation" {
 
         var i: usize = 0;
         while (i < thread_count) : (i += 1) {
-            const t = try rt.Runtime.spawnThread(
+            const t = try CheatLib.spawnThread(
                 allocator,
                 64*1024,
                 &global_ctx,
@@ -197,8 +206,8 @@ test "MVCC Implementation" {
         // 4. Verify Read works with new Guard API
         // We need a dummy runtime to read from the main thread (since we aren't inside spawnThread)
         // In a real app, main thread would also be an "EBR Thread".
-        const main_ebr = rt.ThreadLocalEbr{ .context = &global_ctx };
-        var main_rt = rt.Runtime{
+        const main_ebr = ThreadLocalEbr{ .context = &global_ctx };
+        var main_rt = Runtime{
             .ebr = main_ebr,
             .frame_backing = undefined,
             .frame_fba = undefined,
@@ -237,11 +246,11 @@ test "EBR Step 1: Storage & Automatic Cleanup" {
     const allocator = gpa.allocator();
 
     // Setup a Dummy Context (Needed for compilation now)
-    var dummy_ctx = rt.EbrContext{};
+    var dummy_ctx = EbrContext{};
     defer dummy_ctx.deinit(allocator);
 
     // 2. Initialize our EBR Storage
-    var ebr = rt.ThreadLocalEbr{ .context = &dummy_ctx, .limbo_list =.{} };
+    var ebr = ThreadLocalEbr{ .context = &dummy_ctx, .limbo_list =.{} };
     // Note: We do NOT defer ebr.deinit() yet. We need to manually empty it first
     // to prove we can access and free the pointers correctly.
 
@@ -275,12 +284,12 @@ test "EBR Step 2: Signaling" {
     const allocator = std.testing.allocator;
 
     // 1. Create the GLOBAL Context
-    var global_ctx = rt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
     // 2. Create the LOCAL Thread State
     // Notice we must now link it to the global context
-    var local_ebr = rt.ThreadLocalEbr{ .context = &global_ctx, .limbo_list = .{} };
+    var local_ebr = ThreadLocalEbr{ .context = &global_ctx, .limbo_list = .{} };
     defer local_ebr.deinit(allocator);
 
     // Register it (Simulating thread startup)
@@ -310,8 +319,7 @@ test "EBR Step 2: Signaling" {
 // Use-after-Free / Thread Death
 const AtomicFlag = std.atomic.Value(bool);
 
-fn scavengerWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, stop_flag: *AtomicFlag) !void {
-    _ = trt;
+fn scavengerWorker(_: *Runtime, allocator: std.mem.Allocator, stop_flag: *AtomicFlag) !void {
     // furious allocation loop to overwrite freed memory
     var trash_bag = std.ArrayListUnmanaged(*i32){};
     defer trash_bag.deinit(allocator);
@@ -342,14 +350,14 @@ fn scavengerWorker(trt: *rt.Runtime, allocator: std.mem.Allocator, stop_flag: *A
     for (trash_bag.items) |p| allocator.destroy(p);
 }
 
-fn uafWriter(trt: *rt.Runtime, allocator: std.mem.Allocator, shared_int: *rt.Shared(i32), reader_ready: *AtomicFlag) !void {
+fn uafWriter(rt: *Runtime, allocator: std.mem.Allocator, shared_int: *Shared(i32), reader_ready: *AtomicFlag) !void {
     // 1. Wait for reader to grab the pointer
     while (!reader_ready.load(.seq_cst)) {
         std.Thread.yield() catch {};
     }
 
     // 2. Update (This retires the old pointer '42')
-    try shared_int.update(trt, allocator, struct{
+    try shared_int.update(rt, allocator, struct{
         fn f(ptr: *i32) void { ptr.* = 100; }
     }.f, .{});
 
@@ -358,9 +366,9 @@ fn uafWriter(trt: *rt.Runtime, allocator: std.mem.Allocator, shared_int: *rt.Sha
     // The Scavenger thread is waiting to snatch this memory address!
 }
 
-fn uafReader(trt: *rt.Runtime, shared_int: *rt.Shared(i32), reader_ready: *AtomicFlag, writer_dead: *AtomicFlag) !void {
+fn uafReader(rt: *Runtime, shared_int: *Shared(i32), reader_ready: *AtomicFlag, writer_dead: *AtomicFlag) !void {
     // 1. Grab Read Lock
-    var guard = shared_int.read(trt);
+    var guard = shared_int.read(rt);
     defer guard.release();
 
     // 2. Tell Writer we are ready
@@ -397,12 +405,12 @@ test "PROOF: No Use-After-Free with Scavenger" {
 
     // We wrap everything in a block so defers run BEFORE the leak check
     {
-        var global_ctx = rt.EbrContext{};
+        var global_ctx = EbrContext{};
         defer global_ctx.deinit(allocator);
 
         // Shared Int starts at 42
-        const shared_int = try allocator.create(rt.Shared(i32));
-        shared_int.* = try rt.Shared(i32).init(allocator, 42);
+        const shared_int = try allocator.create(Shared(i32));
+        shared_int.* = try Shared(i32).init(allocator, 42);
         // Cleanup manually since we haven't implemented the graveyard yet
         defer {
             shared_int.deinit(allocator);
@@ -414,13 +422,13 @@ test "PROOF: No Use-After-Free with Scavenger" {
         var scavenger_stop = AtomicFlag.init(false);
 
         // 1. Spawn Scavenger (The "Chaos Monkey")
-        const t_scav = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, scavengerWorker, .{ allocator, &scavenger_stop });
+        const t_scav = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, scavengerWorker, .{ allocator, &scavenger_stop });
 
         // 2. Spawn Reader
-        const t_read = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafReader, .{ shared_int, &reader_ready, &writer_dead });
+        const t_read = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafReader, .{ shared_int, &reader_ready, &writer_dead });
 
         // 3. Spawn Writer
-        const t_write = try rt.Runtime.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafWriter, .{ allocator, shared_int, &reader_ready });
+        const t_write = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafWriter, .{ allocator, shared_int, &reader_ready });
 
         // 4. Wait for Writer to die
         t_write.join();
@@ -442,7 +450,7 @@ test "PROOF: No Use-After-Free with Scavenger" {
 }
 
 // -------------------------------------------------------------------------
-// RwLock<T> Testing
+// RwLocked<T> Testing
 // -------------------------------------------------------------------------
 
 const GameConfig = struct {
@@ -450,9 +458,7 @@ const GameConfig = struct {
     server_name: []const u8,
 };
 
-fn rwWorker(trt: *rt.Runtime, id: usize, loops: usize, shared_config: *rt.RwLock(GameConfig)) !void {
-    _ = trt; // Unused in this specific logic
-
+fn rwWorker(_: *Runtime, id: usize, loops: usize, shared_config: *RwLocked(GameConfig)) !void {
     var i: usize = 0;
     while (i < loops) : (i += 1) {
 
@@ -489,15 +495,15 @@ fn rwWorker(trt: *rt.Runtime, id: usize, loops: usize, shared_config: *rt.RwLock
     std.debug.print("Thread {d} finished.\n", .{id});
 }
 
-test "RwLock Many Readers One Writer" {
+test "RwLocked Many Readers One Writer" {
     const allocator = std.testing.allocator;
 
-    var global_ctx = rt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
     // 1. Create on Heap
-    const shared_state = try allocator.create(rt.RwLock(GameConfig));
-    shared_state.* = rt.RwLock(GameConfig).init(.{
+    const shared_state = try allocator.create(RwLocked(GameConfig));
+    shared_state.* = RwLocked(GameConfig).init(.{
         .difficulty = 1.0,
         .server_name = "Flux Server",
     });
@@ -512,7 +518,7 @@ test "RwLock Many Readers One Writer" {
 
     var i: usize = 0;
     while (i < thread_count) : (i += 1) {
-        const t = try rt.Runtime.spawnThread(
+        const t = try CheatLib.spawnThread(
             allocator,
             64*1024,
             &global_ctx,
@@ -546,5 +552,145 @@ test "RwLock Many Readers One Writer" {
         std.debug.print("\nFinal Difficulty: {d:.2} (Expected ~{d:.2})\n", .{ actual, expected });
         try std.testing.expectApproxEqAbs(expected, actual, 0.01);
     }
+}
+
+// Cross Thread Communication
+
+// The generic worker loop for the threads
+fn workerLoop(r: *Runtime, id: u32) !void {
+    // 1. Initialize the Scheduler for this thread
+    // We use the runtime's local allocator (which is the test allocator)
+    // and the global EBR context linked in the runtime.
+    var sched = try Scheduler.init(r.globalAlloc(), r.ebr.context);
+    defer sched.deinit();
+
+    // 2. Register it as the ACTIVE scheduler for this thread
+    fp.active_scheduler = &sched;
+
+    std.debug.print("Worker {d} online (ID: {d})\n", .{id, std.Thread.getCurrentId()});
+
+    // 3. Run the loop
+    sched.run();
+}
+
+test "Cross-Thread Spawning & Load Balancing" {
+    const allocator = std.testing.allocator;
+
+    // 1. Setup Registry & Context
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    // Initialize Global Registry
+    fp.global_registry.mutex = .{};
+    fp.global_registry.map = .{};
+    defer fp.global_registry.map.deinit(allocator);
+
+    // 2. Start Worker Threads
+    // We'll use a WaitGroup to know when they are "ready" to accept work logic
+    // But for this low-level test, we just start them.
+    _ = try CheatLib.spawnThread(allocator, 4096, &global_ctx, allocator, allocator, workerLoop, .{1});
+    _ = try CheatLib.spawnThread(allocator, 4096, &global_ctx, allocator, allocator, workerLoop, .{2});
+
+    // Give them a moment to register themselves
+    std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
+
+    // ---------------------------------------------------------
+    // TEST 1: SpawnOn (Direct Communication)
+    // ---------------------------------------------------------
+    std.debug.print("\n=== Test 1: Remote Message ===\n", .{});
+
+    var id1: std.Thread.Id = 0;
+
+    // Retry for up to 1 sec
+    var retries: usize = 0;
+    while (retries < 100) : (retries += 1) {
+        fp.global_registry.mutex.lock();
+
+        var it = fp.global_registry.map.keyIterator();
+        if (it.next()) |k| {
+            id1 = k.*;
+            break; // Found one!
+        }
+
+        fp.global_registry.mutex.unlock(); // Unlock if not found
+        std.posix.nanosleep(0, 10 * std.time.ns_per_ms);
+    }
+
+    if (id1 == 0) {
+        // If still empty after 1s, fail gracefully instead of crashing
+        std.debug.print("Error: No workers registered. Map count: {d}\n", .{fp.global_registry.map.count()});
+        return error.Timeout;
+    }
+
+    // A. Create Data on Global Heap
+    const Msg = struct { text: []u8, processed: bool };
+    const msg = try allocator.create(Msg);
+    msg.text = try allocator.dupe(u8, "Hello from Main");
+    msg.processed = false;
+
+    // B. Define the Handler (must be generic signature)
+    const Handler = struct {
+        fn run(_: *Runtime, ctx: ?*anyopaque) anyerror!void {
+            const m = @as(*Msg, @ptrCast(@alignCast(ctx)));
+
+            // Print what we got
+            std.debug.print("Thread {d} got message: {s}\n", .{std.Thread.getCurrentId(), m.text});
+
+            // Modify it
+            m.processed = true;
+
+            // We DO NOT free 'm' here, we let the main thread verify it first.
+            // In a real fire-and-forget, we would free it here.
+        }
+    };
+
+    // C. Send to Thread 1 (We need its ID)
+    // For test stability, we cheat and lookup the registry keys, or just use t1.getHandle().
+    // But t1.getHandle() isn't the ID.
+    // Let's iterate the registry to find IDs.
+    var it = fp.global_registry.map.keyIterator();
+    id1 = it.next().?.*;
+    _ = if (it.next()) |k| k.* else id1; // Just in case
+
+    try Runtime.spawnOn(id1, Handler.run, msg);
+
+    // D. Wait for it (Spin wait for test simplicity)
+    while (!msg.processed) {
+        std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
+    }
+    std.debug.print("Main detected message processed!\n", .{});
+
+    // Cleanup Message
+    allocator.free(msg.text);
+    allocator.destroy(msg);
+
+    // ---------------------------------------------------------
+    // TEST 2: SpawnBest (Load Balancing)
+    // ---------------------------------------------------------
+    std.debug.print("\n=== Test 2: Load Balancing (Flooding) ===\n", .{});
+
+    // We will spawn 20 tasks using spawnBest.
+    // Since both threads are empty, they should get roughly 10 each.
+
+    const LoadTask = struct {
+        fn run(_: *Runtime, _: ?*anyopaque) anyerror!void {
+            // Just simulate work
+            std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
+            // std.debug.print(".", .{});
+        }
+    };
+
+    var i: usize = 0;
+    while (i < 20) : (i += 1) {
+        try Runtime.spawnBest(LoadTask.run, null);
+    }
+
+    // Let them finish
+    std.posix.nanosleep(0, 500 * std.time.ns_per_ms);
+    std.debug.print("\nDone.\n", .{});
+
+    // Cleanup Threads (In a real app, we'd signal shutdown)
+    // t1.detach();
+    // t2.detach();
 }
 

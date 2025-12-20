@@ -1,12 +1,13 @@
 const std = @import("std");
-const crt = @import("runtime-header.zig");
-const Runtime = crt.Runtime;
-const Stack = crt.Stack;
-const Fiber = crt.Fiber;
-const Context = crt.Context;
-const EbrContext = crt.EbrContext;
-const Scheduler = crt.Scheduler;
-const WaitGroup = crt.WaitGroup;
+const CheatLib = @import("runtime-header.zig").CheatLib;
+const Runtime = @import("runtime.zig").Runtime;
+const fp = @import("fiber-pool.zig");
+const Stack = fp.Stack;
+const Fiber = fp.Fiber;
+const Context = fp.Context;
+const EbrContext = @import("ebr.zig").EbrContext;
+const Scheduler = fp.Scheduler;
+const WaitGroup = fp.WaitGroup;
 
 
 // Stack
@@ -101,15 +102,23 @@ test "Full Scheduler Integration" {
     defer global_ctx.deinit(allocator);
 
     // 2. Setup Scheduler
-    var sched = Scheduler.init(allocator, &global_ctx);
+    var sched = try Scheduler.init(allocator, &global_ctx);
     defer sched.deinit();
 
     // Link the global pointer (so entryWrapper can find us)
-    crt.active_scheduler = &sched;
+    fp.active_scheduler = &sched;
 
     std.debug.print("\n--- Spawning Tasks ---", .{});
-    try sched.spawn(.{}, userTask1);
-    try sched.spawn(.{}, userTask2);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&userTask1)),
+        null);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&userTask2)),
+        null);
 
     std.debug.print("\n--- Running Scheduler ---", .{});
     sched.run();
@@ -130,7 +139,7 @@ fn workerA(rt: *Runtime) !void {
     std.debug.print("\n[Worker A] Started. Doing work...", .{});
 
     // Simulate work by yielding once (optional, proves we can yield without breaking WG)
-    crt.active_scheduler.getCurrent().base.yield();
+    fp.active_scheduler.getCurrent().base.yield();
 
     result_a = 100;
     std.debug.print("\n[Worker A] Done.", .{});
@@ -147,17 +156,24 @@ fn workerB(rt: *Runtime) !void {
 }
 
 // Main Coordinator Task
-fn mainTask(rt: *Runtime) !void {
-    _ = rt;
-    const sched = crt.active_scheduler;
+fn mainTask(_: *Runtime) !void {
+    const sched = fp.active_scheduler;
 
     std.debug.print("\n[Main] Initializing WaitGroup...", .{});
     wg = WaitGroup.init(sched);
     wg.add(2);
 
     std.debug.print("\n[Main] Spawning workers...", .{});
-    sched.spawn(.{}, workerA) catch unreachable;
-    sched.spawn(.{}, workerB) catch unreachable;
+    sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(sched),
+        @as(fp.TaskFn, @ptrCast(&workerA)),
+        null) catch unreachable;
+    sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(sched),
+        @as(fp.TaskFn, @ptrCast(&workerB)),
+        null) catch unreachable;
 
     std.debug.print("\n[Main] Waiting (Blocking)...", .{});
 
@@ -176,15 +192,19 @@ test "Structured Concurrency with WaitGroup" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = Scheduler.init(allocator, &global_ctx);
+    var sched = try Scheduler.init(allocator, &global_ctx);
     defer sched.deinit();
 
-    crt.active_scheduler = &sched;
+    fp.active_scheduler = &sched;
 
     std.debug.print("\n\n--- Start Concurrency Test ---", .{});
 
     // We spawn the main coordinator, which spawns the others
-    try sched.spawn(.{}, mainTask);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&mainTask)),
+        null);
 
     sched.run();
 
@@ -197,7 +217,7 @@ test "Structured Concurrency with WaitGroup" {
 
 // Runaway Task
 
-fn infiniteLoop(rt: *crt.Runtime) !void {
+fn infiniteLoop(rt: *Runtime) !void {
     std.debug.print("\n[Task] Starting infinite loop (Timeout: 10ms)...", .{});
 
     var i: usize = 0;
@@ -212,7 +232,7 @@ fn infiniteLoop(rt: *crt.Runtime) !void {
              // Yield occasionally to let the clock update
              // (In single-threaded schedulers, time only passes when we yield or check OS)
              // But std.time.milliTimestamp() is a syscall, so it works.
-             crt.active_scheduler.getCurrent().base.yield();
+             fp.active_scheduler.getCurrent().base.yield();
         }
     }
 }
@@ -221,17 +241,21 @@ test "Timeout Cancellation" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var global_ctx = crt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = crt.Scheduler.init(allocator, &global_ctx);
+    var sched = try Scheduler.init(allocator, &global_ctx);
     defer sched.deinit();
-    crt.active_scheduler = &sched;
+    fp.active_scheduler = &sched;
 
     std.debug.print("\n\n--- Start Timeout Test ---", .{});
 
     // Spawn with 10ms timeout
-    try sched.spawn(.{ .timeout_ms = 10 }, infiniteLoop);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{ .timeout_ms = 10 },
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&infiniteLoop)),
+        null);
 
     const start = std.time.milliTimestamp();
     sched.run();
@@ -245,14 +269,14 @@ test "Timeout Cancellation" {
 // Sleeping Beauty Test
 
 // Sleep for 100ms
-fn fastTask(rt: *crt.Runtime) !void {
+fn fastTask(rt: *Runtime) !void {
     std.debug.print("\n[Fast] Sleeping 100ms...", .{});
     rt.sleep(100);
     std.debug.print("\n[Fast] Woke up!", .{});
 }
 
 // Sleep for 300ms
-fn slowTask(rt: *crt.Runtime) !void {
+fn slowTask(rt: *Runtime) !void {
     std.debug.print("\n[Slow] Sleeping 300ms...", .{});
     rt.sleep(300);
     std.debug.print("\n[Slow] Woke up!", .{});
@@ -262,12 +286,12 @@ test "Non-Blocking Sleep" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var global_ctx = crt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = crt.Scheduler.init(allocator, &global_ctx);
+    var sched = try Scheduler.init(allocator, &global_ctx);
     defer sched.deinit();
-    crt.active_scheduler = &sched;
+    fp.active_scheduler = &sched;
 
     std.debug.print("\n\n--- Start Sleep Test ---", .{});
 
@@ -276,8 +300,16 @@ test "Non-Blocking Sleep" {
     // Spawn both.
     // If sleep was blocking, this would take 100 + 300 = 400ms.
     // Since it's non-blocking, it should take ~300ms total.
-    try sched.spawn(.{}, slowTask);
-    try sched.spawn(.{}, fastTask);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&slowTask)),
+        null);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&fastTask)),
+        null);
 
     sched.run();
 
@@ -306,7 +338,7 @@ var read_fd: i32 = undefined;
 var write_fd: i32 = undefined;
 
 // Task A: Tries to read. It should BLOCK (Yield) initially because there is no data.
-fn readerTask(rt: *crt.Runtime) !void {
+fn readerTask(_: *Runtime) !void {
     std.debug.print("\n[Reader] Starting. Trying to read...", .{});
 
     var buf: [128]u8 = undefined;
@@ -317,13 +349,13 @@ fn readerTask(rt: *crt.Runtime) !void {
     // 3. Yield to Scheduler
     // ... Time Passes ...
     // 4. Wake up when WriterTask writes data
-    const n = try rt.read(read_fd, &buf);
+    const n = try CheatLib.read(read_fd, &buf);
 
     std.debug.print("\n[Reader] Woke up! Received: {s}", .{buf[0..n]});
 }
 
 // Task B: Sleeps, then writes data.
-fn writerTask(rt: *crt.Runtime) !void {
+fn writerTask(rt: *Runtime) !void {
     std.debug.print("\n[Writer] Sleeping 100ms...", .{});
     rt.sleep(100);
 
@@ -336,12 +368,12 @@ test "Async I/O with Epoll" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var global_ctx = crt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = crt.Scheduler.init(allocator, &global_ctx);
+    var sched = try Scheduler.init(allocator, &global_ctx);
     defer sched.deinit();
-    crt.active_scheduler = &sched;
+    fp.active_scheduler = &sched;
 
     // 1. Setup Socket Pair (Simulates Client/Server connection)
     var fds: [2]i32 = undefined;
@@ -359,8 +391,16 @@ test "Async I/O with Epoll" {
     std.debug.print("\n\n--- Start I/O Test ---", .{});
 
     // 2. Spawn Tasks
-    try sched.spawn(.{}, readerTask);
-    try sched.spawn(.{}, writerTask);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&readerTask)),
+        null);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&writerTask)),
+        null);
 
     sched.run();
 
@@ -371,7 +411,7 @@ test "Async I/O with Epoll" {
 // Multi-threaded Fiber Pools
 
 // A heavy task to simulate work
-fn heavyTask(rt: *crt.Runtime) !void {
+fn heavyTask(rt: *Runtime) !void {
     const thread_id = std.Thread.getCurrentId();
     std.debug.print("\n[Thread {d}] Task Started.", .{thread_id});
 
@@ -382,17 +422,25 @@ fn heavyTask(rt: *crt.Runtime) !void {
 }
 
 // The Entry Point for each OS Thread
-fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *crt.EbrContext) !void {
+fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext) !void {
     // 1. Initialize Thread-Local Scheduler
-    var sched = crt.Scheduler.init(allocator, global_ctx);
+    var sched = try Scheduler.init(allocator, global_ctx);
     defer sched.deinit();
 
     // 2. Set the thread-local pointer
-    crt.active_scheduler = &sched;
+    fp.active_scheduler = &sched;
 
     // 3. Spawn Fibers (These stay on THIS thread)
-    try sched.spawn(.{}, heavyTask);
-    try sched.spawn(.{}, heavyTask);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&heavyTask)),
+        null);
+    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
+        .{},
+        @ptrCast(&sched),
+        @as(fp.TaskFn, @ptrCast(&heavyTask)),
+        null);
 
     // 4. Run Loop
     sched.run();
@@ -402,7 +450,7 @@ test "Multi-Threaded Shared Nothing" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var global_ctx = crt.EbrContext{};
+    var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
     std.debug.print("\n\n--- Start Multi-Thread Test ---", .{});
