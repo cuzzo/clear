@@ -133,6 +133,16 @@ pub const Fiber = struct {
     }
 };
 
+pub const InboxType = enum { Spawn, Resume };
+
+const SpawnRequest = struct {
+    inbox_link: InboxNode = .{ .type = .Spawn },
+    user_fn: TaskFn,
+    context: ?*anyopaque,
+    args: ?*anyopaque,
+    config: TaskConfig,
+    trampoline_addr: usize,
+};
 
 pub const TaskStatus = enum {
     Ready,    // Run me again
@@ -145,8 +155,9 @@ pub const TaskConfig = struct {
 };
 
 pub const Task = struct {
-    base: Fiber,
+    base: *Fiber,
     user_fn: TaskFn,
+    inbox_link: InboxNode = .{ .type = .Resume },
     runtime_ptr: ?*anyopaque = null,
     context: ?*anyopaque = null,
     status: TaskStatus = .Ready,
@@ -184,6 +195,112 @@ pub const EventFd = struct {
     }
 };
 
+// A generic node header that must be embedded in any struct sent to the Inbox.
+pub const InboxNode = struct {
+    next: ?*InboxNode = null,
+    type: InboxType,
+};
+
+// Multi-Producer, Single-Consumer Atomic Stack
+// Provides a scalable, thread-safe way to spawn new tasks / fibers
+pub const AtomicInbox = struct {
+    // The "Head" of the linked list.
+    // Producers CAS this to push. Consumer SWAPs this to pop all.
+    head: std.atomic.Value(?*InboxNode) = std.atomic.Value(?*InboxNode).init(null),
+
+    /// Producer: Push a single node. Wait-Free.
+    pub fn push(self: *AtomicInbox, node: *InboxNode) void {
+        var old_head = self.head.load(.monotonic);
+        while (true) {
+            node.next = old_head;
+            // Try to swap Head with Node.
+            // If Head is still OldHead, it works. If not, OldHead updates to current.
+            old_head = self.head.cmpxchgWeak(
+                old_head,
+                node,
+                .release,
+                .monotonic
+            ) orelse break;
+        }
+    }
+
+    /// Consumer: Detach the entire list and return it. Wait-Free.
+    pub fn popAll(self: *AtomicInbox) ?*InboxNode {
+        // Atomically replace HEAD with NULL. We now own the entire chain.
+        return self.head.swap(null, .acquire);
+    }
+
+    /// Helper: The list comes out LIFO (Reverse order).
+    /// If you strictly need FIFO, call this on the result of popAll.
+    pub fn reverse(list: ?*InboxNode) ?*InboxNode {
+        var prev: ?*InboxNode = null;
+        var curr = list;
+        while (curr) |node| {
+            const next = node.next;
+            node.next = prev;
+            prev = node;
+            curr = next;
+        }
+        return prev;
+    }
+};
+
+pub const StackPool = struct {
+    // We keep a list of "hot" stacks ready to go.
+    // 64 is a reasonable cache size; usually you only need enough to cover
+    // the churn of one "tick" of the loop.
+    cache: std.ArrayListUnmanaged(*Fiber) = .{},
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) StackPool {
+        return .{
+            .cache = .{},
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *StackPool) void {
+        for (self.cache.items) |fiber| {
+            fiber.deinit(); // Munmap
+            self.allocator.destroy(fiber);
+        }
+        self.cache.deinit(self.allocator);
+    }
+
+    // Get a fiber. Fast path: Pop from cache. Slow path: mmap.
+    // TODO: 2MB fibers?!
+    pub fn get(self: *StackPool, entry_fn: usize) !*Fiber {
+        if (self.cache.items.len > 0) {
+            const fiber = self.cache.pop().?;
+            // REUSE! Just reset the stack pointer/instruction pointer.
+            // This is virtually free compared to mmap.
+            fiber.reset(entry_fn);
+            return fiber;
+        }
+
+        // COLD PATH: Alloc struct and mmap stack (Expensive)
+        const fiber = try self.allocator.create(Fiber);
+        errdefer self.allocator.destroy(fiber);
+        fiber.* = try Fiber.init(2 * 1024 * 1024, entry_fn); // Default 2MB
+        return fiber;
+    }
+
+    // Recycle a fiber.
+    pub fn put(self: *StackPool, fiber: *Fiber) void {
+        // Optional: Cap the pool size so we don't hoard memory forever
+        if (self.cache.items.len >= 64) {
+            fiber.deinit();
+            self.allocator.destroy(fiber);
+            return;
+        }
+        self.cache.append(self.allocator, fiber) catch {
+            // If alloc fails (rare), just kill the fiber
+            fiber.deinit();
+            self.allocator.destroy(fiber);
+        };
+    }
+};
+
 pub const TaskFn = *const fn (rt: *anyopaque, ctx: ?*anyopaque) anyerror!void;
 
 pub const Scheduler = struct {
@@ -193,10 +310,11 @@ pub const Scheduler = struct {
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
 
     // 2. Communcation
-    inbox_mutex: std.Thread.Mutex = .{},
-    inbox: std.ArrayListUnmanaged(*Task) = .{},
+    inbox: AtomicInbox = .{},  // Lock-free Inbox
+    stack_pool: StackPool,  //Local Stack Cache
     event_fd: EventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
+    global_shutdown: ?*std.atomic.Value(bool) = null,
 
     // 3. IO & Memory
     allocator: std.mem.Allocator,
@@ -213,6 +331,7 @@ pub const Scheduler = struct {
     epoll_events: [128]std.os.linux.epoll_event = undefined,
 
     active_tasks: usize = 0,
+    shutdown_on_idle: bool = true,
 
     pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext) !Scheduler {
         const p = Poller.init() catch unreachable;
@@ -223,6 +342,7 @@ pub const Scheduler = struct {
             .ready_queue = .{},
             .sleeping_queue = .{},
             .inbox = .{},
+            .stack_pool = StackPool.init(allocator),
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -230,6 +350,7 @@ pub const Scheduler = struct {
             .poller = p,
             .main_ctx = undefined,
             .current_task = null,
+            .shutdown_on_idle = true,
         };
 
         try sched.poller.register(sched.event_fd.fd, 0);
@@ -238,90 +359,151 @@ pub const Scheduler = struct {
     }
 
     pub fn deinit(self: *Scheduler) void {
-        // Cleanup all memory
-        for (self.fiber_pool.items) |task| {
-            task.base.deinit();
-            self.allocator.destroy(task);
+        const queues = .{ &self.fiber_pool, &self.ready_queue, &self.sleeping_queue };
+        inline for (queues) |q| {
+            for (q.items) |task| {
+                task.base.deinit();           // Free Stack
+                self.allocator.destroy(task.base); // Free Fiber Struct
+                self.allocator.destroy(task); // Free Task Struct
+            }
+            q.deinit(self.allocator);
         }
-        self.fiber_pool.deinit(self.allocator);
 
-        for (self.ready_queue.items) |task| {
-            task.base.deinit();
-            self.allocator.destroy(task);
-        }
-        self.ready_queue.deinit(self.allocator);
-
-        for (self.sleeping_queue.items) |task| {
-            task.base.deinit();
-            self.allocator.destroy(task);
-        }
-        self.sleeping_queue.deinit(self.allocator);
-
+        self.stack_pool.deinit();
         self.poller.deinit();
     }
 
-    pub fn pushRemote(self: *Scheduler, task: *Task) !void {
-        {
-            self.inbox_mutex.lock();
-            defer self.inbox_mutex.unlock();
-            _ = self.load.fetchAdd(1, .monotonic);
-            try self.inbox.append(self.allocator, task);
-        }
-        // WAKE UP!
+    // ------------------------------------------------------------
+    // 1. THE SPAWN (Producer Side - Thread A)
+    // ------------------------------------------------------------
+    // TODO: Must use slab allocation, otherwise this does not scale
+    pub fn submitSpawn(self: *Scheduler, trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: TaskConfig) !void {
+        // Allocate the lightweight REQUEST, not the TASK.
+        // Using c_allocator is fine here, or a small slab allocator.
+        const req = try std.heap.c_allocator.create(SpawnRequest);
+        req.* = .{
+            .inbox_link = .{.type = .Spawn},
+            .user_fn = user_fn,
+            .args = args,
+            .context = null, // TODO: remove the field from struct
+            .config = config,
+            .trampoline_addr = trampoline_addr,
+        };
+
+        // Push to target's inbox (Lock Free)
+        self.inbox.push(&req.inbox_link);
+
+        // Wake up target
         try self.event_fd.notify();
     }
 
-    // THE BRIDGE: Connects Fibers to the Runtime
-    pub fn spawn(
-        self: *Scheduler,
-        trampoline_addr: usize, // <--- NEW ARGUMENT
-        config: TaskConfig,
-        runtime_ptr: *anyopaque,
-        user_fn: TaskFn, ctx: ?*anyopaque
-    ) !void {
-        var task: *Task = undefined;
+    // ------------------------------------------------------------
+    // 2. THE RESUME (Producer Side - Thread B, WaitGroup, etc)
+    // ------------------------------------------------------------
+    pub fn submitResume(self: *Scheduler, task: *Task) void {
+        task.inbox_link.type = .Resume;
 
-        if (self.fiber_pool.items.len > 0) {
-            task = self.fiber_pool.pop().?;
+        // Push the existing task back to the inbox
+        // Note: Task now has an 'inbox_link' field
+        self.inbox.push(&task.inbox_link);
 
-            // IMPORTANT: Reset the stack pointer so we start fresh!
-            task.base.reset(trampoline_addr);
-
-            task.status = .Ready;
-        } else {
-            // Alloc new Task container
-            task = try self.allocator.create(Task);
-
-            // Safety: Handle error if Fiber init fails
-            errdefer self.allocator.destroy(task);
-
-            // Alloc 8MB Virtual Stack, pointing to OUR Bootstrap function
-            task.base = try Fiber.init(8 * 1024 * 1024, trampoline_addr);
-
-            task.status = .Ready;
-        }
-
-        // Store the user's function so the wrapper can find it later
-        task.runtime_ptr = runtime_ptr;
-        task.user_fn = user_fn;
-        task.context = ctx;
-        task.config = config;
-
-        self.active_tasks += 1;
-        _ = self.load.fetchAdd(1, .monotonic);
-        try self.ready_queue.append(self.allocator, task);
+        // Wake up target (ignore error in hot path)
+        self.event_fd.notify() catch {};
     }
 
     pub fn run(self: *Scheduler) void {
+        const my_id = std.Thread.getCurrentId();
+
+        std.debug.print("[Sched {d}] Registering...\n", .{my_id});
+
         global_registry.register(self.allocator, std.Thread.getCurrentId(), self) catch |err| {
             std.debug.print("SCHEDULER REGISTRATION FAILED: {}\n", .{err});
             return;
         };
 
-        // Ensure we unregister when this loop exits (e.g. shutdown)
-        defer global_registry.unregister(std.Thread.getCurrentId());
+        defer {
+            std.debug.print("[Sched {d}] Exiting & Unregistering...\n", .{my_id});
+            global_registry.unregister(my_id);
+        }
+
+        std.debug.print("[Sched {d}] Loop Started\n", .{my_id});
 
         while (true) {
+            if (self.global_shutdown) |flag| {
+                if (flag.load(.monotonic)) break;
+            }
+
+            // run all to-be-scheduled tasks
+            var req_node = self.inbox.popAll();
+            // OPTIONALLLY: reverse if we want to preserve FIFO
+
+            while (req_node) |node| {
+                const next_node = node.next;
+
+                // Determine what this node is.
+                // We cheat slightly: We know SpawnRequest and Task both start with InboxNode.
+                // But we need to distinguish them.
+                // PRO TIP: Use an `enum` tag in the Node, or check pointer alignment if confident.
+                // SAFEST WAY: Just assume everything in Inbox is a "Command" wrapper?
+                // PERFORMANCE WAY: Check if the pointer matches a known block, or add a 'type' field to InboxNode.
+
+                // Let's assume for this example we added `type: enum { Spawn, Resume }` to InboxNode.
+                // (You need to add this field to InboxNode struct)
+
+                if (node.type == .Spawn) {
+                    const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
+
+                    // 1. GET STACK FROM POOL (Fast!)
+                    const fiber_ptr = self.stack_pool.get(req.trampoline_addr) catch |err| {
+                        // FIX: If we fail to get a stack, we MUST destroy request and skip
+                        std.debug.print("Stack Alloc Failed: {}\n", .{err});
+                        std.heap.c_allocator.destroy(req);
+                        req_node = next_node; // Must advance, or infinite loop
+                        continue;
+                    };
+
+                    // 2. Alloc Task shell (local allocator)
+                    const task = self.allocator.create(Task) catch {
+                        // FIX: If we fail to create Task, we MUST return fiber and destroy request
+                        self.stack_pool.put(fiber_ptr);
+                        std.heap.c_allocator.destroy(req);
+                        req_node = next_node; // Must advance, or infinite loop
+                        continue;
+                    };
+
+                    task.* = .{
+                        .base = fiber_ptr,
+                        .user_fn = req.user_fn,
+                        .context = req.args,
+                        .status = .Ready,
+                        .config = req.config,
+                        .inbox_link = .{ .type = .Resume } // When it comes back, it's a resume
+                    };
+
+                    // Cleanup Request
+                    // TODO: Must use slab allocator, otherwise not scalable.
+                    std.heap.c_allocator.destroy(req);
+
+                    self.ready_queue.append(self.allocator, task) catch {
+                        // If we can't queue the task, we must rollback everything
+                        self.stack_pool.put(fiber_ptr); // Save the fiber
+                        self.allocator.destroy(task);   // Destroy the task
+                        std.heap.c_allocator.destroy(req);
+                        req_node = next_node; // must advance, or infinite loop
+                        continue;
+                    };
+                    self.active_tasks += 1;
+
+                } else {
+                    // It is an existing Task
+                    const task: *Task = @fieldParentPtr("inbox_link", node);
+                    task.status = .Ready;
+                    self.ready_queue.append(self.allocator, task) catch unreachable;
+                }
+
+                req_node = next_node;
+            }
+
             // Look for beautiful sleeping tasks to wake up
             if (self.sleeping_queue.items.len > 0) {
                 const now = std.time.milliTimestamp();
@@ -358,8 +540,8 @@ pub const Scheduler = struct {
                     .Finished => {
                         // Recycle
                         self.active_tasks -= 1;
-                        _ = self.load.fetchSub(1, .monotonic);
-                        self.fiber_pool.append(self.allocator, task) catch unreachable;
+                        self.stack_pool.put(task.base);
+                        self.allocator.destroy(task);
                     },
                     .Ready => {
                         // It yielded, but wants to run again. Put back in queue.
@@ -371,10 +553,6 @@ pub const Scheduler = struct {
                     }
                 }
                 continue; // Keep looping if we have work!
-            }
-
-            if (self.active_tasks == 0) {
-                break;
             }
 
             // IF IDLE: Poll for IO
@@ -395,19 +573,7 @@ pub const Scheduler = struct {
 
                     // CHECK: Is this the Wake Up Signal?
                     if (data_ptr == 0) {
-                        // 1. Reset the signal
                         self.event_fd.consume() catch {};
-
-                        // 2. Drain the Inbox
-                        self.inbox_mutex.lock();
-                        // Move everything from Inbox to Ready Queue
-                        while (self.inbox.items.len > 0) {
-                            const t = self.inbox.pop().?; // Taking from end is O(1)
-                            t.status = .Ready;
-                            self.ready_queue.append(self.allocator, t) catch unreachable;
-                            self.active_tasks += 1;
-                        }
-                        self.inbox_mutex.unlock();
                     }
                     else {
                         // It's a standard IO Task Wakeup
@@ -419,15 +585,16 @@ pub const Scheduler = struct {
             }
 
             // If no IO and no Tasks and no Sleepers -> Break
-            if (count == 0 and self.ready_queue.items.len == 0 and self.sleeping_queue.items.len == 0) {
+            if (self.shutdown_on_idle and count == 0 and self.ready_queue.items.len == 0 and self.sleeping_queue.items.len == 0) {
                 break;
             }
         }
     }
 
     // Helper to wake a specific fiber
+    // TODO: Deprecate
     pub fn schedule(self: *Scheduler, task: *Task) void {
-        self.ready_queue.append(self.allocator, task) catch unreachable;
+        self.submitResume(task);
     }
 
     // Helper to get current task

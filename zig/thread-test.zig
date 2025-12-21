@@ -557,15 +557,25 @@ test "RwLocked Many Readers One Writer" {
 // Cross Thread Communication
 
 // The generic worker loop for the threads
-fn workerLoop(r: *Runtime, id: u32) !void {
+fn workerLoop(r: *Runtime, id: u32, shutdown_signal: *std.atomic.Value(bool)) !void {
+    std.debug.print("[Worker {d}] Starting...\n", .{id});
+
     // 1. Initialize the Scheduler for this thread
     // We use the runtime's local allocator (which is the test allocator)
     // and the global EBR context linked in the runtime.
-    var sched = try Scheduler.init(r.globalAlloc(), r.ebr.context);
-    defer sched.deinit();
+    const sched = try r.globalAlloc().create(Scheduler);
+    sched.* = try Scheduler.init(r.globalAlloc(), r.ebr.context);
+
+    defer {
+        sched.deinit();
+        r.globalAlloc().destroy(sched);
+    }
+
+    sched.shutdown_on_idle = false;
+    sched.global_shutdown = shutdown_signal;
 
     // 2. Register it as the ACTIVE scheduler for this thread
-    fp.active_scheduler = &sched;
+    fp.active_scheduler = sched;
 
     std.debug.print("Worker {d} online (ID: {d})\n", .{id, std.Thread.getCurrentId()});
 
@@ -574,6 +584,8 @@ fn workerLoop(r: *Runtime, id: u32) !void {
 }
 
 test "Cross-Thread Spawning & Load Balancing" {
+    std.debug.print("Size of Scheduler: {d} bytes\n", .{@sizeOf(Scheduler)});
+
     const allocator = std.testing.allocator;
 
     // 1. Setup Registry & Context
@@ -585,11 +597,19 @@ test "Cross-Thread Spawning & Load Balancing" {
     fp.global_registry.map = .{};
     defer fp.global_registry.map.deinit(allocator);
 
+    var shutdown_signal = std.atomic.Value(bool).init(false);
+
+    var threads = std.ArrayListUnmanaged(std.Thread){};
+    defer threads.deinit(allocator);
+
     // 2. Start Worker Threads
     // We'll use a WaitGroup to know when they are "ready" to accept work logic
     // But for this low-level test, we just start them.
-    _ = try CheatLib.spawnThread(allocator, 4096, &global_ctx, allocator, allocator, workerLoop, .{1});
-    _ = try CheatLib.spawnThread(allocator, 4096, &global_ctx, allocator, allocator, workerLoop, .{2});
+    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{1, &shutdown_signal});
+    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{2, &shutdown_signal});
+
+    try threads.append(allocator, t1);
+    try threads.append(allocator, t2);
 
     // Give them a moment to register themselves
     std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
@@ -606,13 +626,19 @@ test "Cross-Thread Spawning & Load Balancing" {
     while (retries < 100) : (retries += 1) {
         fp.global_registry.mutex.lock();
 
-        var it = fp.global_registry.map.keyIterator();
-        if (it.next()) |k| {
-            id1 = k.*;
+        const count = fp.global_registry.map.count();
+        if (count > 0) {
+            var it = fp.global_registry.map.keyIterator();
+            id1 = it.next().?.*;
+            fp.global_registry.mutex.unlock(); // unlock if found!
             break; // Found one!
         }
 
-        fp.global_registry.mutex.unlock(); // Unlock if not found
+        if (retries % 10 == 0) {
+            std.debug.print("Waiting for workers... (Count: {d})\n", .{count});
+        }
+
+        fp.global_registry.mutex.unlock(); // Unlock if not found!
         std.posix.nanosleep(0, 10 * std.time.ns_per_ms);
     }
 
@@ -648,9 +674,12 @@ test "Cross-Thread Spawning & Load Balancing" {
     // For test stability, we cheat and lookup the registry keys, or just use t1.getHandle().
     // But t1.getHandle() isn't the ID.
     // Let's iterate the registry to find IDs.
-    var it = fp.global_registry.map.keyIterator();
-    id1 = it.next().?.*;
-    _ = if (it.next()) |k| k.* else id1; // Just in case
+    {
+        fp.global_registry.mutex.lock();
+        defer fp.global_registry.mutex.unlock();
+        var it2 = fp.global_registry.map.keyIterator();
+        id1 = it2.next().?.*;
+    }
 
     try Runtime.spawnOn(id1, Handler.run, msg);
 
@@ -689,8 +718,20 @@ test "Cross-Thread Spawning & Load Balancing" {
     std.posix.nanosleep(0, 500 * std.time.ns_per_ms);
     std.debug.print("\nDone.\n", .{});
 
-    // Cleanup Threads (In a real app, we'd signal shutdown)
-    // t1.detach();
-    // t2.detach();
+    shutdown_signal.store(true, .seq_cst);
+
+    {
+        fp.global_registry.mutex.lock();
+        defer fp.global_registry.mutex.unlock();
+        var it = fp.global_registry.map.iterator();
+        while (it.next()) |entry| {
+            // Write to their event_fd to break the poll loop
+            try entry.value_ptr.*.event_fd.notify();
+        }
+    }
+
+    for (threads.items) |t| {
+        t.join();
+    }
 }
 

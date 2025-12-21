@@ -18,31 +18,29 @@ pub const CheatLib = struct {
         const task = sched.getCurrent();
 
         while (true) {
-            // 1. Try to read directly
-            const rc = std.os.linux.read(fd, buffer.ptr, buffer.len);
-            const errno = std.posix.errno(rc);
+            // 1. Try to read using the high-level wrapper
+            // This returns an error union (!usize), not a raw number.
+            const n = std.posix.read(fd, buffer) catch |err| {
+                if (err == error.WouldBlock) {
+                    // 2. EAGAIN! No data yet.
 
-            switch (errno) {
-                .SUCCESS => {
-                    // Success! rc is the bytes read.
-                    return rc;
-                },
-                .AGAIN => { // (This handles EAGAIN / EWOULDBLOCK)
-                     // 3. Register with Epoll
-                     try sched.registerFd(fd, task);
+                    // Register with Epoll
+                    // We catch 'FileDescriptorAlreadyPresent' just in case we loop rapidly
+                    try sched.registerFd(fd, task);
 
-                     // 4. Yield (Block)
-                     task.status = .Blocked;
-                     task.base.yield();
+                    // Yield (Block)
+                    task.status = .Blocked;
+                    task.base.yield();
 
-                     // When we wake up, loop back and try read() again!
-                     continue;
-                },
-                else => {
-                    // Real Error
-                    return std.posix.unexpectedErrno(errno);
+                    // When we wake up, loop back and try read() again!
+                    continue;
                 }
-            }
+                // Propagate legitimate errors (e.g. ConnectionReset, etc)
+                return err;
+            };
+
+            // Success! 'n' is definitely the valid byte count.
+            return n;
         }
     }
 

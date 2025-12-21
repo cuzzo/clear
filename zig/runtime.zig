@@ -294,39 +294,33 @@ pub const Runtime = struct {
     }
 
     // Helper to spawn tasks easily from the Runtime
-    pub fn spawn(self: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, ctx: ?*anyopaque) !void {
-        // We cast our specific function to the generic signature
-        // Zig allows this cast because pointers are the same size.
-        const generic_fn = @as(Scheduler.TaskFn, @ptrCast(user_fn));
-
-        // We pass 'self' as the opaque runtime pointer
-        const self_opaque = @as(*anyopaque, @ptrCast(self));
-
-        try self.scheduler.spawn(
+    // TODO: need to pass config here.
+    pub fn spawn(self: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
+        try self.scheduler.submitSpawn(
             @intFromPtr(&entryWrapper), // trampoline
-            .{},          // config
-            self_opaque,  // self
-            generic_fn,   // generic
-            ctx
+            @as(fp.TaskFn, @ptrCast(user_fn)),
+            args_ptr,
+            .{}
         );
     }
 
     // SPAWN ON (Specific Thread)
+    // TODO: need to pass config here.
     pub fn spawnOn(target_id: std.Thread.Id, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
         const target = fp.global_registry.get(target_id) orelse return error.ThreadNotFound;
 
         // We must allocate the Task struct on the GLOBAL heap because
         // we are creating it here but it lives over there.
-        const task = try target.allocator.create(Task);
-        task.base = try Fiber.init(2 * 1024 * 1024, @intFromPtr(&entryWrapper)); // 2MB Stack
-        task.user_fn = @as(fp.TaskFn, @ptrCast(user_fn));
-        task.context = args_ptr; // Pass the data package
-        task.status = .Ready;
-
-        try target.pushRemote(task);
+        try target.submitSpawn(
+            @intFromPtr(&entryWrapper),
+            @as(fp.TaskFn, @ptrCast(user_fn)),
+            args_ptr,
+            .{} // Default Config (timeout_ms = 0)
+        );
     }
 
     // "Power of Two Choices": Pick 2 random threads - best of 2 is surprisingly good - send to the least busy one.
+    // TODO: need to pass config here.
     pub fn spawnBest(user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
         // 1. Pick 2 Random Candidates
         const candidates = fp.global_registry.getRandomPair();
@@ -342,21 +336,16 @@ pub const Runtime = struct {
         // 3. Pick the Winner
         const target = if (l1 <= l2) s1 else s2;
 
-        // 4. Create and Send Task
-        // We allocate the task using the TARGET's allocator (assumed thread-safe/global)
-        const task = try target.allocator.create(Task);
-
-        // Initialize the fiber stack
-        task.base = try Fiber.init(2 * 1024 * 1024, @intFromPtr(&entryWrapper));
-
-        // Setup fields
-        task.user_fn = @as(fp.TaskFn, @ptrCast(user_fn));
-        task.context = args_ptr;
-        task.config = .{}; // Default config
-        task.status = .Ready;
-
-        // 5. Push to Inbox
-        try target.pushRemote(task);
+        // 4. Allocate the REQUEST node locally (eventually from a global slab if strict ownership)
+        // Ideally, we use a global lock-free slab allocator for these nodes
+        // so we don't leak memory if the runtime shuts down.
+        // For now, we'll malloc it.
+        try target.submitSpawn(
+            @intFromPtr(&entryWrapper),
+            @as(fp.TaskFn, @ptrCast(user_fn)),
+            args_ptr,
+            .{}
+        );
     }
 
     // For green fibers

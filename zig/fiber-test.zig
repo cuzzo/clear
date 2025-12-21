@@ -109,16 +109,14 @@ test "Full Scheduler Integration" {
     fp.active_scheduler = &sched;
 
     std.debug.print("\n--- Spawning Tasks ---", .{});
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&userTask1)),
-        null);
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+        null,
+        .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&userTask2)),
-        null);
+        null,
+        .{});
 
     std.debug.print("\n--- Running Scheduler ---", .{});
     sched.run();
@@ -164,16 +162,14 @@ fn mainTask(_: *Runtime) !void {
     wg.add(2);
 
     std.debug.print("\n[Main] Spawning workers...", .{});
-    sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(sched),
+    sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&workerA)),
-        null) catch unreachable;
-    sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(sched),
+        null,
+        .{}) catch unreachable;
+    sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&workerB)),
-        null) catch unreachable;
+        null,
+        .{}) catch unreachable;
 
     std.debug.print("\n[Main] Waiting (Blocking)...", .{});
 
@@ -200,11 +196,10 @@ test "Structured Concurrency with WaitGroup" {
     std.debug.print("\n\n--- Start Concurrency Test ---", .{});
 
     // We spawn the main coordinator, which spawns the others
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&mainTask)),
-        null);
+        null,
+        .{});
 
     sched.run();
 
@@ -251,11 +246,10 @@ test "Timeout Cancellation" {
     std.debug.print("\n\n--- Start Timeout Test ---", .{});
 
     // Spawn with 10ms timeout
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{ .timeout_ms = 10 },
-        @ptrCast(&sched),
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&infiniteLoop)),
-        null);
+        null,
+        .{ .timeout_ms = 10 });
 
     const start = std.time.milliTimestamp();
     sched.run();
@@ -300,16 +294,14 @@ test "Non-Blocking Sleep" {
     // Spawn both.
     // If sleep was blocking, this would take 100 + 300 = 400ms.
     // Since it's non-blocking, it should take ~300ms total.
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&slowTask)),
-        null);
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+        null,
+        .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&fastTask)),
-        null);
+        null,
+        .{});
 
     sched.run();
 
@@ -391,16 +383,14 @@ test "Async I/O with Epoll" {
     std.debug.print("\n\n--- Start I/O Test ---", .{});
 
     // 2. Spawn Tasks
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&readerTask)),
-        null);
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+        null,
+        .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&writerTask)),
-        null);
+        null,
+        .{});
 
     sched.run();
 
@@ -431,16 +421,14 @@ fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext) !void
     fp.active_scheduler = &sched;
 
     // 3. Spawn Fibers (These stay on THIS thread)
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&heavyTask)),
-        null);
-    try sched.spawn(@intFromPtr(&Runtime.entryWrapper),
-        .{},
-        @ptrCast(&sched),
+        null,
+        .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(fp.TaskFn, @ptrCast(&heavyTask)),
-        null);
+        null,
+        .{});
 
     // 4. Run Loop
     sched.run();
