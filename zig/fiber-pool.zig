@@ -1,5 +1,6 @@
 const std = @import("std");
 const EbrContext = @import("ebr.zig").EbrContext;
+const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 // Fibers
 // The registers we need to save.
@@ -135,6 +136,17 @@ pub const Fiber = struct {
 
 pub const InboxType = enum { Spawn, Resume };
 
+const FiberNode = struct {
+    // The SlabAllocator will overwrite the first 8 bytes for its 'next' pointer.
+    // We sacrifice this dummy field so our Fiber data stays safe.
+    freelist_link: ?*anyopaque,
+
+    fiber: Fiber,
+    magic: u64,
+};
+
+const FIBER_MAGIC: u64 = 0xDEAD_BEEF_CAFE_BABE;
+
 const SpawnRequest = struct {
     inbox_link: InboxNode = .{ .type = .Spawn },
     user_fn: TaskFn,
@@ -246,58 +258,74 @@ pub const AtomicInbox = struct {
 };
 
 pub const StackPool = struct {
-    // We keep a list of "hot" stacks ready to go.
-    // 64 is a reasonable cache size; usually you only need enough to cover
-    // the churn of one "tick" of the loop.
-    cache: std.ArrayListUnmanaged(*Fiber) = .{},
-    allocator: std.mem.Allocator,
+    slab: SlabAllocator(FiberNode),
 
     pub fn init(allocator: std.mem.Allocator) StackPool {
+        // Initialize with a slab size (e.g., 64KB).
+        // This holds the Structs, not the 2MB Stacks (which are pointers inside the struct).
         return .{
-            .cache = .{},
-            .allocator = allocator,
+            .slab = SlabAllocator(FiberNode).init(allocator, 64 * 1024),
         };
     }
 
     pub fn deinit(self: *StackPool) void {
-        for (self.cache.items) |fiber| {
-            fiber.deinit(); // Munmap
-            self.allocator.destroy(fiber);
+        // CRITICAL: We must munmap the stacks before freeing the slab memory.
+
+        // 1. Scope the lock so it releases BEFORE we call slab.deinit()
+        {
+            self.slab.lock.lock();
+            defer self.slab.lock.unlock();
+
+            // Iterate over every block of memory we ever allocated
+            for (self.slab.slabs.items) |slab_mem| {
+                 const stride = std.mem.alignForward(usize, @sizeOf(FiberNode), @alignOf(FiberNode));
+                 var offset: usize = 0;
+
+                 while (offset + stride <= slab_mem.len) {
+                     const ptr = slab_mem.ptr + offset;
+                     const node: *FiberNode = @ptrCast(@alignCast(ptr));
+
+                     // If magic matches, it means this slot holds a valid Fiber with an mmap'd stack.
+                     // We must free it, even if it's currently in the free_list, because we are shutting down.
+                     if (node.magic == FIBER_MAGIC) {
+                         node.fiber.deinit(); // munmap
+                         node.magic = 0;      // clear magic to prevent double-free
+                     }
+                     offset += stride;
+                 }
+            }
         }
-        self.cache.deinit(self.allocator);
+
+        self.slab.deinit();
     }
 
-    // Get a fiber. Fast path: Pop from cache. Slow path: mmap.
-    // TODO: 2MB fibers?!
     pub fn get(self: *StackPool, entry_fn: usize) !*Fiber {
-        if (self.cache.items.len > 0) {
-            const fiber = self.cache.pop().?;
-            // REUSE! Just reset the stack pointer/instruction pointer.
-            // This is virtually free compared to mmap.
-            fiber.reset(entry_fn);
-            return fiber;
+        // This create() is now thread-safe and extremely fast (no syscalls usually)
+        const node = try self.slab.create();
+
+        if (node.magic == FIBER_MAGIC) {
+            // HOT PATH: Reuse existing stack
+            node.fiber.reset(entry_fn);
+        } else {
+            // COLD PATH: First time use. Allocate the 2MB stack.
+            node.fiber = Fiber.init(2 * 1024 * 1024, entry_fn) catch |err| {
+                // If mmap fails, return node to slab and propagate error
+                self.slab.destroy(node);
+                return err;
+            };
+            node.magic = FIBER_MAGIC;
         }
 
-        // COLD PATH: Alloc struct and mmap stack (Expensive)
-        const fiber = try self.allocator.create(Fiber);
-        errdefer self.allocator.destroy(fiber);
-        fiber.* = try Fiber.init(2 * 1024 * 1024, entry_fn); // Default 2MB
-        return fiber;
+        return &node.fiber;
     }
 
-    // Recycle a fiber.
     pub fn put(self: *StackPool, fiber: *Fiber) void {
-        // Optional: Cap the pool size so we don't hoard memory forever
-        if (self.cache.items.len >= 64) {
-            fiber.deinit();
-            self.allocator.destroy(fiber);
-            return;
-        }
-        self.cache.append(self.allocator, fiber) catch {
-            // If alloc fails (rare), just kill the fiber
-            fiber.deinit();
-            self.allocator.destroy(fiber);
-        };
+        // Recover the wrapper pointer
+        const node: *FiberNode = @fieldParentPtr("fiber", fiber);
+
+        // Return to slab (Thread Safe).
+        // We DO NOT deinit the fiber. We keep the 2MB stack mapped for reuse.
+        self.slab.destroy(node);
     }
 };
 
@@ -362,8 +390,6 @@ pub const Scheduler = struct {
         const queues = .{ &self.fiber_pool, &self.ready_queue, &self.sleeping_queue };
         inline for (queues) |q| {
             for (q.items) |task| {
-                task.base.deinit();           // Free Stack
-                self.allocator.destroy(task.base); // Free Fiber Struct
                 self.allocator.destroy(task); // Free Task Struct
             }
             q.deinit(self.allocator);
