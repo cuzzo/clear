@@ -257,6 +257,13 @@ pub const AtomicInbox = struct {
     }
 };
 
+fn cleanupFiberStack(_: void, node: *FiberNode) void {
+    if (node.magic == FIBER_MAGIC) {
+        node.fiber.deinit(); // munmap the stack
+        node.magic = 0;      // clear magic
+    }
+}
+
 pub const StackPool = struct {
     slab: SlabAllocator(FiberNode),
 
@@ -275,25 +282,7 @@ pub const StackPool = struct {
         {
             self.slab.lock.lock();
             defer self.slab.lock.unlock();
-
-            // Iterate over every block of memory we ever allocated
-            for (self.slab.slabs.items) |slab_mem| {
-                 const stride = std.mem.alignForward(usize, @sizeOf(FiberNode), @alignOf(FiberNode));
-                 var offset: usize = 0;
-
-                 while (offset + stride <= slab_mem.len) {
-                     const ptr = slab_mem.ptr + offset;
-                     const node: *FiberNode = @ptrCast(@alignCast(ptr));
-
-                     // If magic matches, it means this slot holds a valid Fiber with an mmap'd stack.
-                     // We must free it, even if it's currently in the free_list, because we are shutting down.
-                     if (node.magic == FIBER_MAGIC) {
-                         node.fiber.deinit(); // munmap
-                         node.magic = 0;      // clear magic to prevent double-free
-                     }
-                     offset += stride;
-                 }
-            }
+	    self.slab.scanUnsafe({}, cleanupFiberStack);
         }
 
         self.slab.deinit();
@@ -404,9 +393,7 @@ pub const Scheduler = struct {
     // ------------------------------------------------------------
     // TODO: Must use slab allocation, otherwise this does not scale
     pub fn submitSpawn(self: *Scheduler, trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: TaskConfig) !void {
-        // Allocate the lightweight REQUEST, not the TASK.
-        // Using c_allocator is fine here, or a small slab allocator.
-        const req = try std.heap.c_allocator.create(SpawnRequest);
+        const req = try self.allocator.create(SpawnRequest);
         req.* = .{
             .inbox_link = .{.type = .Spawn},
             .user_fn = user_fn,
@@ -483,7 +470,7 @@ pub const Scheduler = struct {
                     const fiber_ptr = self.stack_pool.get(req.trampoline_addr) catch |err| {
                         // FIX: If we fail to get a stack, we MUST destroy request and skip
                         std.debug.print("Stack Alloc Failed: {}\n", .{err});
-                        std.heap.c_allocator.destroy(req);
+                        self.allocator.destroy(req);
                         req_node = next_node; // Must advance, or infinite loop
                         continue;
                     };
@@ -492,7 +479,7 @@ pub const Scheduler = struct {
                     const task = self.allocator.create(Task) catch {
                         // FIX: If we fail to create Task, we MUST return fiber and destroy request
                         self.stack_pool.put(fiber_ptr);
-                        std.heap.c_allocator.destroy(req);
+                        self.allocator.destroy(req);
                         req_node = next_node; // Must advance, or infinite loop
                         continue;
                     };
@@ -508,13 +495,13 @@ pub const Scheduler = struct {
 
                     // Cleanup Request
                     // TODO: Must use slab allocator, otherwise not scalable.
-                    std.heap.c_allocator.destroy(req);
+                    self.allocator.destroy(req);
 
                     self.ready_queue.append(self.allocator, task) catch {
                         // If we can't queue the task, we must rollback everything
                         self.stack_pool.put(fiber_ptr); // Save the fiber
                         self.allocator.destroy(task);   // Destroy the task
-                        std.heap.c_allocator.destroy(req);
+                        self.allocator.destroy(req);
                         req_node = next_node; // must advance, or infinite loop
                         continue;
                     };

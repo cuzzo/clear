@@ -1,6 +1,5 @@
 const std = @import("std");
 
-// Only ThreadSafe if allocator is ThreadSafeAllocator
 pub fn SlabAllocator(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -9,20 +8,31 @@ pub fn SlabAllocator(comptime T: type) type {
             next: ?*Node,
         };
 
+        const SlabHeader = struct {
+            prev: ?*SlabHeader,
+            next: ?*SlabHeader,
+            free_head: ?*Node,
+            used_count: usize,
+            is_full: bool,
+        };
+
         allocator: std.mem.Allocator,
         slab_size: usize,
-        free_list: ?*Node = null,
-        slabs: std.ArrayListUnmanaged([]u8) = .{},
+
+        partial_slabs: ?*SlabHeader = null,
+        full_slabs: ?*SlabHeader = null,
+
         lock: std.Thread.Mutex = .{},
 
         const object_size = @sizeOf(T);
         const object_align = @alignOf(T);
 
-        pub fn init(
-            allocator: std.mem.Allocator,
-            slab_size: usize,
-        ) Self {
-            std.debug.assert(slab_size >= object_size);
+        pub fn init(allocator: std.mem.Allocator, slab_size: usize) Self {
+            std.debug.assert(std.math.isPowerOfTwo(slab_size));
+            const header_size = @sizeOf(SlabHeader);
+            const first_obj_offset = std.mem.alignForward(usize, header_size, object_align);
+            std.debug.assert(slab_size > first_obj_offset + object_size);
+
             return .{
                 .allocator = allocator,
                 .slab_size = slab_size,
@@ -33,10 +43,20 @@ pub fn SlabAllocator(comptime T: type) type {
             self.lock.lock();
             defer self.lock.unlock();
 
-            for (self.slabs.items) |slab| {
-                self.allocator.free(slab);
+            var it = self.partial_slabs;
+            while (it) |slab| {
+                const next = slab.next;
+                self.freeSlabMemory(slab);
+                it = next;
             }
-            self.slabs.deinit(self.allocator);
+            it = self.full_slabs;
+            while (it) |slab| {
+                const next = slab.next;
+                self.freeSlabMemory(slab);
+                it = next;
+            }
+            self.partial_slabs = null;
+            self.full_slabs = null;
         }
 
         // ---------------------------------------------------------------------
@@ -54,99 +74,203 @@ pub fn SlabAllocator(comptime T: type) type {
 
         pub fn create(self: *Self) !*T {
             self.lock.lock();
-            if (self.free_list) |node| {
-                self.free_list = node.next;
-                self.lock.unlock();
-                const obj: *T = @ptrCast(node);
-                return obj;
-            }
-            self.lock.unlock();
-
-            try self.grow();
-
-            self.lock.lock();
             defer self.lock.unlock();
-            if (self.free_list) |node| {
-                self.free_list = node.next;
+
+            if (self.partial_slabs) |slab| {
+                const node = slab.free_head.?;
+                slab.free_head = node.next;
+                slab.used_count += 1;
+
+                if (slab.free_head == null) {
+                    self.removeSlab(slab, &self.partial_slabs);
+                    self.prependSlab(slab, &self.full_slabs);
+                    slab.is_full = true;
+                }
                 return @ptrCast(node);
             }
 
-            return error.OutOfMemory;
-        }
+            const new_slab = try self.grow();
+            const node = new_slab.free_head.?;
+            new_slab.free_head = node.next;
+            new_slab.used_count += 1;
 
-        // ---------------------------------------------------------------------
-        // TODO: Feature for Another Day (Shrinking)
-        // ---------------------------------------------------------------------
-        // Issue: Memory Reclaim
-        // Currently, we never return memory to the OS until deinit().
-        // If the app spikes to 1GB usage, it stays at 1GB even if idle.
-        //
-        // Fix: Slab Headers & RefCounting
-        // 1. Reserve the start of every slab for a Header { ref_count: usize, slab_ptr: ... }
-        // 2. destroy(obj) calculates which slab owns 'obj', decrements ref_count.
-        // 3. If ref_count == 0, free the slab.
-        // ---------------------------------------------------------------------
+            return @ptrCast(node);
+        }
 
         pub fn destroy(self: *Self, obj: *T) void {
             self.lock.lock();
             defer self.lock.unlock();
 
+            const ptr_addr = @intFromPtr(obj);
+            const mask = ~(self.slab_size - 1);
+            const header_addr = ptr_addr & mask;
+            const slab = @as(*SlabHeader, @ptrFromInt(header_addr));
+
             const node: *Node = @ptrCast(obj);
-            node.next = self.free_list;
-            self.free_list = node;
+            node.next = slab.free_head;
+            slab.free_head = node;
+            slab.used_count -= 1;
+
+            if (slab.used_count == 0) {
+                if (slab.is_full) {
+                    self.removeSlab(slab, &self.full_slabs);
+                } else {
+                    self.removeSlab(slab, &self.partial_slabs);
+                }
+                self.freeSlabMemory(slab);
+            } else if (slab.is_full) {
+                self.removeSlab(slab, &self.full_slabs);
+                self.prependSlab(slab, &self.partial_slabs);
+                slab.is_full = false;
+            }
         }
 
-        fn grow(self: *Self) !void {
-            const alignment = comptime std.mem.Alignment.fromByteUnits(object_align);
-            const slab = try self.allocator.alignedAlloc(u8, alignment, self.slab_size);
+        fn grow(self: *Self) !*SlabHeader {
+            // Allocate raw memory with correct alignment
+            const bytes = try self.allocAligned(self.slab_size);
 
-            const stride = std.mem.alignForward(
-                usize,
-                object_size,
-                object_align,
-            );
+            // Cast Chain:
+            // 1. [*]u8 (slice ptr) -> *u8 (single ptr)
+            const raw_single_ptr: *u8 = @ptrCast(bytes.ptr);
+            // 2. Assert Alignment (*u8 -> *align(8) u8)
+            const aligned_ptr: *align(@alignOf(SlabHeader)) u8 = @alignCast(raw_single_ptr);
+            // 3. Cast to Struct (*align(8) u8 -> *SlabHeader)
+            const slab: *SlabHeader = @ptrCast(aligned_ptr);
 
-            var chain_head: ?*Node = null;
-            var chain_tail: ?*Node = null;
-            var offset: usize = 0;
-
-            while (offset + stride <= slab.len) {
-                const raw_many: [*]u8 = slab.ptr + offset;
-
-                // Convert many-pointer → single-pointer
-                const raw_one: *u8 = @ptrCast(raw_many);
-
-                // Prove alignment
-                const aligned: *align(object_align) u8 = @alignCast(raw_one);
-
-                // Reinterpret as Node
-                const node: *Node = @ptrCast(aligned);
-
-                node.next = chain_head;
-                chain_head = node;
-
-                if (chain_tail == null) chain_tail = node;
-
-                offset += stride;
-            }
-
-            self.lock.lock();
-            defer self.lock.unlock();
-
-            // 1. Add slab to tracking list (Protected)
-            self.slabs.append(self.allocator, slab) catch |err| {
-                // If tracking fails, we must rollback allocations
-                self.allocator.free(slab);
-                return err;
+            slab.* = .{
+                .prev = null,
+                .next = null,
+                .free_head = null,
+                .used_count = 0,
+                .is_full = false,
             };
 
-            // 2. Merge local chain into global free_list (Protected)
-            if (chain_head) |head| {
-                // The tail of our new chain points to the OLD global head
-                chain_tail.?.next = self.free_list;
-                // The global head becomes the START of our new chain
-                self.free_list = head;
+            const header_size = @sizeOf(SlabHeader);
+            var offset = std.mem.alignForward(usize, header_size, object_align);
+
+            while (offset + object_size <= self.slab_size) {
+                const node_addr = @intFromPtr(slab) + offset;
+                const node: *Node = @ptrFromInt(node_addr);
+                node.next = slab.free_head;
+                slab.free_head = node;
+                offset += std.mem.alignForward(usize, object_size, object_align);
             }
+
+            self.prependSlab(slab, &self.partial_slabs);
+            return slab;
+        }
+
+        fn allocAligned(self: *Self, size: usize) ![]u8 {
+            return switch (size) {
+                4096 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(4096), 4096),
+                8192 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(8192), 8192),
+                16384 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(16384), 16384),
+                32768 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(32768), 32768),
+                65536 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(65536), 65536),
+                131072 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(131072), 131072),
+                262144 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(262144), 262144),
+                524288 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(524288), 524288),
+                1048576 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(1048576), 1048576),
+                else => error.InvalidSlabSize,
+            };
+        }
+
+        fn freeSlabMemory(self: *Self, slab: *SlabHeader) void {
+            const raw_ptr: [*]u8 = @ptrCast(slab);
+
+            // BUG FIX: We cast to `[*]align(...)` (Many-Pointer), NOT `*align(...)` (Single-Pointer).
+            // This allows us to perform the slice syntax `[0..size]` below.
+            switch (self.slab_size) {
+                4096 => {
+                    const p: [*]align(4096) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..4096]);
+                },
+                8192 => {
+                    const p: [*]align(8192) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..8192]);
+                },
+                16384 => {
+                    const p: [*]align(16384) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..16384]);
+                },
+                32768 => {
+                    const p: [*]align(32768) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..32768]);
+                },
+                65536 => {
+                    const p: [*]align(65536) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..65536]);
+                },
+                131072 => {
+                    const p: [*]align(131072) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..131072]);
+                },
+                262144 => {
+                    const p: [*]align(262144) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..262144]);
+                },
+                524288 => {
+                    const p: [*]align(524288) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..524288]);
+                },
+                1048576 => {
+                    const p: [*]align(1048576) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..1048576]);
+                },
+                else => unreachable,
+            }
+        }
+
+        fn prependSlab(_: *Self, slab: *SlabHeader, list_head: *?*SlabHeader) void {
+            slab.next = list_head.*;
+            slab.prev = null;
+            if (list_head.*) |head| {
+                head.prev = slab;
+            }
+            list_head.* = slab;
+        }
+
+        fn removeSlab(_: *Self, slab: *SlabHeader, list_head: *?*SlabHeader) void {
+            if (slab.prev) |p| {
+                p.next = slab.next;
+            } else {
+                list_head.* = slab.next;
+            }
+            if (slab.next) |n| {
+                n.prev = slab.prev;
+            }
+            slab.next = null;
+            slab.prev = null;
+        }
+
+        pub fn scanUnsafe(self: *Self, context: anytype, comptime func: fn(ctx: @TypeOf(context), ptr: *T) void) void {
+            // Iterate Partial List
+            var it = self.partial_slabs;
+            while (it) |slab| {
+                self.scanSlab(slab, context, func);
+                it = slab.next;
+            }
+            // Iterate Full List
+            it = self.full_slabs;
+            while (it) |slab| {
+                self.scanSlab(slab, context, func);
+                it = slab.next;
+            }
+        }
+
+        fn scanSlab(self: *Self, slab: *SlabHeader, context: anytype, comptime func: fn(ctx: @TypeOf(context), ptr: *T) void) void {
+             const header_size = @sizeOf(SlabHeader);
+             // Re-calculate offset logic matching grow()
+             var offset = std.mem.alignForward(usize, header_size, object_align);
+
+             while (offset + object_size <= self.slab_size) {
+                 const node_addr = @intFromPtr(slab) + offset;
+                 const ptr: *T = @ptrFromInt(node_addr);
+
+                 func(context, ptr);
+
+                 offset += std.mem.alignForward(usize, object_size, object_align);
+             }
         }
     };
 }

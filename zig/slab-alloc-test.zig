@@ -141,3 +141,133 @@ test "multi-threaded stress test" {
     }
 }
 
+test "PROVE memory reclamation (interleaved free)" {
+    // 1. Setup a tracking allocator
+    var gpa = std.heap.GeneralPurposeAllocator(.{.enable_memory_limit = true}){};
+    defer {
+        const check = gpa.deinit();
+        if (check == .leak) @panic("Leak detected in GPA");
+    }
+    const allocator = gpa.allocator();
+
+    // 2. Init Slab Allocator with small slabs (4KB) to force multiple grow() calls quickly
+    // (TestObj is 24 bytes, so ~160 objects per slab)
+    const slab_size = 4096;
+    var slab_alloc = SlabAllocator(TestObj).init(allocator, slab_size);
+    defer slab_alloc.deinit();
+
+    // Baseline memory usage (should be 0)
+    const usage_start = gpa.total_requested_bytes;
+    try std.testing.expectEqual(@as(usize, 0), usage_start);
+
+    // 3. Allocate enough objects to span roughly 3 slabs
+    // ~170 objects fit in 4096 bytes. 500 objects ensures ~3 slabs.
+    const obj_count = 500;
+    var list = std.ArrayListUnmanaged(*TestObj){};
+    defer list.deinit(std.testing.allocator);
+    try list.ensureTotalCapacity(std.testing.allocator, obj_count);
+
+    for (0..obj_count) |_| {
+        const obj = try slab_alloc.create();
+        try list.append(std.testing.allocator, obj);
+    }
+
+    // 4. Verify we are actually holding memory
+    const usage_peak = gpa.total_requested_bytes;
+    const expected_min_usage = 3 * slab_size;
+    // We expect at least 3 slabs (12KB)
+    try std.testing.expect(usage_peak >= expected_min_usage);
+
+    // 5. THE PROOF: Shuffle the list and destroy objects in RANDOM order.
+    // This proves we don't need to free objects in perfect reverse order to reclaim memory.
+    // Slabs should disappear one by one as their specific objects are gone.
+    var prng = std.Random.DefaultPrng.init(0x12345678);
+    const random = prng.random();
+    random.shuffle(*TestObj, list.items);
+
+    for (list.items) |obj| {
+        slab_alloc.destroy(obj);
+    }
+
+    // 6. Verify we returned EVERYTHING to the OS
+    const usage_end = gpa.total_requested_bytes;
+
+    if (usage_end != 0) {
+        std.debug.print("\nExpected 0 bytes, found {} bytes leaking.\n", .{usage_end});
+        return error.MemoryLeakDetected;
+    }
+}
+
+test "PROVE slab reuse (Swiss Cheese scenario)" {
+    // 1. Setup Tracking Allocator
+    var gpa = std.heap.GeneralPurposeAllocator(.{.enable_memory_limit = true}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const slab_size = 4096;
+    var slab_alloc = SlabAllocator(TestObj).init(allocator, slab_size);
+    defer slab_alloc.deinit();
+
+    // 2. Calculate items per slab
+    // Header is ~40 bytes. TestObj is 24 bytes.
+    // 4096 - 40 = 4056 bytes available.
+    // 4056 / 24 = 169 objects per slab.
+    // We'll alloc 520 objects to be safe (3+ slabs).
+    const obj_count = 520;
+    var list = std.ArrayListUnmanaged(*TestObj){};
+    defer list.deinit(std.testing.allocator);
+
+    for (0..obj_count) |_| {
+        const obj = try slab_alloc.create();
+        try list.append(std.testing.allocator, obj);
+    }
+
+    // Capture memory usage at "Peak" (3 or 4 slabs)
+    const usage_peak = gpa.total_requested_bytes;
+    try std.testing.expect(usage_peak >= 3 * slab_size);
+
+    // 3. Create "Swiss Cheese" in Slab #1
+    // We know objects 0-160 are roughly in the first slab.
+    // We keep index 0 and 1 (anchors), and free indices 2..150.
+    // This moves Slab #1 from "Full" -> "Partial" list (at the HEAD).
+    const items_to_free = 150;
+    for (2..items_to_free) |i| {
+        slab_alloc.destroy(list.items[i]);
+    }
+
+    // 4. Allocate NEW items
+    // These should fit into the holes we just made in Slab #1.
+    // If reuse works, memory usage should NOT increase.
+    // If reuse fails, we would allocate a 4th/5th slab, increasing memory.
+    var reuse_list = std.ArrayListUnmanaged(*TestObj){};
+    defer reuse_list.deinit(std.testing.allocator);
+
+    for (0..100) |_| {
+        const obj = try slab_alloc.create();
+        try reuse_list.append(std.testing.allocator, obj);
+    }
+
+    // 5. The Proof
+    const usage_after_reuse = gpa.total_requested_bytes;
+
+    // We expect usage to be IDENTICAL to peak, or potentially less if a slab was freed entirely (unlikely here).
+    // Crucially, it must NOT be higher.
+    if (usage_after_reuse > usage_peak) {
+        std.debug.print(
+            "\nFAILURE: Memory grew from {} to {}. Slab reuse failed.\n",
+            .{ usage_peak, usage_after_reuse },
+        );
+        return error.SlabReuseFailed;
+    }
+
+    // Cleanup anchors and new items
+    slab_alloc.destroy(list.items[0]);
+    slab_alloc.destroy(list.items[1]);
+    for (items_to_free..obj_count) |i| {
+        slab_alloc.destroy(list.items[i]);
+    }
+    for (reuse_list.items) |obj| {
+        slab_alloc.destroy(obj);
+    }
+}
+
