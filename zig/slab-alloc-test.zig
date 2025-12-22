@@ -189,6 +189,8 @@ test "PROVE memory reclamation (interleaved free)" {
         slab_alloc.destroy(obj);
     }
 
+    slab_alloc.flushThreadCache();
+
     // 6. Verify we returned EVERYTHING to the OS
     const usage_end = gpa.total_requested_bytes;
 
@@ -269,5 +271,59 @@ test "PROVE slab reuse (Swiss Cheese scenario)" {
     for (reuse_list.items) |obj| {
         slab_alloc.destroy(obj);
     }
+}
+
+test "Producer-Consumer contention" {
+    // Setup
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    // Large slab size to minimize grow() overhead
+    var slab = SlabAllocator(TestObj).init(gpa.allocator(), 128 * 1024);
+    defer slab.deinit();
+
+    const ItemCount = 100_000;
+
+    // Shared Queue
+    const Queue = struct {
+        items: [ItemCount]?*TestObj = undefined,
+        ready_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    };
+    // Fix: use 'const' because the pointer itself doesn't change
+    const queue = try std.testing.allocator.create(Queue);
+    defer std.testing.allocator.destroy(queue);
+
+    // Producer Thread
+    const producer = try std.Thread.spawn(.{}, struct {
+        fn run(s: *SlabAllocator(TestObj), q: *Queue) void {
+            for (0..ItemCount) |i| {
+                const obj = s.create() catch @panic("Alloc failed");
+                q.items[i] = obj;
+                // Fix: use lowercase .monotonic
+                _ = q.ready_count.fetchAdd(1, .monotonic);
+            }
+        }
+    }.run, .{ &slab, queue });
+
+    // Consumer Thread
+    const consumer = try std.Thread.spawn(.{}, struct {
+        fn run(s: *SlabAllocator(TestObj), q: *Queue) void {
+            var consumed: usize = 0;
+            while (consumed < ItemCount) {
+                // Fix: use lowercase .monotonic
+                while (q.ready_count.load(.monotonic) <= consumed) {
+                    std.atomic.spinLoopHint();
+                }
+                const obj = q.items[consumed].?;
+                s.destroy(obj);
+                consumed += 1;
+            }
+        }
+    }.run, .{ &slab, queue });
+
+    producer.join();
+    consumer.join();
+
+    slab.flushThreadCache();
 }
 

@@ -8,6 +8,15 @@ pub fn SlabAllocator(comptime T: type) type {
             next: ?*Node,
         };
 
+        const Magazine = struct {
+            objects: [MAGAZINE_SIZE]?*T = [_]?*T{null} ** MAGAZINE_SIZE,
+            count: usize = 0,
+        };
+        const MAGAZINE_SIZE = 64;
+
+        threadlocal var local_alloc_mag: Magazine = .{};
+        threadlocal var local_free_mag: Magazine = .{};
+
         const SlabHeader = struct {
             prev: ?*SlabHeader,
             next: ?*SlabHeader,
@@ -40,6 +49,8 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            self.flushThreadCache();
+
             self.lock.lock();
             defer self.lock.unlock();
 
@@ -59,23 +70,47 @@ pub fn SlabAllocator(comptime T: type) type {
             self.full_slabs = null;
         }
 
-        // ---------------------------------------------------------------------
-        // TODO: Optimization for Another Day (High Contention)
-        // ---------------------------------------------------------------------
-        // Issue: Global Lock
-        // Current implementation locks for every single alloc/free.
-        // For < 50 threads, this is usually fine (nanosecond hold time).
-        // For 100+ threads, this becomes a bottleneck.
-        //
-        // Fix: Thread-Local Caching
-        // 1. Give every thread a small "local_free_list" (no lock needed).
-        // 2. Only lock this global allocator when the local cache is empty or full.
-        // ---------------------------------------------------------------------
-
         pub fn create(self: *Self) !*T {
+            // Try local magazine first (no lock!)
+            if (local_free_mag.count > 0) {
+                local_free_mag.count -= 1;
+                return local_free_mag.objects[local_free_mag.count].?;
+            }
+
+            if (local_alloc_mag.count > 0) {
+                local_alloc_mag.count -= 1;
+                return local_alloc_mag.objects[local_alloc_mag.count].?;
+            }
+
+            // Magazine empty, refill from depot
+            return self.createSlow();
+        }
+
+        fn createSlow(self: *Self) !*T {
             self.lock.lock();
             defer self.lock.unlock();
 
+            // Refill magazine with a batch
+            var refilled: usize = 0;
+            while (refilled < MAGAZINE_SIZE) {
+                const obj = self.createFromDepot() catch break;
+                local_alloc_mag.objects[refilled] = obj;
+                refilled += 1;
+            }
+
+            if (refilled == 0) {
+                // Couldn't refill, need to grow
+                const obj = try self.growAndAlloc();
+                return obj;
+            }
+
+            const result = local_alloc_mag.objects[refilled - 1].?;
+            local_alloc_mag.count = refilled - 1;
+
+            return result;
+        }
+
+        fn createFromDepot(self: *Self) !*T {
             if (self.partial_slabs) |slab| {
                 const node = slab.free_head.?;
                 slab.free_head = node.next;
@@ -97,10 +132,41 @@ pub fn SlabAllocator(comptime T: type) type {
             return @ptrCast(node);
         }
 
+        fn growAndAlloc(self: *Self) !*T {
+            const new_slab = try self.grow();
+            const node = new_slab.free_head.?;
+            new_slab.free_head = node.next;
+            new_slab.used_count += 1;
+            return @ptrCast(node);
+        }
+
         pub fn destroy(self: *Self, obj: *T) void {
+            // Try local free magazine first (no lock!)
+            if (local_free_mag.count < MAGAZINE_SIZE) {
+                local_free_mag.objects[local_free_mag.count] = obj;
+                local_free_mag.count += 1;
+                return;
+            }
+
+            // Magazine full, flush to depot
+            self.destroySlow(obj);
+        }
+
+        fn destroySlow(self: *Self, obj: *T) void {
             self.lock.lock();
             defer self.lock.unlock();
 
+            // Flush all objects from free magazine to depot
+            for (local_free_mag.objects[0..local_free_mag.count]) |o| {
+                self.destroyToDepot(o.?);
+            }
+            local_free_mag.count = 0;
+
+            // Also destroy the current object
+            self.destroyToDepot(obj);
+        }
+
+        fn destroyToDepot(self: *Self, obj: *T) void {
             const ptr_addr = @intFromPtr(obj);
             const mask = ~(self.slab_size - 1);
             const header_addr = ptr_addr & mask;
@@ -271,6 +337,22 @@ pub fn SlabAllocator(comptime T: type) type {
 
                  offset += std.mem.alignForward(usize, object_size, object_align);
              }
+        }
+
+        pub fn flushThreadCache(self: *Self) void {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
+                self.destroyToDepot(o.?);
+            }
+            local_alloc_mag.count = 0;
+
+            for (local_free_mag.objects[0..local_free_mag.count]) |o| {
+                self.destroyToDepot(o.?);
+            }
+            local_free_mag.count = 0;
+
         }
     };
 }
