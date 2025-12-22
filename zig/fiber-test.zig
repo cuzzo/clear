@@ -101,8 +101,11 @@ test "Full Scheduler Integration" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
     // 2. Setup Scheduler
-    var sched = try Scheduler.init(allocator, &global_ctx);
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
 
     // Link the global pointer (so entryWrapper can find us)
@@ -188,7 +191,10 @@ test "Structured Concurrency with WaitGroup" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = try Scheduler.init(allocator, &global_ctx);
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
 
     fp.active_scheduler = &sched;
@@ -239,7 +245,10 @@ test "Timeout Cancellation" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = try Scheduler.init(allocator, &global_ctx);
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
 
@@ -283,7 +292,10 @@ test "Non-Blocking Sleep" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = try Scheduler.init(allocator, &global_ctx);
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
 
@@ -363,7 +375,10 @@ test "Async I/O with Epoll" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var sched = try Scheduler.init(allocator, &global_ctx);
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
 
@@ -412,9 +427,9 @@ fn heavyTask(rt: *Runtime) !void {
 }
 
 // The Entry Point for each OS Thread
-fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext) !void {
+fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_pool: *fp.StackPool) !void {
     // 1. Initialize Thread-Local Scheduler
-    var sched = try Scheduler.init(allocator, global_ctx);
+    var sched = try Scheduler.init(allocator, global_ctx, stack_pool);
     defer sched.deinit();
 
     // 2. Set the thread-local pointer
@@ -441,16 +456,19 @@ test "Multi-Threaded Shared Nothing" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
     std.debug.print("\n\n--- Start Multi-Thread Test ---", .{});
 
     // Spawn 3 OS Threads
     var threads: [3]std.Thread = undefined;
     for (0..3) |i| {
-        threads[i] = try std.Thread.spawn(.{}, threadEntryPoint, .{allocator, &global_ctx});
+        threads[i] = try std.Thread.spawn(.{}, threadEntryPoint, .{allocator, &global_ctx, &stack_pool});
     }
 
     // Also run a scheduler on the Main Thread (Thread 4)
-    try threadEntryPoint(allocator, &global_ctx);
+    try threadEntryPoint(allocator, &global_ctx, &stack_pool);
 
     // Wait for others
     for (threads) |t| {

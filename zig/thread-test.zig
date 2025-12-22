@@ -557,14 +557,14 @@ test "RwLocked Many Readers One Writer" {
 // Cross Thread Communication
 
 // The generic worker loop for the threads
-fn workerLoop(r: *Runtime, id: u32, shutdown_signal: *std.atomic.Value(bool)) !void {
+fn workerLoop(r: *Runtime, id: u32, shutdown_signal: *std.atomic.Value(bool), stack_pool: *fp.StackPool) !void {
     std.debug.print("[Worker {d}] Starting...\n", .{id});
 
     // 1. Initialize the Scheduler for this thread
     // We use the runtime's local allocator (which is the test allocator)
     // and the global EBR context linked in the runtime.
     const sched = try r.globalAlloc().create(Scheduler);
-    sched.* = try Scheduler.init(r.globalAlloc(), r.ebr.context);
+    sched.* = try Scheduler.init(r.globalAlloc(), r.ebr.context, stack_pool);
 
     defer {
         sched.deinit();
@@ -592,6 +592,9 @@ test "Cross-Thread Spawning & Load Balancing" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
+    var stack_pool = fp.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
     // Initialize Global Registry
     fp.global_registry.mutex = .{};
     fp.global_registry.map = .{};
@@ -605,8 +608,8 @@ test "Cross-Thread Spawning & Load Balancing" {
     // 2. Start Worker Threads
     // We'll use a WaitGroup to know when they are "ready" to accept work logic
     // But for this low-level test, we just start them.
-    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{1, &shutdown_signal});
-    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{2, &shutdown_signal});
+    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{1, &shutdown_signal, &stack_pool});
+    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{2, &shutdown_signal, &stack_pool});
 
     try threads.append(allocator, t1);
     try threads.append(allocator, t2);

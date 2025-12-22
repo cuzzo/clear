@@ -288,6 +288,10 @@ pub const StackPool = struct {
         self.slab.deinit();
     }
 
+    pub fn flushLocalCache(self: *StackPool) void {
+        self.slab.flushThreadCache();
+    }
+
     pub fn get(self: *StackPool, entry_fn: usize) !*Fiber {
         // This create() is now thread-safe and extremely fast (no syscalls usually)
         const node = try self.slab.create();
@@ -318,17 +322,75 @@ pub const StackPool = struct {
     }
 };
 
+const RunQueue = struct {
+    mutex: std.Thread.Mutex = .{},
+    queue: std.ArrayListUnmanaged(*Task) = .{},
+
+    pub fn deinit(self: *RunQueue, allocator: std.mem.Allocator) void {
+        self.queue.deinit(allocator);
+    }
+
+    // Local push (Fast path)
+    pub fn push(self: *RunQueue, alloc: std.mem.Allocator, task: *Task) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.queue.append(alloc, task);
+    }
+
+    pub fn pop(self: *RunQueue) ?*Task {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.queue.items.len == 0) return null;
+        return self.queue.orderedRemove(0); // FIFO
+    }
+
+    // Safe length check
+    pub fn len(self: *RunQueue) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.queue.items.len;
+    }
+
+    // For stealing (Take half)
+    pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        // 2. Try-Lock the Victim (Non-blocking to avoid Deadlocks)
+        if (!victim.mutex.tryLock()) return 0;
+        defer victim.mutex.unlock();
+
+        const v_len = victim.queue.items.len;
+        if (v_len == 0) return 0;
+
+        // 3. Naive Steal: Take half
+        // Steal from BACK (LIFO) to avoid fighting victim's pop (FIFO) logic
+        const steal_count = (v_len + 1) / 2;
+        const new_victim_len = v_len - steal_count;
+
+        const tasks = victim.queue.items[new_victim_len..];
+
+        // Move to Thief
+        self.queue.appendSlice(alloc, tasks) catch return 0;
+
+        // Shrink Victim
+        victim.queue.items.len = new_victim_len;
+
+        return steal_count;
+    }
+};
+
 pub const TaskFn = *const fn (rt: *anyopaque, ctx: ?*anyopaque) anyerror!void;
 
 pub const Scheduler = struct {
     // 1. The Manager State
     fiber_pool: std.ArrayListUnmanaged(*Task) = .{},
-    ready_queue: std.ArrayListUnmanaged(*Task) = .{},
+    ready_queue: RunQueue,
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
 
     // 2. Communcation
     inbox: AtomicInbox = .{},  // Lock-free Inbox
-    stack_pool: StackPool,  //Local Stack Cache
+    stack_pool: *StackPool,    //GLOBAL Stack Cache
     event_fd: EventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
     global_shutdown: ?*std.atomic.Value(bool) = null,
@@ -347,19 +409,44 @@ pub const Scheduler = struct {
     // Only works on Linux
     epoll_events: [128]std.os.linux.epoll_event = undefined,
 
-    active_tasks: usize = 0,
+    // -------------------------------------------------------------------------
+    // PERFORMANCE NOTE: ATOMIC SCALABILITY & CACHE LINE SAFETY
+    // -------------------------------------------------------------------------
+    // We use an atomic here to track active tasks across threads. This allows
+    // accurate accounting even when tasks are stolen by other threads.
+    //
+    // Q: Does this cause Cache-Line Bouncing / False Sharing?
+    // A: NO, provided Schedulers are not packed tightly in memory.
+    //
+    // 1. Thread-Local Access: In 99% of cases (no stealing), this atomic is
+    //    only modified by the owning thread. It stays in the L1 cache (Modified state)
+    //    and executes in ~1ns with zero bus traffic.
+    //
+    // 2. Stealing (The Victim): When a thief steals, they issue an atomic SUB.
+    //    This forces a cache invalidation for the Victim. This is the intended cost
+    //    of work stealing. It only happens when a thread is idle.
+    //
+    // 3. False Sharing: If two Schedulers shared a 64-byte cache line, modifying
+    //    Scheduler A would invalidate Scheduler B. We avoid this because Schedulers
+    //    are typically allocated on the Thread Stack (MBs apart) or individually
+    //    heap-allocated (likely padded by allocator metadata).
+    //
+    //    If you allocate an array of Schedulers (e.g. `[]Scheduler`), you MUST
+    //    ensure `align(64)` padding between them to preserve scalability.
+    // -------------------------------------------------------------------------
+    active_tasks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     shutdown_on_idle: bool = true,
 
-    pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext) !Scheduler {
+    pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
         const p = Poller.init() catch unreachable;
         const efd = try EventFd.init();
 
         var sched = Scheduler{
+            .stack_pool = stack_pool,
             .fiber_pool = .{},
             .ready_queue = .{},
             .sleeping_queue = .{},
             .inbox = .{},
-            .stack_pool = StackPool.init(allocator),
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -367,6 +454,7 @@ pub const Scheduler = struct {
             .poller = p,
             .main_ctx = undefined,
             .current_task = null,
+            .active_tasks = std.atomic.Value(usize).init(0),
             .shutdown_on_idle = true,
         };
 
@@ -376,7 +464,7 @@ pub const Scheduler = struct {
     }
 
     pub fn deinit(self: *Scheduler) void {
-        const queues = .{ &self.fiber_pool, &self.ready_queue, &self.sleeping_queue };
+        const queues = .{ &self.fiber_pool, &self.sleeping_queue };
         inline for (queues) |q| {
             for (q.items) |task| {
                 self.allocator.destroy(task); // Free Task Struct
@@ -384,14 +472,20 @@ pub const Scheduler = struct {
             q.deinit(self.allocator);
         }
 
-        self.stack_pool.deinit();
+        // Ownership Split: RunQueue manages the backing array (the pointers),
+        // but Scheduler (me) owns the Task structs (the memory).
+        // We must destroy the Tasks before destroying the container.
+        // Otherwise we lose the keys to the memory, before we free the memory.
+        for (self.ready_queue.queue.items) |task| {
+            self.allocator.destroy(task);
+        }
+        self.ready_queue.deinit(self.allocator);
         self.poller.deinit();
     }
 
     // ------------------------------------------------------------
     // 1. THE SPAWN (Producer Side - Thread A)
     // ------------------------------------------------------------
-    // TODO: Must use slab allocation, otherwise this does not scale
     pub fn submitSpawn(self: *Scheduler, trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: TaskConfig) !void {
         const req = try self.allocator.create(SpawnRequest);
         req.* = .{
@@ -425,6 +519,8 @@ pub const Scheduler = struct {
     }
 
     pub fn run(self: *Scheduler) void {
+        defer self.stack_pool.flushLocalCache();
+
         const my_id = std.Thread.getCurrentId();
 
         std.debug.print("[Sched {d}] Registering...\n", .{my_id});
@@ -454,21 +550,11 @@ pub const Scheduler = struct {
                 const next_node = node.next;
 
                 // Determine what this node is.
-                // We cheat slightly: We know SpawnRequest and Task both start with InboxNode.
-                // But we need to distinguish them.
-                // PRO TIP: Use an `enum` tag in the Node, or check pointer alignment if confident.
-                // SAFEST WAY: Just assume everything in Inbox is a "Command" wrapper?
-                // PERFORMANCE WAY: Check if the pointer matches a known block, or add a 'type' field to InboxNode.
-
-                // Let's assume for this example we added `type: enum { Spawn, Resume }` to InboxNode.
-                // (You need to add this field to InboxNode struct)
-
                 if (node.type == .Spawn) {
                     const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
 
                     // 1. GET STACK FROM POOL (Fast!)
                     const fiber_ptr = self.stack_pool.get(req.trampoline_addr) catch |err| {
-                        // FIX: If we fail to get a stack, we MUST destroy request and skip
                         std.debug.print("Stack Alloc Failed: {}\n", .{err});
                         self.allocator.destroy(req);
                         req_node = next_node; // Must advance, or infinite loop
@@ -477,7 +563,6 @@ pub const Scheduler = struct {
 
                     // 2. Alloc Task shell (local allocator)
                     const task = self.allocator.create(Task) catch {
-                        // FIX: If we fail to create Task, we MUST return fiber and destroy request
                         self.stack_pool.put(fiber_ptr);
                         self.allocator.destroy(req);
                         req_node = next_node; // Must advance, or infinite loop
@@ -494,10 +579,9 @@ pub const Scheduler = struct {
                     };
 
                     // Cleanup Request
-                    // TODO: Must use slab allocator, otherwise not scalable.
                     self.allocator.destroy(req);
 
-                    self.ready_queue.append(self.allocator, task) catch {
+                    self.ready_queue.push(self.allocator, task) catch {
                         // If we can't queue the task, we must rollback everything
                         self.stack_pool.put(fiber_ptr); // Save the fiber
                         self.allocator.destroy(task);   // Destroy the task
@@ -505,13 +589,13 @@ pub const Scheduler = struct {
                         req_node = next_node; // must advance, or infinite loop
                         continue;
                     };
-                    self.active_tasks += 1;
+                    _ = self.active_tasks.fetchAdd(1, .monotonic);
 
                 } else {
                     // It is an existing Task
                     const task: *Task = @fieldParentPtr("inbox_link", node);
                     task.status = .Ready;
-                    self.ready_queue.append(self.allocator, task) catch unreachable;
+                    self.ready_queue.push(self.allocator, task) catch unreachable;
                 }
 
                 req_node = next_node;
@@ -530,7 +614,7 @@ pub const Scheduler = struct {
 
                         // Add to ready queue
                         task.status = .Ready;
-                        self.ready_queue.append(self.allocator, task) catch unreachable;
+                        self.ready_queue.push(self.allocator, task) catch unreachable;
 
                         // Don't increment 'i' because we just swapped a new item here
                     } else {
@@ -540,8 +624,8 @@ pub const Scheduler = struct {
             }
 
             // Look for tasks ready to start:
-            if (self.ready_queue.items.len > 0) {
-                const task = self.ready_queue.orderedRemove(0);
+            if (self.ready_queue.len() > 0) {
+                const task = self.ready_queue.pop().?;
                 self.current_task = task;
 
                 // 1. Switch to the Task
@@ -552,13 +636,13 @@ pub const Scheduler = struct {
                 switch (task.status) {
                     .Finished => {
                         // Recycle
-                        self.active_tasks -= 1;
+                        _ = self.active_tasks.fetchSub(1, .monotonic);
                         self.stack_pool.put(task.base);
                         self.allocator.destroy(task);
                     },
                     .Ready => {
                         // It yielded, but wants to run again. Put back in queue.
-                        self.ready_queue.append(self.allocator, task) catch unreachable;
+                        self.ready_queue.push(self.allocator, task) catch unreachable;
                     },
                     .Blocked => {
                         // Do nothing! It is now owned by the WaitGroup/Mutex/Etc.
@@ -566,6 +650,24 @@ pub const Scheduler = struct {
                     }
                 }
                 continue; // Keep looping if we have work!
+            }
+
+            // Look for tasks to steal (ONLY IF IDLE):
+            if (self.ready_queue.len() == 0) {
+                const pair = global_registry.getRandomPair();
+                if (pair.b) |victim| {
+                    // Don't steal from myself
+                    if (victim != self) {
+                        // Lock the victim's queue and take half tasks
+                        const stolen = self.ready_queue.tryStealFrom(&victim.ready_queue, self.allocator);
+                        if (stolen > 0) {
+                            // update my queue size to account for steals
+                            _ = self.active_tasks.fetchAdd(stolen, .monotonic);
+                            // update victim queue size to account for steals
+                            _ = victim.active_tasks.fetchSub(stolen, .monotonic);
+                        }
+                    }
+                }
             }
 
             // IF IDLE: Poll for IO
@@ -576,6 +678,9 @@ pub const Scheduler = struct {
             if (self.sleeping_queue.items.len > 0) {
                 // Simplification: Just poll for 1ms if we have timers pending
                 timeout = 1;
+            }
+            else if (self.shutdown_on_idle and self.active_tasks.load(.monotonic) == 0) {
+                timeout = 0;
             }
 
             const count = self.poller.poll(&self.epoll_events, timeout);
@@ -592,13 +697,13 @@ pub const Scheduler = struct {
                         // It's a standard IO Task Wakeup
                         const task = @as(*Task, @ptrFromInt(data_ptr));
                         task.status = .Ready;
-                        self.ready_queue.append(self.allocator, task) catch unreachable;
+                        self.ready_queue.push(self.allocator, task) catch unreachable;
                     }
                 }
             }
 
             // If no IO and no Tasks and no Sleepers -> Break
-            if (self.shutdown_on_idle and count == 0 and self.ready_queue.items.len == 0 and self.sleeping_queue.items.len == 0) {
+            if (self.shutdown_on_idle and count == 0 and self.ready_queue.len() == 0 and self.sleeping_queue.items.len == 0) {
                 break;
             }
         }
