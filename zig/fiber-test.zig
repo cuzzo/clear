@@ -1,16 +1,19 @@
 const std = @import("std");
+
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
 const qs = @import("queues.zig");
 const fc = @import("fiber-core.zig");
-const fp = @import("fiber-pool.zig");
+const fm = @import("fiber-memory.zig");
+const fp = @import("scheduler.zig");
+
 const Stack = fc.Stack;
 const Fiber = fc.Fiber;
 const Context = fc.Context;
 const EbrContext = @import("ebr.zig").EbrContext;
 const Scheduler = fp.Scheduler;
 const WaitGroup = fp.WaitGroup;
-
+const StackPool = fm.StackPool;
 
 // Stack
 
@@ -118,7 +121,7 @@ test "Full Scheduler Integration" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     // 2. Setup Scheduler
@@ -208,7 +211,7 @@ test "Structured Concurrency with WaitGroup" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
@@ -262,7 +265,7 @@ test "Timeout Cancellation" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
@@ -309,7 +312,7 @@ test "Non-Blocking Sleep" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
@@ -392,7 +395,7 @@ test "Async I/O with Epoll" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
@@ -444,7 +447,7 @@ fn heavyTask(rt: *Runtime) !void {
 }
 
 // The Entry Point for each OS Thread
-fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_pool: *fp.StackPool) !void {
+fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack_pool: *StackPool) !void {
     // 1. Initialize Thread-Local Scheduler
     var sched = try Scheduler.init(allocator, global_ctx, stack_pool);
     defer sched.deinit();
@@ -473,7 +476,7 @@ test "Multi-Threaded Shared Nothing" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     std.debug.print("\n\n--- Start Multi-Thread Test ---", .{});

@@ -1,11 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Runtime = @import("runtime.zig").Runtime;
-const fp = @import("fiber-pool.zig");
+const fc = @import("fiber-core.zig");
+const fp = @import("scheduler.zig");
 
 const EbrContext = @import("ebr.zig").EbrContext;
-const Task = fp.Task;
-const Fiber = fp.Fiber;
+const Task = fc.Task;
+const Fiber = fc.Fiber;
 
 
 // Helper Functions

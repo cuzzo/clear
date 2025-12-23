@@ -1,5 +1,5 @@
 const std = @import("std");
-const fp = @import("fiber-pool.zig");
+const fp = @import("scheduler.zig");
 
 const ThreadLocalEbr = @import("ebr.zig").ThreadLocalEbr;
 const EbrContext = @import("ebr.zig").EbrContext;

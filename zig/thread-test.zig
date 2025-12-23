@@ -1,14 +1,18 @@
 const std = @import("std");
+
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
 const sm = @import("shared-memory.zig");
-const fp = @import("fiber-pool.zig");
+const fp = @import("scheduler.zig");
+const fm = @import("fiber-memory.zig");
+
 const EbrContext = @import("ebr.zig").EbrContext;
 const ThreadLocalEbr = @import("ebr.zig").ThreadLocalEbr;
 const Locked = sm.Locked;
 const Shared = sm.Shared;
 const RwLocked = sm.RwLocked;
 const Scheduler = fp.Scheduler;
+const StackPool = fm.StackPool;
 
 // -------------------------------------------------------------------------
 // Locked<T> Testing
@@ -557,7 +561,7 @@ test "RwLocked Many Readers One Writer" {
 // Cross Thread Communication
 
 // The generic worker loop for the threads
-fn workerLoop(r: *Runtime, id: u32, shutdown_signal: *std.atomic.Value(bool), stack_pool: *fp.StackPool) !void {
+fn workerLoop(r: *Runtime, id: u32, shutdown_signal: *std.atomic.Value(bool), stack_pool: *StackPool) !void {
     std.debug.print("[Worker {d}] Starting...\n", .{id});
 
     // 1. Initialize the Scheduler for this thread
@@ -592,7 +596,7 @@ test "Cross-Thread Spawning & Load Balancing" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = fp.StackPool.init(allocator);
+    var stack_pool = StackPool.init(allocator);
     defer stack_pool.deinit();
 
     // Initialize Global Registry
