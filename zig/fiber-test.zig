@@ -1,10 +1,12 @@
 const std = @import("std");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
+const qs = @import("queues.zig");
+const fc = @import("fiber-core.zig");
 const fp = @import("fiber-pool.zig");
-const Stack = fp.Stack;
-const Fiber = fp.Fiber;
-const Context = fp.Context;
+const Stack = fc.Stack;
+const Fiber = fc.Fiber;
+const Context = fc.Context;
 const EbrContext = @import("ebr.zig").EbrContext;
 const Scheduler = fp.Scheduler;
 const WaitGroup = fp.WaitGroup;
@@ -128,11 +130,11 @@ test "Full Scheduler Integration" {
 
     std.debug.print("\n--- Spawning Tasks ---", .{});
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&userTask1)),
+        @as(qs.TaskFn, @ptrCast(&userTask1)),
         null,
         .{});
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&userTask2)),
+        @as(qs.TaskFn, @ptrCast(&userTask2)),
         null,
         .{});
 
@@ -181,11 +183,11 @@ fn mainTask(_: *Runtime) !void {
 
     std.debug.print("\n[Main] Spawning workers...", .{});
     sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&workerA)),
+        @as(qs.TaskFn, @ptrCast(&workerA)),
         null,
         .{}) catch unreachable;
     sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&workerB)),
+        @as(qs.TaskFn, @ptrCast(&workerB)),
         null,
         .{}) catch unreachable;
 
@@ -218,7 +220,7 @@ test "Structured Concurrency with WaitGroup" {
 
     // We spawn the main coordinator, which spawns the others
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&mainTask)),
+        @as(qs.TaskFn, @ptrCast(&mainTask)),
         null,
         .{});
 
@@ -271,7 +273,7 @@ test "Timeout Cancellation" {
 
     // Spawn with 10ms timeout
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&infiniteLoop)),
+        @as(qs.TaskFn, @ptrCast(&infiniteLoop)),
         null,
         .{ .timeout_ms = 10 });
 
@@ -322,11 +324,11 @@ test "Non-Blocking Sleep" {
     // If sleep was blocking, this would take 100 + 300 = 400ms.
     // Since it's non-blocking, it should take ~300ms total.
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&slowTask)),
+        @as(qs.TaskFn, @ptrCast(&slowTask)),
         null,
         .{});
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&fastTask)),
+        @as(qs.TaskFn, @ptrCast(&fastTask)),
         null,
         .{});
 
@@ -414,11 +416,11 @@ test "Async I/O with Epoll" {
 
     // 2. Spawn Tasks
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&readerTask)),
+        @as(qs.TaskFn, @ptrCast(&readerTask)),
         null,
         .{});
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&writerTask)),
+        @as(qs.TaskFn, @ptrCast(&writerTask)),
         null,
         .{});
 
@@ -452,11 +454,11 @@ fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack
 
     // 3. Spawn Fibers (These stay on THIS thread)
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&heavyTask)),
+        @as(qs.TaskFn, @ptrCast(&heavyTask)),
         null,
         .{});
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
-        @as(fp.TaskFn, @ptrCast(&heavyTask)),
+        @as(qs.TaskFn, @ptrCast(&heavyTask)),
         null,
         .{});
 

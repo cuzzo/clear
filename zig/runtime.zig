@@ -3,9 +3,11 @@ const fp = @import("fiber-pool.zig");
 
 const ThreadLocalEbr = @import("ebr.zig").ThreadLocalEbr;
 const EbrContext = @import("ebr.zig").EbrContext;
+const qs = @import("queues.zig");
+
 const Scheduler = fp.Scheduler;
-const Task = fp.Task;
-const Fiber = fp.Fiber;
+const Task = qs.Task;
+const Fiber = qs.Fiber;
 
 pub const CheatArena = struct {
     // 16KB Blocks - nice balance for L1/L2 cache
@@ -276,7 +278,7 @@ pub const Runtime = struct {
     }
 
     pub fn allocCopy(self: *Runtime, comptime T: type, value: T) !*T {
-        const ptr = try self.heapAlloc().create(T);
+        const ptr = try self.globalAlloc().create(T);
         ptr.* = value;
         return ptr;
     }
@@ -295,10 +297,10 @@ pub const Runtime = struct {
 
     // Helper to spawn tasks easily from the Runtime
     // TODO: need to pass config here.
-    pub fn spawn(self: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
-        try self.scheduler.submitSpawn(
+    pub fn spawn(_: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
+        try fp.active_scheduler.submitSpawn(
             @intFromPtr(&entryWrapper), // trampoline
-            @as(fp.TaskFn, @ptrCast(user_fn)),
+            @as(qs.TaskFn, @ptrCast(user_fn)),
             args_ptr,
             .{}
         );
@@ -313,7 +315,7 @@ pub const Runtime = struct {
         // we are creating it here but it lives over there.
         try target.submitSpawn(
             @intFromPtr(&entryWrapper),
-            @as(fp.TaskFn, @ptrCast(user_fn)),
+            @as(qs.TaskFn, @ptrCast(user_fn)),
             args_ptr,
             .{} // Default Config (timeout_ms = 0)
         );
@@ -342,7 +344,7 @@ pub const Runtime = struct {
         // For now, we'll malloc it.
         try target.submitSpawn(
             @intFromPtr(&entryWrapper),
-            @as(fp.TaskFn, @ptrCast(user_fn)),
+            @as(qs.TaskFn, @ptrCast(user_fn)),
             args_ptr,
             .{}
         );

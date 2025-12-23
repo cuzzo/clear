@@ -1,128 +1,28 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const qs = @import("queues.zig");
+const fc = @import("fiber-core.zig");
 const EbrContext = @import("ebr.zig").EbrContext;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
+const InboxType = qs.InboxType;
+const InboxNode = qs.InboxNode;
+const AtomicInbox = qs.AtomicInbox;
+const RunQueue = qs.RunQueue;
+const Task = qs.Task;
+const TaskStatus = qs.TaskStatus;
+const TaskConfig = qs.TaskConfig;
+const TaskFn = qs.TaskFn;
+
+const Context = fc.Context;
+const switchContext = fc.switchContext;
+const Fiber = fc.Fiber;
+const Stack = fc.Stack;
+const StackSize = fc.StackSize;
+
 const linux = std.os.linux;
 const posix = std.posix;
-
-// Fibers
-// The registers we need to save.
-// This layout matches the assembly exactly.
-pub const Context = extern struct {
-    sp: u64, // Stack Pointer
-
-    // Callee-saved registers for x86_64
-    rbx: u64 = 0,
-    rbp: u64 = 0,
-    r12: u64 = 0,
-    r13: u64 = 0,
-    r14: u64 = 0,
-    r15: u64 = 0,
-};
-
-// 1. Declare the external symbol
-// Zig will look for this in the .s file we just created.
-extern fn switch_context_asm(from: *Context, to: *Context) callconv(.c) void;
-
-// 2. Public Wrapper
-pub fn switchContext(from: *Context, to: *Context) void {
-    switch_context_asm(from, to);
-}
-
-// CHEAT uses VMA Pooling with mprotect and madvise.
-// 2MB is not the per-fiber stack memory usage. It's the limit.
-// 4KB is the minimum (p95) size.
-pub const StackSize = enum {
-    Standard,  // 2MB (Fall back to mmap/mprotect)
-};
-
-pub const Stack = struct {
-    // The raw slice of memory we own
-    memory: []u8,
-
-    // Add this helper. Fiber.reset() relies on it.
-    pub fn getStackTop(self: Stack) usize {
-        const addr = @intFromPtr(self.memory.ptr) + self.memory.len;
-        // Align to 16 bytes and back off by 16 bytes
-        return (addr & ~@as(usize, 15)) - 16;
-    }
-};
-
-pub const Fiber = struct {
-    stack: Stack,
-    ctx: Context,
-    parent_ctx: *Context, // Who to jump back to when we yield/finish
-    size_class: StackSize,
-
-    pub fn init(memory: []u8, entry_fn: usize) Fiber {
-        const stack = Stack{ .memory = memory };
-
-        // CALCULATION: Stack grows DOWN from the end of the memory block.
-        const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
-
-        // ---------------------------------------------------------------------
-        // PERFORMANCE FIX: L1 Cache Staggering
-        // ---------------------------------------------------------------------
-        // Problem: 2MB strides cause every stack to alias to the same L1 Cache Set.
-        // Fix: We shift the starting stack pointer by 64 bytes (1 cache line)
-        // for every 2MB index. We wrap around every 16KB (half of L1 cache).
-        //
-        // Math: (Address >> 21) gives us the unique index of this 2MB block.
-        // We multiply by 64 to shift one cache line per block.
-        // We mask with 0x3FFF to limit the wasted space to 16KB max.
-        // ---------------------------------------------------------------------
-        const block_index = stack_top_addr >> 21;
-        const stagger_offset = (block_index * 64) & 0x3FFF;
-
-        // Align to 16 bytes (x64 requirement) and back off slightly
-        // to ensure we don't start at the very edge.
-        const stack_top = ((stack_top_addr - stagger_offset) & ~@as(usize, 15)) - 16;
-
-        // THE TRAMPOLINE:
-        // We simulate a "Return Address" on the top of the stack.
-        // When switchContext executes 'ret', it will pop this address and jump to it.
-        const ptr = @as(*usize, @ptrFromInt(stack_top));
-        ptr.* = entry_fn;
-
-        return Fiber{
-            .stack = stack,
-            // Point SP to the address we just wrote.
-            // When 'ret' runs, it pops the value AT this pointer.
-            .ctx = Context{ .sp = stack_top },
-            .parent_ctx = undefined,
-            .size_class = .Standard,
-        };
-    }
-
-    // Switch FROM parent TO this fiber
-    pub fn switchTo(self: *Fiber, parent: *Context) void {
-        self.parent_ctx = parent;
-        switchContext(parent, &self.ctx);
-    }
-
-    // Switch FROM this fiber BACK to parent
-    pub fn yield(self: *Fiber) void {
-        switchContext(&self.ctx, self.parent_ctx);
-    }
-
-    // Reset the stack pointer and put the entry function back at the top.
-    pub fn reset(self: *Fiber, entry_fn: usize) void {
-        const stack_top = self.stack.getStackTop();
-
-        // 1. Rewrite the Trampoline (Return Address)
-        const ptr = @as(*usize, @ptrFromInt(stack_top));
-        ptr.* = entry_fn;
-
-        // 2. Reset the Context Stack Pointer
-        self.ctx.sp = stack_top;
-
-        // No need to clear registers; they get overwritten on switchContext
-    }
-};
-
-pub const InboxType = enum { Spawn, Resume };
 
 const FiberNode = struct {
     // The SlabAllocator will overwrite the first 8 bytes for its 'next' pointer.
@@ -147,27 +47,6 @@ const SpawnRequest = struct {
     trampoline_addr: usize,
 };
 
-pub const TaskStatus = enum {
-    Ready,    // Run me again
-    Finished, // Recycle me
-    Blocked,  // Don't run me, I'm waiting on something
-};
-
-pub const TaskConfig = struct {
-    timeout_ms: u64 = 0,
-    stack_size: StackSize = .Standard,  // Default to Standard
-};
-
-pub const Task = struct {
-    base: *Fiber,
-    user_fn: TaskFn,
-    inbox_link: InboxNode = .{ .type = .Resume },
-    runtime_ptr: ?*anyopaque = null,
-    context: ?*anyopaque = null,
-    status: TaskStatus = .Ready,
-    config: TaskConfig = .{},
-    wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
-};
 
 // A thread-safe wake-up signal
 pub const SmartEventFd = struct {
@@ -192,7 +71,7 @@ pub const SmartEventFd = struct {
         // 1. Check if the scheduler is actually sleeping
         // We utilize 'monotonic' for the load because strict ordering isn't
         // strictly required here; if we miss a race, the scheduler loops anyway.
-        const is_sleeping = (self.state.load(.monotonic) == 1);
+        const is_sleeping = (self.state.load(.seq_cst) == 1);
 
         // 2. Only pay the syscall tax if absolutely necessary
         if (is_sleeping) {
@@ -219,56 +98,6 @@ pub const SmartEventFd = struct {
     // Called immediately after exiting epoll
     pub fn markAwake(self: *SmartEventFd) void {
         self.state.store(0, .seq_cst);
-    }
-};
-
-// A generic node header that must be embedded in any struct sent to the Inbox.
-pub const InboxNode = struct {
-    next: ?*InboxNode = null,
-    type: InboxType,
-};
-
-// Multi-Producer, Single-Consumer Atomic Stack
-// Provides a scalable, thread-safe way to spawn new tasks / fibers
-pub const AtomicInbox = struct {
-    // The "Head" of the linked list.
-    // Producers CAS this to push. Consumer SWAPs this to pop all.
-    head: std.atomic.Value(?*InboxNode) = std.atomic.Value(?*InboxNode).init(null),
-
-    /// Producer: Push a single node. Wait-Free.
-    pub fn push(self: *AtomicInbox, node: *InboxNode) void {
-        var old_head = self.head.load(.monotonic);
-        while (true) {
-            node.next = old_head;
-            // Try to swap Head with Node.
-            // If Head is still OldHead, it works. If not, OldHead updates to current.
-            old_head = self.head.cmpxchgWeak(
-                old_head,
-                node,
-                .release,
-                .monotonic
-            ) orelse break;
-        }
-    }
-
-    /// Consumer: Detach the entire list and return it. Wait-Free.
-    pub fn popAll(self: *AtomicInbox) ?*InboxNode {
-        // Atomically replace HEAD with NULL. We now own the entire chain.
-        return self.head.swap(null, .acquire);
-    }
-
-    /// Helper: The list comes out LIFO (Reverse order).
-    /// If you strictly need FIFO, call this on the result of popAll.
-    pub fn reverse(list: ?*InboxNode) ?*InboxNode {
-        var prev: ?*InboxNode = null;
-        var curr = list;
-        while (curr) |node| {
-            const next = node.next;
-            node.next = prev;
-            prev = node;
-            curr = next;
-        }
-        return prev;
     }
 };
 
@@ -357,113 +186,6 @@ pub var global_arena: VirtualArena = .{
     .stack_watermark = std.atomic.Value(usize).init(0),
 };
 
-// TODO: Rename to Deque
-pub const RunQueue = struct {
-    // Fixed size ring buffer for MVP
-    buffer: [256]std.atomic.Value(?*Task) = undefined,
-    mask: u32 = 255,
-
-    top: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    bottom: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-
-    pub fn init() RunQueue {
-        var q = RunQueue{};
-        for (&q.buffer) |*slot| slot.* = std.atomic.Value(?*Task).init(null);
-        return q;
-    }
-
-    // push (bottom) - lock free
-    pub fn push(self: *RunQueue, alloc: std.mem.Allocator, task: *Task) !void {
-        _ = alloc; // Don't need allocator for fixed buffer
-
-        // Chase-Lev Push Bottom
-        const b = self.bottom.load(.monotonic);
-        const t = self.top.load(.acquire);
-
-        if (b -% t > self.mask) return error.QueueFull; // MVP limitation
-
-        self.buffer[b & self.mask].store(task, .monotonic);
-        self.bottom.store(b +% 1, .release);
-    }
-
-
-    // Chase-Lev Pop Bottom - lock free
-    pub fn pop(self: *RunQueue) ?*Task {
-        const b = self.bottom.load(.monotonic);
-        if (b == 0) return null; // Simplified
-
-        const new_b = b -% 1;
-        self.bottom.store(new_b, .seq_cst);
-        const t = self.top.load(.monotonic);
-        const task = self.buffer[new_b & self.mask].load(.monotonic);
-
-        if (t > new_b) {
-            self.bottom.store(b, .monotonic); // Restore
-            return null;
-        }
-        if (t == new_b) {
-            // Race with thief
-            if (self.top.cmpxchgWeak(t, t +% 1, .seq_cst, .monotonic) != null) {
-                self.bottom.store(b, .monotonic); // Lost race
-                return null;
-            }
-            self.bottom.store(b, .monotonic);
-            return task;
-        }
-        return task;
-    }
-
-    // Safe length check
-    pub fn len(self: *RunQueue) usize {
-        const b = self.bottom.load(.monotonic);
-        const t = self.top.load(.monotonic);
-        if (b >= t) return b - t;
-        return 0;
-    }
-
-    // Used internally by tryStealFrom
-    fn stealOne(self: *RunQueue) ?*Task {
-        const t = self.top.load(.acquire);
-        const b = self.bottom.load(.seq_cst);
-
-        if (t >= b) return null;
-
-        const task = self.buffer[t & self.mask].load(.monotonic);
-        if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
-            return null;  // Lost race
-        }
-        return task;
-    }
-
-    // For stealing (Take half, lock free)
-    pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator, fallback_inbox: *AtomicInbox) usize {
-        const v_len = victim.len();
-        if (v_len == 0) return 0;
-
-        const target = (v_len + 1) / 2;
-        var stolen_count: usize = 0;
-
-        while (stolen_count < target) {
-            const task = victim.stealOne() orelse break;
-
-            self.push(alloc, task) catch {
-                // FIX: Queue is full, but we already stole the task!
-                // We cannot drop it. We must offload it to the inbox.
-                task.inbox_link.type = .Resume;
-                fallback_inbox.push(&task.inbox_link);
-
-                // We successfully took responsibility for the task, even if we put it in inbox.
-                stolen_count += 1;
-                continue;
-            };
-            stolen_count += 1;
-        }
-
-        return stolen_count;
-    }
-};
-
-pub const TaskFn = *const fn (rt: *anyopaque, ctx: ?*anyopaque) anyerror!void;
 
 pub const Scheduler = struct {
     // 1. The Manager State
@@ -735,7 +457,6 @@ pub const Scheduler = struct {
                         // If we can't queue the task, we must rollback everything
                         self.freeStack(stack_mem); // Save the fiber
                         self.allocator.destroy(task);   // Destroy the task
-                        self.allocator.destroy(req);
                         req_node = next_node; // must advance, or infinite loop
                         continue;
                     };
@@ -821,19 +542,6 @@ pub const Scheduler = struct {
                 }
             }
 
-            // Scavange (ONLY IF IDLE):
-            if (self.ready_queue.len() == 0) {
-                 // Free excess stacks in local cache back to OS (physically)
-                 // Keep 16 hot.
-                 while (self.stack_cache.items.len > 16) {
-                     const stack = self.stack_cache.pop().?;
-                     const aligned_ptr = @as([*]align(4096) u8, @alignCast(stack.ptr));
-                     // BLOCKING SYSCALL: Only pay this when truly idle
-                     std.posix.madvise(aligned_ptr, stack.len, linux.MADV.DONTNEED) catch {};
-                     // We drop the pointer. VMA stays mapped but unused.
-                 }
-            }
-
             // IF IDLE: Poll for IO
             // Determine timeout based on next timer
             // If we have a sleeper in 50ms, poll(50). If empty, poll(-1) [Wait Forever].
@@ -884,6 +592,16 @@ pub const Scheduler = struct {
 
             // If no IO and no Tasks and no Sleepers -> Break
             if (self.shutdown_on_idle and count == 0 and self.ready_queue.len() == 0 and self.sleeping_queue.items.len == 0) {
+                // Free excess stacks in local cache back to OS (physically)
+                // Keep 16 hot.
+                while (self.stack_cache.items.len > 16) {
+                    const stack = self.stack_cache.pop().?;
+                    const aligned_ptr = @as([*]align(4096) u8, @alignCast(stack.ptr));
+                    // BLOCKING SYSCALL: Only pay this when truly idle
+                    std.posix.madvise(aligned_ptr, stack.len, linux.MADV.DONTNEED) catch {};
+                    // We drop the pointer. VMA stays mapped but unused.
+                }
+
                 break;
             }
         }
