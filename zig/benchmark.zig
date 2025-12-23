@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const rt_mod = @import("runtime.zig");
@@ -14,6 +15,8 @@ var stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
 
 pub fn main() !void {
+    if (builtin.mode == .Debug) return error.SkipZigTest; // Don't bench in debug
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
