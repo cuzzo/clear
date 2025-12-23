@@ -599,10 +599,15 @@ pub const SchedulerRegistry = struct {
 pub var global_registry: SchedulerRegistry = .{};
 
 pub const WaitGroup = struct {
-    counter: usize = 0,
-    waiting_task: ?*Task = null,
+    // The counter must be atomic
+    counter: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
-    // We need the scheduler to wake people up
+    // We need to protect the 'waiting_task' pointer itself,
+    // because one thread might be writing it (wait) while another reads it (done)
+    // 0 = unlocked, 1 = locked
+    lock: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    waiting_task: ?*Task = null,
     sched: *Scheduler,
 
     pub fn init(sched: *Scheduler) WaitGroup {
@@ -610,34 +615,62 @@ pub const WaitGroup = struct {
     }
 
     pub fn add(self: *WaitGroup, count: usize) void {
-        self.counter += count;
+        _ = self.counter.fetchAdd(count, .seq_cst);
     }
 
     pub fn done(self: *WaitGroup) void {
-        self.counter -= 1;
-        if (self.counter == 0) {
-            if (self.waiting_task) |task| {
-                // Wake up the waiter!
-                self.sched.schedule(task);
-                self.waiting_task = null;
-            }
+        // Atomic Decrement
+        const prev = self.counter.fetchSub(1, .seq_cst);
+
+        // If we just dropped to 0 (prev was 1), we must wake the waiter.
+        if (prev == 1) {
+            self.wakeWaiter();
         }
     }
 
-    // This is a blocking call!
+    fn wakeWaiter(self: *WaitGroup) void {
+        // Spinlock to grab the waiter
+        while (self.lock.swap(1, .acquire) == 1) {
+            std.Thread.yield() catch {};
+        }
+        defer self.lock.store(0, .release);
+
+        if (self.waiting_task) |task| {
+            self.sched.schedule(task);
+            self.waiting_task = null;
+        }
+    }
+
+    // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
-        if (self.counter == 0) return;
+        // Fast path: already done
+        if (self.counter.load(.seq_cst) == 0) return;
 
-        var task = self.sched.getCurrent();
-
-        // 1. Mark status as Blocked
+        // 1. Get current task
+        const task = self.sched.getCurrent();
         task.status = .Blocked;
-        self.waiting_task = task;
 
-        // 2. Yield. The scheduler will see .Blocked and NOT re-queue us.
+        // 2. Register as waiter (Spinlock protected)
+        // CRITICAL: We must check counter *inside* the lock or right before/after
+        // to avoid the "Lost Wakeup" race where done() happens between check and sleep.
+        while (self.lock.swap(1, .acquire) == 1) {
+             std.Thread.yield() catch {};
+        }
+
+        // Double Check inside lock: Did it finish while we were acquiring lock?
+        if (self.counter.load(.seq_cst) == 0) {
+            self.lock.store(0, .release);
+            task.status = .Ready; // Undo status change
+            return;
+        }
+
+        self.waiting_task = task;
+        self.lock.store(0, .release);
+
+        // 3. Yield control
         task.base.yield();
 
-        // 3. We are back! Reset status for safety
+        // 4. Back (Reset status)
         task.status = .Ready;
     }
 };
