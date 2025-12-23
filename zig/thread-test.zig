@@ -729,7 +729,7 @@ test "Cross-Thread Spawning & Load Balancing" {
         var it = fp.global_registry.map.iterator();
         while (it.next()) |entry| {
             // Write to their event_fd to break the poll loop
-            try entry.value_ptr.*.event_fd.notify();
+            entry.value_ptr.*.event_fd.notify();
         }
     }
 

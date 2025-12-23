@@ -60,12 +60,25 @@ pub const Fiber = struct {
         const stack = Stack{ .memory = memory };
 
         // CALCULATION: Stack grows DOWN from the end of the memory block.
-        // We use the full 2MB slice.
         const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
+
+        // ---------------------------------------------------------------------
+        // PERFORMANCE FIX: L1 Cache Staggering
+        // ---------------------------------------------------------------------
+        // Problem: 2MB strides cause every stack to alias to the same L1 Cache Set.
+        // Fix: We shift the starting stack pointer by 64 bytes (1 cache line)
+        // for every 2MB index. We wrap around every 16KB (half of L1 cache).
+        //
+        // Math: (Address >> 21) gives us the unique index of this 2MB block.
+        // We multiply by 64 to shift one cache line per block.
+        // We mask with 0x3FFF to limit the wasted space to 16KB max.
+        // ---------------------------------------------------------------------
+        const block_index = stack_top_addr >> 21;
+        const stagger_offset = (block_index * 64) & 0x3FFF;
 
         // Align to 16 bytes (x64 requirement) and back off slightly
         // to ensure we don't start at the very edge.
-        const stack_top = (stack_top_addr & ~@as(usize, 15)) - 16;
+        const stack_top = ((stack_top_addr - stagger_offset) & ~@as(usize, 15)) - 16;
 
         // THE TRAMPOLINE:
         // We simulate a "Return Address" on the top of the stack.
@@ -157,32 +170,55 @@ pub const Task = struct {
 };
 
 // A thread-safe wake-up signal
-pub const EventFd = struct {
+pub const SmartEventFd = struct {
     fd: i32,
+    // 0 = Awake (Busy processing), 1 = Sleeping (Waiting on Epoll)
+    state: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
-    pub fn init() !EventFd {
-        // EFD_NONBLOCK: Don't block on read/write
-        // EFD_CLOEXEC: Standard safety
-        const fd = try std.posix.eventfd(0, std.os.linux.EFD.CLOEXEC | std.os.linux.EFD.NONBLOCK);
-        return EventFd{ .fd = fd };
+    pub fn init() !SmartEventFd {
+        // EFD_SEMAPHORE: Reads decrement counter by 1.
+        // We use this so we can consume exactly one wake-up if needed.
+        const flags = std.os.linux.EFD.CLOEXEC | std.os.linux.EFD.NONBLOCK | std.os.linux.EFD.SEMAPHORE;
+        const fd = try std.posix.eventfd(0, flags);
+        return SmartEventFd{ .fd = fd };
     }
 
-    pub fn deinit(self: *EventFd) void {
+    pub fn deinit(self: *SmartEventFd) void {
         std.posix.close(self.fd);
     }
 
-    // Wake up the other thread! (Write 1 to the counter)
-    pub fn notify(self: *EventFd) !void {
-        const val: u64 = 1;
-        const bytes = std.mem.asBytes(&val);
-        _ = try std.posix.write(self.fd, bytes);
+    // HOT PATH: This is what makes it fast!
+    pub fn notify(self: *SmartEventFd) void {
+        // 1. Check if the scheduler is actually sleeping
+        // We utilize 'monotonic' for the load because strict ordering isn't
+        // strictly required here; if we miss a race, the scheduler loops anyway.
+        const is_sleeping = (self.state.load(.monotonic) == 1);
+
+        // 2. Only pay the syscall tax if absolutely necessary
+        if (is_sleeping) {
+            const val: u64 = 1;
+            const bytes = std.mem.asBytes(&val);
+            // Ignore error, if buffer is full, they are already awake
+            _ = std.posix.write(self.fd, bytes) catch {};
+        }
     }
 
-    // Reset the signal (Read the counter)
-    pub fn consume(self: *EventFd) !void {
+    // Called by Scheduler loop to reset the signal drain
+    pub fn consume(self: *SmartEventFd) void {
         var val: u64 = 0;
         const buf = std.mem.asBytes(&val);
-        _ = try std.posix.read(self.fd, buf);
+        // Drain the eventfd buffer
+        _ = std.posix.read(self.fd, buf) catch {};
+    }
+
+    // Called before entering epoll
+    pub fn markSleeping(self: *SmartEventFd) void {
+        self.state.store(1, .seq_cst);
+    }
+
+    // Called immediately after exiting epoll
+    pub fn markAwake(self: *SmartEventFd) void {
+        self.state.store(0, .seq_cst);
     }
 };
 
@@ -439,7 +475,7 @@ pub const Scheduler = struct {
     // 2. Communcation
     inbox: AtomicInbox = .{},  // Lock-free Inbox
     stack_pool: *StackPool,    //GLOBAL Stack Cache
-    event_fd: EventFd,
+    event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
     global_shutdown: ?*std.atomic.Value(bool) = null,
 
@@ -487,7 +523,7 @@ pub const Scheduler = struct {
 
     pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
         const p = Poller.init() catch unreachable;
-        const efd = try EventFd.init();
+        const efd = try SmartEventFd.init();
 
         var sched = Scheduler{
             .stack_pool = stack_pool,
@@ -604,7 +640,7 @@ pub const Scheduler = struct {
         self.inbox.push(&req.inbox_link);
 
         // Wake up target
-        try self.event_fd.notify();
+        self.event_fd.notify();
     }
 
     // ------------------------------------------------------------
@@ -618,7 +654,7 @@ pub const Scheduler = struct {
         self.inbox.push(&task.inbox_link);
 
         // Wake up target (ignore error in hot path)
-        self.event_fd.notify() catch {};
+        self.event_fd.notify();
     }
 
     pub fn run(self: *Scheduler) void {
@@ -811,7 +847,23 @@ pub const Scheduler = struct {
                 timeout = 0;
             }
 
+            // A. Announce we are going to sleep
+            self.event_fd.markSleeping();
+
+            // B. The Double Check
+            // We must check for new work ONE LAST TIME after setting the flag.
+            // If we don't do this, a task could arrive between our last check
+            // and the 'markSleeping' call, and we would sleep forever.
+            if (self.ready_queue.len() > 0 or self.inbox.head.load(.monotonic) != null) {
+                self.event_fd.markAwake();
+                continue; // Restart loop to process the new work
+            }
+
+            // C. Actually Sleep
             const count = self.poller.poll(&self.epoll_events, timeout);
+
+            // D. We are awake
+            self.event_fd.markAwake();
 
             if (count > 0) {
                 for (self.epoll_events[0..count]) |event| {
@@ -819,7 +871,7 @@ pub const Scheduler = struct {
 
                     // CHECK: Is this the Wake Up Signal?
                     if (data_ptr == 0) {
-                        self.event_fd.consume() catch {};
+                        self.event_fd.consume();
                     }
                     else {
                         // It's a standard IO Task Wakeup
