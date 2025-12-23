@@ -121,7 +121,7 @@ pub fn SlabAllocator(comptime T: type) type {
                     self.prependSlab(slab, &self.full_slabs);
                     slab.is_full = true;
                 }
-                return @ptrCast(node);
+                return @ptrCast(@alignCast(node));
             }
 
             const new_slab = try self.grow();
@@ -129,7 +129,7 @@ pub fn SlabAllocator(comptime T: type) type {
             new_slab.free_head = node.next;
             new_slab.used_count += 1;
 
-            return @ptrCast(node);
+            return @ptrCast(@alignCast(node));
         }
 
         fn growAndAlloc(self: *Self) !*T {
@@ -137,7 +137,7 @@ pub fn SlabAllocator(comptime T: type) type {
             const node = new_slab.free_head.?;
             new_slab.free_head = node.next;
             new_slab.used_count += 1;
-            return @ptrCast(node);
+            return @ptrCast(@alignCast(node));
         }
 
         pub fn destroy(self: *Self, obj: *T) void {

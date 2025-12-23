@@ -1,6 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const EbrContext = @import("ebr.zig").EbrContext;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
+
+const linux = std.os.linux;
+const posix = std.posix;
 
 // Fibers
 // The registers we need to save.
@@ -26,57 +31,22 @@ pub fn switchContext(from: *Context, to: *Context) void {
     switch_context_asm(from, to);
 }
 
+// CHEAT uses VMA Pooling with mprotect and madvise.
+// 2MB is not the per-fiber stack memory usage. It's the limit.
+// 4KB is the minimum (p95) size.
+pub const StackSize = enum {
+    Standard,  // 2MB (Fall back to mmap/mprotect)
+};
+
 pub const Stack = struct {
     // The raw slice of memory we own
-    memory: []align(4096) u8,
+    memory: []u8,
 
-    // The usable size (excluding the guard page)
-    usable_len: usize,
-
-    // How big we want the guard to be (usually 4KB, one OS page)
-    const PAGE_SIZE: usize = 4096;
-
-    pub fn init(size: usize) !Stack {
-        // 1. Round up to page size to keep the OS happy
-        const total_size = std.mem.alignForward(usize, size + PAGE_SIZE, PAGE_SIZE);
-
-        // 2. Ask OS for memory
-        // PROT_READ | PROT_WRITE: We can read and write
-        // MAP_PRIVATE | MAP_ANONYMOUS: Private memory, not backed by a file
-        const ptr = try std.posix.mmap(
-            null,
-            total_size,
-            std.posix.PROT.READ | std.posix.PROT.WRITE,
-            .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
-            -1,
-            0,
-        );
-        const slice = ptr[0..total_size];
-
-        // 3. The Magic: "Poison" the bottom page
-        // We tell the OS: "If anyone touches the first 4KB, kill the process."
-        // This is our hardware stack-overflow protection.
-        try std.posix.mprotect(slice[0..PAGE_SIZE], std.posix.PROT.NONE // No permissions at all
-        );
-
-        return Stack{
-            .memory = slice,
-            .usable_len = total_size - PAGE_SIZE,
-        };
-    }
-
-    pub fn deinit(self: *Stack) void {
-        // Return memory to OS
-        std.posix.munmap(self.memory);
-    }
-
-    // CRITICAL: Stacks grow DOWN (High -> Low).
-    // So the "Start" of the stack is actually the END of the memory block.
-    // We return a pointer slightly offset from the top to be safe.
-    pub fn getStackTop(self: *Stack) usize {
-        const top = @intFromPtr(self.memory.ptr) + self.memory.len;
-        // Align to 16 bytes (x64 requirement) and back off a tiny bit
-        return (top & ~@as(usize, 15)) - 16;
+    // Add this helper. Fiber.reset() relies on it.
+    pub fn getStackTop(self: Stack) usize {
+        const addr = @intFromPtr(self.memory.ptr) + self.memory.len;
+        // Align to 16 bytes and back off by 16 bytes
+        return (addr & ~@as(usize, 15)) - 16;
     }
 };
 
@@ -84,10 +54,18 @@ pub const Fiber = struct {
     stack: Stack,
     ctx: Context,
     parent_ctx: *Context, // Who to jump back to when we yield/finish
+    size_class: StackSize,
 
-    pub fn init(stack_size: usize, entry_fn: usize) !Fiber {
-        var stack = try Stack.init(stack_size);
-        const stack_top = stack.getStackTop();
+    pub fn init(memory: []u8, entry_fn: usize) Fiber {
+        const stack = Stack{ .memory = memory };
+
+        // CALCULATION: Stack grows DOWN from the end of the memory block.
+        // We use the full 2MB slice.
+        const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
+
+        // Align to 16 bytes (x64 requirement) and back off slightly
+        // to ensure we don't start at the very edge.
+        const stack_top = (stack_top_addr & ~@as(usize, 15)) - 16;
 
         // THE TRAMPOLINE:
         // We simulate a "Return Address" on the top of the stack.
@@ -101,11 +79,8 @@ pub const Fiber = struct {
             // When 'ret' runs, it pops the value AT this pointer.
             .ctx = Context{ .sp = stack_top },
             .parent_ctx = undefined,
+            .size_class = .Standard,
         };
-    }
-
-    pub fn deinit(self: *Fiber) void {
-        self.stack.deinit();
     }
 
     // Switch FROM parent TO this fiber
@@ -142,6 +117,9 @@ const FiberNode = struct {
     freelist_link: ?*anyopaque,
 
     fiber: Fiber,
+
+    // TODO: deprecated
+    // Not needed when we trust our sizing, but keeping for safety.
     magic: u64,
 };
 
@@ -164,6 +142,7 @@ pub const TaskStatus = enum {
 
 pub const TaskConfig = struct {
     timeout_ms: u64 = 0,
+    stack_size: StackSize = .Standard,  // Default to Standard
 };
 
 pub const Task = struct {
@@ -257,126 +236,194 @@ pub const AtomicInbox = struct {
     }
 };
 
-fn cleanupFiberStack(_: void, node: *FiberNode) void {
-    if (node.magic == FIBER_MAGIC) {
-        node.fiber.deinit(); // munmap the stack
-        node.magic = 0;      // clear magic
-    }
-}
-
+// TODO: Deprecate, replaced by Arena
 pub const StackPool = struct {
-    slab: SlabAllocator(FiberNode),
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) StackPool {
-        // Initialize with a slab size (e.g., 64KB).
-        // This holds the Structs, not the 2MB Stacks (which are pointers inside the struct).
-        return .{
-            .slab = SlabAllocator(FiberNode).init(allocator, 64 * 1024),
-        };
+        return .{ .allocator = allocator };
     }
 
-    pub fn deinit(self: *StackPool) void {
-        // CRITICAL: We must munmap the stacks before freeing the slab memory.
-
-        // 1. Scope the lock so it releases BEFORE we call slab.deinit()
-        {
-            self.slab.lock.lock();
-            defer self.slab.lock.unlock();
-	    self.slab.scanUnsafe({}, cleanupFiberStack);
-        }
-
-        self.slab.deinit();
+    pub fn deinit(_: *StackPool) void {
     }
 
-    pub fn flushLocalCache(self: *StackPool) void {
-        self.slab.flushThreadCache();
+    pub fn flushLocalCache(_: *StackPool) void {
     }
 
-    pub fn get(self: *StackPool, entry_fn: usize) !*Fiber {
-        // This create() is now thread-safe and extremely fast (no syscalls usually)
-        const node = try self.slab.create();
+    // The "Cache Check" happens inside Scheduler before calling this.
+    pub fn get(self: *StackPool, entry_fn: usize, size: StackSize) !*Fiber {
+        _ = size; // We only support 2MB now
 
-        if (node.magic == FIBER_MAGIC) {
-            // HOT PATH: Reuse existing stack
-            node.fiber.reset(entry_fn);
-        } else {
-            // COLD PATH: First time use. Allocate the 2MB stack.
-            node.fiber = Fiber.init(2 * 1024 * 1024, entry_fn) catch |err| {
-                // If mmap fails, return node to slab and propagate error
-                self.slab.destroy(node);
-                return err;
-            };
-            node.magic = FIBER_MAGIC;
-        }
+        // Atomic Alloc from Arena
+        const memory = try global_arena.allocGlobalSlot();
 
-        return &node.fiber;
+        // We still allocate the Fiber struct itself.
+        // Ideally this comes from a SlabAllocator, but using standard allocator for now as per your code.
+        const fiber = try self.allocator.create(Fiber);
+        fiber.* = Fiber.init(memory, entry_fn);
+        return fiber;
     }
 
+    // This function is deprecated in the new flow.
     pub fn put(self: *StackPool, fiber: *Fiber) void {
-        // Recover the wrapper pointer
-        const node: *FiberNode = @fieldParentPtr("fiber", fiber);
-
-        // Return to slab (Thread Safe).
-        // We DO NOT deinit the fiber. We keep the 2MB stack mapped for reuse.
-        self.slab.destroy(node);
+        // Scheduler puts memory into its local cache.
+        // If we must destroy a fiber struct:
+        self.allocator.destroy(fiber);
     }
 };
 
-const RunQueue = struct {
-    mutex: std.Thread.Mutex = .{},
-    queue: std.ArrayListUnmanaged(*Task) = .{},
 
-    pub fn deinit(self: *RunQueue, allocator: std.mem.Allocator) void {
-        self.queue.deinit(allocator);
+// We reserve 1TB of virtual address space.
+// 0 syscalls to sub-divide this. It's just math.
+const ARENA_SIZE: usize = 1 * 1024 * 1024 * 1024 * 1024;
+const STACK_SIZE: usize = 2 * 1024 * 1024; // 2MB
+const MAX_STACKS: usize = ARENA_SIZE / STACK_SIZE;
+
+pub const VirtualArena = struct {
+    base_addr: ?[*]u8,
+
+    // Global atomic counter for the "Watermark" of allocated stacks.
+    // We only increment this. We never "free" an index back to the global pool
+    // to keep it lock-free. Freed stacks go to Thread-Local caches.
+    stack_watermark: std.atomic.Value(usize),
+
+    pub fn init() !VirtualArena {
+        // HUGE mmap. NO_RESERVE means we don't commit swap/ram.
+        // PROT_READ|WRITE means no mprotect needed later.
+        const addr = try posix.mmap(
+            null,
+            ARENA_SIZE,
+            posix.PROT.READ | posix.PROT.WRITE,
+            .{ .TYPE = .PRIVATE, .ANONYMOUS = true, .NORESERVE = true },
+            -1,
+            0,
+        );
+
+        return VirtualArena{
+            .base_addr = addr.ptr,
+            .stack_watermark = std.atomic.Value(usize).init(0),
+        };
     }
 
-    // Local push (Fast path)
+    // Returns a POINTER to the start of the stack memory.
+    // Hot Path: 1 atomic increment.
+    pub fn allocGlobalSlot(self: *VirtualArena) ![]u8 {
+        const index = self.stack_watermark.fetchAdd(1, .monotonic);
+        if (index >= MAX_STACKS) return error.OutOfMemory;
+
+        const offset = index * STACK_SIZE;
+        return self.base_addr.?[offset..offset+STACK_SIZE];
+    }
+};
+
+pub var global_arena: VirtualArena = .{
+    .base_addr = null,
+    .stack_watermark = std.atomic.Value(usize).init(0),
+};
+
+// TODO: Rename to Deque
+pub const RunQueue = struct {
+    // Fixed size ring buffer for MVP
+    buffer: [256]std.atomic.Value(?*Task) = undefined,
+    mask: u32 = 255,
+
+    top: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    bottom: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    pub fn init() RunQueue {
+        var q = RunQueue{};
+        for (&q.buffer) |*slot| slot.* = std.atomic.Value(?*Task).init(null);
+        return q;
+    }
+
+    // push (bottom) - lock free
     pub fn push(self: *RunQueue, alloc: std.mem.Allocator, task: *Task) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        try self.queue.append(alloc, task);
+        _ = alloc; // Don't need allocator for fixed buffer
+
+        // Chase-Lev Push Bottom
+        const b = self.bottom.load(.monotonic);
+        const t = self.top.load(.acquire);
+
+        if (b -% t > self.mask) return error.QueueFull; // MVP limitation
+
+        self.buffer[b & self.mask].store(task, .monotonic);
+        self.bottom.store(b +% 1, .release);
     }
 
+
+    // Chase-Lev Pop Bottom - lock free
     pub fn pop(self: *RunQueue) ?*Task {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        if (self.queue.items.len == 0) return null;
-        return self.queue.orderedRemove(0); // FIFO
+        const b = self.bottom.load(.monotonic);
+        if (b == 0) return null; // Simplified
+
+        const new_b = b -% 1;
+        self.bottom.store(new_b, .seq_cst);
+        const t = self.top.load(.monotonic);
+        const task = self.buffer[new_b & self.mask].load(.monotonic);
+
+        if (t > new_b) {
+            self.bottom.store(b, .monotonic); // Restore
+            return null;
+        }
+        if (t == new_b) {
+            // Race with thief
+            if (self.top.cmpxchgWeak(t, t +% 1, .seq_cst, .monotonic) != null) {
+                self.bottom.store(b, .monotonic); // Lost race
+                return null;
+            }
+            self.bottom.store(b, .monotonic);
+            return task;
+        }
+        return task;
     }
 
     // Safe length check
     pub fn len(self: *RunQueue) usize {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.queue.items.len;
+        const b = self.bottom.load(.monotonic);
+        const t = self.top.load(.monotonic);
+        if (b >= t) return b - t;
+        return 0;
     }
 
-    // For stealing (Take half)
-    pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator) usize {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+    // Used internally by tryStealFrom
+    fn stealOne(self: *RunQueue) ?*Task {
+        const t = self.top.load(.acquire);
+        const b = self.bottom.load(.seq_cst);
 
-        // 2. Try-Lock the Victim (Non-blocking to avoid Deadlocks)
-        if (!victim.mutex.tryLock()) return 0;
-        defer victim.mutex.unlock();
+        if (t >= b) return null;
 
-        const v_len = victim.queue.items.len;
+        const task = self.buffer[t & self.mask].load(.monotonic);
+        if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
+            return null;  // Lost race
+        }
+        return task;
+    }
+
+    // For stealing (Take half, lock free)
+    pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator, fallback_inbox: *AtomicInbox) usize {
+        const v_len = victim.len();
         if (v_len == 0) return 0;
 
-        // 3. Naive Steal: Take half
-        // Steal from BACK (LIFO) to avoid fighting victim's pop (FIFO) logic
-        const steal_count = (v_len + 1) / 2;
-        const new_victim_len = v_len - steal_count;
+        const target = (v_len + 1) / 2;
+        var stolen_count: usize = 0;
 
-        const tasks = victim.queue.items[new_victim_len..];
+        while (stolen_count < target) {
+            const task = victim.stealOne() orelse break;
 
-        // Move to Thief
-        self.queue.appendSlice(alloc, tasks) catch return 0;
+            self.push(alloc, task) catch {
+                // FIX: Queue is full, but we already stole the task!
+                // We cannot drop it. We must offload it to the inbox.
+                task.inbox_link.type = .Resume;
+                fallback_inbox.push(&task.inbox_link);
 
-        // Shrink Victim
-        victim.queue.items.len = new_victim_len;
+                // We successfully took responsibility for the task, even if we put it in inbox.
+                stolen_count += 1;
+                continue;
+            };
+            stolen_count += 1;
+        }
 
-        return steal_count;
+        return stolen_count;
     }
 };
 
@@ -386,6 +433,7 @@ pub const Scheduler = struct {
     // 1. The Manager State
     fiber_pool: std.ArrayListUnmanaged(*Task) = .{},
     ready_queue: RunQueue,
+    stack_cache: std.ArrayListUnmanaged([]u8) = .{},   // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
 
     // 2. Communcation
@@ -445,6 +493,7 @@ pub const Scheduler = struct {
             .stack_pool = stack_pool,
             .fiber_pool = .{},
             .ready_queue = .{},
+            .stack_cache = .{}, // probs needs to be unmanaged
             .sleeping_queue = .{},
             .inbox = .{},
             .event_fd = efd,
@@ -476,11 +525,65 @@ pub const Scheduler = struct {
         // but Scheduler (me) owns the Task structs (the memory).
         // We must destroy the Tasks before destroying the container.
         // Otherwise we lose the keys to the memory, before we free the memory.
-        for (self.ready_queue.queue.items) |task| {
-            self.allocator.destroy(task);
+        const b = self.ready_queue.bottom.load(.monotonic);
+        const t = self.ready_queue.top.load(.monotonic);
+
+        // Iterate valid range
+        var i = t;
+        while (i < b) : (i += 1) {
+             // Access raw slot directly
+             const task_opt = self.ready_queue.buffer[i & self.ready_queue.mask].load(.monotonic);
+             if (task_opt) |task| {
+                 self.allocator.destroy(task.base);
+                 self.allocator.destroy(task);
+             }
         }
-        self.ready_queue.deinit(self.allocator);
+
+        self.stack_cache.deinit(self.allocator);
         self.poller.deinit();
+    }
+
+    // ------------------------------------------------------------
+    // Memory Management
+    // ------------------------------------------------------------
+    // HOT PATH: Allocating a stack
+    fn allocStack(self: *Scheduler) ![]u8 {
+        // 1. Check Local Cache (5ns)
+        if (self.stack_cache.items.len > 0) {
+            const stack = self.stack_cache.pop().?;
+            return stack;
+        }
+        // 2. Fallback to Global Arena (Atomic Increment)
+        return global_arena.allocGlobalSlot();
+    }
+
+    // HOT PATH: Freeing a stack
+    fn freeStack(self: *Scheduler, stack: []u8) void {
+        // 1. Push to local cache (Amortized Alloc)
+        self.stack_cache.append(self.allocator, stack) catch {
+            // Cache full or OOM on arraylist?
+            // In a robust system, we might madvise immediately or drop reference.
+            // For MVP, if ArrayList fails, we technically leak the VMA mapping (not RAM).
+        };
+    }
+
+    // IDLE PATH: Scavenge memory (The Cleanup)
+    fn scavengeMemory(self: *Scheduler) void {
+        // Keep 16 stacks warm, release the rest to OS
+        const CACHE_LIMIT = 16;
+        while (self.stack_cache.items.len > CACHE_LIMIT) {
+            const stack = self.stack_cache.pop().?;
+            const aligned_ptr = @as([*]align(4096) u8, @alignCast(stack.ptr));
+            // Blocking Syscall! Only call when idle.
+            posix.madvise(aligned_ptr, stack.len, linux.MADV.DONTNEED) catch {};
+            // We keep the slice in the "air" (virtually mapped),
+            // but we drop it from our cache so we don't reuse it immediately?
+            // Actually, for a simple cache, we just drop the physical RAM.
+            // We can add it back to the cache if we want to reuse the VMA address,
+            // OR we can just drop the VMA pointer effectively leaking the virtual address
+            // (but saving the RAM).
+            // Since we have 1TB, leaking virtual addresses is fine for MVP.
+        }
     }
 
     // ------------------------------------------------------------
@@ -519,7 +622,9 @@ pub const Scheduler = struct {
     }
 
     pub fn run(self: *Scheduler) void {
-        defer self.stack_pool.flushLocalCache();
+        if (global_arena.base_addr == null) {
+            global_arena = VirtualArena.init() catch unreachable;
+        }
 
         const my_id = std.Thread.getCurrentId();
 
@@ -554,16 +659,25 @@ pub const Scheduler = struct {
                     const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
 
                     // 1. GET STACK FROM POOL (Fast!)
-                    const fiber_ptr = self.stack_pool.get(req.trampoline_addr) catch |err| {
+                    const stack_mem = self.allocStack() catch |err| {
                         std.debug.print("Stack Alloc Failed: {}\n", .{err});
+                        self.allocator.destroy(req);
+                        req_node = next_node;
+                        continue;
+                    };
+
+                    const fiber_ptr = self.allocator.create(Fiber) catch {
+                        self.freeStack(stack_mem); // Return memory to cache
                         self.allocator.destroy(req);
                         req_node = next_node; // Must advance, or infinite loop
                         continue;
                     };
+                    fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr);
 
                     // 2. Alloc Task shell (local allocator)
                     const task = self.allocator.create(Task) catch {
-                        self.stack_pool.put(fiber_ptr);
+                        self.freeStack(stack_mem);
+                        self.allocator.destroy(fiber_ptr);
                         self.allocator.destroy(req);
                         req_node = next_node; // Must advance, or infinite loop
                         continue;
@@ -583,7 +697,7 @@ pub const Scheduler = struct {
 
                     self.ready_queue.push(self.allocator, task) catch {
                         // If we can't queue the task, we must rollback everything
-                        self.stack_pool.put(fiber_ptr); // Save the fiber
+                        self.freeStack(stack_mem); // Save the fiber
                         self.allocator.destroy(task);   // Destroy the task
                         self.allocator.destroy(req);
                         req_node = next_node; // must advance, or infinite loop
@@ -637,7 +751,8 @@ pub const Scheduler = struct {
                     .Finished => {
                         // Recycle
                         _ = self.active_tasks.fetchSub(1, .monotonic);
-                        self.stack_pool.put(task.base);
+                        self.freeStack(task.base.stack.memory);
+                        self.allocator.destroy(task.base);
                         self.allocator.destroy(task);
                     },
                     .Ready => {
@@ -659,7 +774,7 @@ pub const Scheduler = struct {
                     // Don't steal from myself
                     if (victim != self) {
                         // Lock the victim's queue and take half tasks
-                        const stolen = self.ready_queue.tryStealFrom(&victim.ready_queue, self.allocator);
+                        const stolen = self.ready_queue.tryStealFrom(&victim.ready_queue, self.allocator, &self.inbox);
                         if (stolen > 0) {
                             // update my queue size to account for steals
                             _ = self.active_tasks.fetchAdd(stolen, .monotonic);
@@ -668,6 +783,19 @@ pub const Scheduler = struct {
                         }
                     }
                 }
+            }
+
+            // Scavange (ONLY IF IDLE):
+            if (self.ready_queue.len() == 0) {
+                 // Free excess stacks in local cache back to OS (physically)
+                 // Keep 16 hot.
+                 while (self.stack_cache.items.len > 16) {
+                     const stack = self.stack_cache.pop().?;
+                     const aligned_ptr = @as([*]align(4096) u8, @alignCast(stack.ptr));
+                     // BLOCKING SYSCALL: Only pay this when truly idle
+                     std.posix.madvise(aligned_ptr, stack.len, linux.MADV.DONTNEED) catch {};
+                     // We drop the pointer. VMA stays mapped but unused.
+                 }
             }
 
             // IF IDLE: Poll for IO

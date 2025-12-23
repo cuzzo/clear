@@ -12,10 +12,23 @@ const WaitGroup = fp.WaitGroup;
 
 // Stack
 
+fn allocTestMemory(size: usize) ![]align(4096) u8 {
+    return std.posix.mmap(
+        null,
+        size,
+        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+        -1,
+        0
+    );
+}
+
 test "Stack Allocation and Permissions" {
     // 1. Create a 1MB Stack
-    var stack = try Stack.init(1024 * 1024);
-    defer stack.deinit();
+    const memory = try allocTestMemory(1024 * 1024);
+    defer std.posix.munmap(memory);
+
+    const stack = Stack{ .memory = memory };
 
     std.debug.print("\nStack allocated at: {X} -> {X}\n", .{
         @intFromPtr(stack.memory.ptr),
@@ -58,10 +71,12 @@ fn fiberEntry() void {
 test "Context Switching" {
     std.debug.print("\n[Main] Initializing Fiber...", .{});
 
+    const memory = try allocTestMemory(1024 * 1024);
+    defer std.posix.munmap(memory);
+
     // 1. Create Fiber pointing to our function
     // We cast the function pointer to usize to write it to the stack
-    my_fiber = try Fiber.init(1024 * 1024, @intFromPtr(&fiberEntry));
-    defer my_fiber.deinit();
+    my_fiber = Fiber.init(memory, @intFromPtr(&fiberEntry));
 
     std.debug.print("\n[Main] Switching to Fiber...", .{});
 
