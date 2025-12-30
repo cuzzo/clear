@@ -17,6 +17,7 @@ fn createObject(allocator: std.mem.Allocator, comptime T: type) !*T {
         .len = @intCast(@sizeOf(T)),
         .log2_align = 4, // 16-byte alignment
         .anchored = false,
+        .tracker_index = 0,
     };
 
     const user_ptr_val = @intFromPtr(slice.ptr) + header_size;
@@ -34,6 +35,7 @@ fn createSlice(allocator: std.mem.Allocator, comptime T: type, n: usize) ![]T {
         .len = @intCast(@sizeOf(T) * n),
         .log2_align = 4,
         .anchored = false,
+        .tracker_index = 0,
     };
 
     const user_ptr_val = @intFromPtr(slice.ptr) + header_size;
@@ -41,7 +43,7 @@ fn createSlice(allocator: std.mem.Allocator, comptime T: type, n: usize) ![]T {
 }
 
 test "ScopeTracker: basic add and restore (pointer)" {
-    var tracker = ScopeTracker.init();
+    var tracker = try ScopeTracker.init(testing.allocator);
     defer tracker.deinit(testing.allocator);
 
     const ptr = try createObject(testing.allocator, u64);
@@ -52,7 +54,7 @@ test "ScopeTracker: basic add and restore (pointer)" {
 }
 
 test "ScopeTracker: basic add and restore (slice)" {
-    var tracker = ScopeTracker.init();
+    var tracker = try ScopeTracker.init(testing.allocator);
     defer tracker.deinit(testing.allocator);
 
     const slice = try createSlice(testing.allocator, u8, 128);
@@ -63,7 +65,7 @@ test "ScopeTracker: basic add and restore (slice)" {
 }
 
 test "ScopeTracker: nested scopes" {
-    var tracker = ScopeTracker.init();
+    var tracker = try ScopeTracker.init(testing.allocator);
     defer tracker.deinit(testing.allocator);
 
     const root_item = try createObject(testing.allocator, u64);
@@ -79,7 +81,7 @@ test "ScopeTracker: nested scopes" {
 }
 
 test "ScopeTracker: closeAndCompact (Survivor Logic)" {
-    var tracker = ScopeTracker.init();
+    var tracker = try ScopeTracker.init(testing.allocator);
     defer tracker.deinit(testing.allocator);
 
     const mark = tracker.save();
@@ -100,7 +102,7 @@ test "ScopeTracker: closeAndCompact (Survivor Logic)" {
 }
 
 test "ScopeTracker: aligned types (max 16)" {
-    var tracker = ScopeTracker.init();
+    var tracker = try ScopeTracker.init(testing.allocator);
     defer tracker.deinit(testing.allocator);
 
     const AlignedData = struct {
@@ -114,7 +116,7 @@ test "ScopeTracker: aligned types (max 16)" {
 }
 
 test "ScopeTracker: closeAndCompact with slice survivor" {
-    var tracker = ScopeTracker.init();
+    var tracker = try ScopeTracker.init(testing.allocator);
     defer tracker.deinit(testing.allocator);
 
     const mark = tracker.save();

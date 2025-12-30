@@ -11,7 +11,7 @@ const User = struct {
     id: i64,
     score: i32,
     // We use a dummy field to make the object size realistic (e.g. 64 bytes)
-    padding: [40]u8 = undefined,
+    padding: [32]u8 = undefined,
 };
 
 const TreeNode = struct {
@@ -35,7 +35,8 @@ pub fn main() !void {
     defer allocator.free(frame_mem);
 
     var global_ctx = EbrContext{};
-    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, allocator, allocator, 0);
+    const c_alloc = std.heap.c_allocator;
+    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, c_alloc, c_alloc, 0);
     rt.wireAllocator();
     defer rt.deinit();
 
@@ -119,7 +120,20 @@ pub fn main() !void {
     }
 
     // ---------------------------------------------------------------------
-    // 5. REALISTIC (Binary Tree Insert - Alloc + Link)
+    // 5. LIST FILTER (Alloc + Anchor + Filter + Return)
+    // ---------------------------------------------------------------------
+    {
+        const LIST_ITERS = 50_000; // 50k batches of 50 items
+
+        // Native uses c_allocator to match Runtime's Heap/Slab overhead
+        const native_t = try measure(LIST_ITERS, 1, benchListNative, .{std.heap.c_allocator}, false);
+        const rt_t = try measure(LIST_ITERS, 1, benchListRuntime, .{&rt}, false);
+
+        printResult("5. List Filter (50 items)", native_t, rt_t);
+    }
+
+    // ---------------------------------------------------------------------
+    // 6. REALISTIC (Binary Tree Insert - Alloc + Link)
     // ---------------------------------------------------------------------
     {
         // For this test, we reduce iterations because it allocates LOTS of memory
@@ -129,7 +143,7 @@ pub fn main() !void {
         const native_t = try measure(TREE_ITERS, 1, benchTreeNative, .{std.heap.c_allocator}, false);
         const rt_t = try measure(TREE_ITERS, 1, benchTreeRuntime, .{&rt}, false);
 
-        printResult("5. Tree Insert (1k)", native_t, rt_t);
+        printResult("6. Tree Insert (1k)", native_t, rt_t);
     }
 
     std.debug.print("{s:-<90}\n\n", .{""});
@@ -236,7 +250,7 @@ fn benchStackDPSLogicRuntime(rt: *Runtime, u: *User, i: usize) void {
 
 // --- 3. Maybe Return (Affine) ---
 
-fn benchMaybeNative(alloc: std.mem.Allocator) !*User {
+fn benchMaybeNative(alloc: std.mem.Allocator) !void {
     const us1 = try alloc.create(User);
     const us2 = try alloc.create(User);
 
@@ -245,12 +259,12 @@ fn benchMaybeNative(alloc: std.mem.Allocator) !*User {
 
     // Logic: Return u2, Free u1
     alloc.destroy(us1);
-    return us2; // Caller would free u2, but we don't in the loop to avoid measuring caller cost
+    alloc.destroy(us2);
 }
 
-fn benchMaybeRuntime(rt: *Runtime) !*User {
+fn benchMaybeRuntime(rt: *Runtime) !void {
     const mark = rt.saveHeapMark();
-    // Note: We don't defer restoreHeapMark here because heapReturn does the cleanup logic.
+    defer rt.restoreHeapMark(mark); // we have to clear after heapReturn to avoid leak, not practical
 
     const us1 = try rt.heapCreate(User);
     const us2 = try rt.heapCreate(User);
@@ -260,7 +274,7 @@ fn benchMaybeRuntime(rt: *Runtime) !*User {
 
     // Logic: Return u2, Runtime Auto-Frees u1
     // This measures: Anchor Scan + Compaction + Freeing u1
-    return rt.heapReturn(mark, us2);
+    _ = rt.heapReturn(mark, us2);
 }
 
 // --- 4. Write Barrier ---
@@ -367,6 +381,82 @@ fn benchTreeRuntime(rt: *Runtime) !void {
         }
     }
     // No manual cleanup needed! restoreHeapMark handles it.
+}
+
+// --- 6. List Build & Filter ---
+
+fn benchListNative(alloc: std.mem.Allocator) !void {
+    var list = std.ArrayListUnmanaged(*User){};
+    defer list.deinit(alloc);
+
+    // 1. Build (50 items)
+    var i: usize = 0;
+    while (i < 50) : (i += 1) {
+        const u = try alloc.create(User);
+        u.* = .{ .id = @intCast(i), .score = @intCast(i) };
+        try list.append(alloc, u);
+    }
+
+    // 2. Filter (< 10)
+    i = 0;
+    while (i < list.items.len) {
+        if (list.items[i].score < 10) {
+            const removed = list.orderedRemove(i);
+            alloc.destroy(removed); // Manual Free
+        } else {
+            i += 1;
+        }
+    }
+    const slice = try list.toOwnedSlice(alloc);
+
+    // 3. Cleanup Result (Required to prevent OOM in benchmark loop)
+    for (slice) |u| alloc.destroy(u);
+    alloc.free(slice);
+}
+
+fn benchListRuntime(rt: *Runtime) !void {
+    const mark = rt.saveHeapMark();
+    defer rt.restoreHeapMark(mark);
+
+    _ = try buildAndFilter(rt, 50, 10);
+}
+
+// Your implementation (Logic verified)
+fn buildAndFilter(rt: *Runtime, n: usize, threshold: i32) ![]const *User {
+    const mark = rt.saveHeapMark();
+
+    var list = std.ArrayListUnmanaged(*User){};
+    try list.ensureTotalCapacity(rt.heapAlloc(), n);
+
+    // Phase 1: Build
+    for (0..n) |i| {
+        const user = try rt.heapCreate(User);
+        user.score = @intCast(i);
+
+        try list.append(rt.heapAlloc(), user);
+        rt.anchor(user);  // Manual Write Barrier: Item is now in collection
+    }
+
+    // Phase 2: Filter in-place
+    var i: usize = 0;
+    while (i < list.items.len) {
+        if (list.items[i].score < threshold) {
+            const removed = list.orderedRemove(i);
+            //rt.heapFree(removed);
+            rt.unanchor(removed);  // Manual Write Barrier: Item removed
+            // removed is now "Trash" and will be freed by heapReturn below
+        } else {
+            i += 1;
+        }
+    }
+
+    // Phase 3: Return
+    // heapReturn will:
+    // 1. Anchor 'slice' (the array buffer)
+    // 2. Anchor all *User pointers inside 'slice' (Recursive)
+    // 3. Free all unanchored objects (the filtered-out users)
+    const slice = try list.toOwnedSlice(rt.heapAlloc());
+    return rt.heapReturn(mark, slice);
 }
 
 

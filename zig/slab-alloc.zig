@@ -42,6 +42,9 @@ pub fn SlabAllocator(comptime T: type) type {
             const first_obj_offset = std.mem.alignForward(usize, header_size, object_align);
             std.debug.assert(slab_size > first_obj_offset + object_size);
 
+            local_alloc_mag.count = 0;
+            local_free_mag.count = 0;
+
             return .{
                 .allocator = allocator,
                 .slab_size = slab_size,

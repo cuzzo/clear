@@ -10,23 +10,63 @@ const Allocator = std.mem.Allocator;
 // Unanchor must be called when removing or setting (previous item).
 pub const ScopeTracker = struct {
     headers: std.ArrayListUnmanaged(*ObjectHeader),
+    anchored_bits: std.DynamicBitSetUnmanaged,
 
-    pub fn init() ScopeTracker {
-        return .{ .headers = .{} };
+    pub fn init(allocator: Allocator) !ScopeTracker {
+        var bits = std.DynamicBitSetUnmanaged{};
+        // PRE-ALLOCATE MAX SIZE (8KB)
+        // We use 'false' to initialize them all to unanchored
+        // This is way too big for green fibers.
+        // We need to set the starting size at something like 128 bytes / 1024 bits.
+        // We currently only support scope tracking up to ~55k scope heap variables.
+        // The transpiler should take care of >90% of heap variables.
+        // That would mean you'd need >1M heap objects in a single fiber to overflow
+        // If you refuse to lifetime annotate anything.
+        try bits.resize(allocator, std.math.maxInt(u16), false);
+
+        return .{
+            .headers = .{},
+            .anchored_bits = bits,
+        };
     }
 
-    pub fn deinit(self: *ScopeTracker, allocator: Allocator) void {
+    pub fn deinit(self: *ScopeTracker, object_allocator: Allocator, internal_allocator: Allocator) void {
+
+        // 1. Free the TRACKED OBJECTS using the Object Allocator (Slab)
         for (self.headers.items) |header| {
-             const total_len = @sizeOf(ObjectHeader) + header.len;
-             const raw_ptr = @as([*]u8, @ptrCast(header));
-             const slice = raw_ptr[0..total_len];
-             allocator.rawFree(slice, @enumFromInt(header.log2_align), @returnAddress());
+            const total_len = @sizeOf(ObjectHeader) + header.len;
+            const raw_ptr = @as([*]u8, @ptrCast(header));
+            const slice = raw_ptr[0..total_len];
+
+            // Use object_allocator here!
+            object_allocator.rawFree(slice, @enumFromInt(header.log2_align), @returnAddress());
         }
-        self.headers.deinit(allocator);
+
+        // 2. Free the INTERNAL LISTS using the Internal Allocator (Backing)
+        self.headers.deinit(internal_allocator);
+        self.anchored_bits.deinit(internal_allocator);
     }
 
     pub fn add(self: *ScopeTracker, allocator: Allocator, header: *ObjectHeader) !void {
+        if (self.headers.items.len >= std.math.maxInt(u16)) {
+             return error.ScopeTooLarge;
+        }
+
+        const idx = self.headers.items.len;
+        header.tracker_index = @intCast(idx);
+
+        self.anchored_bits.unset(idx);
         try self.headers.append(allocator, header);
+    }
+
+    // O(1) Anchor Operation (No object access needed if we had the index,
+    // but here we set the bit in the tracker instead of the header)
+    pub fn setAnchor(self: *ScopeTracker, header: *ObjectHeader, active: bool) void {
+        const idx = header.tracker_index;
+        // Safety check
+        if (idx < self.headers.items.len and self.headers.items[idx] == header) {
+            self.anchored_bits.setValue(idx, active);
+        }
     }
 
     pub fn save(self: *ScopeTracker) usize {
@@ -34,69 +74,79 @@ pub const ScopeTracker = struct {
     }
 
     pub fn forget(self: *ScopeTracker, header: *ObjectHeader) void {
-        var i = self.headers.items.len;
-        while (i > 0) {
-            i -= 1;
-            if (self.headers.items[i] == header) {
-                _ = self.headers.swapRemove(i);
-                return;
+        const idx = header.tracker_index;
+        if (idx < self.headers.items.len and self.headers.items[idx] == header) {
+            // Swap Remove is O(1)
+            // Returns the removed element. We ignore it.
+            _ = self.headers.swapRemove(idx);
+
+            // If we removed from the middle, the last element was moved to 'idx'.
+            // We must update its tracker_index to match its new location.
+            if (idx < self.headers.items.len) {
+                const swapped_in = self.headers.items[idx];
+                swapped_in.tracker_index = @intCast(idx);
             }
         }
+
     }
 
     pub fn closeAndCompact(self: *ScopeTracker, allocator: Allocator, mark: usize, survivor: ?*ObjectHeader) void {
-        // 1. Anchor the Root Survivor
-        if (survivor) |s| {
-            s.find().anchored = true;
-        }
+        if (survivor) |s| self.setAnchor(s, true);
 
-        // 2. COMPACT IN-PLACE
-        var write_idx = mark;
-        var read_idx = mark;
         const len = self.headers.items.len;
 
-        while (read_idx < len) : (read_idx += 1) {
-            const header = self.headers.items[read_idx];
-
-            // Check if this object is part of the survivor graph
-            if (header.find().anchored) {
-                // SURVIVOR: Move it to the write position
-                if (read_idx != write_idx) {
-                    // We swap instead of overwrite to preserve the dead pointers for step 3
-                    const dead = self.headers.items[write_idx];
-                    self.headers.items[write_idx] = header;
-                    self.headers.items[read_idx] = dead;
-                }
-                write_idx += 1;
+        for (mark..len) |i| {
+            const h = self.headers.items[i];
+            if (h.find().anchored) {
+                self.anchored_bits.set(i);
             }
         }
 
-        // 3. FREE DEAD OBJECTS (Now safe, as we are done with liveness checks)
-        // Everything from write_idx to len is dead.
-        for (self.headers.items[write_idx..len]) |header| {
-             const total_len = @sizeOf(ObjectHeader) + header.len;
-             const raw_ptr = @as([*]u8, @ptrCast(header));
-             const slice = raw_ptr[0..total_len];
-             allocator.rawFree(slice, @enumFromInt(header.log2_align), @returnAddress());
+        var write_idx = mark;
+        var read_idx = mark;
+
+        while (read_idx < len) : (read_idx += 1) {
+            const is_anchored = self.anchored_bits.isSet(read_idx);
+            const header = self.headers.items[read_idx];
+
+            if (is_anchored) {
+                // SURVIVOR: Move to new position
+                if (read_idx != write_idx) {
+                    self.headers.items[write_idx] = header;
+                    header.tracker_index = @intCast(write_idx);
+                }
+
+                // RESET: Clear the UF flag for the next scope
+                // This is safe now because we know the parent wasn't freed in this pass.
+                header.find().anchored = false;
+
+                write_idx += 1;
+            } else {
+                 // TRASH logic
+                 const total_len = @sizeOf(ObjectHeader) + header.len;
+                 const raw_ptr = @as([*]u8, @ptrCast(header));
+                 const slice = raw_ptr[0..total_len];
+                 allocator.rawFree(slice, @enumFromInt(header.log2_align), @returnAddress());
+            }
         }
 
-        // 4. Shrink the list
         self.headers.shrinkRetainingCapacity(write_idx);
 
-        // 5. Reset Anchor Flags for the survivors
-        for (self.headers.items[mark..write_idx]) |h| {
-            h.find().anchored = false;
+        // Clear bits for the survivors
+        for (mark..write_idx) |i| {
+            self.anchored_bits.unset(i);
         }
     }
 };
 
 /// The Hidden Header that lives immediately before the user pointer.
-/// 64-bit Layout: [ 8b Parent | 4b Len | 1b Align | 1b Anchor | 2b Pad ] = 16 Bytes
+/// 64-bit Layout: [ 8b Parent | 4b Len | 1b Align | 1b Anchor | 2b tracker index ] = 16 Bytes
 pub const ObjectHeader = struct {
     parent: *ObjectHeader,
     len: u32,              // Optimized: 4GB max object size is plenty
     log2_align: u8,
     anchored: bool,
+    tracker_index: u16,
 
     pub fn find(self: *ObjectHeader) *ObjectHeader {
         var root = self;

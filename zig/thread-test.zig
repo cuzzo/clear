@@ -1,11 +1,12 @@
 const std = @import("std");
 
 const CheatLib = @import("runtime-header.zig").CheatLib;
-const Runtime = @import("runtime.zig").Runtime;
+const rt_mod = @import("runtime.zig");
 const sm = @import("shared-memory.zig");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 
+const Runtime = rt_mod.Runtime;
 const EbrContext = @import("ebr.zig").EbrContext;
 const ThreadLocalEbr = @import("ebr.zig").ThreadLocalEbr;
 const Locked = sm.Locked;
@@ -210,10 +211,14 @@ test "MVCC Implementation" {
         // 4. Verify Read works with new Guard API
         // We need a dummy runtime to read from the main thread (since we aren't inside spawnThread)
         // In a real app, main thread would also be an "EBR Thread".
+        const slab = Runtime.Slab64.init(std.heap.page_allocator, 4 * 1024);
         const main_ebr = ThreadLocalEbr{ .context = &global_ctx };
         var main_rt = Runtime{
+            .slab = slab,
             .ebr = main_ebr,
             .frame_backing = undefined,
+            .backing_allocator = undefined,
+            .heap_allocator = undefined,
             .frame_fba = undefined,
             .global_allocator = undefined,
             .owns_frame_memory = true,
@@ -221,6 +226,7 @@ test "MVCC Implementation" {
             .local_allocator = undefined,
             .overflow_arena = undefined,
             .smart_allocator = undefined,
+            .tracker = undefined,
         };
         main_rt.wireAllocator();
 

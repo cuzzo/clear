@@ -125,7 +125,7 @@ pub const Runtime = struct {
     // 64 bytes covers: ObjectHeader (16) + TreeNode (24) + padding.
     // Alignment 16 ensures we satisfy ObjectHeader requirements.
     const Block64 = [64]u8;
-    const Slab64 = SlabGen(Block64);
+    pub const Slab64 = SlabGen(Block64);
 
     slab: Slab64,
 
@@ -202,14 +202,14 @@ pub const Runtime = struct {
             .smart_allocator = undefined,
             .heap_allocator = undefined,
             .overflow_arena = CheatArena.init(backing_alloc),
-            .tracker = ScopeTracker.init(),
+            .tracker = try ScopeTracker.init(backing_alloc),
         };
     }
 
     pub fn deinit(self: *Runtime) void {
         self.ebr.deinit(self.global_allocator);
         self.overflow_arena.deinit();
-        self.tracker.deinit(self.local_allocator);
+        self.tracker.deinit(self.local_allocator, self.backing_allocator);
         self.slab.deinit();
 
         // We DO NOT free global_allocator (it's shared)
@@ -275,6 +275,8 @@ pub const Runtime = struct {
             if (new_len > 64) return false;
             return true;
         }
+
+        if (new_len <= 64) return false;
 
         return self.backing_allocator.rawResize(buf, buf_align, new_len, ret_addr);
     }
@@ -390,6 +392,7 @@ pub const Runtime = struct {
             .anchored = false,
             .len = @intCast(n),
             .log2_align = @intCast(@intFromEnum(final_align)),
+            .tracker_index = 0,
         };
 
         // 4. Register with SBR Tracker
@@ -469,6 +472,19 @@ pub const Runtime = struct {
 
     // Heap/Slab auto-track & free helpers:
 
+    // Policy: Objects smaller than 256 bytes go to Nursery.
+    // Larger objects go directly to Heap.
+    //const MAX_NURSERY_SIZE = 256;
+    //pub fn create(self: *Runtime, comptime T: type) !*T {
+    //    if (@sizeOf(T) <= MAX_NURSERY_SIZE) {
+    //        // GEN 0: Fast Bump Pointer, No SBR Tracking
+    //        return self.frameAlloc().create(T);
+    //    } else {
+    //        // GEN 1: Direct Heap, SBR Tracked
+    //        return self.heapCreate(T);
+    //    }
+    //}
+
     // Allocates: [ ObjectHeader | User Data T ]
     pub fn heapCreate(self: *Runtime, comptime T: type) !*T {
         // 1. Static Checks
@@ -495,6 +511,7 @@ pub const Runtime = struct {
             .anchored = false,
             .len = @sizeOf(T),
             .log2_align = @intCast(std.math.log2_int(usize, 16)), // We allocated with 16
+            .tracker_index = 0,
         };
 
         // 5. Register
@@ -508,14 +525,14 @@ pub const Runtime = struct {
 
     // Manual API: Mark an object as a Survivor (Anchor).
     // Use this when modifying an argument (Side-Effects) but returning void.
-    pub fn anchor(_: *Runtime, ptr: anytype) void {
+    pub fn anchor(self: *Runtime, ptr: anytype) void {
         const hdr = sbr_mod.ObjectHeader.fromUserPtr(ptr);
-        hdr.find().anchored = true;
+        self.tracker.setAnchor(hdr, true);
     }
 
-    pub fn unanchor(_: *Runtime, ptr: anytype) void {
+    pub fn unanchor(self: *Runtime, ptr: anytype) void {
         const hdr = sbr_mod.ObjectHeader.fromUserPtr(ptr);
-        hdr.find().anchored = false;
+        self.tracker.setAnchor(hdr, false);
     }
 
     // Internal Helper: Recursively find and anchor all heap pointers in a value.
@@ -548,14 +565,10 @@ pub const Runtime = struct {
             .optional => {
                 if (value) |v| self.anchorRoots(v);
             },
+            // This is a non-starter
             .@"struct" => |struct_info| {
                 inline for (struct_info.fields) |field| {
                     self.anchorRoots(@field(value, field.name));
-                }
-            },
-            .array => |_| {
-                for (value) |item| {
-                    self.anchorRoots(item);
                 }
             },
             // Unions, Vectors, etc. can be added if needed
@@ -566,14 +579,8 @@ pub const Runtime = struct {
     // Safely return an object (or Struct of objects) from the heap.
     // This now automatically scans structs to find all survivors.
     pub inline fn heapReturn(self: *Runtime, mark: usize, survivor: anytype) @TypeOf(survivor) {
-        // 1. Auto-Detect and Anchor ALL Roots in the return value
         self.anchorRoots(survivor);
-
-        // 2. Compact the scope
-        // We pass 'null' because we have already manually anchored the specific roots above.
-        // The compaction logic will promote the anchored objects to the parent scope.
         self.tracker.closeAndCompact(self.local_allocator, mark, null);
-
         return survivor;
     }
 
@@ -712,12 +719,11 @@ pub const Runtime = struct {
             task.config.timeout_ms
         ) catch unreachable;
 
-        defer rt.deinit();
         rt.wireAllocator();
 
         const rt_ptr = @as(*anyopaque, @ptrCast(&rt));
 
-        // 3. EXECUTE USER CODE
+        // 4. EXECUTE USER CODE
         if (task.user_fn(rt_ptr, task.context)) {
             // Success
         } else |err| {
@@ -731,11 +737,11 @@ pub const Runtime = struct {
             }
         }
 
-        // 4. Mark as finished before yielding back
-        task.status = .Finished;
 
         // 5. Cleanup & Yield
         // When we yield here, we go back to Scheduler.run loop.
+        rt.deinit();  // must manually de-init
+        task.status = .Finished;
         task.base.yield();
     }
 
