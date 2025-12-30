@@ -1,3 +1,5 @@
+require_relative "type"
+
 # ==========================================
 # AST
 # ==========================================
@@ -6,45 +8,72 @@ module AST
     def line; token.line; end
     def column; token.column; end
     def token_value; token.value; end
-    attr_accessor :full_type
-    attr_accessor :coerced_type
+
+    attr_reader :coerced_type_object
+    attr_reader :type_object
     attr_accessor :zig_pattern
 
-    def resolved_type
-      # function_signature
-      if full_type.is_a?(Hash)
-        ft = full_type[:return_type]
-      # Lambda
-      elsif full_type.is_a?(Array)
-        ft = full_type[2]
-      else
-        ft = full_type
-      end
+    # -- BACKWARDS COMPATIBILITY SETTER --
+    # When existing code sets full_type = :Number, we wrap it.
+    def full_type=(val)
+      @type_object = Type.new(val)
+    end
 
-      if ft[0] == "%"
-        full_type[1..].to_sym
-      else
-        full_type
-      end
+    # -- BACKWARDS COMPATIBILITY GETTER --
+    # Returns the raw value so things like .is_a?(Hash) still work
+    # until you refactor them.
+    def full_type
+      @type_object&.raw
+    end
+
+    def coerced_type=(val)
+      return @coerced_type_object = nil if val.nil?
+
+      # Same logic: Wrap raw values, accept Type objects
+      @coerced_type_object = val.is_a?(Type) ? val : Type.new(val)
+    end
+
+    def coerced_type
+      @coerced_type_object&.raw
+    end
+
+    # Use this to access the rich object for coerced types
+    def coerced_type_info
+      @coerced_type_object
+    end
+
+    # -- NEW PREFERRED ACCESSOR --
+    # Use this in new code to get the rich object
+    def type_info
+      @type_object
+    end
+
+    # -- REFACTORED HELPERS --
+    # Delegate to the new class
+    def resolved_type
+      @type_object&.resolved
     end
 
     def base_type
-       resolved_type.to_s.sub(/\[.*\]$/, "").to_sym
+      @type_object&.base_type
     end
 
     def storage
-      full_type[0] == "%" ? :heap : :stack
+      @type_object&.location
     end
 
     def metatype
       return :lambda if self.is_a?(LambdaLit)
       return :named_function if self.is_a?(FunctionDef)
-      return nil if resolved_type.nil?
-      return :void if resolved_type == :Void
-      return :die if resolved_type == :NoReturn
-      return :array if resolved_type.to_s.end_with?("]")
-      return :hashmap if resolved_type.to_s.start_with?("HashMap")
-      return :struct if !PRIMITIVE_TYPES.include?(resolved_type)
+
+      t = @type_object
+      return nil unless t
+
+      return :void if t.resolved == :Void
+      return :die if t.resolved == :NoReturn
+      return :array if t.resolved.to_s.end_with?("]")
+      return :hashmap if t.resolved.to_s.start_with?("HashMap")
+      return :struct if !t.primitive?
       return :primitive
     end
   end
@@ -85,7 +114,7 @@ module AST
 
   UNARY_OPS = ['-', '!', '~']
 
-  PRIMITIVE_TYPES = [:Number, :Bool, :Byte]
+  PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64]
 
   PRECEDENCE_MAP = {
     8 => { ops: ['**'], assoc: :right },

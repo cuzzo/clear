@@ -1135,60 +1135,9 @@ private
     return :"Any[]"
   end
 
-  # ==========================================
-  # TYPE SIZING LOGIC
-  # ==========================================
-
-  # Returns size in 64-bit slots
   def get_type_slot_size(type_name)
-    type_str = type_name.to_s
-
-    if type_str.start_with?("Byte[") && type_str.end_with?("]")
-      count = type_str.match(/\[(\d+)\]/)[1].to_i
-      # 1 slot per 8 bytes (rounded up)
-      # e.g. 10 chars -> 2 slots (16 bytes)
-      return (count / 8.0).ceil
-    end
-
-    # CASE A: Primitive / Reference / Pointer
-    # These always take 1 slot (Number, String, List, StackPtr, Any)
-    if [:Number, :Bool, :Byte, :Int64, :Any, :StackPtr, :String].include?(type_name) ||
-       type_str.start_with?("List") ||
-       type_str.include?("[]") # Dynamic arrays are just pointers
-       return 1
-    end
-
-    # CASE B: Fixed Array "Type[N]"
-    # Recursive Size = N * SizeOf(Type)
-    if type_str.include?("[")
-      match = type_str.match(/^(\w+)\[(\d+)\]$/)
-      if match
-        base_type = match[1].to_sym
-        count = match[2].to_i
-
-        base_size = get_type_slot_size(base_type)
-        return count * base_size
-      end
-      # Fallback for complex array types or malformed strings
-      return 1
-    end
-
-    # CASE C: Structs (The tricky part)
-    # We look up the schema in the SCOPE stack
-    schema = lookup_type_schema(type_name)
-
-    if schema
-      total_slots = 0
-      schema.each do |field_name, field_type|
-        # Recursively calculate size of each field
-        total_slots += get_type_slot_size(field_type)
-      end
-      return total_slots
-    end
-
-    # Fallback / Error
-    # If we don't know what it is, assume it's a pointer (1 slot)
-    return 1
+    type_obj = type_name.is_a?(Symbol) ? Type.new(type_name) : type_name
+    type_obj.slot_size { |name| lookup_type_schema(name) }
   end
 
   def verify_function_signature(node, signature)
@@ -1338,59 +1287,11 @@ private
   # TYPE CHECKING & AUTOCAST LOGIC
   # ==========================================
 
+  # TODO: use directly -> track down everywhere we have a string, make a type
   def is_safe_autocast?(source_type, target_type)
-    s_str = source_type.to_s
-    t_str = target_type.to_s
-
-    # 1. Exact Match
-    return true if source_type == target_type
-    return true if target_type == :Any || source_type == :Any
-
-    # 2. Primitives (Safe widening/narrowing)
-    if (source_type == :Number && target_type == :Int64) ||
-       (source_type == :Int64 && target_type == :Number) ||
-       (source_type == :Byte && target_type == :Number) ||
-       (source_type == :Number && target_type == :Byte) ||
-       (source_type == :Byte && target_type == :String)
-       return true
-    end
-
-    # 3. Array Coercion (The specific case failing your test)
-    #    Target: "Number[]" (Dynamic)
-    #    Source: "Number[4]" (Fixed) OR "Number[]" (Heap)
-    if t_str.end_with?("[]") || t_str.end_with?("[*]")
-      target_base = t_str.sub(/\[\*?\]$/, "") # Strip "[]" or "[*]" to get "Number"
-
-      if match_source = s_str.match(/^(.+)\[.*\]$/)
-        source_base = match_source[1] # "Number"
-
-        # Check if the BASE types are compatible (Number -> Int64)
-        return true if is_safe_autocast?(source_base.to_sym, target_base.to_sym)
-      end
-
-      # Handle Empty List: "Any[]" -> "Number[]"
-      # If source is empty list (Any[]), allow cast to specific array
-      return true if s_str == "Any[]"
-
-    # Fixed-Sized Arrays
-    elsif match_target = t_str.match(/^(.+)\[(\d+)\]$/)
-      target_base = match_target[1]
-      target_limit = match_target[2].to_i
-
-      # Check 1: Source is also Fixed (e.g. "Number[4]")
-      if match_source = s_str.match(/^(.+)\[(\d+)\]$/)
-        source_base = match_source[1]
-        source_size = match_source[2].to_i
-
-        # Allow if bases match AND source fits in target (4 <= 10)
-        return true if is_safe_autocast?(source_base.to_sym, target_base.to_sym) && source_size <= target_limit
-      end
-
-      # Check 2: Source is Empty List (always fits)
-      return true if s_str == "Any[]"
-    end
-
-    false
+    source = source_type.is_a?(Symbol) ? Type.new(source_type) : source_type
+    target = target_type.is_a?(Symbol) ? Type.new(target_type) : target_type
+    target.accepts?(source)
   end
 
   def check_array_type_mismatch!(node, type_inf, type_decl)
