@@ -1,6 +1,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+// TODO: Eventually, 95% of this will move to compile time.
+// Overhead here will be almost completlely eliminated.
+// Transpiler MUST insert anchor and unanchor for collections.
+// If a collection is passed into a function, and it's pruned, data will NOT be freed in place
+// Unanchor only affects survivors, the calling function will free data when it collapses.
+// Anchor must be called on collections when adding or setting a heap alloc only!
+// Unanchor must be called when removing or setting (previous item).
 pub const ScopeTracker = struct {
     headers: std.ArrayListUnmanaged(*ObjectHeader),
 
@@ -55,22 +62,28 @@ pub const ScopeTracker = struct {
             if (header.find().anchored) {
                 // SURVIVOR: Move it to the write position
                 if (read_idx != write_idx) {
+                    // We swap instead of overwrite to preserve the dead pointers for step 3
+                    const dead = self.headers.items[write_idx];
                     self.headers.items[write_idx] = header;
+                    self.headers.items[read_idx] = dead;
                 }
                 write_idx += 1;
-            } else {
-                // DEAD: Free it immediately
-                const total_len = @sizeOf(ObjectHeader) + header.len;
-                const raw_ptr = @as([*]u8, @ptrCast(header));
-                const slice = raw_ptr[0..total_len];
-                allocator.rawFree(slice, @enumFromInt(header.log2_align), @returnAddress());
             }
         }
 
-        // 3. Shrink the list
+        // 3. FREE DEAD OBJECTS (Now safe, as we are done with liveness checks)
+        // Everything from write_idx to len is dead.
+        for (self.headers.items[write_idx..len]) |header| {
+             const total_len = @sizeOf(ObjectHeader) + header.len;
+             const raw_ptr = @as([*]u8, @ptrCast(header));
+             const slice = raw_ptr[0..total_len];
+             allocator.rawFree(slice, @enumFromInt(header.log2_align), @returnAddress());
+        }
+
+        // 4. Shrink the list
         self.headers.shrinkRetainingCapacity(write_idx);
 
-        // 4. Reset Anchor Flags for the survivors
+        // 5. Reset Anchor Flags for the survivors
         for (self.headers.items[mark..write_idx]) |h| {
             h.find().anchored = false;
         }

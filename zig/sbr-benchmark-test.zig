@@ -41,28 +41,28 @@ pub fn main() !void {
 
     const ITERATIONS = 1_000_000;
 
-    std.debug.print("\n{s:-<90}\n", .{""});
-    std.debug.print("{s:^90}\n", .{"RUNTIME vs NATIVE BENCHMARK (-O ReleaseFast)"});
-    std.debug.print("{s:-<90}\n", .{""});
+    std.debug.print("\n{s:-<92}\n", .{""});
+    std.debug.print("{s:^92}\n", .{"RUNTIME vs NATIVE BENCHMARK (-O ReleaseFast)"});
+    std.debug.print("{s:-<92}\n", .{""});
     std.debug.print("{s:<35} | {s:<15} | {s:<15} | {s:<10}\n", .{ "Test Case", "Native (ns/op)", "Runtime (ns/op)", "Overhead" });
-    std.debug.print("{s:-<90}\n", .{""});
+    std.debug.print("{s:-<92}\n", .{""});
 
     // ---------------------------------------------------------------------
     // 1. PURE MATH (Function Call Overhead)
     // ---------------------------------------------------------------------
     {
-        const native_t = try measure(ITERATIONS, 25, benchMathNative, .{}, true);
-        const rt_t = try measure(ITERATIONS, 25, benchMathRuntime, .{&rt}, true);
-        printResult("1. Pure Math (25x)", native_t, rt_t);
+        const native_t = try measure(ITERATIONS, 100, benchMathNative, .{}, true);
+        const rt_t = try measure(ITERATIONS, 100, benchMathRuntime, .{&rt}, true);
+        printResult("1. Pure Math (100x)", native_t, rt_t);
     }
 
     // ---------------------------------------------------------------------
     // 2. DETERMINATE STACK RETURN (Frame Alloc vs Stack Return)
     // ---------------------------------------------------------------------
     {
-        const native_t = try measure(ITERATIONS, 25, benchStackNative, .{}, false);
-        const rt_t = try measure(ITERATIONS, 25, benchStackRuntime, .{&rt}, false);
-        printResult("2a. Stack Return Native (25x)", native_t, rt_t);
+        const native_t = try measure(ITERATIONS, 100, benchStackNative, .{}, false);
+        const rt_t = try measure(ITERATIONS, 100, benchStackRuntime, .{&rt}, false);
+        printResult("2a. Stack Return Native (100x)", native_t, rt_t);
     }
 
     // ---------------------------------------------------------------------
@@ -70,9 +70,9 @@ pub fn main() !void {
     // ---------------------------------------------------------------------
     {
         var user: User = undefined;
-        const native_t = try measure(ITERATIONS, 25, benchStackDPSNative, .{&user}, false);
-        const rt_t = try measure(ITERATIONS, 25, benchStackDPSRuntime, .{&rt, &user}, false);
-        printResult("2b. Stack Return DPS (25x)", native_t, rt_t);
+        const native_t = try measure(ITERATIONS, 100, benchStackDPSNative, .{&user}, false);
+        const rt_t = try measure(ITERATIONS, 100, benchStackDPSRuntime, .{&rt, &user}, false);
+        printResult("2b. Stack Return DPS (100x)", native_t, rt_t);
     }
 
     // ---------------------------------------------------------------------
@@ -80,12 +80,10 @@ pub fn main() !void {
     // ---------------------------------------------------------------------
     {
         var user: User = undefined;
-        const native_t = try measure(ITERATIONS, 10, benchStackDPSLogicNative, .{&user}, true);
-        const rt_t = try measure(ITERATIONS, 10, benchStackDPSLogicRuntime, .{&rt, &user}, true);
-        printResult("2b. Stack Return DPS - Logic (10x)", native_t, rt_t);
+        const native_t = try measure(ITERATIONS, 100, benchStackDPSLogicNative, .{&user}, true);
+        const rt_t = try measure(ITERATIONS, 100, benchStackDPSLogicRuntime, .{&rt, &user}, true);
+        printResult("2c. Stack Return DPS - Logic (100x)", native_t, rt_t);
     }
-
-
 
     // ---------------------------------------------------------------------
     // 3. MAYBE RETURN (Conditional Free / Affine Move)
@@ -286,31 +284,43 @@ fn benchTreeNative(alloc: std.mem.Allocator) !void {
 
     // Insert 1000 nodes
     var i: i64 = 0;
+    var rng = std.Random.DefaultPrng.init(0x12345678);
     while (i < 1000) : (i += 1) {
         const node = try alloc.create(TreeNode);
-        node.val = i;
+        // 2. Random value prevents linked-list degeneracy
+        node.val = rng.random().int(i64);
         node.left = null;
         node.right = null;
 
         if (root == null) {
             root = node;
         } else {
-            // Simple append to right for benchmark stability (O(N))
-            // We just want to test alloc + link cost
+            // 3. Iterative BST Insert
             var curr = root.?;
-            while (curr.right) |r| curr = r;
-            curr.right = node;
+            while (true) {
+                if (node.val < curr.val) {
+                    if (curr.left) |l| { curr = l; } else { curr.left = node; break; }
+                } else {
+                    if (curr.right) |r| { curr = r; } else { curr.right = node; break; }
+                }
+            }
         }
     }
-
     // Cleanup entire tree
     destroyTree(alloc, root);
 }
 
 fn destroyTree(alloc: std.mem.Allocator, node: ?*TreeNode) void {
-    if (node) |n| {
-        destroyTree(alloc, n.left);
-        destroyTree(alloc, n.right);
+    var stack = std.ArrayListUnmanaged(*TreeNode){};
+    defer stack.deinit(alloc);
+
+    if (node) |n| stack.append(alloc, n) catch unreachable;
+
+    // 2. Iterative cleanup (prevents Stack Overflow)
+    while (stack.items.len > 0) {
+        const n = stack.pop().?;
+        if (n.left) |l| stack.append(alloc, l) catch unreachable;
+        if (n.right) |r| stack.append(alloc, r) catch unreachable;
         alloc.destroy(n);
     }
 }
@@ -323,21 +333,37 @@ fn benchTreeRuntime(rt: *Runtime) !void {
     var root: ?*TreeNode = null;
 
     var i: i64 = 0;
+    var rng = std.Random.DefaultPrng.init(0x12345678);
     while (i < 1000) : (i += 1) {
         const node = try rt.heapCreate(TreeNode);
-        node.val = i;
+        // Randomize value to create a balanced-ish tree, preventing O(N) stack depth
+        node.val = rng.random().int(i64);
+        node.left = null;
+        node.right = null;
 
         if (root == null) {
             root = node;
         } else {
             var curr = root.?;
-            while (curr.right) |r| curr = r;
-
-            // The Runtime Cost:
-            // 1. Pointer Assign
-            curr.right = node;
-            // 2. Barrier (UF)
-            rt.ufConnect(curr, node);
+            while (true) {
+                if (node.val < curr.val) {
+                    if (curr.left) |l| {
+                        curr = l;
+                    } else {
+                        curr.left = node;
+                        rt.ufConnect(curr, node); // Barrier
+                        break;
+                    }
+                } else {
+                    if (curr.right) |r| {
+                        curr = r;
+                    } else {
+                        curr.right = node;
+                        rt.ufConnect(curr, node); // Barrier
+                        break;
+                    }
+                }
+            }
         }
     }
     // No manual cleanup needed! restoreHeapMark handles it.
@@ -388,7 +414,7 @@ inline fn runOne(func: anytype, args: anytype) void {
 
 fn printResult(name: []const u8, native_ns: u64, rt_ns: u64) void {
     const ratio = @as(f64, @floatFromInt(rt_ns)) / @as(f64, @floatFromInt(native_ns));
-    std.debug.print("{s:<35} | {d:<10} ns | {d:<10} ns | {d:>8.2}x\n",
+    std.debug.print("{s:<35} | {d:<12} ns | {d:<12} ns | {d:>8.2}x\n",
         .{ name, native_ns, rt_ns, ratio });
 }
 

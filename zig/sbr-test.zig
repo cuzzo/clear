@@ -605,7 +605,7 @@ test "FAILURE MODE: Barnacle Injection (Upward Linking)" {
 }
 
 // -------------------------------------------------------------------------
-// SCENARIO 7: TWIN DRAGONS (The Struct Return Failure)
+// SCENARIO 7: TWIN DRAGONS
 // -------------------------------------------------------------------------
 
 const Pair = struct {
@@ -613,7 +613,7 @@ const Pair = struct {
     right: *User,
 };
 
-pub fn createTwinDragons(rt: *Runtime) !Pair {
+pub fn createTwinDragonsBad(rt: *Runtime) !Pair {
     const mark = rt.saveHeapMark();
 
     // 1. Create two DISJOINT heap objects
@@ -647,7 +647,7 @@ test "FAILURE MODE: Twin Dragons" {
     defer rt.deinit();
 
     // 1. Call the function
-    const twins = try createTwinDragons(&rt);
+    const twins = try createTwinDragonsBad(&rt);
 
     std.debug.print("\n[Twin] Checking Left (ID 1)...", .{});
     // This might succeed purely by luck if memory hasn't been overwritten yet,
@@ -660,6 +660,50 @@ test "FAILURE MODE: Twin Dragons" {
     // We expect the data to be valid, but because heapReturn didn't anchor it,
     // it was technically freed. The test runner (GPA) might catch this as a Use-After-Free
     // or we might see garbage data.
+    try std.testing.expectEqual(@as(i64, 2), twins.right.id);
+}
+
+// TODO: In transpiler, Pair would be a heap alloc, this would be a UF, zero runtime overhead.
+pub fn createTwinDragonsGood(rt: *Runtime) !Pair {
+    const mark = rt.saveHeapMark();
+
+    // 1. Create two DISJOINT heap objects
+    const dragon_l = try rt.heapCreate(User);
+    dragon_l.* = User{ .id = 1, .score = 100, .name = "Left" };
+
+    const dragon_r = try rt.heapCreate(User);
+    dragon_r.* = User{ .id = 2, .score = 200, .name = "Right" };
+
+    rt.anchor(dragon_l);
+    rt.anchor(dragon_r);
+    const result_pair = Pair{ .left = dragon_l, .right = dragon_r };
+
+    return rt.heapReturn(mark, result_pair);
+}
+
+test "SUCCESS MODE: Twin Dragons" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    // Use a fresh frame for this test
+    const frame_mem = try allocator.alloc(u8, 1024 * 1024);
+    defer allocator.free(frame_mem);
+
+    var global_ctx = EbrContext{};
+    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, allocator, allocator, 0);
+    rt.wireAllocator();
+    defer rt.deinit();
+
+    // 1. Call the function
+    const twins = try createTwinDragonsGood(&rt);
+
+    std.debug.print("\n[Twin] Checking Left (ID 1)...", .{});
+    // This might succeed purely by luck if memory hasn't been overwritten yet,
+    // or fail immediately.
+    try std.testing.expectEqual(@as(i64, 1), twins.left.id);
+
+    std.debug.print(" OK. Checking Right (ID 2)...", .{});
+
     try std.testing.expectEqual(@as(i64, 2), twins.right.id);
 }
 
@@ -712,5 +756,255 @@ test "STRESS: Ouroboros (Cycles)" {
     rt.heapFree(snake);
 
     rt.deinit();
+}
+
+//// -------------------------------------------------------------------------
+//// SCENARIO 9: Cross Scope Barnacle
+//// -------------------------------------------------------------------------
+//pub fn crossScopeDanger(rt: *Runtime) !*User {
+//    const outer_mark = rt.saveHeapMark();
+//
+//    const outer_user = try rt.heapCreate(User);
+//    outer_user.id = 1;
+//
+//    {
+//        const inner_mark = rt.saveHeapMark();
+//
+//        const inner_user = try rt.heapCreate(User);
+//        inner_user.id = 2;
+//
+//        // DANGER: Outer points to Inner
+//        rt.ufConnect(outer_user, inner_user);
+//
+//        // Inner scope closes - inner_user is freed
+//        rt.restoreHeapMark(inner_mark);
+//    }
+//
+//    // outer_user now has dangling pointer to freed inner_user
+//    return rt.heapReturn(outer_mark, outer_user);
+//}
+//
+//test "Cross Scope Barnacle" {
+//    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//    // We expect NO leaks here.
+//    defer {
+//        const status = gpa.deinit();
+//        if (status == .leak) @panic("LEAK DETECTED in Cross Scope!");
+//    }
+//    const allocator = gpa.allocator();
+//
+//    const frame_mem = try allocator.alloc(u8, 1024 * 1024);
+//    defer allocator.free(frame_mem);
+//
+//    var global_ctx = EbrContext{};
+//    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, allocator, allocator, 0);
+//    rt.wireAllocator();
+//
+//    // This should never transpile, but leads to an error.
+//    // Should cause run-time error.
+//    const user = try crossScopeDanger(&rt);
+//
+//    try std.testing.expectEqual(@as(i64, 1), user.id);
+//
+//    rt.heapFree(user);
+//
+//    rt.deinit();
+//}
+
+// -------------------------------------------------------------------------
+// SCENARIO 10: Conditional Return
+// -------------------------------------------------------------------------
+pub fn conditionalAlloc(rt: *Runtime, flag: bool) !?*User {
+    const mark = rt.saveHeapMark();
+
+    var result: ?*User = null;
+
+    if (flag) {
+        const user = try rt.heapCreate(User);
+        user.id = 1;
+        result = user;
+    }
+
+    // Your UF analysis: Does it trace through the Optional?
+    // If flag is false, result is null - correct.
+    // If flag is true, result contains user - must survive.
+
+    return rt.heapReturn(mark, result);
+}
+
+test "Conditional Alloc" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // We expect NO leaks here.
+    defer {
+        const status = gpa.deinit();
+        if (status == .leak) @panic("LEAK DETECTED in Cross Scope!");
+    }
+    const allocator = gpa.allocator();
+
+    const frame_mem = try allocator.alloc(u8, 1024 * 1024);
+    defer allocator.free(frame_mem);
+
+    var global_ctx = EbrContext{};
+    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, allocator, allocator, 0);
+    rt.wireAllocator();
+
+    const null_user = try conditionalAlloc(&rt, false);
+    try std.testing.expect(null_user == null);
+
+    const good_user = try conditionalAlloc(&rt, true);
+    try std.testing.expectEqual(@as(i64, 1), good_user.?.id);
+
+    rt.heapFree(good_user.?);
+
+    rt.deinit();
+}
+
+// Anchor / Unanchor for collections
+// -------------------------------------------------------------------------
+// SCENARIO: Dynamic Filtering (Real-World Use Case)
+// -------------------------------------------------------------------------
+
+//pub fn filterUsers(rt: *Runtime, min_score: i32) ![]const *User {
+//    const frame_mark = rt.saveFrameMark();
+//    defer rt.restoreFrameMark(frame_mark);
+//
+//    const heap_mark = rt.saveHeapMark();
+//
+//    // Working list on frame
+//    var all_users = std.ArrayListUnmanaged(*User){};
+//
+//    // Create 20 users with random scores
+//    var prng = std.Random.DefaultPrng.init(12345);
+//    const random = prng.random();
+//
+//    for (0..20) |i| {
+//        const user = try rt.heapCreate(User);
+//        user.* = User{
+//            .id = @intCast(i),
+//            .score = random.intRangeAtMost(i32, 0, 100),
+//            .name = "User",
+//        };
+//
+//        try all_users.append(rt.frameAlloc(), user);
+//    }
+//
+//    // Filter: keep only users with score >= min_score
+//    var filtered = std.ArrayListUnmanaged(*User){};
+//
+//    for (all_users.items) |user| {
+//        if (user.score >= min_score) {
+//            rt.anchor(user);
+//            try filtered.append(rt.heapAlloc(), user);
+//            // Keep anchored
+//        } else {
+//        }
+//    }
+//
+//    std.debug.print("\n[Filter] Kept {d}/{d} users with score >= {d}",
+//        .{ filtered.items.len, all_users.items.len, min_score });
+//
+//    return rt.heapReturn(heap_mark, filtered);
+//}
+//
+//test "STRATEGY: Dynamic Filtering (Real-World)" {
+//    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//    defer {
+//        const status = gpa.deinit();
+//        if (status == .leak) {
+//            @panic("LEAK DETECTED!");
+//        }
+//    }
+//    const allocator = gpa.allocator();
+//
+//    const frame_mem = try allocator.alloc(u8, 1024 * 1024);
+//    defer allocator.free(frame_mem);
+//
+//    var global_ctx = EbrContext{};
+//    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, allocator, allocator, 0);
+//    rt.wireAllocator();
+//    defer rt.deinit();
+//
+//    const result = try filterUsers(&rt, 50);
+//
+//    std.debug.print("\n[Filter] Result has {d} users", .{result.len});
+//
+//    // Verify all returned users meet criteria
+//    for (result) |user| {
+//        try testing.expect(user.score >= 50);
+//        std.debug.print("\n  User {d}: score {d}", .{ user.id, user.score });
+//    }
+//
+//    // Cleanup
+//    for (result) |user| {
+//        rt.heapFree(user);
+//    }
+//    allocator.free(result);
+//}
+//
+
+// TODO: What about conditional lists?
+fn buildAndFilter(rt: *Runtime, n: usize, threshold: i32) ![]const *User {
+    const mark = rt.saveHeapMark();
+
+    var list = std.ArrayListUnmanaged(*User){};
+
+    // Phase 1: Build
+    for (0..n) |i| {
+        const user = try rt.heapCreate(User);
+        user.score = @intCast(i);
+
+        try list.append(rt.heapAlloc(), user);
+        rt.anchor(user);  // Item is now in collection
+    }
+
+    // Phase 2: Filter in-place
+    var i: usize = 0;
+    while (i < list.items.len) {
+        if (list.items[i].score < threshold) {
+            const removed = list.orderedRemove(i);
+            rt.unanchor(removed);  // Item no longer in collection
+            // removed will be freed at scope close
+        } else {
+            i += 1;
+        }
+    }
+
+    // Phase 3: Return
+    const slice = try list.toOwnedSlice(rt.heapAlloc());
+    return rt.heapReturn(mark, slice);
+}
+
+test "STRATEGY: Build Filtered List (Real-World)" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer {
+        const status = gpa.deinit();
+        if (status == .leak) {
+            @panic("LEAK DETECTED!");
+        }
+    }
+    const allocator = gpa.allocator();
+
+    const frame_mem = try allocator.alloc(u8, 1024 * 1024);
+    defer allocator.free(frame_mem);
+
+    var global_ctx = EbrContext{};
+    var rt = try Runtime.initFromSlice(frame_mem, &global_ctx, allocator, allocator, 0);
+    rt.wireAllocator();
+    defer rt.deinit();
+
+    const result = try buildAndFilter(&rt, 50, 10);
+
+    std.debug.print("\n[Filter] Result has {d} users", .{result.len});
+
+    // Verify all returned users meet criteria
+    for (result) |user| {
+        try testing.expect(user.score >= 10);
+    }
+
+    // Cleanup
+    for (result) |user| {
+        rt.heapFree(user);
+    }
+    rt.heapAlloc().free(result);
 }
 

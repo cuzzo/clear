@@ -34,7 +34,7 @@ pub fn SlabAllocator(comptime T: type) type {
         lock: std.Thread.Mutex = .{},
 
         const object_size = @sizeOf(T);
-        const object_align = @alignOf(T);
+        const object_align = @max(16, @max(@alignOf(T), @alignOf(Node)));
 
         pub fn init(allocator: std.mem.Allocator, slab_size: usize) Self {
             std.debug.assert(std.math.isPowerOfTwo(slab_size));
@@ -172,7 +172,7 @@ pub fn SlabAllocator(comptime T: type) type {
             const header_addr = ptr_addr & mask;
             const slab = @as(*SlabHeader, @ptrFromInt(header_addr));
 
-            const node: *Node = @ptrCast(obj);
+            const node: *Node = @ptrCast(@alignCast(obj));
             node.next = slab.free_head;
             slab.free_head = node;
             slab.used_count -= 1;
@@ -194,6 +194,16 @@ pub fn SlabAllocator(comptime T: type) type {
         fn grow(self: *Self) !*SlabHeader {
             // Allocate raw memory with correct alignment
             const bytes = try self.allocAligned(self.slab_size);
+
+            // If the allocator ignores our alignment request, the mask logic
+            // in destroyToDepot will segfault. Catch it here.
+            const addr = @intFromPtr(bytes.ptr);
+            if (addr & (self.slab_size - 1) != 0) {
+                // If we can't get aligned memory, we can't function.
+                // We could try to free and retry, but for now, panic or error.
+                std.debug.print("SlabAllocator: Underlying allocator returned unaligned memory! Expected {d}, got ptr {x}\n", .{self.slab_size, addr});
+                return error.OutOfMemory;
+            }
 
             // Cast Chain:
             // 1. [*]u8 (slice ptr) -> *u8 (single ptr)
@@ -227,16 +237,18 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         fn allocAligned(self: *Self, size: usize) ![]u8 {
+            const Alignment = std.mem.Alignment;
+
             return switch (size) {
-                4096 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(4096), 4096),
-                8192 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(8192), 8192),
-                16384 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(16384), 16384),
-                32768 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(32768), 32768),
-                65536 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(65536), 65536),
-                131072 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(131072), 131072),
-                262144 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(262144), 262144),
-                524288 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(524288), 524288),
-                1048576 => self.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(1048576), 1048576),
+                4096 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(4096), 4096),
+                8192 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(8192), 8192),
+                16384 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(16384), 16384),
+                32768 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(32768), 32768),
+                65536 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(65536), 65536),
+                131072 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(131072), 131072),
+                262144 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(262144), 262144),
+                524288 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(524288), 524288),
+                1048576 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(1048576), 1048576),
                 else => error.InvalidSlabSize,
             };
         }
@@ -244,7 +256,7 @@ pub fn SlabAllocator(comptime T: type) type {
         fn freeSlabMemory(self: *Self, slab: *SlabHeader) void {
             const raw_ptr: [*]u8 = @ptrCast(slab);
 
-            // BUG FIX: We cast to `[*]align(...)` (Many-Pointer), NOT `*align(...)` (Single-Pointer).
+            // We cast to `[*]align(...)` (Many-Pointer), NOT `*align(...)` (Single-Pointer).
             // This allows us to perform the slice syntax `[0..size]` below.
             switch (self.slab_size) {
                 4096 => {

@@ -3,6 +3,7 @@ const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
 const ebr_mod = @import("ebr.zig");
 const sbr_mod = @import("sbr.zig");
+const SlabGen = @import("slab-alloc.zig").SlabAllocator;
 
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const EbrContext = ebr_mod.EbrContext;
@@ -12,7 +13,6 @@ const Scheduler = fp.Scheduler;
 const Task = qs.Task;
 const Fiber = qs.Fiber;
 
-// TODO: Should this be replaced with SlabAllocator?
 pub const CheatArena = struct {
     // 16KB Blocks - nice balance for L1/L2 cache
     const BlockSize = 16 * 1024;
@@ -118,6 +118,17 @@ pub const CheatArena = struct {
 };
 
 pub const Runtime = struct {
+    // -----------------------------------------------------
+    // EMBEDDED SLAB LOGIC
+    // -----------------------------------------------------
+    // We define a "Standard Block" that fits headers + common objects.
+    // 64 bytes covers: ObjectHeader (16) + TreeNode (24) + padding.
+    // Alignment 16 ensures we satisfy ObjectHeader requirements.
+    const Block64 = [64]u8;
+    const Slab64 = SlabGen(Block64);
+
+    slab: Slab64,
+
     // THE FRAME (Scratchpad)
     // We use a FixedBufferAllocator to simulate the linear stack.
     // It is backed by a raw slice of memory.
@@ -138,23 +149,23 @@ pub const Runtime = struct {
     tracker: ScopeTracker,
 
     // THREE ALLOCATORS
-    local_allocator: std.mem.Allocator,  // Thread-local HEAP (No lock) -> %
-    global_allocator: std.mem.Allocator, // Shared / Global HEAP (Locked) -> %% - Deprecate
-    smart_allocator: std.mem.Allocator,  // The VTable interface / FRAME
-    heap_allocator: std.mem.Allocator,   // The VTable interface / HEAP
+    global_allocator: std.mem.Allocator,  // GPA or tcmalloc/jemalloc/mimalloc/malloc
+    backing_allocator: std.mem.Allocator, // Thread-local allocator
+    local_allocator: std.mem.Allocator,   // Slab-backed
+    smart_allocator: std.mem.Allocator,   // The VTable interface / FRAME
+    heap_allocator: std.mem.Allocator,    // The VTable interface / HEAP
 
     pub fn init(
         allocator: std.mem.Allocator,
         frame_size: usize,
         global_ctx: *EbrContext,
         global_alloc: std.mem.Allocator,
-        local_alloc: std.mem.Allocator,
+        backing_alloc: std.mem.Allocator,
     ) !Runtime {
         // Alloc raw memory for the frame (1MB or whatever passed)
         const frame_mem = try allocator.alloc(u8, frame_size);
 
-        // Pass 'local_alloc' down to initFromSlice
-        var rt = try initFromSlice(frame_mem, global_ctx, global_alloc, local_alloc, 0);
+        var rt = try initFromSlice(frame_mem, global_ctx, global_alloc, backing_alloc, 0);
 
         // Because we allocated 'slice' above
         rt.owns_frame_memory = true;
@@ -165,7 +176,7 @@ pub const Runtime = struct {
         slice: []u8,
         global_ctx: *EbrContext,
         global_alloc: std.mem.Allocator,
-        local_alloc: std.mem.Allocator,
+        backing_alloc: std.mem.Allocator,
         timeout_ms: u64
     ) !Runtime {
         const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .{} };
@@ -175,17 +186,22 @@ pub const Runtime = struct {
             deadline = std.time.milliTimestamp() + @as(i64, @intCast(timeout_ms));
         }
 
+        // TODO: Eventually, we want to use 16 or 32kb slabs
+        const slab = Slab64.init(std.heap.page_allocator, 4 * 1024);
+
         return Runtime{
+            .slab = slab,
             .frame_backing = slice,
             .frame_fba = std.heap.FixedBufferAllocator.init(slice),
             .global_allocator = global_alloc,
-            .local_allocator = local_alloc,
+            .backing_allocator = backing_alloc,
+            .local_allocator = undefined,
             .ebr = local_ebr,
             .owns_frame_memory = false, // DO NOT FREE THIS in deinit.
             .deadline = deadline,
             .smart_allocator = undefined,
             .heap_allocator = undefined,
-            .overflow_arena = CheatArena.init(local_alloc),
+            .overflow_arena = CheatArena.init(backing_alloc),
             .tracker = ScopeTracker.init(),
         };
     }
@@ -194,6 +210,7 @@ pub const Runtime = struct {
         self.ebr.deinit(self.global_allocator);
         self.overflow_arena.deinit();
         self.tracker.deinit(self.local_allocator);
+        self.slab.deinit();
 
         // We DO NOT free global_allocator (it's shared)
 
@@ -206,6 +223,11 @@ pub const Runtime = struct {
     // Allocators:
 
     pub fn wireAllocator(self: *Runtime) void {
+        self.local_allocator = std.mem.Allocator{
+            .ptr = self,
+            .vtable = &SlabVTable,
+        };
+
         self.smart_allocator = std.mem.Allocator{
             .ptr = self,
             .vtable = &SmartAllocatorVTable,
@@ -215,6 +237,71 @@ pub const Runtime = struct {
             .vtable = &SbrHeapVTable,
         };
     }
+
+    // Slab Allocator Backing
+    const SlabVTable = std.mem.Allocator.VTable{
+        .alloc = slabAlloc,
+        .resize = slabResize,
+        .free = slabFree,
+        .remap = slabRemap,
+    };
+
+    fn slabAlloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *Runtime = @ptrCast(@alignCast(ctx));
+
+        if (len <= 64) {
+             if (ptr_align.toByteUnits() > 16) {
+                 @panic("SlabAlloc: Alignment too high for Slab!");
+             }
+             const ptr = self.slab.create() catch return null;
+             return @ptrCast(ptr);
+        }
+
+        //if (len <= 64 and ptr_align.toByteUnits() <= 16) {
+        //    // Fast Path: Slab
+        //    const ptr = self.slab.create() catch return null;
+        //    return @ptrCast(ptr);
+        //}
+
+        // Slow Path: Backing Allocator
+        // rawAlloc now accepts std.mem.Alignment directly
+        return self.backing_allocator.rawAlloc(len, ptr_align, ret_addr);
+    }
+
+    fn slabResize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *Runtime = @ptrCast(@alignCast(ctx));
+
+        if (buf.len <= 64 and buf_align.toByteUnits() <= 16) {
+            if (new_len > 64) return false;
+            return true;
+        }
+
+        return self.backing_allocator.rawResize(buf, buf_align, new_len, ret_addr);
+    }
+
+    fn slabFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
+        const self: *Runtime = @ptrCast(@alignCast(ctx));
+
+        if (buf.len <= 64 and buf_align.toByteUnits() <= 16) {
+            const ptr: *Block64 = @ptrCast(@alignCast(buf.ptr));
+            self.slab.destroy(ptr);
+            return;
+        }
+
+        self.backing_allocator.rawFree(buf, buf_align, ret_addr);
+    }
+
+    fn slabRemap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        // If we can resize in-place, return the existing pointer.
+        if (slabResize(ctx, memory, alignment, new_len, ret_addr)) {
+            return memory.ptr;
+        }
+        // Return null to tell Zig: "I couldn't resize in-place, please Alloc-Copy-Free yourself."
+        return null;
+    }
+
+
+    // Frame Allocator Backing
 
     pub const SmartAllocatorVTable = std.mem.Allocator.VTable{
         .alloc = smartAlloc,
@@ -394,7 +481,6 @@ pub const Runtime = struct {
         const header_size = @sizeOf(sbr_mod.ObjectHeader);
         const total_size = header_size + @sizeOf(T);
 
-        // 2. THE FIX: Explicit Comptime Alignment
         // We use 16 because ObjectHeader requires it, and T is <= 16.
         const alignment = comptime std.mem.Alignment.fromByteUnits(16);
 
@@ -427,6 +513,11 @@ pub const Runtime = struct {
         hdr.find().anchored = true;
     }
 
+    pub fn unanchor(_: *Runtime, ptr: anytype) void {
+        const hdr = sbr_mod.ObjectHeader.fromUserPtr(ptr);
+        hdr.find().anchored = false;
+    }
+
     // Internal Helper: Recursively find and anchor all heap pointers in a value.
     // This allows heapReturn to handle Structs, Tuples, Arrays, and Optionals automatically.
     fn anchorRoots(self: *Runtime, value: anytype) void {
@@ -435,13 +526,23 @@ pub const Runtime = struct {
 
         switch (info) {
             .pointer => |ptr_info| {
-                // We only care about single pointers to data (not slices yet, not opaque)
-                if (ptr_info.size == .one and ptr_info.child != anyopaque) {
-                    // Assumption: Any pointer in a return value is a Heap Object.
-                    // If you return a pointer to a global/static string, this might crash.
-                    // In a controlled Runtime, we assume strict SBR ownership.
-                    const header = sbr_mod.ObjectHeader.fromUserPtr(value);
-                    header.find().anchored = true;
+                switch (ptr_info.size) {
+                    .one => {
+                        if (ptr_info.child != anyopaque) {
+                            const header = sbr_mod.ObjectHeader.fromUserPtr(value);
+                            header.find().anchored = true;
+                        }
+                    },
+                    .slice => {
+                        // O(1) Anchor: Save the container (Backing Array).
+                        // We DO NOT walk the list (User Constraint).
+                        // Items inside must be anchored manually or connected previously.
+                        if (value.len > 0) {
+                            const header = sbr_mod.ObjectHeader.fromUserPtr(value);
+                            header.find().anchored = true;
+                        }
+                    },
+                    else => {},
                 }
             },
             .optional => {
@@ -592,7 +693,7 @@ pub const Runtime = struct {
         const sched = fp.active_scheduler;
         const task = sched.current_task.?;
 
-        // 2. THE FIX: Skip the first 4KB (Guard Page)
+        // Skip the first 4KB (Guard Page)
         // We cannot write to index 0. We must start at 4096.
         const guard_offset = 4096;
         const scratchpad_size = 1024 * 1024; // 1MB
