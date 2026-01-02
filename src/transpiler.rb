@@ -151,7 +151,19 @@ private
       # TODO: Have the annotator suppress unused variables.
       suppression = is_mutable ? "_ = &#{node.name};" : "_ = &#{node.name};"
 
-      "#{decl} #{suppression}"
+      is_heap = node.storage == :heap
+
+      affine_logic = ""
+      if is_heap
+        # 1. Create the moved flag
+        # 2. Create the defer guard
+        affine_logic = <<~ZIG
+          var #{node.name}_moved = false;
+          defer if (!#{node.name}_moved) rt.free(rt.heapAlloc(), #{node.name});
+        ZIG
+      end
+
+      "#{decl} #{suppression}\n#{affine_logic}"
 
     when AST::Assignment
       # 1. Resolve the Target string
@@ -275,6 +287,7 @@ private
         "rt.getAt(#{target}, #{index})"
       end
 
+    # TODO: See where drops live
     when AST::IfStatement
       # 1. Transpile Condition
       #    Zig idiomatic: if (cond) { ... }
@@ -306,7 +319,20 @@ private
       "try #{node.name}(#{args.join(', ')})"
 
     when AST::ReturnNode
-      "return #{visit(node.value)};"
+      val_code = visit(node.value)
+
+      # If we are returning a variable, we are moving it out.
+      # We must disable the local free.
+      if node.value.is_a?(AST::Identifier)
+        # Check if it's a heap variable (simple heuristic for now)
+        var_name = node.value.name
+        # Ideally look up scope, but for now assuming pattern:
+        prefix = "#{var_name}_moved = true;\n"
+      else
+        prefix = ""
+      end
+
+      "#{prefix}return #{val_code};"
 
     when AST::GetField
       "#{visit(node.target)}.#{node.field}"

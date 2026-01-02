@@ -218,6 +218,8 @@ private
 
       # Visit Body
       node.body.each { |stmt| visit(stmt) }
+
+      finalize_scope(node)
     end
 
     # 5. Process Returns (The inference logic from the previous fix)
@@ -268,7 +270,7 @@ private
     # Each branch gets its own scope to prevent leaking vars
     with_new_scope(current_scope.dup) do
       node.then_branch.each { |stmt| visit(stmt) }
-      finalize_scope(node)
+      finalize_scope(node, branch: :then)
       @then_state = current_scope.var_states # Conceptual
     end
 
@@ -276,7 +278,7 @@ private
 
     with_new_scope(current_scope.dup) do
       node.else_branch.each { |stmt| visit(stmt) }
-      finalize_scope(node)
+      finalize_scope(node, branch: :else)
       @else_state = current_scope.var_states
     end
 
@@ -291,7 +293,9 @@ private
     end
   end
 
-  def finalize_scope(scope_node)
+  def finalize_scope(node, branch: nil)
+    drops = []
+
     # Look at all variables in the current scope
     current_scope.locals.each do |name, info|
 
@@ -303,11 +307,19 @@ private
         # AUTOMATICALLY INSERT DROP
         # In a transpiler, you might attach this metadata to the AST node
         # so the code generator knows to emit "free(x)" here.
-        scope_node.deferred_drops << { name: name, type: info[:type] }
+        drops << { name: name, type: info[:type] }
 
         # Mark as consumed so we don't double-free
         current_scope.set_state(name, :dropped)
       end
+    end
+
+    if branch == :then
+      node.then_drops = drops
+    elsif branch == :else
+      node.else_drops = drops
+    else
+      node.deferred_drops = drops
     end
   end
 

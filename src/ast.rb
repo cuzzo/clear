@@ -13,12 +13,6 @@ module AST
     attr_reader :type_object
     attr_accessor :zig_pattern
 
-    attr_writer :deferred_drops
-
-    def deferred_drops
-      @deferred_drops ||= []
-    end
-
     # -- BACKWARDS COMPATIBILITY SETTER --
     # When existing code sets full_type = :Number, we wrap it.
     def full_type=(val)
@@ -85,7 +79,7 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) { include Locatable }
-  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var) { include Locatable }
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var, :deferred_drops) { include Locatable }
   StructDef    = Struct.new(:token, :name, :fields) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
   Assignment   = Struct.new(:token, :name, :value) { include Locatable }
@@ -97,8 +91,8 @@ module AST
   HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage) { include Locatable }
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage) { include Locatable }
-  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch) { include Locatable }
-  WhileLoop    = Struct.new(:token, :condition, :do_branch) { include Locatable }
+  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) { include Locatable }
+  WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) { include Locatable }
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }
   FuncCall     = Struct.new(:token, :name, :args) { include Locatable }

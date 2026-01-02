@@ -1804,7 +1804,7 @@ RSpec.describe SemanticAnnotator do
           FN test() ->
             IF TRUE THEN
               VAR x = Config { id: 1 };
-              -- x is unused and Linear
+              -- x is unused and Affine
               -- Should auto-drop here
             END
           END
@@ -1815,14 +1815,51 @@ RSpec.describe SemanticAnnotator do
         func_node = ast.statements.last
         if_node = func_node.body.first
 
-        # Access the THEN branch scope (you might need to expose this in your AST logic)
-        # Or check if `finalize_scope` modified the `if_node`
+        expect(if_node.then_drops).to include(include(name: "x"))
+      end
+    end
 
-        # Assuming finalize_scope pushes to node.deferred_drops or similar:
-        # We expect 'x' to be in the drop list of the IfStatement
+    context "Automatic Memory Reclamation (Deferred Drops)" do
+      let(:code) { preamble + <<~FLUX
+          FN test() ->
+            IF TRUE THEN
+              VAR z = 1;
+            ELSE
+              VAR x = Config { id: 1 };
+              -- x is unused and Affine
+              -- Should auto-drop here
+            END
+          END
+        FLUX
+      }
 
-        # Note: You need to ensure your AST::IfStatement has an accessor for deferred_drops
-        expect(if_node.deferred_drops).to include(include(name: "x"))
+      it "attaches deferred drops to the scope node (ELSE) for unused linear vars" do
+        func_node = ast.statements.last
+        if_node = func_node.body.first
+
+        expect(if_node.else_drops).to include(include(name: "x"))
+      end
+    end
+
+
+    context "Function Scope (Deferred Drops)" do
+      let(:code) { preamble + <<~FLUX
+          FN test() ->
+            VAR a = Config { id: 1 };
+            VAR b = 10; -- Primitive, no drop needed
+            -- 'a' is never moved. It must be dropped here.
+          END
+        FLUX
+      }
+
+      it "attaches deferred drops to the FunctionDef node" do
+        func_node = ast.statements.last
+
+        # Verify 'a' is dropped
+        expect(func_node.deferred_drops).to include(include(name: "a"))
+
+        # Verify 'b' is NOT dropped (it's a primitive)
+        expect(func_node.deferred_drops).not_to include(include(name: "b"))
       end
     end
 
