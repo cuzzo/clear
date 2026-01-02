@@ -193,7 +193,8 @@ private
         name: p[:name],
         type: p[:type],
         required: p[:default].nil?,
-        mutable: p[:mutable]
+        mutable: p[:mutable],
+        takes: p[:takes]
       }},
       return_type: declared_return
     }
@@ -255,13 +256,52 @@ private
   def visit_IfStatement(node)
     visit(node.condition)
 
+    # 1. Snapshot state before branching
+    initial_state = current_scope.clone_states
+
     # Each branch gets its own scope to prevent leaking vars
     with_new_scope(current_scope.dup) do
       node.then_branch.each { |stmt| visit(stmt) }
+      finalize_scope(node)
+      @then_state = current_scope.var_states # Conceptual
     end
+
+    current_scope.var_states = initial_state # restore_states(initial_state)
 
     with_new_scope(current_scope.dup) do
       node.else_branch.each { |stmt| visit(stmt) }
+      finalize_scope(node)
+      @else_state = current_scope.var_states
+    end
+
+    # 2. MERGE STATES (The Affine Logic)
+    # Iterate over all variables in the parent scope
+    initial_state.each do |var, state|
+      if @then_state[var] != :live || @else_state[var] != :live
+        # If it died in EITHER branch, it is dead in the main scope.
+        # (Because we can't be sure it's alive, we must assume it's unsafe to use)
+        current_scope.set_state(var, :moved) # or :invalid
+      end
+    end
+  end
+
+  def finalize_scope(scope_node)
+    # Look at all variables in the current scope
+    current_scope.locals.each do |name, info|
+
+      # We only care about variables that are:
+      # 1. LIVE (Not moved yet)
+      # 2. Linear (Have a destructor/need freeing)
+      if current_scope.get_state(name) == :live && Type.new(info[:type]).requires_move?
+
+        # AUTOMATICALLY INSERT DROP
+        # In a transpiler, you might attach this metadata to the AST node
+        # so the code generator knows to emit "free(x)" here.
+        scope_node.deferred_drops << { name: name, type: info[:type] }
+
+        # Mark as consumed so we don't double-free
+        current_scope.set_state(name, :dropped)
+      end
     end
   end
 
@@ -273,6 +313,8 @@ private
       error!(node, "Condition must be a Boolean, got #{node.condition.resolved_type}")
     end
 
+    pre_loop_state = current_scope.clone_states
+
     # 2. Analyze Body in a New Scope AND increment loop depth
     @loop_depth += 1
     with_new_scope(current_scope.dup) do
@@ -280,6 +322,19 @@ private
         node.do_branch.each { |stmt| visit(stmt) }
       else
         visit(node.do_branch)
+      end
+
+      finalize_scope(node)
+
+      current_scope.var_states.each do |name, new_state|
+        old_state = pre_loop_state[name]
+
+        # If it was defined outside (exists in old_state)
+        # AND it was Live before
+        # AND it is Moved now (consumed without replacement)
+        if old_state == :live && new_state == :moved
+          error!(node, "Use of moved value '#{name}' in loop. The variable is moved in the first iteration and not available for the next.")
+        end
       end
     end
     @loop_depth -= 1
@@ -457,6 +512,16 @@ private
   def visit_VarDecl(node)
     visit(node.value)
 
+    # 0. Affine Ownership:
+    if node.value.is_a?(AST::Identifier)
+      rhs_name = node.value.name
+      rhs_type = current_scope.resolve_type(rhs_name)
+
+      if Type.new(rhs_type).requires_move?
+        current_scope.set_state(rhs_name, :moved)
+      end
+    end
+
     inferred_type = node.value.resolved_type
     final_type = (node.type == :Any) ? inferred_type : node.type
 
@@ -489,6 +554,9 @@ private
       storage
     )
 
+    # 4. Set live
+    current_scope.set_state(node.name, :live)
+
     if storage == :heap
       node.full_type = :"%#{final_type}"
     else
@@ -512,6 +580,15 @@ private
 
     # 2. Resolve Type
     node.full_type = scope.resolve_full_type(node.name)
+
+    # 3. Liveness
+    state = scope.get_state(node.name)
+    type = scope.resolve_type(node.name)
+
+    if state == :moved
+      # TODO: Better error
+      error!(node, "Use of moved value '#{node.name}'")
+    end
   end
 
   # ==========================================
@@ -523,6 +600,20 @@ private
 
     # 2. Handle the Target (The Left-Hand Side)
     target = node.name
+
+    # 1. Handle the Source (RHS)
+    # If the RHS is an Identifier, and it's an Affine or Linear Type,
+    # we must MOVE it.
+    if node.value.is_a?(AST::Identifier)
+      rhs_name = node.value.name
+      rhs_type = current_scope.resolve_type(rhs_name)
+
+      # Primitives COPY, everything else MOVES
+      if Type.new(rhs_type).requires_move?
+        current_scope.set_state(rhs_name, :moved)
+      end
+      type = current_scope.resolve_type(target.name)
+    end
 
     case target
     when AST::Identifier, String
@@ -540,6 +631,10 @@ private
     else
       error!(node, "Invalid assignment target: #{target.class}")
     end
+
+    # If sucessfully assigned, set live
+    target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
+    current_scope.set_state(target_name, :live)
   end
 
   def visit_assignment_variable(identifier_or_name, node)
@@ -1171,7 +1266,13 @@ private
         end
       end
 
-      # C. Type Check
+      # C. Handle ownership (Affine / Linear):
+      if param[:takes]
+        # TODO: See if this is correct...
+        current_scope.set_state(arg_node.name, :moved)
+      end
+
+      # D. Type Check
       expected = param[:type]
       actual = arg_node.resolved_type
 

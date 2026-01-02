@@ -303,6 +303,7 @@ class Parser
 
   def parse_argument_list()
     parse_comma_seq(:CHAR, '(', ')') do
+      takes = match!(:KEYWORD, 'TAKES')
       is_mutable = match!(:KEYWORD, 'MUTABLE')
 
       p_name = consume(:VAR_ID).value
@@ -318,7 +319,7 @@ class Parser
         default_val = parse_expression()
       end
 
-      { name: p_name, type: p_type, default: default_val, mutable: is_mutable }
+      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes }
     end
      .last # always ignore the first token
   end

@@ -16,6 +16,7 @@ class Lexer
       MOD OR
       REQUIRE
       SELECT WHERE
+      GIVE TAKES
     ].to_set
 
   def initialize(source)

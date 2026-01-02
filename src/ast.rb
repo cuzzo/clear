@@ -13,6 +13,12 @@ module AST
     attr_reader :type_object
     attr_accessor :zig_pattern
 
+    attr_writer :deferred_drops
+
+    def deferred_drops
+      @deferred_drops ||= []
+    end
+
     # -- BACKWARDS COMPATIBILITY SETTER --
     # When existing code sets full_type = :Number, we wrap it.
     def full_type=(val)

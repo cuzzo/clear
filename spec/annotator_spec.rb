@@ -1676,5 +1676,177 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  describe "Affine Ownership & Move Semantics" do
+    let(:preamble) {
+      <<~FLUX
+        STRUCT Config { id: Number }
+      FLUX
+    }
+
+    context "Assignments" do
+      context "Copy Types (Primitives)" do
+        let(:code) { preamble + <<~FLUX
+            FN test() ->
+              VAR a = 10;
+              VAR b = a;    -- Copy
+              VAR c = a;    -- 'a' should still be alive
+            END
+          FLUX
+        }
+        it "allows multiple uses of a primitive (Number)" do
+          expect { ast }.not_to raise_error
+        end
+      end
+
+      context "Linear Types (Structs)" do
+        let(:code) { preamble + <<~FLUX
+            FN test() ->
+              VAR a = Config { id: 1 };
+              VAR b = a;    -- MOVE occurs here because Config is not primitive
+              VAR c = a;    -- ERROR: Use after move
+            END
+          FLUX
+        }
+        it "raises error on use-after-move" do
+          expect { ast }.to raise_error(/Use of moved value 'a'/)
+        end
+      end
+
+      context "Re-initialization" do
+        let(:code) { preamble + <<~FLUX
+            FN test() ->
+              MUTABLE a = Config { id: 1 };
+              VAR b = a;                -- 'a' is moved
+              SET a = Config { id: 2 }; -- 'a' is reborn (live)
+              VAR c = a;                -- Should be valid
+            END
+          FLUX
+        }
+        it "allows using a variable after it has been re-assigned" do
+          expect { ast }.not_to raise_error
+        end
+      end
+    end
+
+    context "Function Calls" do
+      context "Passing by Value (Explicit TAKES)" do
+        let(:code) { preamble + <<~FLUX
+            FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+
+            FN test() ->
+              VAR x = Config { id: 1 };
+              consume(x);   -- 'x' is moved into 'consume'
+              VAR y = x;    -- ERROR: 'x' is dead
+            END
+          FLUX
+        }
+        it "marks the variable as moved if the parameter specifies TAKES" do
+          expect { ast }.to raise_error(/Use of moved value 'x'/)
+        end
+      end
+
+      # Note: Depending on your implementation, passing a Linear Type by value
+      # might implicitly move it even without TAKES.
+      # If your language requires explicit TAKES, this test confirms that safety.
+    end
+
+    context "Control Flow (Branching)" do
+      context "Move in one branch, Use in parent" do
+        let(:code) { preamble + <<~FLUX
+            FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+
+            FN test(n: Number) ->
+              VAR x = Config { id: 1 };
+
+              IF n > 10 THEN
+                consume(x); -- 'x' moved here
+              ELSE
+                -- 'x' alive here
+              END
+
+              -- Merge: x is dead because it died in the THEN branch
+              VAR y = x;
+            END
+          FLUX
+        }
+        it "invalidates the variable in the parent scope if it moved in ANY branch" do
+          expect { ast }.to raise_error(/Use of moved value 'x'/)
+        end
+      end
+
+      context "Move in both branches" do
+        let(:code) { preamble + <<~FLUX
+            FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+
+            FN test(n: Number) ->
+              VAR x = Config { id: 1 };
+
+              IF n > 10 THEN
+                consume(x);
+              ELSE
+                consume(x);
+              END
+
+              -- x should definitely be dead
+              VAR y = x;
+            END
+          FLUX
+        }
+        it "consistently invalidates the variable" do
+          expect { ast }.to raise_error(/Use of moved value 'x'/)
+        end
+      end
+    end
+
+    context "Automatic Memory Reclamation (Deferred Drops)" do
+      let(:code) { preamble + <<~FLUX
+          FN test() ->
+            IF TRUE THEN
+              VAR x = Config { id: 1 };
+              -- x is unused and Linear
+              -- Should auto-drop here
+            END
+          END
+        FLUX
+      }
+
+      it "attaches deferred drops to the scope node (IfStatement) for unused linear vars" do
+        func_node = ast.statements.last
+        if_node = func_node.body.first
+
+        # Access the THEN branch scope (you might need to expose this in your AST logic)
+        # Or check if `finalize_scope` modified the `if_node`
+
+        # Assuming finalize_scope pushes to node.deferred_drops or similar:
+        # We expect 'x' to be in the drop list of the IfStatement
+
+        # Note: You need to ensure your AST::IfStatement has an accessor for deferred_drops
+        expect(if_node.deferred_drops).to include(include(name: "x"))
+      end
+    end
+
+    context "Loops (While)" do
+      # Assuming you implement similar logic for While loops
+      let(:code) { preamble + <<~FLUX
+          FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+
+          FN test() ->
+            VAR x = Config { id: 1 };
+
+            WHILE TRUE DO
+              consume(x); -- Error: Moves 'x' in first iteration, 2nd iteration crashes
+            END
+          END
+        FLUX
+      }
+
+      # This detects that the loop body moves 'x', implying 'x' must be available
+      # at the start of every iteration, which it isn't after the first move.
+      it "raises error if a loop body moves a variable defined outside the loop" do
+         expect { ast }.to raise_error(/Use of moved value 'x'/)
+      end
+    end
+  end
 end
 

@@ -173,6 +173,11 @@ class Type
     1 # Default
   end
 
+  # TODO: In the future, structs under 2 bytes COPY
+  def requires_move?
+    !primitive?
+  end
+
   private
 
   def parse_raw_input

@@ -1,10 +1,11 @@
 class Scope
-  attr_accessor :locals
+  attr_accessor :locals, :var_states
 
   def initialize
     @locals = {}
     @dependencies = {}
     @types = {}
+    @var_states = {}
   end
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack)
@@ -72,6 +73,19 @@ class Scope
   def is_on_heap?(name)
     entry = @locals[name]
     entry ? entry[:storage] == :heap : false
+  end
+
+  def set_state(name, state)
+    @var_states[name] = state
+  end
+
+  def get_state(name)
+    @var_states[name] || :uninit
+  end
+
+  # Helper for branching
+  def clone_states
+    @var_states.dup
   end
 
   def register_dependency(owner_name, dependent_name)
