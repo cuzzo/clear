@@ -68,7 +68,7 @@ class Parser
   stmt(:KEYWORD, 'IF') { parse_if_statement }
   stmt(:KEYWORD, 'STRUCT', AST::StructDef, ['STRUCT', :TYPE_ID, :struct_body])
   stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
-  stmt(:KEYWORD, 'RETURN', AST::ReturnNode, ['RETURN', :expression, ';'])
+  stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
   stmt(:KEYWORD, 'RAISE', AST::Raise, ['RAISE', :raise_msg, ';'])
   stmt(:KEYWORD, 'EXIT') { parse_exit }
@@ -275,6 +275,20 @@ class Parser
     # Note: 'target' is now a Node, not just a String name.
     # Your Compiler already handles this!
     AST::Assignment.new(set_token, target, value)
+  end
+
+  def parse_return
+    ret_token = consume(:KEYWORD, 'RETURN')
+    value = nil
+
+    # optional expression -> RETURN; is valid for Void functions
+    unless match?(:CHAR, ';')
+      value = parse_expression
+    end
+
+    consume(:CHAR, ';')
+
+    AST::ReturnNode.new(ret_token, value)
   end
 
   def parse_exit()

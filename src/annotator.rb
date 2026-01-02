@@ -238,7 +238,7 @@ private
       end
     end
 
-    signature[:return_strategy] = get_return_strategy(node, found_returns, signature[:return_type])
+    signature[:return_strategy] = get_return_strategy(signature[:return_type])
     node.full_type = signature
 
     @function_context_stack.pop
@@ -382,6 +382,18 @@ private
   # ==========================================
 
   def visit_ReturnNode(node)
+    # Handle optional return node for Void functions.
+    expected = @function_context_stack.last
+    if node.value.nil?
+      # If the function expects a value but we return nothing -> ERROR
+      if expected && expected != :Void && expected != :Any
+        error!(node, "Function expects return type #{expected}, got Void")
+      end
+
+      node.full_type = :Void
+      return # Stop here, nothing else to analyze
+    end
+
     visit(node.value)
 
     # 1. Identify if we are returning a Variable
@@ -1446,35 +1458,17 @@ private
     end
   end
 
-  def get_return_strategy(node, found_returns, final_return_type)
-    # Default for Void functions
-    return :void if final_return_type == :Void || found_returns.empty?
+  def get_return_strategy(return_type)
+    type = Type.new(return_type)
 
-    # 1. Detect Conflict
-    # If one path returns Heap and another returns Stack, we have a problem in a strict language.
-    # For now, let's enforce consistency or default to the "heavier" option.
-    has_heap = found_returns.any? { |r| r[:storage] == :heap }
-    has_stack = found_returns.any? { |r| r[:storage] == :stack }
-
-    if has_heap && has_stack
-      error!(node, "Function returns mixed storage (Stack vs Heap). Explicitly cast stack objects to Heap with %")
-      # return { storage: :heap, metatype: infer_metatype(final_return_type), is_srvo: false }
-    end
-
-    # 2. Extract Consensus Properties
-    storage = has_heap ? :heap : :stack
-    metatype = found_returns.first[:metatype] # They should be consistent by now
-
-    # 3. Determine SRVO
-    # Rule: SRVO only happens for STACK storage of COMPLEX types.
-    is_complex = [:struct, :array].include?(metatype)
-
-    if (storage == :stack && is_complex)
-      :srvo
-    elsif storage == :heap
-      :destination_pass
+    # 1. Small Objects & Pointers -> Return in Register (Fastest)
+    if !type.requires_move? || type.heap?
+      return :register
+    elsif type.void?
+      return :void
     else
-      :primitive
+      # Structs, Fixed Arrays, etc.
+      return :destination_pass
     end
   end
 

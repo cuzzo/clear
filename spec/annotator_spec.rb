@@ -1916,5 +1916,85 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  describe "Function Return Strategies (ABI)" do
+    # Helper to get the strategy of the first function in the code
+    def get_strategy(source)
+      ast = run(source)
+      func_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
+
+      # If this fails, it means the parser/annotator crashed or didn't produce a function
+      raise "No FunctionDef found in AST" unless func_node
+
+      signature = func_node.full_type
+      signature[:return_strategy]
+    end
+
+    let(:preamble) { "STRUCT Config { id: Number }" }
+
+    context "Register Return (Fast)" do
+      it "uses :register for Primitives (Number)" do
+        code = <<~FLUX
+          FN get_num() RETURNS Number -> RETURN 1; END
+        FLUX
+        expect(get_strategy(code)).to eq(:register)
+      end
+
+      it "uses :register for Booleans" do
+        code = <<~FLUX
+          FN check() RETURNS Bool -> RETURN TRUE; END
+        FLUX
+        expect(get_strategy(code)).to eq(:register)
+      end
+
+      it "uses :register for Heap Objects (Pointers)" do
+        # Even though Config is a struct, %Config is a pointer (8 bytes).
+        # Pointers fit in registers.
+        code = preamble + <<~FLUX
+          FN make_heap() RETURNS %Config ->
+            VAR c = %Config{id:1};
+            RETURN c;
+          END
+        FLUX
+        expect(get_strategy(code)).to eq(:register)
+      end
+    end
+
+    context "Destination Passing (Large Value Types)" do
+      it "uses :destination_pass for Stack Structs" do
+        # A Stack Struct is a "Value Type". It must be written to memory provided by the caller.
+        code = preamble + <<~FLUX
+          FN make_stack() RETURNS Config ->
+            VAR c = Config{id:1};
+            RETURN c;
+          END
+        FLUX
+        expect(get_strategy(code)).to eq(:destination_pass)
+      end
+
+      it "uses :destination_pass for Fixed Arrays" do
+        code = <<~FLUX
+          FN get_vec() RETURNS Number[3] -> RETURN [1, 2, 3]; END
+        FLUX
+        expect(get_strategy(code)).to eq(:destination_pass)
+      end
+    end
+
+    context "Void" do
+      it "uses :void for empty returns" do
+        code = <<~FLUX
+          FN do_thing() RETURNS Void -> RETURN; END
+        FLUX
+        expect(get_strategy(code)).to eq(:void)
+      end
+
+      it "uses :void for procedures with no return" do
+        code = <<~FLUX
+          FN do_thing() RETURNS Void -> VAR x = 1; END
+        FLUX
+        expect(get_strategy(code)).to eq(:void)
+      end
+    end
+  end
 end
 
