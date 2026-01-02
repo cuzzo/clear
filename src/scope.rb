@@ -88,6 +88,24 @@ class Scope
     @var_states.dup
   end
 
+  def mark_escaped(name)
+    entry = @locals[name]
+    return unless entry
+
+    # Optimization: Don't promote primitives (Int, Bool, etc).
+    # They copy cheaply and don't suffer from "dangling pointer" issues
+    # in the same way (unless you support pointers to stack ints).
+    type = entry[:type]
+    return if !Type.new(type).requires_move?
+
+    # The Flip
+    if entry[:storage] == :stack
+      entry[:storage] = :heap
+      # You might want to log this for debugging:
+      # puts "Escaped: #{name} promoted to Heap."
+    end
+  end
+
   def register_dependency(owner_name, dependent_name)
     return unless @locals.key?(owner_name) # Only track local vars
 

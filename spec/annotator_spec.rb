@@ -1848,5 +1848,73 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  describe "Escape Analysis (Heap Promotion)" do
+    # Helper to check if a specific variable was promoted
+    def expect_escape(var_name)
+      # We verify that ANY instance of Scope receives this message
+      expect_any_instance_of(Scope).to receive(:mark_escaped).with(var_name)
+    end
+
+    def expect_no_escape
+      expect_any_instance_of(Scope).not_to receive(:mark_escaped)
+    end
+
+    context "Return Statements" do
+      it "promotes a variable when it is returned (Pass-by-Reference requirement)" do
+        expect_escape("x")
+        run(<<~FLUX)
+          STRUCT Config { id: Number }
+          FN create() RETURNS Config ->
+            VAR x = Config { id: 1 };
+            RETURN x; -- x must be on heap to survive return
+          END
+        FLUX
+      end
+
+      it "does NOT promote primitives (Number)" do
+        # Primitives are copied, so mark_escaped guards against them,
+        # or the annotator shouldn't even call it.
+        # Your Scope code handles the guard, so we can expect the call OR check the logic.
+        # But generally, we expect NO promotion to heap storage.
+        expect_no_escape
+        run(<<~FLUX)
+          FN get_num() RETURNS Number ->
+            VAR x = 10;
+            RETURN x;
+          END
+        FLUX
+      end
+    end
+
+    context "Assignment to Persistent Storage" do
+      it "promotes a variable assigned to a Global" do
+        expect_escape("local")
+        run(<<~FLUX)
+          STRUCT Item { id: Number }
+          STRUCT Container { item: Item }
+
+          MUTABLE g = %Container { item: Item{id:0} }; -- Global Heap
+
+          FN update() USE(MUTABLE g) ->
+            VAR local = Item { id: 99 };
+            SET g.item = local; -- 'local' escapes to Global
+          END
+        FLUX
+      end
+
+      it "does NOT promote when assigning to a local stack variable" do
+        expect_no_escape
+        run(<<~FLUX)
+          STRUCT Item { id: Number }
+          FN test() ->
+            MUTABLE a = Item { id: 1 };
+            VAR b = Item { id: 2 };
+            SET a = b; -- 'b' moves to 'a', but both are stack. No escape.
+          END
+        FLUX
+      end
+    end
+  end
 end
 

@@ -136,7 +136,13 @@ private
     @scope_stack.pop
   end
 
+  def is_global_scope?(scope)
+    # Assuming the first scope in the stack is global
+    scope == @scope_stack.first
+  end
+
   # TODO: Implement return_strategy for lambdas
+  # TODO: Implement force heap for USE
   def visit_LambdaLit(node)
     # 1. Analyze Captures (Before entering the new scope)
     # We need to look up the types of variables being captured from the OUTER scope.
@@ -377,6 +383,20 @@ private
 
   def visit_ReturnNode(node)
     visit(node.value)
+
+    # 1. Identify if we are returning a Variable
+    root = get_root_object(node.value)
+    if root.is_a?(AST::Identifier)
+      var_name = root.name
+      owner_scope = lookup_scope_for(var_name)
+      if owner_scope
+        type = owner_scope.resolve_type(var_name)
+        if Type.new(type).requires_move?
+          owner_scope.mark_escaped(var_name)
+        end
+      end
+    end
+
     actual = node.value.resolved_type
     expected = @function_context_stack.last
 
@@ -595,25 +615,11 @@ private
   # Assignment
   # ==========================================
   def visit_Assignment(node)
-    # 1. Analyze the Value (The Right-Hand Side)
     visit(node.value)
+    handle_assign_escape(node)
+    handle_assign_move(node)
 
-    # 2. Handle the Target (The Left-Hand Side)
     target = node.name
-
-    # 1. Handle the Source (RHS)
-    # If the RHS is an Identifier, and it's an Affine or Linear Type,
-    # we must MOVE it.
-    if node.value.is_a?(AST::Identifier)
-      rhs_name = node.value.name
-      rhs_type = current_scope.resolve_type(rhs_name)
-
-      # Primitives COPY, everything else MOVES
-      if Type.new(rhs_type).requires_move?
-        current_scope.set_state(rhs_name, :moved)
-      end
-      type = current_scope.resolve_type(target.name)
-    end
 
     case target
     when AST::Identifier, String
@@ -635,6 +641,71 @@ private
     # If sucessfully assigned, set live
     target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
     current_scope.set_state(target_name, :live)
+  end
+
+  # If the RHS is an Identifier, and it's an Affine or Linear Type,
+  # We must MOVE it.
+  def handle_assign_move(node)
+    # 1. Handle the Source (RHS)
+    return if !node.value.is_a?(AST::Identifier)
+
+    rhs_name = node.value.name
+    rhs_type = current_scope.resolve_type(rhs_name)
+
+    # Primitives COPY, everything else MOVES
+    if Type.new(rhs_type).requires_move?
+      current_scope.set_state(rhs_name, :moved)
+    end
+  end
+
+  # Only applies if we are assigning a Variable (RHS) to something (LHS)
+  def handle_assign_escape(node)
+    return if !node.value.is_a?(AST::Identifier)
+
+    rhs_name = node.value.name
+    rhs_scope = lookup_scope_for(rhs_name)
+
+    # Check LHS: Where are we putting this?
+    target_is_heap = false
+
+    if node.name.is_a?(AST::Identifier)
+      # Case 1: Assigning to a Variable
+      # lhs = rhs
+      lhs_name = node.name.name
+      lhs_scope = lookup_scope_for(lhs_name)
+
+      # If LHS is Global or explicitly Heap, RHS escapes
+      if lhs_scope && (lhs_scope.is_on_heap?(lhs_name) || is_global_scope?(lhs_scope))
+        target_is_heap = true
+      end
+
+    elsif node.name.is_a?(AST::GetField) || node.name.is_a?(AST::GetIndex)
+      # Walk up to find the root owner (e.g. 'x' in 'x.y.z = rhs')
+      root = get_root_object(node.name)
+
+      # Look up the scope directly since AST types aren't resolved yet
+      if root.is_a?(AST::Identifier)
+        root_name = root.name
+        root_scope = lookup_scope_for(root_name)
+
+        if root_scope
+          # Check 1: Is it Global? OR Check 2: Is it on the Heap?
+          if is_global_scope?(root_scope) || root_scope.is_on_heap?(root_name)
+            target_is_heap = true
+          end
+        end
+      end
+    end
+
+    # PROMOTE IF NEEDED
+    if target_is_heap && rhs_scope
+      rhs_type = rhs_scope.resolve_type(rhs_name)
+
+      # Optimization: Only promote if it requires a move (i.e. not a primitive Number)
+      if Type.new(rhs_type).requires_move?
+        rhs_scope.mark_escaped(rhs_name)
+      end
+    end
   end
 
   def visit_assignment_variable(identifier_or_name, node)
@@ -1325,12 +1396,28 @@ private
       cap_name = cap[:name]
 
       if !current_scope.locals.key?(cap_name)
-        error!(node, "Cannot capture undefined variable '#{cap_name}'")
+        # Check if it's in a higher scope (Globals are visible without capture in some langs,
+        # but if you require USE, we check here)
+        owner_scope = lookup_scope_for(cap_name)
+        if owner_scope.nil?
+           error!(node, "Cannot capture undefined variable '#{cap_name}'")
+        end
+
+        # SAVE TYPE AND STORAGE
+        # We need to know if the outer var is on the Heap so the inner proxy reflects that.
+        entry = owner_scope.locals[cap_name]
+      else
+        # Local capture (e.g. lambda inside function)
+        entry = current_scope.locals[cap_name]
+      end
+
+      if cap[:mutable] && !entry[:mutable]
+        error!(node, "Cannot capture immutable variable '#{cap_name}' as MUTABLE")
       end
 
       # Enrich the capture node with the resolved type
-      cap_type = current_scope.resolve_type(cap_name)
-      cap[:type] = cap_type
+      cap[:type] = entry[:type]
+      cap[:storage] = entry[:storage]
     end
   end
 
@@ -1338,7 +1425,15 @@ private
     return if node.captures.nil? || node.captures.empty?
 
     node.captures.each do |cap|
-      current_scope.declare(cap[:name], nil, cap[:type], false)
+      current_scope.declare(
+        cap[:name],
+        nil,
+        cap[:type],
+        cap[:mutable],
+        false,
+        nil,
+        cap[:storage]
+      )
     end
   end
 
@@ -1383,6 +1478,13 @@ private
     end
   end
 
+  def get_root_object(node)
+    curr = node
+    while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
+      curr = curr.target
+    end
+    curr
+  end
 
   # ==========================================
   # TYPE CHECKING & AUTOCAST LOGIC
