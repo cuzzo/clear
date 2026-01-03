@@ -122,13 +122,14 @@ private
 
       <<~ZIG
         #{signature} {
-            const frame_mark = rt.saveStackMark();
-            defer rt.restoreStackMark(frame_mark);
+            const frame_mark = rt.saveFrameMark();
+            defer rt.restoreFrameMark(frame_mark);
 
             #{body}
         }
       ZIG
 
+    # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       # CHEAT: VAR u = ...
       # ZIG:   var u = ...
@@ -148,18 +149,21 @@ private
       # 3. Generate Suppression
       #    _ = &u;  <-- If mutable, we take address to silence "never mutated" check
       #
-      # TODO: Have the annotator suppress unused variables.
-      suppression = is_mutable ? "_ = &#{node.name};" : "_ = &#{node.name};"
+      # TODO: Have the annotator determine whether a var is used, and whether a mutable is mutated.
+      suppression = "_ = &#{node.name};"
 
       is_heap = node.storage == :heap
 
       affine_logic = ""
+      # TODO: If definitively returned, eliminate this deferral
       if is_heap
         # 1. Create the moved flag
         # 2. Create the defer guard
+        # 3. TODO: use destroy, not free
         affine_logic = <<~ZIG
           var #{node.name}_moved = false;
-          defer if (!#{node.name}_moved) rt.free(rt.heapAlloc(), #{node.name});
+          _ = &#{node.name}_moved;
+          defer if (!#{node.name}_moved) CheatLib.free(rt, #{node.name});
         ZIG
       end
 
@@ -193,13 +197,13 @@ private
              val_ref = visit(node.value)
 
              # Pass &map_ref because Put modifies the map struct
-             return "try rt.mapPut(#{zig_type}, rt.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+             return "try CheatLib.mapPut(#{zig_type}, rt.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
           end
           arr_ref = visit(target_node)
           idx_ref = visit(node.name.index)
           val_ref = visit(node.value)
 
-          return "rt.setAt(#{arr_ref}, #{idx_ref}, #{val_ref});"
+          return "CheatLib.setAt(#{arr_ref}, #{idx_ref}, #{val_ref});"
         else
           # Recursive visit for things like 'user.id' or 'list[0]'
           visit(node.name)
@@ -220,14 +224,18 @@ private
       struct_init = "#{node.name}{ #{field_inits} }"
 
       if node.storage == :heap # You set this in the Annotator!
-        # The 2-step Zig dance
-        # We use a block expression usually, or a helper function
-        # For simplicity, we can use a helper: try rt.newHeap(User, User{...})
-        "try rt.allocCopy(#{node.name}, #{struct_init})"
+       <<~ZIG
+          blk: {
+             const ptr = try rt.heapCreate(#{node.name});
+             ptr.* = #{struct_init};
+             break :blk ptr;
+          }
+        ZIG
       else
         struct_init
       end
 
+    # TODO: Need overflow logic for frame to overflow to heap / malloc
     when AST::ListLit
       # 1. Determine the Zig Type (T)
       #    The Annotator sets 'full_type' (e.g. :Number[] or :%User[])
@@ -240,7 +248,7 @@ private
 
       # 2. Determine Allocator
       #    The Annotator sets 'storage' (:heap or :stack)
-      allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
+      allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
 
       # 3. Generate Items Slice
       #    Zig syntax for an array literal slice is: &.{ item1, item2 }
@@ -252,10 +260,11 @@ private
       end
 
       # 4. Generate the Call
-      #    Result: try rt.makeList(i64, rt.stackAlloc(), &.{ 1, 2, 3 })
+      #    Result: try rt.makeList(i64, rt.frameAlloc(), &.{ 1, 2, 3 })
       "try rt.makeList(#{zig_type}, #{allocator}, #{items_slice})"
 
 
+    # TODO: Try on frame.
     when AST::HashLit
       # 1. Extract Value Type (V)
       #    "HashMap<Int64>" -> "i64"
@@ -282,9 +291,9 @@ private
         inner_type = node.target.full_type.match(/HashMap<(.+)>/)[1]
         zig_type = transpile_type(inner_type)
 
-        "rt.mapGet(#{zig_type}, #{target}, #{index})"
+        "CheatLib.mapGet(#{zig_type}, #{target}, #{index})"
       else
-        "rt.getAt(#{target}, #{index})"
+        "CheatLib.getAt(#{target}, #{index})"
       end
 
     # TODO: See where drops live
@@ -370,6 +379,7 @@ private
         raise "Transpiler Error: Unknown Unary Operator '#{node.op}'"
       end
 
+    # TODO: Use Frame unless marked escaping
     when AST::BinaryOp
       return transpile_Smooth(node) if node.op == :SMOOTH
 
@@ -452,6 +462,7 @@ private
   end
 
   # --- HIGHER ORDER FUNCTIONS ---
+  # TODO: Use frame, unless marked escape
   def transpile_select_projection(list_node, expression_node)
     # 1. Setup Types
     #    We need the Result Type to create the new List
@@ -514,7 +525,7 @@ private
 
     #    {alloc} -> determine allocator automatically
     if pattern.include?("{alloc}")
-      alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.stackAlloc()"
+      alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
       pattern = pattern.gsub("{alloc}", alloc)
     end
 
@@ -530,7 +541,7 @@ private
     statements.map do |stmt|
       code = visit(stmt)
       # Add ; if it's not a block ending (}) and doesn't have one yet
-      code += ";" unless code.end_with?(";") || code.end_with?("}")
+      code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
       code
     end.join("\n    ")
   end

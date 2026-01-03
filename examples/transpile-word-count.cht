@@ -9,7 +9,7 @@ FN cheatMain() RETURNS User ->
   -- TODO: Figure this out...
   MUTABLE parts = raw_data.split(",");
 
-  print("Count:", parts.count());
+  print("Count:", parts.length());
   print("Part 1:", parts[1]);
 
   -- 2. Modify

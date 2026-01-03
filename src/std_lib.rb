@@ -19,8 +19,8 @@ STD_LIB = {
 
   # 1. String.length()
   "length" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "rt.len({0})" },
-    { args: [:"Any[]"], return: :Int64, zig: "rt.len({0})" }
+    { args: [STRING_TYPE], return: :Int64, zig: "CheatLib.len({0})" },
+    { args: [:"Any[]"], return: :Int64, zig: "CheatLib.len({0})" }
   ],
 
   # 2. String.substr(start, len)
@@ -28,19 +28,19 @@ STD_LIB = {
     args: [STRING_TYPE, :Int64, :Int64],
     return: HEAP_STRING_TYPE, # Returns new string on heap
     # Call runtime helper: rt.substr(allocator, str, start, len)
-    zig: "try rt.substr({alloc}, {0}, {1}, {2})"
+    zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})"
   },
 
   # 3. String Equality
   "eql" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
-    zig: "rt.eql({0}, {1})"
+    zig: "CheatLib.eql({0}, {1})"
   },
 
   # toInt() (Overloaded)
   "toInt" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "try rt.toInt({0})" },
+    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})" },
     { args: [:Number], return: :Int64, zig: "@intFromFloat({0})" },
     { args: [:Int64], return: :Int64, zig: "{0}" }
   ],
@@ -63,28 +63,28 @@ STD_LIB = {
   "readFile" => {
     args: [STRING_TYPE],
     return: HEAP_STRING_TYPE,
-    zig: "try rt.readFile({0})"
+    zig: "try CheatLib.readFile({alloc}, {0})"
   },
 
   # 5. Write File
   "writeFile" => {
     args: [STRING_TYPE, STRING_TYPE],     # Path, Content
     return: :Void,
-    zig: "try rt.writeFile({0}, {1})"
+    zig: "try CheatLib.writeFile({0}, {1})"
   },
 
   # 6. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE], # str, delimiter
     return: :"%String[][]",         # Returns a Heap List of Strings
-    zig: "try rt.split({alloc}, {0}, {1})"
+    zig: "try CheatLib.split({alloc}, {0}, {1})"
   },
 
   # 7. Join (String[] -> String)
   "join" => {
     args: [:"String[][]", STRING_TYPE], # list, delimiter
     return: HEAP_STRING_TYPE,
-    zig: "try rt.join({alloc}, {0}, {1})"
+    zig: "try CheatLib.join({alloc}, {0}, {1})"
   },
 
   "trim" => {
@@ -141,7 +141,7 @@ STD_LIB = {
   "shell" => {
     args: [STRING_TYPE],
     return: HEAP_STRING_TYPE, # Returns %String[] (Heap String)
-    zig: "try rt.shell({alloc}, {0})"
+    zig: "try CheatLib.shell({alloc}, {0})"
   },
 }
 
