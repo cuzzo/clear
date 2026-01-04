@@ -49,7 +49,7 @@ fn testWorker(rt: *Runtime, id: usize, loops: usize, shared_counter: *Locked(i32
         // 3. Reset frame
         const zero_mark = Runtime.FrameMark{
             .stack_index = 0,
-            .overflow_mark = .{ .block_index = 0, .cursor = 0 },
+            .overflow_mark = .{ .block_index = 0, .cursor = 0, .large_obj_count = 0 },
         };
         rt.restoreFrameMark(zero_mark);
     }

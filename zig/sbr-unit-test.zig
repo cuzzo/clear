@@ -44,7 +44,7 @@ fn createSlice(allocator: std.mem.Allocator, comptime T: type, n: usize) ![]T {
 
 test "ScopeTracker: basic add and restore (pointer)" {
     var tracker = try ScopeTracker.init(testing.allocator);
-    defer tracker.deinit(testing.allocator);
+    defer tracker.deinit(testing.allocator, testing.allocator);
 
     const ptr = try createObject(testing.allocator, u64);
     ptr.* = 0xDEADBEEF;
@@ -55,7 +55,7 @@ test "ScopeTracker: basic add and restore (pointer)" {
 
 test "ScopeTracker: basic add and restore (slice)" {
     var tracker = try ScopeTracker.init(testing.allocator);
-    defer tracker.deinit(testing.allocator);
+    defer tracker.deinit(testing.allocator, testing.allocator);
 
     const slice = try createSlice(testing.allocator, u8, 128);
     @memset(slice, 0xFF);
@@ -66,7 +66,7 @@ test "ScopeTracker: basic add and restore (slice)" {
 
 test "ScopeTracker: nested scopes" {
     var tracker = try ScopeTracker.init(testing.allocator);
-    defer tracker.deinit(testing.allocator);
+    defer tracker.deinit(testing.allocator, testing.allocator);
 
     const root_item = try createObject(testing.allocator, u64);
     try tracker.add(testing.allocator, ObjectHeader.fromUserPtr(root_item));
@@ -82,7 +82,7 @@ test "ScopeTracker: nested scopes" {
 
 test "ScopeTracker: closeAndCompact (Survivor Logic)" {
     var tracker = try ScopeTracker.init(testing.allocator);
-    defer tracker.deinit(testing.allocator);
+    defer tracker.deinit(testing.allocator, testing.allocator);
 
     const mark = tracker.save();
 
@@ -103,7 +103,7 @@ test "ScopeTracker: closeAndCompact (Survivor Logic)" {
 
 test "ScopeTracker: aligned types (max 16)" {
     var tracker = try ScopeTracker.init(testing.allocator);
-    defer tracker.deinit(testing.allocator);
+    defer tracker.deinit(testing.allocator, testing.allocator);
 
     const AlignedData = struct {
         data: [64]u8 align(16),
@@ -117,7 +117,7 @@ test "ScopeTracker: aligned types (max 16)" {
 
 test "ScopeTracker: closeAndCompact with slice survivor" {
     var tracker = try ScopeTracker.init(testing.allocator);
-    defer tracker.deinit(testing.allocator);
+    defer tracker.deinit(testing.allocator, testing.allocator);
 
     const mark = tracker.save();
 

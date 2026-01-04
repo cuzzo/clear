@@ -258,15 +258,10 @@ pub const CheatLib = struct {
     }
 
     // TODO: When does this get cleaned up?
-    pub fn spawnThread(rt: *Runtime, comptime func: anytype, args: anytype) !void {
-        // 1. Allocate arguments on the Global Heap (Raw Malloc)
-        //    We use globalAlloc() because this pointer passes to another Fiber/Task.
-        const ArgsType = @TypeOf(args);
-        const ptr = try rt.globalAlloc().create(ArgsType);
-        ptr.* = args;
-
-        // 2. Submit to Runtime Scheduler
-        try rt.spawn(func, ptr);
+    pub fn spawnThread(sys_allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, global_alloc: std.mem.Allocator, local_alloc: std.mem.Allocator, comptime func: anytype, args: anytype) !std.Thread {
+        // We don't call 'func' directly. We call the wrapper.
+        // We pass the config + the function + the args TO the wrapper.
+        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, frame_size, global_ctx, global_alloc, local_alloc, func, args });
     }
 
     // Helper to wrap arbitrary arguments into a Context Pointer
