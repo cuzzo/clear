@@ -62,6 +62,11 @@ module AST
       @type_object&.location
     end
 
+    def storage=(val)
+      @type_object.location = val
+    end
+
+
     def metatype
       return :lambda if self.is_a?(LambdaLit)
       return :named_function if self.is_a?(FunctionDef)
@@ -79,7 +84,7 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) { include Locatable }
-  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var, :deferred_drops) { include Locatable }
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :body, :catch_body, :catch_var, :deferred_drops, :uses_frame) { include Locatable }
   StructDef    = Struct.new(:token, :name, :fields) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
   Assignment   = Struct.new(:token, :name, :value) { include Locatable }

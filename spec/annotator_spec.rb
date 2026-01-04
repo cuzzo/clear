@@ -1511,7 +1511,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
       it "resolves split to a List of Strings" do
-        expect(result).to eq(:"%String[][]")
+        expect(result).to eq(:"String[][]")
       end
     end
 
@@ -1524,7 +1524,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
       it "resolves join to a Heap String" do
-        expect(result).to eq(:"%String[]")
+        expect(result).to eq(:"String[]")
       end
     end
 
@@ -1606,7 +1606,7 @@ RSpec.describe SemanticAnnotator do
 
       it "infers the resulting list type based on the projection body" do
         # _.length() returns Int64, so result is Int64[]
-        expect(result).to eq(:"%Int64[]")
+        expect(result).to eq(:"Int64[]")
       end
     end
 
@@ -1622,7 +1622,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "correctly resolves types through the chain" do
-        expect(result).to eq(:"%Int64[]")
+        expect(result).to eq(:"Int64[]")
       end
     end
 
@@ -1642,7 +1642,7 @@ RSpec.describe SemanticAnnotator do
       it "infers a List of HashMaps" do
         # The Hash contains Int64s (since _ is Int and 2 is Int inferred)
         # So it is HashMap<Int64>[]
-        expect(result).to eq(:"%HashMap<Number>[]")
+        expect(result).to eq(:"HashMap<Number>[]")
       end
     end
 
@@ -1928,13 +1928,13 @@ RSpec.describe SemanticAnnotator do
       it "promotes a variable assigned to a Global" do
         expect_escape("local")
         run(<<~FLUX)
-          STRUCT Item { id: Number }
-          STRUCT Container { item: Item }
+          STRUCT Item { id: Number, name: Byte[100] }
+          STRUCT Container { item: %Item }
 
-          MUTABLE g = %Container { item: Item{id:0} }; -- Global Heap
+          MUTABLE g = %Container { item: Item{id:0, name: [0]} }; -- Global Heap
 
           FN update() USE(MUTABLE g) ->
-            VAR local = Item { id: 99 };
+            VAR local = Item { id: 99, name: [1] };
             SET g.item = local; -- 'local' escapes to Global
           END
         FLUX

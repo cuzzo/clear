@@ -1,0 +1,13 @@
+STRUCT User { id: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    VAR a = %User{ id: 1 };
+    -- 'a' should be marked moved here.
+    -- 'b' is now the owner.
+    VAR b = a;
+
+    -- If 'a' tries to free at end of scope -> Double Free Crash
+    -- If 'b' fails to free -> Leak
+    RETURN;
+END
+

@@ -177,6 +177,8 @@ private
   end
 
   def visit_FunctionDef(node)
+    @frame_usage_count = 0
+
     # 1. Distinguish between Implicit (nil) and Explicit (:Any) return types
     is_implicit_return = node.return_type.nil?
     declared_return = node.return_type || :Any
@@ -243,6 +245,7 @@ private
     signature[:return_strategy] = get_return_strategy(signature[:return_type])
     node.full_type = signature
 
+    node.uses_frame = (@frame_usage_count > 0)
     @function_context_stack.pop
   end
 
@@ -416,7 +419,10 @@ private
       if owner_scope
         type = owner_scope.resolve_type(var_name)
         if Type.new(type).requires_move?
-          owner_scope.mark_escaped(var_name)
+          was_promoted = owner_scope.mark_escaped(var_name)
+          if was_promoted
+            @frame_usage_count -= 1
+          end
         end
       end
     end
@@ -429,7 +435,7 @@ private
       unless is_safe_autocast?(actual, expected)
         error!(node, :RETURN_MISMATCH, expected, actual)
       end
-      node.coerced_type = expected  # Don't coerce EXPLICIT returns
+      node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
     end
 
     node.full_type = actual
@@ -566,11 +572,12 @@ private
       end
     end
 
+    is_explicit = !node.type.nil? && node.type != :Any
     inferred_type = node.value.resolved_type
-    final_type = (node.type == :Any) ? inferred_type : node.type
+    final_type = is_explicit ? node.type : inferred_type
 
     # 1. Check Conflicts
-    if node.type != inferred_type && node.type != :Any
+    if node.type != inferred_type && is_explicit
       if !is_safe_autocast?(inferred_type, node.type)
         if check_array_type_mismatch!(node, inferred_type, node.type)
           ;
@@ -581,7 +588,17 @@ private
       node.value.coerced_type = final_type
     end
 
-    stack_size = get_type_slot_size(final_type)
+    # TODO: Move this logic to type.rb
+    # TODO: If over 64kb => automatic heap
+    type_size = get_type_slot_size(final_type)
+    if node.value.storage != :heap && node.value.type_object.requires_move?
+      if type_size > 128
+        node.value.storage = :frame
+        @frame_usage_count += 1
+      else
+        node.value.storage = :stack
+      end
+    end
 
     # 2. Get storage info
     # (Assuming your AST::Literal or Value nodes have a storage field)
@@ -590,11 +607,11 @@ private
     # 3. Declare in Scope
     current_scope.declare(
       node.name,
-      nil,           # reg
+      node,          # reg
       final_type,
       node.mutable,
       false,         # rebindable? usually false for VAR
-      stack_size,    # size (can infer from Literal if needed)
+      type_size,     # size (can infer from Literal if needed)
       storage
     )
 
@@ -640,11 +657,8 @@ private
   # ==========================================
   def visit_Assignment(node)
     visit(node.value)
-    handle_assign_escape(node)
-    handle_assign_move(node)
 
     target = node.name
-
     case target
     when AST::Identifier, String
       # Simple Variable Assignment: x = 1
@@ -661,6 +675,9 @@ private
     else
       error!(node, "Invalid assignment target: #{target.class}")
     end
+
+    handle_assign_escape(node)
+    handle_assign_move(node)
 
     # If sucessfully assigned, set live
     target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
@@ -788,7 +805,7 @@ private
   end
 
   def validate_assignment_type(node, target_type, value_type)
-    return if target_type == :Any || value_type == :Any
+    return if target_type.nil? || value_type.nil? || target_type == :Any || value_type == :Any
     return if target_type == value_type
 
     if !is_safe_autocast?(value_type, target_type)
@@ -1074,9 +1091,9 @@ private
       # D. Set Result Type (It returns a List of the Body's result)
       if node.right.is_a?(AST::SelectOp)
         result_base = node.right.expression.full_type
-        node.full_type = :"%#{result_base}[]"
+        node.full_type = :"#{result_base}[]"
       elsif node.right.is_a?(AST::WhereOp)
-        node.full_type = :"%#{item_type}[]"
+        node.full_type = :"#{item_type}[]"
       end
 
     elsif node.right.is_a?(AST::FuncCall)
@@ -1378,7 +1395,7 @@ private
         match = true
 
       elsif is_safe_autocast?(actual, expected)
-        node.coerced_type = expected
+        arg_node.coerced_type = expected
         match = true
       end
 

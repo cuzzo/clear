@@ -26,7 +26,7 @@ STD_LIB = {
   # 2. String.substr(start, len)
   "substr" => {
     args: [STRING_TYPE, :Int64, :Int64],
-    return: HEAP_STRING_TYPE, # Returns new string on heap
+    return: STRING_TYPE, # Returns new string on heap
     # Call runtime helper: rt.substr(allocator, str, start, len)
     zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})"
   },
@@ -62,7 +62,7 @@ STD_LIB = {
   # 4. Read File
   "readFile" => {
     args: [STRING_TYPE],
-    return: HEAP_STRING_TYPE,
+    return: STRING_TYPE,
     zig: "try CheatLib.readFile({alloc}, {0})"
   },
 
@@ -76,14 +76,14 @@ STD_LIB = {
   # 6. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE], # str, delimiter
-    return: :"%String[][]",         # Returns a Heap List of Strings
+    return: :"String[][]",         # Returns a Heap List of Strings
     zig: "try CheatLib.split({alloc}, {0}, {1})"
   },
 
   # 7. Join (String[] -> String)
   "join" => {
     args: [:"String[][]", STRING_TYPE], # list, delimiter
-    return: HEAP_STRING_TYPE,
+    return: STRING_TYPE,
     zig: "try CheatLib.join({alloc}, {0}, {1})"
   },
 
@@ -140,7 +140,7 @@ STD_LIB = {
 
   "shell" => {
     args: [STRING_TYPE],
-    return: HEAP_STRING_TYPE, # Returns %String[] (Heap String)
+    return: STRING_TYPE, # Returns %String[] (Heap String)
     zig: "try CheatLib.shell({alloc}, {0})"
   },
 }

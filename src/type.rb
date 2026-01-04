@@ -173,8 +173,10 @@ class Type
     1 # Default
   end
 
-  # TODO: In the future, structs under 2 bytes COPY
+  # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
+    return true if heap?
+    return true if array?
     !primitive?
   end
 

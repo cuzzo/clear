@@ -101,14 +101,7 @@ private
     when AST::FunctionDef
       # CHEAT: FN test() RETURNS User ->
       # ZIG:   pub fn test(rt: *Runtime) !User {
-      base_type = transpile_type(node.return_type || :Void)
-
-      # 2. Check if it's a Struct (Simple heuristic: not a primitive)
-      #    Primitives: i64, f64, bool, void, and slices ([]...)
-      is_struct = !["i64", "f64", "bool", "void"].include?(base_type) && !base_type.start_with?("[]")
-
-      # 3. If Struct, return Pointer (*User)
-      final_type = is_struct ? "*#{base_type}" : base_type
+      final_type = transpile_type(node.return_type || :Void)
 
       params_zig = node.params.map do |param|
         p_name = param[:name]
@@ -120,13 +113,13 @@ private
       all_params = ["rt: *Runtime"] + params_zig
       signature = "pub fn #{node.name}(#{all_params.join(', ')}) !#{final_type}"
 
+      prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
+      prologue = node.uses_frame ? prologue : "_ = &rt;"
       body = transpile_block(node.body)
 
       <<~ZIG
         #{signature} {
-            const frame_mark = rt.saveFrameMark();
-            defer rt.restoreFrameMark(frame_mark);
-
+            #{prologue}
             #{body}
         }
       ZIG
@@ -169,7 +162,16 @@ private
         ZIG
       end
 
-      "#{decl} #{suppression}\n#{affine_logic}"
+      move_source_logic = ""
+      if node.value.is_a?(AST::Identifier)
+        # Check if the RHS variable requires a move (Heap types, etc.)
+        # The Annotator populates 'type_info' on identifiers.
+        if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
+           move_source_logic = "#{node.value.name}_moved = true;"
+        end
+      end
+
+      "#{decl} #{suppression}\n#{affine_logic}\n#{move_source_logic}"
 
     when AST::Assignment
       # 1. Resolve the Target string
@@ -214,8 +216,15 @@ private
       # 2. Resolve the Value
       value_str = visit(node.value)
 
+      move_logic = ""
+      if node.value.is_a?(AST::Identifier)
+        if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
+          move_logic = "\n#{node.value.name}_moved = true;"
+        end
+      end
+
       # 3. Output Zig Code
-      "#{target_str} = #{value_str}"
+      "#{target_str} = #{value_str}; #{move_logic}"
 
     when AST::StructLit
       # CHEAT: User{ id: 1 }
@@ -549,10 +558,12 @@ private
       # Add ; if it's not a block ending (}) and doesn't have one yet
       code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
       code
-    end.join("\n    ")
+    end.join("\n")
   end
 
   def transpile_type(type)
+    is_pointer = type.to_s.start_with?("%")
+
     t = type.to_s.gsub("%", "") # Strip explicit heap marker if present
 
     # 1. SPECIAL CASE: "String[]" is the atomic "Text" type
@@ -581,6 +592,7 @@ private
       end
     end
 
+    zig_type =
     case t
     when "Number"          then "f64"
     when "Int64"           then "i64"
@@ -589,12 +601,16 @@ private
     when "Void"            then "void"
     else t # Fallback for Struct names (e.g. "User")
     end
+
+    return is_pointer && zig_type != "void" ? "*#{zig_type}" : zig_type
   end
 
   # TODO: from_type/to_type may need to be simplified
   def transpile_cast(code, from_type, to_type)
-    from = from_type
-    to = to_type
+    from = from_type.respond_to?(:resolved) ? from_type.resolved : from_type
+    to = to_type.respond_to?(:resolved) ? to_type.resolved : to_type
+
+    return code if from == to
 
     # A. Int -> Float (e.g. i64 -> f64)
     if [:Int64, :Byte].include?(from) && to == :Number
@@ -633,6 +649,13 @@ private
     else
       "{any}" # Fallback for Structs/Objects (Debug print)
     end
+  end
+
+  def indent_text(text, amount = 4)
+    padding = " " * amount
+    text.split("\n").map do |line|
+      line.strip.empty? ? line : "#{padding}#{line}"
+    end.join("\n")
   end
 
   ### ---- STD LIB MACROS ---

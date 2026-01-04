@@ -112,5 +112,6 @@ File.open(OUTPUT_FILE, "w") do |f|
   end
 end
 
+`zig fmt zig/all-tests.zig`
 puts "Done. Run with: zig test #{OUTPUT_FILE} -lc"
 

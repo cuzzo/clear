@@ -15,7 +15,7 @@ class Scope
       mutable: is_mutable,
       storage: storage,
       rebindable: is_rebindable,
-      size: size,
+      size: size || 0,  # TODO: see if size is ever nil
       valid: true,
       invalid_reason: nil
     }
@@ -98,12 +98,20 @@ class Scope
     type = entry[:type]
     return if !Type.new(type).requires_move?
 
-    # The Flip
-    if entry[:storage] == :stack
+    # Only promote if currently on Frame or Stack
+    if entry[:storage] == :frame || entry[:storage] == :stack
+      is_frame_decrement = (entry[:storage] == :frame)
       entry[:storage] = :heap
-      # You might want to log this for debugging:
-      # puts "Escaped: #{name} promoted to Heap."
+
+      # Update AST Node
+      if entry[:reg] && entry[:reg].respond_to?(:storage=)
+         entry[:reg].storage = :heap
+
+         # Only return true (to decrement counter) if it was actually on the Frame
+         return is_frame_decrement
+      end
     end
+    return false
   end
 
   def register_dependency(owner_name, dependent_name)

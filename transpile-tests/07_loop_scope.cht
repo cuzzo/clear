@@ -1,0 +1,12 @@
+STRUCT User { id: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE i = 0;
+    WHILE i < 10 DO
+        -- This variable dies every iteration
+        VAR u = %User{ id: i };
+        SET i = i + 1;
+    END
+    RETURN;
+END
+
