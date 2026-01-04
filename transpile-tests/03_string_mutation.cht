@@ -1,0 +1,12 @@
+FN cheatMain() RETURNS Void ->
+    -- Strings are currently Heap objects in your runtime
+    VAR s1 = "Hello";
+    VAR s2 = " World";
+
+    -- This creates a new heap string
+    VAR s3 = s1 + s2;
+
+    -- Transpiler must ensure s3 is freed
+    RETURN;
+END
+

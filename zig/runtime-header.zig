@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Runtime = @import("runtime.zig").Runtime;
+pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 
-const EbrContext = @import("ebr.zig").EbrContext;
+pub const EbrContext = @import("ebr.zig").EbrContext;
 const Task = fc.Task;
 const Fiber = fc.Fiber;
 
@@ -304,6 +304,13 @@ pub const CheatLib = struct {
                 }
             },
             else => {},
+        }
+    }
+
+    pub fn assert(condition: bool, msg: []const u8) void {
+        if (!condition) {
+            std.debug.print("ASSERTION FAILED: {s}\n", .{msg});
+            std.process.exit(1);
         }
     }
 };

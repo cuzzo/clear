@@ -1,0 +1,12 @@
+STRUCT Point { x: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    -- Standard Frame allocation
+    VAR p = Point{ x: 10 };
+
+    -- Assertion: Check value
+    ASSERT p.x == 10, "Struct Initialization Failed";
+
+    RETURN;
+END
+

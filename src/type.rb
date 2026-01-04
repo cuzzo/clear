@@ -110,7 +110,7 @@ class Type
   end
 
   def string?
-    resolved == :String
+    resolved == :String || (array? && base_type == :Byte)
   end
 
   def any?

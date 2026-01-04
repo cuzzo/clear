@@ -49,9 +49,11 @@ class ZigTranspiler
     # 2. Generate Zig
     # We output the Runtime preamble + Transpiled Code + Main
     <<~ZIG
-      // [RUNTIME BEGIN] ---------------------------------------------------------
-      #{File.read("./zig/runtime-header.zig")}
-      // [RUNTIME END] -----------------------------------------------------------
+      const std = @import("std");
+      const CheatHeader = @import("runtime-header.zig");
+      const CheatLib = CheatHeader.CheatLib;
+      const Runtime = CheatHeader.Runtime;
+      const EbrContext = CheatHeader.EbrContext;
 
       // -------------------------------------------------------------------------
       // 2. User Types & Functions (Transpiled)
@@ -328,7 +330,7 @@ private
       "try #{node.name}(#{args.join(', ')})"
 
     when AST::ReturnNode
-      val_code = visit(node.value)
+      val_code = node.value.nil? ? "" : visit(node.value)
 
       # If we are returning a variable, we are moving it out.
       # We must disable the local free.
@@ -392,10 +394,10 @@ private
         t_left = node.left.full_type.to_s
         t_right = node.right.full_type.to_s
 
-        if t_left.include?("String") || t_right.include?("String")
+        if Type.new(t_left).string? || Type.new(t_right).string?
           # Generate call to runtime helper
           # We use heapAlloc to ensure the result survives (safe default)
-          return "try rt.concat(rt.heapAlloc(), #{left}, #{right})"
+          return "try CheatLib.concat(rt.heapAlloc(), #{left}, #{right})"
         end
       end
 
@@ -413,6 +415,10 @@ private
       end
 
       "(#{left} #{op_str} #{right})"
+
+    when AST::Assert
+      cond = visit(node.condition)
+      "CheatLib.assert(#{cond}, \"#{node.message}\")"
 
     else
       raise "Unknown Node: #{node.class}"
@@ -678,5 +684,4 @@ if __FILE__ == $0
     $stderr.puts "Usage: ruby transpiler.rb <script.ct>"
   end
 end
-
 

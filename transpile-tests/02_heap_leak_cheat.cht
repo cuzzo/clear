@@ -1,0 +1,14 @@
+STRUCT User { id: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    -- Heap allocation
+    VAR u = %User{ id: 99 };
+
+    -- The transpiler is responsible for generating:
+    -- defer CheatLib.free(rt, u);
+
+    -- If transpiler logic works, `zig test` passes.
+    -- If it fails to free, `zig test` reports "Memory leak detected".
+    RETURN;
+END
+

@@ -2,3 +2,5 @@ vendor
 .byebug_history
 examples/*.fluxc
 log.txt
+zig/all-tests.zig
+zig/transpile-test.zig
