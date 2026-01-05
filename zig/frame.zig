@@ -5,9 +5,14 @@ pub const CheatArena = struct {
     const MIN_PAGE_SIZE = 4 * 1024;
     const MAX_PAGE_SIZE = 256 * 1024;
 
+    const LargeObject = struct {
+        slice: []u8,
+        alignment: std.mem.Alignment,
+    };
+
     // We store raw slices now
     blocks: std.ArrayListUnmanaged([]u8),
-    large_objects: std.ArrayListUnmanaged([]u8),
+    large_objects: std.ArrayListUnmanaged(LargeObject),
 
     current_block_index: usize = 0,
     cursor: usize = 0,
@@ -31,11 +36,7 @@ pub const CheatArena = struct {
         self.blocks.deinit(self.child_allocator);
 
         for (self.large_objects.items) |obj| {
-            // Large objects have variable alignment, but rawFree needs the exact one.
-            // Since we don't track the alignment of large objects (only the slice),
-            // we will just assume strict 16-byte alignment for all large allocations
-            // to simplify freeing.
-            self.child_allocator.rawFree(obj, std.mem.Alignment.fromByteUnits(16), @returnAddress());
+            self.child_allocator.rawFree(obj.slice, obj.alignment, @returnAddress());
         }
         self.large_objects.deinit(self.child_allocator);
     }
@@ -81,7 +82,11 @@ pub const CheatArena = struct {
             const ptr_opt = self.child_allocator.rawAlloc(n, final_align, @returnAddress());
             if (ptr_opt) |ptr| {
                 const slice = ptr[0..n];
-                self.large_objects.append(self.child_allocator, slice) catch {
+                // Store struct: { .slice, .alignment }
+                self.large_objects.append(self.child_allocator, .{
+                    .slice = slice,
+                    .alignment = final_align
+                }) catch {
                     self.child_allocator.rawFree(slice, final_align, @returnAddress());
                     return null;
                 };
@@ -142,8 +147,8 @@ pub const CheatArena = struct {
         // Free Large Objects
         while (self.large_objects.items.len > mark.large_obj_count) {
             const popped = self.large_objects.pop().?;
-            // We assume 16-byte alignment (see Alloc logic)
-            self.child_allocator.rawFree(popped, large_align, @returnAddress());
+            // Use stored alignment
+            self.child_allocator.rawFree(popped.slice, popped.alignment, @returnAddress());
         }
 
         // Trim Blocks

@@ -68,7 +68,7 @@ test "CheatArena: Large Object Overflow" {
     try testing.expectEqual(@as(usize, 1), arena.large_objects.items.len);
 
     // 2. Verify Size of the allocation
-    const lo_slice = arena.large_objects.items[0];
+    const lo_slice = arena.large_objects.items[0].slice;
     try testing.expect(lo_slice.len >= 300 * 1024);
 }
 
@@ -205,4 +205,54 @@ test "CheatArena: Integration with ArrayList (Dynamic Growth)" {
     // Verify large object backing the list was freed
     try testing.expectEqual(@as(usize, 0), arena.large_objects.items.len);
 }
+
+test "alignment verification" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test various alignments
+    const alignments = [_]u8{ 1, 2, 4, 8, 16, 32, 64 };
+    for (alignments) |alignment| {  // Changed from |align| to |alignment|
+        const ptr = arena.alloc(100, alignment, 0).?;
+        try std.testing.expect(@intFromPtr(ptr) % alignment == 0);
+    }
+}
+
+test "large allocation with 32-byte alignment" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Allocate something larger than MAX_PAGE_SIZE with 32-byte alignment
+    const ptr = arena.alloc(300 * 1024, 32, 0).?;
+
+    // Verify alignment
+    try std.testing.expect(@intFromPtr(ptr) % 32 == 0);
+
+    // Should be in large_objects
+    try std.testing.expect(arena.large_objects.items.len == 1);
+    try std.testing.expect(arena.large_objects.items[0].alignment.toByteUnits() == 32);
+}
+
+test "rewind frees blocks correctly" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const mark1 = arena.getMark();
+    _ = &mark1;
+    _ = arena.alloc(1000, 1, 0).?;  // First block (4KB)
+
+    const mark2 = arena.getMark();
+    _ = arena.alloc(5000, 1, 0).?;   // Forces second block (16KB)
+    _ = arena.alloc(20000, 1, 0).?;  // Forces third block (64KB)
+
+    const blocks_before = arena.blocks.items.len;
+    try std.testing.expect(blocks_before == 3);
+
+    arena.rewind(mark2);
+    const blocks_after = arena.blocks.items.len;
+
+    // Should keep blocks 0 and 1, free block 2
+    try std.testing.expect(blocks_after == 1);  // keep_count = current_block_index + 1 = 0 + 1
+}
+
 

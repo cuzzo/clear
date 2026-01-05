@@ -14,11 +14,8 @@ var global_ebr: ebr.EbrContext = .{};
 var stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
 
-pub fn main() !void {
-    if (builtin.mode == .Debug) return error.SkipZigTest; // Don't bench in debug
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+test "Integration Benchmark" {
+    const allocator = std.heap.c_allocator;
 
     std.debug.print("\n[Benchmark] Initializing System...\n", .{});
 
