@@ -298,3 +298,66 @@ test "RunQueue: Concurrent Thieves" {
     }
 }
 
+test "RunQueue: Steal to Inbox (Overflow Handling)" {
+    var owner_q = RunQueue.init();
+    var thief_q = RunQueue.init();
+    var inbox = AtomicInbox{};
+
+    // 1. Fill Thief to CAPACITY
+    const dummy = createTask(999);
+    defer destroyTask(dummy);
+
+    // Push until error.QueueFull
+    while (true) {
+        thief_q.push(std.testing.allocator, dummy) catch break;
+    }
+
+    // 2. Put item in Owner
+    const t_steal = createTask(1);
+    defer destroyTask(t_steal);
+    try owner_q.push(std.testing.allocator, t_steal);
+
+    // 3. Steal (Force overflow to inbox)
+    const stolen = thief_q.tryStealFrom(&owner_q, std.testing.allocator, &inbox);
+    try testing.expectEqual(@as(usize, 1), stolen);
+
+    // 4. Verify Task is in INBOX
+    // REMOVED: try testing.expect(thief_q.pop() == null); <-- Caused failure because Q is full
+
+    const node = inbox.popAll();
+    try testing.expect(node != null);
+
+    const item: *Task = @fieldParentPtr("inbox_link", node.?);
+    try testing.expectEqual(t_steal, item);
+}
+
+test "RunQueue: Index Wrapping Behavior" {
+    var q = RunQueue.init();
+
+    // 1. Force near overflow
+    const near_max = std.math.maxInt(u32) - 1;
+    q.top.store(near_max, .seq_cst);
+    q.bottom.store(near_max, .seq_cst);
+
+    const t1 = createTask(1);
+    defer destroyTask(t1);
+
+    // 2. Push (bottom: MAX-1 -> MAX)
+    try q.push(std.testing.allocator, t1);
+
+    const t2 = createTask(2);
+    defer destroyTask(t2);
+
+    // 3. Push (bottom: MAX -> 0)
+    try q.push(std.testing.allocator, t2);
+
+    // 4. Verify Len (Should be 2)
+    try testing.expectEqual(@as(usize, 2), q.len());
+
+    // 5. Pop Verify
+    // LIFO Order: t2, then t1
+    try testing.expectEqual(t2, q.pop().?);
+    try testing.expectEqual(t1, q.pop().?);
+    try testing.expect(q.pop() == null);
+}
+

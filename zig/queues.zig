@@ -90,17 +90,23 @@ pub const RunQueue = struct {
     // Chase-Lev Pop Bottom - lock free
     pub fn pop(self: *RunQueue) ?*Task {
         const b = self.bottom.load(.monotonic);
-        if (b == 0) return null; // Simplified
+
+        const t_check = self.top.load(.monotonic);
+        if (b -% t_check == 0) return null;
 
         const new_b = b -% 1;
         self.bottom.store(new_b, .seq_cst);
+
         const t = self.top.load(.monotonic);
         const task = self.buffer[new_b & self.mask].load(.monotonic);
 
-        if (t > new_b) {
-            self.bottom.store(b, .monotonic); // Restore
+        const size = new_b -% t;
+        if (size > self.mask) {
+            // Queue is empty (new_b is effectively less than t)
+            self.bottom.store(b, .monotonic);
             return null;
         }
+
         if (t == new_b) {
             // Race with thief
             if (self.top.cmpxchgWeak(t, t +% 1, .seq_cst, .monotonic) != null) {
@@ -116,9 +122,8 @@ pub const RunQueue = struct {
     // Safe length check
     pub fn len(self: *RunQueue) usize {
         const b = self.bottom.load(.monotonic);
-        const t = self.top.load(.monotonic);
-        if (b >= t) return b - t;
-        return 0;
+        const t = self.top.load(.monotonic); // TODO: May need to be .seq_cast
+        return b -% t;
     }
 
     // Used internally by tryStealFrom
@@ -126,7 +131,8 @@ pub const RunQueue = struct {
         const t = self.top.load(.acquire);
         const b = self.bottom.load(.seq_cst);
 
-        if (t >= b) return null;
+        const size = b -% t;
+        if (size == 0 or size > self.mask) return null;
 
         const task = self.buffer[t & self.mask].load(.monotonic);
         if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
