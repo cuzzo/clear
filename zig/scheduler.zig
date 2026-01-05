@@ -82,6 +82,7 @@ pub const SmartEventFd = struct {
             const val: u64 = 1;
             const bytes = std.mem.asBytes(&val);
             // Ignore error, if buffer is full, they are already awake
+            // TODO: This must be fixed before release.
             _ = std.posix.write(self.fd, bytes) catch {};
         }
     }
@@ -384,6 +385,7 @@ pub const Scheduler = struct {
                     // It is an existing Task
                     const task: *Task = @fieldParentPtr("inbox_link", node);
                     task.status = .Ready;
+                    // TODO: There must be a fix here before release.
                     self.ready_queue.push(self.allocator, task) catch unreachable;
                 }
 

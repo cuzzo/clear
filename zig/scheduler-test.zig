@@ -16,52 +16,7 @@ const Scheduler = scheduler.Scheduler;
 const Runtime = @import("runtime.zig").Runtime;
 
 // -------------------------------------------------------------------------
-// TEST 1: The "Hammer" Test (Atomic Correctness)
-// -------------------------------------------------------------------------
-// This runs on raw OS threads. It proves that 'done()' never misses a decrement.
-// It relies on a "Mock" scheduler just to satisfy the struct initialization,
-// but we never call 'wait()', so the scheduler is never touched.
-
-test "WaitGroup: Thread-Safe Atomic Decrement" {
-    // 1. Setup
-    // We cast a null pointer to *Scheduler because we won't use it in this test.
-    // We only test add/done logic here.
-    const mock_sched = @as(*Scheduler, @ptrFromInt(0xDEADBEE0)); // Aligned dummy
-
-    var wg = WaitGroup.init(mock_sched);
-
-    const THREADS = 10;
-    const LOOPS = 100_000;
-
-    // We are adding 1 million items to the counter
-    wg.add(THREADS * LOOPS);
-
-    const Worker = struct {
-        fn run(ptr: *WaitGroup, count: usize) void {
-            for (0..count) |_| {
-                ptr.done();
-            }
-        }
-    };
-
-    // 2. Spawn Threads to hammer the counter
-    var threads: [THREADS]std.Thread = undefined;
-    for (0..THREADS) |i| {
-        threads[i] = try std.Thread.spawn(.{}, Worker.run, .{ &wg, LOOPS });
-    }
-
-    // 3. Join
-    for (threads) |t| t.join();
-
-    // 4. Verify
-    // If the old race condition existed, this would be > 0
-    std.debug.print("\n[Atomic Test] Final Counter: {d}\n", .{wg.counter.load(.seq_cst)});
-    try testing.expectEqual(@as(usize, 0), wg.counter.load(.seq_cst));
-}
-
-
-// -------------------------------------------------------------------------
-// TEST 2: Integration Test (Wakeup Logic)
+// TEST 1: Integration Test (Wakeup Logic)
 // -------------------------------------------------------------------------
 // This runs inside your Runtime. It verifies that a task actually blocks
 // and gets woken up by another task.
@@ -146,5 +101,161 @@ test "WaitGroup: Integration (Block & Wake)" {
 
     try testing.expect(elapsed >= 50); // It must have waited for the worker
     try testing.expectEqual(@as(usize, 0), global_wg.counter.load(.seq_cst));
+}
+
+// -------------------------------------------------------------------------
+// TEST 2: Multi-Threaded "Hammer" Integration Test
+// -------------------------------------------------------------------------
+// This test spawns N real OS threads, each running a Scheduler.
+// It spawns a "Root Task" which then spawns thousands of "Worker Tasks".
+// All workers signal a single WaitGroup.
+// This validates:
+//  1. Cross-thread wakeup (EventFD)
+//  2. Work Stealing (Load balancing)
+//  3. Atomic correctness of WaitGroup under heavy contention
+//  4. Clean shutdown of the Scheduler cluster
+
+const HammerContext = struct {
+    wg: *WaitGroup,
+    counter: *std.atomic.Value(usize),
+};
+
+// Updated to match TaskFn signature: fn(*anyopaque, ?*anyopaque) anyerror!void
+fn hammerWorker(_: *anyopaque, args: ?*anyopaque) anyerror!void {
+    const ctx: *HammerContext = @ptrCast(@alignCast(args));
+
+    // 1. Simulate a tiny bit of CPU work to encourage interleaving
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        std.mem.doNotOptimizeAway(i);
+    }
+
+    // 2. Atomic Increment (Proof of work)
+    _ = ctx.counter.fetchAdd(1, .seq_cst);
+
+    // 3. Signal Done (This hits the WaitGroup lock)
+    ctx.wg.done();
+}
+
+// Updated to match TaskFn signature
+fn hammerRoot(_: *anyopaque, args: ?*anyopaque) anyerror!void {
+    const ctx: *HammerContext = @ptrCast(@alignCast(args));
+    const WORKER_COUNT = 10_000;
+
+    std.debug.print("\n[Hammer] Spawning {d} workers...", .{WORKER_COUNT});
+
+    // 1. Register intent to wait
+    ctx.wg.add(WORKER_COUNT);
+
+    // 2. Spawn loop
+    const current_sched = scheduler.active_scheduler;
+
+    var i: usize = 0;
+    while (i < WORKER_COUNT) : (i += 1) {
+        // We use Runtime.entryWrapper (or similar) as the trampoline.
+        // We pass 'ctx' as the argument.
+        try current_sched.submitSpawn(
+            @intFromPtr(&Runtime.entryWrapper),
+            hammerWorker,
+            ctx,
+            .{}
+        );
+    }
+
+    std.debug.print("\n[Hammer] Waiting for completion...", .{});
+
+    // 3. Block until all workers are done
+    ctx.wg.wait();
+
+    std.debug.print("\n[Hammer] All workers returned!", .{});
+}
+
+fn runSchedulerThread(sched: *Scheduler) void {
+    // CRITICAL: Set thread-local so tasks can find the scheduler
+    scheduler.active_scheduler = sched;
+    sched.run();
+}
+
+test "Scheduler: Multi-Threaded Hammer (Work Stealing & Sync)" {
+    if (builtin.single_threaded) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+
+    std.debug.print("\n--- Start Multi-Threaded Hammer Test ---", .{});
+
+    // 1. Setup Global Resources
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = memory.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    // 2. Reset Registry
+    {
+        scheduler.global_registry.mutex.lock();
+        defer scheduler.global_registry.mutex.unlock();
+
+        // We simply overwrite the map with a fresh, empty state.
+        // We assume the previous test called deinit() on the old map (which it did).
+        // If we try to call deinit() or clearAndFree() on the old map here,
+        // we panic because it's already dead.
+        scheduler.global_registry.map = .{};
+    }
+    defer {
+        scheduler.global_registry.mutex.lock();
+        scheduler.global_registry.map.deinit(allocator);
+        scheduler.global_registry.mutex.unlock();
+    }
+
+    // 3. Create Scheduler Cluster
+    const THREAD_COUNT = 4;
+    var scheds: [THREAD_COUNT]*Scheduler = undefined;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+
+    for (0..THREAD_COUNT) |i| {
+        const s = try allocator.create(Scheduler);
+        s.* = try Scheduler.init(allocator, &global_ctx, &stack_pool);
+        s.shutdown_on_idle = true;
+        scheds[i] = s;
+    }
+
+    // 4. Prepare Test Data
+    var wg = WaitGroup.init(scheds[0]);
+    var atomic_counter = std.atomic.Value(usize).init(0);
+
+    var context = HammerContext{
+        .wg = &wg,
+        .counter = &atomic_counter,
+    };
+
+    // 5. Submit Root Task to Scheduler[0]
+    try scheds[0].submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        hammerRoot,
+        &context,
+        .{}
+    );
+
+    // 6. Start Threads
+    for (0..THREAD_COUNT) |i| {
+        threads[i] = try std.Thread.spawn(.{}, runSchedulerThread, .{scheds[i]});
+    }
+
+    // 7. Wait for Shutdown
+    for (threads) |t| {
+        t.join();
+    }
+
+    // 8. Verification
+    const final_count = atomic_counter.load(.seq_cst);
+    std.debug.print("\n[Hammer] Final Counter: {d}\n", .{final_count});
+
+    // Cleanup
+    for (scheds) |s| {
+        s.deinit();
+        allocator.destroy(s);
+    }
+
+    try testing.expectEqual(@as(usize, 10_000), final_count);
+    try testing.expectEqual(@as(usize, 0), wg.counter.load(.seq_cst));
 }
 

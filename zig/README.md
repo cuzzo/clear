@@ -27,3 +27,10 @@ valgrind --leak-check=full \
          ./fuzz_runner
 ```
 
+```bash
+zig test queues-test.zig -fsanitize-thread -lc
+```
+
+```bash
+./scheduler-fuzz-test.sh
+```
