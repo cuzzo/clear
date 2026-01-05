@@ -243,8 +243,7 @@ test "Producer-Consumer contention" {
             for (0..ItemCount) |i| {
                 const obj = s.create() catch @panic("Alloc failed");
                 q.items[i] = obj;
-                // Fix: use lowercase .monotonic
-                _ = q.ready_count.fetchAdd(1, .monotonic);
+                _ = q.ready_count.fetchAdd(1, .release);
             }
         }
     }.run, .{ &slab, queue });
@@ -254,8 +253,7 @@ test "Producer-Consumer contention" {
         fn run(s: *SlabAllocator(TestObj), q: *Queue) void {
             var consumed: usize = 0;
             while (consumed < ItemCount) {
-                // Fix: use lowercase .monotonic
-                while (q.ready_count.load(.monotonic) <= consumed) {
+                while (q.ready_count.load(.acquire) <= consumed) {
                     std.atomic.spinLoopHint();
                 }
                 const obj = q.items[consumed].?;

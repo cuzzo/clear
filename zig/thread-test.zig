@@ -89,8 +89,6 @@ test "Runtime Spawn & Mutex Verify" {
             allocator,
             64 * 1024,           // Frame Size
             &global_ctx,
-            allocator,
-            allocator,
             testWorker,          // Function
             .{ i, loops_per_thread, shared_state } // Args (Tuple)
         );
@@ -154,6 +152,9 @@ fn mvccWorker(rt: *Runtime, allocator: std.mem.Allocator, loops: usize, shared_u
         // Simulate work
         std.Thread.yield() catch {};
     }
+
+    rt.ebr.reclaimLocal(allocator);
+    rt.ebr.context.reclaim(allocator);
 }
 
 test "MVCC Implementation" {
@@ -196,8 +197,6 @@ test "MVCC Implementation" {
                 allocator,
                 64*1024,
                 &global_ctx,
-                allocator,
-                allocator,
                 mvccWorker,
                 .{ allocator, loops, shared_container }
             );
@@ -211,20 +210,14 @@ test "MVCC Implementation" {
         // 4. Verify Read works with new Guard API
         // We need a dummy runtime to read from the main thread (since we aren't inside spawnThread)
         // In a real app, main thread would also be an "EBR Thread".
-        const slab = Runtime.Slab64.init(std.heap.page_allocator, 4 * 1024);
         const main_ebr = ThreadLocalEbr{ .context = &global_ctx };
         var main_rt = Runtime{
-            .slab = slab,
             .ebr = main_ebr,
-            .backing_allocator = undefined,
             .heap_allocator = undefined,
-            .global_allocator = undefined,
             .owns_frame_memory = true,
             .deadline = 0,
-            .local_allocator = undefined,
             .overflow_arena = undefined,
-            .smart_allocator = undefined,
-            .tracker = undefined,
+            .frame_allocator = undefined,
         };
         main_rt.wireAllocator();
 
@@ -430,13 +423,13 @@ test "PROOF: No Use-After-Free with Scavenger" {
         var scavenger_stop = AtomicFlag.init(false);
 
         // 1. Spawn Scavenger (The "Chaos Monkey")
-        const t_scav = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, scavengerWorker, .{ allocator, &scavenger_stop });
+        const t_scav = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, scavengerWorker, .{ allocator, &scavenger_stop });
 
         // 2. Spawn Reader
-        const t_read = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafReader, .{ shared_int, &reader_ready, &writer_dead });
+        const t_read = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, uafReader, .{ shared_int, &reader_ready, &writer_dead });
 
         // 3. Spawn Writer
-        const t_write = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, allocator, allocator, uafWriter, .{ allocator, shared_int, &reader_ready });
+        const t_write = try CheatLib.spawnThread(allocator, 64*1024, &global_ctx, uafWriter, .{ allocator, shared_int, &reader_ready });
 
         // 4. Wait for Writer to die
         t_write.join();
@@ -530,8 +523,6 @@ test "RwLocked Many Readers One Writer" {
             allocator,
             64*1024,
             &global_ctx,
-            allocator,
-            allocator,
             rwWorker,
             .{ i, loops, shared_state }
         );
@@ -620,8 +611,8 @@ test "Cross-Thread Spawning & Load Balancing" {
     // 2. Start Worker Threads
     // We'll use a WaitGroup to know when they are "ready" to accept work logic
     // But for this low-level test, we just start them.
-    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{1, &shutdown_signal, stack_pool});
-    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{2, &shutdown_signal, stack_pool});
+    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, workerLoop, .{1, &shutdown_signal, stack_pool});
+    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, workerLoop, .{2, &shutdown_signal, stack_pool});
 
     try threads.append(allocator, t1);
     try threads.append(allocator, t2);

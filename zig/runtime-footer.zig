@@ -1,3 +1,4 @@
+// TODO: Make this depend on libc, use jemalloc
 pub fn main() !void {
     // 1. Setup Allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -15,8 +16,6 @@ pub fn main() !void {
         allocator,
         1024 * 1024,
         &global_ctx,
-        allocator,
-        allocator
     );
     defer rt.deinit();
     rt.wireAllocator();

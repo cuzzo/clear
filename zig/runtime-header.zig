@@ -234,9 +234,9 @@ pub const CheatLib = struct {
     // Threading
     // THE INTERNAL WRAPPER
     // This runs INSIDE the new thread. It handles the boilerplate.
-    fn threadWrapper(allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, global_alloc: std.mem.Allocator, local_alloc: std.mem.Allocator, comptime func: anytype, args: anytype) !void {
+    fn threadWrapper(allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, comptime func: anytype, args: anytype) !void {
         // 1. BOILERPLATE: Setup Runtime
-        var rt = try Runtime.init(allocator, frame_size, global_ctx, global_alloc, local_alloc);
+        var rt = try Runtime.init(allocator, frame_size, global_ctx);
         defer rt.deinit();
 
         rt.wireAllocator();
@@ -258,10 +258,10 @@ pub const CheatLib = struct {
     }
 
     // TODO: When does this get cleaned up?
-    pub fn spawnThread(sys_allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, global_alloc: std.mem.Allocator, local_alloc: std.mem.Allocator, comptime func: anytype, args: anytype) !std.Thread {
+    pub fn spawnThread(sys_allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, comptime func: anytype, args: anytype) !std.Thread {
         // We don't call 'func' directly. We call the wrapper.
         // We pass the config + the function + the args TO the wrapper.
-        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, frame_size, global_ctx, global_alloc, local_alloc, func, args });
+        return std.Thread.spawn(.{}, threadWrapper, .{ sys_allocator, frame_size, global_ctx, func, args });
     }
 
     // Helper to wrap arbitrary arguments into a Context Pointer

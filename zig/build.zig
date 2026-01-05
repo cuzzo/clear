@@ -35,8 +35,6 @@ pub fn build(b: *std.Build) void {
         // "fiber-memory-test.zig",
         "frame-test.zig",
         "queues-test.zig",
-        "sbr-test.zig",
-        "sbr-unit-test.zig",
         "scheduler-test.zig",
         "slab-alloc-test.zig",
         "thread-test.zig",
@@ -73,7 +71,6 @@ pub fn build(b: *std.Build) void {
         "benchmark-test.zig",
         "arena-benchmark-test.zig",
         "queues-benchmark-test.zig",
-        "sbr-benchmark-test.zig",
         "slab-alloc-benchmark-test.zig",
     };
 

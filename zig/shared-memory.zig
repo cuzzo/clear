@@ -105,34 +105,44 @@ pub fn Shared(comptime T: type) type {
         // This is the "Transaction" logic.
         // func: A lambda/function that takes (*NewData) and modifies it.
         pub fn update(self: *Self, trt: *Runtime, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) !void {
-
-            // OPTIMISTIC LOOP
+            // We loop until we successfully swap the pointer
             while (true) {
-                // A. Snapshot the world
+                // 1. Load the current state (Snapshot)
                 const old_ptr = self.ptr.load(.monotonic);
 
-                // B. Create the Future (Allocation)
+                // 2. Allocation: Create a copy of the state
+                //    This is easy to leak, beware.
                 const new_ptr = try allocator.create(T);
-
-                // C. Copy History (Clone old data to new)
                 new_ptr.* = old_ptr.*;
 
-                // D. Apply Changes (Run the user's logic on the PRIVATE new copy)
-                //    We use @call to pass arguments to the update function
+                // 3. Modification: Apply the user function to the copy
+                // We use @call to unpack the args tuple
                 @call(.auto, func, .{new_ptr} ++ args);
 
-                // E. The Commit (Compare and Swap)
-                // "If ptr is still old_ptr, replace it with new_ptr."
-                // ordering: .release to ensure writes to new_ptr are visible before the swap
-                const result = self.ptr.cmpxchgWeak(old_ptr, new_ptr, .release, .monotonic);
+                // 4. CAS: Attempt to swap the old pointer with the new one
+                // .release ensures our writes to new_ptr are visible if we succeed
+                // .monotonic is sufficient for the failure load
+                const attempts = self.ptr.cmpxchgWeak(old_ptr, new_ptr, .release, .monotonic);
 
-                if (result == null) {
-                    // Schedule this ptr for deletion
-                    try trt.ebr.retire(allocator, old_ptr);
-                    return;
-                } else {
+                if (attempts) |actual_old| {
+                    // === FAILURE PATH ===
+                    // Someone else updated the pointer before us.
+                    // Our 'new_ptr' is now invalid/stale.
+
+                    // We MUST destroy the allocation we just made.
                     allocator.destroy(new_ptr);
+
+                    // Optional: update your local view of old_ptr here to retry faster,
+                    // though loading it at the top of the loop is also fine.
+                    _ = actual_old;
+                    continue;
                 }
+
+                // === SUCCESS PATH ===
+                // We successfully swapped the pointer. 'new_ptr' is now live.
+                // 'old_ptr' is now effectively garbage.
+                try trt.ebr.retire(allocator, old_ptr);
+                return;
             }
         }
     };

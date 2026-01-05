@@ -101,10 +101,12 @@ test "Context Switching" {
 // (In your real app, manage this carefully)
 
 fn userTask1(rt: *Runtime) !void {
-    std.debug.print("\n[Task 1] Hello! My stack offset is: {d}", .{rt.frame_fba.end_index});
+
+    const mark = rt.overflow_arena.getMark();
+    std.debug.print("\n[Task 1] Hello! My stack offset is: {d}", .{mark.cursor});
 
     // Simulate some work using the Runtime
-    const ptr = rt.frame_fba.allocator().create(u64) catch unreachable;
+    const ptr = rt.frameAlloc().create(u64) catch unreachable;
     ptr.* = 12345;
     std.debug.print("\n[Task 1] Allocated data on fiber heap: {d}", .{ptr.*});
 }
