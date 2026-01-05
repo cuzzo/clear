@@ -56,23 +56,12 @@ pub const Fiber = struct {
         // CALCULATION: Stack grows DOWN from the end of the memory block.
         const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
 
-        // ---------------------------------------------------------------------
-        // PERFORMANCE FIX: L1 Cache Staggering
-        // ---------------------------------------------------------------------
-        // Problem: 2MB strides cause every stack to alias to the same L1 Cache Set.
-        // Fix: We shift the starting stack pointer by 64 bytes (1 cache line)
-        // for every 2MB index. We wrap around every 16KB (half of L1 cache).
-        //
-        // Math: (Address >> 21) gives us the unique index of this 2MB block.
-        // We multiply by 64 to shift one cache line per block.
-        // We mask with 0x3FFF to limit the wasted space to 16KB max.
-        // ---------------------------------------------------------------------
-        const block_index = stack_top_addr >> 21;
-        const stagger_offset = (block_index * 64) & 0x3FFF;
-
-        // Align to 16 bytes (x64 requirement) and back off slightly
-        // to ensure we don't start at the very edge.
-        const stack_top = ((stack_top_addr - stagger_offset) & ~@as(usize, 15)) - 16;
+        // MAXIMIZE STACK USAGE:
+        // 1. Align the absolute top to 16 bytes.
+        // 2. Subtract 8 bytes. This is the slot for our "Trampoline" (Return Address).
+        // Result: SP is 16-byte aligned - 8. When 'ret' runs, SP becomes 16-byte aligned.
+        const aligned_top = stack_top_addr & ~@as(usize, 15);
+        const stack_top = aligned_top - 8;
 
         // THE TRAMPOLINE:
         // We simulate a "Return Address" on the top of the stack.

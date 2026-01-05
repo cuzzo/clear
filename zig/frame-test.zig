@@ -4,7 +4,7 @@ const testing = std.testing;
 const CheatArena = @import("runtime.zig").CheatArena;
 
 test "CheatArena: Basic Allocation" {
-    var arena = CheatArena.init(testing.allocator);
+    var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. Allocate a small integer
@@ -22,7 +22,7 @@ test "CheatArena: Basic Allocation" {
 }
 
 test "CheatArena: Growth Strategy (4KB -> 16KB -> 64KB)" {
-    var arena = CheatArena.init(testing.allocator);
+    var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. Fill Page 0 (4KB)
@@ -49,7 +49,7 @@ test "CheatArena: Growth Strategy (4KB -> 16KB -> 64KB)" {
 }
 
 test "CheatArena: Large Object Overflow" {
-    var arena = CheatArena.init(testing.allocator);
+    var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. Alloc something massive (300KB).
@@ -73,7 +73,7 @@ test "CheatArena: Large Object Overflow" {
 }
 
 test "CheatArena: Rewind Logic (Standard & Large Objects)" {
-    var arena = CheatArena.init(testing.allocator);
+    var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. Setup State: 2 Blocks + 1 Large Object
@@ -105,7 +105,7 @@ test "CheatArena: Rewind Logic (Standard & Large Objects)" {
 }
 
 test "CheatArena: Hybrid Trim (Rewind Far Back)" {
-    var arena = CheatArena.init(testing.allocator);
+    var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. Create 5 Blocks of growth
@@ -139,7 +139,7 @@ test "CheatArena: Hybrid Trim (Rewind Far Back)" {
 }
 
 test "CheatArena: Integration with ArrayList (Dynamic Growth)" {
-    var arena = CheatArena.init(testing.allocator);
+    var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // Define the Wrapper to match Zig 0.15 Allocator.VTable
@@ -207,7 +207,7 @@ test "CheatArena: Integration with ArrayList (Dynamic Growth)" {
 }
 
 test "alignment verification" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // Test various alignments
@@ -219,7 +219,7 @@ test "alignment verification" {
 }
 
 test "large allocation with 32-byte alignment" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // Allocate something larger than MAX_PAGE_SIZE with 32-byte alignment
@@ -234,7 +234,7 @@ test "large allocation with 32-byte alignment" {
 }
 
 test "rewind frees blocks correctly" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     const mark1 = arena.getMark();
@@ -256,7 +256,7 @@ test "rewind frees blocks correctly" {
 }
 
 test "CheatArena: Edge Cases (Zero and Max)" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. Zero Allocation
@@ -271,7 +271,7 @@ test "CheatArena: Edge Cases (Zero and Max)" {
 }
 
 test "CheatArena: Exact Block Filling & Boundary Crossing" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // 1. We know the first page is 4096 bytes (MIN_PAGE_SIZE).
@@ -301,7 +301,7 @@ test "CheatArena: Exact Block Filling & Boundary Crossing" {
 }
 
 test "CheatArena: Game Loop Simulation (Memory Stability)" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     var prng = std.Random.DefaultPrng.init(0x1234);
@@ -370,7 +370,7 @@ test "CheatArena: Game Loop Simulation (Memory Stability)" {
 }
 
 test "CheatArena: Profiling Fragmentation & Efficiency" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     var prng = std.Random.DefaultPrng.init(0xDEADBEEF);
@@ -416,7 +416,7 @@ test "CheatArena: Profiling Fragmentation & Efficiency" {
 }
 
 test "CheatArena: The 'Goldilocks' Test (Packing Small Objects)" {
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     // SCENARIO: A Particle System

@@ -216,10 +216,8 @@ test "MVCC Implementation" {
         var main_rt = Runtime{
             .slab = slab,
             .ebr = main_ebr,
-            .frame_backing = undefined,
             .backing_allocator = undefined,
             .heap_allocator = undefined,
-            .frame_fba = undefined,
             .global_allocator = undefined,
             .owns_frame_memory = true,
             .deadline = 0,
@@ -602,8 +600,12 @@ test "Cross-Thread Spawning & Load Balancing" {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    var stack_pool = StackPool.init(allocator);
-    defer stack_pool.deinit();
+    var stack_pool = try allocator.create(StackPool);
+    stack_pool.* = StackPool.init(allocator);
+    defer {
+        stack_pool.deinit();
+        allocator.destroy(stack_pool);
+    }
 
     // Initialize Global Registry
     fp.global_registry.mutex = .{};
@@ -618,8 +620,8 @@ test "Cross-Thread Spawning & Load Balancing" {
     // 2. Start Worker Threads
     // We'll use a WaitGroup to know when they are "ready" to accept work logic
     // But for this low-level test, we just start them.
-    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{1, &shutdown_signal, &stack_pool});
-    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{2, &shutdown_signal, &stack_pool});
+    const t1 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{1, &shutdown_signal, stack_pool});
+    const t2 = try CheatLib.spawnThread(allocator, 16 * 1024, &global_ctx, allocator, allocator, workerLoop, .{2, &shutdown_signal, stack_pool});
 
     try threads.append(allocator, t1);
     try threads.append(allocator, t2);

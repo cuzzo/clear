@@ -26,12 +26,6 @@ pub const Runtime = struct {
 
     slab: Slab64,
 
-    // THE FRAME (Scratchpad)
-    // We use a FixedBufferAllocator to simulate the linear stack.
-    // It is backed by a raw slice of memory.
-    frame_backing: []u8,
-    frame_fba: std.heap.FixedBufferAllocator,
-
     // Control
     ebr: ThreadLocalEbr,  // This probably needs to be global...
     owns_frame_memory: bool,
@@ -88,8 +82,6 @@ pub const Runtime = struct {
 
         return Runtime{
             .slab = slab,
-            .frame_backing = slice,
-            .frame_fba = std.heap.FixedBufferAllocator.init(slice),
             .global_allocator = global_alloc,
             .backing_allocator = backing_alloc,
             .local_allocator = undefined,
@@ -98,7 +90,7 @@ pub const Runtime = struct {
             .deadline = deadline,
             .smart_allocator = undefined,
             .heap_allocator = undefined,
-            .overflow_arena = CheatArena.init(backing_alloc),
+            .overflow_arena = CheatArena.init(backing_alloc, slice),
             .tracker = try ScopeTracker.init(backing_alloc),
         };
     }
@@ -113,7 +105,7 @@ pub const Runtime = struct {
 
         // IMPORTANT: Only free frame IF WE OWN IT!
         if (self.owns_frame_memory) {
-            self.global_allocator.free(self.frame_backing);
+            self.global_allocator.free(self.overflow_arena.static_block);
         }
     }
 
@@ -129,6 +121,7 @@ pub const Runtime = struct {
             .ptr = self,
             .vtable = &SmartAllocatorVTable,
         };
+
         self.heap_allocator = std.mem.Allocator{
             .ptr = self,
             .vtable = &SbrHeapVTable,
@@ -211,32 +204,14 @@ pub const Runtime = struct {
 
     fn smartAlloc(ctx: *anyopaque, n: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self = @as(*Runtime, @ptrCast(@alignCast(ctx)));
-
-        // 1. Try FRAME
-        // rawAlloc accepts std.mem.Alignment directly
-        if (self.frame_fba.allocator().rawAlloc(n, ptr_align, ret_addr)) |ptr| {
-            return ptr;
-        }
-
-        // 2. Try Overflow Arena
-        // CheatArena.alloc still expects u8 (or usize), so we convert using .toByteUnits()
-        // We cast to u8 because alignment is rarely > 255.
         const align_u8 = @as(u8, @intCast(ptr_align.toByteUnits()));
+
+        // No more "try fba, else try arena". It's just arena.
         return self.overflow_arena.alloc(n, align_u8, ret_addr);
     }
 
     fn smartResize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-        _ = buf_align;
-        _ = ret_addr;
-
-        const self = @as(*Runtime, @ptrCast(@alignCast(ctx)));
-        const start = @intFromPtr(self.frame_backing.ptr);
-        const end = start + self.frame_backing.len;
-        const ptr_addr = @intFromPtr(buf.ptr);
-
-        if (ptr_addr >= start and ptr_addr < end) {
-            return self.frame_fba.allocator().resize(buf, new_len);
-        }
+        _ = ctx; _ = buf; _ = buf_align; _ = ret_addr; _ = new_len;
         return false;
     }
 
@@ -338,14 +313,13 @@ pub const Runtime = struct {
     // Stack Helper: Get current Mark (Offset)
     pub fn saveFrameMark(self: *Runtime) FrameMark {
         return FrameMark{
-            .stack_index = self.frame_fba.end_index,
+            .stack_index = 0,  // TODO: Deprecate
             .overflow_mark = self.overflow_arena.getMark(),
         };
     }
 
     // Stack Helper: Reset to Mark (O(1) Free)
     pub fn restoreFrameMark(self: *Runtime, mark: FrameMark) void {
-        self.frame_fba.end_index = mark.stack_index;
         self.overflow_arena.rewind(mark.overflow_mark);
     }
 
@@ -597,19 +571,20 @@ pub const Runtime = struct {
         const sched = fp.active_scheduler;
         const task = sched.current_task.?;
 
-        // Skip the first 4KB (Guard Page)
-        // We cannot write to index 0. We must start at 4096.
-        const guard_offset = 4096;
-        const scratchpad_size = 1024 * 1024; // 1MB
+        // Skip the first 4KB (Frame)
+        const frame_size = 4 * 1024; // 4kb -> Frame
 
         // 3. Initialize Runtime
         // Optimization: We carve 1MB off the bottom of the Fiber's OWN stack
         // to use as the Runtime's scratchpad. No malloc needed!
         const full_stack_memory = task.base.stack.memory;
-        const scratchpad_slice = full_stack_memory[guard_offset .. guard_offset + scratchpad_size];
+        if (full_stack_memory.len < frame_size + 1024) @panic("Stack too small for Frame!");
 
+        const frame_slice = full_stack_memory[0 .. frame_size];
+
+        // TODO: Initialize Runtime with Frame
         var rt = Runtime.initFromSlice(
-            scratchpad_slice,
+            frame_slice,
             sched.global_ebr,
             sched.allocator,
             sched.allocator,

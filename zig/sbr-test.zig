@@ -4,6 +4,7 @@ const testing = std.testing;
 const Runtime = @import("runtime.zig").Runtime;
 const EbrContext = @import("ebr.zig").EbrContext;
 const Chain = @import("sbr.zig").Chain;
+const FrameMark = Runtime.FrameMark;
 
 // -------------------------------------------------------------------------
 // DOMAIN OBJECTS
@@ -26,10 +27,11 @@ const User = struct {
 pub fn createUserCorrect(rt: *Runtime) !*User {
     // 1. MARK STACK (The Kill Zone)
     //    We use saveFrameMark (matches your saveStackMark concept)
-    const frame_mark = rt.saveFrameMark();
+    const start_mark = rt.saveFrameMark();
+    const frame_mark = start_mark.overflow_mark;
 
     //    Defer cleanup: The "Scope" ends when this function returns.
-    defer rt.restoreFrameMark(frame_mark);
+    defer rt.restoreFrameMark(start_mark);
 
     // 2. Create Dynamic List on STACK (Frame)
     //    Using Frame Allocator (rt.frameAlloc())
@@ -66,13 +68,16 @@ pub fn createUserCorrect(rt: *Runtime) !*User {
 
     // 4. MEMORY REPORT (Inside Function)
     //    We can inspect the frame index to see we actually consumed stack memory
-    const current_stack = rt.frame_fba.end_index;
-    const consumed = current_stack - frame_mark.stack_index;
+    const current_mark = rt.saveFrameMark().overflow_mark;
 
-    std.debug.print("\n[Inside Correct] Stack Consumed: {d} bytes", .{consumed});
+    // Logic: If cursor OR block index changed, we consumed memory.
+    const consumed_memory = (current_mark.block_index != frame_mark.block_index) or
+                            (current_mark.cursor != frame_mark.cursor);
+
+    std.debug.print("\n[Inside Correct] Stack Moved: {}", .{consumed_memory});
 
     // We expect to have used memory for 10 Users + List pointers
-    if (consumed == 0) return error.TestExpectedMemoryConsumption;
+    if (!consumed_memory) return error.TestExpectedMemoryConsumption;
 
     // 5. RETURN
     //    The 'defer' runs now. List and Stack Users are wiped.
@@ -92,7 +97,7 @@ test "STRATEGY: Correct Usage (Stack Cleanup + Heap Survivor)" {
     rt.wireAllocator();
     defer rt.deinit();
 
-    const start_stack_idx = rt.frame_fba.end_index;
+    const start_mark = rt.saveFrameMark().overflow_mark;
 
     // --- CALL FUNCTION ---
     const user = try createUserCorrect(&rt);
@@ -101,7 +106,9 @@ test "STRATEGY: Correct Usage (Stack Cleanup + Heap Survivor)" {
 
     // 1. Stack should be reset (Scope Reclamation worked)
     //    The 'defer' inside createUserCorrect should have rewound the index.
-    try testing.expectEqual(start_stack_idx, rt.frame_fba.end_index);
+    const end_mark = rt.saveFrameMark().overflow_mark;
+    try testing.expectEqual(start_mark.block_index, end_mark.block_index);
+    try testing.expectEqual(start_mark.cursor, end_mark.cursor);
 
     // 2. Return value should be VALID (Survivor worked)
     try testing.expectEqual(@as(i64, 999), user.id);
@@ -438,7 +445,9 @@ test "STRATEGY: Chaos (Strict Frame & Heap)" {
         // VERIFY FRAME IS CLEAN
         // Since chaosUser returned, its frame allocation (ArrayLists) MUST be gone.
         // The frame index should be back to 0 (or wherever it started).
-        try testing.expectEqual(@as(usize, 0), rt.frame_fba.end_index);
+        const mark = rt.saveFrameMark().overflow_mark;
+        try testing.expectEqual(@as(usize, 0), mark.block_index);
+        try testing.expectEqual(@as(usize, 0), mark.cursor);
 
         // CLEANUP SURVIVOR (Manual check)
         rt.heapFree(survivor);
@@ -489,7 +498,10 @@ test "STRATEGY: The Barnacle (Graph Survival)" {
     const head = try createBarnacleGraph(&rt);
 
     // Frame should be reset
-    try testing.expectEqual(@as(usize, 0), rt.frame_fba.end_index);
+    const mark = rt.saveFrameMark().overflow_mark;
+    try testing.expectEqual(@as(usize, 0), mark.block_index);
+    try testing.expectEqual(@as(usize, 0), mark.cursor);
+
     try testing.expectEqual(@as(i64, 1), head.id);
 
     rt.heapFree(head);
@@ -549,7 +561,9 @@ test "STRATEGY: Transient Graph (Full Cleanup)" {
     try testing.expectEqual(@as(i32, 4), size);
 
     // Verify Frame Reset
-    try testing.expectEqual(@as(usize, 0), rt.frame_fba.end_index);
+    const mark = rt.saveFrameMark().overflow_mark;
+    try testing.expectEqual(@as(usize, 0), mark.block_index);
+    try testing.expectEqual(@as(usize, 0), mark.cursor);
 
     rt.deinit();
 }

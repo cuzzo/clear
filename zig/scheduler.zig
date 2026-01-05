@@ -106,6 +106,8 @@ pub const SmartEventFd = struct {
     }
 };
 
+const STACK_CACHE_LIMIT: usize = 16;
+
 pub const Scheduler = struct {
     // 1. The Manager State
     fiber_pool: std.ArrayListUnmanaged(*Task) = .{},
@@ -115,7 +117,7 @@ pub const Scheduler = struct {
 
     // 2. Communcation
     inbox: AtomicInbox = .{},  // Lock-free Inbox
-    stack_pool: *StackPool,    //GLOBAL Stack Cache
+    stack_pool: *StackPool,    // GLOBAL Stack Cache
     event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
     global_shutdown: ?*std.atomic.Value(bool) = null,
@@ -193,9 +195,38 @@ pub const Scheduler = struct {
         const queues = .{ &self.fiber_pool, &self.sleeping_queue };
         inline for (queues) |q| {
             for (q.items) |task| {
+                if (task.base.stack.memory.len > 0) {
+                     self.freeStack(task.base.stack.memory);
+                }
+                self.allocator.destroy(task.base); // Free Fiber
                 self.allocator.destroy(task); // Free Task Struct
             }
             q.deinit(self.allocator);
+        }
+
+        var node = self.inbox.popAll();
+        while (node) |n| {
+            const next = n.next;
+            if (n.type == .Resume) {
+                 const task: *Task = @fieldParentPtr("inbox_link", n);
+                 // Free the stack
+                 if (task.base.stack.memory.len > 0) {
+                     self.freeStack(task.base.stack.memory);
+                 }
+                 // Free the structs
+                 self.allocator.destroy(task.base);
+                 self.allocator.destroy(task);
+            } else if (n.type == .Spawn) {
+                 const req: *SpawnRequest = @fieldParentPtr("inbox_link", n);
+                 self.allocator.destroy(req);
+            }
+            node = next;
+        }
+
+        // Ownership: We must return all cached stacks to the pool
+        while (self.stack_cache.items.len > 0) {
+            const stack = self.stack_cache.pop().?;
+            self.stack_pool.stack_slab.free(stack);
         }
 
         // Ownership Split: RunQueue manages the backing array (the pointers),
@@ -211,11 +242,13 @@ pub const Scheduler = struct {
              // Access raw slot directly
              const task_opt = self.ready_queue.buffer[i & self.ready_queue.mask].load(.monotonic);
              if (task_opt) |task| {
+                 self.freeStack(task.base.stack.memory);
                  self.allocator.destroy(task.base);
                  self.allocator.destroy(task);
              }
         }
 
+        self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
         self.poller.deinit();
     }
@@ -231,36 +264,38 @@ pub const Scheduler = struct {
             return stack;
         }
         // 2. Fallback to Global Arena (Atomic Increment)
-        return fm.global_arena.allocGlobalSlot();
+        return self.stack_pool.stack_slab.alloc();
     }
 
     // HOT PATH: Freeing a stack
     fn freeStack(self: *Scheduler, stack: []u8) void {
-        // 1. Push to local cache (Amortized Alloc)
-        self.stack_cache.append(self.allocator, stack) catch {
-            // Cache full or OOM on arraylist?
-            // In a robust system, we might madvise immediately or drop reference.
-            // For MVP, if ArrayList fails, we technically leak the VMA mapping (not RAM).
-        };
+        if (self.stack_cache.items.len < STACK_CACHE_LIMIT) {
+            self.stack_cache.append(self.allocator, stack) catch {
+                self.stack_pool.stack_slab.free(stack);
+            };
+        } else {
+            self.stack_pool.stack_slab.free(stack);
+        }
     }
 
     // IDLE PATH: Scavenge memory (The Cleanup)
-    fn scavengeMemory(self: *Scheduler) void {
-        // Keep 16 stacks warm, release the rest to OS
-        const CACHE_LIMIT = 16;
-        while (self.stack_cache.items.len > CACHE_LIMIT) {
+    fn scavengeMemory(self: *Scheduler, draining: bool) void {
+        // 1. Drain L1 Cache (Scheduler ArrayList) -> L2 Cache (Slab Magazine)
+        // We keep a small buffer (e.g. 4) just in case we wake up immediately.
+        const WARM_CACHE_SIZE: usize = if (draining) 0 else 4;
+
+        while (self.stack_cache.items.len > WARM_CACHE_SIZE) {
             const stack = self.stack_cache.pop().?;
-            const aligned_ptr = @as([*]align(4096) u8, @alignCast(stack.ptr));
-            // Blocking Syscall! Only call when idle.
-            posix.madvise(aligned_ptr, stack.len, linux.MADV.DONTNEED) catch {};
-            // We keep the slice in the "air" (virtually mapped),
-            // but we drop it from our cache so we don't reuse it immediately?
-            // Actually, for a simple cache, we just drop the physical RAM.
-            // We can add it back to the cache if we want to reuse the VMA address,
-            // OR we can just drop the VMA pointer effectively leaking the virtual address
-            // (but saving the RAM).
-            // Since we have 1TB, leaking virtual addresses is fine for MVP.
+            // Push to the Slab's Thread-Local Magazine
+            // (Note: Using stack_slab directly as seen in your freeStack code,
+            //  or access via self.stack_pool.stack_slab)
+            self.stack_pool.stack_slab.free(stack);
         }
+
+        // 2. Flush L2 Cache (Magazine) -> L3 Depot (Global Slabs)
+        // If a slab becomes completely empty during this flush,
+        // SlabAllocator will free the backing memory to the OS/Allocator.
+        self.stack_pool.flushLocalCache();
     }
 
     // ------------------------------------------------------------
@@ -299,10 +334,6 @@ pub const Scheduler = struct {
     }
 
     pub fn run(self: *Scheduler) void {
-        if (fm.global_arena.base_addr == null) {
-            fm.global_arena = VirtualArena.init() catch unreachable;
-        }
-
         const my_id = std.Thread.getCurrentId();
 
         std.debug.print("[Sched {d}] Registering...\n", .{my_id});
@@ -512,16 +543,7 @@ pub const Scheduler = struct {
 
             // If no IO and no Tasks and no Sleepers -> Break
             if (self.shutdown_on_idle and count == 0 and self.ready_queue.len() == 0 and self.sleeping_queue.items.len == 0) {
-                // Free excess stacks in local cache back to OS (physically)
-                // Keep 16 hot.
-                while (self.stack_cache.items.len > 16) {
-                    const stack = self.stack_cache.pop().?;
-                    const aligned_ptr = @as([*]align(4096) u8, @alignCast(stack.ptr));
-                    // BLOCKING SYSCALL: Only pay this when truly idle
-                    std.posix.madvise(aligned_ptr, stack.len, linux.MADV.DONTNEED) catch {};
-                    // We drop the pointer. VMA stays mapped but unused.
-                }
-
+                self.scavengeMemory(true);
                 break;
             }
         }

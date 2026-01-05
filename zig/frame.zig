@@ -19,11 +19,15 @@ pub const CheatArena = struct {
 
     child_allocator: std.mem.Allocator,
 
-    pub fn init(child_allocator: std.mem.Allocator) CheatArena {
+    // An optional pre-allocated buffer (e.g. the 4KB Frame)
+    static_block: []u8 = &[_]u8{},
+
+    pub fn init(child_allocator: std.mem.Allocator, static_block: []u8) CheatArena {
         return .{
             .blocks = .{},
             .large_objects = .{},
             .child_allocator = child_allocator,
+            .static_block = static_block,
         };
     }
 
@@ -53,9 +57,12 @@ pub const CheatArena = struct {
         const align_enum = std.mem.Alignment.fromByteUnits(alignment);
         const align_usize = align_enum.toByteUnits();
 
-        // 1. Check current block
-        if (self.blocks.items.len > 0) {
-            const block = self.blocks.items[self.current_block_index];
+        // 1. Check active block (either Static or Dynamic)
+        // If we have dynamic blocks, use the last one. Otherwise use static.
+        const use_dynamic = (self.blocks.items.len > 0);
+
+        if (use_dynamic or self.static_block.len > 0) {
+            const block = if (use_dynamic) self.blocks.items[self.current_block_index] else self.static_block;
             const start = @intFromPtr(block.ptr);
             const curr = start + self.cursor;
             const aligned_addr = std.mem.alignForward(usize, curr, align_usize);
@@ -130,16 +137,39 @@ pub const CheatArena = struct {
     };
 
     pub fn getMark(self: *CheatArena) Mark {
-        if (self.blocks.items.len == 0) return .{ .block_index = 0, .cursor = 0, .large_obj_count = 0 };
+        const shift: usize = if (self.static_block.len > 0 and self.blocks.items.len > 0) 1 else 0;
+
         return .{
-            .block_index = self.current_block_index,
+            .block_index = self.current_block_index + shift,
             .cursor = self.cursor,
             .large_obj_count = self.large_objects.items.len,
         };
     }
 
     pub fn rewind(self: *CheatArena, mark: Mark) void {
-        self.current_block_index = mark.block_index;
+        const has_static = (self.static_block.len > 0);
+
+        var keep_count: usize = 0;
+        var new_index: usize = 0;
+
+        if (has_static) {
+            if (mark.block_index == 0) {
+                // Rewinding to Static Block -> Free ALL dynamic blocks
+                keep_count = 0;
+                new_index = 0;
+            } else {
+                // Rewinding to Dynamic Block N -> Internal Index is N-1
+                new_index = mark.block_index - 1;
+                keep_count = new_index + 1;
+            }
+        } else {
+            // Standard behavior (No static block)
+            new_index = mark.block_index;
+            // If we have blocks, we keep up to the current index
+            keep_count = if (self.blocks.items.len > 0) new_index + 1 else 0;
+        }
+
+        self.current_block_index = new_index;
         self.cursor = mark.cursor;
 
         const large_align = std.mem.Alignment.fromByteUnits(16);
@@ -152,8 +182,7 @@ pub const CheatArena = struct {
         }
 
         // Trim Blocks
-        const keep_count = if (self.blocks.items.len > 0) self.current_block_index + 1 else 0;
-
+        // If we are back to using the static block (blocks.len == 0), we free ALL dynamic blocks.
         while (self.blocks.items.len > keep_count) {
             const popped = self.blocks.pop().?;
             self.child_allocator.rawFree(popped, large_align, @returnAddress());

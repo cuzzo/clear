@@ -2,84 +2,78 @@ const std = @import("std");
 
 const fc = @import("fiber-core.zig");
 
+const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 const StackSize = fc.StackSize;
 const Fiber = fc.Fiber;
 
-const linux = std.os.linux;
-const posix = std.posix;
+const STACK_SIZE: usize = 16 * 1024; // 16KB -> 12KB Stack, 4KB Frame
+const StackArray = [STACK_SIZE]u8;
 
-// We reserve 1TB of virtual address space.
-// 0 syscalls to sub-divide this. It's just math.
-const ARENA_SIZE: usize = 1 * 1024 * 1024 * 1024 * 1024;
-const STACK_SIZE: usize = 2 * 1024 * 1024; // 2MB
-const MAX_STACKS: usize = ARENA_SIZE / STACK_SIZE;
+// Calculate a Slab Size that is larger than the Stack Size.
+// The SlabAllocator puts a header at the start of every chunk.
+// If we used 16KB slabs for 16KB stacks, the header would displace the stack.
+// Let's use 1MB chunks to hold ~63 stacks per chunk.
+const SLAB_MEMORY_BLOCK = 1 * 1024 * 1024;
 
-pub const VirtualArena = struct {
-    base_addr: ?[*]u8,
+pub const StackSlab = struct {
+    slab: SlabAllocator(StackArray),
 
-    // Global atomic counter for the "Watermark" of allocated stacks.
-    // We only increment this. We never "free" an index back to the global pool
-    // to keep it lock-free. Freed stacks go to Thread-Local caches.
-    stack_watermark: std.atomic.Value(usize),
-
-    pub fn init() !VirtualArena {
-        // HUGE mmap. NO_RESERVE means we don't commit swap/ram.
-        // PROT_READ|WRITE means no mprotect needed later.
-        const addr = try posix.mmap(
-            null,
-            ARENA_SIZE,
-            posix.PROT.READ | posix.PROT.WRITE,
-            .{ .TYPE = .PRIVATE, .ANONYMOUS = true, .NORESERVE = true },
-            -1,
-            0,
-        );
-
-        return VirtualArena{
-            .base_addr = addr.ptr,
-            .stack_watermark = std.atomic.Value(usize).init(0),
+    pub fn init(allocator: std.mem.Allocator) !StackSlab {
+        return .{
+            .slab = SlabAllocator(StackArray).init(
+                allocator,
+                SLAB_MEMORY_BLOCK,
+            ),
         };
     }
 
-    // Returns a POINTER to the start of the stack memory.
-    // Hot Path: 1 atomic increment.
-    pub fn allocGlobalSlot(self: *VirtualArena) ![]u8 {
-        const index = self.stack_watermark.fetchAdd(1, .monotonic);
-        if (index >= MAX_STACKS) return error.OutOfMemory;
+    pub fn deinit(self: *StackSlab) void {
+        self.slab.deinit();
+    }
 
-        const offset = index * STACK_SIZE;
-        return self.base_addr.?[offset..offset+STACK_SIZE];
+    pub fn alloc(self: *StackSlab) ![]u8 {
+        // Map .alloc() -> .create()
+        // .create() returns a pointer to the array (*[16KB]u8)
+        const ptr = try self.slab.create();
+        return ptr[0..];
+    }
+
+    pub fn free(self: *StackSlab, stack: []u8) void {
+        // Recover the pointer to the array
+        // We know the slice ptr points to the start of our StackArray
+        const ptr: *StackArray = @ptrCast(stack.ptr);
+        self.slab.destroy(ptr);
+    }
+
+    pub fn flushLocalCache(self: *StackSlab) void {
+        self.slab.flushThreadCache();
     }
 };
 
-pub var global_arena: VirtualArena = .{
-    .base_addr = null,
-    .stack_watermark = std.atomic.Value(usize).init(0),
-};
-
-
-// TODO: Deprecate, replaced by Arena
 pub const StackPool = struct {
     allocator: std.mem.Allocator,
+    stack_slab: StackSlab,
 
     pub fn init(allocator: std.mem.Allocator) StackPool {
-        return .{ .allocator = allocator };
+        return .{
+            .allocator = allocator,
+            .stack_slab = try StackSlab.init(allocator),
+        };
     }
 
-    pub fn deinit(_: *StackPool) void {
+    pub fn deinit(self: *StackPool) void {
+        self.stack_slab.deinit();
     }
 
-    pub fn flushLocalCache(_: *StackPool) void {
+    pub fn flushLocalCache(self: *StackPool) void {
+        self.stack_slab.flushLocalCache();
     }
 
     // The "Cache Check" happens inside Scheduler before calling this.
     pub fn get(self: *StackPool, entry_fn: usize, size: StackSize) !*Fiber {
-        _ = size; // We only support 2MB now
+        _ = size; // For now, only standard size is supported.
+        const memory = try self.stack_slab.alloc();
 
-        // Atomic Alloc from Arena
-        const memory = try global_arena.allocGlobalSlot();
-
-        // We still allocate the Fiber struct itself.
-        // Ideally this comes from a SlabAllocator, but using standard allocator for now as per your code.
         const fiber = try self.allocator.create(Fiber);
         fiber.* = Fiber.init(memory, entry_fn);
         return fiber;
@@ -87,8 +81,7 @@ pub const StackPool = struct {
 
     // This function is deprecated in the new flow.
     pub fn put(self: *StackPool, fiber: *Fiber) void {
-        // Scheduler puts memory into its local cache.
-        // If we must destroy a fiber struct:
+        self.stack_slab.free(fiber.stack.memory);
         self.allocator.destroy(fiber);
     }
 };
