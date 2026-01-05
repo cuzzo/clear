@@ -255,4 +255,219 @@ test "rewind frees blocks correctly" {
     try std.testing.expect(blocks_after == 1);  // keep_count = current_block_index + 1 = 0 + 1
 }
 
+test "CheatArena: Edge Cases (Zero and Max)" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // 1. Zero Allocation
+    // Should return a valid pointer (non-null), even if size is 0.
+    // It shouldn't panic or crash the block logic.
+    const ptr_zero = arena.alloc(0, 1, 0);
+    try std.testing.expect(ptr_zero != null);
+
+    // 2. Max Allocation (Should fail gracefully, not crash)
+    const ptr_huge = arena.alloc(std.math.maxInt(usize), 1, 0);
+    try std.testing.expect(ptr_huge == null);
+}
+
+test "CheatArena: Exact Block Filling & Boundary Crossing" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // 1. We know the first page is 4096 bytes (MIN_PAGE_SIZE).
+    // Allocate 4090 bytes.
+    const p1 = arena.alloc(4090, 1, 0).?;
+
+    // Remaining: 6 bytes.
+
+    // 2. Allocate exactly 6 bytes.
+    const p2 = arena.alloc(6, 1, 0).?;
+
+    // Verify they are contiguous (same block)
+    const addr1 = @intFromPtr(p1);
+    const addr2 = @intFromPtr(p2);
+    try std.testing.expectEqual(addr1 + 4090, addr2);
+
+    // 3. Current block is now FULL (4096/4096).
+    // Allocate 1 byte. MUST trigger new block (or next cached block).
+    const p3 = arena.alloc(1, 1, 0).?;
+    const addr3 = @intFromPtr(p3);
+
+    // Address should NOT be contiguous
+    try std.testing.expect(addr3 != addr2 + 6);
+
+    // Verify we have 2 blocks now
+    try std.testing.expectEqual(@as(usize, 2), arena.blocks.items.len);
+}
+
+test "CheatArena: Game Loop Simulation (Memory Stability)" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var prng = std.Random.DefaultPrng.init(0x1234);
+    const random = prng.random();
+
+    const FRAMES = 60;
+    const ALLOCS_PER_FRAME = 1000;
+
+    std.debug.print("\n[Simulation] Running {d} frames...\n", .{FRAMES});
+
+    var max_memory_used: usize = 0;
+
+    for (0..FRAMES) |frame_idx| {
+        // 1. Mark the start of the frame
+        const mark = arena.getMark();
+
+        // 2. Simulate "Game Logic" (Allocating entities, physics, strings)
+        var frame_bytes: usize = 0;
+        for (0..ALLOCS_PER_FRAME) |_| {
+            // Mix of tiny structs and occasional buffers
+            var size: usize = 0;
+            if (random.intRangeAtMost(u8, 0, 100) > 95) {
+                size = random.intRangeAtMost(usize, 1024, 10 * 1024); // Occasional 10KB buffer
+            } else {
+                size = random.intRangeAtMost(usize, 16, 128); // Standard structs
+            }
+
+            if (arena.alloc(size, 4, 0)) |_| {
+                frame_bytes += size;
+            }
+        }
+
+        // 3. Measure Memory BEFORE Rewind (Peak usage for this frame)
+        var current_capacity: usize = 0;
+        for (arena.blocks.items) |b| current_capacity += b.len;
+        for (arena.large_objects.items) |l| current_capacity += l.slice.len;
+
+        if (current_capacity > max_memory_used) max_memory_used = current_capacity;
+
+        // Log stats for the first few frames to ensure we are reusing memory
+        if (frame_idx < 3 or frame_idx == FRAMES - 1) {
+            std.debug.print("  Frame {d}: Used {d:.2} KB | Capacity {d:.2} KB\n", .{
+                frame_idx,
+                @as(f64, @floatFromInt(frame_bytes)) / 1024.0,
+                @as(f64, @floatFromInt(current_capacity)) / 1024.0,
+            });
+        }
+
+        // 4. The Critical Step: REWIND
+        arena.rewind(mark);
+    }
+
+    std.debug.print("[Simulation] Peak Memory: {d:.2} KB\n", .{@as(f64, @floatFromInt(max_memory_used)) / 1024.0});
+
+    // VERIFICATION
+    // After Frame 0, the capacity should essentially effectively "freeze".
+    // If capacity keeps growing every frame, your 'rewind' logic is broken (leaking blocks).
+    // We allow a small margin for fragmentation variance, but it shouldn't double.
+
+    // This is the specific assertion that proves your allocator is "Production Ready" for a game loop.
+    // If this fails, you have a fragmentation leak.
+    const expected_cap = 2 * 1024 * 1024; // Expecting ~1-2MB roughly based on allocs
+    if (max_memory_used > expected_cap) {
+        std.debug.print("WARNING: High Memory Usage detected!\n", .{});
+    }
+}
+
+test "CheatArena: Profiling Fragmentation & Efficiency" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var prng = std.Random.DefaultPrng.init(0xDEADBEEF);
+    const random = prng.random();
+
+    var total_requested_bytes: usize = 0;
+
+    // SIMULATION: Run a "frame" with 5,000 mixed allocations
+    const ITERATIONS = 5_000;
+    for (0..ITERATIONS) |_| {
+        // Mix of small (common) and medium allocations
+        const size = random.intRangeAtMost(usize, 1, 256);
+        // Random alignment (1, 4, 8, 16)
+        const align_pow = random.intRangeAtMost(u4, 0, 4);
+        const alignment: u8 = try std.math.powi(u8, 2, align_pow);
+
+        if (arena.alloc(size, alignment, 0)) |_| {
+            total_requested_bytes += size;
+        }
+    }
+
+    // --- CALCULATE METRICS ---
+
+    // 1. Total OS Memory (Capacity)
+    var total_os_bytes: usize = 0;
+    for (arena.blocks.items) |blk| total_os_bytes += blk.len;
+    for (arena.large_objects.items) |obj| total_os_bytes += obj.slice.len;
+
+    // 2. Calculate Efficiency
+    const overhead = total_os_bytes - total_requested_bytes;
+    const efficiency = @as(f64, @floatFromInt(total_requested_bytes)) / @as(f64, @floatFromInt(total_os_bytes));
+
+    std.debug.print("\n[Profiler Report]\n", .{});
+    std.debug.print("  Requested: {d:.2} MB\n", .{@as(f64, @floatFromInt(total_requested_bytes)) / 1024.0 / 1024.0});
+    std.debug.print("  Allocated: {d:.2} MB (OS)\n", .{@as(f64, @floatFromInt(total_os_bytes)) / 1024.0 / 1024.0});
+    std.debug.print("  Wasted:    {d:.2} KB\n", .{@as(f64, @floatFromInt(overhead)) / 1024.0});
+    std.debug.print("  Efficiency: {d:.2}%\n", .{efficiency * 100.0});
+
+    // ASSERTIONS
+    // A linear allocator should be very efficient (>85%) unless you have terrible alignment luck.
+    // If this drops below 70%, your block sizing strategy might be too aggressive or too small.
+    try std.testing.expect(efficiency > 0.70);
+}
+
+test "CheatArena: The 'Goldilocks' Test (Packing Small Objects)" {
+    var arena = CheatArena.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // SCENARIO: A Particle System
+    // We want to allocate 10_000 particles.
+    // Each particle is 32 bytes.
+    // Total Data: 128 KB.
+
+    // This forces the Arena to use the block growth curve:
+    // Block 0: 4 KB   (Holds ~128 particles)
+    // Block 1: 16 KB  (Holds ~512 particles)
+    // Block 2: 64 KB  (Holds ~2048 particles)
+    // Block 3: 256 KB (Holds remainder)
+
+    const Particle = struct {
+        x: f32, y: f32, z: f32,
+        vx: f32, vy: f32, vz: f32,
+        life: f32,
+        padding: u32, // Pad to 32 bytes exactly
+    };
+
+    var total_requested: usize = 0;
+    const particle_count = 10_000;
+
+    for (0..particle_count) |_| {
+        const ptr = arena.alloc(@sizeOf(Particle), @alignOf(Particle), 0);
+        if (ptr) |_| total_requested += @sizeOf(Particle);
+    }
+
+    // --- CALCULATE TRUE EFFICIENCY ---
+
+    var total_capacity: usize = 0;
+
+    // We expect NO large objects this time
+    try std.testing.expectEqual(@as(usize, 0), arena.large_objects.items.len);
+
+    for (arena.blocks.items) |b| total_capacity += b.len;
+
+    const efficiency = @as(f64, @floatFromInt(total_requested)) / @as(f64, @floatFromInt(total_capacity));
+    const wasted_kb = @as(f64, @floatFromInt(total_capacity - total_requested)) / 1024.0;
+
+    std.debug.print("\n[Particle System Test]\n", .{});
+    std.debug.print("  Particles: {d}\n", .{particle_count});
+    std.debug.print("  Requested: {d:.2} KB\n", .{@as(f64, @floatFromInt(total_requested)) / 1024.0});
+    std.debug.print("  Capacity:  {d:.2} KB\n", .{@as(f64, @floatFromInt(total_capacity)) / 1024.0});
+    std.debug.print("  Wasted:    {d:.2} KB (Tail Waste)\n", .{wasted_kb});
+    std.debug.print("  Efficiency: {d:.2}%\n", .{efficiency * 100.0});
+
+    // EXPECTATION:
+    // We should be very high (>90%), but NOT 100%.
+    // Why not 100%? Because the last block (Block 3) will likely be partially empty.
+    // This "Tail Waste" is the price we pay for speed.
+    try std.testing.expect(efficiency > 0.90);
+}
 
