@@ -1,20 +1,29 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 // Fibers
 
 // The registers we need to save.
 // This layout matches the assembly exactly.
-pub const Context = extern struct {
-    sp: u64, // Stack Pointer
 
-    // Callee-saved registers for x86_64
+pub const Context = if (builtin.cpu.arch == .x86_64) extern struct {
+    sp: u64,
     rbx: u64 = 0,
     rbp: u64 = 0,
     r12: u64 = 0,
     r13: u64 = 0,
     r14: u64 = 0,
     r15: u64 = 0,
-};
+} else if (builtin.cpu.arch == .aarch64) extern struct {
+    sp: u64,
+    x19: u64 = 0, x20: u64 = 0,
+    x21: u64 = 0, x22: u64 = 0,
+    x23: u64 = 0, x24: u64 = 0,
+    x25: u64 = 0, x26: u64 = 0,
+    x27: u64 = 0, x28: u64 = 0,
+    fp: u64 = 0, // x29 is frame pointer
+    lr: u64 = 0, // x30 is link register
+} else @compileError("Unsupported Architecture");
 
 // 1. Declare the external symbol
 // Zig will look for this in the .s file we just created.
@@ -23,6 +32,22 @@ extern fn switch_context_asm(from: *Context, to: *Context) callconv(.c) void;
 // 2. Public Wrapper
 pub fn switchContext(from: *Context, to: *Context) void {
     switch_context_asm(from, to);
+}
+
+// 3. switch to Root Stack
+extern fn call_on_stack_asm(
+    stack_ptr: usize,
+    func: *const fn (?*anyopaque) callconv(.c) void,
+    arg: ?*anyopaque
+) void;
+
+pub fn callOnStack(
+    stack_ptr: usize,
+    func: *const fn (?*anyopaque) callconv(.c) void,
+    arg: ?*anyopaque
+) void {
+    const aligned_sp = stack_ptr & ~@as(usize, 0xF);
+    call_on_stack_asm(aligned_sp, func, arg);
 }
 
 // CHEAT uses VMA Pooling with mprotect and madvise.
@@ -86,6 +111,7 @@ pub const Fiber = struct {
     }
 
     // Switch FROM this fiber BACK to parent
+    // Before yielding, scheduler must check task.is_on_root_stack
     pub fn yield(self: *Fiber) void {
         switchContext(&self.ctx, self.parent_ctx);
     }

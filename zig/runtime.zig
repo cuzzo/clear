@@ -1,4 +1,5 @@
 const std = @import("std");
+const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
 const ebr_mod = @import("ebr.zig");
@@ -284,6 +285,21 @@ pub const Runtime = struct {
         rt.deinit();  // must manually de-init
         task.status = .Finished;
         task.base.yield();
+    }
+
+    pub fn onRootStack(_: *Runtime, user_fn: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
+        const sched = fp.active_scheduler;
+        const task = sched.getCurrent();
+        task.is_on_root_stack = true;
+        defer task.is_on_root_stack = false;
+
+        // We want to use the Scheduler's stack, but we need to make sure we don't
+        // overwrite the Scheduler's actual active frames.
+        // We use the scheduler's current main_ctx.sp as the base.
+        const root_stack_sp = sched.main_ctx.sp;
+
+        // Execute the function on the OS stack
+        fc.callOnStack(root_stack_sp, user_fn, arg);
     }
 };
 

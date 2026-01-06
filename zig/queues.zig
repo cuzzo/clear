@@ -192,6 +192,7 @@ pub const Task = struct {
     context: ?*anyopaque = null,
     status: TaskStatus = .Ready,
     config: TaskConfig = .{},
+    is_on_root_stack: bool = false,
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
 };
 

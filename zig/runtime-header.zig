@@ -308,6 +308,40 @@ pub const CheatLib = struct {
             std.process.exit(1);
         }
     }
+
+pub fn ffi(rt: *Runtime, comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
+    const F = @TypeOf(f);
+    const type_info = @typeInfo(F);
+    const ReturnType = type_info.@"fn".return_type.?;
+
+    // Create a Function POINTER type based on the function's signature.
+    // This is the key: we need the pointer type, not the function type.
+    const PtrType = *const F;
+
+    const Frame = struct {
+        args: @TypeOf(args),
+        ret: ReturnType,
+        func_ptr: PtrType,
+    };
+
+    var frame = Frame{
+        .args = args,
+        .ret = undefined,
+        .func_ptr = &f, // Take the address of the function constant
+    };
+
+    rt.onRootStack(struct {
+        fn wrapper(ptr: ?*anyopaque) callconv(.c) void {
+            const wrapped: *Frame = @ptrCast(@alignCast(ptr));
+            // We call through the pointer stored in the frame.
+            // Since func_ptr is a PtrType (*const fn...), this is a valid runtime call.
+            wrapped.ret = @call(.auto, wrapped.func_ptr, wrapped.args);
+        }
+    }.wrapper, &frame);
+
+    return frame.ret;
+}
+
 };
 
 

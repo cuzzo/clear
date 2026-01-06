@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
@@ -499,3 +500,159 @@ test "Multi-Threaded Shared Nothing" {
 
     std.debug.print("\n--- End Multi-Thread Test ---\n", .{});
 }
+
+
+// --- ROOT STACK TRAMPOLINE TESTS ---
+
+fn rootStackChecker(arg: ?*anyopaque) callconv(.c) void {
+    const fiber_sp = @intFromPtr(arg);
+    var local_var: u8 = 0;
+    const current_sp = @intFromPtr(&local_var);
+
+    // If we are on Root Stack, the current SP should be nowhere near the fiber SP.
+    // Standard fiber stacks are 2MB apart; OS stacks are usually in a different VMA range entirely.
+    const distance = if (current_sp > fiber_sp) current_sp - fiber_sp else fiber_sp - current_sp;
+
+    std.debug.print("\n[Root Stack] Fiber SP: {X}, Root Stack SP: {X}, Distance: {d} bytes", .{fiber_sp, current_sp, distance});
+
+    // Proving we are on a different stack (at least 1MB away for safety)
+    if (distance < 1024 * 1024) {
+        @panic("Root Stack Trampoline failed: Still running on (or too close to) Fiber Stack!");
+    }
+}
+
+fn testRootStackBasic(rt: *Runtime) !void {
+    var local_fiber_var: u8 = 0;
+    const fiber_sp = @intFromPtr(&local_fiber_var);
+
+    std.debug.print("\n[Task] Transitioning to Root Stack...", .{});
+
+    // We pass our current SP as an argument to verify distance
+    rt.onRootStack(rootStackChecker, @ptrFromInt(fiber_sp));
+
+    std.debug.print("\n[Task] Successfully returned from Root Stack to Fiber Stack.", .{});
+}
+
+test "Root Stack Trampoline: Stack Isolation" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&testRootStackBasic)),
+        null, .{});
+
+    sched.run();
+}
+
+// --- RECURSION TEST (The Stack Overflow Proof) ---
+
+fn deepRecursion(arg: ?*anyopaque) callconv(.c) void {
+    const depth = @as(*usize, @ptrCast(@alignCast(arg)));
+    if (depth.* >= 5000) return; // Stop at 5000 frames
+
+    depth.* += 1;
+    var padding: [1024]u8 = undefined; // 1KB per frame
+    std.mem.doNotOptimizeAway(&padding);
+
+    deepRecursion(arg);
+}
+
+fn testRootStackRecursion(rt: *Runtime) !void {
+    var depth: usize = 0;
+
+    std.debug.print("\n[Task] Attempting 5MB recursion on Root Stack...", .{});
+
+    // 5000 * 1KB = 5MB. This would blow a standard 2MB (or smaller) green stack.
+    rt.onRootStack(deepRecursion, &depth);
+
+    try std.testing.expectEqual(@as(usize, 5000), depth);
+    std.debug.print("\n[Task] Root Stack handled deep recursion. Current depth: {d}", .{depth});
+}
+
+test "Root Stack Trampoline: Deep Recursion (OS Stack Capacity)" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    // 1. Setup Global Context (EBR)
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
+
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&testRootStackRecursion)),
+        null, .{});
+    sched.run();
+}
+
+// --- REGISTER INTEGRITY TEST ---
+
+fn clobberRegisters(arg: ?*anyopaque) callconv(.c) void {
+    _ = arg;
+    // We intentionally fill registers with garbage in ASM to see if Fiber recovers
+    if (builtin.cpu.arch == .x86_64) {
+        asm volatile (
+            \\ movq $0xDEADBEEF, %%rbx
+            \\ movq $0xDEADBEEF, %%r12
+            \\ movq $0xDEADBEEF, %%r13
+            \\ movq $0xDEADBEEF, %%r14
+            \\ movq $0xDEADBEEF, %%r15
+        );
+    } else if (builtin.cpu.arch == .aarch64) {
+        asm volatile (
+            \\ mov x19, #0xDEAD
+            \\ mov x20, #0xDEAD
+            \\ mov x21, #0xDEAD
+        );
+    }
+}
+
+fn testRegisterIntegrity(rt: *Runtime) !void {
+    // Callee-saved registers are handled by the compiler.
+    // We create local variables that the compiler is likely to keep in registers.
+    const a: usize = 0x1111222233334444;
+    const b: usize = 0x5555666677778888;
+
+    std.debug.print("\n[Task] Values before Root Stack: {X}, {X}", .{a, b});
+
+    rt.onRootStack(clobberRegisters, null);
+
+    std.debug.print("\n[Task] Values after Root Stack:  {X}, {X}", .{a, b});
+
+    try std.testing.expectEqual(@as(usize, 0x1111222233334444), a);
+    try std.testing.expectEqual(@as(usize, 0x5555666677778888), b);
+}
+
+test "Root Stack Trampoline: Register Integrity" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    // 1. Setup Global Context (EBR)
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    // 2. Setup Scheduler
+    var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    // ... setup sched ...
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&testRegisterIntegrity)),
+        null, .{});
+    sched.run();
+}
+

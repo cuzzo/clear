@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) void {
         .root_module = mod,
     });
     mod_tests.addAssemblyFile(b.path("switch.S")); // Link ASM for runtime internal tests
+    mod_tests.addAssemblyFile(b.path("onRoot.S")); // Link ASM for runtime internal tests
     mod_tests.linkLibC();
     const run_mod_tests = b.addRunArtifact(mod_tests);
     test_step.dependOn(&run_mod_tests.step);
@@ -55,6 +56,8 @@ pub fn build(b: *std.Build) void {
         // Even if a specific test doesn't use fibers, linking it doesn't hurt,
         // and it ensures 'thread-test' and 'fiber-test' work correctly.
         unit_tests.addAssemblyFile(b.path("switch.S"));
+        unit_tests.addAssemblyFile(b.path("onRoot.S"));
+
         unit_tests.linkLibC();
 
         // Create the run step and attach it to the top-level 'test' command
@@ -87,6 +90,7 @@ pub fn build(b: *std.Build) void {
         });
 
         bench_tests.addAssemblyFile(b.path("switch.S"));
+        bench_tests.addAssemblyFile(b.path("onRoot.S"));
         bench_tests.linkLibC();
 
         // Optional: Benchmarks often output to stdout, which `zig build` hides by default.
@@ -111,6 +115,7 @@ pub fn build(b: *std.Build) void {
     });
 
     lib.addAssemblyFile(b.path("switch.S"));
+    lib.addAssemblyFile(b.path("onRoot.S"));
     lib.linkLibC();
     b.installArtifact(lib);
 }

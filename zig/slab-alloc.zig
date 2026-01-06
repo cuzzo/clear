@@ -181,12 +181,14 @@ pub fn SlabAllocator(comptime T: type) type {
             slab.used_count -= 1;
 
             if (slab.used_count == 0) {
+                // Instead of freeing immediately, move to a "to be cleaned" list
+                // or simply leave it in partial_slabs until deinit.
+                // Freeing here is dangerous while thread-local magazines might still have pointers.
                 if (slab.is_full) {
                     self.removeSlab(slab, &self.full_slabs);
-                } else {
-                    self.removeSlab(slab, &self.partial_slabs);
+                    self.prependSlab(slab, &self.partial_slabs);
+                    slab.is_full = false;
                 }
-                self.freeSlabMemory(slab);
             } else if (slab.is_full) {
                 self.removeSlab(slab, &self.full_slabs);
                 self.prependSlab(slab, &self.partial_slabs);
