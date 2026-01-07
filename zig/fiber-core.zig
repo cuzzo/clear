@@ -14,17 +14,20 @@ pub const Context = if (builtin.cpu.arch == .x86_64) extern struct {
     r13: u64 = 0,
     r14: u64 = 0,
     r15: u64 = 0,
-    stack_limit: u64,
 } else if (builtin.cpu.arch == .aarch64) extern struct {
     sp: u64,
-    x19: u64 = 0, x20: u64 = 0,
-    x21: u64 = 0, x22: u64 = 0,
-    x23: u64 = 0, x24: u64 = 0,
-    x25: u64 = 0, x26: u64 = 0,
-    x27: u64 = 0, x28: u64 = 0,
+    x19: u64 = 0,
+    x20: u64 = 0,
+    x21: u64 = 0,
+    x22: u64 = 0,
+    x23: u64 = 0,
+    x24: u64 = 0,
+    x25: u64 = 0,
+    x26: u64 = 0,
+    x27: u64 = 0,
+    x28: u64 = 0,
     fp: u64 = 0, // x29 is frame pointer
     lr: u64 = 0, // x30 is link register
-    stack_limit: u64,
 } else @compileError("Unsupported Architecture");
 
 // 1. Declare the external symbol
@@ -37,55 +40,27 @@ pub fn switchContext(from: *Context, to: *Context) void {
 }
 
 // 3. switch to Root Stack
-extern fn call_on_stack_asm(
-    stack_ptr: usize,
-    func: *const fn (?*anyopaque) callconv(.c) void,
-    arg: ?*anyopaque
-) void;
+extern fn call_on_stack_asm(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void;
 
-pub fn callOnStack(
-    stack_ptr: usize,
-    func: *const fn (?*anyopaque) callconv(.c) void,
-    arg: ?*anyopaque
-) void {
+pub fn callOnStack(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
     const aligned_sp = stack_ptr & ~@as(usize, 0xF);
     call_on_stack_asm(aligned_sp, func, arg);
 }
 
-// This is the exported symbol the ASM jumps to
-export fn panic_stack_overflow_asm() callconv(.c) noreturn {
-     const msg = "\n!!! SOFTWARE STACK OVERFLOW DETECTED !!!\n";
-     _ = std.posix.write(2, msg) catch {};
-     std.process.exit(1);
-//    const root_sp = active_scheduler.main_ctx.sp;
-//
-//    if (builtin.cpu.arch == .x86_64) {
-//        asm volatile (
-//            \\ movq %[root_sp], %%rsp
-//            \\ andq $-16, %%rsp
-//            \\ jmp *%[dest]
-//            :
-//            : [root_sp] "r" (root_sp),
-//              [dest] "r" (&panic_stack_overflow) // Pass function address as operand
-//        );
-//    } else if (builtin.cpu.arch == .aarch64) {
-//        asm volatile (
-//            \\ mov sp, %[root_sp]
-//            \\ br %[dest]
-//            :
-//            : [root_sp] "r" (root_sp),
-//              [dest] "r" (&panic_stack_overflow)
-//        );
-//    }
-//    unreachable;
-}
+pub export threadlocal var __fiber_stack_limit: ?*u8 = null;
 
+export fn __fiber_stack_slow_path() callconv(.c) noreturn {
+    // int $3 invokes a "Trace/Breakpoint Trap" (SIGTRAP).
+    // It stops the CPU instantly without using stack memory.
+    asm volatile ("int $3");
+    unreachable;
+}
 
 // CHEAT uses VMA Pooling with mprotect and madvise.
 // 2MB is not the per-fiber stack memory usage. It's the limit.
 // 4KB is the minimum (p95) size.
 pub const StackSize = enum {
-    Standard,  // 2MB (Fall back to mmap/mprotect)
+    Standard, // 2MB (Fall back to mmap/mprotect)
 };
 
 pub const Stack = struct {
@@ -105,6 +80,7 @@ pub const Fiber = struct {
     ctx: Context,
     parent_ctx: *Context, // Who to jump back to when we yield/finish
     size_class: StackSize,
+    stack_limit: usize,
 
     pub fn init(memory: []u8, entry_fn: usize) Fiber {
         const stack = Stack{ .memory = memory };
@@ -126,19 +102,17 @@ pub const Fiber = struct {
         ptr.* = entry_fn;
 
         // Safety Margin: LLVM needs a bit of room to execute the __morestack
-        // call itself. 256 bytes is plenty for the jump to panic.
+        // call itself. 288 bytes is plenty for the jump to panic.
         const stack_bottom_addr = @intFromPtr(memory.ptr);
-        const safety_margin = 256;
+        const safety_margin = 288;
         const limit = stack_bottom_addr + safety_margin;
 
         return Fiber{
             .stack = stack,
             // Point SP to the address we just wrote.
             // When 'ret' runs, it pops the value AT this pointer.
-            .ctx = Context{
-                .sp = stack_top,
-                .stack_limit = limit,
-             },
+            .ctx = Context{ .sp = stack_top },
+            .stack_limit = limit,
             .parent_ctx = undefined,
             .size_class = .Standard,
         };
@@ -147,12 +121,14 @@ pub const Fiber = struct {
     // Switch FROM parent TO this fiber
     pub fn switchTo(self: *Fiber, parent: *Context) void {
         self.parent_ctx = parent;
+        __fiber_stack_limit = @ptrFromInt(self.stack_limit);
         switchContext(parent, &self.ctx);
     }
 
     // Switch FROM this fiber BACK to parent
     // Before yielding, scheduler must check task.is_on_root_stack
     pub fn yield(self: *Fiber) void {
+        __fiber_stack_limit = @ptrFromInt(self.parent.stack_limit);
         switchContext(&self.ctx, self.parent_ctx);
     }
 
@@ -170,4 +146,3 @@ pub const Fiber = struct {
         // No need to clear registers; they get overwritten on switchContext
     }
 };
-

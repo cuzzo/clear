@@ -1,3 +1,35 @@
+## Stack Overflow Detection
+
+### Step 1: Build LLVM Pass
+
+```bash
+rm -rf fiber-stack-check/pass/build
+cmake -B fiber-stack-check/pass/build -S fiber-stack-check/pass
+cmake --build fiber-stack-check/pass/build
+```
+
+### Step 2: Build the LLVM IR:
+
+```bash
+zig test fiber-overflow-test.zig switch.S onRoot.S     --library c     -femit-llvm-bc=fiber-overflow-test.bc     -fno-emit-bin
+```
+
+### Step 3: Run the Plugin:
+
+```bash
+opt -load-pass-plugin=fiber-stack-check/pass/build/libFiberStackCheck.so \
+    -passes="fiber-stack-check" \
+    fiber-overflow-test.bc \
+    -o fiber-overflow-test-instrumented.bc
+```
+
+### Step 4: Run the exe:
+
+```bash
+zig build-exe fiber-overflow-test-instrumented.bc switch.S onRoot.S --library c --name fiber-test-runner
+```
+
+
 ## Benchmarking
 
 ```bash
@@ -34,3 +66,4 @@ zig test queues-test.zig -fsanitize-thread -lc
 ```bash
 ./scheduler-fuzz-test.sh
 ```
+
