@@ -24,7 +24,7 @@ struct FiberStackCheckPass : PassInfoMixin<FiberStackCheckPass> {
             return PreservedAnalyses::all();
 
         // Skip the slow path itself
-        if (F.getName() == "__fiber_stack_slow_path")
+        if (F.getName() == "__morestack")
             return PreservedAnalyses::all();
 
         Module *M = F.getParent();
@@ -67,10 +67,10 @@ struct FiberStackCheckPass : PassInfoMixin<FiberStackCheckPass> {
             LimitGV->setThreadLocalMode(GlobalValue::LocalExecTLSModel);
         }
 
-        // Declare: extern void __fiber_stack_slow_path() noreturn
+        // Declare: extern void __morestack() noreturn
         FunctionCallee SlowPath =
             M->getOrInsertFunction(
-                "__fiber_stack_slow_path",
+                "__morestack",
                 FunctionType::get(VoidTy, {}, false));
 
         // Find insertion point at function entry

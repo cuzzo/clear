@@ -49,7 +49,8 @@ pub fn callOnStack(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) 
 
 pub export threadlocal var __fiber_stack_limit: ?*u8 = null;
 
-export fn __fiber_stack_slow_path() callconv(.c) noreturn {
+// You can't hve more stack yet! You must die instead!
+export fn __morestack() callconv(.c) noreturn {
     // int $3 invokes a "Trace/Breakpoint Trap" (SIGTRAP).
     // It stops the CPU instantly without using stack memory.
     asm volatile ("int $3");
