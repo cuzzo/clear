@@ -14,6 +14,7 @@ pub const Context = if (builtin.cpu.arch == .x86_64) extern struct {
     r13: u64 = 0,
     r14: u64 = 0,
     r15: u64 = 0,
+    stack_limit: u64,
 } else if (builtin.cpu.arch == .aarch64) extern struct {
     sp: u64,
     x19: u64 = 0, x20: u64 = 0,
@@ -23,6 +24,7 @@ pub const Context = if (builtin.cpu.arch == .x86_64) extern struct {
     x27: u64 = 0, x28: u64 = 0,
     fp: u64 = 0, // x29 is frame pointer
     lr: u64 = 0, // x30 is link register
+    stack_limit: u64,
 } else @compileError("Unsupported Architecture");
 
 // 1. Declare the external symbol
@@ -49,6 +51,35 @@ pub fn callOnStack(
     const aligned_sp = stack_ptr & ~@as(usize, 0xF);
     call_on_stack_asm(aligned_sp, func, arg);
 }
+
+// This is the exported symbol the ASM jumps to
+export fn panic_stack_overflow_asm() callconv(.c) noreturn {
+     const msg = "\n!!! SOFTWARE STACK OVERFLOW DETECTED !!!\n";
+     _ = std.posix.write(2, msg) catch {};
+     std.process.exit(1);
+//    const root_sp = active_scheduler.main_ctx.sp;
+//
+//    if (builtin.cpu.arch == .x86_64) {
+//        asm volatile (
+//            \\ movq %[root_sp], %%rsp
+//            \\ andq $-16, %%rsp
+//            \\ jmp *%[dest]
+//            :
+//            : [root_sp] "r" (root_sp),
+//              [dest] "r" (&panic_stack_overflow) // Pass function address as operand
+//        );
+//    } else if (builtin.cpu.arch == .aarch64) {
+//        asm volatile (
+//            \\ mov sp, %[root_sp]
+//            \\ br %[dest]
+//            :
+//            : [root_sp] "r" (root_sp),
+//              [dest] "r" (&panic_stack_overflow)
+//        );
+//    }
+//    unreachable;
+}
+
 
 // CHEAT uses VMA Pooling with mprotect and madvise.
 // 2MB is not the per-fiber stack memory usage. It's the limit.
@@ -94,11 +125,20 @@ pub const Fiber = struct {
         const ptr = @as(*usize, @ptrFromInt(stack_top));
         ptr.* = entry_fn;
 
+        // Safety Margin: LLVM needs a bit of room to execute the __morestack
+        // call itself. 256 bytes is plenty for the jump to panic.
+        const stack_bottom_addr = @intFromPtr(memory.ptr);
+        const safety_margin = 256;
+        const limit = stack_bottom_addr + safety_margin;
+
         return Fiber{
             .stack = stack,
             // Point SP to the address we just wrote.
             // When 'ret' runs, it pops the value AT this pointer.
-            .ctx = Context{ .sp = stack_top },
+            .ctx = Context{
+                .sp = stack_top,
+                .stack_limit = limit,
+             },
             .parent_ctx = undefined,
             .size_class = .Standard,
         };

@@ -1,21 +1,28 @@
 const std = @import("std");
 const StackMemory = @import("fiber-memory.zig").StackMemory;
 
-test "StackMemory: Bitmask Recovery" {
+// To avoid linker errors
+const fc = @import("fiber-core.zig");
+comptime {
+  _ = fc;
+}
+
+test "StackSlab: Pointer Integrity" {
     const allocator = std.testing.allocator;
-    var mem = StackMemory.init(allocator);
-    defer mem.deinit();
+    var stack_slab = try @import("fiber-memory.zig").StackSlab.init(allocator);
+    defer stack_slab.deinit();
 
-    const seg = try mem.alloc();
-    defer mem.free(seg);
+    const stack = try stack_slab.alloc();
 
-    // 1. Pretend SP is somewhere inside the data
-    const sp = @intFromPtr(&seg.data[1000]);
+    // Ensure we got exactly 16KB
+    try std.testing.expectEqual(@as(usize, 16 * 1024), stack.len);
 
-    // 2. Recover
-    const recovered = StackMemory.fromSP(sp);
+    // Verify pointer casting safety
+    _ = stack.ptr;
+    stack_slab.free(stack);
 
-    // 3. Verify
-    try std.testing.expectEqual(seg, recovered);
+    // Note: We can't easily verify 'free' worked without looking at
+    // SlabAllocator internals, but we can verify it doesn't crash
+    // on the ptrCast.
 }
 

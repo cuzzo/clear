@@ -3,6 +3,12 @@ const testing = std.testing;
 // Adjust import to point to where you defined CheatArena
 const CheatArena = @import("runtime.zig").CheatArena;
 
+// To avoid linker errors
+const fc = @import("fiber-core.zig");
+comptime {
+  _ = fc;
+}
+
 test "CheatArena: Basic Allocation" {
     var arena = CheatArena.init(testing.allocator, &[_]u8{});
     defer arena.deinit();

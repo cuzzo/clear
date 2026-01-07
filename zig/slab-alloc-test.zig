@@ -1,6 +1,12 @@
 const std = @import("std");
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
+// To avoid linker errors
+const fc = @import("fiber-core.zig");
+comptime {
+  _ = fc;
+}
+
 const PAGE_SIZE = 4096;
 
 const TestObj = struct {

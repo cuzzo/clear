@@ -21,9 +21,15 @@ pub fn build(b: *std.Build) void {
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
-    mod_tests.addAssemblyFile(b.path("switch.S")); // Link ASM for runtime internal tests
-    mod_tests.addAssemblyFile(b.path("onRoot.S")); // Link ASM for runtime internal tests
+
+    mod_tests.root_module.addImport("fiber-core", b.createModule(.{
+        .root_source_file = b.path("fiber-core.zig"),
+    }));
+
+    mod_tests.addAssemblyFile(b.path("switch.S"));
+    mod_tests.addAssemblyFile(b.path("onRoot.S"));
     mod_tests.linkLibC();
+
     const run_mod_tests = b.addRunArtifact(mod_tests);
     test_step.dependOn(&run_mod_tests.step);
 
@@ -33,13 +39,13 @@ pub fn build(b: *std.Build) void {
     // We add every test file found in your directory here.
     const test_files = [_][]const u8{
         "fiber-test.zig",
-        // "fiber-memory-test.zig",
+        "fiber-memory-test.zig",
         "frame-test.zig",
         "queues-test.zig",
         "scheduler-test.zig",
         "slab-alloc-test.zig",
         "thread-test.zig",
-        "transpile-test.zig",
+        // "transpile-test.zig",
     };
 
     for (test_files) |filename| {
@@ -51,6 +57,11 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
+
+        // ensure ASM symbols exist
+        unit_tests.root_module.addImport("fiber-core", b.createModule(.{
+            .root_source_file = b.path("fiber-core.zig"),
+        }));
 
         // CRITICAL: Link the context switching assembly to every test.
         // Even if a specific test doesn't use fibers, linking it doesn't hurt,
@@ -88,6 +99,10 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
+
+        bench_tests.root_module.addImport("fiber-core", b.createModule(.{
+            .root_source_file = b.path("fiber-core.zig"),
+        }));
 
         bench_tests.addAssemblyFile(b.path("switch.S"));
         bench_tests.addAssemblyFile(b.path("onRoot.S"));

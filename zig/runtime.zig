@@ -11,6 +11,11 @@ const Task = qs.Task;
 const Fiber = qs.Fiber;
 pub const CheatArena = @import("frame.zig").CheatArena;
 
+// This forces Zig to generate the exported panic symbols
+comptime {
+    _ = fc;
+}
+
 pub const Runtime = struct {
     // Control
     ebr: ThreadLocalEbr,  // This probably needs to be global...

@@ -48,7 +48,7 @@ test "CheatArena: Optimized Fuzz Test" {
     // SETUP
     var prng = std.Random.DefaultPrng.init(0x12345678);
     const random = prng.random();
-    var arena = CheatArena.init(std.testing.allocator);
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
     var allocations = std.ArrayListUnmanaged(Allocation){};

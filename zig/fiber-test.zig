@@ -16,6 +16,11 @@ const Scheduler = fp.Scheduler;
 const WaitGroup = fp.WaitGroup;
 const StackPool = fm.StackPool;
 
+// to avoid linker errors
+comptime {
+  _ = fc;
+}
+
 // Stack
 
 fn allocTestMemory(size: usize) ![]align(4096) u8 {
@@ -654,5 +659,40 @@ test "Root Stack Trampoline: Register Integrity" {
         @as(qs.TaskFn, @ptrCast(&testRegisterIntegrity)),
         null, .{});
     sched.run();
+}
+
+fn recurseUntilDeath(rt: *Runtime, depth: usize) anyerror!void {
+    // We allocate a small array on the stack to consume space quickly
+    var buf: [128]u8 = undefined;
+    std.mem.doNotOptimizeAway(&buf);
+
+    // Print depth every so often so we can see it working in the logs
+    if (depth % 10 == 0) {
+        std.debug.print("Recursing... depth: {d}\n", .{depth});
+    }
+
+    try recurseUntilDeath(rt, depth + 1);
+}
+
+test "Fiber: Software Stack Overflow Detection" {
+    const allocator = std.testing.allocator;
+
+    // 1. Setup minimal runtime components
+    // We use a small stack (16KB) to hit the limit quickly
+    const stack_memory = try allocator.alloc(u8, 16 * 1024);
+    defer allocator.free(stack_memory);
+
+    // 2. Initialize a Fiber manually
+    // We point it to our recursion function
+    var fiber = fc.Fiber.init(stack_memory, @intFromPtr(&recurseUntilDeath));
+
+    // 3. Jump into the fiber
+    // WARNING: This test is EXPECTED to exit the process with status 1
+    // because your current panic_stack_overflow_asm calls std.process.exit(1).
+    std.debug.print("\n[Test] Entering recursive fiber (Stack: 16KB, Limit: Bottom + 256B)\n", .{});
+    fiber.switchTo(&main_ctx);
+
+    // If we reach here, the test FAILED because it didn't catch the overflow.
+    try std.testing.expect(false);
 }
 

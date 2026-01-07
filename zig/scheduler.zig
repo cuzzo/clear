@@ -28,6 +28,19 @@ const StackPool = fm.StackPool;
 const linux = std.os.linux;
 const posix = std.posix;
 
+//export fn panic_stack_overflow() callconv(.c) noreturn {
+//    // const task_name = if (active_scheduler.current_task) |t| t.name else "unknown";
+//
+//    // Standard debug printing usually uses some stack,
+//    // but since we are about to die, we'll try to get the message out.
+//    std.debug.print("\n\n--- CHEAT RUNTIME PANIC ---\n", .{});
+//    std.debug.print("Stack Overflow detected in task: \n", .{});
+//    std.debug.print("Fiber limit exceeded. Terminating process.\n", .{});
+//
+//    // Exit the process immediately
+//    std.process.exit(1);
+//}
+
 const FiberNode = struct {
     // The SlabAllocator will overwrite the first 8 bytes for its 'next' pointer.
     // We sacrifice this dummy field so our Fiber data stays safe.
