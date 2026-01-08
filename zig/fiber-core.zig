@@ -48,13 +48,91 @@ pub fn callOnStack(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) 
 }
 
 pub export threadlocal var __fiber_stack_limit: ?*u8 = null;
+pub export threadlocal var __fiber_parent_ctx: ?*Context = null;
+pub export threadlocal var __fiber: ?*Fiber = null;
 
-// You can't hve more stack yet! You must die instead!
-export fn __morestack() callconv(.c) noreturn {
-    // int $3 invokes a "Trace/Breakpoint Trap" (SIGTRAP).
-    // It stops the CPU instantly without using stack memory.
-    asm volatile ("int $3");
-    unreachable;
+
+pub const StackSegment = struct {
+    memory: []u8,
+    previous_sp: usize,    // Where we came from
+    previous_limit: usize, // The limit of the previous stack
+    previous_segment: ?*StackSegment,
+};
+
+threadlocal var segment_pool: [20][]u8 = undefined;
+threadlocal var segment_index: usize = 0;
+pub threadlocal var __test_last_allocation: []u8 = &.{};
+
+// CACHE: Pointer to the thread-local pool.
+// We resolve this ONCE during setup, so we don't need complex TLS logic
+// inside the tiny stack allocator.
+pub threadlocal var pool_addr_cache: ?* [20][]u8 = null;
+
+// Helper for tests to setup the pool
+pub fn test_setup_segment_pool(allocator: std.mem.Allocator) !void {
+    pool_addr_cache = &segment_pool;
+
+    segment_index = 0;
+    for (&segment_pool) |*slot| {
+        // Allocate real heap memory
+        slot.* = try allocator.alloc(u8, 32 * 1024);
+        @memset(slot.*, 0xAA); // Pre-fill to be safe
+    }
+}
+
+pub fn test_teardown_segment_pool(allocator: std.mem.Allocator) void {
+    for (segment_pool) |slot| {
+        if (slot.len > 0) allocator.free(slot);
+    }
+}
+
+fn alloc_segment_impl() usize {
+    // Disable Safety to avoid panic overhead in the Red Zone
+    @setRuntimeSafety(false);
+
+    const pool_ptr = pool_addr_cache orelse {
+        @trap(); // Setup was not called!
+    };
+
+    const idx = segment_index;
+    if (idx >= pool_ptr.len) {
+        @trap();
+    }
+
+    // Increment Thread-Local Index
+    segment_index += 1;
+
+    // Get the slice from the pool correctly.
+    // We want the address OF the slot.
+    const new_mem = pool_ptr[idx];
+
+    if (@intFromPtr(new_mem.ptr) < 0x1000) {
+        @trap(); // We got garbage (like 0xCC) again. Trap immediately.
+    }
+
+    __test_last_allocation = new_mem;
+
+    // 5. Minimal Setup (Zero stack usage)
+    //    We fill with 0xCC to help debugging, but we do NOT call Fiber.init or print.
+    @memset(new_mem, 0xCC);
+
+    // 6. Calculate Top (High Address)
+    const stack_top = @intFromPtr(new_mem.ptr) + new_mem.len;
+
+    // 7. Align 16-byte
+    const aligned_top = (stack_top & ~@as(usize, 15));
+
+    return aligned_top;
+}
+
+pub export fn __zig_alloc_segment() callconv(.c) usize {
+    @setRuntimeSafety(false);
+    return alloc_segment_impl();
+}
+
+pub export fn __zig_free_segment(current_sp_ptr: usize) callconv(.c) void {
+    _ = current_sp_ptr;
+    segment_index -= 1;
 }
 
 // CHEAT uses VMA Pooling with mprotect and madvise.
@@ -84,35 +162,48 @@ pub const Fiber = struct {
     stack_limit: usize,
 
     pub fn init(memory: []u8, entry_fn: usize) Fiber {
+        std.debug.print("\n=== Fiber.init ===\n", .{});
+        std.debug.print("Memory: 0x{x} - 0x{x} ({} bytes)\n", .{
+            @intFromPtr(memory.ptr),
+            @intFromPtr(memory.ptr) + memory.len,
+            memory.len,
+        });
+        std.debug.print("Entry function: 0x{x}\n", .{entry_fn});
+
+        // Fill stack with pattern to debug
+        @memset(memory, 0xCC);
+
         const stack = Stack{ .memory = memory };
-
-        // CALCULATION: Stack grows DOWN from the end of the memory block.
         const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
-
-        // MAXIMIZE STACK USAGE:
-        // 1. Align the absolute top to 16 bytes.
-        // 2. Subtract 8 bytes. This is the slot for our "Trampoline" (Return Address).
-        // Result: SP is 16-byte aligned - 8. When 'ret' runs, SP becomes 16-byte aligned.
         const aligned_top = stack_top_addr & ~@as(usize, 15);
-        const stack_top = aligned_top - 8;
 
-        // THE TRAMPOLINE:
-        // We simulate a "Return Address" on the top of the stack.
-        // When switchContext executes 'ret', it will pop this address and jump to it.
-        const ptr = @as(*usize, @ptrFromInt(stack_top));
+        std.debug.print("Stack top addr: 0x{x}\n", .{stack_top_addr});
+        std.debug.print("Aligned top: 0x{x}\n", .{aligned_top});
+
+        const return_addr_location = aligned_top - 128;  // Back off past Red Zone
+        std.debug.print("Return addr location: 0x{x}\n", .{return_addr_location});
+
+        const ptr = @as(*usize, @ptrFromInt(return_addr_location));
         ptr.* = entry_fn;
 
-        // Safety Margin: LLVM needs a bit of room to execute the __morestack
-        // call itself. 288 bytes is plenty for the jump to panic.
+        std.debug.print("Stored value: 0x{x}\n", .{ptr.*});
+        std.debug.print("Verify read back: 0x{x}\n", .{ptr.*});
+
+        const initial_sp = return_addr_location;
+        std.debug.print("Initial SP: 0x{x}\n", .{initial_sp});
+
         const stack_bottom_addr = @intFromPtr(memory.ptr);
-        const safety_margin = 288;
+        const safety_margin = 512;
         const limit = stack_bottom_addr + safety_margin;
+
+        std.debug.print("Stack limit: 0x{x}\n", .{limit});
+        std.debug.print("=================\n\n", .{});
 
         return Fiber{
             .stack = stack,
             // Point SP to the address we just wrote.
             // When 'ret' runs, it pops the value AT this pointer.
-            .ctx = Context{ .sp = stack_top },
+            .ctx = Context{ .sp = initial_sp },
             .stack_limit = limit,
             .parent_ctx = undefined,
             .size_class = .Standard,
@@ -123,13 +214,16 @@ pub const Fiber = struct {
     pub fn switchTo(self: *Fiber, parent: *Context) void {
         self.parent_ctx = parent;
         __fiber_stack_limit = @ptrFromInt(self.stack_limit);
+        __fiber_parent_ctx = parent;
+        __fiber = self;
         switchContext(parent, &self.ctx);
     }
 
     // Switch FROM this fiber BACK to parent
     // Before yielding, scheduler must check task.is_on_root_stack
     pub fn yield(self: *Fiber) void {
-        __fiber_stack_limit = @ptrFromInt(self.parent.stack_limit);
+        __fiber_stack_limit = undefined;
+        __fiber = undefined;
         switchContext(&self.ctx, self.parent_ctx);
     }
 
@@ -147,3 +241,4 @@ pub const Fiber = struct {
         // No need to clear registers; they get overwritten on switchContext
     }
 };
+

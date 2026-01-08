@@ -127,6 +127,7 @@ pub fn build(b: *std.Build) void {
         "scheduler-test.zig",
         "slab-alloc-test.zig",
         "thread-test.zig",
+        // "fiber-control-tests.zig",
         // "transpile-test.zig",
     };
 

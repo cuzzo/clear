@@ -59,3 +59,87 @@ switch_context_asm:
 
 #endif
 
+
+.global __morestack
+.type __morestack, @function
+__morestack:
+    /* Save callee-saved registers on OLD stack */
+    pushq %rbp
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    pushq %rbx
+
+    /* Snapshot pointer */
+    movq %rsp, %r11
+
+    /* Switch to parent stack */
+    movq __fiber_parent_ctx@gottpoff(%rip), %rax
+    movq %fs:(%rax), %rax
+    movq (%rax), %rsp
+    andq $-16, %rsp
+
+    /* Save volatile args */
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %r8
+    pushq %r9
+
+    /* Pass snapshot pointer to allocator */
+    pushq %r11
+    subq $8, %rsp
+    movq %r11, %rdi
+    call __zig_alloc_segment
+    addq $8, %rsp
+    popq %r11
+
+    /* Restore volatile args */
+    popq %r9
+    popq %r8
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+
+    /* Pivot to new stack */
+    subq $8, %rax
+    movq %rax, %rsp
+    pushq %r11                 /* link back to old frame */
+    leaq __lessstack(%rip), %rax
+    pushq %rax                 /* return target on new stack */
+
+    /* Restore callee-saved registers */
+    movq 0(%r11), %rbx
+    movq 8(%r11), %r15
+    movq 16(%r11), %r14
+    movq 24(%r11), %r13
+    movq 32(%r11), %r12
+    movq 40(%r11), %rbp
+
+    /* Resume execution at continuation */
+    movq 48(%r11), %rax       /* original continuation */
+    jmp *%rax
+
+
+.global __lessstack
+__lessstack:
+    /* 1. Pivot back to the Old Stack */
+    popq %rsp
+
+    /* 2. Restore Callee-Saved Registers */
+    /* CRITICAL: You must pop RBX first because it was pushed last! */
+    popq %rbx
+
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+
+    /* 3. Smart Unwind */
+    movq %rbp, %rsp
+    popq %rbp
+    ret
+

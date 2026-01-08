@@ -11,39 +11,45 @@ comptime {
   _ = fc;
 }
 
+extern fn switch_context_asm(from: *Context, to: *Context) callconv(.c) void;
+
 var main_ctx: Context = undefined;
+var test_recursion_depth: usize = 0;
 
-fn recurseUntilDeath() callconv(.c) void {
-    // Allocate on stack to consume space
-    var buf: [20]u8 = undefined;
-
-    // Recursive call
-    recurseUntilDeath();
-
-    // This forces the compiler to preserve 'buf' (and the stack frame)
-    // until *after* the call returns. It disables Tail Call Optimization.
+// The recursive function that consumes stack
+fn recurseDeeply() callconv(.c) void {
+    // Consume stack (~64 bytes per frame + overhead)
+    var buf: [64]u8 = undefined;
     std.mem.doNotOptimizeAway(&buf);
+
+    if (test_recursion_depth > 0) {
+        test_recursion_depth -= 1;
+        recurseDeeply();
+    } else {
+        fc.__fiber.?.yield();
+    }
 }
 
-test "Fiber: Software Stack Overflow Detection" {
-    const allocator = std.testing.allocator;
+test "Fiber: Segmented Stack (Real Memory)" {
+    try fc.test_setup_segment_pool(std.testing.allocator);
+    defer fc.test_teardown_segment_pool(std.testing.allocator);
 
-    // 1. Setup minimal runtime components
-    // We use a small stack (16KB) to hit the limit quickly
-    const stack_memory = try allocator.alloc(u8, 16 * 1024);
-    defer allocator.free(stack_memory);
+    // 1. Alloc small stack (5KB)
+    const stack_mem = try std.testing.allocator.alloc(u8, 5 * 1024);
+    defer std.testing.allocator.free(stack_mem);
 
-    // 2. Initialize a Fiber manually
-    // We point it to our recursion function
-    var fiber = fc.Fiber.init(stack_memory, @intFromPtr(&recurseUntilDeath));
+    // 2. Initialize main_ctx with current stack
+    main_ctx = Context{ .sp = 0 }; // Will be filled by switchTo
 
-    // 3. Jump into the fiber
-    // WARNING: This test is EXPECTED to exit the process with status 1
-    // because your current panic_stack_overflow_asm calls std.process.exit(1).
-    std.debug.print("\n[Test] Entering recursive fiber (Stack: 16KB, Limit: Bottom + 288B)\n", .{});
+    // 3. Init Fiber with a wrapper function
+    var fiber = fc.Fiber.init(stack_mem, @intFromPtr(&recurseDeeply));
+
+    // 4. Run
+    test_recursion_depth = 100;
+
+    std.debug.print("\n[Test] Segmented Stack (Initial 5KB)...\n", .{});
     fiber.switchTo(&main_ctx);
 
-    // If we reach here, the test FAILED because it didn't catch the overflow.
-    try std.testing.expect(false);
+    std.debug.print("[Test] Success\n", .{});
 }
 

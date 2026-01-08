@@ -146,14 +146,18 @@ llvmGetPassPluginInfo() {
                     return false;
                 });
 
-            // 2. AUTOMATICALLY INSERT into the pipeline
+            // 2. Register for O0 (Debug) support
+            // This runs at the start of the pipeline, ensuring it works in Debug builds.
+            PB.registerPipelineStartEPCallback(
+                [](ModulePassManager &MPM, OptimizationLevel Level) {
+                    // We must wrap the FunctionPass in an adaptor for the ModuleManager
+                    MPM.addPass(createModuleToFunctionPassAdaptor(FiberStackCheckPass()));
+                });
+
+            // 3. Keep this for release builds if needed,
+            // though the PipelineStart callback usually covers both.
             PB.registerScalarOptimizerLateEPCallback(
                 [](FunctionPassManager &FPM, OptimizationLevel Level) {
-                    // Only run if optimizations are enabled, or always?
-                    // Usually stack checks should run even in O0, but
-                    // ScalarOptimizerLate might not run in O0.
-                    // For O0 support, you might need registerVectorizerStartEPCallback
-                    // or similar, but let's stick to this for now.
                     FPM.addPass(FiberStackCheckPass());
                 });
         }
