@@ -597,6 +597,7 @@ entry_r15: .quad 0
 .text
 .global test_stack_switch
 test_stack_switch:
+    .cfi_startproc
     SAVE_ENTRY_STATE
     CHECK_RSP_VALID 9100
     movq %rsp, entry_rsp(%rip)
@@ -604,16 +605,43 @@ test_stack_switch:
     CRUMB 1000
 
     # Save callee-saved
-    pushq %rbx          # Save Caller's RBX before overwriting it
-    pushq %r12          # Save Caller's R12 before overwriting it
-    pushq %r13          # Save Caller's R13 before overwriting it
-    pushq %r14          # Save R14 (purely to maintain 16-byte alignment)
+    # Save Caller's RBX before overwriting it
+    pushq %rbx
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbx, -16
+
+    # Save Caller's R12 before overwriting it
+    pushq %r12
+    .cfi_def_cfa_offset 24
+    .cfi_offset %r12, -24
+
+    # Save Caller's R13 before overwriting it
+    pushq %r13
+    .cfi_def_cfa_offset 32
+    .cfi_offset %r13, -32
+
+    # Save Caller's R14
+    pushq %r14
+    .cfi_def_cfa_offset 40
+    .cfi_offset %r14, -40
+
+    # Save Caller's R15
+    pushq %r15
+    .cfi_def_cfa_offset 48
+    .cfi_offset %r15, -48
+
+    # Save Caller's RBP
+    pushq %rbp
+    .cfi_def_cfa_offset 56
+    .cfi_offset %rbp, -56
 
     CRUMB 1001
 
     # Snapshot NOW
     # RSP points to R12, then RBX, then Return Address
     movq %rsp, %r12
+    .cfi_def_cfa_register %r12
+
     # Save CURRENT stack limit to later restore
     movq test_stack_limit@gottpoff(%rip), %rax  # Load Offset from GOT
     movq %fs:(%rax), %r13                       # Read from FS + Offset
@@ -622,13 +650,9 @@ test_stack_switch:
     CHECK_NOT_NULL %rax, 9101
 
     # Get return address (don't pop, just read)
-    # 0(%r12)  = Saved R14
-    # 8(%r12)  = Saved R13
-    # 16(%r12) = Saved R12
-    # 24(%r12) = Saved RBX
-    # 32(%r12) = Return Address
+    # 0(Dummy), 8(R15), 16(R14), 24(R13), 32(R12), 40(RBX), 48(RET)
     # This is perfect inverse of `Save Callee-saved` above
-    movq 32(%r12), %rax
+    movq 48(%r12), %rax
 
     CRUMB 1003
 
@@ -642,12 +666,9 @@ test_stack_switch:
     CHECK_NOT_NULL %r12, 9102
 
     # 3. Switch RSP to the Parent's SP
-    movq (%rax), %rsp
+    movq (%rax), %rsp                             # We are now on the emergency stack. The old stack (R12) is frozen.
     CHECK_RSP_VALID 9200                          # ENSURE VALIDITY!
     andq $-16, %rsp                               # FORCE ALIGNMENT!
-
-    # NOTE: We are now running on 'safe_stack_buffer'!
-    # The Old Stack (R12) is frozen.
 
     # ---------------------------------------------------------------------
     # Prepare for Zig call - Save volatile regs, call, restore
@@ -684,8 +705,27 @@ test_stack_switch:
     # RAX holds the new stack pointer returned by mock_alloc_stack
     # RAX holds returned values...
     movq %rax, %rsp                     # We are now running on the stitched stack (The new segment)
-    andq $-16, %rsp                     # Safety alignment (DIRELY NECESSARY for ABI)
+
+    CRUMB 1004
+
+    # --- START NEW FRAME UNWIND LOGIC ---
+    movq 48(%r12), %r11
+    pushq %r11
+
+    pushq %rbp                          # 1. Save Old RBP (links to caller's frame)
+    movq %rsp, %rbp                     # 2. Update RBP to current stack
+    .cfi_def_cfa_register %rbp
+    .cfi_offset %rbp, -16               # Saved RBP is at RBP (CFA - 16)
+    .cfi_offset %rip, -8                # Return Addr is at RBP + 8 (CFA - 8)
+    # --- END NEW FRAME UNWIND LOGIC ---
+
+    # Safety alignment (DIRELY NECESSARY for ABI)
+    andq $-16, %rsp
     CHECK_ALIGN 9051
+
+    # 6. Populate new stack with state:
+    pushq %r13                          # Old Stack Limit
+    pushq %r12                          # Old Stack Pointer
 
     # ---------------------------------------------------------------------
     # END Zig Call
@@ -699,20 +739,18 @@ test_stack_switch:
     movq %r11, %fs:(%rax)
 
     CHECK_RSP_VALID 9103
-    CHECK_ALIGN 9001      # Check new stack is aligned
-    CRUMB 1004
-
-    # Push link back to old stack
-    pushq %r12
-
+    CHECK_ALIGN 9001                    # Check new stack is aligned
     CRUMB 1005
+
     SNAPSHOT test_before_switch, capture_pivot
 
     # Push fake return
     leaq restore_stack(%rip), %r11
+
+    pushq $0                            # Padding, for alignment
     pushq %r11
 
-    CHECK_ALIGN 9002      # Check still aligned after pushes
+    CHECK_ALIGN 9002                    # Check still aligned after pushes
     CRUMB 1006
 
     jmp does_ret3
@@ -720,33 +758,81 @@ test_stack_switch:
 restore_stack:
     CRUMB 2000
 
-    # Pop old stack pointer
-    popq %rsp                              # We are now back on the original fiber stack.
+    # RESTORE LOGIC (LIFO) -> Current Stack Layout:
+    # RSP+0  = dummy padding
+    # RSP+8  = Saved R12 (Old SP)
+    # RSP+16 = Saved R13 (Old Limit)
+    # RSP+24 = Saved RBP (For DWARF / Unwind)
+
+    # 1. Skip padding
+    addq $8, %rsp
+
+    # 2. Restore TLS Stack Limit (written in memory at start of new stack)
+    movq 8(%rsp), %r11
+    movq test_stack_limit@gottpoff(%rip), %rcx
+    movq %r11, %fs:(%rcx)
+
+    # 3. Restore rpb for unwinding
+    movq (%rbp), %rbp
+
+    # 4. Pop old stack pointer
+    movq 0(%rsp), %rsp                  # We are now back on the original fiber stack.
+    .cfi_def_cfa_register %rsp
     CHECK_RSP_VALID 9105
+
+    cmpq %rsp, %r12
+    jne panic_alignment_mismatch
+
+    movq entry_rsp(%rip), %r11
+    subq $48, %r11                      # Adjust for the 6 pushes
+    cmpq %rsp, %r11
+    jne panic_stack_depth_mismatch
 
     CRUMB 2001
 
-    # Restore TLS Stack Limit (to what it what it was before -> stored in %r13)
-    movq test_stack_limit@gottpoff(%rip), %rax
-    movq %r13, %fs:(%rax)
-
     # Restore Callee-saved (LIFO order)
     # This must be exact inverse of `Save Callee-saved` above
-    popq %r14           # purely for alignment
-    popq %r13           # Restore R13
-    popq %r12           # Restore R12
-    popq %rbx           # Restore RBX
+    # Restore RBP
+    popq %rbp
+    .cfi_def_cfa_offset 48
+    .cfi_restore %rbp
+
+    # Restore R15
+    popq %r15
+    .cfi_def_cfa_offset 40
+    .cfi_restore %r15
+
+    popq %r14
+    .cfi_def_cfa_offset 32
+    .cfi_restore %r14
+
+    # Restore R13 (which was clobbered)
+    popq %r13
+    .cfi_def_cfa_offset 24
+    .cfi_restore %r13
+
+    # Restore R12
+    popq %r12
+    .cfi_def_cfa_offset 16
+    .cfi_restore %r12
+
+    # Restore RBX
+    popq %rbx
+    .cfi_def_cfa_offset 8
+    .cfi_restore %rbx
 
     CRUMB 2002
-    CHECK_CALLEE_SAVED 9003   # Check callee-saved before return
+    CHECK_CALLEE_SAVED 9003             # Check callee-saved before return
     SNAPSHOT test_restore_done, capture_restore
 
     # RSP is ALREADY pointing to the return address.
     # We do NOT push %rax. Just return.
     ret
+    .cfi_endproc
 
 does_ret3:
     CRUMB 3000
+    xorq %r13, %r13
     ret
 
 handle_overflow_error:
@@ -759,6 +845,14 @@ handle_overflow_error:
     andq $-16, %rsp
     CHECK_ALIGN 9900
     call __zig_stack_overflow_handler
+
+panic_stack_depth_mismatch:
+    movq $9998, %rdi
+    call abi_panic
+
+panic_alignment_mismatch:
+    movq $9999, %rdi
+    call abi_panic
 
 .global test_before_switch
 test_before_switch:

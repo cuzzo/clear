@@ -25,7 +25,8 @@ pub const MockContext = extern struct {
     sp: u64 = 0,
 };
 
-var safe_stack_buffer: [1024]u8 = undefined;
+const SAFE_STACK_BUFFER_SIZE: usize = 4096;
+var safe_stack_buffer: [SAFE_STACK_BUFFER_SIZE]u8 = undefined;
 
 pub export threadlocal var test_parent_ctx: *MockContext = undefined;
 
@@ -93,41 +94,29 @@ export fn __zig_stack_overflow_handler() callconv(.c) noreturn {
 export fn __mock_zig_alloc_segment(old_sp: usize) callconv(.c) usize {
     @setRuntimeSafety(false);
 
-    // 1. Verify we received the correct argument (RDI)
-    // We expect old_sp to be the snapshot pointer.
-    // For this test, we can just print it or assert it's not 0.
-    if (old_sp == 0) @panic("Received NULL old_sp in mock_alloc");
+    allocator_run_sp = @intFromPtr(&old_sp);
+    var aligned_top: usize = 0;
 
-    allocator_run_sp = @intFromPtr(&old_sp); // Approximate SP
-
-    // ---------------------------------------------------------
-    // STICKY SEGMENT LOGIC
-    // ---------------------------------------------------------
-
+    // 1. Determine the Segment Top
     if (test_overflow_segment) |seg| {
         // [CRITICAL] Check for Double Overflow
         if (is_inside(old_sp, seg)) {
-             // Tell the fiber it's time to die.
-             return 0;
+             return 0; // Poison Pill
         }
+        // REUSE: Calculate Top
+        const seg_top = @intFromPtr(seg.ptr) + seg.len;
+        aligned_top = seg_top & ~@as(usize, 15);
+    } else {
+        // FIRST TIME: Malloc
+        // ... (Call internal_alloc or use fake_stack) ...
+        const new_slice = &fake_stack;
+        test_overflow_segment = new_slice;
 
-        // Reuse (Sticky Strategy)
-        // We aren't currently ON it, so we must be switching TO it.
-        // Return the existing top.
-        return @intFromPtr(seg.ptr) + seg.len;
+        const seg_top = @intFromPtr(new_slice.ptr) + new_slice.len;
+        aligned_top = seg_top & ~@as(usize, 15);
     }
 
-    // ---------------------------------------------------------
-    // FIRST TIME ALLOCATION
-    // ---------------------------------------------------------
-
-    // Simulate Malloc: point to our 'fake_stack' buffer
-    const new_slice = &fake_stack;
-    test_overflow_segment = new_slice;
-
-    // 2. Return the top of our fake stack (simulating a new segment)
-    // Remember: Stack grows down, so return the END of the buffer.
-    return @intFromPtr(&fake_stack) + 2048;
+    return aligned_top;
 }
 
 extern var breadcrumb_counter: u64;
@@ -210,7 +199,7 @@ test "stack switch" {
 
     var ctx = MockContext{
         // Point to top of safe stack (aligned)
-        .sp = @intFromPtr(&safe_stack_buffer) + 1024 - 16,
+        .sp = @intFromPtr(&safe_stack_buffer) + SAFE_STACK_BUFFER_SIZE - 16,
     };
     test_parent_ctx = &ctx;
 
@@ -237,40 +226,34 @@ test "stack switch" {
 
     // Verify Callee-Saved Registers (Should match entry state)
     try std.testing.expectEqual(entry_rbx, capture_pivot.rbx);
-    try std.testing.expectEqual(entry_rbp, capture_pivot.rbp);
-    try std.testing.expectEqual(@as(u64, 0xAAAA_BBBB_CCCC_DDDD), capture_pivot.r13); // This is the fake from above
+    try std.testing.expectEqual(@as(u64, 0xAAAA_BBBB_CCCC_DDDD), capture_pivot.r13);  // This is the fake from above
     try std.testing.expectEqual(entry_r14, capture_pivot.r14);
     try std.testing.expectEqual(entry_r15, capture_pivot.r15);
 
     // Verify R12 (The Critical One - Old Stack Pointer)
-    // Logic:
-    // 1. entry_rsp points to the Return Address.
-    // 2. We pushed RBX (8 bytes).
-    // 3. We pushed R12 (8 bytes).
-    // 4. We pushed R13 (8 bytes).
-    // 5. We pushed R14 (8 bytes) - purely for alignment.
-    // 4. Then we did `movq %rsp, %r12`.
-    // Therefore: R12 must be exactly (entry_rsp - 32).
-    const expected_r12 = entry_rsp - 32;
+    // Logic: push all 6 volatile registers
+    // Therefore: R12 must be exactly (entry_rsp - 6 * 8 (48) ).
+    const expected_r12 = entry_rsp - 48;
     try std.testing.expectEqual(expected_r12, capture_pivot.r12);
 
     // Verify RSP (New Stack Pointer)
     // Logic:
     // 1. We took the address of `fake_stack` + 2048.
     // 2. We aligned it down to 16 bytes (`andq $-16`).
-    // 3. We pushed R12 (8 bytes).
-    // 4. SNAPSHOT happened right here.
+    // 3. We added 32 bytes for state (to preserve old stack pointer & limit, and new unwind frame)
+    // 5. SNAPSHOT happened right here.
     const stack_end = @intFromPtr(&fake_stack) + 2048;
+
     // Perform bitwise AND with -16 (which is ~15 for unsigned 64-bit)
     const aligned_end = stack_end & ~@as(u64, 15);
-    const expected_rsp = aligned_end - 8;
+    const expected_rsp = aligned_end - 32;
     try std.testing.expectEqual(expected_rsp, capture_pivot.rsp);
+    try std.testing.expectEqual(expected_rsp + 16, capture_pivot.rbp);
 
     // Verify Stack Content
     // The value at the top of the new stack (fake stack) should be the link (R12)
     const val_on_stack = @as(*u64, @ptrFromInt(capture_pivot.rsp)).*;
     try std.testing.expectEqual(capture_pivot.r12, val_on_stack);
-
 
     // 2. Validate State at Restore
     // Verify Execution Location
@@ -305,7 +288,7 @@ test "stack switch" {
 
     // CRITICAL: Ensure that we ran __alloc_new_segment on EMERGENCY STACK
     const safe_stack_start = @intFromPtr(&safe_stack_buffer);
-    const safe_stack_end = safe_stack_start + 1024;
+    const safe_stack_end = safe_stack_start + SAFE_STACK_BUFFER_SIZE;
 
     try std.testing.expect(allocator_run_sp >= safe_stack_start);
     try std.testing.expect(allocator_run_sp <= safe_stack_end);
