@@ -604,27 +604,36 @@ test_stack_switch:
     CRUMB 1000
 
     # Save callee-saved
-    pushq %rbx
-    pushq %r12          # Save R12 before overwriting it
+    pushq %rbx          # Save Caller's RBX before overwriting it
+    pushq %r12          # Save Caller's R12 before overwriting it
+    pushq %r13          # Save Caller's R13 before overwriting it
+    pushq %r14          # Save R14 (purely to maintain 16-byte alignment)
 
     CRUMB 1001
 
-    # Snapshot NOW (RSP points to R12, then RBX, then Return Address)
+    # Snapshot NOW
+    # RSP points to R12, then RBX, then Return Address
     movq %rsp, %r12
+    # Save CURRENT stack limit to later restore
+    movq test_stack_limit@gottpoff(%rip), %rax  # Load Offset from GOT
+    movq %fs:(%rax), %r13                       # Read from FS + Offset
 
     CRUMB 1002
     CHECK_NOT_NULL %r12, 9101
 
     # Get return address (don't pop, just read)
-    # 0(%r12)  = Saved R12
-    # 8(%r12)  = Saved RBX
-    # 16(%r12) = Return Address
-    movq 16(%r12), %rax
+    # 0(%r12)  = Saved R14
+    # 8(%r12)  = Saved R13
+    # 16(%r12) = Saved R12
+    # 24(%r12) = Saved RBX
+    # 32(%r12) = Return Address
+    # This is perfect inverse of `Save Callee-saved` above
+    movq 32(%r12), %rax
 
     CRUMB 1003
 
     # ---------------------------------------------------------------------
-    # START ADDITION
+    # Prepare for Zig call - Save volatile regs, call, restore
     # ---------------------------------------------------------------------
 
     # 1. Save Volatiles (Allocator will clobber these)
@@ -656,8 +665,15 @@ test_stack_switch:
     andq $-16, %rsp     # Safety alignment (DIRELY NECESSARY for ABI)
 
     # ---------------------------------------------------------------------
-    # END ADDITION
+    # END Zig Call
     # ---------------------------------------------------------------------
+
+    movq %rsp, %r11                     # Calc New Limit
+    subq $2048, %r11                    # Bottom = Top - Size
+
+    # Update TLS stack limit to the new limit (stored in %r11)
+    movq test_stack_limit@gottpoff(%rip), %rax
+    movq %r11, %fs:(%rax)
 
     CHECK_RSP_VALID 9102
     CHECK_ALIGN 9001      # Check new stack is aligned
@@ -687,7 +703,14 @@ restore_stack:
 
     CRUMB 2001
 
+    # Restore TLS Stack Limit (to what it what it was before -> stored in %r13)
+    movq test_stack_limit@gottpoff(%rip), %rax
+    movq %r13, %fs:(%rax)
+
     # Restore Callee-saved (LIFO order)
+    # This must be exact inverse of `Save Callee-saved` above
+    popq %r14           # purely for alignment
+    popq %r13           # Restore R13
     popq %r12           # Restore R12
     popq %rbx           # Restore RBX
 

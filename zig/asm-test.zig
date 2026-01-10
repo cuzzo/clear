@@ -26,7 +26,6 @@ export var debug_capture: RegisterState = .{};
 export var capture_pivot: RegisterState = .{};
 export var capture_restore: RegisterState = .{};
 
-
 extern fn __lessstack() callconv(.c) void;
 extern fn test_morestack_simple() void;
 extern fn test_morestack_stop() void;
@@ -46,6 +45,8 @@ extern var entry_r14: u64;
 extern var entry_r15: u64;
 extern var fake_stack: [2048]u8;
 extern fn test_before_switch() void;
+
+pub export threadlocal var test_stack_limit: u64 = 0;
 
 export fn abi_panic(code: u64) noreturn {
     std.debug.print("ABI PANIC: {}\n", .{code});
@@ -141,6 +142,7 @@ test "snapshot survives" {
 extern fn test_stack_switch() void;
 
 test "stack switch" {
+    test_stack_limit = 0xAAAA_BBBB_CCCC_DDDD;
     breadcrumb_counter = 0;
 
     test_stack_switch();
@@ -167,7 +169,7 @@ test "stack switch" {
     // Verify Callee-Saved Registers (Should match entry state)
     try std.testing.expectEqual(entry_rbx, capture_pivot.rbx);
     try std.testing.expectEqual(entry_rbp, capture_pivot.rbp);
-    try std.testing.expectEqual(entry_r13, capture_pivot.r13);
+    try std.testing.expectEqual(@as(u64, 0xAAAA_BBBB_CCCC_DDDD), capture_pivot.r13); // This is the fake from above
     try std.testing.expectEqual(entry_r14, capture_pivot.r14);
     try std.testing.expectEqual(entry_r15, capture_pivot.r15);
 
@@ -176,9 +178,11 @@ test "stack switch" {
     // 1. entry_rsp points to the Return Address.
     // 2. We pushed RBX (8 bytes).
     // 3. We pushed R12 (8 bytes).
+    // 4. We pushed R13 (8 bytes).
+    // 5. We pushed R14 (8 bytes) - purely for alignment.
     // 4. Then we did `movq %rsp, %r12`.
-    // Therefore: R12 must be exactly (entry_rsp - 16).
-    const expected_r12 = entry_rsp - 16;
+    // Therefore: R12 must be exactly (entry_rsp - 32).
+    const expected_r12 = entry_rsp - 32;
     try std.testing.expectEqual(expected_r12, capture_pivot.r12);
 
     // Verify RSP (New Stack Pointer)
@@ -226,6 +230,9 @@ test "stack switch" {
     const ret_addr_at_entry   = @as(*u64, @ptrFromInt(entry_rsp)).*;
     const ret_addr_at_restore = @as(*u64, @ptrFromInt(capture_restore.rsp)).*;
     try std.testing.expectEqual(ret_addr_at_entry, ret_addr_at_restore);
+
+    // CRITICAL: Ensure old stack limit was preserved.
+    try std.testing.expectEqual(@as(u64, 0xAAAA_BBBB_CCCC_DDDD), test_stack_limit);
 
     std.debug.print("✓ Exact stack addresses verified\n", .{});
 }
