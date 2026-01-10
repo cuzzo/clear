@@ -125,7 +125,8 @@ fn alloc_segment_impl() usize {
     return aligned_top;
 }
 
-pub export fn __zig_alloc_segment() callconv(.c) usize {
+pub export fn __zig_alloc_segment(old_sp: usize) callconv(.c) usize {
+    _ = old_sp; // Currently unused, but keeps ABI honest
     @setRuntimeSafety(false);
     return alloc_segment_impl();
 }

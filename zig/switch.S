@@ -623,10 +623,41 @@ test_stack_switch:
 
     CRUMB 1003
 
-    # Switch to fake stack
-    leaq fake_stack(%rip), %rsp
-    addq $2048, %rsp
-    andq $-16, %rsp
+    # ---------------------------------------------------------------------
+    # START ADDITION
+    # ---------------------------------------------------------------------
+
+    # 1. Save Volatiles (Allocator will clobber these)
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %r8
+    pushq %r9
+
+    # 2. Setup Argument: RDI = Old Stack Snapshot
+    movq %r12, %rdi
+
+    # 3. Call Allocator
+    # Note: Stack is 16-byte aligned here (2 Saved Regs + 6 Volatiles = 8 pushes)
+    call __mock_zig_alloc_segment
+
+    # 4. Restore Volatiles (Pop in reverse order)
+    popq %r9
+    popq %r8
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+
+    # 5. Switch Stack
+    # RAX holds the new stack pointer returned by mock_alloc_stack
+    movq %rax, %rsp
+    andq $-16, %rsp     # Safety alignment (DIRELY NECESSARY for ABI)
+
+    # ---------------------------------------------------------------------
+    # END ADDITION
+    # ---------------------------------------------------------------------
 
     CHECK_RSP_VALID 9102
     CHECK_ALIGN 9001      # Check new stack is aligned
