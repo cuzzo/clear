@@ -619,7 +619,7 @@ test_stack_switch:
     movq %fs:(%rax), %r13                       # Read from FS + Offset
 
     CRUMB 1002
-    CHECK_NOT_NULL %r12, 9101
+    CHECK_NOT_NULL %rax, 9101
 
     # Get return address (don't pop, just read)
     # 0(%r12)  = Saved R14
@@ -631,6 +631,23 @@ test_stack_switch:
     movq 32(%r12), %rax
 
     CRUMB 1003
+
+    # ---------------------------------------------------------------------
+    # Switch to EMERGENCY STACK: We are out of space
+    # ---------------------------------------------------------------------
+    # Load the "Parent Context" pointer from TLS
+    movq test_parent_ctx@gottpoff(%rip), %rax
+    movq %fs:(%rax), %rax                          # RAX now holds *MockContext
+
+    CHECK_NOT_NULL %r12, 9102
+
+    # 3. Switch RSP to the Parent's SP
+    movq (%rax), %rsp
+    CHECK_RSP_VALID 9200                          # ENSURE VALIDITY!
+    andq $-16, %rsp                               # FORCE ALIGNMENT!
+
+    # NOTE: We are now running on 'safe_stack_buffer'!
+    # The Old Stack (R12) is frozen.
 
     # ---------------------------------------------------------------------
     # Prepare for Zig call - Save volatile regs, call, restore
@@ -649,7 +666,7 @@ test_stack_switch:
 
     # 3. Call Allocator
     # Note: Stack is 16-byte aligned here (2 Saved Regs + 6 Volatiles = 8 pushes)
-    call __mock_zig_alloc_segment
+    call __mock_zig_alloc_segment                  # CALL ON EMERGECY STACK!
 
     # 4. Restore Volatiles (Pop in reverse order)
     popq %r9
@@ -675,7 +692,7 @@ test_stack_switch:
     movq test_stack_limit@gottpoff(%rip), %rax
     movq %r11, %fs:(%rax)
 
-    CHECK_RSP_VALID 9102
+    CHECK_RSP_VALID 9103
     CHECK_ALIGN 9001      # Check new stack is aligned
     CRUMB 1004
 
@@ -699,7 +716,7 @@ restore_stack:
 
     # Pop old stack pointer
     popq %rsp
-    CHECK_RSP_VALID 9103
+    CHECK_RSP_VALID 9105
 
     CRUMB 2001
 

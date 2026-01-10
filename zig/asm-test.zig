@@ -21,6 +21,13 @@ pub const RegisterState = extern struct {
     rip: u64 = 0,
 };
 
+pub const MockContext = extern struct {
+    sp: u64 = 0,
+};
+
+var safe_stack_buffer: [1024]u8 = undefined;
+
+pub export threadlocal var test_parent_ctx: *MockContext = undefined;
 
 export var debug_capture: RegisterState = .{};
 export var capture_pivot: RegisterState = .{};
@@ -144,6 +151,12 @@ extern fn test_stack_switch() void;
 test "stack switch" {
     test_stack_limit = 0xAAAA_BBBB_CCCC_DDDD;
     breadcrumb_counter = 0;
+
+    var ctx = MockContext{
+        // Point to top of safe stack (aligned)
+        .sp = @intFromPtr(&safe_stack_buffer) + 1024 - 16,
+    };
+    test_parent_ctx = &ctx;
 
     test_stack_switch();
 
