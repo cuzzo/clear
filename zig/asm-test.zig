@@ -62,6 +62,34 @@ export fn abi_panic(code: u64) noreturn {
 }
 
 
+var allocator_run_sp: usize = 0;
+
+// The "Sticky" segment for the test.
+// In real code, this lives in the Fiber struct.
+var test_overflow_segment: ?[]u8 = null;
+
+// Helper to check if a pointer is inside a slice
+fn is_inside(ptr: usize, slice: []u8) bool {
+    const start = @intFromPtr(slice.ptr);
+    const end = start + slice.len;
+    return ptr >= start and ptr < end;
+}
+
+// Runs on emergency stack
+export fn __zig_stack_overflow_handler() callconv(.c) noreturn {
+    // 1. Log the error
+    std.debug.print("FATAL: Fiber Stack Overflow (Double Fault)\n", .{});
+
+    // 2. Kill the current fiber
+    // In a real scheduler, this would be:
+    // scheduler.kill_current_fiber(error.StackOverflow);
+    // scheduler.schedule_next();
+
+    // For the test, we just exit or loop
+    @panic("Fiber Double Stack Overflow");
+}
+
+// Runs on emergency stack
 export fn __mock_zig_alloc_segment(old_sp: usize) callconv(.c) usize {
     @setRuntimeSafety(false);
 
@@ -69,6 +97,33 @@ export fn __mock_zig_alloc_segment(old_sp: usize) callconv(.c) usize {
     // We expect old_sp to be the snapshot pointer.
     // For this test, we can just print it or assert it's not 0.
     if (old_sp == 0) @panic("Received NULL old_sp in mock_alloc");
+
+    allocator_run_sp = @intFromPtr(&old_sp); // Approximate SP
+
+    // ---------------------------------------------------------
+    // STICKY SEGMENT LOGIC
+    // ---------------------------------------------------------
+
+    if (test_overflow_segment) |seg| {
+        // [CRITICAL] Check for Double Overflow
+        if (is_inside(old_sp, seg)) {
+             // Tell the fiber it's time to die.
+             return 0;
+        }
+
+        // Reuse (Sticky Strategy)
+        // We aren't currently ON it, so we must be switching TO it.
+        // Return the existing top.
+        return @intFromPtr(seg.ptr) + seg.len;
+    }
+
+    // ---------------------------------------------------------
+    // FIRST TIME ALLOCATION
+    // ---------------------------------------------------------
+
+    // Simulate Malloc: point to our 'fake_stack' buffer
+    const new_slice = &fake_stack;
+    test_overflow_segment = new_slice;
 
     // 2. Return the top of our fake stack (simulating a new segment)
     // Remember: Stack grows down, so return the END of the buffer.
@@ -149,6 +204,7 @@ test "snapshot survives" {
 extern fn test_stack_switch() void;
 
 test "stack switch" {
+    allocator_run_sp = 0;
     test_stack_limit = 0xAAAA_BBBB_CCCC_DDDD;
     breadcrumb_counter = 0;
 
@@ -246,6 +302,13 @@ test "stack switch" {
 
     // CRITICAL: Ensure old stack limit was preserved.
     try std.testing.expectEqual(@as(u64, 0xAAAA_BBBB_CCCC_DDDD), test_stack_limit);
+
+    // CRITICAL: Ensure that we ran __alloc_new_segment on EMERGENCY STACK
+    const safe_stack_start = @intFromPtr(&safe_stack_buffer);
+    const safe_stack_end = safe_stack_start + 1024;
+
+    try std.testing.expect(allocator_run_sp >= safe_stack_start);
+    try std.testing.expect(allocator_run_sp <= safe_stack_end);
 
     std.debug.print("✓ Exact stack addresses verified\n", .{});
 }

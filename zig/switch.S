@@ -665,8 +665,12 @@ test_stack_switch:
     movq %r12, %rdi
 
     # 3. Call Allocator
-    # Note: Stack is 16-byte aligned here (2 Saved Regs + 6 Volatiles = 8 pushes)
+    CHECK_ALIGN 9050
     call __mock_zig_alloc_segment                  # CALL ON EMERGECY STACK!
+
+    # 3.1: Die if already overflown
+    testq %rax, %rax
+    jz handle_overflow_error
 
     # 4. Restore Volatiles (Pop in reverse order)
     popq %r9
@@ -678,8 +682,10 @@ test_stack_switch:
 
     # 5. Switch Stack
     # RAX holds the new stack pointer returned by mock_alloc_stack
-    movq %rax, %rsp
-    andq $-16, %rsp     # Safety alignment (DIRELY NECESSARY for ABI)
+    # RAX holds returned values...
+    movq %rax, %rsp                     # We are now running on the stitched stack (The new segment)
+    andq $-16, %rsp                     # Safety alignment (DIRELY NECESSARY for ABI)
+    CHECK_ALIGN 9051
 
     # ---------------------------------------------------------------------
     # END Zig Call
@@ -715,7 +721,7 @@ restore_stack:
     CRUMB 2000
 
     # Pop old stack pointer
-    popq %rsp
+    popq %rsp                              # We are now back on the original fiber stack.
     CHECK_RSP_VALID 9105
 
     CRUMB 2001
@@ -742,6 +748,17 @@ restore_stack:
 does_ret3:
     CRUMB 3000
     ret
+
+handle_overflow_error:
+    # We are currently on the Safe Stack (Emergency Stack).
+    # We can safely call a logging function or scheduler kill function.
+
+    # We need to clean up the stack (pops) before jumping?
+    # Actually, if we are killing the fiber, we don't care about these registers.
+    # Just align the stack and call the panic handler.
+    andq $-16, %rsp
+    CHECK_ALIGN 9900
+    call __zig_stack_overflow_handler
 
 .global test_before_switch
 test_before_switch:
