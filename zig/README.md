@@ -67,3 +67,9 @@ zig test queues-test.zig -fsanitize-thread -lc
 ./scheduler-fuzz-test.sh
 ```
 
+
+## Unwinding
+
+```bash
+zig test unwind-test.zig unwind.S -lc -lunwind   -O Debug   -fno-strip   -rdynamic   --eh-frame-hdr
+```
