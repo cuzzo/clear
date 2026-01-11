@@ -1,6 +1,11 @@
 const std = @import("std");
 const fc = @import("fiber-core.zig");
 
+//const c = @cImport({
+//    @cInclude("libunwind.h");
+//    @cInclude("stdio.h");
+//});
+
 pub const RegisterState = extern struct {
     rax: u64 = 0,
     rbx: u64 = 0,
@@ -130,67 +135,20 @@ pub fn printBreadcrumbs() void {
     std.debug.print("\n", .{});
 }
 
-extern fn test_simple_stack_switch() void;
-extern fn test_breadcrumbs() void;
 extern var abi_error_code: u64;
 
-test "breadcrumbs work" {
-    var parent_stack: [1024]u8 align(16) = [_]u8{0} ** 1024;
-    var parent_ctx = fc.Context{ .sp = @intFromPtr(&parent_stack) + 1024 - 64 };
-    fc.__fiber_parent_ctx = &parent_ctx;
+extern fn run_stack_stitch_harness() i64;
 
-    // Reset breadcrumbs
-    breadcrumb_counter = 0;
+// This function represents the code your transpiler generates.
+// It will be "moved" to the new stack by the assembly harness.
+export fn zig_worker_function(a: i64, b: i64) i64 {
+    std.debug.print("   [Zig] Working on new stack segment...\n", .{});
+    std.debug.print("   [Zig] Args: {} + {} = {}\n", .{a, b, a + b});
 
-    test_breadcrumbs();
-
-    printBreadcrumbs();
-    try std.testing.expectEqual(3, breadcrumb_counter);
-    try std.testing.expectEqual(100, breadcrumbs[0]);
-    try std.testing.expectEqual(200, breadcrumbs[1]);
-    try std.testing.expectEqual(300, breadcrumbs[2]);
+    // We can even try a CRUMB here to see if unwinding works
+    // across the stitch!
+    return a + b;
 }
-
-extern fn test_fake_return() void;
-
-test "fake return" {
-    // Reset breadcrumbs
-    breadcrumb_counter = 0;
-
-    test_fake_return();
-
-    printBreadcrumbs();
-    try std.testing.expectEqual(@as(u64, 5), breadcrumb_counter);
-    try std.testing.expectEqual(@as(u64, 1000), breadcrumbs[0]);
-    try std.testing.expectEqual(@as(u64, 1001), breadcrumbs[1]);
-    try std.testing.expectEqual(@as(u64, 1002), breadcrumbs[2]);
-    try std.testing.expectEqual(@as(u64, 3000), breadcrumbs[3]);
-    try std.testing.expectEqual(@as(u64, 2000), breadcrumbs[4]);
-}
-
-extern fn test_snapshot_survives() void;
-
-test "snapshot survives" {
-    breadcrumb_counter = 0;
-
-    test_snapshot_survives();
-
-    printBreadcrumbs();
-    try std.testing.expectEqual(@as(u64, 11), breadcrumb_counter);
-    try std.testing.expectEqual(@as(u64, 1000), breadcrumbs[0]);
-    try std.testing.expectEqual(@as(u64, 1001), breadcrumbs[1]);
-    try std.testing.expectEqual(@as(u64, 1002), breadcrumbs[2]);
-    try std.testing.expectEqual(@as(u64, 1003), breadcrumbs[3]);
-    try std.testing.expectEqual(@as(u64, 1004), breadcrumbs[4]);
-    try std.testing.expectEqual(@as(u64, 1005), breadcrumbs[5]);
-    try std.testing.expectEqual(@as(u64, 3000), breadcrumbs[6]);
-    try std.testing.expectEqual(@as(u64, 2000), breadcrumbs[7]);
-    try std.testing.expectEqual(@as(u64, 2001), breadcrumbs[8]);
-    try std.testing.expectEqual(@as(u64, 2002), breadcrumbs[9]);
-    try std.testing.expectEqual(@as(u64, 2003), breadcrumbs[10]);
-}
-
-extern fn test_stack_switch() void;
 
 test "stack switch" {
     allocator_run_sp = 0;
@@ -203,7 +161,12 @@ test "stack switch" {
     };
     test_parent_ctx = &ctx;
 
-    test_stack_switch();
+    // TODO: Remove
+    var parent_stack: [1024]u8 align(16) = [_]u8{0} ** 1024;
+    var parent_ctx = fc.Context{ .sp = @intFromPtr(&parent_stack) + 1024 - 64 };
+    fc.__fiber_parent_ctx = &parent_ctx;
+
+    _ = run_stack_stitch_harness();
 
     printBreadcrumbs();
     try std.testing.expectEqual(@as(u64, 0), abi_error_code);
@@ -220,6 +183,7 @@ test "stack switch" {
     try std.testing.expectEqual(@as(u64, 2001), breadcrumbs[9]);
     try std.testing.expectEqual(@as(u64, 2002), breadcrumbs[10]);
 
+//    try std.testing.expectEqual(false, true);
     // 1. Validate State at Pivot
     // Verify RIP matches the label
     try std.testing.expectEqual(@intFromPtr(&test_before_switch), capture_pivot.rip);

@@ -134,9 +134,13 @@ func_a:
 .size func_a, .-func_a
 
 
-# CFI only necessary when moving rsp or rbp
-# OR callee-saved registers: %rbx, %r12-%r15
-# NOT: %rax, %rdx, %rdi, %r8-%r11
+# CFI either anchored to rsp or rpb
+# If anchored to rsp and rsp changes, must update
+# If anchored to rpb and rpb changes, must update
+# Do not need to update rsp if it changes when anchored to rpb (and vice versa).
+#
+# Need to update when callee-saved registers change: %rbx, %r12-%r15
+# Do NOT need to update when volatile registers change: %rax, %rdx, %rdi, %r8-%r11
 .global func_b
 .type func_b, @function
 func_b:

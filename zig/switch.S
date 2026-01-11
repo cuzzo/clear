@@ -1,5 +1,42 @@
 # switch.s
 
+.data
+.global breadcrumb_counter
+.global breadcrumbs
+.global abi_error_code
+abi_error_code: .quad 0
+breadcrumb_counter: .quad 0
+breadcrumbs: .space 512  # 64 breadcrumbs
+
+.data
+.balign 8
+.global test_saved_rsp
+test_saved_rsp: .quad 0
+
+.data
+.global entry_rbx
+.global entry_rsp
+.global entry_rbp
+.global entry_r12
+.global entry_r13
+.global entry_r14
+.global entry_r15
+.global fake_stack
+
+fake_stack: .space 2048  # 2KB fake stack
+entry_rsp: .quad 0
+entry_rbx: .quad 0
+entry_rbp: .quad 0
+entry_r12: .quad 0
+entry_r13: .quad 0
+entry_r14: .quad 0
+entry_r15: .quad 0
+
+
+
+.text
+.cfi_sections .eh_frame
+
 .macro SNAPSHOT label_rip, destination
     pushq %rax
     pushq %rcx
@@ -42,21 +79,20 @@
     popq %rax
 .endm
 
-
-.data
-.global breadcrumb_counter
-.global breadcrumbs
-breadcrumb_counter: .quad 0
-breadcrumbs: .space 512  # 64 breadcrumbs
-
+# -----------------------------------------------------------------------
+# The Macro
+# -----------------------------------------------------------------------
 .macro CRUMB id
+    # 1. Update Global Counter (Quickly)
     pushq %rax
     pushq %rdx
+
     movq breadcrumb_counter(%rip), %rax
     leaq breadcrumbs(%rip), %rdx
     movq $\id, (%rdx, %rax, 8)
     incq %rax
     movq %rax, breadcrumb_counter(%rip)
+
     popq %rdx
     popq %rax
 .endm
@@ -149,9 +185,6 @@ breadcrumbs: .space 512  # 64 breadcrumbs
 
 
 
-.data
-.global abi_error_code
-abi_error_code: .quad 0
 
 
 # Check for x86_64 (Linux/Intel)
@@ -369,10 +402,6 @@ test_morestack_stop:
     ret
 
 
-.data
-.balign 8
-.global test_saved_rsp
-test_saved_rsp: .quad 0
 
 
 .text
@@ -417,187 +446,11 @@ test_restore_point:
 
 
 
-.global test_simple_stack_switch
-test_simple_stack_switch:
-    CRUMB 2000
 
-    # Save callee-saved
-    pushq %rbx
-    pushq %r12
-
-    CRUMB 2001
-    movq %rsp, %r12     # R12 = snapshot of old stack
-
-    CRUMB 2002
-    # "Allocate new stack" (fake - just move down)
-    subq $1024, %rsp
-    andq $-16, %rsp
-
-    CRUMB 2003
-    # Push link to old stack
-    pushq %r12
-
-    CRUMB 2004
-    # Push fake return
-    leaq test_lessstack_simple(%rip), %rax
-    pushq %rax
-
-    CRUMB 2005
-    # Get return address from old stack
-    movq 16(%r12), %rax    # Skip over our 2 pushes
-
-    CRUMB 2006
-    # Jump to it (simulating continuation)
-    jmp *%rax
-
-.global test_lessstack_simple
-test_lessstack_simple:
-    CRUMB 3000
-
-    # Pop old stack pointer
-    popq %rsp
-
-    CRUMB 3001
-    # Restore callee-saved
-    popq %r12
-    popq %rbx
-
-    CRUMB 3002
-    ret
-
-
-
-.text
-.global test_breadcrumbs
-test_breadcrumbs:
-    CRUMB 100
-    CRUMB 200
-    CRUMB 300
-    ret
-
-
-.text
-.global test_fake_return
-test_fake_return:
-    CRUMB 1000
-
-    # Pop the real return address
-    popq %rax
-
-    CRUMB 1001
-
-    # Push a fake return address
-    leaq fake_target(%rip), %rbx
-    pushq %rbx
-
-    CRUMB 1002
-
-    # Jump somewhere that will ret
-    jmp does_simple_ret
-
-fake_target:
-    CRUMB 2000
-    # We landed here from does_simple_ret
-    # Now return to real caller (it's in RAX)
-    pushq %rax
-    ret
-
-does_simple_ret:
-    CRUMB 3000
-    # This ret will jump to fake_target
-    ret
-
-
-
-
-
-
-.text
-.global test_snapshot_survives
-test_snapshot_survives:
-    CRUMB 1000
-
-    # Save a register
-    pushq %rbx
-
-    CRUMB 1001
-
-    # Snapshot points to RBX
-    movq %rsp, %r12
-
-    CRUMB 1002
-
-    # Move stack pointer past the saved value
-    addq $8, %rsp
-
-    CRUMB 1003
-
-    # Pop real return (now at top of stack)
-    popq %rax
-
-    CRUMB 1004
-
-    # Push fake return
-    leaq fake_target2(%rip), %rbx
-    pushq %rbx
-
-    CRUMB 1005
-
-    jmp does_ret2
-
-fake_target2:
-    CRUMB 2000
-
-    # R12 still points to saved RBX
-    movq 0(%r12), %rbx
-
-    CRUMB 2001
-
-    # Restore stack (move back down to where RBX was)
-    movq %r12, %rsp
-
-    CRUMB 2002
-
-    # Pop RBX off
-    popq %rbx
-
-    CRUMB 2003
-
-    # Return
-    pushq %rax
-    ret
-
-does_ret2:
-    CRUMB 3000
-    ret
-
-
-
-
-
-.data
-.global entry_rbx
-.global entry_rsp
-.global entry_rbp
-.global entry_r12
-.global entry_r13
-.global entry_r14
-.global entry_r15
-.global fake_stack
-
-fake_stack: .space 2048  # 2KB fake stack
-entry_rsp: .quad 0
-entry_rbx: .quad 0
-entry_rbp: .quad 0
-entry_r12: .quad 0
-entry_r13: .quad 0
-entry_r14: .quad 0
-entry_r15: .quad 0
-
-.text
 .global test_stack_switch
+.type test_stack_switch, @function
 test_stack_switch:
-    .cfi_startproc
+    #.cfi_startproc
     SAVE_ENTRY_STATE
     CHECK_RSP_VALID 9100
     movq %rsp, entry_rsp(%rip)
@@ -607,40 +460,40 @@ test_stack_switch:
     # Save callee-saved
     # Save Caller's RBX before overwriting it
     pushq %rbx
-    .cfi_def_cfa_offset 16
-    .cfi_offset %rbx, -16
+    #.cfi_def_cfa_offset 16
+    #.cfi_offset %rbx, -16
 
     # Save Caller's R12 before overwriting it
     pushq %r12
-    .cfi_def_cfa_offset 24
-    .cfi_offset %r12, -24
+    #.cfi_def_cfa_offset 24
+    #.cfi_offset %r12, -24
 
     # Save Caller's R13 before overwriting it
     pushq %r13
-    .cfi_def_cfa_offset 32
-    .cfi_offset %r13, -32
+    #.cfi_def_cfa_offset 32
+    #.cfi_offset %r13, -32
 
     # Save Caller's R14
     pushq %r14
-    .cfi_def_cfa_offset 40
-    .cfi_offset %r14, -40
+    #.cfi_def_cfa_offset 40
+    #.cfi_offset %r14, -40
 
     # Save Caller's R15
     pushq %r15
-    .cfi_def_cfa_offset 48
-    .cfi_offset %r15, -48
+    #.cfi_def_cfa_offset 48
+    #.cfi_offset %r15, -48
 
     # Save Caller's RBP
     pushq %rbp
-    .cfi_def_cfa_offset 56
-    .cfi_offset %rbp, -56
+    #.cfi_def_cfa_offset 56
+    #.cfi_offset %rbp, -56
 
     CRUMB 1001
 
     # Snapshot NOW
     # RSP points to R12, then RBX, then Return Address
     movq %rsp, %r12
-    .cfi_def_cfa_register %r12
+    #.cfi_def_cfa_register %r12
 
     # Save CURRENT stack limit to later restore
     movq test_stack_limit@gottpoff(%rip), %rax  # Load Offset from GOT
@@ -667,6 +520,7 @@ test_stack_switch:
 
     # 3. Switch RSP to the Parent's SP
     movq (%rax), %rsp                             # We are now on the emergency stack. The old stack (R12) is frozen.
+    # TODO: UNWINDING BREAKS HERE! NEED TO UPDATE CFI
     CHECK_RSP_VALID 9200                          # ENSURE VALIDITY!
     andq $-16, %rsp                               # FORCE ALIGNMENT!
 
@@ -710,22 +564,28 @@ test_stack_switch:
 
     # --- START NEW FRAME UNWIND LOGIC ---
     movq 48(%r12), %r11
-    pushq %r11
+    pushq %r11                          # synthetic return address
+    #.cfi_def_cfa_offset 8
+    #.cfi_offset %rip, -8
 
-    pushq %rbp                          # 1. Save Old RBP (links to caller's frame)
-    movq %rsp, %rbp                     # 2. Update RBP to current stack
-    .cfi_def_cfa_register %rbp
-    .cfi_offset %rbp, -16               # Saved RBP is at RBP (CFA - 16)
-    .cfi_offset %rip, -8                # Return Addr is at RBP + 8 (CFA - 8)
+    pushq %rbp                          # save caller's RBP
+    #.cfi_def_cfa_offset 16
+    #.cfi_offset %rbp, -16
+    movq %rsp, %rbp
     # --- END NEW FRAME UNWIND LOGIC ---
 
     # Safety alignment (DIRELY NECESSARY for ABI)
-    andq $-16, %rsp
+    # andq $-16, %rsp
     CHECK_ALIGN 9051
 
     # 6. Populate new stack with state:
     pushq %r13                          # Old Stack Limit
+    #.cfi_def_cfa_offset 24
+    #.cfi_offset %r13, -24
+
     pushq %r12                          # Old Stack Pointer
+    #.cfi_def_cfa_offset 32
+    #.cfi_offset %r12, -32
 
     # ---------------------------------------------------------------------
     # END Zig Call
@@ -753,7 +613,9 @@ test_stack_switch:
     CHECK_ALIGN 9002                    # Check still aligned after pushes
     CRUMB 1006
 
-    jmp does_ret3
+    # Retrieve old return address from frozen R12, store it in R11, jump to it.
+    movq 48(%r12), %r11
+    jmp *%r11
 
 restore_stack:
     CRUMB 2000
@@ -764,7 +626,7 @@ restore_stack:
     # RSP+16 = Saved R13 (Old Limit)
     # RSP+24 = Saved RBP (For DWARF / Unwind)
 
-    # 1. Skip padding
+    # 1. Skip padding - now removed by real working fucntion
     addq $8, %rsp
 
     # 2. Restore TLS Stack Limit (written in memory at start of new stack)
@@ -777,7 +639,7 @@ restore_stack:
 
     # 4. Pop old stack pointer
     movq 0(%rsp), %rsp                  # We are now back on the original fiber stack.
-    .cfi_def_cfa_register %rsp
+    #.cfi_def_cfa_register %rsp
     CHECK_RSP_VALID 9105
 
     cmpq %rsp, %r12
@@ -794,46 +656,49 @@ restore_stack:
     # This must be exact inverse of `Save Callee-saved` above
     # Restore RBP
     popq %rbp
-    .cfi_def_cfa_offset 48
-    .cfi_restore %rbp
+    #.cfi_def_cfa_offset 48
+    #.cfi_restore %rbp
 
     # Restore R15
     popq %r15
-    .cfi_def_cfa_offset 40
-    .cfi_restore %r15
+    #.cfi_def_cfa_offset 40
+    #.cfi_restore %r15
 
     popq %r14
-    .cfi_def_cfa_offset 32
-    .cfi_restore %r14
+    #.cfi_def_cfa_offset 32
+    #.cfi_restore %r14
 
     # Restore R13 (which was clobbered)
     popq %r13
-    .cfi_def_cfa_offset 24
-    .cfi_restore %r13
+    #.cfi_def_cfa_offset 24
+    #.cfi_restore %r13
 
     # Restore R12
     popq %r12
-    .cfi_def_cfa_offset 16
-    .cfi_restore %r12
+    #.cfi_def_cfa_offset 16
+    #.cfi_restore %r12
 
     # Restore RBX
     popq %rbx
-    .cfi_def_cfa_offset 8
-    .cfi_restore %rbx
+    #.cfi_def_cfa_offset 8
+    #.cfi_restore %rbx
 
     CRUMB 2002
     CHECK_CALLEE_SAVED 9003             # Check callee-saved before return
     SNAPSHOT test_restore_done, capture_restore
 
+    # Pop the fake frame (16 bytes: saved RBP + synthetic return), otherwise we run user code twice
+    addq $16, %rsp
+
     # RSP is ALREADY pointing to the return address.
     # We do NOT push %rax. Just return.
     ret
-    .cfi_endproc
 
-does_ret3:
-    CRUMB 3000
-    xorq %r13, %r13
-    ret
+#does_ret3:
+#    CRUMB 3000
+#    xorq %r13, %r13
+#    ret
+#    .cfi_endproc
 
 handle_overflow_error:
     # We are currently on the Safe Stack (Emergency Stack).
@@ -862,4 +727,35 @@ test_before_switch:
 test_restore_done:
     nop
 
+
+.size test_stack_switch, .-test_stack_switch
+
+
+
+.text
+.global victim_func
+.type victim_func, @function
+victim_func:
+    .cfi_startproc
+    # This simulates the LLVM-inserted prologue check
+    call test_stack_switch
+    # --- test_stack_switch JUMPS BACK HERE ---
+
+    CRUMB 3000
+    movq $777, %rax
+
+    ret                 # This pops 'restore_stack'
+    .cfi_endproc
+
+.text
+.global run_stack_stitch_harness
+.type run_stack_stitch_harness, @function
+run_stack_stitch_harness:
+    .cfi_startproc
+
+    movq $7, %rdi
+    call victim_func
+    # %rax should be 130
+    ret
+    .cfi_endproc
 
