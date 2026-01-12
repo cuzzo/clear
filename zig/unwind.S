@@ -158,3 +158,103 @@ func_b:
     .cfi_endproc
 .size func_b, .-func_b
 
+
+.section .bss
+test_stack: .space 65536  # 64KB fake stack
+
+.data
+.global entry_rbx
+.global entry_rsp
+.global entry_rbp
+.global entry_r12
+.global entry_r13
+.global entry_r14
+.global entry_r15
+entry_rsp: .quad 0
+entry_rbx: .quad 0
+entry_rbp: .quad 0
+entry_r12: .quad 0
+entry_r13: .quad 0
+entry_r14: .quad 0
+entry_r15: .quad 0
+
+
+# 1 option is to manually manage the registers. It's ugly
+.section .text
+.global test_stack_unwind_bad
+.type test_stack_unwind_bad, @function
+test_stack_unwind_bad:
+    .cfi_startproc
+    # 1. SAVE R13 (Crucial! Zig crashes if you don't restore this)
+    pushq %r13
+    .cfi_adjust_cfa_offset 8
+    .cfi_offset %r13, -16
+
+    # 2. Setup the Pivot
+    #    (Note: RSP changed by push, so we use the current RSP)
+    movq %rsp, %r13
+    .cfi_def_cfa_register 13
+
+    # Move stack pointer!
+    leaq test_stack + 4096(%rip), %rsp
+
+    # 3. Call your dumper
+    #    (If you uncomment the LEA later, do it here)
+    call dump_unwind_safe
+
+    # 4. RESTORE STACK
+    #    Copy the original stack pointer back from our backup
+    movq %r13, %rsp
+
+    # 5. Restore State
+    #    Reset DWARF to look at RSP again
+    .cfi_def_cfa_register 7
+
+    # 6. Restore R13 to its original value
+    popq %r13
+    .cfi_adjust_cfa_offset -8
+
+    ret
+    .cfi_endproc
+.size test_stack_unwind_bad, .-test_stack_unwind_bad
+
+
+.section .text
+.global test_stack_unwind
+.type test_stack_unwind, @function
+test_stack_unwind:
+    .cfi_startproc
+
+    pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
+
+    movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
+
+    # 2. SAVE R13 (Crucial!)
+    #    We push this *inside* our new frame.
+    #    Location: RBP - 8
+    pushq %r13
+    .cfi_offset %r13, -24
+
+    # 3. SWITCH STACK
+    #    We overwrite RSP.
+    #    RBP is NOT touched, so it still points to the Old Stack.
+    leaq test_stack + 4096(%rip), %rsp
+
+    # 4. CALL DUMPER
+    call dump_unwind_safe
+
+    # 5. RESTORE STACK
+    #    We cannot use 'mov %rbp, %rsp' yet, because R13 is sitting *below* RBP.
+    #    We set RSP to RBP-8, which points exactly at our saved R13.
+    leaq -8(%rbp), %rsp
+
+    # 6. RESTORE REGISTERS
+    popq %r13      # RSP now points to RBP
+    popq %rbp      # RSP now points to Return Address
+
+    ret
+    .cfi_endproc
+.size test_stack_unwind, .-test_stack_unwind
