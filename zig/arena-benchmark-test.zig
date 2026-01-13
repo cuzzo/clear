@@ -18,7 +18,7 @@ test "Benchmark: CheatArena vs Malloc (ArrayList)" {
     {
         // We use c_allocator as the backing for the arena so we measure
         // purely the overhead of the Arena logic vs raw Malloc logic.
-        var arena = CheatArena.init(std.heap.c_allocator);
+        var arena = CheatArena.init(std.heap.c_allocator, &[_]u8{});
         defer arena.deinit();
 
         // Create the interface for the ArrayList to use

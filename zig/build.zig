@@ -120,6 +120,7 @@ pub fn build(b: *std.Build) void {
     // -------------------------------------------------------------------------
     // We add every test file found in your directory here.
     const test_files = [_][]const u8{
+        "asm-test.zig",
         "fiber-test.zig",
         "fiber-memory-test.zig",
         "frame-test.zig",

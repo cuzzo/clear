@@ -163,13 +163,13 @@ pub const Fiber = struct {
     stack_limit: usize,
 
     pub fn init(memory: []u8, entry_fn: usize) Fiber {
-        std.debug.print("\n=== Fiber.init ===\n", .{});
-        std.debug.print("Memory: 0x{x} - 0x{x} ({} bytes)\n", .{
-            @intFromPtr(memory.ptr),
-            @intFromPtr(memory.ptr) + memory.len,
-            memory.len,
-        });
-        std.debug.print("Entry function: 0x{x}\n", .{entry_fn});
+        //std.debug.print("\n=== Fiber.init ===\n", .{});
+        //std.debug.print("Memory: 0x{x} - 0x{x} ({} bytes)\n", .{
+        //    @intFromPtr(memory.ptr),
+        //    @intFromPtr(memory.ptr) + memory.len,
+        //    memory.len,
+        //});
+        //std.debug.print("Entry function: 0x{x}\n", .{entry_fn});
 
         // Fill stack with pattern to debug
         @memset(memory, 0xCC);
@@ -178,27 +178,27 @@ pub const Fiber = struct {
         const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
         const aligned_top = stack_top_addr & ~@as(usize, 15);
 
-        std.debug.print("Stack top addr: 0x{x}\n", .{stack_top_addr});
-        std.debug.print("Aligned top: 0x{x}\n", .{aligned_top});
+        //std.debug.print("Stack top addr: 0x{x}\n", .{stack_top_addr});
+        //std.debug.print("Aligned top: 0x{x}\n", .{aligned_top});
 
         const return_addr_location = aligned_top - 128;  // Back off past Red Zone
-        std.debug.print("Return addr location: 0x{x}\n", .{return_addr_location});
+        //std.debug.print("Return addr location: 0x{x}\n", .{return_addr_location});
 
         const ptr = @as(*usize, @ptrFromInt(return_addr_location));
         ptr.* = entry_fn;
 
-        std.debug.print("Stored value: 0x{x}\n", .{ptr.*});
-        std.debug.print("Verify read back: 0x{x}\n", .{ptr.*});
+        //std.debug.print("Stored value: 0x{x}\n", .{ptr.*});
+        //std.debug.print("Verify read back: 0x{x}\n", .{ptr.*});
 
         const initial_sp = return_addr_location;
-        std.debug.print("Initial SP: 0x{x}\n", .{initial_sp});
+        //std.debug.print("Initial SP: 0x{x}\n", .{initial_sp});
 
         const stack_bottom_addr = @intFromPtr(memory.ptr);
         const safety_margin = 512;
         const limit = stack_bottom_addr + safety_margin;
 
-        std.debug.print("Stack limit: 0x{x}\n", .{limit});
-        std.debug.print("=================\n\n", .{});
+        //std.debug.print("Stack limit: 0x{x}\n", .{limit});
+        //std.debug.print("=================\n\n", .{});
 
         return Fiber{
             .stack = stack,

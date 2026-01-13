@@ -1,16 +1,6 @@
-.text
-.cfi_sections .eh_frame
+#.text
+#.cfi_sections .eh_frame
 
-.data
-.align 64
-# Ensure visibility is restricted to prevent name collisions
-.global breadcrumb_counter
-breadcrumb_counter:
-    .quad 0
-
-.global breadcrumbs
-breadcrumbs:
-    .zero 8000
 
 # Assumes 16-byte alignment (standard for function bodies after prologue)
 .text
@@ -159,24 +149,9 @@ func_b:
 .size func_b, .-func_b
 
 
-.section .bss
-test_stack: .space 65536  # 64KB fake stack
+#.section .bss
+#test_stack: .space 65536  # 64KB fake stack
 
-.data
-.global entry_rbx
-.global entry_rsp
-.global entry_rbp
-.global entry_r12
-.global entry_r13
-.global entry_r14
-.global entry_r15
-entry_rsp: .quad 0
-entry_rbx: .quad 0
-entry_rbp: .quad 0
-entry_r12: .quad 0
-entry_r13: .quad 0
-entry_r14: .quad 0
-entry_r15: .quad 0
 
 
 # 1 option is to manually manage the registers. It's ugly
@@ -258,3 +233,32 @@ test_stack_unwind:
     ret
     .cfi_endproc
 .size test_stack_unwind, .-test_stack_unwind
+
+
+.data
+.global entry_rbx
+.global entry_rsp
+.global entry_rbp
+.global entry_r12
+.global entry_r13
+.global entry_r14
+.global entry_r15
+entry_rsp: .quad 0
+entry_rbx: .quad 0
+entry_rbp: .quad 0
+entry_r12: .quad 0
+entry_r13: .quad 0
+entry_r14: .quad 0
+entry_r15: .quad 0
+
+.data
+.align 64
+# Ensure visibility is restricted to prevent name collisions
+.global breadcrumb_counter
+breadcrumb_counter:
+    .quad 0
+
+.global breadcrumbs
+breadcrumbs:
+    .zero 8000
+

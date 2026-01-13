@@ -32,6 +32,14 @@ entry_r13: .quad 0
 entry_r14: .quad 0
 entry_r15: .quad 0
 
+.weak test_stack_limit
+.weak test_parent_ctx
+.weak capture_pivot
+.weak capture_restore
+test_stack_limit: .quad 0
+test_paretn_ctx: .space 0
+capture_pivot: .space 0
+capture_restore: .space 0
 
 
 .text
@@ -97,6 +105,9 @@ entry_r15: .quad 0
     popq %rax
 .endm
 
+.weak abi_panic
+abi_panic:
+    ret # no-op
 
 # Strictly check for 16-byte alignment
 # Do NOT push anything before this check.
@@ -247,6 +258,13 @@ switch_context_asm:
 #endif
 
 
+.weak __zig_stack_overflow_handler
+__zig_stack_overflow_handler:
+    ret # no-op
+
+.weak __mock_zig_alloc_segment
+__mock_zig_alloc_segment:
+    ret # no-op
 
 .global __morestack
 .type __morestack, @function

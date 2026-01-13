@@ -8,4 +8,5 @@ zig/zig-out
 zig/.zig-cache
 zig/fiber-stack-check/pass/build
 zig/*.bc
+zig/*.o
 
