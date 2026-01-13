@@ -122,13 +122,14 @@ pub fn build(b: *std.Build) void {
     const test_files = [_][]const u8{
         "asm-test.zig",
         "fiber-test.zig",
+        "fiber-control-tests.zig",
         "fiber-memory-test.zig",
         "frame-test.zig",
         "queues-test.zig",
+        "safety-test.zig",
         "scheduler-test.zig",
         "slab-alloc-test.zig",
         "thread-test.zig",
-        // "fiber-control-tests.zig",
         // "transpile-test.zig",
     };
 
@@ -166,10 +167,11 @@ pub fn build(b: *std.Build) void {
     const bench_step = b.step("benchmark", "Run performance benchmarks");
 
     const benchmark_files = [_][]const u8{
-        "benchmark-test.zig",
         "arena-benchmark-test.zig",
-        "queues-benchmark-test.zig",
+        "benchmark-test.zig",
+        "safety-benchmark-test.zig",
         "slab-alloc-benchmark-test.zig",
+        "queues-benchmark-test.zig",
     };
 
     for (benchmark_files) |filename| {

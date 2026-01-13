@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const safety = @import("safety.zig");
 
 // Fibers
 
@@ -161,6 +162,7 @@ pub const Fiber = struct {
     parent_ctx: *Context, // Who to jump back to when we yield/finish
     size_class: StackSize,
     stack_limit: usize,
+    stack_guard_head: ?*safety.GuardNode = null,
 
     pub fn init(memory: []u8, entry_fn: usize) Fiber {
         //std.debug.print("\n=== Fiber.init ===\n", .{});
@@ -208,6 +210,7 @@ pub const Fiber = struct {
             .stack_limit = limit,
             .parent_ctx = undefined,
             .size_class = .Standard,
+            .stack_guard_head = null,
         };
     }
 
@@ -217,6 +220,7 @@ pub const Fiber = struct {
         __fiber_stack_limit = @ptrFromInt(self.stack_limit);
         __fiber_parent_ctx = parent;
         __fiber = self;
+        safety.stack_guard_head = self.stack_guard_head;
         switchContext(parent, &self.ctx);
     }
 
@@ -225,6 +229,7 @@ pub const Fiber = struct {
     pub fn yield(self: *Fiber) void {
         __fiber_stack_limit = undefined;
         __fiber = undefined;
+        safety.stack_guard_head = null;
         switchContext(&self.ctx, self.parent_ctx);
     }
 

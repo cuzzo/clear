@@ -22,7 +22,7 @@ test "Component: Stack Segment Allocator" {
 
     // 1. Call the allocator manually
     // Mock a stack pointer (just a random number for now, or 0)
-    const new_sp = fc.__zig_alloc_segment();
+    const new_sp = fc.__zig_alloc_segment(42);
 
     // 2. Verify Alignment (Must be 16-byte aligned for C ABI)
     try std.testing.expect((new_sp & 15) == 0);
