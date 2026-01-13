@@ -73,3 +73,13 @@ zig test queues-test.zig -fsanitize-thread -lc
 ```bash
 zig test unwind-test.zig unwind.S -lc -lunwind   -O Debug   -fno-strip   -rdynamic   --eh-frame-hdr
 ```
+
+
+## Generate ASM
+
+```bash
+zig build-obj proof.zig -O ReleaseSmall -fno-emit-bin -femit-asm
+# Manually edit proof.s
+
+zig cc -c switch.S -o switch.o && zig cc -c proof.s -o proof.o && zig build-exe proof.o switch.o && ./proof
+```

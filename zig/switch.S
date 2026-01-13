@@ -251,206 +251,7 @@ switch_context_asm:
 .global __morestack
 .type __morestack, @function
 __morestack:
-    CHECK_RSP_VALID 9100
-    CRUMB 1000
-
-    /* 1. Save callee-saved registers on OLD stack */
-    /* Stack alignment note: We entered via a CALL, so RSP ends in 8 */
-    pushq %rbp  # RSP...0
-    pushq %r12  # RSP...8
-    pushq %r13  # RSP...0
-    pushq %r14  # RSP...8
-    pushq %r15  # RSP...0
-    pushq %rbx  # RSP...8
-
-    CRUMB 1001
-    /* 2. Snapshot pointer (The Anchor) */
-    /* R12 now holds the address of the "Old Stack Top" */
-    movq %rsp, %r12
-
-    CRUMB 1002
-    /* 3. Switch to parent stack (TLS Logic) */
-    /* UNTESTED: Ensure your test harness mocks this or runs on Linux with libc */
-    movq __fiber_parent_ctx@gottpoff(%rip), %rax
-    movq %fs:(%rax), %rax
-    movq (%rax), %rsp
-
-    /* Force alignment for the upcoming C ABI call */
-    andq $-16, %rsp
-
-    CHECK_RSP_VALID 9101
-    CRUMB 1003
-    CHECK_ALIGN 9001
-
-    /* 4. Save volatile args (C calling convention preservation) */
-    pushq %rdi
-    pushq %rsi
-    pushq %rdx
-    pushq %rcx
-    pushq %r8
-    pushq %r9
-
-    /* 5. Pass snapshot pointer to allocator */
-    /* FIX: Used R12 (the actual snapshot), not R11 (garbage) */
-    movq %r12, %rdi
-
-    CRUMB 1004
-    call __zig_alloc_segment
-    CRUMB 1005
-
-    /* RAX now holds the NEW stack pointer */
-
-    /* 6. Restore volatile args */
-    popq %r9
-    popq %r8
-    popq %rcx
-    popq %rdx
-    popq %rsi
-    popq %rdi
-
-    /* 7. Pivot to new stack */
-    /* The allocator returns the top of stack. We need to reserve space
-       for our variables, but we are about to push, so just move RSP. */
-    movq %rax, %rsp
-    CHECK_RSP_VALID 9102
-
-    /* 8. Setup Linkage */
-    /* FIX: Push R12 (Old Stack Ptr) as the link, not R11 */
-    pushq %r12                  /* link back to old frame */
-
-    leaq __lessstack(%rip), %rax
-    pushq %rax                  /* return target on new stack */
-
-    SNAPSHOT morestack_post_pivot
-
-    /* 9. Restore callee-saved registers from Snapshot */
-    /* NOTE: We are reading from R12 (Old Stack), but NOT popping.
-       The Old Stack stays frozen until __lessstack pops it later. */
-
-    movq 0(%r12), %rbx
-    movq 8(%r12), %r15   /* FIX: Use R12, not R11 */
-    movq 16(%r12), %r14  /* FIX: Use R12 */
-    movq 24(%r12), %r13  /* FIX: Use R12 */
-    movq 32(%r12), %r12  /* Note: This restores the R12 VALUE, not the snapshot ptr */
-    movq 40(%r12), %rbp
-
-    /* 10. Resume execution at continuation */
-    /* The return address was pushed onto the old stack BEFORE we saved regs.
-       So it is at 48(%r12_snapshot). */
-    /* FIX: Use offset 48 off the snapshot */
-    movq 48(%r12), %rax
-    jmp *%rax
-
-morestack_post_pivot:
-    nop
-
-.global __lessstack
-__lessstack:
-    CRUMB 2000
-
-    /* 1. Pivot back to the Old Stack */
-    /* The link (Old SP) was pushed right before the return address.
-       RSP points to it now. */
-    popq %rsp
-
-    CHECK_RSP_VALID 9103
-    CRUMB 2001
-
-    /* 2. Restore Callee-Saved Registers */
-    /* We are now back on the Old Stack, exactly where R12 pointed earlier. */
-    popq %rbx
-    popq %r15
-    popq %r14
-    popq %r13
-    popq %r12
-
-    /* FIX: Do NOT use 'movq %rbp, %rsp'. Just pop. */
-    popq %rbp
-
-    CRUMB 2002
-    /* 3. Return to original caller */
-    ret
-
-
-.text
-.global test_morestack_simple
-.type test_morestack_simple, @function
-test_morestack_simple:
-    /* 1. Save the REAL Zig stack pointer so we can escape later */
-    movq %rsp, test_saved_rsp(%rip)
-
-    /* 2. Load the constants you want to see in the snapshot */
-    movq $0xBBBBBBBBBBBBBBBB, %rbx
-    movq $0xAAAAAAAAAAAAAAAA, %rbp
-
-    /* 3. Push the STOP POINT as the return address.
-       This is what morestack will load into RAX and JMP to. */
-    leaq test_morestack_stop(%rip), %rax
-    pushq %rax
-
-    /* 4. Run morestack logic */
-    jmp __morestack
-
-.global test_morestack_stop
-.type test_morestack_stop, @function
-test_morestack_stop:
-    /* We are now at the very end of morestack.
-       The SNAPSHOT has already fired.
-       RSP is currently on the NEW stack.
-       We ignore everything and jump back to the Zig stack. */
-    movq test_saved_rsp(%rip), %rsp
-    ret
-
-
-
-
-.text
-.global test_lessstack_harness
-test_lessstack_harness:
-    # RDI = Address of the "New Stack" (which points to the Old Stack)
-
-    # 1. Save the REAL test runner stack
-    movq %rsp, test_saved_rsp(%rip)
-
-    # 2. Switch to the fake "New Stack" provided by Zig
-    movq %rdi, %rsp
-
-    # 3. Jump into the logic under test
-    jmp __lessstack
-
-
-.global test_restore_point
-test_restore_point:
-    # If we get here, __lessstack successfully pivoted and "returned".
-    # We must now CAPTURE the registers to verify they were restored.
-
-    pushq %rax
-    leaq debug_capture(%rip), %rax
-
-    movq %rbx, 8(%rax)   # struct.rbx
-    movq %r12, 96(%rax)  # struct.r12
-    movq %r13, 104(%rax) # struct.r13
-    movq %r14, 112(%rax) # struct.r14
-    movq %r15, 120(%rax) # struct.r15
-    movq %rbp, 48(%rax)  # struct.rbp
-
-    popq %rax
-
-    # 4. Restore the REAL test runner stack and exit
-    movq test_saved_rsp(%rip), %rsp
-    ret
-
-
-
-
-
-
-
-
-.global test_stack_switch
-.type test_stack_switch, @function
-test_stack_switch:
-    #.cfi_startproc
+    .cfi_startproc
     SAVE_ENTRY_STATE
     CHECK_RSP_VALID 9100
     movq %rsp, entry_rsp(%rip)
@@ -460,33 +261,33 @@ test_stack_switch:
     # Save callee-saved
     # Save Caller's RBX before overwriting it
     pushq %rbx
-    #.cfi_def_cfa_offset 16
-    #.cfi_offset %rbx, -16
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbx, -16
 
     # Save Caller's R12 before overwriting it
     pushq %r12
-    #.cfi_def_cfa_offset 24
-    #.cfi_offset %r12, -24
+    .cfi_def_cfa_offset 24
+    .cfi_offset %r12, -24
 
     # Save Caller's R13 before overwriting it
     pushq %r13
-    #.cfi_def_cfa_offset 32
-    #.cfi_offset %r13, -32
+    .cfi_def_cfa_offset 32
+    .cfi_offset %r13, -32
 
     # Save Caller's R14
     pushq %r14
-    #.cfi_def_cfa_offset 40
-    #.cfi_offset %r14, -40
+    .cfi_def_cfa_offset 40
+    .cfi_offset %r14, -40
 
     # Save Caller's R15
     pushq %r15
-    #.cfi_def_cfa_offset 48
-    #.cfi_offset %r15, -48
+    .cfi_def_cfa_offset 48
+    .cfi_offset %r15, -48
 
     # Save Caller's RBP
     pushq %rbp
-    #.cfi_def_cfa_offset 56
-    #.cfi_offset %rbp, -56
+    .cfi_def_cfa_offset 56
+    .cfi_offset %rbp, -56
 
     CRUMB 1001
 
@@ -518,9 +319,14 @@ test_stack_switch:
 
     CHECK_NOT_NULL %r12, 9102
 
+    # 1. We are still on the old stack.
+    # Snapshot RSP into R11 (Volatile/Caller-saved)
+    # We use R11 because you HAVE NOT issued a .cfi_offset for it.
+    #movq %rsp, %r11
+
     # 3. Switch RSP to the Parent's SP
+    .cfi_endproc                                  # BUYER BEWARE: UNWINDING IS TEMPORARILY IMPOSSIBLE
     movq (%rax), %rsp                             # We are now on the emergency stack. The old stack (R12) is frozen.
-    # TODO: UNWINDING BREAKS HERE! NEED TO UPDATE CFI
     CHECK_RSP_VALID 9200                          # ENSURE VALIDITY!
     andq $-16, %rsp                               # FORCE ALIGNMENT!
 
@@ -565,27 +371,15 @@ test_stack_switch:
     # --- START NEW FRAME UNWIND LOGIC ---
     movq 48(%r12), %r11
     pushq %r11                          # synthetic return address
-    #.cfi_def_cfa_offset 8
-    #.cfi_offset %rip, -8
-
     pushq %rbp                          # save caller's RBP
-    #.cfi_def_cfa_offset 16
-    #.cfi_offset %rbp, -16
     movq %rsp, %rbp
     # --- END NEW FRAME UNWIND LOGIC ---
 
-    # Safety alignment (DIRELY NECESSARY for ABI)
-    # andq $-16, %rsp
     CHECK_ALIGN 9051
 
     # 6. Populate new stack with state:
     pushq %r13                          # Old Stack Limit
-    #.cfi_def_cfa_offset 24
-    #.cfi_offset %r13, -24
-
     pushq %r12                          # Old Stack Pointer
-    #.cfi_def_cfa_offset 32
-    #.cfi_offset %r12, -32
 
     # ---------------------------------------------------------------------
     # END Zig Call
@@ -605,39 +399,35 @@ test_stack_switch:
     SNAPSHOT test_before_switch, capture_pivot
 
     # Push fake return
-    leaq restore_stack(%rip), %r11
-
-    pushq $0                            # Padding, for alignment
+    leaq __lessstack(%rip), %r11
     pushq %r11
 
-    CHECK_ALIGN 9002                    # Check still aligned after pushes
     CRUMB 1006
 
     # Retrieve old return address from frozen R12, store it in R11, jump to it.
     movq 48(%r12), %r11
     jmp *%r11
 
-restore_stack:
+.global __lessstack
+.type __lessstack, @function
+__lessstack:
+    .cfi_startproc
     CRUMB 2000
 
     # RESTORE LOGIC (LIFO) -> Current Stack Layout:
-    # RSP+0  = dummy padding
     # RSP+8  = Saved R12 (Old SP)
     # RSP+16 = Saved R13 (Old Limit)
     # RSP+24 = Saved RBP (For DWARF / Unwind)
 
-    # 1. Skip padding - now removed by real working fucntion
-    addq $8, %rsp
-
-    # 2. Restore TLS Stack Limit (written in memory at start of new stack)
+    # 1. Restore TLS Stack Limit (written in memory at start of new stack)
     movq 8(%rsp), %r11
     movq test_stack_limit@gottpoff(%rip), %rcx
     movq %r11, %fs:(%rcx)
 
-    # 3. Restore rpb for unwinding
+    # 2. Restore rpb for unwinding
     movq (%rbp), %rbp
 
-    # 4. Pop old stack pointer
+    # 3. Pop old stack pointer
     movq 0(%rsp), %rsp                  # We are now back on the original fiber stack.
     #.cfi_def_cfa_register %rsp
     CHECK_RSP_VALID 9105
@@ -687,18 +477,13 @@ restore_stack:
     CHECK_CALLEE_SAVED 9003             # Check callee-saved before return
     SNAPSHOT test_restore_done, capture_restore
 
-    # Pop the fake frame (16 bytes: saved RBP + synthetic return), otherwise we run user code twice
-    addq $16, %rsp
+    # Pop the fake frame (8 bytes: synthetic frame), otherwise we run user code twice
+    addq $8, %rsp
 
     # RSP is ALREADY pointing to the return address.
     # We do NOT push %rax. Just return.
     ret
-
-#does_ret3:
-#    CRUMB 3000
-#    xorq %r13, %r13
-#    ret
-#    .cfi_endproc
+    .cfi_endproc
 
 handle_overflow_error:
     # We are currently on the Safe Stack (Emergency Stack).
@@ -737,15 +522,49 @@ test_restore_done:
 .type victim_func, @function
 victim_func:
     .cfi_startproc
-    # This simulates the LLVM-inserted prologue check
-    call test_stack_switch
-    # --- test_stack_switch JUMPS BACK HERE ---
+    # 1. Injection Prologue: Switch Stacks
+    #    This simulates the LLVM pass insertion.
+    call __morestack
 
+    # --- WE ARE NOW ON THE NEW STACK ---
+    # The return address on the stack points to 'restore_stack'
+
+    # 2. Standard Prologue (Happens ON THE NEW STACK)
+    #    This aligns RSP from ...8 to ...0.
+    pushq %rbp
+    movq %rsp, %rbp
+
+    # 3. The Body
+    #    We are now 16-byte aligned. Safe to call Zig/C functions.
     CRUMB 3000
-    movq $777, %rax
 
-    ret                 # This pops 'restore_stack'
+    # Verify RDI (Arg 1) AND RSI (Arg 2) survived
+    # 3. Verify ALL registers survived the wormhole
+    movq %rdi, %rax    # rax = 7
+    addq %rsi, %rax    # rax = 42
+    addq %rdx, %rax    # rax = 142
+    addq %rcx, %rax    # rax = 1142
+    addq %r8,  %rax    # rax = 11142
+    addq %r9,  %rax    # rax = 111142
+
+    # 5. Standard Epilogue
+    popq %rbp
+
+    # 6. Return
+    #    This executes 'ret'.
+    #    Because 'test_stack_switch' set up the stack, this 'ret'
+    #    actually jumps to 'restore_stack'.
+    ret
     .cfi_endproc
+
+    # 7. What happens nex:
+    #    - execution jumps to 'restore_stack'
+    #    - 'restore_stack' pops registers (RBX, R12-R15, RBP)
+    #    - 'restore_stack' switches RSP back to the old stack
+    #    - 'restore_stack' executes 'ret'
+    #
+    #    Because 'restore_stack' NEVER touches %rax,
+    #    it is still there when control returns to the Zig Test Caller.
 
 .text
 .global run_stack_stitch_harness
@@ -753,9 +572,16 @@ victim_func:
 run_stack_stitch_harness:
     .cfi_startproc
 
-    movq $7, %rdi
+    movq $7, %rdi      # Arg 1
+    movq $35, %rsi     # Arg 2
+    movq $100, %rdx    # Arg 3
+    movq $1000, %rcx   # Arg 4
+    movq $10000, %r8   # Arg 5
+    movq $100000, %r9  # Arg 6
+
     call victim_func
-    # %rax should be 130
+
+    # %rax should be 111142
     ret
     .cfi_endproc
 

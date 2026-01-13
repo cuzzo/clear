@@ -1,11 +1,6 @@
 const std = @import("std");
 const fc = @import("fiber-core.zig");
 
-//const c = @cImport({
-//    @cInclude("libunwind.h");
-//    @cInclude("stdio.h");
-//});
-
 pub const RegisterState = extern struct {
     rax: u64 = 0,
     rbx: u64 = 0,
@@ -38,11 +33,6 @@ pub export threadlocal var test_parent_ctx: *MockContext = undefined;
 export var debug_capture: RegisterState = .{};
 export var capture_pivot: RegisterState = .{};
 export var capture_restore: RegisterState = .{};
-
-extern fn __lessstack() callconv(.c) void;
-extern fn test_morestack_simple() void;
-extern fn test_morestack_stop() void;
-extern fn test_lessstack_harness(mock_rsp: usize) void;
 
 // Global target for the 'ret' in __lessstack to hit
 extern var test_saved_rsp: usize;
@@ -138,18 +128,6 @@ pub fn printBreadcrumbs() void {
 extern var abi_error_code: u64;
 
 extern fn run_stack_stitch_harness() i64;
-
-// This function represents the code your transpiler generates.
-// It will be "moved" to the new stack by the assembly harness.
-export fn zig_worker_function(a: i64, b: i64) i64 {
-    std.debug.print("   [Zig] Working on new stack segment...\n", .{});
-    std.debug.print("   [Zig] Args: {} + {} = {}\n", .{a, b, a + b});
-
-    // We can even try a CRUMB here to see if unwinding works
-    // across the stitch!
-    return a + b;
-}
-
 test "stack switch" {
     allocator_run_sp = 0;
     test_stack_limit = 0xAAAA_BBBB_CCCC_DDDD;
@@ -166,7 +144,7 @@ test "stack switch" {
     var parent_ctx = fc.Context{ .sp = @intFromPtr(&parent_stack) + 1024 - 64 };
     fc.__fiber_parent_ctx = &parent_ctx;
 
-    _ = run_stack_stitch_harness();
+    const res = run_stack_stitch_harness();
 
     printBreadcrumbs();
     try std.testing.expectEqual(@as(u64, 0), abi_error_code);
@@ -183,7 +161,9 @@ test "stack switch" {
     try std.testing.expectEqual(@as(u64, 2001), breadcrumbs[9]);
     try std.testing.expectEqual(@as(u64, 2002), breadcrumbs[10]);
 
-//    try std.testing.expectEqual(false, true);
+    try std.testing.expectEqual(res, 111142);
+
+    //try std.testing.expectEqual(false, true);
     // 1. Validate State at Pivot
     // Verify RIP matches the label
     try std.testing.expectEqual(@intFromPtr(&test_before_switch), capture_pivot.rip);
@@ -211,7 +191,11 @@ test "stack switch" {
     // Perform bitwise AND with -16 (which is ~15 for unsigned 64-bit)
     const aligned_end = stack_end & ~@as(u64, 15);
     const expected_rsp = aligned_end - 32;
+
+    // We push the return address AFTER snapshotting, subtract 8 to account for that.
+    const resume_rsp = expected_rsp - 8;
     try std.testing.expectEqual(expected_rsp, capture_pivot.rsp);
+    try std.testing.expectEqual(@as(u64, 8), resume_rsp & 15);           // Guarantee rsp at resume is 8-byte aligned
     try std.testing.expectEqual(expected_rsp + 16, capture_pivot.rbp);
 
     // Verify Stack Content
@@ -225,7 +209,7 @@ test "stack switch" {
     try std.testing.expectEqual(@intFromPtr(&test_restore_done), capture_restore.rip);
 
     // Verify RSP (Stack Pointer)
-    // At the moment of snapshot (before 'ret'), RSP points to the return address.
+    // At the moment of snapshot(before 'ret'), RSP points to the return address.
     // entry_rsp was captured at the very start, pointing to that same return address.
     // They must be identical.
     try std.testing.expectEqual(entry_rsp, capture_restore.rsp);
@@ -259,105 +243,4 @@ test "stack switch" {
 
     std.debug.print("✓ Exact stack addresses verified\n", .{});
 }
-
-//test "simple stack switch" {
-//    var parent_stack: [1024]u8 align(16) = [_]u8{0} ** 1024;
-//    var parent_ctx = fc.Context{ .sp = @intFromPtr(&parent_stack) + 1024 - 64 };
-//    fc.__fiber_parent_ctx = &parent_ctx;
-//
-//    test_simple_stack_switch();
-//    printBreadcrumbs();
-//    // Should see: 2000 2001 2002 2003 2004 3000 3001
-//}
-
-
-//test "Identify Morestack Hand-off" {
-//    try fc.test_setup_segment_pool(std.testing.allocator);
-//
-//    var parent_stack: [1024]u8 align(16) = [_]u8{0} ** 1024;
-//    var parent_ctx = fc.Context{ .sp = @intFromPtr(&parent_stack) + 1024 - 64 };
-//    fc.__fiber_parent_ctx = &parent_ctx;
-//
-//    debug_capture = .{};
-//    test_morestack_simple();
-//
-//    // 1. USE R11. This is where your assembly saved %rsp.
-//    const old_frame_ptr = debug_capture.r11;
-//    const mem = @as([*]u64, @ptrFromInt(old_frame_ptr));
-//
-//    std.debug.print("\n--- Stack Memory Map (from R11) ---\n", .{});
-//    // We expect 7 items total: 6 registers + 1 return address
-//    for (0..7) |i| {
-//        std.debug.print("Offset {d:2}: 0x{x}\n", .{ i * 8, mem[i] });
-//    }
-//
-//    std.debug.print("\n--- Old Stack Frame Verification ---\n", .{});
-//
-//    // 2. VERIFY INDICES (Stack grows down, so last push is index 0)
-//    // Order pushed: RetAddr -> RBP -> R12 -> R13 -> R14 -> R15 -> RBX (Top)
-//
-//    // Index 0: RBX (Last pushed)
-//    try std.testing.expectEqual(@as(u64, 0xBBBB_BBBB_BBBB_BBBB), mem[0]);
-//
-//    // Index 1..4: R15, R14, R13, R12 (Uninitialized in test, values undefined)
-//
-//    // Index 5: RBP
-//    try std.testing.expectEqual(@as(u64, 0xAAAA_AAAA_AAAA_AAAA), mem[5]);
-//
-//    // Index 6: Return Address
-//    // This is the address of 'test_morestack_stop' pushed manually in your setup
-//    try std.testing.expectEqual(@intFromPtr(&test_morestack_stop), mem[6]);
-//
-//    std.debug.print("✓ Morestack setup verified perfectly.\n", .{});
-//}
-
-
-//test "Direct Lessstack Pivot" {
-//    // Reset debug state
-//    breadcrumb_counter = 0;
-//    debug_capture = .{};
-//
-//    // 1. Construct the "Old Stack"
-//    // This simulates the stack frame of the parent function.
-//    // __lessstack expects to pop these values into registers.
-//    var old_stack = [_]u64{
-//        // ... (Higher addresses) ...
-//        @intFromPtr(&test_restore_point), // The return address
-//        0x5000_0000_0000_0001,            // Saved RBP
-//        0x5000_0000_0000_0002,            // Saved R12
-//        0x5000_0000_0000_0003,            // Saved R13
-//        0x5000_0000_0000_0004,            // Saved R14
-//        0x5000_0000_0000_0005,            // Saved R15
-//        0x5000_0000_0000_0006,            // Saved RBX (First to be popped)
-//    };
-//
-//    // The "Stack Pointer" points to the last element pushed (RBX at index 6)
-//    const old_sp = @intFromPtr(&old_stack[6]);
-//
-//    // 2. Construct the "New Stack"
-//    // __lessstack expects RSP to point to a link (the old_sp).
-//    var new_stack: [2]u64 = undefined;
-//    new_stack[0] = old_sp;
-//
-//    const mock_new_rsp = @intFromPtr(&new_stack[0]);
-//
-//    // 3. Run the test
-//    test_lessstack_harness(mock_new_rsp);
-//
-//    // 4. Verify Breadcrumbs
-//    // We expect: 2000 (Entry) -> 2001 (Pop old SP) -> 2002 (After restores)
-//    printBreadcrumbs();
-//    try std.testing.expectEqual(@as(u64, 3), breadcrumb_counter);
-//    try std.testing.expectEqual(@as(u64, 2000), breadcrumbs[0]);
-//    try std.testing.expectEqual(@as(u64, 2001), breadcrumbs[1]);
-//    try std.testing.expectEqual(@as(u64, 2002), breadcrumbs[2]);
-//
-//    // 5. Verify Registers
-//    try std.testing.expectEqual(@as(u64, 0x5000_0000_0000_0006), debug_capture.rbx);
-//    try std.testing.expectEqual(@as(u64, 0x5000_0000_0000_0005), debug_capture.r15);
-//    try std.testing.expectEqual(@as(u64, 0x5000_0000_0000_0004), debug_capture.r14);
-//    try std.testing.expectEqual(@as(u64, 0x5000_0000_0000_0003), debug_capture.r13);
-//    try std.testing.expectEqual(@as(u64, 0x5000_0000_0000_0002), debug_capture.r12);
-//    try std.testing.expectEqual(@as(u64, 0x5000_0000_0000_0001), debug_capture.rbp);
-//}
 
