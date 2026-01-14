@@ -403,10 +403,12 @@ private
         t_left = node.left.full_type.to_s
         t_right = node.right.full_type.to_s
 
+        alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
         if Type.new(t_left).string? || Type.new(t_right).string?
           # Generate call to runtime helper
           # We use heapAlloc to ensure the result survives (safe default)
-          return "try CheatLib.concat(rt.heapAlloc(), #{left}, #{right})"
+          return "try CheatLib.concat(#{alloc}, #{left}, #{right})"
         end
       end
 
@@ -480,7 +482,6 @@ private
   end
 
   # --- HIGHER ORDER FUNCTIONS ---
-  # TODO: Use frame, unless marked escape
   def transpile_select_projection(list_node, expression_node)
     # 1. Setup Types
     #    We need the Result Type to create the new List

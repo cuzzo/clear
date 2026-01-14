@@ -1146,6 +1146,7 @@ private
     node.full_type = :Bool
   end
 
+  # TODO: Simplify with Type
   def visit_Add(node)
     visit(node.left)
     visit(node.right)
@@ -1181,6 +1182,8 @@ private
         node.right.coerced_type = STRING_TYPE
       end
 
+      node.storage = :frame
+
     # D. Array Concatenation
     elsif t_left.to_s.end_with?("]") && t_right.to_s.end_with?("]")
       if t_left != t_right
@@ -1190,6 +1193,8 @@ private
       else
         node.full_type = t_left
       end
+
+      node.storage = :frame
 
     else
       error!(node, "Type Error: Cannot add type: #{type_left} and #{type_right}")
