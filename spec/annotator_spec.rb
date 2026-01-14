@@ -2037,7 +2037,7 @@ RSpec.describe SemanticAnnotator do
   # LIFETIMES
   describe "Lifetimes" do
     let(:func_def) { ast.statements.first }
-    context "parses" do
+    context "simple valid lifetime" do
       let(:code) {
         <<~FLUX
           -- Define function that returns a Number
@@ -2052,6 +2052,24 @@ RSpec.describe SemanticAnnotator do
       it "parses annotation properly" do
         expect(func_def.return_lifetime.name).to eq("n")
         expect(result).to eq(:Number)
+      end
+    end
+
+    context "simple invalid lifetime" do
+      let(:code) {
+        <<~FLUX
+          -- Define function that returns a Number
+          FN identity(n: Number) RETURNS x:Number ->
+            RETURN n;
+          END
+
+          identity(1);
+        FLUX
+      }
+
+      it "parses annotation properly" do
+
+        expect { result }.to raise_error(/Lifetime Error/i)
       end
     end
   end

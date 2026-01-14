@@ -117,7 +117,8 @@ private
         required: p[:default].nil?,
         mutable: p[:mutable]
       }},
-      return_type: (node.return_type || :Any)
+      return_type: (node.return_type || :Any),
+      return_lifetime: node.return_lifetime&.name,
     }
 
     current_scope.declare(
@@ -198,6 +199,7 @@ private
 
     # Must happen BEFORE new scope
     verify_captures(node)
+    verify_lifetime(node)
 
     # 3. Build Signature
     # ENSURE this hash is never nil
@@ -209,7 +211,8 @@ private
         mutable: p[:mutable],
         takes: p[:takes]
       }},
-      return_type: declared_return
+      return_type: declared_return,
+      return_lifetime: node.return_lifetime&.name
     }
 
     # This overwrites the Pass 2 declaration. We must ensure signature is valid.

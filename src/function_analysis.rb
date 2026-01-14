@@ -60,6 +60,16 @@ module FunctionAnalysis
     end
   end
 
+  def verify_lifetime(node)
+    return true if node.return_lifetime.nil?
+
+    lifetime = node.return_lifetime.name
+
+    error!(node, "Lifetime Error: Sub-lifetimes not yet supportd.") if lifetime.include?(".")
+    error!(node, "Lifetime Error: Scoped lifetime is not a param.") if !node.params.map { |p| p[:name] }.include?(lifetime)
+    return true
+  end
+
   def declare_and_verify_params(node)
     node.params.each do |param|
       # Validate Defaults (unchanged)
