@@ -117,8 +117,10 @@ private
         required: p[:default].nil?,
         mutable: p[:mutable]
       }},
-      return_type: (node.return_type || :Any),
-      return_lifetime: node.return_lifetime&.name,
+      return: {
+        type: (node.return_type || :Any),
+        lifetime: node.return_lifetime&.name
+      }
     }
 
     current_scope.declare(
@@ -189,7 +191,7 @@ private
     is_implicit_return = node.return_type.nil?
     declared_return = node.return_type || :Any
 
-    @function_context_stack.push(declared_return)
+    @function_context_stack.push({type: declared_return, lifetime: node.return_lifetime&.name})
 
     # 2. Check Style (unchanged)
     has_mutable_param = node.params.any? { |p| p[:mutable] }
@@ -211,8 +213,10 @@ private
         mutable: p[:mutable],
         takes: p[:takes]
       }},
-      return_type: declared_return,
-      return_lifetime: node.return_lifetime&.name
+      return: {
+        type: declared_return,
+        lifetime: node.return_lifetime&.name
+      }
     }
 
     # This overwrites the Pass 2 declaration. We must ensure signature is valid.
@@ -246,11 +250,11 @@ private
         node.return_type = inferred
 
         # MUTATE the existing signature hash so the Scope entry updates automatically
-        signature[:return_type] = inferred
+        signature[:return][:type] = inferred
       end
     end
 
-    signature[:return_strategy] = get_return_strategy(signature[:return_type])
+    signature[:return_strategy] = get_return_strategy(signature[:return][:type])
     node.full_type = signature
 
     node.uses_frame = (@frame_usage_count > 0)
@@ -376,7 +380,7 @@ private
 
   def visit_ReturnNode(node)
     # Handle optional return node for Void functions.
-    expected = @function_context_stack.last
+    expected = @function_context_stack.last&.dig(:type)
     if node.value.nil?
       # If the function expects a value but we return nothing -> ERROR
       if expected && expected != :Void && expected != :Any
@@ -389,7 +393,11 @@ private
 
     visit(node.value)
 
-    # 1. Identify if we are returning a Variable
+    # 1. Lifetime Tracking
+    verify_return(node.value)
+
+    # 2. Ownership Tracking
+    # TODO: Move to ownership tracker
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier)
       var_name = root.name
@@ -406,11 +414,11 @@ private
     end
 
     actual = node.value.resolved_type
-    expected = @function_context_stack.last
+    expected = @function_context_stack.last[:type]
 
     if expected && expected != :Void && expected != :Any && actual != expected
       # Basic check (you might want to allow Number[3] -> Number[] coercion)
-      unless is_safe_autocast?(actual, expected)
+      if !is_safe_autocast?(actual, expected)
         error!(node, :RETURN_MISMATCH, expected, actual)
       end
       node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
@@ -449,7 +457,7 @@ private
       visit_IntrinsicFunc(node, node.args)
     elsif func_type.is_a?(Hash) # Named Function (Rich Signature)
       verify_function_signature(node, func_type)
-      node.full_type = func_type[:return_type]
+      node.full_type = func_type[:return][:type]
     elsif func_type.is_a?(Array) && func_type[0] == :Proc # Lambda/Proc
       # Extract return type from [:Proc, args, ret]
       node.full_type = func_type[2]
@@ -485,7 +493,7 @@ private
     elsif func_type.is_a?(Hash) # Named Function
       fake_call_node = Struct.new(:token, :name, :args).new(node.token, method_name, ufcs_args)
       verify_function_signature(fake_call_node, func_type)
-      node.full_type = func_type[:return_type]
+      node.full_type = func_type[:return][:type]
     elsif func_type.is_a?(Array) && func_type[0] == :Proc
       node.full_type = func_type[2]
     else
@@ -1055,7 +1063,7 @@ private
         end
 
         # 3. Set Result Type
-        node.full_type = sig[:return_type]
+        node.full_type = sig[:return][:type]
 
 
       elsif sig.is_a?(Array) && sig[0] == :Proc

@@ -164,5 +164,39 @@ module FunctionAnalysis
       return :destination_pass
     end
   end
+
+  def verify_return(node)
+    # Only verify for fields & indexes
+    return true if !node.is_a?(AST::GetField) && !node.is_a?(AST::GetIndex)
+
+    # Get the current function's return lifetime annotation
+    lifetime = @function_context_stack.last&.dig(:lifetime)
+
+    type_info = node.type_object
+
+    # TODO: Need to propagate GIVE, implement copyable
+    has_lifetime = !lifetime.nil?
+    is_copyable = type_info.copyable?
+    has_give = false
+
+    if !has_lifetime && !is_copyable && !has_give
+      if node.is_a?(AST::GetField)
+        access_type = "field"
+        access_name = "field '#{node.field}'"
+      else
+        access_type = "element"
+        access_name = "element at index"
+      end
+
+      error!(
+        node,
+        "Cannot return #{access_name} without:\n" \
+        "  1) A lifetime annotation on the function (e.g., fn foo(...) RETURNS lifetime:Type -> )\n" \
+        "  2) GIVE to transfer ownership\n" \
+        "  3) COPY for copyable types\n" \
+        "#{access_type.capitalize} type '#{node.full_type}' requires one of these."
+      )
+    end
+  end
 end
 

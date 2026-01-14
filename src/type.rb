@@ -34,7 +34,7 @@ class Type
     # Logic moved from Locatable#resolved_type
     return @resolved_cache if @resolved_cache
 
-    ft = if @raw.is_a?(Hash); @raw[:return_type]
+    ft = if @raw.is_a?(Hash); @raw[:return][:type]
          elsif @raw.is_a?(Array); @raw[2]
          else; @raw; end
 
@@ -186,6 +186,11 @@ class Type
     return true if heap?
     return true if array?
     !primitive?
+  end
+
+  def copyable?
+    return true if primitive?
+    false # for now, everything else is not
   end
 
   private

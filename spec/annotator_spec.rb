@@ -2036,7 +2036,7 @@ RSpec.describe SemanticAnnotator do
 
   # LIFETIMES
   describe "Lifetimes" do
-    let(:func_def) { ast.statements.first }
+    let(:func_def) { ast.statements.find { |n| n.is_a?(AST::FunctionDef) } }
     context "simple valid lifetime" do
       let(:code) {
         <<~FLUX
@@ -2067,9 +2067,68 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "parses annotation properly" do
-
+      it "errors" do
         expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
+
+    context "simple missing field lifetime" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS Bar ->
+            RETURN f.b;
+          END
+
+          identity(1);
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Cannot return/i)
+      end
+    end
+
+    context "simple supplied field lifetime" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          identity(Foo{ b: Bar{ index: 1 }});
+        FLUX
+      }
+
+      it "parses successfully" do
+        expect(func_def.return_lifetime.name).to eq("f")
+        expect(result).to eq(:Bar)
+      end
+    end
+
+    context "simple missing index lifetime" do
+      let(:code) {
+        <<~FLUX
+          STRUCT User { index: Number }
+
+          -- Define function that returns a Number
+          FN identity(l: User[]) RETURNS User ->
+            RETURN l[1];
+          END
+
+          identity([User{index: 1}, User{index: 2}]);
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Cannot return/i)
       end
     end
   end
