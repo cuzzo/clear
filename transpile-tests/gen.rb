@@ -44,8 +44,6 @@ class TestGenerator < ZigTranspiler
               t_alloc,      // Backing Allocator
               1024 * 1024,  // Frame Size
               &global_ctx,
-              t_alloc,      // Global Allocator
-              t_alloc       // Local Allocator
           );
           defer rt.deinit();
           rt.wireAllocator();

@@ -237,7 +237,7 @@ private
       if node.storage == :heap # You set this in the Annotator!
        <<~ZIG
           blk: {
-             const ptr = try rt.heapCreate(#{node.name});
+             const ptr = try rt.heapAlloc().create(#{node.name});
              ptr.* = #{struct_init};
              break :blk ptr;
           }
@@ -272,7 +272,7 @@ private
 
       # 4. Generate the Call
       #    Result: try rt.makeList(i64, rt.frameAlloc(), &.{ 1, 2, 3 })
-      "try rt.makeList(#{zig_type}, #{allocator}, #{items_slice})"
+      "try CheatLib.makeList(#{zig_type}, #{allocator}, #{items_slice})"
 
 
     # TODO: Try on frame.
@@ -441,6 +441,9 @@ private
     # Check Higher-Order functions
     if node.right.is_a?(AST::SelectOp)
       return transpile_select_projection(node.left, node.right.expression)
+
+    elsif node.right.is_a?(AST::WhereOp)
+      return transpile_where_filter(node.left, node.right.expression)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -499,7 +502,7 @@ private
     <<~ZIG
       blk: {
           const src_list = #{list_code};
-          var res_list = try rt.makeList(#{result_zig_type}, rt.heapAlloc(), &.{});
+          var res_list = try CheatLib.makeList(#{result_zig_type}, rt.heapAlloc(), &.{});
 
           // Handle both ArrayList and Slice
           const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
@@ -507,6 +510,46 @@ private
           for (items) |it| {
               const val = #{expr_code};
               try res_list.append(rt.heapAlloc(), val);
+          }
+          break :blk res_list;
+      }
+    ZIG
+  end
+
+  def transpile_where_filter(list_node, expression_node)
+    # 1. Setup Types
+    #    WHERE preserves the input type - if we filter Number[], we get Number[]
+    #    We can read the list's type directly
+    list_flux_type = list_node.full_type
+
+    # Extract the element type (e.g. "Number[]" -> "Number")
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_zig_type = transpile_type(element_type_str)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+
+    # 3. Handle the '_' placeholder
+    #    Same pattern as SELECT - the expression can reference 'it'
+    @placeholder_name = "it"
+    expr_code = visit(expression_node)
+    @placeholder_name = nil
+
+    # 4. Generate Inline Loop with Conditional Append
+    #    Only append items where the expression evaluates to true
+    <<~ZIG
+      blk: {
+          const src_list = #{list_code};
+          var res_list = try CheatLib.makeList(#{element_zig_type}, rt.heapAlloc(), &.{});
+
+          // Handle both ArrayList and Slice
+          const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
+
+          for (items) |it| {
+              const matches = #{expr_code};
+              if (matches) {
+                  try res_list.append(rt.heapAlloc(), it);
+              }
           }
           break :blk res_list;
       }
