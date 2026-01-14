@@ -86,6 +86,14 @@ class Type
     false
   end
 
+  # Used specifically to check if assigning an array too large to a fixed array
+  def array_overflow?(other_type)
+    return false if !other_type.array? || !self.array?
+    return false if self.base_type != other_type.base_type
+    return false if !other_type.fixed? || !self.fixed?
+    return true if other_type.capacity > self.capacity
+  end
+
   # ----------------------------------------------
   # Type Predicates
   # ----------------------------------------------

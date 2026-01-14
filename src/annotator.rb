@@ -577,13 +577,10 @@ private
     final_type = is_explicit ? node.type : inferred_type
 
     # 1. Check Conflicts
+    byebug
     if node.type != inferred_type && is_explicit
       if !is_safe_autocast?(inferred_type, node.type)
-        if check_array_type_mismatch!(node, inferred_type, node.type)
-          ;
-        else
-          error!(node, "Type Mismatch: Cannot assign #{inferred_type} to #{node.type}")
-        end
+        throw_assign_mismatch_error!(node, inferred_type, node.type)
       end
       node.value.coerced_type = final_type
     end
@@ -1520,34 +1517,14 @@ private
     target.accepts?(source)
   end
 
-  def check_array_type_mismatch!(node, type_inf, type_decl)
-    type_inf = type_inf.to_s
-    type_decl = type_decl.to_s
-    return false if !type_inf.include?("[") || !type_decl.include?("[")
-    return false if type_inf.split("[", 0).first != type_decl.split("[", 0).first
-
-    match = type_decl.match(/^(\w+)\[(.*)\]$/)
-    return false unless match
-
-    size_str = match[2]
-
-    # If size is empty (Number[]) or wildcard (Number[*]), skip size check.
-    # This ensures we only validate counts for explicit fixed arrays like Number[3].
-    return false if size_str.nil? || size_str.strip.empty? || !size_str.match?(/^\d+$/)
-
-    limit = size_str.to_i
-
-    # Safety check: Ensure node.value is actually a list literal
-    # (VarDecl might be assigning a variable, not a literal)
-    return false unless node.value.respond_to?(:items)
-
-    current_size = node.value.items.size
-
-    if current_size > limit
-      error!(node, :FIXED_ARRAY_SIZE_MISMATCH, current_size, type_decl)
+  def throw_assign_mismatch_error!(node, source_type, target_type)
+    source = source_type.is_a?(Symbol) ? Type.new(source_type) : source_type
+    target = target_type.is_a?(Symbol) ? Type.new(target_type) : target_type
+    if target.array_overflow?(source)
+      error!(node, :FIXED_ARRAY_SIZE_MISMATCH, target.capacity, source_type)
+    else
+      error!(node, "Type Mismatch: Cannot assign #{source_type} to #{node.type}")
     end
-
-    true
   end
 end
 
