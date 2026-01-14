@@ -757,6 +757,7 @@ private
     node.full_type = :Void
   end
 
+  # TODO: Simplify with new type class
   def visit_GetIndex(node)
     visit(node.target)
     visit(node.index)
