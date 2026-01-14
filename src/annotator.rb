@@ -23,6 +23,7 @@ class SemanticAnnotator
     @return_collection_stack = [] # Track actual returns found in current function/lambda
     @loop_depth = 0 # Track if we are inside a loop
     @smooth_depth = 0
+    @frame_usage_count = 0
     setup_builtins
   end
 
@@ -558,21 +559,14 @@ private
       node.value.coerced_type = final_type
     end
 
-    # TODO: Move this logic to type.rb
-    # TODO: If over 64kb => automatic heap
+    # 2. Finalize Storage
     type_size = get_type_slot_size(final_type)
-    if node.value.storage != :heap && node.value.type_object.requires_move?
-      if type_size > 128
-        node.value.storage = :frame
-        @frame_usage_count += 1
-      else
-        node.value.storage = :stack
-      end
+    storage = finalize_storage(node, final_type, type_size)
+    if storage == :heap
+      node.full_type = :"%#{final_type}"
+    else
+      node.full_type = final_type
     end
-
-    # 2. Get storage info
-    # (Assuming your AST::Literal or Value nodes have a storage field)
-    storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
 
     # 3. Declare in Scope
     current_scope.declare(
@@ -587,12 +581,6 @@ private
 
     # 4. Set live
     current_scope.set_state(node.name, :live)
-
-    if storage == :heap
-      node.full_type = :"%#{final_type}"
-    else
-      node.full_type = final_type
-    end
   end
 
   def visit_Identifier(node)
@@ -998,25 +986,23 @@ private
       # D. Set Result Type (It returns a List of the Body's result)
       if node.right.is_a?(AST::SelectOp)
         result_base = node.right.expression.full_type
+        # TODO: Select keeps same capacity
         node.full_type = :"#{result_base}[]"
       elsif node.right.is_a?(AST::WhereOp)
         node.full_type = :"#{item_type}[]"
       end
+
+      # Important: default to frame for now (even if a stack array)
+      node.storage = :frame
 
     elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)
       # We intentionally modify the AST temporarily to leverage visit_FuncCall's
       # existing validation logic (arity, type checks, intrinsics).
 
-      # A. Inject LHS as the first argument
+      # Inject LHS as the first argument (UFC), call, uninject / eject / pop.
       node.right.args.unshift(node.left)
-
-      # B. Analyze the Function Call
-      #    This will recursively visit node.left again, but since it's already
-      #    resolved/declared, this is generally safe (idempotent).
       visit(node.right)
-
-      # C. Restore AST
       node.right.args.shift
 
       # D. Propagate Result Type
@@ -1260,6 +1246,28 @@ private
       curr = curr.target
     end
     curr
+  end
+
+  def finalize_storage(node, final_type, type_size)
+    # TODO: Move this logic to type.rb
+    # TODO: If over 64kb => automatic heap
+    # TODO: SROA & SIMD analysis -> if possible -> stack
+    if (node.value.storage.nil? || node.value.storage == :stack) && node.value.type_object.requires_move?
+      if type_size > 128
+        node.value.storage = :frame
+      else
+        node.value.storage = :stack
+      end
+    end
+
+    # Get storage info
+    # (Assuming your AST::Literal or Value nodes have a storage field)
+    storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
+
+    # Increment frame after storage finalized
+    @frame_usage_count += 1 if storage == :frame
+
+    return storage
   end
 
   # ==========================================

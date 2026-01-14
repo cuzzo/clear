@@ -497,19 +497,21 @@ private
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
+    alloc = expression_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
     # 4. Generate Inline Loop
     #    We use a Zig block: { ... break :blk list; }
     <<~ZIG
       blk: {
           const src_list = #{list_code};
-          var res_list = try CheatLib.makeList(#{result_zig_type}, rt.heapAlloc(), &.{});
+          var res_list = try CheatLib.makeList(#{result_zig_type}, #{alloc}, &.{});
 
           // Handle both ArrayList and Slice
           const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
 
           for (items) |it| {
               const val = #{expr_code};
-              try res_list.append(rt.heapAlloc(), val);
+              try res_list.append(#{alloc}, val);
           }
           break :blk res_list;
       }
@@ -535,12 +537,14 @@ private
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
+    alloc = expression_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
     # 4. Generate Inline Loop with Conditional Append
     #    Only append items where the expression evaluates to true
     <<~ZIG
       blk: {
           const src_list = #{list_code};
-          var res_list = try CheatLib.makeList(#{element_zig_type}, rt.heapAlloc(), &.{});
+          var res_list = try CheatLib.makeList(#{element_zig_type}, #{alloc}, &.{});
 
           // Handle both ArrayList and Slice
           const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
@@ -548,7 +552,7 @@ private
           for (items) |it| {
               const matches = #{expr_code};
               if (matches) {
-                  try res_list.append(rt.heapAlloc(), it);
+                  try res_list.append(#{alloc}, it);
               }
           }
           break :blk res_list;
