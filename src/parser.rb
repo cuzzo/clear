@@ -353,6 +353,11 @@ class Parser
     # 3. Parse optional RETURNS
     return_type = nil
     if match!(:KEYWORD, 'RETURNS')
+      if current.type == :VAR_ID
+        return_lifetime = parse_var_id
+        consume(:CHAR, ':')
+      end
+
       return_type = parse_type_annotation()
     end
 
@@ -368,7 +373,7 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    AST::FunctionDef.new(fn_token, name, params, captures, return_type, body, catch_body, catch_var)
+    AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var)
   end
 
   def parse_block_body(stop_words = ['END'])
