@@ -203,7 +203,7 @@ RSpec.describe SemanticAnnotator do
           return_node = func_def.body.last
 
           expect(return_node).to be_a(AST::ReturnNode) # Sanity check
-          expect(return_node.coerced_type).to eq(:Number)
+          expect(return_node.value.coerced_type).to eq(:Number)
         end
       end
 
@@ -234,7 +234,7 @@ RSpec.describe SemanticAnnotator do
           func_def = ast.statements.first
           return_node = func_def.body.last
 
-          expect(return_node.coerced_type).to eq(:"Number[]")
+          expect(return_node.value.coerced_type).to eq(:"Number[]")
         end
       end
     end
