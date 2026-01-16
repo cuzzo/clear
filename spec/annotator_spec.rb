@@ -2131,6 +2131,27 @@ RSpec.describe SemanticAnnotator do
         expect { result }.to raise_error(/Cannot return/i)
       end
     end
+
+    context "block non-restricted mutable borrows" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          identity(foo);
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
   end
 end
 

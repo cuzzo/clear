@@ -155,7 +155,7 @@ private
     # 1. Analyze Captures (Before entering the new scope)
     # We need to look up the types of variables being captured from the OUTER scope.
     # The Transpiler needs these types to build the 'Closure Struct'.
-    verify_captures(node)
+    verify_captures!(node)
 
     # 2. Enter the Lambda's Scope
     with_new_scope do
@@ -200,8 +200,8 @@ private
     end
 
     # Must happen BEFORE new scope
-    verify_captures(node)
-    verify_lifetime(node)
+    verify_captures!(node)
+    verify_lifetime!(node)
 
     # 3. Build Signature
     # ENSURE this hash is never nil
@@ -456,7 +456,7 @@ private
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, node.args)
     elsif func_type.is_a?(Hash) # Named Function (Rich Signature)
-      verify_function_signature(node, func_type)
+      verify_function_signature!(node, func_type)
       node.full_type = func_type[:return][:type]
     elsif func_type.is_a?(Array) && func_type[0] == :Proc # Lambda/Proc
       # Extract return type from [:Proc, args, ret]
@@ -492,7 +492,7 @@ private
       visit_IntrinsicFunc(node, ufcs_args)
     elsif func_type.is_a?(Hash) # Named Function
       fake_call_node = Struct.new(:token, :name, :args).new(node.token, method_name, ufcs_args)
-      verify_function_signature(fake_call_node, func_type)
+      verify_function_signature!(fake_call_node, func_type)
       node.full_type = func_type[:return][:type]
     elsif func_type.is_a?(Array) && func_type[0] == :Proc
       node.full_type = func_type[2]
@@ -1210,6 +1210,40 @@ private
     else
       error!(node, "Type Error: Cannot add type: #{type_left} and #{type_right}")
     end
+  end
+
+  def visit_Give(node)
+    visit(node.value)
+
+    # Validate that GIVE is used on something that makes sense
+    # (e.g., an identifier, field access, or index access)
+    if !node.value.is_a?(AST::Identifier) &&
+       !node.value.is_a?(AST::GetField) &&
+       !node.value.is_a?(AST::GetIndex)
+      error!(node, "GIVE can only be used on variables, fields, or array elements")
+    end
+
+    # Mark the original as moved
+    root = get_root_object(node.value)
+    if root.is_a?(AST::Identifier)
+      current_scope.set_state(root.name, :moved)
+    end
+
+    node.full_type = node.value.resolved_type
+    node.metatype = :give  # Mark this for transpiler
+  end
+
+  def visit_Copy(node)
+    visit(node.value)
+
+    # Validate that the type is actually copyable
+    type = Type.new(node.value.resolved_type)
+    unless type.copyable?
+      error!(node, "Cannot COPY non-copyable type '#{node.value.resolved_type}'")
+    end
+
+    node.full_type = node.value.resolved_type
+    node.metatype = :copy  # Mark this for transpiler
   end
 
   # ==========================================

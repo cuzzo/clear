@@ -1,7 +1,7 @@
 require_relative "../src/ast"
 
 module FunctionAnalysis
-  def verify_function_signature(node, signature)
+  def verify_function_signature!(node, signature)
     params = signature[:params]
     min_args = params.count { |param| param[:required] }
     max_args = params.size
@@ -18,6 +18,8 @@ module FunctionAnalysis
 
     node.args.each_with_index do |arg_node, i|
       param = params[i]
+      verify_param_lifetime!(arg_node, param, signature)
+
       # B. Check mutability
       if param[:mutable]
         # Rule 1: Must be a Variable (Identifier), not a literal/expression
@@ -60,7 +62,22 @@ module FunctionAnalysis
     end
   end
 
-  def verify_lifetime(node)
+  # TODO: Needs updated after WITH RESTRICT capability allows mutable borrows
+  # TODO: Needs updated once lifetimes are complex
+  # TODO: At definition time, verify the full path is valid
+  def verify_param_lifetime!(arg_node, param, signature)
+    return true if !arg_node.is_a?(AST::Identifier)
+    return true if signature.dig(:return, :lifetime).nil?
+    return true if current_scope.is_immutable?(arg_node.name)
+    # At this point, param IS mutable, signature HAS lifetime, and lifetime is SIMPLE.
+    base_path = signature[:return][:lifetime].split(".").first
+
+    return true if param[:name] != base_path
+
+    error!(arg_node, "Lifetime Error: param `#{param[:name]}` is mutable, must be RESTRICTed before it can be borrowed.")
+  end
+
+  def verify_lifetime!(node)
     return true if node.return_lifetime.nil?
 
     lifetime = node.return_lifetime.name
@@ -93,7 +110,7 @@ module FunctionAnalysis
   end
 
   # Cannot be part of declare, needs to happen in outer-scope
-  def verify_captures(node)
+  def verify_captures!(node)
     return if node.captures.nil? || node.captures.empty?
 
     node.captures.each do |cap|
