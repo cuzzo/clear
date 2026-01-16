@@ -1,4 +1,5 @@
 require_relative "./ast"
+require_relative "./lexer"
 require_relative "./source_error"
 
 # ==========================================
@@ -75,6 +76,8 @@ class Parser
   stmt(:KEYWORD, 'DIE') { parse_die }
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
+  stmt(:KEYWORD, 'WITH') { parse_with_capability }
+
 
   # Primaries
   primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
@@ -378,8 +381,10 @@ class Parser
 
   def parse_block_body(stop_words = ['END'])
     stmts = []
-    # Keep going until we hit a stop word (END, ELSE, CATCH, etc)
-    until stop_words.any? { |w| match?(:KEYWORD, w) } || match?(:EOF)
+    types = stop_words.map { |w| Lexer::KEYWORDS.include?(w) ? :KEYWORD : :CHAR }
+    stop_words = stop_words.zip(types)
+    # Keep going until we hit a stop word (END, ELSE, CATCH, }, etc)
+    until stop_words.any? { |w, t| match?(t, w) } || match?(:EOF)
       stmt = parse_statement()
       stmts << stmt if stmt
     end
@@ -673,6 +678,35 @@ class Parser
     end
 
     "#{prefix}#{base}#{inner}".to_sym
+  end
+
+  def parse_with_capability
+    with_token = consume(:KEYWORD, 'WITH')
+
+    # Parse comma-separated list of capability specifications
+    capabilities = []
+
+    while match?(:KEYWORD) do
+      capability = match!(:KEYWORD).value.to_sym
+      unless AST::CAPABILITIES.include?(capability)
+        error!(current, "Expected EXCLUSIVE or RESTRICT, got #{capability}")
+      end
+
+      # Parse variable (supports foo, foo.bar, foo.bar.baz, etc.)
+      var_node = parse_var_id
+
+      capabilities << { capability: capability, var_node: var_node }
+
+      # Check for comma (continue) or opening brace (done)
+      break unless match!(:CHAR, ',')
+    end
+
+    # Parse block
+    consume(:CHAR, '{')
+    body = parse_block_body(['}'])
+    consume(:CHAR, '}')
+
+    AST::WithBlock.new(with_token, capabilities, body)
   end
 
   def parse_comma_seq(type, open, close)

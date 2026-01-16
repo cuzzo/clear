@@ -2152,6 +2152,30 @@ RSpec.describe SemanticAnnotator do
         expect { result }.to raise_error(/Lifetime Error/i)
       end
     end
+
+    context "allow WITH RESTRICT mutable borrows" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          WITH RESTRICT foo {
+            identity(foo);
+          }
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(func_def.return_lifetime.name).to eq("f")
+        expect(result).to eq(:Void)
+      end
+    end
   end
 end
 

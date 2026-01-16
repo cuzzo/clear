@@ -17,6 +17,7 @@ class Lexer
       REQUIRE
       SELECT WHERE
       GIVE TAKES
+      WITH EXCLUSIVE RESTRICT
     ].to_set
 
   def initialize(source)

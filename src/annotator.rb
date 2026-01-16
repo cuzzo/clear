@@ -1246,6 +1246,27 @@ private
     node.metatype = :copy  # Mark this for transpiler
   end
 
+  def visit_WithBlock(node)
+    # 1. Validate each capability's variable exists and resolve its type
+    capabilities = node.capabilities.map do |cap|
+      var_node = cap[:var_node]
+      visit(var_node)
+      cap[:resolved_type] = var_node.full_type
+      cap[:old_scope] = lookup_scope_for(var_node.name)
+      validate_capability(node, cap[:capability], var_node)
+    end
+
+    # 2. Enter a new scope for the capability block
+    # This isolates any variables declared inside
+    with_new_scope do
+      node.capabilities.each { |cap| current_scope.declare_with_new_capability(cap) }
+      node.body.each { |stmt| visit(stmt) }
+      finalize_scope(node)
+    end
+
+    node.full_type = :Void
+  end
+
   # ==========================================
   # BUILT-IN INFERENCE LOGIC
   # ==========================================
@@ -1318,6 +1339,28 @@ private
     @frame_usage_count += 1 if storage == :frame
 
     return storage
+  end
+
+  def validate_capability(node, capability_type, var_node)
+    var_type = var_node.full_type
+    if !var_node.is_a?(AST::Identifier)
+      error!(var_node, "WITH #{capability_type} expects an identifier, got '#{var_node.class}'.")
+    end
+
+    case capability_type
+    when :EXCLUSIVE
+      error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
+
+    when :RESTRICT
+      # TODO: RESTRICT only mutables for now. Probably want to allow anything, as it doesn't matter.
+      scope = lookup_scope_for(var_node.name)
+      if scope && scope.is_immutable?(var_node.name)
+        error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
+      end
+
+    else
+      error!(node, "Unknown capability type: #{capability_type}")
+    end
   end
 
   # ==========================================

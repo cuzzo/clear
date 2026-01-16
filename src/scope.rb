@@ -1,3 +1,5 @@
+require "set"
+
 class Scope
   attr_accessor :locals, :var_states
 
@@ -8,7 +10,7 @@ class Scope
     @var_states = {}
   end
 
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack)
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new)
     @locals[name] = {
       reg: reg,
       type: type,
@@ -16,6 +18,7 @@ class Scope
       storage: storage,
       rebindable: is_rebindable,
       size: size || 0,  # TODO: see if size is ever nil
+      capabilities: capabilities,
       valid: true,
       invalid_reason: nil
     }
@@ -70,6 +73,10 @@ class Scope
     !is_mutable?(name)
   end
 
+  def is_borrowable?(name)
+    is_immutable?(name) || @locals.dig(name, :capabilities).include?(:RESTRICT)
+  end
+
   def is_on_heap?(name)
     entry = @locals[name]
     entry ? entry[:storage] == :heap : false
@@ -112,6 +119,15 @@ class Scope
       end
     end
     return false
+  end
+
+  def declare_with_new_capability(capability)
+    name = capability[:var_node].name
+    local = capability[:old_scope].locals[name]
+    error!("Cannot add capability: #{name}") if local.nil?
+    local = local.dup
+    local[:capabilities] << capability[:capability]
+    @locals[name] = local
   end
 
   def register_dependency(owner_name, dependent_name)

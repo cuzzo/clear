@@ -68,7 +68,7 @@ module FunctionAnalysis
   def verify_param_lifetime!(arg_node, param, signature)
     return true if !arg_node.is_a?(AST::Identifier)
     return true if signature.dig(:return, :lifetime).nil?
-    return true if current_scope.is_immutable?(arg_node.name)
+    return true if current_scope.is_borrowable?(arg_node.name)
     # At this point, param IS mutable, signature HAS lifetime, and lifetime is SIMPLE.
     base_path = signature[:return][:lifetime].split(".").first
 

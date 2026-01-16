@@ -112,6 +112,7 @@ module AST
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
   Require      = Struct.new(:token, :path) { include Locatable }
+  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) { include Locatable }
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
   WhereOp      = Struct.new(:token, :expression) { include Locatable }
@@ -173,5 +174,7 @@ module AST
     '~' => :BITWISE_NOT,
     'AS' => :BIND_VAR
   }
+
+  CAPABILITIES = [:RESTRICT, :EXCLUSIVE]
 end
 
