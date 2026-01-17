@@ -557,6 +557,37 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Alias Overlap" do
+      let(:mutable_func) {
+        <<~FLUX
+          STRUCT User { id: Number }
+
+          -- This doesn't actually work, but it's just for testing aliasing...
+          FN swap!(MUTABLE u1: User, MUTABLE u2: User) ->
+            SET u1 = u2;
+            SET u2 = User{ id: 20 };
+          END
+        FLUX
+      }
+
+      it "errors" do
+        code = mutable_func + <<~FLUX
+          MUTABLE u = User{ id: 1 };
+          swap!(u, u);
+        FLUX
+        expect { run(code) }.to raise_error(/Aliasing Error/i)
+      end
+
+      it "does not error" do
+        code = mutable_func + <<~FLUX
+          MUTABLE u1 = User{id: 1};
+          MUTABLE u2 = User{id: 2};
+          swap!(u1, u2);
+        FLUX
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
     context "Resolved Type Correctness" do
       it "resolves to the explicit return type" do
         code = <<~FLUX
