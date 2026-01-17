@@ -62,16 +62,22 @@ module FunctionAnalysis
     end
   end
 
-  # TODO: Needs updated after WITH RESTRICT capability allows mutable borrows
   # TODO: Needs updated once lifetimes are complex
   # TODO: At definition time, verify the full path is valid
   def verify_param_lifetime!(arg_node, param, signature)
     return true if !arg_node.is_a?(AST::Identifier)
-    return true if signature.dig(:return, :lifetime).nil?
-    return true if current_scope.is_borrowable?(arg_node.name)
-    # At this point, param IS mutable, signature HAS lifetime, and lifetime is SIMPLE.
-    base_path = signature[:return][:lifetime].split(".").first
 
+    if param[:mutable] && !current_scope.can_borrow?(arg_node.name, [arg_node.name.to_sym], :mutable)
+      error!(arg_node, "Lifetime Error: Cannot pass '#{arg_node.name}' as mutable argument because it is currently RESTRICTed.")
+    end
+
+    lifetime = signature.dig(:return, :lifetime)
+    return true if lifetime.nil?
+
+    borrow_type = param[:mutable] ? :mutable : :immutable
+    return true if current_scope.is_borrowable?(arg_node.name, lifetime, borrow_type)
+
+    base_path = signature.dig(:return, :lifetime).split(".").first
     return true if param[:name] != base_path
 
     error!(arg_node, "Lifetime Error: param `#{param[:name]}` is mutable, must be RESTRICTed before it can be borrowed.")

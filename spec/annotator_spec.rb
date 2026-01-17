@@ -2176,6 +2176,131 @@ RSpec.describe SemanticAnnotator do
         expect(result).to eq(:Void)
       end
     end
+
+    context "allow WITH RESTRICT multiple mutable borrows WITHOUT assignment" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          WITH RESTRICT foo {
+            identity(foo);
+            identity(foo);
+          }
+        FLUX
+      }
+
+      it "succeeds" do
+        expect(func_def.return_lifetime.name).to eq("f")
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "forbid WITH RESTRICT multiple mutable borrows WITH assignment" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          WITH RESTRICT foo {
+            MUTABLE x = identity(foo);
+            MUTABLE y = identity(foo);
+          }
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
+
+    context "forbid WITH RESTRICT multiple borrows (one mutable) WITH assignment" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          WITH RESTRICT foo {
+            VAR x = identity(foo);
+            MUTABLE y = identity(foo);
+          }
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
+
+    context "forbid mutating RESTRICTed mutables" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          WITH RESTRICT foo {
+            MUTABLE y = identity(foo);
+            SET foo.b = Bar{index: 10};
+          }
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
+
+    context "forbid mutating RESTRICTed mutables" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { b: Bar }
+
+          FN changeBar!(MUTABLE f: Foo) ->
+            SET f.b = Bar{index: 10};
+          END
+
+          -- Define function that returns a Number
+          FN identity(f: Foo) RETURNS f:Bar ->
+            RETURN f.b;
+          END
+
+          MUTABLE foo = Foo{ b: Bar{ index: 1 }};
+          WITH RESTRICT foo {
+            MUTABLE y = identity(foo);
+            changeBar!(foo);
+          }
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
   end
 end
 

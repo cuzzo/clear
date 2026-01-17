@@ -139,7 +139,8 @@ private
   # ==========================================
 
   def with_new_scope(scope = nil)
-    @scope_stack.push(scope || Scope.new)
+    new_scope = scope.nil? ? Scope.new : scope.dup
+    @scope_stack.push(new_scope)
     yield
     @scope_stack.pop
   end
@@ -283,7 +284,7 @@ private
     initial_state = current_scope.clone_states
 
     # Each branch gets its own scope to prevent leaking vars
-    with_new_scope(current_scope.dup) do
+    with_new_scope(current_scope) do
       node.then_branch.each { |stmt| visit(stmt) }
       finalize_scope(node, branch: :then)
       @then_state = current_scope.var_states # Conceptual
@@ -291,7 +292,7 @@ private
 
     current_scope.var_states = initial_state # restore_states(initial_state)
 
-    with_new_scope(current_scope.dup) do
+    with_new_scope(current_scope) do
       node.else_branch.each { |stmt| visit(stmt) }
       finalize_scope(node, branch: :else)
       @else_state = current_scope.var_states
@@ -320,7 +321,7 @@ private
 
     # 2. Analyze Body in a New Scope AND increment loop depth
     @loop_depth += 1
-    with_new_scope(current_scope.dup) do
+    with_new_scope(current_scope) do
       if node.do_branch.is_a?(Array)
         node.do_branch.each { |stmt| visit(stmt) }
       else
@@ -558,6 +559,8 @@ private
       end
     end
 
+    handle_assign_borrow(node)
+
     is_explicit = !node.type.nil? && node.type != :Any
     inferred_type = node.value.resolved_type
     final_type = is_explicit ? node.type : inferred_type
@@ -627,6 +630,8 @@ private
   def visit_Assignment(node)
     visit(node.value)
 
+    verify_unrestricted!(node)
+
     target = node.name
     case target
     when AST::Identifier, String
@@ -647,12 +652,12 @@ private
 
     handle_assign_escape(node)
     handle_assign_move(node)
+    handle_assign_borrow(node)
 
     # If sucessfully assigned, set live
     target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
     current_scope.set_state(target_name, :live)
   end
-
 
   def visit_assignment_variable(identifier_or_name, node)
     var_name = identifier_or_name.is_a?(AST::Identifier) ? identifier_or_name.name : identifier_or_name

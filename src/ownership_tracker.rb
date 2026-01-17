@@ -66,6 +66,77 @@ module OwnershipTracker
     end
   end
 
+  # TODO: Only works for simple borrows
+  def handle_assign_borrow(node)
+    return if !node.value.is_a?(AST::FuncCall) && !node.value.is_a?(AST::MethodCall)
+
+    call_node = node.value
+
+    func_name = call_node.is_a?(AST::MethodCall) ? call_node.name : call_node.name
+    scope = lookup_scope_for(func_name)
+    if scope.nil?
+      error!(node, "Method not found")
+    end
+
+    func_type = scope.resolve_type(func_name)
+    return unless func_type.is_a?(Hash)
+    # TODO: intrinsics should have a real function signature
+    # error!(node, "Missing Function Signature") if !func_type.is_a?(Hash)
+
+    # Most functions don't have a lifetime -> this is expected
+    lifetime = func_type.dig(:return, :lifetime)
+    return if lifetime.nil?
+
+    param_index = func_type[:params].find_index { |p| p[:name] == lifetime }
+    error!(node, "Missing lifetime") if param_index.nil?
+
+    args = if call_node.is_a?(AST::MethodCall)
+      [call_node.object] + call_node.args  # UFCS: object is first arg
+    else
+      call_node.args
+    end
+
+    actual_arg = args[param_index]
+    error!(node, "Missing borrowed param") if actual_arg.nil?
+
+    path = get_path_to_root(actual_arg)
+    # e.g. borrow(Node{v: 1, child: Node { v: 2} }) -> this is fine
+    return if path.nil?
+
+    root_var = path.first.to_s
+    borrowed_scope = lookup_scope_for(root_var)
+    error!(node, "Variable not found") if borrowed_scope.nil?
+
+    # 3. Check Mutability
+    # (If the root is immutable, we don't care about borrows usually, unless you want Read-Write locks)
+    return if borrowed_scope.is_immutable?(root_var)
+
+    # 4. Check Path Conflicts
+    borrow_type = node.mutable ? :mutable : :immutable
+    if !borrowed_scope.can_borrow?(root_var, path, borrow_type)
+      error!(node, "Lifetime Error: '#{root_var}' (or part of it) is already borrowed.")
+    end
+
+    current_scope.mark_borrowed(root_var, path, borrow_type)
+  end
+
+  def verify_unrestricted!(node)
+    # 1. Calculate the path being written to (e.g. foo.b)
+    target_node = node.name # Identifier, GetField, or GetIndex
+    path = get_path_to_root(target_node)
+
+    return if path.nil?
+
+    root_name = path.first.to_s
+    scope = lookup_scope_for(root_name)
+    return if scope.nil?
+
+    # Writing requires EXCLUSIVE (Mutable) access.
+    if !scope.can_borrow?(root_name, path, :mutable)
+      error!(node, "Lifetime Error: Cannot assign to '#{root_name}' because it is currently borrowed.")
+    end
+  end
+
   def finalize_scope(node, branch: nil)
     drops = []
 
@@ -94,5 +165,24 @@ module OwnershipTracker
     else
       node.deferred_drops = drops
     end
+  end
+
+  def get_path_to_root(node)
+    path = []
+    curr = node
+    while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
+      if curr.is_a?(AST::GetField)
+        path.unshift(curr.field.to_sym)
+      elsif curr.is_a?(AST::GetIndex)
+        # For arrays, we might just track the whole array, or use a wildcard :*
+        # For now, let's treat index access as "modifying the container"
+        path.unshift(:*)
+      end
+      curr = curr.target
+    end
+
+    return nil unless curr.is_a?(AST::Identifier)
+    path.unshift(curr.name.to_sym) # The root variable is first
+    path
   end
 end

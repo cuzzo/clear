@@ -1,7 +1,7 @@
 require "set"
 
 class Scope
-  attr_accessor :locals, :var_states
+  attr_accessor :locals, :var_states, :dependencies, :var_states
 
   def initialize
     @locals = {}
@@ -10,7 +10,7 @@ class Scope
     @var_states = {}
   end
 
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new)
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [])
     @locals[name] = {
       reg: reg,
       type: type,
@@ -19,9 +19,32 @@ class Scope
       rebindable: is_rebindable,
       size: size || 0,  # TODO: see if size is ever nil
       capabilities: capabilities,
+      borrowed_paths: borrowed_paths,
       valid: true,
       invalid_reason: nil
     }
+  end
+
+  def initialize_copy(original)
+    super
+
+    # 1. Deep Copy Locals
+    # We must dup the Hash AND the values inside it (the entries)
+    # AND mutable objects inside the entries (like the capabilities Set)
+    @locals = original.locals.transform_values do |entry|
+      new_entry = entry.dup
+      # Sets/Arrays inside the entry must be duped too, or they remain shared
+      new_entry[:capabilities] = entry[:capabilities].dup
+      new_entry[:borrowed_paths] = entry[:borrowed_paths]&.map(&:dup) # If you implemented the path logic
+      new_entry
+    end
+
+    # 2. Copy State Maps
+    @var_states = original.var_states.dup
+    @dependencies = original.dependencies.dup
+
+    # 3. Types are usually static definitions, so a shallow copy is fine
+    @types = original.instance_variable_get(:@types).dup
   end
 
   def declare_type(name, schema)
@@ -73,8 +96,50 @@ class Scope
     !is_mutable?(name)
   end
 
-  def is_borrowable?(name)
-    is_immutable?(name) || @locals.dig(name, :capabilities).include?(:RESTRICT)
+  def is_borrowable?(name, requested_path, type)
+    is_immutable?(name) ||
+      (is_restricted?(name) && can_borrow?(name, requested_path, type))
+  end
+
+  def is_restricted?(name)
+    @locals.dig(name, :capabilities).include?(:RESTRICT)
+  end
+
+  def can_borrow?(name, requested_path, requested_type)
+    entry = @locals[name]
+
+    entry[:borrowed_paths].each do |borrow|
+      existing_path = borrow[:path]
+      existing_type = borrow[:type]
+
+      is_overlapping = path_overlaps?(existing_path, requested_path)
+      next unless is_overlapping
+
+      # 2. APPLY RUST RULES
+      # Rule A: If I want a WRITER (Mutable), NO ONE else can be there.
+      if requested_type == :mutable
+        return false # Conflict with ANY existing borrow
+      end
+
+      # Rule B: If I want a READER (Immutable), only WRITERS block me.
+      # (Existing Readers are fine!)
+      if requested_type == :immutable && existing_type == :mutable
+        return false # Conflict with existing writer
+      end
+    end
+
+    true
+  end
+
+  def path_overlaps?(p1, p2)
+    return true if p1 == p2
+    return true if p2.size > p1.size && p2[0...p1.size] == p1
+    return true if p1.size > p2.size && p1[0...p2.size] == p2
+    false
+  end
+
+  def mark_borrowed(name, path, type)
+    @locals.dig(name, :borrowed_paths) << { path: path, type: type }
   end
 
   def is_on_heap?(name)
