@@ -4,6 +4,11 @@ module OwnershipTracker
   # If the RHS is an Identifier, and it's an Affine or Linear Type,
   # We must MOVE it.
   def handle_assign_move(node)
+    # TODO: Allow swap for pointers and optionals.
+    if node.value.is_a?(AST::GetField)
+      error!(node, "NOT YET SUPPORTED: Cannot move field '#{node.value.field}' directly. Use 'swap' to replace it, or 'copy' (future) to clone it.")
+    end
+
     # 1. Handle the Source (RHS)
     return if !node.value.is_a?(AST::Identifier)
 

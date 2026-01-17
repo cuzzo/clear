@@ -1758,6 +1758,23 @@ RSpec.describe SemanticAnnotator do
           expect { ast }.not_to raise_error
         end
       end
+
+      context "Sub-move" do
+        let(:code) { <<~FLUX
+            STRUCT Bar { index: Number }
+            STRUCT Baz { name: Byte[] }
+            STRUCT Foo { bar: Bar, baz: Baz }
+            STRUCT Root { foo: Foo }
+
+            VAR r = Root{ foo: Foo{ bar: Bar{ index: 1 }, baz: Baz{ name: "Test"}}};
+            VAR f = r.foo;
+          FLUX
+        }
+
+        it "fails on moving sub-fields" do
+          expect { ast }.to raise_error(/NOT YET SUPPORTED/i)
+        end
+      end
     end
 
     context "Function Calls" do

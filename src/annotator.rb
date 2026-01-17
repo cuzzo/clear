@@ -560,6 +560,7 @@ private
       end
     end
 
+    handle_assign_move(node)
     handle_assign_borrow(node)
 
     is_explicit = !node.type.nil? && node.type != :Any

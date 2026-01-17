@@ -16,6 +16,9 @@ module FunctionAnalysis
       end
     end
 
+    # For alias overlap
+    encountered_args = []
+
     node.args.each_with_index do |arg_node, i|
       param = params[i]
       verify_param_lifetime!(arg_node, param, signature)
@@ -59,6 +62,34 @@ module FunctionAnalysis
         arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
         error!(arg_node, :ARGUMENT_TYPE_ERROR, arg_name, i+1, expected, actual)
       end
+
+      # E. Check for Alias overlap (i.e. swap(x, x) -> ERROR!)
+      current_path = get_path_to_root(arg_node)
+
+      next if current_path.nil?
+      is_mutable = param[:mutable]
+
+      encountered_args.each_with_index do |prev, prev_index|
+        # Conflict Condition:
+        # 1. At least one of them is MUTABLE (Mut/Mut OR Mut/Immut)
+        # 2. The paths overlap (e.g. "x" overlaps "x.child", "x" overlaps "x")
+        if (is_mutable || prev[:mutable]) && paths_overlap?(current_path, prev[:path])
+
+          error!(
+            arg_node,
+            "Aliasing Error: Argument #{i+1} ('#{arg_node.name rescue 'arg'}') conflicts with argument #{prev_index+1}.\n" \
+            "Cannot pass the same variable defined at '#{current_path.first}' twice if one usage is MUTABLE.\n" \
+            "This violates exclusive mutability."
+          )
+        end
+      end
+
+      # Register this argument for future checks
+      encountered_args << {
+        path: current_path,
+        mutable: is_mutable,
+        name: arg_node.respond_to?(:name) ? arg_node.name : "arg"
+      }
     end
   end
 
@@ -279,6 +310,19 @@ module FunctionAnalysis
          "  Actual return derived from:   #{actual_path.join('.')}"
        )
     end
+  end
+
+  def paths_overlap?(path_a, path_b)
+    # 1. Different Roots? (e.g. [:x, ...] vs [:y, ...]) -> No Overlap
+    return false if path_a.first != path_b.first
+
+    # 2. Same Root -> Check if one is a prefix of the other.
+    # We only compare up to the length of the shorter path.
+    # [:x, :a] vs [:x, :b] -> Compare [:x, :a] vs [:x, :b] -> mismatch at index 1 -> Safe.
+    # [:x] vs [:x, :y]     -> Compare [:x] vs [:x]          -> match -> Unsafe.
+
+    len = [path_a.size, path_b.size].min
+    return path_a[0...len] == path_b[0...len]
   end
 end
 
