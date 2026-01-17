@@ -2301,6 +2301,54 @@ RSpec.describe SemanticAnnotator do
         expect { result }.to raise_error(/Lifetime Error/i)
       end
     end
+
+    context "forbid invalid sub-lifetimes" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Baz { name: String }
+          STRUCT Foo { bar: Bar, baz: Baz }
+          STRUCT Root { foo: Foo }
+
+          -- Define function that returns a Number
+          FN identity(r: Root) RETURNS f.baz:Bar ->
+            RETURN r.bar;
+          END
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
+
+    context "allow valid sub-lifetimes" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Baz { name: Byte[] }
+          STRUCT Foo { bar: Bar, baz: Baz }
+          STRUCT Root { foo: Foo }
+
+          -- Define function that returns a Number
+          FN identity(r: Root) RETURNS r.foo.bar:Bar ->
+            RETURN r.foo.bar;
+          END
+
+          VAR r = Root{ foo: Foo{ bar: Bar{ index: 1 }, baz: Baz{ name: "Test"}}};
+          identity(r);
+        FLUX
+      }
+
+      it "succeeds" do
+        class Track
+          include OwnershipTracker
+        end
+        t = Track.new
+        expect(t.get_lifetime_path(func_def)).to eq("r.foo.bar")
+        expect(result).to eq(:Bar)
+      end
+    end
   end
 end
 

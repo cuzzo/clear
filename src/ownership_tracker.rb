@@ -185,4 +185,9 @@ module OwnershipTracker
     path.unshift(curr.name.to_sym) # The root variable is first
     path
   end
+
+  # TODO: Save lifetime path as a path, not a string.
+  def get_lifetime_path(func_node)
+    get_path_to_root(func_node.return_lifetime)&.join(".")
+  end
 end

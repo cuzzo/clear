@@ -119,7 +119,7 @@ private
       }},
       return: {
         type: (node.return_type || :Any),
-        lifetime: node.return_lifetime&.name
+        lifetime: get_lifetime_path(node)
       }
     }
 
@@ -192,7 +192,8 @@ private
     is_implicit_return = node.return_type.nil?
     declared_return = node.return_type || :Any
 
-    @function_context_stack.push({type: declared_return, lifetime: node.return_lifetime&.name})
+    lifetime_path = get_lifetime_path(node)
+    @function_context_stack.push({type: declared_return, lifetime: lifetime_path})
 
     # 2. Check Style (unchanged)
     has_mutable_param = node.params.any? { |p| p[:mutable] }
@@ -216,7 +217,7 @@ private
       }},
       return: {
         type: declared_return,
-        lifetime: node.return_lifetime&.name
+        lifetime: lifetime_path
       }
     }
 

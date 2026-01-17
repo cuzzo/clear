@@ -83,13 +83,48 @@ module FunctionAnalysis
     error!(arg_node, "Lifetime Error: param `#{param[:name]}` is mutable, must be RESTRICTed before it can be borrowed.")
   end
 
+  # TODO: Still only supports simple lifetimes, partially arrays
+  # TODO: Need to support wildcard and OR lifetimes
   def verify_lifetime!(node)
     return true if node.return_lifetime.nil?
 
-    lifetime = node.return_lifetime.name
+    # 1. Parse the path (Reuse the robust logic you just verified)
+    # This gives you [:f, :b]
+    path = get_path_to_root(node.return_lifetime)
 
-    error!(node, "Lifetime Error: Sub-lifetimes not yet supportd.") if lifetime.include?(".")
-    error!(node, "Lifetime Error: Scoped lifetime is not a param.") if !node.params.map { |p| p[:name] }.include?(lifetime)
+    # 2. Check the Root Parameter
+    root_param_name = path.first.to_s
+    param = node.params.find { |p| p[:name] == root_param_name }
+
+    if param.nil?
+      error!(node, "Lifetime Error: Scoped lifetime '#{root_param_name}' is not a parameter.")
+    end
+
+    current_type_name = param[:type]
+
+    path.drop(1).each do |field_sym|
+      field_name = field_sym.to_s
+
+      # Stop if we hit an Array index wildcard (we can't verify types past a dynamic index easily yet)
+      break if field_sym == :* # Look up the definition (e.g. { index: :Number })
+      # You added this method to Scope earlier!
+      schema = current_scope.resolve_type_definition(current_type_name)
+
+      if schema.nil?
+        error!(node, "Lifetime Error: Type '#{current_type_name}' is not a struct, cannot access field '#{field_name}'.")
+      end
+
+      # Check if the field exists in the schema
+      next_type = schema[field_name] || schema[field_sym] # handle string/sym keys
+
+      if next_type.nil?
+        error!(node, "Lifetime Error: Type '#{current_type_name}' has no field '#{field_name}'.")
+      end
+
+      # Advance to the next type
+      current_type_name = next_type
+    end
+
     return true
   end
 
