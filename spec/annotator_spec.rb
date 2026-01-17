@@ -2349,6 +2349,25 @@ RSpec.describe SemanticAnnotator do
         expect(result).to eq(:Bar)
       end
     end
+
+    context "allow valid sub-lifetimes" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Bar { index: Number }
+          STRUCT Foo { bar1: Bar, bar2: Bar }
+          STRUCT Root { foo: Foo }
+
+          -- Define function that returns a Number
+          FN identity(r: Root) RETURNS r.foo.bar2:Bar ->
+            RETURN r.foo.bar1;
+          END
+        FLUX
+      }
+
+      it "errors" do
+        expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
   end
 end
 

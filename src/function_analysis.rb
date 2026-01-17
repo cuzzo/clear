@@ -228,12 +228,12 @@ module FunctionAnalysis
     return true if !node.is_a?(AST::GetField) && !node.is_a?(AST::GetIndex)
 
     # Get the current function's return lifetime annotation
-    lifetime = @function_context_stack.last&.dig(:lifetime)
+    lifetime_path = @function_context_stack.last&.dig(:lifetime)
 
     type_info = node.type_object
 
     # TODO: Need to propagate GIVE, implement copyable
-    has_lifetime = !lifetime.nil?
+    has_lifetime = !lifetime_path.nil?
     is_copyable = type_info.copyable?
     has_give = false
 
@@ -254,6 +254,30 @@ module FunctionAnalysis
         "  3) COPY for copyable types\n" \
         "#{access_type.capitalize} type '#{node.full_type}' requires one of these."
       )
+    end
+
+    # We're done, below we validate lifetime
+    return true if !has_lifetime
+
+    # TODO: This needs to change when lifetimes allow splats, ORs
+    lifetime_path = lifetime_path.split(".").map(&:to_sym)
+
+    actual_path = get_path_to_root(node)
+    if actual_path.nil?
+      error!("Lifetime Error: Lifetime '#{lifetime_path}' specified on return, but returned value is not associated.")
+    end
+
+    # Logic: The actual return must be "under" the declared lifetime.
+    # declared: r.foo -> return: r.foo.bar (OK)
+    # declared: r.foo.bar1 -> return: r.foo.bar2 (FAIL)
+    # We check if the Actual Path starts with the Expected Path
+    if actual_path[0...lifetime_path.size] != lifetime_path
+       error!(
+         node,
+         "Lifetime Error:\n" \
+         "  Expected return derived from: #{lifetime_path.join('.')}\n" \
+         "  Actual return derived from:   #{actual_path.join('.')}"
+       )
     end
   end
 end
