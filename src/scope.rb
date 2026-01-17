@@ -1,13 +1,14 @@
 require "set"
 
 class Scope
-  attr_accessor :locals, :var_states, :dependencies, :var_states
+  attr_accessor :locals, :var_states, :dependencies, :var_states, :type
 
   def initialize
     @locals = {}
     @dependencies = {}
     @types = {}
     @var_states = {}
+    @type = :block
   end
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [])
@@ -42,6 +43,7 @@ class Scope
     # 2. Copy State Maps
     @var_states = original.var_states.dup
     @dependencies = original.dependencies.dup
+    @type = :block # must be overwritten
 
     # 3. Types are usually static definitions, so a shallow copy is fine
     @types = original.instance_variable_get(:@types).dup

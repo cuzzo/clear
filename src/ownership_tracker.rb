@@ -172,6 +172,27 @@ module OwnershipTracker
     end
   end
 
+  def get_return_drops(node)
+    all_drops = []
+
+    # Walk backwards through scopes until we hit the function boundary
+    # (You might need a flag in Scope to mark it as a "function body" vs "block")
+    @scope_stack.reverse_each do |scope|
+      scope.locals.each do |name, info|
+        if scope.get_state(name) == :live && Type.new(info[:type]).requires_move?
+           all_drops << { name: name, type: info[:type] }
+           # We don't mark them :moved in the tracker because execution stops here anyway.
+        end
+      end
+      # Stop if we hit the function scope (implementation detail depends on how you track function boundaries)
+      # For now, dropping everything is safe if RETURN is top-level,
+      # but be careful if you implement lambdas/closures later.
+      break if scope.type == :function_root
+    end
+
+    node.drops = all_drops
+  end
+
   def get_path_to_root(node)
     path = []
     curr = node

@@ -105,7 +105,7 @@ module AST
   GetField     = Struct.new(:token, :target, :field) { include Locatable }
   GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
-  ReturnNode   = Struct.new(:token, :value) { include Locatable }
+  ReturnNode   = Struct.new(:token, :value, :drops) { include Locatable }
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   Raise        = Struct.new(:token, :message_expr) { include Locatable }
   ThrowNode    = Struct.new(:token, :value) { include Locatable }
