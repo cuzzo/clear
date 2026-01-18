@@ -503,6 +503,8 @@ private
     end
   end
 
+  # TODO: verify_signature is sufficiently complicated.  Intrinsics must support the correct signatures.
+  # This does not have all the proper protections of regular functions and method calls.
   def visit_IntrinsicFunc(node, args)
     definitions = STD_LIB[node.name]
     definitions = [definitions] if definitions.is_a?(Hash)
@@ -550,16 +552,7 @@ private
   def visit_VarDecl(node)
     visit(node.value)
 
-    # 0. Affine Ownership:
-    if node.value.is_a?(AST::Identifier)
-      rhs_name = node.value.name
-      rhs_type = current_scope.resolve_type(rhs_name)
-
-      if Type.new(rhs_type).requires_move?
-        current_scope.set_state(rhs_name, :moved)
-      end
-    end
-
+    verify_unrestricted!(node)
     handle_assign_move(node)
     handle_assign_borrow(node)
 
