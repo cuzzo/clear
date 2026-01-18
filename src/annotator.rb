@@ -138,9 +138,8 @@ private
   # SCOPE MANAGEMENT
   # ==========================================
 
-  def with_new_scope(scope = nil, type: :block)
+  def with_new_scope(scope = nil)
     new_scope = scope.nil? ? Scope.new : scope.dup
-    new_scope.type = type
     @scope_stack.push(new_scope)
     yield
     @scope_stack.pop
@@ -160,7 +159,7 @@ private
     verify_captures!(node)
 
     # 2. Enter the Lambda's Scope
-    with_new_scope(nil, type: :function_root) do
+    with_new_scope do
       param_types = declare_and_verify_params(node)
       declare_captures(node)
 
@@ -228,7 +227,7 @@ private
     # 4. Analyze Body & Track Returns
     @return_collection_stack.push([])
 
-    with_new_scope(nil, type: :function_root) do
+    with_new_scope do
       # Register Parameters
       declare_and_verify_params(node)
       declare_captures(node)
@@ -399,10 +398,7 @@ private
     # 1. Lifetime Tracking
     verify_return(node.value)
 
-    # 2. Handle conditional drops
-    node.drops = get_return_drops(node)
-
-    # 3. Ownership Tracking
+    # 2. Ownership Tracking
     # TODO: Move to ownership tracker
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier)
@@ -507,8 +503,6 @@ private
     end
   end
 
-  # TODO: verify_signature is sufficiently complicated.  Intrinsics must support the correct signatures.
-  # This does not have all the proper protections of regular functions and method calls.
   def visit_IntrinsicFunc(node, args)
     definitions = STD_LIB[node.name]
     definitions = [definitions] if definitions.is_a?(Hash)
@@ -556,7 +550,16 @@ private
   def visit_VarDecl(node)
     visit(node.value)
 
-    verify_unrestricted!(node)
+    # 0. Affine Ownership:
+    if node.value.is_a?(AST::Identifier)
+      rhs_name = node.value.name
+      rhs_type = current_scope.resolve_type(rhs_name)
+
+      if Type.new(rhs_type).requires_move?
+        current_scope.set_state(rhs_name, :moved)
+      end
+    end
+
     handle_assign_move(node)
     handle_assign_borrow(node)
 
