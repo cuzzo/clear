@@ -1,0 +1,13 @@
+FN cheatMain() RETURNS Void ->
+  VAR path = "./test_output.txt";
+  VAR content = "12345";
+
+  -- 1. Write
+  writeFile(path, content);
+
+  -- 2. Read
+  VAR read_back = readFile(path);
+
+  -- 3. Verify
+  ASSERT eql(read_back, content), "File read should match written content";
+END

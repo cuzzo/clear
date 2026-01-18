@@ -1,0 +1,14 @@
+FN cheatMain() RETURNS Void ->
+  -- Basic shell echo test
+  VAR greeting = shell("echo 'Hello from Shell'");
+  VAR clean = greeting.trim();
+
+  ASSERT eql(clean, "Hello from Shell"), "Shell output should match";
+
+  -- Dynamic command construction
+  VAR who = "World";
+  VAR cmd = "echo " + who;
+  VAR dynamic_out = shell(cmd).trim();
+
+  ASSERT eql(dynamic_out, "World"), "Dynamic shell command should work";
+END

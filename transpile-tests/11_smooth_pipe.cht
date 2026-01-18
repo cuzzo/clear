@@ -1,0 +1,15 @@
+FN double(n: Int64) RETURNS Int64 ->
+  RETURN n * 2_i64;
+END
+
+FN cheatMain() RETURNS Void ->
+  VAR start = 10_i64;
+
+  -- 1. Simple Pipe: double(10)
+  VAR res1 = start s> double;
+  ASSERT res1 == 20, "Simple pipe should double to 20";
+
+  -- 2. Chained Pipe: double(double(10))
+  VAR res2 = start s> double s> double;
+  ASSERT res2 == 40, "Chained pipe should double twice to 40";
+END

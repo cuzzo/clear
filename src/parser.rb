@@ -81,7 +81,7 @@ class Parser
 
   # Primaries
   primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
-  primary(:INT64) { parse_literal(:INT64, :heap) }
+  primary(:INT64) { parse_literal(:INT64, :stack) }
   primary(:STRING) { parse_literal(:STRING, :stack) }
   primary(:BYTE) { parse_literal(:BYTE, :stack) }
   primary(:VAR_ID) { parse_var_id }

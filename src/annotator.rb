@@ -576,6 +576,8 @@ private
     else
       node.full_type = final_type
     end
+    # Set storage after full_type (which creates type_object)
+    node.storage = storage
 
     # 3. Declare in Scope
     current_scope.declare(
@@ -958,7 +960,14 @@ private
       elsif AST::NUMBER_RESULT_OPS.include?(node.op)
         visit(node.left)
         visit(node.right)
-        node.full_type = :Number
+        # Preserve Int64 if both operands are Int64
+        t_left = node.left.resolved_type
+        t_right = node.right.resolved_type
+        if t_left == :Int64 && t_right == :Int64
+          node.full_type = :Int64
+        else
+          node.full_type = :Number
+        end
       else
         error!(node, "UNKNOWN OPERAND!")
       end
@@ -1334,6 +1343,8 @@ private
     # Get storage info
     # (Assuming your AST::Literal or Value nodes have a storage field)
     storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
+    # Default to stack if storage is nil (e.g., primitives)
+    storage ||= :stack
 
     # Increment frame after storage finalized
     @frame_usage_count += 1 if storage == :frame

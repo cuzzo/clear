@@ -284,8 +284,8 @@ private
       zig_type = transpile_type(inner_type)
 
       # 2. Generate Creation
-      #    var map = try rt.makeHashMap(i64, rt.heapAlloc());
-      creation = "try rt.makeHashMap(#{zig_type}, rt.heapAlloc())"
+      #    var map = try CheatLib.makeHashMap(i64);
+      creation = "try CheatLib.makeHashMap(#{zig_type})"
 
       # 3. Generate Initializers (Block Expression)
       #    Zig doesn't have a simple Map Literal syntax, so we stick to creation-only
@@ -587,8 +587,14 @@ private
     pattern = node.zig_pattern
 
     #    {alloc} -> determine allocator automatically
+    #    For method calls, use the object's storage (not the result's storage)
     if pattern.include?("{alloc}")
-      alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      target_storage = if node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
+        node.object.storage
+      else
+        node.storage
+      end
+      alloc = target_storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
       pattern = pattern.gsub("{alloc}", alloc)
     end
 
@@ -666,6 +672,7 @@ private
     end
 
     # B. Float -> Int (e.g. f64 -> i64)
+    #    But skip if both are actually integer types (annotator may over-coerce)
     if from == :Number && to == :Int64
       return "@intFromFloat(#{code})"
     end
@@ -673,6 +680,14 @@ private
     # C. Int Widening (e.g. u8 -> i64)
     if from == :Byte && to == :Int64
       return "@intCast(#{code})"
+    end
+
+    # D. Array coercion (e.g. Any[] -> Int64[])
+    #    ArrayList types are already correctly typed by makeList, no cast needed
+    from_str = from.to_s
+    to_str = to.to_s
+    if from_str.end_with?("[]") && to_str.end_with?("[]")
+      return code
     end
 
     # Fallback: Zig's generic cast (often works for simple types)

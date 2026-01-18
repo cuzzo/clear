@@ -1,0 +1,15 @@
+FN cheatMain() RETURNS Void ->
+  MUTABLE list : Int64[] = %[];
+  list.append(10);
+  list.append(20);
+
+  -- Verify append works
+  ASSERT list.length() == 2, "Array length should be 2";
+
+  -- Access index 1
+  VAR val = list[1];
+  ASSERT val == 20, "Index 1 should be 20";
+
+  -- Verify index 0
+  ASSERT list[0] == 10, "Index 0 should be 10";
+END

@@ -118,7 +118,7 @@ class Type
   end
 
   def string?
-    resolved == :String || (array? && base_type == :Byte)
+    resolved == :String || resolved == :"String[]" || (array? && (base_type == :Byte || base_type == :String))
   end
 
   def any?
