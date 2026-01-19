@@ -146,6 +146,12 @@ class Parser
     AST::FuncCall.new(start_token, lhs, args)
   end
 
+  # Optional Unwrap: maybe_value?
+  suffix(:CHAR, '?') do |lhs|
+    q_token = consume(:CHAR, '?')
+    AST::OptionalUnwrap.new(q_token, lhs)
+  end
+
   def parse_literal(type, storage)
     token = consume(type)
     node = AST::Literal.new(token, type, token.value, storage)
@@ -647,11 +653,17 @@ class Parser
   end
 
   def parse_type_annotation
+    # Check for optional prefix: ?Type
+    optional_prefix = ""
+    if match!(:CHAR, '?')
+      optional_prefix = "?"
+    end
+
+    # Check for heap prefix: %Type
+    heap_prefix = ""
     if match?(:PERCENT)
       consume(:PERCENT)
-      prefix = "%"
-    else
-      prefix = ""
+      heap_prefix = "%"
     end
 
     base = consume(:TYPE_ID).value
@@ -678,7 +690,7 @@ class Parser
       end
     end
 
-    "#{prefix}#{base}#{inner}".to_sym
+    "#{optional_prefix}#{heap_prefix}#{base}#{inner}".to_sym
   end
 
   def parse_with_capability

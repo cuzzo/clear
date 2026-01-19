@@ -950,6 +950,7 @@ private
         end
       when :BYTE then :Byte
       when :BOOLEAN then :Bool
+      when :NIL then :NIL
       else
         error!(node, "UNKNOWN LITERAL!")
       end
@@ -1261,6 +1262,19 @@ private
     end
 
     node.full_type = node.value.resolved_type
+  end
+
+  def visit_OptionalUnwrap(node)
+    visit(node.target)
+
+    # Validate that the target is actually an optional type
+    type = Type.new(node.target.resolved_type)
+    unless type.optional?
+      error!(node, "Cannot unwrap non-optional type '#{node.target.resolved_type}' with '?'")
+    end
+
+    # The result type is the wrapped type (without the ?)
+    node.full_type = type.wrapped_type.resolved
   end
 
   def visit_WithBlock(node)

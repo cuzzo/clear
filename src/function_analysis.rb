@@ -39,8 +39,8 @@ module FunctionAnalysis
 
       # C. Handle ownership (Affine / Linear):
       if param[:takes]
-        # TODO: See if this is correct...
         current_scope.set_state(arg_node.name, :moved)
+        arg_node.was_moved = true
       end
 
       # D. Type Check

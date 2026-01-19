@@ -381,6 +381,10 @@ private
       # Zig copies structs by value on assignment, so just return the inner expression
       visit(node.value)
 
+    when AST::OptionalUnwrap
+      # Zig uses .? for optional unwrapping
+      "#{visit(node.target)}.?"
+
     when AST::Identifier
       # [FIX] Handle '_' Identifier acting as a Placeholder
       if node.name == "_" && @placeholder_name
@@ -397,6 +401,8 @@ private
         node.value.to_i.to_s # Force Integer for Zig i64 compatibility
       when :BOOLEAN
         node.value.to_s      # "true"/"false" is fine
+      when :NIL
+        "null"               # Zig's null for optionals
       else
         node.value.to_s
       end
@@ -640,9 +646,17 @@ private
   end
 
   def transpile_type(type)
-    is_pointer = type.to_s.start_with?("%")
+    t = type.to_s
 
-    t = type.to_s.gsub("%", "") # Strip explicit heap marker if present
+    # 0. Handle Optional types: ?T -> ?zig_type
+    if t.start_with?("?")
+      inner = t[1..]  # Strip the ? prefix
+      zig_inner = transpile_type(inner)
+      return "?#{zig_inner}"
+    end
+
+    is_pointer = t.start_with?("%")
+    t = t.gsub("%", "") # Strip explicit heap marker if present
 
     # 1. SPECIAL CASE: "String[]" is the atomic "Text" type
     #    We map this directly to Zig's string slice.

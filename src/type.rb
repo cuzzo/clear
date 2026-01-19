@@ -68,7 +68,16 @@ class Type
     return true if self.numeric? && other_type.numeric? # Simplified logic
     return true if self.string? && other_type.byte?
 
-    # 3. Array Coercion (The complex part from your Annotator)
+    # 3. Optional Coercion: ?T accepts T, NIL, or ?T
+    if self.optional?
+      return true if other_type.resolved == :NIL  # nil is always valid
+      # Accept the wrapped type (e.g., ?Int64 accepts Int64)
+      return wrapped_type.accepts?(other_type) if !other_type.optional?
+      # Accept same optional type
+      return wrapped_type.accepts?(other_type.wrapped_type) if other_type.optional?
+    end
+
+    # 4. Array Coercion (The complex part from your Annotator)
     if self.array?
       return false if !other_type.array?
       return true if other_type.empty_list?
@@ -151,7 +160,16 @@ class Type
 
   # TODO: keep metatype from ast, use that
   def struct?
-    !primitive? && !any? && !void? && !string? && !array? && !map?
+    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional?
+  end
+
+  def optional?
+    @is_optional
+  end
+
+  def wrapped_type
+    return nil unless optional?
+    @wrapped_type_obj ||= Type.new(@wrapped_type_raw || :Any)
   end
 
   def element_type
@@ -209,20 +227,30 @@ class Type
   private
 
   def parse_raw_input
-    # Initialize location based on your current "%" hack
-    # This allows you to slowly refine this logic later without breaking AST creation
     str = @raw.to_s
+    original_str = str  # Keep original for resolved_cache
+
+    # A. Detect Optional prefix: ?Type
+    if str.start_with?("?")
+      @is_optional = true
+      @wrapped_type_raw = str[1..].to_sym  # Store the inner type
+      str = str[1..]  # Strip the ? for further parsing of inner type
+    else
+      @is_optional = false
+      @wrapped_type_raw = nil
+    end
+
+    # B. Initialize location based on "%" prefix
     if str.start_with?("%")
       @location = :heap
       str = str[1..] # Strip the % so we can parse the inner type cleanly
     elsif primitive?
       @location = :stack
     else
-      # The new distinction you requested
       @location = :frame
     end
 
-    # B. Detect Array Structure
+    # C. Detect Array Structure
     # Regex Breakdown:
     #   ^       Start of string
     #   (.+)    Capture Group 1: Base Type (e.g. "Number")
@@ -244,7 +272,8 @@ class Type
       @element_type_raw = nil
     end
 
-    @resolved_cache = str.to_sym
+    # Keep the full type including ? prefix for resolved
+    @resolved_cache = original_str.gsub("%", "").to_sym
   end
 end
 
