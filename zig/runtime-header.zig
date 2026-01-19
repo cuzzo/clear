@@ -102,7 +102,12 @@ pub const CheatLib = struct {
 
     // Usage: try rt.mapPut(i64, rt.heapAlloc(), &map, "key", 100);
     pub fn mapPut(comptime V: type, allocator: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
-        // Critical: We must duplicate the key to the Heap because the Map keeps a pointer to it.
+        // Check if key already exists - if so, just update the value
+        if (map.getPtr(key)) |val_ptr| {
+            val_ptr.* = value;
+            return;
+        }
+        // Key doesn't exist - duplicate it to the Heap because the Map keeps a pointer to it.
         // If we don't, and 'key' is a frame string that dies, the map breaks.
         const key_copy = try allocator.dupe(u8, key);
         try map.put(allocator, key_copy, value);
@@ -279,7 +284,15 @@ pub const CheatLib = struct {
         switch (@typeInfo(T)) {
             // Case 1: Structs (check for deinit, e.g. ArrayListUnmanaged)
             .@"struct" => {
-                if (@hasDecl(T, "deinit")) {
+                // Special case: StringHashMapUnmanaged - free duplicated keys first
+                if (@hasDecl(T, "iterator") and @hasField(T, "metadata")) {
+                    var mut_item = item;
+                    var it = mut_item.iterator();
+                    while (it.next()) |entry| {
+                        rt.heapAlloc().free(entry.key_ptr.*);
+                    }
+                    mut_item.deinit(rt.heapAlloc());
+                } else if (@hasDecl(T, "deinit")) {
                     var mut_item = item;
                     mut_item.deinit(rt.heapAlloc());
                 }
