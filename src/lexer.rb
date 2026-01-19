@@ -16,7 +16,7 @@ class Lexer
       MOD OR
       REQUIRE
       SELECT WHERE
-      GIVE TAKES
+      GIVE TAKES COPY
       WITH EXCLUSIVE RESTRICT
     ].to_set
 

@@ -1775,6 +1775,67 @@ RSpec.describe SemanticAnnotator do
           expect { ast }.to raise_error(/NOT YET SUPPORTED/i)
         end
       end
+
+      context "COPY Keyword" do
+        context "copying a struct with all primitive fields" do
+          let(:code) { <<~FLUX
+              STRUCT Point { x: Int64, y: Int64 }
+
+              FN test() ->
+                VAR p = Point{ x: 10, y: 20 };
+                VAR copy = COPY p;  -- COPY creates independent value
+              END
+            FLUX
+          }
+          it "allows COPY of copyable struct" do
+            expect { ast }.not_to raise_error
+          end
+        end
+
+        context "copying a nested copyable struct" do
+          let(:code) { <<~FLUX
+              STRUCT Inner { value: Int64 }
+              STRUCT Outer { inner: Inner, count: Int64 }
+
+              FN test() ->
+                VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+                VAR inner_copy = COPY outer.inner;  -- COPY nested struct
+              END
+            FLUX
+          }
+          it "allows COPY of nested copyable struct" do
+            expect { ast }.not_to raise_error
+          end
+        end
+
+        context "copying a non-copyable type (array)" do
+          let(:code) { <<~FLUX
+              FN test() ->
+                VAR arr = [1, 2, 3];
+                VAR copy = COPY arr;
+              END
+            FLUX
+          }
+          it "raises error for non-copyable array" do
+            expect { ast }.to raise_error(/Cannot COPY non-copyable type/)
+          end
+        end
+
+        context "copying a struct with non-copyable field" do
+          let(:code) { <<~FLUX
+              STRUCT Container { data: Byte[] }
+
+              FN test() ->
+                VAR c = Container{ data: "hello" };
+                VAR copy = COPY c;
+              END
+            FLUX
+          }
+          it "raises error for struct containing non-copyable field" do
+            expect { ast }.to raise_error(/Cannot COPY non-copyable type/)
+          end
+        end
+      end
     end
 
     context "Function Calls" do

@@ -188,9 +188,22 @@ class Type
     !primitive?
   end
 
-  def copyable?
+  def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    false # for now, everything else is not
+    return false if heap?    # Heap-allocated types are not copyable
+    return false if array?   # Arrays are not copyable
+    return false if map?     # Maps are not copyable
+
+    # Structs: copyable if all fields are copyable
+    if struct?
+      resolver = lookup_arg || lookup_block
+      return false unless resolver
+      schema = resolver.call(base_type.to_sym)
+      return false unless schema
+      return schema.values.all? { |t| Type.new(t).copyable?(resolver) }
+    end
+
+    false
   end
 
   private

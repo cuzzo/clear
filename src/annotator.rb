@@ -1239,7 +1239,6 @@ private
     end
 
     node.full_type = node.value.resolved_type
-    node.metatype = :give  # Mark this for transpiler
   end
 
   def visit_Copy(node)
@@ -1247,12 +1246,11 @@ private
 
     # Validate that the type is actually copyable
     type = Type.new(node.value.resolved_type)
-    unless type.copyable?
+    unless type.copyable? { |name| lookup_type_schema(name) }
       error!(node, "Cannot COPY non-copyable type '#{node.value.resolved_type}'")
     end
 
     node.full_type = node.value.resolved_type
-    node.metatype = :copy  # Mark this for transpiler
   end
 
   def visit_WithBlock(node)

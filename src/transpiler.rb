@@ -357,6 +357,10 @@ private
     when AST::GetField
       "#{visit(node.target)}.#{node.field}"
 
+    when AST::Copy
+      # Zig copies structs by value on assignment, so just return the inner expression
+      visit(node.value)
+
     when AST::Identifier
       # [FIX] Handle '_' Identifier acting as a Placeholder
       if node.name == "_" && @placeholder_name

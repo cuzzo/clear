@@ -12,6 +12,7 @@ module AST
     attr_reader :coerced_type_object
     attr_reader :type_object
     attr_accessor :zig_pattern
+    attr_accessor :was_moved
 
     # -- BACKWARDS COMPATIBILITY SETTER --
     # When existing code sets full_type = :Number, we wrap it.
@@ -117,6 +118,7 @@ module AST
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
   WhereOp      = Struct.new(:token, :expression) { include Locatable }
   Placeholder  = Struct.new(:token) { include Locatable }
+  Copy         = Struct.new(:token, :value) { include Locatable }
 
   UNARY_OPS = ['-', '!', '~']
 
