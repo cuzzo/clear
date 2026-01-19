@@ -1,0 +1,19 @@
+STRUCT Inner { value: Int64 }
+STRUCT Outer { inner: Inner, count: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    -- Create nested struct
+    VAR outer = Outer{ inner: Inner{ value: 42 }, count: 10 };
+
+    -- Move sub-field to new variable
+    VAR moved_inner = outer.inner;
+
+    -- Verify the moved value is correct
+    ASSERT moved_inner.value == 42, "Moved inner value should be 42";
+
+    -- Sibling field should still be accessible
+    ASSERT outer.count == 10, "Sibling count should still be 10";
+
+    -- No double-free should occur when outer and moved_inner go out of scope
+    RETURN;
+END

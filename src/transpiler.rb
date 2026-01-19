@@ -230,20 +230,40 @@ private
       # CHEAT: User{ id: 1 }
       # ZIG:   User{ .id = 1 }
 
-      # ... field init logic ...
-      field_inits = node.fields.map { |k,v| ".#{k} = #{visit(v)}" }.join(", ")
+      # Track heap variables that need to be marked as moved
+      move_statements = []
+      field_inits = node.fields.map do |k, v|
+        # If field value is a heap identifier, mark it as moved
+        if v.is_a?(AST::Identifier) && v.type_info && v.type_info.requires_move? && v.storage == :heap
+          move_statements << "#{v.name}_moved = true;"
+        end
+        ".#{k} = #{visit(v)}"
+      end.join(", ")
+
       struct_init = "#{node.name}{ #{field_inits} }"
+      move_logic = move_statements.join("\n")
 
       if node.storage == :heap # You set this in the Annotator!
        <<~ZIG
           blk: {
+             #{move_logic}
              const ptr = try rt.heapAlloc().create(#{node.name});
              ptr.* = #{struct_init};
              break :blk ptr;
           }
         ZIG
       else
-        struct_init
+        if move_logic.empty?
+          struct_init
+        else
+          # Need a block to execute move logic before struct init
+          <<~ZIG
+            blk: {
+               #{move_logic}
+               break :blk #{struct_init};
+            }
+          ZIG
+        end
       end
 
     # TODO: Need overflow logic for frame to overflow to heap / malloc

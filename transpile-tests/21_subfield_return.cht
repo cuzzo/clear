@@ -1,0 +1,22 @@
+STRUCT Inner { value: Int64 }
+STRUCT Outer { inner: Inner, count: Int64 }
+
+-- Function that extracts and returns sub-field
+FN extractInner(TAKES o: Outer) RETURNS Inner ->
+    VAR result = o.inner;
+    RETURN result;
+END
+
+FN cheatMain() RETURNS Void ->
+    VAR outer = Outer{ inner: Inner{ value: 99 }, count: 5 };
+
+    -- Move entire outer into function, get inner back
+    VAR inner = extractInner(outer);
+
+    ASSERT inner.value == 99, "Extracted inner value should be 99";
+
+    -- outer is now moved (consumed by extractInner)
+    -- inner is the only owner of the Inner struct
+    -- No leaks or double-frees should occur
+    RETURN;
+END
