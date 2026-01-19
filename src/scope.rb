@@ -1,13 +1,14 @@
 require "set"
 
 class Scope
-  attr_accessor :locals, :var_states, :dependencies, :var_states
+  attr_accessor :locals, :var_states, :dependencies, :var_states, :moved_paths
 
   def initialize
     @locals = {}
     @dependencies = {}
     @types = {}
     @var_states = {}
+    @moved_paths = []  # Track moved sub-paths like [:foo, :child]
   end
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [])
@@ -42,6 +43,7 @@ class Scope
     # 2. Copy State Maps
     @var_states = original.var_states.dup
     @dependencies = original.dependencies.dup
+    @moved_paths = original.moved_paths.map(&:dup)
 
     # 3. Types are usually static definitions, so a shallow copy is fine
     @types = original.instance_variable_get(:@types).dup
@@ -140,6 +142,22 @@ class Scope
 
   def mark_borrowed(name, path, type)
     @locals.dig(name, :borrowed_paths) << { path: path, type: type }
+  end
+
+  # Mark a sub-path as moved (e.g., [:foo, :child] for foo.child)
+  def mark_path_moved(path)
+    @moved_paths << path
+  end
+
+  # Check if a path or any of its ancestors has been moved
+  # e.g., if [:foo, :child] is moved, then [:foo, :child, :value] is also dead
+  def is_path_moved?(path)
+    @moved_paths.any? do |moved|
+      # Check if 'moved' is a prefix of 'path' (or equal)
+      # e.g., moved=[:foo, :child], path=[:foo, :child, :value] -> true
+      # e.g., moved=[:foo, :child], path=[:foo] -> false (parent is still valid)
+      path.size >= moved.size && path[0...moved.size] == moved
+    end
   end
 
   def is_on_heap?(name)

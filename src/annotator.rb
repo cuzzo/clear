@@ -798,6 +798,16 @@ private
   def visit_GetField(node)
     visit(node.target)
 
+    # Check if this path has been moved
+    path = get_path_to_root(node)
+    if path
+      root_name = path.first.to_s
+      scope = lookup_scope_for(root_name)
+      if scope&.is_path_moved?(path)
+        error!(node, "Use of moved value '#{path.join(".")}'")
+      end
+    end
+
     type = node.target.resolved_type
 
     # Struct Field Lookup

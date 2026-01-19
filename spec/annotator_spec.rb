@@ -1759,20 +1759,73 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "Sub-move" do
-        let(:code) { <<~FLUX
-            STRUCT Bar { index: Number }
-            STRUCT Baz { name: Byte[] }
-            STRUCT Foo { bar: Bar, baz: Baz }
-            STRUCT Root { foo: Foo }
+      context "Sub-path Move Tracking" do
+        context "moving a sub-field marks it as dead" do
+          let(:code) { <<~FLUX
+              STRUCT Inner { value: Int64 }
+              STRUCT Outer { inner: Inner, count: Int64 }
 
-            VAR r = Root{ foo: Foo{ bar: Bar{ index: 1 }, baz: Baz{ name: "Test"}}};
-            VAR f = r.foo;
-          FLUX
-        }
+              FN test() ->
+                VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+                VAR x = outer.inner;  -- moves outer.inner
+                VAR y = outer.inner;  -- ERROR: outer.inner is moved
+              END
+            FLUX
+          }
+          it "raises error on use-after-move of sub-path" do
+            expect { ast }.to raise_error(/Use of moved value 'outer.inner'/)
+          end
+        end
 
-        it "fails on moving sub-fields" do
-          expect { ast }.to raise_error(/NOT YET SUPPORTED/i)
+        context "moving a sub-field allows access to sibling fields" do
+          let(:code) { <<~FLUX
+              STRUCT Inner { value: Int64 }
+              STRUCT Outer { inner: Inner, count: Int64 }
+
+              FN test() ->
+                VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+                VAR x = outer.inner;   -- moves outer.inner
+                VAR y = outer.count;   -- OK: outer.count is still valid
+              END
+            FLUX
+          }
+          it "allows access to sibling fields after sub-move" do
+            expect { ast }.not_to raise_error
+          end
+        end
+
+        context "moving a sub-field marks nested children as dead" do
+          let(:code) { <<~FLUX
+              STRUCT Deep { val: Int64 }
+              STRUCT Inner { deep: Deep }
+              STRUCT Outer { inner: Inner }
+
+              FN test() ->
+                VAR outer = Outer{ inner: Inner{ deep: Deep{ val: 1 } } };
+                VAR x = outer.inner;       -- moves outer.inner
+                VAR y = outer.inner.deep;  -- ERROR: outer.inner is moved, so outer.inner.deep is dead
+              END
+            FLUX
+          }
+          it "raises error on accessing child of moved sub-path" do
+            expect { ast }.to raise_error(/Use of moved value 'outer.inner'/)
+          end
+        end
+
+        context "primitive fields are copied, not moved" do
+          let(:code) { <<~FLUX
+              STRUCT Point { x: Int64, y: Int64 }
+
+              FN test() ->
+                VAR p = Point{ x: 10, y: 20 };
+                VAR a = p.x;  -- primitives copy
+                VAR b = p.x;  -- still valid
+              END
+            FLUX
+          }
+          it "allows multiple reads of primitive sub-fields" do
+            expect { ast }.not_to raise_error
+          end
         end
       end
 

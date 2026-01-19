@@ -1,15 +1,25 @@
 require_relative "./ast"
 
 module OwnershipTracker
-  # If the RHS is an Identifier, and it's an Affine or Linear Type,
+  # If the RHS is an Identifier or GetField, and it's an Affine or Linear Type,
   # We must MOVE it.
   def handle_assign_move(node)
-    # TODO: Allow swap for pointers and optionals.
-    if node.value.is_a?(AST::GetField)
-      error!(node, "NOT YET SUPPORTED: Cannot move field '#{node.value.field}' directly. Use 'swap' to replace it, or 'copy' (future) to clone it.")
+    # Case 1: Moving a sub-field (e.g., VAR x = foo.child)
+    if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
+      path = get_path_to_root(node.value)
+      return if path.nil?
+
+      rhs_type = node.value.resolved_type
+      if Type.new(rhs_type).requires_move?
+        # Find the scope that owns this variable
+        root_name = path.first.to_s
+        scope = lookup_scope_for(root_name)
+        scope&.mark_path_moved(path) if scope
+      end
+      return
     end
 
-    # 1. Handle the Source (RHS)
+    # Case 2: Moving a whole variable (e.g., VAR x = foo)
     return if !node.value.is_a?(AST::Identifier)
 
     rhs_name = node.value.name
