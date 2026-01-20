@@ -783,13 +783,9 @@ private
 
       # Validate Key Type
       # Allow String (stack), %String[] (heap), or Byte[] (raw)
-      index_type = node.index.full_type
-      is_string_key = index_type == :String ||
-                      index_type.to_s == "%String[]" ||
-                      index_type.to_s.start_with?("Byte[")
-
-      unless is_string_key
-         error!(node, "Map keys must be Strings, got #{index_type}")
+      index_type_info = node.index.type_info
+      unless index_type_info&.string?
+         error!(node, "Map keys must be Strings, got #{node.index.resolved_type}")
       end
 
     # Case 2: Array Access "Number[]" -> :Number
@@ -832,9 +828,10 @@ private
 
     # A slice of T[] is T[]
     # A slice of T[3] is T[] (Fixed becomes Dynamic view)
-    base_type = node.target.resolved_type.to_s
-    if match = base_type.match(/^(\w+)\[.*\]$/)
-      node.full_type = :"#{match[1]}[]"
+    target_type = node.target.type_info
+    if target_type&.array?
+      element = target_type.element_type.resolved
+      node.full_type = :"#{element}[]"
     else
       node.full_type = :Any
     end
@@ -1005,7 +1002,7 @@ private
       if node.left.metatype != :array
         error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")
       end
-      item_type = node.left.resolved_type.to_s.gsub(/\[(\d+|\*)?\]$/, "").to_sym
+      item_type = node.left.type_info.element_type.resolved
 
       # B. Create a temporary Scope for the SELECT body
       with_new_scope do
@@ -1075,16 +1072,9 @@ private
            expected = param[:type]
            actual = node.left.resolved_type
 
-           # Use existing compatibility check
+           # Type.accepts? handles slice coercion (Number[3] -> Number[])
            unless is_safe_autocast?(actual, expected)
-             # Check for Slice Coercion (e.g. Number[3] -> Number[])
-             # This duplicates logic from verify_function_signature
-             is_slice_match = expected.to_s.end_with?("[]") &&
-                              actual.to_s.start_with?(expected.to_s.chomp("[]") + "[")
-
-             unless is_slice_match
-               error!(node.left, :ARGUMENT_TYPE_ERROR, "Pipe Input", 1, param[:name], expected, actual)
-             end
+             error!(node.left, :ARGUMENT_TYPE_ERROR, "Pipe Input", 1, param[:name], expected, actual)
            end
         end
 
@@ -1161,8 +1151,8 @@ private
     visit(node.left)
     visit(node.right)
 
-    t_left_type = Type.new(node.left.full_type)
-    t_right = node.right.full_type
+    t_left_type = node.left.type_info
+    t_right_type = node.right.type_info
 
     # Handle OR RAISE: bubble up error (Zig's try)
     if node.right.is_a?(AST::OrRaise)
@@ -1190,7 +1180,6 @@ private
     # Handle error union types: !T OR default -> T
     if t_left_type.error_union?
       payload_type = t_left_type.payload_type
-      t_right_type = Type.new(t_right)
 
       # Type check: RHS must be compatible with payload type
       unless payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
@@ -1203,15 +1192,14 @@ private
     end
 
     # Standard OR behavior
-    t_left = node.left.full_type
     # Type Safety: Usually we want them to match.
     # If LHS is "Number?" (Nullable), RHS must be "Number".
-    if t_left == t_right
-      node.full_type = t_left
+    if t_left_type.resolved == t_right_type.resolved
+      node.full_type = t_left_type.resolved
     else
       # If types mismatch, it might be :Any, or you could support Union types
       # For this stage, default to the LHS type or :Any
-      node.full_type = t_left
+      node.full_type = t_left_type.resolved
     end
   end
 
@@ -1264,7 +1252,7 @@ private
       node.full_type = HEAP_STRING_TYPE
 
       # Cast non-string side to String
-      if t_left != STRING_TYPE && is_safe_autocast(t_left, STRING_TYPE)
+      if t_left != STRING_TYPE && is_safe_autocast?(t_left, STRING_TYPE)
         node.left.coerced_type = STRING_TYPE
       end
       if t_right != STRING_TYPE && is_safe_autocast?(t_right, STRING_TYPE)
@@ -1274,7 +1262,7 @@ private
       node.storage = :frame
 
     # D. Array Concatenation
-    elsif t_left.to_s.end_with?("]") && t_right.to_s.end_with?("]")
+    elsif node.left.type_info&.array? && node.right.type_info&.array?
       if t_left != t_right
         # We could allow Number[] + Number[3], but result is Number[]
         # For now, simplistic check:
@@ -1286,7 +1274,7 @@ private
       node.storage = :frame
 
     else
-      error!(node, "Type Error: Cannot add type: #{type_left} and #{type_right}")
+      error!(node, "Type Error: Cannot add type: #{t_left} and #{t_right}")
     end
   end
 
@@ -1314,8 +1302,8 @@ private
     visit(node.value)
 
     # Validate that the type is actually copyable
-    type = Type.new(node.value.resolved_type)
-    unless type.copyable? { |name| lookup_type_schema(name) }
+    type = node.value.type_info
+    unless type&.copyable? { |name| lookup_type_schema(name) }
       error!(node, "Cannot COPY non-copyable type '#{node.value.resolved_type}'")
     end
 
@@ -1326,8 +1314,8 @@ private
     visit(node.target)
 
     # Validate that the target is actually an optional type
-    type = Type.new(node.target.resolved_type)
-    unless type.optional?
+    type = node.target.type_info
+    unless type&.optional?
       error!(node, "Cannot unwrap non-optional type '#{node.target.resolved_type}' with '?'")
     end
 
@@ -1380,23 +1368,17 @@ private
       return_type = sig[2] # The 3rd element is the return type
 
       # 2. Construct the New List Type
-      # If the function returns :String, map returns :String[]
-      # We check if it's a primitive or complex type to format correctly
-      if return_type.to_s.end_with?("]")
-        # e.g. String[] -> String[][]
-        return :"#{return_type}[]"
-      else
-        # e.g. Number -> Number[]
-        return :"#{return_type}[]"
-      end
+      # map returns an array of whatever the function returns
+      # e.g. Number -> Number[], String[] -> String[][]
+      return :"#{return_type}[]"
     end
 
     # Fallback if we can't read the signature
     return :"Any[]"
   end
 
-  def get_type_slot_size(type_name)
-    type_obj = type_name.is_a?(Symbol) ? Type.new(type_name) : type_name
+  def get_type_slot_size(type_input)
+    type_obj = type_input.is_a?(Type) ? type_input : Type.new(type_input)
     type_obj.slot_size { |name| lookup_type_schema(name) }
   end
 
@@ -1458,20 +1440,22 @@ private
   # TYPE CHECKING & AUTOCAST LOGIC
   # ==========================================
 
-  # TODO: use directly -> track down everywhere we have a string, make a type
+  # Coerce input to Type object if needed
+  def to_type(input)
+    input.is_a?(Type) ? input : Type.new(input)
+  end
+
   def is_safe_autocast?(source_type, target_type)
-    source = source_type.is_a?(Symbol) ? Type.new(source_type) : source_type
-    target = target_type.is_a?(Symbol) ? Type.new(target_type) : target_type
-    target.accepts?(source)
+    to_type(target_type).accepts?(to_type(source_type))
   end
 
   def throw_assign_mismatch_error!(node, source_type, target_type)
-    source = source_type.is_a?(Symbol) ? Type.new(source_type) : source_type
-    target = target_type.is_a?(Symbol) ? Type.new(target_type) : target_type
+    source = to_type(source_type)
+    target = to_type(target_type)
     if target.array_overflow?(source)
-      error!(node, :FIXED_ARRAY_SIZE_MISMATCH, target.capacity, source_type)
+      error!(node, :FIXED_ARRAY_SIZE_MISMATCH, target.capacity, source.resolved)
     else
-      error!(node, "Type Mismatch: Cannot assign #{source_type} to #{node.type}")
+      error!(node, "Type Mismatch: Cannot assign #{source.resolved} to #{node.type}")
     end
   end
 end
