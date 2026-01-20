@@ -377,13 +377,13 @@ private
 
       # If we are returning a variable, we are moving it out.
       # We must disable the local free.
+      prefix = ""
       if node.value.is_a?(AST::Identifier)
-        # Check if it's a heap variable (simple heuristic for now)
-        var_name = node.value.name
-        # Ideally look up scope, but for now assuming pattern:
-        prefix = "#{var_name}_moved = true;\n"
-      else
-        prefix = ""
+        # Only generate move tracking for heap variables that have _moved tracking set up
+        if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
+          var_name = node.value.name
+          prefix = "#{var_name}_moved = true;\n"
+        end
       end
 
       "#{prefix}return #{val_code};"

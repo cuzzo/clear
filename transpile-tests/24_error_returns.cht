@@ -34,28 +34,31 @@ END
 -- Tests
 -- ==========================================
 
--- Test 1: Successful division
-print("Test 1: divide(10, 2) OR -1");
-VAR r1 = divide(10, 2) OR -1;
-print(r1);
-ASSERT r1 == 5, "Expected 5";
+FN cheatMain() RETURNS Void ->
+  -- Test 1: Successful division
+  print("Test 1: divide(10, 2) OR -1");
+  VAR r1 = divide(10, 2) OR -1;
+  print(r1);
+  ASSERT r1 == 5, "Expected 5";
 
--- Test 2: Division by zero with fallback
-print("Test 2: divide(10, 0) OR -1");
-VAR r2 = divide(10, 0) OR -1;
-print(r2);
-ASSERT r2 == -1, "Expected -1 fallback";
+  -- Test 2: Division by zero with fallback
+  print("Test 2: divide(10, 0) OR -1");
+  VAR r2 = divide(10, 0) OR -1;
+  print(r2);
+  ASSERT r2 == -1, "Expected -1 fallback";
 
--- Test 3: Safe divide wrapping
-print("Test 3: safe_divide(10, 0)");
-VAR r3 = safe_divide(10, 0);
-print(r3);
-ASSERT r3 == 0, "Expected 0 from safe_divide";
+  -- Test 3: Safe divide wrapping
+  print("Test 3: safe_divide(10, 0)");
+  VAR r3 = safe_divide(10, 0);
+  print(r3);
+  ASSERT r3 == 0, "Expected 0 from safe_divide";
 
--- Test 4: OR RAISE propagating success
-print("Test 4: compute(16) OR -999");
-VAR r4 = compute(16) OR -999;
-print(r4);
-ASSERT r4 == 4, "Expected 4 from compute(16)";
+  -- Test 4: OR RAISE propagating success
+  print("Test 4: compute(16) OR -999");
+  VAR r4 = compute(16) OR -999;
+  print(r4);
+  ASSERT r4 == 4, "Expected 4 from compute(16)";
 
-print("ALL ERROR RETURN TESTS PASSED");
+  print("ALL ERROR RETURN TESTS PASSED");
+  RETURN;
+END
