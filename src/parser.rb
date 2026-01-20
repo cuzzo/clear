@@ -480,6 +480,14 @@ class Parser
       # TODO: TEST!
       rhs = AST::ReturnNode.new(previous, nil)
 
+    # Syntax: ... OR RAISE (bubble up error - Zig's `try`)
+    elsif match!(:KEYWORD, 'RAISE')
+      rhs = AST::OrRaise.new(previous)
+
+    # Syntax: ... OR PASS (ignore error, use undefined/default)
+    elsif match!(:KEYWORD, 'PASS')
+      rhs = AST::OrPass.new(previous)
+
     # Syntax: ... OR EXIT
     elsif match!(:KEYWORD, 'EXIT')
       exit_token = previous
@@ -653,6 +661,12 @@ class Parser
   end
 
   def parse_type_annotation
+    # Check for error union prefix: !Type (Zig-style error returns)
+    error_prefix = ""
+    if match!(:CHAR, '!')
+      error_prefix = "!"
+    end
+
     # Check for optional prefix: ?Type
     optional_prefix = ""
     if match!(:CHAR, '?')
@@ -690,7 +704,7 @@ class Parser
       end
     end
 
-    "#{optional_prefix}#{heap_prefix}#{base}#{inner}".to_sym
+    "#{error_prefix}#{optional_prefix}#{heap_prefix}#{base}#{inner}".to_sym
   end
 
   def parse_with_capability

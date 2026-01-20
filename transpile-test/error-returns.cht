@@ -1,0 +1,61 @@
+-- ==========================================
+-- Zig-style Error Returns Demo
+-- This demonstrates !T error union types
+-- ==========================================
+
+-- A function that can fail, returning !Number
+FN divide(a: Number, b: Number) RETURNS !Number ->
+  IF b == 0 THEN
+    RAISE "Division by zero";
+  END
+  RETURN a / b;
+END
+
+-- Using OR with a default value: !T OR val -> T
+FN safe_divide(a: Number, b: Number) RETURNS Number ->
+  VAR result = divide(a, b) OR 0;
+  RETURN result;
+END
+
+-- Using OR RAISE to bubble up errors (like Zig's `try`)
+FN compute(x: Number) RETURNS !Number ->
+  VAR half = divide(x, 2) OR RAISE;
+  VAR quarter = divide(half, 2) OR RAISE;
+  RETURN quarter;
+END
+
+-- Using OR PASS to ignore errors (use undefined)
+FN maybe_compute(x: Number) RETURNS Number ->
+  VAR result = divide(x, 0) OR PASS;
+  RETURN 42;
+END
+
+-- ==========================================
+-- Tests
+-- ==========================================
+
+-- Test 1: Successful division
+print("Test 1: divide(10, 2) OR -1");
+VAR r1 = divide(10, 2) OR -1;
+print(r1);
+ASSERT r1 == 5, "Expected 5";
+
+-- Test 2: Division by zero with fallback
+print("Test 2: divide(10, 0) OR -1");
+VAR r2 = divide(10, 0) OR -1;
+print(r2);
+ASSERT r2 == -1, "Expected -1 fallback";
+
+-- Test 3: Safe divide wrapping
+print("Test 3: safe_divide(10, 0)");
+VAR r3 = safe_divide(10, 0);
+print(r3);
+ASSERT r3 == 0, "Expected 0 from safe_divide";
+
+-- Test 4: OR RAISE propagating success
+print("Test 4: compute(16) OR -999");
+VAR r4 = compute(16) OR -999;
+print(r4);
+ASSERT r4 == 4, "Expected 4 from compute(16)";
+
+print("ALL ERROR RETURN TESTS PASSED");

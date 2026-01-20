@@ -111,7 +111,9 @@ private
 
       # We inject 'rt' into every function signature
       all_params = ["rt: *Runtime"] + params_zig
-      signature = "pub fn #{node.name}(#{all_params.join(', ')}) !#{final_type}"
+      # Don't add ! if the type is already an error union
+      return_type_str = final_type.start_with?("!") ? final_type : "!#{final_type}"
+      signature = "pub fn #{node.name}(#{all_params.join(', ')}) #{return_type_str}"
 
       prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
       prologue = node.uses_frame ? prologue : "_ = &rt;"
@@ -355,8 +357,20 @@ private
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
       # Standard call (pass rt)
+      # Note: We don't add 'try' here - let the caller decide via OR RAISE or context
       args = ["rt"] + node.args.map { |a| visit(a) }
-      "try #{node.name}(#{args.join(', ')})"
+      call = "#{node.name}(#{args.join(', ')})"
+
+      # If the call returns an error union and is not being handled by OR,
+      # we need to add 'try' to propagate errors implicitly
+      return_type = Type.new(node.full_type)
+      if return_type.error_union?
+        # Error union - caller should use OR to handle, or we propagate with try
+        "try #{call}"
+      else
+        # Non-error return - just call
+        "try #{call}"  # All functions can error in CHEAT (runtime allocations)
+      end
 
     when AST::ReturnNode
       val_code = node.value.nil? ? "" : visit(node.value)
@@ -423,6 +437,7 @@ private
     # TODO: Use Frame unless marked escaping
     when AST::BinaryOp
       return transpile_Smooth(node) if node.op == :SMOOTH
+      return transpile_OrRescue(node) if node.op == :OR_RESCUE
 
       left = visit(node.left)
       right = visit(node.right)
@@ -460,6 +475,17 @@ private
     when AST::Assert
       cond = visit(node.condition)
       "CheatLib.assert(#{cond}, \"#{node.message}\")"
+
+    when AST::Raise
+      # RAISE "message" - return an error in Zig
+      msg = visit(node.message_expr)
+      "return error.CheatError"
+
+    # Marker nodes for OR RAISE / OR PASS - handled in transpile_OrRescue
+    when AST::OrRaise
+      "error.OrRaise"  # Should not be visited directly
+    when AST::OrPass
+      "undefined"  # Should not be visited directly
 
     else
       raise "Unknown Node: #{node.class}"
@@ -509,6 +535,51 @@ private
 
     # Visit the fake node as if it were in the original source
     visit(synthetic_call)
+  end
+
+  # --- ERROR HANDLING (OR RESCUE) ---
+  def transpile_OrRescue(node)
+    t_left = Type.new(node.left.full_type)
+
+    # For error union handling, we need the raw call without 'try'
+    # Visit the left normally first (which may add 'try' for error unions)
+    left = visit(node.left)
+
+    # If this is an error union, the visit may have added 'try' - strip it
+    # because we'll handle it with catch or explicit try here
+    left_raw = left.sub(/^try /, '')
+
+    # Handle OR RAISE: bubble up error (Zig's `try`)
+    if node.right.is_a?(AST::OrRaise)
+      if t_left.error_union?
+        # Use Zig's try to propagate error
+        return "try #{left_raw}"
+      else
+        # Non-error type: just return the value
+        return left
+      end
+    end
+
+    # Handle OR PASS: ignore error, use undefined (Zig's `catch |_| undefined`)
+    if node.right.is_a?(AST::OrPass)
+      if t_left.error_union?
+        # Use Zig's catch to ignore error and return undefined
+        return "(#{left_raw} catch undefined)"
+      else
+        return left
+      end
+    end
+
+    # Handle error union with default value: !T OR default -> T
+    if t_left.error_union?
+      right = visit(node.right)
+      # Use Zig's catch to provide fallback value
+      return "(#{left_raw} catch #{right})"
+    end
+
+    # Standard OR behavior (non-error types)
+    right = visit(node.right)
+    return "(#{left}) orelse #{right}"
   end
 
   # --- HIGHER ORDER FUNCTIONS ---
@@ -648,7 +719,14 @@ private
   def transpile_type(type)
     t = type.to_s
 
-    # 0. Handle Optional types: ?T -> ?zig_type
+    # 0a. Handle Error Union types: !T -> !zig_type (Zig-style error returns)
+    if t.start_with?("!")
+      inner = t[1..]  # Strip the ! prefix
+      zig_inner = transpile_type(inner)
+      return "!#{zig_inner}"
+    end
+
+    # 0b. Handle Optional types: ?T -> ?zig_type
     if t.start_with?("?")
       inner = t[1..]  # Strip the ? prefix
       zig_inner = transpile_type(inner)
@@ -726,6 +804,15 @@ private
     to_str = to.to_s
     if from_str.end_with?("[]") && to_str.end_with?("[]")
       return code
+    end
+
+    # E. Error union coercion: T -> !T (Zig handles this automatically)
+    #    No explicit cast needed when returning payload from error union function
+    if to_str.start_with?("!")
+      payload_type = to_str[1..]
+      if from_str == payload_type || from == to.to_s[1..].to_sym
+        return code  # Zig auto-wraps payload in error union
+      end
     end
 
     # Fallback: Zig's generic cast (often works for simple types)

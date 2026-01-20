@@ -376,6 +376,12 @@ private
      node.full_type = :NoReturn # Special type indicating execution stops
   end
 
+  def visit_Raise(node)
+    # RAISE "message" - signals an error
+    visit(node.message_expr) if node.message_expr
+    node.full_type = :NoReturn # Raises propagate up or are caught
+  end
+
   # ==========================================
   # VARIABLES & DEPENDENCIES
   # ==========================================
@@ -1155,9 +1161,49 @@ private
     visit(node.left)
     visit(node.right)
 
-    t_left = node.left.full_type
+    t_left_type = Type.new(node.left.full_type)
     t_right = node.right.full_type
 
+    # Handle OR RAISE: bubble up error (Zig's try)
+    if node.right.is_a?(AST::OrRaise)
+      if t_left_type.error_union?
+        # Unwrap to payload type - error will be propagated
+        node.full_type = t_left_type.payload_type.resolved
+      else
+        # OR RAISE on non-error type just passes through
+        node.full_type = t_left_type.resolved
+      end
+      return
+    end
+
+    # Handle OR PASS: ignore error, use undefined/default
+    if node.right.is_a?(AST::OrPass)
+      if t_left_type.error_union?
+        # Unwrap to payload type - error will be ignored
+        node.full_type = t_left_type.payload_type.resolved
+      else
+        node.full_type = t_left_type.resolved
+      end
+      return
+    end
+
+    # Handle error union types: !T OR default -> T
+    if t_left_type.error_union?
+      payload_type = t_left_type.payload_type
+      t_right_type = Type.new(t_right)
+
+      # Type check: RHS must be compatible with payload type
+      unless payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
+        error!(node, "Type mismatch in OR: expected #{payload_type.resolved}, got #{t_right_type.resolved}")
+      end
+
+      # Result is the payload type (error is handled)
+      node.full_type = payload_type.resolved
+      return
+    end
+
+    # Standard OR behavior
+    t_left = node.left.full_type
     # Type Safety: Usually we want them to match.
     # If LHS is "Number?" (Nullable), RHS must be "Number".
     if t_left == t_right
@@ -1167,6 +1213,18 @@ private
       # For this stage, default to the LHS type or :Any
       node.full_type = t_left
     end
+  end
+
+  def visit_OrRaise(node)
+    # This is a marker node for OR RAISE - no type annotation needed
+    # The actual type handling is done in visit_OrRescue
+    node.full_type = :Void
+  end
+
+  def visit_OrPass(node)
+    # This is a marker node for OR PASS - no type annotation needed
+    # The actual type handling is done in visit_OrRescue
+    node.full_type = :Void
   end
 
   def visit_LogicalOp(node)

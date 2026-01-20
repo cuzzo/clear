@@ -77,7 +77,15 @@ class Type
       return wrapped_type.accepts?(other_type.wrapped_type) if other_type.optional?
     end
 
-    # 4. Array Coercion (The complex part from your Annotator)
+    # 4. Error Union Coercion: !T accepts T or !T
+    if self.error_union?
+      # Accept the payload type (e.g., !Number accepts Number)
+      return payload_type.accepts?(other_type) if !other_type.error_union?
+      # Accept same error union type
+      return payload_type.accepts?(other_type.payload_type) if other_type.error_union?
+    end
+
+    # 5. Array Coercion (The complex part from your Annotator)
     if self.array?
       return false if !other_type.array?
       return true if other_type.empty_list?
@@ -160,7 +168,7 @@ class Type
 
   # TODO: keep metatype from ast, use that
   def struct?
-    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional?
+    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union?
   end
 
   def optional?
@@ -170,6 +178,16 @@ class Type
   def wrapped_type
     return nil unless optional?
     @wrapped_type_obj ||= Type.new(@wrapped_type_raw || :Any)
+  end
+
+  # Error union types: !T (Zig-style error returns)
+  def error_union?
+    @is_error_union
+  end
+
+  def payload_type
+    return nil unless error_union?
+    @payload_type_obj ||= Type.new(@payload_type_raw || :Any)
   end
 
   def element_type
@@ -230,7 +248,17 @@ class Type
     str = @raw.to_s
     original_str = str  # Keep original for resolved_cache
 
-    # A. Detect Optional prefix: ?Type
+    # A. Detect Error Union prefix: !Type (Zig-style error returns)
+    if str.start_with?("!")
+      @is_error_union = true
+      @payload_type_raw = str[1..].to_sym  # Store the inner type
+      str = str[1..]  # Strip the ! for further parsing of inner type
+    else
+      @is_error_union = false
+      @payload_type_raw = nil
+    end
+
+    # B. Detect Optional prefix: ?Type
     if str.start_with?("?")
       @is_optional = true
       @wrapped_type_raw = str[1..].to_sym  # Store the inner type
@@ -240,7 +268,7 @@ class Type
       @wrapped_type_raw = nil
     end
 
-    # B. Initialize location based on "%" prefix
+    # C. Initialize location based on "%" prefix
     if str.start_with?("%")
       @location = :heap
       str = str[1..] # Strip the % so we can parse the inner type cleanly
@@ -250,7 +278,7 @@ class Type
       @location = :frame
     end
 
-    # C. Detect Array Structure
+    # D. Detect Array Structure
     # Regex Breakdown:
     #   ^       Start of string
     #   (.+)    Capture Group 1: Base Type (e.g. "Number")

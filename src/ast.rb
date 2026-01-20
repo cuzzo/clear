@@ -120,6 +120,8 @@ module AST
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
+  OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
+  OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
 
   UNARY_OPS = ['-', '!', '~']
 
