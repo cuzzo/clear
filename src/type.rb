@@ -1,3 +1,6 @@
+# Result struct for binary operation type resolution
+BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
+
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :location, :mutability, :ownership, :lifetime_constraint
@@ -5,6 +8,84 @@ class Type
   # Enum constants for clarity
   LOCATIONS = [:stack, :frame, :heap]
   OWNERSHIP = [:unique, :borrowed, :shared, :static]
+
+  # String type constants
+  STRING_TYPE = :"String[]"
+  HEAP_STRING_TYPE = :"%String[]"
+
+  # Operator categories
+  BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
+  NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD]
+
+  # Resolves the result type of a binary operation given two operand types.
+  # Returns a BinaryOpResult with type, optional coercions, and storage.
+  def self.binary_op(op, left_type, right_type)
+    t_left = left_type&.resolved
+    t_right = right_type&.resolved
+
+    case op
+    when :AND, :OR
+      BinaryOpResult.new(type: :Bool)
+
+    when *BOOL_RESULT_OPS
+      BinaryOpResult.new(type: :Bool)
+
+    when *NUMBER_RESULT_OPS
+      resolve_numeric_op(t_left, t_right)
+
+    when :ADD
+      resolve_add_op(t_left, t_right, left_type, right_type)
+
+    else
+      BinaryOpResult.new(error: "Unknown operator: #{op}")
+    end
+  end
+
+  private
+
+  def self.resolve_numeric_op(t_left, t_right)
+    if t_left == :Int64 && t_right == :Int64
+      BinaryOpResult.new(type: :Int64)
+    else
+      BinaryOpResult.new(type: :Number)
+    end
+  end
+
+  def self.resolve_add_op(t_left, t_right, left_type, right_type)
+    # A. Int64 Optimization
+    if t_left == :Int64 && t_right == :Int64
+      return BinaryOpResult.new(type: :Int64)
+    end
+
+    # B. Float Propagation (Mixed Int/Number -> Number)
+    if t_left == :Number || t_right == :Number
+      left_coercion = (t_left == :Int64) ? :Number : nil
+      right_coercion = (t_right == :Int64) ? :Number : nil
+      return BinaryOpResult.new(type: :Number, left_coercion: left_coercion, right_coercion: right_coercion)
+    end
+
+    # C. String Concatenation
+    if t_left == HEAP_STRING_TYPE || t_right == HEAP_STRING_TYPE
+      left_coercion = (t_left != STRING_TYPE && safe_autocast?(t_left, STRING_TYPE)) ? STRING_TYPE : nil
+      right_coercion = (t_right != STRING_TYPE && safe_autocast?(t_right, STRING_TYPE)) ? STRING_TYPE : nil
+      return BinaryOpResult.new(type: HEAP_STRING_TYPE, left_coercion: left_coercion, right_coercion: right_coercion, storage: :frame)
+    end
+
+    # D. Array Concatenation
+    if left_type&.array? && right_type&.array?
+      return BinaryOpResult.new(type: t_left, storage: :frame)
+    end
+
+    BinaryOpResult.new(error: "Cannot add types: #{t_left} and #{t_right}")
+  end
+
+  def self.safe_autocast?(from_type, to_type)
+    return false if from_type.nil?
+    # Numbers and booleans can be auto-cast to strings
+    [:Number, :Int64, :Bool, :Byte].include?(from_type)
+  end
+
+  public
 
   def initialize(raw_input)
     @raw = raw_input

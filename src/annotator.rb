@@ -13,9 +13,6 @@ class SemanticAnnotator
 
   attr_reader :scope_stack
 
-  STRING_TYPE = "String[]".to_sym
-  HEAP_STRING_TYPE = "%String[]".to_sym
-
   def initialize
     # We start with a global scope
     @scope_stack = [Scope.new]
@@ -39,7 +36,7 @@ private
     end
 
     # Setup Globals
-    current_scope.declare("argv", nil, STRING_TYPE, false, false, nil, :heap)
+    current_scope.declare("argv", nil, Type::STRING_TYPE, false, false, nil, :heap)
   end
 
   # Helper to get the top-most scope
@@ -949,7 +946,7 @@ private
         if node.storage == :stack
           :"Byte[#{node.value.length}]"
         else
-          :"%#{STRING_TYPE}"
+          :"%#{Type::STRING_TYPE}"
         end
       when :BYTE then :Byte
       when :BOOLEAN then :Bool
@@ -960,32 +957,28 @@ private
   end
 
   def visit_BinaryOp(node)
+    # Special operators that need custom handling
     case node.op
-    when :SMOOTH then visit_Smooth(node)
-    when :BIND_VAR then visit_BindVar(node)
-    when :OR_RESCUE then visit_OrRescue(node)
-    when :AND, :OR then visit_LogicalOp(node)
-    when :ADD then visit_Add(node)
-    else
-      if AST::BOOL_RESULT_OPS.include?(node.op)
-        visit(node.left)
-        visit(node.right)
-        node.full_type = :Bool
-      elsif AST::NUMBER_RESULT_OPS.include?(node.op)
-        visit(node.left)
-        visit(node.right)
-        # Preserve Int64 if both operands are Int64
-        t_left = node.left.resolved_type
-        t_right = node.right.resolved_type
-        if t_left == :Int64 && t_right == :Int64
-          node.full_type = :Int64
-        else
-          node.full_type = :Number
-        end
-      else
-        error!(node, "UNKNOWN OPERAND!")
-      end
+    when :SMOOTH then return visit_Smooth(node)
+    when :BIND_VAR then return visit_BindVar(node)
+    when :OR_RESCUE then return visit_OrRescue(node)
     end
+
+    # Standard binary operations - visit children first
+    visit(node.left)
+    visit(node.right)
+
+    # Delegate type resolution to Type class
+    result = Type.binary_op(node.op, node.left.type_info, node.right.type_info)
+
+    if result.error
+      error!(node, "Type Error: #{result.error}")
+    end
+
+    node.full_type = result.type
+    node.left.coerced_type = result.left_coercion if result.left_coercion
+    node.right.coerced_type = result.right_coercion if result.right_coercion
+    node.storage = result.storage if result.storage
   end
 
   # =========================================================
@@ -1316,69 +1309,6 @@ private
     # This is a marker node for OR PASS - no type annotation needed
     # The actual type handling is done in visit_OrRescue
     node.full_type = :Void
-  end
-
-  def visit_LogicalOp(node)
-    visit(node.left)
-    visit(node.right)
-
-    # Boolean operators always return Bool
-    node.full_type = :Bool
-  end
-
-  # TODO: Simplify with Type
-  def visit_Add(node)
-    visit(node.left)
-    visit(node.right)
-
-    t_left = node.left.resolved_type
-    t_right = node.right.resolved_type
-
-    # A. Int64 Optimization
-    if t_left == :Int64 && t_right == :Int64
-      node.full_type = :Int64
-
-    # B. Float Propagation (Mixed Int/Number -> Number)
-    elsif t_left == :Number || t_right == :Number
-      node.full_type = :Number
-
-      # Mark children for implicit casting if they are Ints
-      if t_left == :Int64
-        node.left.coerced_type = :Number
-      end
-      if t_right == :Int64
-        node.right.coerced_type = :Number
-      end
-
-    # C. String Concatenation
-    elsif t_left == HEAP_STRING_TYPE || t_right == HEAP_STRING_TYPE
-      node.full_type = HEAP_STRING_TYPE
-
-      # Cast non-string side to String
-      if t_left != STRING_TYPE && is_safe_autocast?(t_left, STRING_TYPE)
-        node.left.coerced_type = STRING_TYPE
-      end
-      if t_right != STRING_TYPE && is_safe_autocast?(t_right, STRING_TYPE)
-        node.right.coerced_type = STRING_TYPE
-      end
-
-      node.storage = :frame
-
-    # D. Array Concatenation
-    elsif node.left.type_info&.array? && node.right.type_info&.array?
-      if t_left != t_right
-        # We could allow Number[] + Number[3], but result is Number[]
-        # For now, simplistic check:
-        node.full_type = t_left
-      else
-        node.full_type = t_left
-      end
-
-      node.storage = :frame
-
-    else
-      error!(node, "Type Error: Cannot add type: #{t_left} and #{t_right}")
-    end
   end
 
   def visit_Give(node)
