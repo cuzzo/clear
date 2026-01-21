@@ -207,8 +207,22 @@ pub const CheatLib = struct {
     }
 
     // String Equality (Content check)
-    pub fn eql(s1: []const u8, s2: []const u8) bool {
+    pub fn strEql(s1: []const u8, s2: []const u8) bool {
         return std.mem.eql(u8, s1, s2);
+    }
+
+    // Generic Equality (works for primitives and slices)
+    pub fn eql(a: anytype, b: @TypeOf(a)) bool {
+        const T = @TypeOf(a);
+        const info = @typeInfo(T);
+
+        // For slices (like strings), use mem.eql
+        if (info == .pointer and info.pointer.size == .slice) {
+            return std.mem.eql(info.pointer.child, a, b);
+        }
+
+        // For primitives (int, float, bool), use ==
+        return a == b;
     }
 
     // Split: String -> List

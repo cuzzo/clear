@@ -1987,6 +1987,57 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ============================================================================
+  # 2g. Higher-Order Functions: DISTINCT (Unique elements)
+  # ============================================================================
+  describe "Higher-Order Syntax (DISTINCT)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic DISTINCT: unique elements by value" do
+      let(:code) {
+        <<~FLUX
+          VAR nums = [1, 2, 1, 3, 2, 4];
+          VAR unique = nums s> DISTINCT _;
+        FLUX
+      }
+
+      it "returns the same list type" do
+        expect(result).to eq(:"Number[]")
+      end
+    end
+
+    context "DISTINCT by struct field" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { id: Int64, name: String[] }
+          VAR items = [
+            Item{ id: 1_i64, name: %"a" },
+            Item{ id: 2_i64, name: %"b" },
+            Item{ id: 1_i64, name: %"c" }
+          ];
+          VAR unique_by_id = items s> DISTINCT _.id;
+        FLUX
+      }
+
+      it "returns the same list type" do
+        expect(result).to eq(:"Item[]")
+      end
+    end
+
+    context "Error Handling: DISTINCT on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> DISTINCT _;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot DISTINCT non-list type/)
+      end
+    end
+  end
+
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX

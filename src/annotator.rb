@@ -1111,6 +1111,27 @@ private
       node.right.full_type = node.right.expression.full_type
       node.storage = :frame
 
+    elsif node.right.is_a?(AST::DistinctOp)
+      # DISTINCT: list s> DISTINCT _.field (or just DISTINCT _)
+      # Returns unique elements, preserving order
+      if node.left.metatype != :array
+        error!(node.left, "Cannot DISTINCT non-list type #{node.left.resolved_type}")
+      end
+      item_type = node.left.type_info.element_type.resolved
+
+      # A. Analyze the expression with '_' in scope
+      with_new_scope do
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+        visit(node.right.expression)
+      end
+
+      # B. Store the key type for transpilation (what we're comparing for uniqueness)
+      node.right.full_type = node.right.expression.resolved_type
+
+      # C. Result type is the same list type
+      node.full_type = :"#{item_type}[]"
+      node.storage = :frame
+
     elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)
       # We intentionally modify the AST temporarily to leverage visit_FuncCall's

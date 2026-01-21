@@ -545,6 +545,9 @@ private
 
     elsif node.right.is_a?(AST::UnnestOp)
       return transpile_unnest(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::DistinctOp)
+      return transpile_distinct(node.left, node.right, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -907,6 +910,65 @@ private
               }
           }
           break :blk unn_result;
+      }
+    ZIG
+  end
+
+  def transpile_distinct(list_node, distinct_node, smooth_node)
+    # DISTINCT: list s> DISTINCT _.field (or DISTINCT _)
+    # Returns unique elements, preserving insertion order
+
+    # 1. Setup Types
+    list_flux_type = list_node.full_type
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_zig_type = transpile_type(element_type_str)
+
+    # Key type for uniqueness comparison
+    key_flux_type = distinct_node.full_type
+    key_zig_type = transpile_type(key_flux_type.to_s)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+
+    # 3. Handle the '_' placeholder - we need two versions
+    #    One for the outer loop (it) and one for the inner check (it2)
+    @placeholder_name = "it"
+    expr_code = visit(distinct_node.expression)
+    @placeholder_name = "it2"
+    expr_code_inner = visit(distinct_node.expression)
+    @placeholder_name = nil
+
+    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
+    # 4. Generate Zig code for order-preserving distinct
+    #    Using linear scan for correctness with all types (including floats)
+    <<~ZIG
+      blk: {
+          const dist_src_list = #{list_code};
+          var dist_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, &.{});
+
+          // Handle both ArrayList and Slice
+          const dist_items = if (@hasField(@TypeOf(dist_src_list), "items")) dist_src_list.items else dist_src_list;
+
+          for (dist_items) |it| {
+              const dist_key = #{expr_code};
+
+              // Check if this key already exists in result (linear scan)
+              var dist_found = false;
+              const dist_result_items = dist_result.items;
+              for (dist_result_items) |it2| {
+                  const dist_existing_key = #{expr_code_inner};
+                  if (CheatLib.eql(dist_key, dist_existing_key)) {
+                      dist_found = true;
+                      break;
+                  }
+              }
+
+              if (!dist_found) {
+                  try dist_result.append(#{alloc}, it);
+              }
+          }
+          break :blk dist_result;
       }
     ZIG
   end

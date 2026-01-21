@@ -101,6 +101,7 @@ class Parser
   primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :expression])
   primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :expression])
   primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :expression])
+  primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do
