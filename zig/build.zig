@@ -125,6 +125,7 @@ pub fn build(b: *std.Build) void {
         "fiber-control-tests.zig",
         "fiber-memory-test.zig",
         "frame-test.zig",
+        "ownership-test.zig",
         "queues-test.zig",
         "safety-test.zig",
         "scheduler-test.zig",
