@@ -97,6 +97,7 @@ class Parser
   primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :expression])
   primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :expression])
   primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :expression])
+  primary(:KEYWORD, 'REDUCE') { parse_reduce_op }
 
   # Expression Grouping
   primary(:CHAR, '(') do
@@ -659,6 +660,17 @@ class Parser
       # TODO: Is this accurate?
       return AST::LambdaLit.new(percent_token, params, captures, body, :heap)
     end
+  end
+
+  # REDUCE(initial_value) expression
+  # e.g., myList s> REDUCE(0) acc + _.value
+  def parse_reduce_op
+    reduce_token = consume(:KEYWORD, 'REDUCE')
+    consume(:CHAR, '(')
+    initial_value = parse_expression
+    consume(:CHAR, ')')
+    body = parse_expression
+    AST::ReduceOp.new(reduce_token, initial_value, body)
   end
 
   def parse_type_annotation

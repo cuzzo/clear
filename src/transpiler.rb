@@ -514,6 +514,9 @@ private
 
     elsif node.right.is_a?(AST::IndexOp)
       return transpile_index_grouping(node.left, node.right.expression, node)
+
+    elsif node.right.is_a?(AST::ReduceOp)
+      return transpile_reduce(node.left, node.right)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -716,6 +719,41 @@ private
               gop.value_ptr.append(#{alloc}, it) catch @panic("INDEX append failed");
           }
           break :blk idx_result;
+      }
+    ZIG
+  end
+
+  def transpile_reduce(list_node, reduce_node)
+    # REDUCE: list s> REDUCE(initial) acc + _.value
+    # Generates a loop that accumulates values
+
+    # 1. Setup Types
+    acc_type = transpile_type(reduce_node.full_type)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+    initial_code = visit(reduce_node.initial_value)
+
+    # 3. Handle placeholders for 'acc' and '_'
+    @placeholder_name = "it"
+    @acc_placeholder = "acc"
+    expr_code = visit(reduce_node.expression)
+    @placeholder_name = nil
+    @acc_placeholder = nil
+
+    # 4. Generate Zig code for reduce loop
+    <<~ZIG
+      blk: {
+          const red_src_list = #{list_code};
+          var acc: #{acc_type} = #{initial_code};
+
+          // Handle both ArrayList and Slice
+          const red_items = if (@hasField(@TypeOf(red_src_list), "items")) red_src_list.items else red_src_list;
+
+          for (red_items) |it| {
+              acc = #{expr_code};
+          }
+          break :blk acc;
       }
     ZIG
   end

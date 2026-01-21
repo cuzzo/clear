@@ -1036,6 +1036,33 @@ private
       # Important: default to frame for now (even if a stack array)
       node.storage = :frame
 
+    elsif node.right.is_a?(AST::ReduceOp)
+      # REDUCE: list s> REDUCE(initial) acc + _.value
+      if node.left.metatype != :array
+        error!(node.left, "Cannot REDUCE non-list type #{node.left.resolved_type}")
+      end
+      item_type = node.left.type_info.element_type.resolved
+
+      # A. Analyze the initial value to get the accumulator type
+      visit(node.right.initial_value)
+      acc_type = node.right.initial_value.resolved_type
+
+      # B. Create scope with both 'acc' and '_'
+      with_new_scope do
+        # 'acc' is mutable (it accumulates)
+        current_scope.declare("acc", nil, acc_type, true, false, nil, :stack)
+        # '_' is the current element
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+
+        # C. Analyze the body expression
+        visit(node.right.expression)
+      end
+
+      # D. Result type is the accumulator type
+      node.full_type = acc_type
+      node.right.full_type = acc_type
+      node.storage = :stack
+
     elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)
       # We intentionally modify the AST temporarily to leverage visit_FuncCall's

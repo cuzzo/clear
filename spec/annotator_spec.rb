@@ -1765,6 +1765,57 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ============================================================================
+  # 2c. Higher-Order Functions: REDUCE (Fold)
+  # ============================================================================
+  describe "Higher-Order Syntax (REDUCE)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic REDUCE: sum of numbers" do
+      let(:code) {
+        <<~FLUX
+          VAR nums = [1, 2, 3, 4, 5];
+          VAR sum = nums s> REDUCE(0) acc + _;
+        FLUX
+      }
+
+      it "infers the accumulator type from initial value" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "REDUCE with struct field access" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Int64 }
+          VAR items = [
+            Item{ value: 10_i64 },
+            Item{ value: 20_i64 },
+            Item{ value: 30_i64 }
+          ];
+          VAR total = items s> REDUCE(0_i64) acc + _.value;
+        FLUX
+      }
+
+      it "infers Int64 from initial value" do
+        expect(result).to eq(:Int64)
+      end
+    end
+
+    context "Error Handling: REDUCE on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> REDUCE(0) acc + _;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot REDUCE non-list type/)
+      end
+    end
+  end
+
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX
