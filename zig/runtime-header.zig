@@ -114,17 +114,44 @@ pub const CheatLib = struct {
     }
 
     // Usage: rt.mapGet(i64, map, "key")
-    pub fn mapGet(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) V {
-        // Return value or Default (0/null).
-        // For v0.1 scripting, returning 0/empty is often friendlier than crashing.
+    // Smart return: if V is ArrayListUnmanaged(T), returns []T instead of the list struct
+    pub fn mapGet(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) MapGetReturnType(V) {
+        const is_array_list = comptime isArrayListUnmanaged(V);
+
         if (map.get(key)) |val| {
-            return val;
+            if (comptime is_array_list) {
+                return val.items; // Return slice for ArrayListUnmanaged
+            } else {
+                return val;
+            }
         }
 
         // Default values based on type
+        if (comptime is_array_list) return &[_]ArrayListElement(V){};
         if (V == i64 or V == f64) return 0;
         if (V == []const u8) return "";
-        return undefined; // Should ideally handle this better
+        return undefined;
+    }
+
+    // Helper: Check if type is ArrayListUnmanaged
+    fn isArrayListUnmanaged(comptime T: type) bool {
+        if (@typeInfo(T) != .@"struct") return false;
+        return @hasField(T, "items") and @hasField(T, "capacity") and !@hasField(T, "allocator");
+    }
+
+    // Helper: Get element type from ArrayListUnmanaged
+    fn ArrayListElement(comptime T: type) type {
+        const items_field = @typeInfo(T).@"struct".fields[0]; // items is first field
+        const slice_info = @typeInfo(items_field.type).pointer;
+        return slice_info.child;
+    }
+
+    // Helper: Compute return type for mapGet
+    fn MapGetReturnType(comptime V: type) type {
+        if (comptime isArrayListUnmanaged(V)) {
+            return []ArrayListElement(V);
+        }
+        return V;
     }
 
     // FILE

@@ -1708,6 +1708,63 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ============================================================================
+  # 2b. Higher-Order Functions: INDEX (Group By)
+  # ============================================================================
+  describe "Higher-Order Syntax (INDEX)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic INDEX: list s> INDEX _.field" do
+      let(:code) {
+        <<~FLUX
+          STRUCT User { name: String[], age: Int64 }
+          VAR users = [
+            User{ name: %"Alice", age: 30_i64 },
+            User{ name: %"Bob", age: 30_i64 },
+            User{ name: %"Charlie", age: 25_i64 }
+          ];
+          VAR grouped = users s> INDEX _.age;
+        FLUX
+      }
+
+      it "infers HashMap with array values" do
+        # INDEX _.age returns HashMap<User[]> (grouped by age)
+        expect(result).to eq(:"HashMap<User[]>")
+      end
+    end
+
+    context "INDEX with string keys: list s> INDEX _.name" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { category: String[], price: Number }
+          VAR items = [
+            Item{ category: %"food", price: 10 },
+            Item{ category: %"electronics", price: 100 },
+            Item{ category: %"food", price: 20 }
+          ];
+          VAR byCategory = items s> INDEX _.category;
+        FLUX
+      }
+
+      it "infers HashMap with string keys and array values" do
+        expect(result).to eq(:"HashMap<Item[]>")
+      end
+    end
+
+    context "Error Handling: INDEX on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> INDEX _;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot SELECT from non-list type/)
+      end
+    end
+  end
+
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX

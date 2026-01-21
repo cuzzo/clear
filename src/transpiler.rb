@@ -321,8 +321,17 @@ private
       index = visit(node.index)
 
       if node.target.metatype == :hashmap
-        inner_type = node.target.full_type.match(/HashMap<(.+)>/)[1]
-        zig_type = transpile_type(inner_type)
+        inner_type = node.target.full_type.to_s.match(/HashMap<(.+)>/)[1]
+
+        # For INDEX results (HashMap<T[]>), the runtime stores ArrayListUnmanaged(T)
+        # We need to pass the actual stored type, not the conceptual slice type
+        if inner_type.end_with?("[]")
+          element_type = inner_type.gsub(/[\[\]%]/, '')
+          zig_element = transpile_type(element_type)
+          zig_type = "std.ArrayListUnmanaged(#{zig_element})"
+        else
+          zig_type = transpile_type(inner_type)
+        end
 
         "CheatLib.mapGet(#{zig_type}, #{target}, #{index})"
       else
@@ -502,6 +511,9 @@ private
 
     elsif node.right.is_a?(AST::WhereOp)
       return transpile_where_filter(node.left, node.right.expression)
+
+    elsif node.right.is_a?(AST::IndexOp)
+      return transpile_index_grouping(node.left, node.right.expression, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -658,6 +670,52 @@ private
               }
           }
           break :blk res_list;
+      }
+    ZIG
+  end
+
+  def transpile_index_grouping(list_node, expression_node, smooth_node)
+    # INDEX groups elements by a key, returning HashMap<KeyType, ElementType[]>
+    # e.g., users s> INDEX _.age  returns HashMap<Int64, User[]>
+
+    # 1. Setup Types
+    #    Get the element type from the input list
+    list_flux_type = list_node.full_type
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_zig_type = transpile_type(element_type_str)
+
+    # The result type is an array of the element type (for HashMap values)
+    value_zig_type = "[]#{element_zig_type}"
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+
+    # 3. Handle the '_' placeholder
+    @placeholder_name = "it"
+    expr_code = visit(expression_node)
+    @placeholder_name = nil
+
+    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
+    # 4. Generate Zig code for grouping
+    #    We create a StringHashMap where values are ArrayLists of elements
+    <<~ZIG
+      blk: {
+          const idx_src_list = #{list_code};
+          var idx_result: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(#{element_zig_type})) = .{};
+
+          // Handle both ArrayList and Slice
+          const idx_items = if (@hasField(@TypeOf(idx_src_list), "items")) idx_src_list.items else idx_src_list;
+
+          for (idx_items) |it| {
+              const idx_key = #{expr_code};
+              const gop = idx_result.getOrPut(#{alloc}, idx_key) catch @panic("INDEX allocation failed");
+              if (!gop.found_existing) {
+                  gop.value_ptr.* = std.ArrayListUnmanaged(#{element_zig_type}){};
+              }
+              gop.value_ptr.append(#{alloc}, it) catch @panic("INDEX append failed");
+          }
+          break :blk idx_result;
       }
     ZIG
   end

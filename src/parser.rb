@@ -96,6 +96,7 @@ class Parser
 
   primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :expression])
   primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :expression])
+  primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do
