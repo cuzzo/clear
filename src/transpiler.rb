@@ -517,6 +517,9 @@ private
 
     elsif node.right.is_a?(AST::ReduceOp)
       return transpile_reduce(node.left, node.right)
+
+    elsif node.right.is_a?(AST::OrderByOp)
+      return transpile_order_by(node.left, node.right, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -754,6 +757,52 @@ private
               acc = #{expr_code};
           }
           break :blk acc;
+      }
+    ZIG
+  end
+
+  def transpile_order_by(list_node, order_node, smooth_node)
+    # ORDER_BY: list s> ORDER_BY _.field
+    # Generates code that copies and sorts the list
+
+    # 1. Setup Types
+    list_flux_type = list_node.full_type
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_zig_type = transpile_type(element_type_str)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+
+    # 3. Handle the '_' placeholder - use 'a' and 'b' for comparison
+    # We need to generate the key expression for both 'a' and 'b'
+    @placeholder_name = "a"
+    key_expr_a = visit(order_node.expression)
+    @placeholder_name = "b"
+    key_expr_b = visit(order_node.expression)
+    @placeholder_name = nil
+
+    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
+    # 4. Generate Zig code for sorting
+    <<~ZIG
+      blk: {
+          const ord_src_list = #{list_code};
+
+          // Handle both ArrayList and Slice
+          const ord_src_items = if (@hasField(@TypeOf(ord_src_list), "items")) ord_src_list.items else ord_src_list;
+
+          // Copy to new list
+          var ord_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, ord_src_items);
+          _ = &ord_result; // Suppress mutability warning (contents are mutated via .items)
+
+          // Sort using custom comparator
+          std.mem.sort(#{element_zig_type}, ord_result.items, {}, struct {
+              pub fn lessThan(_: void, a: #{element_zig_type}, b: #{element_zig_type}) bool {
+                  return #{key_expr_a} < #{key_expr_b};
+              }
+          }.lessThan);
+
+          break :blk ord_result;
       }
     ZIG
   end

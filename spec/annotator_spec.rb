@@ -1816,6 +1816,57 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ============================================================================
+  # 2d. Higher-Order Functions: ORDER_BY (Sort)
+  # ============================================================================
+  describe "Higher-Order Syntax (ORDER_BY)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic ORDER_BY: sort by field" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { name: String[], value: Int64 }
+          VAR items = [
+            Item{ name: %"c", value: 30_i64 },
+            Item{ name: %"a", value: 10_i64 },
+            Item{ name: %"b", value: 20_i64 }
+          ];
+          VAR sorted = items s> ORDER_BY _.value;
+        FLUX
+      }
+
+      it "returns the same list type" do
+        expect(result).to eq(:"Item[]")
+      end
+    end
+
+    context "ORDER_BY with simple values" do
+      let(:code) {
+        <<~FLUX
+          VAR nums = [3_i64, 1_i64, 2_i64];
+          VAR sorted = nums s> ORDER_BY _;
+        FLUX
+      }
+
+      it "returns the same list type" do
+        expect(result).to eq(:"Int64[]")
+      end
+    end
+
+    context "Error Handling: ORDER_BY on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> ORDER_BY _;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot SELECT from non-list type/)
+      end
+    end
+  end
+
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX

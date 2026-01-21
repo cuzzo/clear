@@ -119,6 +119,7 @@ module AST
   WhereOp      = Struct.new(:token, :expression) { include Locatable }
   IndexOp      = Struct.new(:token, :expression) { include Locatable }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable }
+  OrderByOp    = Struct.new(:token, :expression) { include Locatable }
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }

@@ -98,6 +98,7 @@ class Parser
   primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :expression])
   primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :expression])
   primary(:KEYWORD, 'REDUCE') { parse_reduce_op }
+  primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do

@@ -1,0 +1,25 @@
+STRUCT Item { name: String[], value: Int64 }
+
+FN cheatMain() RETURNS Void ->
+  -- Test 1: Sort structs by field
+  VAR items = %[
+    Item{ name: %"c", value: 30_i64 },
+    Item{ name: %"a", value: 10_i64 },
+    Item{ name: %"b", value: 20_i64 }
+  ];
+  VAR sorted = items s> ORDER_BY _.value;
+
+  ASSERT sorted[0].value == 10, "First should be 10";
+  ASSERT sorted[1].value == 20, "Second should be 20";
+  ASSERT sorted[2].value == 30, "Third should be 30";
+
+  -- Test 2: Sort simple integers
+  VAR nums = %[5_i64, 2_i64, 8_i64, 1_i64, 9_i64];
+  VAR sorted_nums = nums s> ORDER_BY _;
+
+  ASSERT sorted_nums[0] == 1, "First should be 1";
+  ASSERT sorted_nums[1] == 2, "Second should be 2";
+  ASSERT sorted_nums[2] == 5, "Third should be 5";
+  ASSERT sorted_nums[3] == 8, "Fourth should be 8";
+  ASSERT sorted_nums[4] == 9, "Fifth should be 9";
+END

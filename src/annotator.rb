@@ -998,7 +998,7 @@ private
     # 1. Visit the Left (Input) FIRST
     visit(node.left)
 
-    if node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp) || node.right.is_a?(AST::IndexOp)
+    if node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp) || node.right.is_a?(AST::IndexOp) || node.right.is_a?(AST::OrderByOp)
       if node.left.metatype != :array
         error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")
       end
@@ -1031,6 +1031,11 @@ private
         node.full_type = :"HashMap<#{item_type}[]>"
         # Store the key type for transpilation
         node.right.full_type = key_type
+      elsif node.right.is_a?(AST::OrderByOp)
+        # ORDER_BY returns the same list type, sorted
+        node.full_type = :"#{item_type}[]"
+        # Store key type for transpilation
+        node.right.full_type = node.right.expression.resolved_type
       end
 
       # Important: default to frame for now (even if a stack array)
