@@ -520,6 +520,9 @@ private
 
     elsif node.right.is_a?(AST::OrderByOp)
       return transpile_order_by(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::LimitOp)
+      return transpile_limit(node.left, node.right, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -803,6 +806,42 @@ private
           }.lessThan);
 
           break :blk ord_result;
+      }
+    ZIG
+  end
+
+  def transpile_limit(list_node, limit_node, smooth_node)
+    # LIMIT: list s> LIMIT n
+    # Returns at most n items from the list
+
+    # 1. Setup Types
+    list_flux_type = list_node.full_type
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_zig_type = transpile_type(element_type_str)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+    count_code = visit(limit_node.count)
+
+    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
+    # 3. Generate Zig code for limit
+    #    Use @min to handle case where list is smaller than limit
+    <<~ZIG
+      blk: {
+          const lim_src_list = #{list_code};
+
+          // Handle both ArrayList and Slice
+          const lim_src_items = if (@hasField(@TypeOf(lim_src_list), "items")) lim_src_list.items else lim_src_list;
+
+          // Calculate actual count (min of requested and available)
+          const lim_requested: usize = @intCast(#{count_code});
+          const lim_actual = @min(lim_requested, lim_src_items.len);
+
+          // Create new list with limited items
+          const lim_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, lim_src_items[0..lim_actual]);
+
+          break :blk lim_result;
       }
     ZIG
   end

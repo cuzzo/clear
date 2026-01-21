@@ -1068,6 +1068,24 @@ private
       node.right.full_type = acc_type
       node.storage = :stack
 
+    elsif node.right.is_a?(AST::LimitOp)
+      # LIMIT: list s> LIMIT n
+      if node.left.metatype != :array
+        error!(node.left, "Cannot LIMIT non-list type #{node.left.resolved_type}")
+      end
+      item_type = node.left.type_info.element_type.resolved
+
+      # A. Analyze the count expression
+      visit(node.right.count)
+      count_type = node.right.count.resolved_type
+      unless [:Int64, :Number].include?(count_type)
+        error!(node.right.count, "LIMIT count must be a number, got #{count_type}")
+      end
+
+      # B. Result type is the same list type
+      node.full_type = :"#{item_type}[]"
+      node.storage = :frame
+
     elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)
       # We intentionally modify the AST temporarily to leverage visit_FuncCall's

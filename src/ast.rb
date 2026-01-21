@@ -120,6 +120,7 @@ module AST
   IndexOp      = Struct.new(:token, :expression) { include Locatable }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable }
   OrderByOp    = Struct.new(:token, :expression) { include Locatable }
+  LimitOp      = Struct.new(:token, :count) { include Locatable }
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }

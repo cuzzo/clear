@@ -1867,6 +1867,57 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ============================================================================
+  # 2e. Higher-Order Functions: LIMIT
+  # ============================================================================
+  describe "Higher-Order Syntax (LIMIT)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic LIMIT: take first n items" do
+      let(:code) {
+        <<~FLUX
+          VAR nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+          VAR first_three = nums s> LIMIT 3;
+        FLUX
+      }
+
+      it "returns the same list type" do
+        expect(result).to eq(:"Int64[]")
+      end
+    end
+
+    context "LIMIT with structs" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Int64 }
+          VAR items = [
+            Item{ value: 10_i64 },
+            Item{ value: 20_i64 },
+            Item{ value: 30_i64 }
+          ];
+          VAR limited = items s> LIMIT 2;
+        FLUX
+      }
+
+      it "returns the same list type" do
+        expect(result).to eq(:"Item[]")
+      end
+    end
+
+    context "Error Handling: LIMIT on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> LIMIT 5;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot LIMIT non-list type/)
+      end
+    end
+  end
+
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX

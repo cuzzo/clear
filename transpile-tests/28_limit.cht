@@ -1,0 +1,36 @@
+STRUCT Item { name: String[], value: Int64 }
+
+FN cheatMain() RETURNS Void ->
+  -- Test 1: Basic LIMIT
+  VAR nums = %[1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+  VAR first_three = nums s> LIMIT 3;
+
+  ASSERT first_three.length() == 3, "Should have 3 items";
+  ASSERT first_three[0] == 1, "First should be 1";
+  ASSERT first_three[1] == 2, "Second should be 2";
+  ASSERT first_three[2] == 3, "Third should be 3";
+
+  -- Test 2: LIMIT larger than list size (should not crash)
+  VAR small = %[10_i64, 20_i64];
+  VAR limited = small s> LIMIT 100;
+
+  ASSERT limited.length() == 2, "Should have only 2 items";
+  ASSERT limited[0] == 10, "First should be 10";
+  ASSERT limited[1] == 20, "Second should be 20";
+
+  -- Test 3: LIMIT with structs
+  VAR items = %[
+    Item{ name: %"a", value: 1_i64 },
+    Item{ name: %"b", value: 2_i64 },
+    Item{ name: %"c", value: 3_i64 }
+  ];
+  VAR first_two = items s> LIMIT 2;
+
+  ASSERT first_two.length() == 2, "Should have 2 items";
+  ASSERT first_two[0].value == 1, "First value should be 1";
+  ASSERT first_two[1].value == 2, "Second value should be 2";
+
+  -- Test 4: LIMIT 0 should return empty list
+  VAR zero_limit = nums s> LIMIT 0;
+  ASSERT zero_limit.length() == 0, "Should have 0 items";
+END
