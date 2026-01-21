@@ -121,6 +121,7 @@ module AST
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable }
   OrderByOp    = Struct.new(:token, :expression) { include Locatable }
   LimitOp      = Struct.new(:token, :count) { include Locatable }
+  UnnestOp     = Struct.new(:token, :expression) { include Locatable }
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }

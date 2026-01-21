@@ -1918,6 +1918,75 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ============================================================================
+  # 2f. Higher-Order Functions: UNNEST (Flatmap)
+  # ============================================================================
+  describe "Higher-Order Syntax (UNNEST)" do
+    let(:result) { ast.statements.last.full_type }
+
+    context "Basic UNNEST: flatten nested arrays" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Container { values: Int64[] }
+          VAR containers = [
+            Container{ values: [1_i64, 2_i64] },
+            Container{ values: [3_i64, 4_i64] }
+          ];
+          VAR flattened = containers s> UNNEST _.values;
+        FLUX
+      }
+
+      it "returns the inner element type" do
+        expect(result).to eq(:"Int64[]")
+      end
+    end
+
+    context "UNNEST with multiple containers" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Batch { nums: Number[] }
+          VAR batches = [
+            Batch{ nums: [10, 20, 30] },
+            Batch{ nums: [40] },
+            Batch{ nums: [50, 60] }
+          ];
+          VAR all_nums = batches s> UNNEST _.nums;
+        FLUX
+      }
+
+      it "returns Number[]" do
+        expect(result).to eq(:"Number[]")
+      end
+    end
+
+    context "Error Handling: UNNEST on non-array field" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Int64 }
+          VAR items = [Item{ value: 10_i64 }];
+          VAR bad = items s> UNNEST _.value;
+        FLUX
+      }
+
+      it "raises a semantic error suggesting SELECT" do
+        expect { run(code) }.to raise_error(/UNNEST requires an array expression.*Use SELECT instead/)
+      end
+    end
+
+    context "Error Handling: UNNEST on a non-list" do
+      let(:code) {
+        <<~FLUX
+          VAR num = 100;
+          VAR bad = num s> UNNEST _;
+        FLUX
+      }
+
+      it "raises a semantic error" do
+        expect { run(code) }.to raise_error(/Cannot UNNEST non-list type/)
+      end
+    end
+  end
+
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX

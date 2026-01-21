@@ -100,6 +100,7 @@ class Parser
   primary(:KEYWORD, 'REDUCE') { parse_reduce_op }
   primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :expression])
   primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :expression])
+  primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do

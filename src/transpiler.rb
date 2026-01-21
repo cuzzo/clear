@@ -272,11 +272,13 @@ private
     when AST::ListLit
       # 1. Determine the Zig Type (T)
       #    The Annotator sets 'full_type' (e.g. :Number[] or :%User[])
-      #    We strip the brackets and % to get the base type.
+      #    We need the element type, so strip leading % and ONE trailing []
+      #    e.g., %Number[][] -> Number[] (element type for nested list)
       effective_type = node.coerced_type || node.full_type
       type_str = effective_type.to_s
 
-      base_type_sym = type_str.gsub(/[\[\]%]/, '')
+      # Strip leading % and one trailing [] to get element type
+      base_type_sym = type_str.gsub(/^%/, '').sub(/\[\]$/, '')
       zig_type = transpile_type(base_type_sym)
 
       # 2. Determine Allocator
@@ -288,7 +290,15 @@ private
       if node.items.empty?
         items_slice = "&.{}"
       else
-        items_list = node.items.map { |item| visit(item) }.join(", ")
+        items_list = node.items.map do |item|
+          item_code = visit(item)
+          # If item is an array type (ArrayList), convert to slice via .items
+          if item.type_info&.array?
+            "#{item_code}.items"
+          else
+            item_code
+          end
+        end.join(", ")
         items_slice = "&.{ #{items_list} }"
       end
 
@@ -367,7 +377,16 @@ private
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
       # Standard call (pass rt)
       # Note: We don't add 'try' here - let the caller decide via OR RAISE or context
-      args = ["rt"] + node.args.map { |a| visit(a) }
+      args_zig = node.args.map do |a|
+        arg_code = visit(a)
+        # If argument is an array (ArrayList), convert to slice via .items for function params
+        if a.type_info&.array?
+          "#{arg_code}.items"
+        else
+          arg_code
+        end
+      end
+      args = ["rt"] + args_zig
       call = "#{node.name}(#{args.join(', ')})"
 
       # If the call returns an error union and is not being handled by OR,
@@ -523,6 +542,9 @@ private
 
     elsif node.right.is_a?(AST::LimitOp)
       return transpile_limit(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::UnnestOp)
+      return transpile_unnest(node.left, node.right, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
@@ -842,6 +864,49 @@ private
           const lim_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, lim_src_items[0..lim_actual]);
 
           break :blk lim_result;
+      }
+    ZIG
+  end
+
+  def transpile_unnest(list_node, unnest_node, smooth_node)
+    # UNNEST: list s> UNNEST _.arr (flatmap)
+    # Flattens nested arrays into a single list
+
+    # 1. Setup Types - get the element type of the INNER array
+    inner_array_type = unnest_node.full_type.to_s  # e.g., "Int64[]"
+    inner_element_type = inner_array_type.gsub(/[\[\]%]/, '')
+    inner_zig_type = transpile_type(inner_element_type)
+
+    # 2. Transpile Inputs
+    list_code = visit(list_node)
+
+    # 3. Handle the '_' placeholder
+    @placeholder_name = "it"
+    expr_code = visit(unnest_node.expression)
+    @placeholder_name = nil
+
+    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+
+    # 4. Generate Zig code for flattening
+    <<~ZIG
+      blk: {
+          const unn_src_list = #{list_code};
+          var unn_result = try CheatLib.makeList(#{inner_zig_type}, #{alloc}, &.{});
+
+          // Handle both ArrayList and Slice
+          const unn_outer_items = if (@hasField(@TypeOf(unn_src_list), "items")) unn_src_list.items else unn_src_list;
+
+          for (unn_outer_items) |it| {
+              // Get the inner array from each element
+              const unn_inner = #{expr_code};
+              const unn_inner_items = if (@hasField(@TypeOf(unn_inner), "items")) unn_inner.items else unn_inner;
+
+              // Append all inner items to result
+              for (unn_inner_items) |inner_it| {
+                  try unn_result.append(#{alloc}, inner_it);
+              }
+          }
+          break :blk unn_result;
       }
     ZIG
   end

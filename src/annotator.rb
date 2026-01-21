@@ -1086,6 +1086,31 @@ private
       node.full_type = :"#{item_type}[]"
       node.storage = :frame
 
+    elsif node.right.is_a?(AST::UnnestOp)
+      # UNNEST: list s> UNNEST _.arr (flatmap)
+      if node.left.metatype != :array
+        error!(node.left, "Cannot UNNEST non-list type #{node.left.resolved_type}")
+      end
+      item_type = node.left.type_info.element_type.resolved
+
+      # A. Analyze the expression with '_' in scope
+      with_new_scope do
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+        visit(node.right.expression)
+      end
+
+      # B. Check that the expression evaluates to an array type
+      expr_type = Type.new(node.right.expression.full_type)
+      unless expr_type.array?
+        error!(node.right.expression, "UNNEST requires an array expression, got #{node.right.expression.resolved_type}. Use SELECT instead for non-array fields.")
+      end
+
+      # C. Result type is the element type of the nested array
+      nested_element_type = expr_type.element_type.resolved
+      node.full_type = :"#{nested_element_type}[]"
+      node.right.full_type = node.right.expression.full_type
+      node.storage = :frame
+
     elsif node.right.is_a?(AST::FuncCall)
       # Case 1: x s> f(y)  => f(x, y)
       # We intentionally modify the AST temporarily to leverage visit_FuncCall's

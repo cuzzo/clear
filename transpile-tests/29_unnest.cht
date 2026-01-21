@@ -1,0 +1,36 @@
+-- UNNEST test with struct field accessor pattern
+-- This is the most common use case: list s> UNNEST _.field
+
+STRUCT Item { id: Int64, tags: Int64[] }
+
+-- Helper to build Item without inline array literal issue
+FN makeItem(id: Int64, TAKES tags: Int64[]) RETURNS Item ->
+  RETURN Item{ id: id, tags: tags };
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Build items with nested arrays
+  VAR tags1 = %[10_i64, 20_i64];
+  VAR tags2 = %[30_i64, 40_i64, 50_i64];
+  VAR tags3 = %[60_i64];
+
+  VAR item1 = makeItem(1_i64, tags1);
+  VAR item2 = makeItem(2_i64, tags2);
+  VAR item3 = makeItem(3_i64, tags3);
+
+  MUTABLE items: Item[] = %[];
+  items.append(item1);
+  items.append(item2);
+  items.append(item3);
+
+  -- Test UNNEST: flatten all tags from all items
+  VAR all_tags = items s> UNNEST _.tags;
+
+  ASSERT all_tags.length() == 6, "Should have 6 tags total";
+  ASSERT all_tags[0] == 10, "First should be 10";
+  ASSERT all_tags[1] == 20, "Second should be 20";
+  ASSERT all_tags[2] == 30, "Third should be 30";
+  ASSERT all_tags[3] == 40, "Fourth should be 40";
+  ASSERT all_tags[4] == 50, "Fifth should be 50";
+  ASSERT all_tags[5] == 60, "Sixth should be 60";
+END
