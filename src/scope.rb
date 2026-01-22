@@ -267,3 +267,40 @@ class Scope
   end
 end
 
+# Helper module for scope stack management.
+# Include in classes that maintain @scope_stack.
+module ScopeHelper
+  def current_scope
+    @scope_stack.last
+  end
+
+  def lookup_scope_for(name)
+    # Search from Top (last) to Bottom (first)
+    @scope_stack.reverse_each do |scope|
+      return scope if scope.resolve_type(name) != :Any || scope.locals.key?(name)
+    end
+    nil
+  end
+
+  def lookup_type_schema(name)
+    # Search from Top (newest) to Bottom (global)
+    @scope_stack.reverse_each do |scope|
+      schema = scope.resolve_type_definition(name)
+      return schema if schema
+    end
+    nil
+  end
+
+  def with_new_scope(scope = nil)
+    new_scope = scope.nil? ? Scope.new : scope.dup
+    @scope_stack.push(new_scope)
+    yield
+    @scope_stack.pop
+  end
+
+  def is_global_scope?(scope)
+    # Assuming the first scope in the stack is global
+    scope == @scope_stack.first
+  end
+end
+
