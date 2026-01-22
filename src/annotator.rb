@@ -110,10 +110,6 @@ private
     )
   end
 
-  # ==========================================
-  # SCOPE MANAGEMENT
-  # ==========================================
-
   # TODO: Implement return_strategy for lambdas
   # TODO: Implement force heap for USE
   def visit_LambdaLit(node)
@@ -485,31 +481,6 @@ private
 
     # 4. Store Zig pattern for transpiler
     node.zig_pattern = matched_def[:zig]
-  end
-
-  # Finds the first intrinsic overload that matches the given arguments.
-  # Returns nil if no overload matches.
-  def find_matching_intrinsic(definitions, args)
-    definitions.find do |config|
-      next true if config[:args] == :Varargs  # Varargs accepts anything
-
-      # Arity check
-      next false if args.size != config[:args].size
-
-      # Type check each argument
-      args.each_with_index.all? do |arg, i|
-        expected = config[:args][i].is_a?(Hash) ? config[:args][i][:type] : config[:args][i]
-        actual = arg.resolved_type
-        is_safe_autocast?(actual, expected)
-      end
-    end
-  end
-
-  # Formats intrinsic args for error messages
-  def format_intrinsic_args(args)
-    return "(varargs)" if args == :Varargs
-    types = args.map { |a| a.is_a?(Hash) ? a[:type] : a }
-    "(#{types.join(', ')})"
   end
 
   def visit_VarDecl(node)
@@ -1097,36 +1068,6 @@ private
     node.full_type = :Void
   end
 
-  # ==========================================
-  # BUILT-IN INFERENCE LOGIC
-  # ==========================================
-
-  def infer_map_return_type(args, node)
-    # map(list, function)
-    if args.size != 2
-      error!(node, "map requires 2 arguments, #{args.size} given.}")
-    end
-
-    list_node = args[0]
-    func_node = args[1]
-
-    # 1. Resolve the Function's Return Type
-    sig = func_node.full_type
-
-    # Check if it's a valid signature (hash format for functions and lambdas)
-    if sig.is_a?(Hash) && sig[:return]
-      return_type = sig[:return][:type]
-
-      # 2. Construct the New List Type
-      # map returns an array of whatever the function returns
-      # e.g. Number -> Number[], String[] -> String[][]
-      return :"#{return_type}[]"
-    end
-
-    # Fallback if we can't read the signature
-    return :"Any[]"
-  end
-
   def get_type_slot_size(type_input)
     type_obj = type_input.is_a?(Type) ? type_input : Type.new(type_input)
     type_obj.slot_size { |name| lookup_type_schema(name) }
@@ -1140,29 +1081,6 @@ private
     curr
   end
 
-  def finalize_storage(node, final_type, type_size)
-    # TODO: Move this logic to type.rb
-    # TODO: If over 64kb => automatic heap
-    # TODO: SROA & SIMD analysis -> if possible -> stack
-    if (node.value.storage.nil? || node.value.storage == :stack) && node.value.type_object.requires_move?
-      if type_size > 128
-        node.value.storage = :frame
-      else
-        node.value.storage = :stack
-      end
-    end
-
-    # Get storage info
-    # (Assuming your AST::Literal or Value nodes have a storage field)
-    storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
-    # Default to stack if storage is nil (e.g., primitives)
-    storage ||= :stack
-
-    # Increment frame after storage finalized
-    @frame_usage_count += 1 if storage == :frame
-
-    return storage
-  end
 
   def validate_capability(node, capability_type, var_node)
     var_type = var_node.full_type
@@ -1207,6 +1125,30 @@ private
     else
       error!(node, "Type Mismatch: Cannot assign #{source.resolved} to #{node.type}")
     end
+  end
+
+  def finalize_storage(node, final_type, type_size)
+    # TODO: Move this logic to type.rb
+    # TODO: If over 64kb => automatic heap
+    # TODO: SROA & SIMD analysis -> if possible -> stack
+    if (node.value.storage.nil? || node.value.storage == :stack) && node.value.type_object.requires_move?
+      if type_size > 128
+        node.value.storage = :frame
+      else
+        node.value.storage = :stack
+      end
+    end
+
+    # Get storage info
+    # (Assuming your AST::Literal or Value nodes have a storage field)
+    storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
+    # Default to stack if storage is nil (e.g., primitives)
+    storage ||= :stack
+
+    # Increment frame after storage finalized
+    @frame_usage_count += 1 if storage == :frame
+
+    return storage
   end
 end
 

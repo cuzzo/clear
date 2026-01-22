@@ -410,5 +410,30 @@ module FunctionAnalysis
     len = [path_a.size, path_b.size].min
     return path_a[0...len] == path_b[0...len]
   end
+
+  # Finds the first intrinsic overload that matches the given arguments.
+  # Returns nil if no overload matches.
+  def find_matching_intrinsic(definitions, args)
+    definitions.find do |config|
+      next true if config[:args] == :Varargs  # Varargs accepts anything
+
+      # Arity check
+      next false if args.size != config[:args].size
+
+      # Type check each argument
+      args.each_with_index.all? do |arg, i|
+        expected = config[:args][i].is_a?(Hash) ? config[:args][i][:type] : config[:args][i]
+        actual = arg.resolved_type
+        is_safe_autocast?(actual, expected)
+      end
+    end
+  end
+
+  # Formats intrinsic args for error messages
+  def format_intrinsic_args(args)
+    return "(varargs)" if args == :Varargs
+    types = args.map { |a| a.is_a?(Hash) ? a[:type] : a }
+    "(#{types.join(', ')})"
+  end
 end
 
