@@ -559,18 +559,8 @@ private
     error!(node, error) if error
 
     # 2. Finalize Storage
-    type_size = get_type_slot_size(final_type)
-    value_type = node.value.type_object
-    storage = value_type.finalize_storage(type_size, node.value.storage)
-    node.value.storage = storage if node.value.respond_to?(:storage=)
+    storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
     @frame_usage_count += 1 if storage == :frame
-
-    if storage == :heap
-      node.full_type = :"%#{final_type}"
-    else
-      node.full_type = final_type
-    end
-    node.storage = storage
 
     # 3. Declare in Scope
     current_scope.declare(
@@ -579,7 +569,7 @@ private
       final_type,
       node.mutable,
       false,         # rebindable? usually false for VAR
-      type_size,     # size (can infer from Literal if needed)
+      node.slot_size,
       storage
     )
 

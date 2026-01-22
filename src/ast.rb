@@ -13,6 +13,7 @@ module AST
     attr_reader :type_object
     attr_accessor :zig_pattern
     attr_accessor :was_moved
+    attr_accessor :slot_size
 
     # -- BACKWARDS COMPATIBILITY SETTER --
     # When existing code sets full_type = :Number, we wrap it.
@@ -65,6 +66,37 @@ module AST
       # Valid coercion - set coerced_type and return declared
       self.coerced_type = declared_type
       [declared_type, nil]
+    end
+
+    # Finalizes storage for a declaration node (VarDecl, etc.).
+    # Calculates slot_size, determines storage, and sets full_type.
+    # Returns the storage location (:stack, :frame, :heap).
+    #
+    # @param final_type [Symbol] The resolved type after coercion
+    # @yield [name] Block to look up struct schema by name
+    # @return [Symbol] The storage location
+    #
+    def finalize_storage!(final_type, &schema_lookup)
+      # Calculate slot size
+      type_obj = Type.new(final_type)
+      @slot_size = type_obj.slot_size(&schema_lookup)
+
+      # Determine storage from value's type if this node has a value
+      if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
+        value_type = value.type_object
+        storage = value_type.finalize_storage(@slot_size, value.storage)
+        value.storage = storage if value.respond_to?(:storage=)
+      else
+        storage = type_obj.finalize_storage(@slot_size, nil)
+      end
+
+      # Set full_type with % prefix if heap
+      self.full_type = storage == :heap ? :"%#{final_type}" : final_type
+
+      # Override storage in case Type's default differs from finalized storage
+      self.storage = storage
+
+      storage
     end
 
     # -- NEW PREFERRED ACCESSOR --
