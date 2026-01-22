@@ -20,6 +20,40 @@ module FunctionAnalysis
   # Supports extended param format for future use:
   #   args: [{ type: :Int64, mutable: true }, :String]
   #
+  # Builds a standard function signature from lambda parameters and return type.
+  # This allows lambdas to use the same verify_function_signature! validation.
+  #
+  # @param params [Array] Lambda parameters from AST (each with :name, :type, :mutable, :default, :takes)
+  # @param return_type [Symbol] The inferred or declared return type
+  # @return [Hash] Standard signature format with :lambda marker
+  #
+  # Example output:
+  #   {
+  #     params: [
+  #       { name: "x", type: :Number, required: true, mutable: false, takes: false }
+  #     ],
+  #     return: { type: :Bool },
+  #     lambda: true
+  #   }
+  #
+  def build_lambda_signature(params, return_type)
+    normalized_params = params.map do |param|
+      {
+        name: param[:name],
+        type: param[:type],
+        required: param[:default].nil?,
+        mutable: param[:mutable] || false,
+        takes: param[:takes] || false
+      }
+    end
+
+    {
+      params: normalized_params,
+      return: { type: return_type },
+      lambda: true
+    }
+  end
+
   def normalize_intrinsic_signature(config)
     return nil if config[:args] == :Varargs
 

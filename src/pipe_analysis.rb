@@ -205,10 +205,8 @@ module PipeAnalysis
     func_name = node.right.name
 
     if sig.is_a?(Hash)
+      # Named Function or Lambda (both use standard signature format)
       analyze_pipe_to_named_function(node, sig, func_name)
-    elsif sig.is_a?(Array) && sig[0] == :Proc
-      # Lambda / Proc: [:Proc, [ArgTypes], ReturnType]
-      node.full_type = sig[2]
     elsif sig == :Intrinsic || sig == :Nil
       # Builtin / Intrinsic
       # e.g. 'print' returns :Nil. 'map' returns :Intrinsic (resolved later via call).

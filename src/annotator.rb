@@ -159,12 +159,12 @@ private
 
     # 2. Enter the Lambda's Scope
     with_new_scope do
-      param_types = declare_and_verify_params(node)
+      declare_and_verify_params(node)
       declare_captures(node)
 
       @return_collection_stack.push([])
 
-      # 5. Analyze the Body
+      # 3. Analyze the Body
       # The body is usually an AST::Node (expression) or Array (statements)
       if node.body.is_a?(Array)
         node.body.each { |stmt| visit(stmt) }
@@ -177,10 +177,9 @@ private
         @return_collection_stack.pop()
       end
 
-      # 6. Annotate the Node
-      # We construct a type signature: [:Proc, [ArgTypes], ReturnType]
-      # Zig Transpiler will use this to generate: fn call(self, args...) ReturnType
-      node.full_type = [:Proc, param_types, return_type] # , return_strategy]
+      # 4. Build standard signature (same format as user-defined functions)
+      # This enables verify_function_signature! to validate lambda calls
+      node.full_type = build_lambda_signature(node.params, return_type)
     end
   end
 
@@ -462,12 +461,10 @@ private
     # 3. Determine Return Type
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, node.args)
-    elsif func_type.is_a?(Hash) # Named Function (Rich Signature)
+    elsif func_type.is_a?(Hash)
+      # Named Function or Lambda (both use standard signature format)
       verify_function_signature!(node, func_type)
       node.full_type = func_type[:return][:type]
-    elsif func_type.is_a?(Array) && func_type[0] == :Proc # Lambda/Proc
-      # Extract return type from [:Proc, args, ret]
-      node.full_type = func_type[2]
     elsif func_type.is_a?(Symbol)
       node.full_type = func_type
     else
@@ -497,12 +494,11 @@ private
     ufcs_args = [node.object] + node.args
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, ufcs_args)
-    elsif func_type.is_a?(Hash) # Named Function
+    elsif func_type.is_a?(Hash)
+      # Named Function or Lambda (both use standard signature format)
       fake_call_node = Struct.new(:token, :name, :args).new(node.token, method_name, ufcs_args)
       verify_function_signature!(fake_call_node, func_type)
       node.full_type = func_type[:return][:type]
-    elsif func_type.is_a?(Array) && func_type[0] == :Proc
-      node.full_type = func_type[2]
     else
       error!(node, "Property '#{method_name}' is not a function")
     end
@@ -1189,14 +1185,11 @@ private
     func_node = args[1]
 
     # 1. Resolve the Function's Return Type
-    # We expect the function node to have a resolved_type of:
-    # [:Fn, [ArgTypes], ReturnType]  OR  [:Proc, [ArgTypes], ReturnType]
-
     sig = func_node.full_type
 
-    # Check if it's a valid signature array
-    if sig.is_a?(Array) && (sig[0] == :Fn || sig[0] == :Proc)
-      return_type = sig[2] # The 3rd element is the return type
+    # Check if it's a valid signature (hash format for functions and lambdas)
+    if sig.is_a?(Hash) && sig[:return]
+      return_type = sig[:return][:type]
 
       # 2. Construct the New List Type
       # map returns an array of whatever the function returns
