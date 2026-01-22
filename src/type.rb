@@ -1,6 +1,16 @@
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
+# Result struct for type coercion
+# success: true if coercion is valid
+# coerced_type: the target type to coerce to (if different from source)
+# error: error code symbol or message string if coercion fails
+# error_args: additional arguments for error formatting
+CoercionResult = Struct.new(:success, :coerced_type, :error, :error_args, keyword_init: true) do
+  def ok?; success; end
+  def failed?; !success; end
+end
+
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :mutability, :ownership, :lifetime_constraint
@@ -40,6 +50,51 @@ class Type
     else
       BinaryOpResult.new(error: "Unknown operator: #{op}")
     end
+  end
+
+  # Checks if source_type can be coerced to target_type.
+  # Returns a CoercionResult indicating success or failure with error details.
+  #
+  # @param source_type [Type, Symbol, String] The type being assigned
+  # @param target_type [Type, Symbol, String] The declared/expected type
+  # @return [CoercionResult] Result with success status and error info if failed
+  #
+  # Example:
+  #   result = Type.coerce(:Int64, :Number)
+  #   result.ok?          # => true
+  #   result.coerced_type # => :Number
+  #
+  #   result = Type.coerce(:String, :Int64)
+  #   result.failed?      # => true
+  #   result.error        # => "Type Mismatch: Cannot assign String[] to Int64"
+  #
+  def self.coerce(source_type, target_type)
+    source = source_type.is_a?(Type) ? source_type : Type.new(source_type)
+    target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
+
+    # Check if coercion is valid
+    if target.accepts?(source)
+      # Coercion needed only if types differ
+      needs_coercion = source.resolved != target.resolved
+      return CoercionResult.new(
+        success: true,
+        coerced_type: needs_coercion ? target.resolved : nil
+      )
+    end
+
+    # Coercion failed - determine specific error
+    if target.array_overflow?(source)
+      return CoercionResult.new(
+        success: false,
+        error: :FIXED_ARRAY_SIZE_MISMATCH,
+        error_args: [target.capacity, source.resolved]
+      )
+    end
+
+    CoercionResult.new(
+      success: false,
+      error: "Type Mismatch: Cannot assign #{source.resolved} to #{target.resolved}"
+    )
   end
 
   private
@@ -334,6 +389,31 @@ class Type
   # Memoized for performance; cache is invalidated when location changes.
   def zig_type
     @zig_type_cache ||= compute_zig_type
+  end
+
+  # Determines the appropriate storage location based on type characteristics and size.
+  # Returns :stack for small primitives, :frame for medium-sized data, :heap for large/dynamic.
+  #
+  # @param size [Integer] The slot size of the type (from slot_size method)
+  # @param current_storage [Symbol, nil] The current storage if already set
+  # @return [Symbol] One of :stack, :frame, or :heap
+  #
+  def finalize_storage(size, current_storage = nil)
+    # If already heap, keep it heap
+    return :heap if current_storage == :heap || heap?
+
+    # Primitives stay on stack
+    return :stack if primitive? && !requires_move?
+
+    # Types that require moves need frame or heap based on size
+    if requires_move?
+      if current_storage.nil? || current_storage == :stack
+        return size > 128 ? :frame : :stack
+      end
+    end
+
+    # Default to current or stack
+    current_storage || :stack
   end
 
   private

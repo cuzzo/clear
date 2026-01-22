@@ -571,23 +571,30 @@ private
     inferred_type = node.value.resolved_type
     final_type = is_explicit ? node.type : inferred_type
 
-    # 1. Check Conflicts
-    if node.type != inferred_type && is_explicit
-      if !is_safe_autocast?(inferred_type, node.type)
-        throw_assign_mismatch_error!(node, inferred_type, node.type)
+    # 1. Check Conflicts & Coerce
+    if is_explicit && node.type != inferred_type
+      result = node.value.coerce!(node.type)
+      if result.failed?
+        if result.error.is_a?(Symbol)
+          error!(node, result.error, *result.error_args)
+        else
+          error!(node, result.error)
+        end
       end
-      node.value.coerced_type = final_type
     end
 
     # 2. Finalize Storage
     type_size = get_type_slot_size(final_type)
-    storage = finalize_storage(node, final_type, type_size)
+    value_type = node.value.type_object
+    storage = value_type.finalize_storage(type_size, node.value.storage)
+    node.value.storage = storage if node.value.respond_to?(:storage=)
+    @frame_usage_count += 1 if storage == :frame
+
     if storage == :heap
       node.full_type = :"%#{final_type}"
     else
       node.full_type = final_type
     end
-    # Set storage after full_type (which creates type_object)
     node.storage = storage
 
     # 3. Declare in Scope

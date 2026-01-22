@@ -43,6 +43,32 @@ module AST
       @coerced_type_object
     end
 
+    # Attempts to coerce this node's type to target_type.
+    # Sets coerced_type if coercion is needed and valid.
+    # Returns a CoercionResult indicating success or failure.
+    #
+    # @param target_type [Type, Symbol, String] The type to coerce to
+    # @return [CoercionResult] Result with success status; caller handles errors
+    #
+    # Example usage in annotator:
+    #   result = node.value.coerce!(declared_type)
+    #   error!(node, result.error, *result.error_args) if result.failed?
+    #
+    def coerce!(target_type)
+      return CoercionResult.new(success: true) if target_type.nil?
+
+      source_type = @type_object
+      return CoercionResult.new(success: true) unless source_type
+
+      result = Type.coerce(source_type, target_type)
+
+      if result.ok? && result.coerced_type
+        self.coerced_type = result.coerced_type
+      end
+
+      result
+    end
+
     # -- NEW PREFERRED ACCESSOR --
     # Use this in new code to get the rich object
     def type_info
