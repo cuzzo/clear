@@ -373,7 +373,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
       it "errors when calling undefined function" do
-        expect { ast }.to raise_error(/Missing function/i)
+        expect { ast }.to raise_error(/Undefined function/i)
       end
     end
 

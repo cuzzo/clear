@@ -438,69 +438,58 @@ private
   end
 
   def visit_FuncCall(node)
-    # 1. Resolve Arguments First
-    # We need to know arg types before we can figure out the result
     node.args.each { |arg| visit(arg) }
 
-    # 2. Look up the Function in Scope
-    func_type = nil
-
-    # Handle "native_call" or other special AST quirks if you have them
+    # Handle "native_call" special case
     if node.name == "native_call"
       node.full_type = :Any
       return
     end
 
-    scope = lookup_scope_for(node.name)
-    if scope
-      func_type = scope.resolve_type(node.name)
-    else
-      error!(node, :MISSING_FUNCTION, node.name)
-    end
-
-    # 3. Determine Return Type
-    if func_type == :Intrinsic
-      visit_IntrinsicFunc(node, node.args)
-    elsif func_type.is_a?(Hash)
-      # Named Function or Lambda (both use standard signature format)
-      verify_function_signature!(node, func_type)
-      node.full_type = func_type[:return][:type]
-    elsif func_type.is_a?(Symbol)
-      node.full_type = func_type
-    else
-      # Fallback
-      node.full_type = :Any
-    end
+    resolve_call(node, node.args)
   end
 
   def visit_MethodCall(node)
-    # 1. Analyze the 'Receiver' (Object) and the explicit arguments
     visit(node.object)
     node.args.each { |arg| visit(arg) }
 
-    method_name = node.name
+    ufcs_args = [node.object] + node.args
+    resolve_call(node, ufcs_args)
+  end
 
-    # 3. Look up the function in the Scope
-    scope = lookup_scope_for(method_name)
+  # Shared logic for resolving function/method calls.
+  # Handles intrinsics, user-defined functions, and lambdas uniformly.
+  #
+  # @param node [AST::FuncCall, AST::MethodCall] The call node
+  # @param args [Array] The arguments (includes receiver for UFCS method calls)
+  def resolve_call(node, args)
+    func_name = node.name
 
-    # ERROR CHECK: If scope is nil, the function doesn't exist.
-    if scope.nil?
-      error!(node, "Undefined function '#{method_name}'")
+    # 1. Look up function in scope
+    scope = lookup_scope_for(func_name)
+    unless scope
+      error!(node, "Undefined function '#{func_name}'")
+      return
     end
 
-    func_type = scope.resolve_type(method_name)
+    func_type = scope.resolve_type(func_name)
 
-    # 4. Validate types using the synthesized argument list
-    ufcs_args = [node.object] + node.args
+    # 2. Dispatch based on function type
     if func_type == :Intrinsic
-      visit_IntrinsicFunc(node, ufcs_args)
+      visit_IntrinsicFunc(node, args)
+
     elsif func_type.is_a?(Hash)
       # Named Function or Lambda (both use standard signature format)
-      fake_call_node = Struct.new(:token, :name, :args).new(node.token, method_name, ufcs_args)
-      verify_function_signature!(fake_call_node, func_type)
+      # Create synthetic node with correct args for UFCS method calls
+      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+      verify_function_signature!(call_node, func_type)
       node.full_type = func_type[:return][:type]
+
+    elsif func_type.is_a?(Symbol)
+      node.full_type = func_type
+
     else
-      error!(node, "Property '#{method_name}' is not a function")
+      error!(node, "Cannot call '#{func_name}' - not a function")
     end
   end
 
