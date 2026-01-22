@@ -508,50 +508,71 @@ private
     end
   end
 
-  # TODO: verify_signature is sufficiently complicated.  Intrinsics must support the correct signatures.
-  # This does not have all the proper protections of regular functions and method calls.
+  # Handles intrinsic function calls by finding the matching overload and
+  # using verify_function_signature! for validation (same as user-defined functions).
+  #
+  # @param node [AST::FuncCall, AST::MethodCall] The call node
+  # @param args [Array] The arguments (includes receiver for method calls - UFCS)
   def visit_IntrinsicFunc(node, args)
     definitions = STD_LIB[node.name]
     definitions = [definitions] if definitions.is_a?(Hash)
 
-    matched_def = definitions.find do |config|
-      # A. Arity Check
-      next false if config[:args] != :Varargs && args.size != config[:args].size
+    # 1. Find matching overload (needed for polymorphic intrinsics like 'length')
+    matched_def = find_matching_intrinsic(definitions, args)
 
-      # B. Type Check
-      match = true
-      if config[:args] != :Varargs
-        args.each_with_index do |arg, i|
-          expected = config[:args][i]
-          actual = arg.resolved_type
-
-          # Use your existing safe casting check
-          unless is_safe_autocast?(actual, expected)
-            match = false
-            break
-          end
-        end
-      end
-      match
-    end
-
-    # 3. Apply Result or Error
-    if matched_def
-      ret = matched_def[:return]
-
-      if ret.is_a?(Symbol) && respond_to?(ret, true)
-        node.full_type = send(ret, args, node)
-      else
-        node.full_type = ret
-      end
-
-      node.zig_pattern = matched_def[:zig]
-    else
-      # Build a nice error message listing expected signatures
-      sigs = definitions.map { |d| "(#{d[:args].join(', ')})" }.join(" or ")
+    unless matched_def
+      sigs = definitions.map { |d| format_intrinsic_args(d[:args]) }.join(" or ")
       arg_types = args.map { |a| a.resolved_type }.join(", ")
       error!(node, "No overload for '#{node.name}' matches arguments (#{arg_types}).\nCandidates: #{sigs}")
+      return
     end
+
+    # 2. Normalize to standard signature format and verify
+    signature = normalize_intrinsic_signature(matched_def)
+
+    if signature
+      # Create a synthetic node with the full args (for UFCS method calls,
+      # node.args doesn't include the receiver, but args does)
+      call_node = Struct.new(:token, :name, :args).new(node.token, node.name, args)
+      verify_function_signature!(call_node, signature)
+    end
+    # Varargs functions skip verify_function_signature! (arity is flexible)
+
+    # 3. Resolve return type (may be dynamic via method call)
+    ret = matched_def[:return]
+    if ret.is_a?(Symbol) && respond_to?(ret, true)
+      node.full_type = send(ret, args, node)
+    else
+      node.full_type = ret
+    end
+
+    # 4. Store Zig pattern for transpiler
+    node.zig_pattern = matched_def[:zig]
+  end
+
+  # Finds the first intrinsic overload that matches the given arguments.
+  # Returns nil if no overload matches.
+  def find_matching_intrinsic(definitions, args)
+    definitions.find do |config|
+      next true if config[:args] == :Varargs  # Varargs accepts anything
+
+      # Arity check
+      next false if args.size != config[:args].size
+
+      # Type check each argument
+      args.each_with_index.all? do |arg, i|
+        expected = config[:args][i].is_a?(Hash) ? config[:args][i][:type] : config[:args][i]
+        actual = arg.resolved_type
+        is_safe_autocast?(actual, expected)
+      end
+    end
+  end
+
+  # Formats intrinsic args for error messages
+  def format_intrinsic_args(args)
+    return "(varargs)" if args == :Varargs
+    types = args.map { |a| a.is_a?(Hash) ? a[:type] : a }
+    "(#{types.join(', ')})"
   end
 
   def visit_VarDecl(node)

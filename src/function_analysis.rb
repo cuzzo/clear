@@ -1,6 +1,58 @@
 require_relative "../src/ast"
 
 module FunctionAnalysis
+  # Converts an intrinsic definition from STD_LIB format to the standard
+  # function signature format used by verify_function_signature!.
+  #
+  # Input format (STD_LIB):
+  #   { args: [:Int64, :String], return: :Bool, zig: "..." }
+  #
+  # Output format (standard signature):
+  #   {
+  #     params: [
+  #       { name: "arg0", type: :Int64, required: true, mutable: false, takes: false },
+  #       { name: "arg1", type: :String, required: true, mutable: false, takes: false }
+  #     ],
+  #     return: { type: :Bool },
+  #     zig: "..."
+  #   }
+  #
+  # Supports extended param format for future use:
+  #   args: [{ type: :Int64, mutable: true }, :String]
+  #
+  def normalize_intrinsic_signature(config)
+    return nil if config[:args] == :Varargs
+
+    params = config[:args].each_with_index.map do |arg_def, i|
+      if arg_def.is_a?(Hash)
+        # Extended format: { type: :Int64, mutable: true, takes: false }
+        {
+          name: arg_def[:name] || "arg#{i}",
+          type: arg_def[:type],
+          required: true,
+          mutable: arg_def[:mutable] || false,
+          takes: arg_def[:takes] || false
+        }
+      else
+        # Simple format: just a type symbol
+        {
+          name: "arg#{i}",
+          type: arg_def,
+          required: true,
+          mutable: false,
+          takes: false
+        }
+      end
+    end
+
+    {
+      params: params,
+      return: { type: config[:return] },
+      zig: config[:zig],
+      intrinsic: true  # Marker to identify intrinsic signatures
+    }
+  end
+
   def verify_function_signature!(node, signature)
     params = signature[:params]
     min_args = params.count { |param| param[:required] }
