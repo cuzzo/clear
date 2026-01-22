@@ -135,6 +135,30 @@ module OwnershipTracker
     current_scope.mark_borrowed(root_var, path, borrow_type)
   end
 
+  # Handles ownership tracking when a value escapes via return.
+  # If the returned value is a variable that requires a move, marks it as escaped.
+  # Returns true if the variable was promoted from frame to heap, false otherwise.
+  #
+  # @param value_node [AST::Node] The value being returned
+  # @return [Boolean] Whether a frame-to-heap promotion occurred
+  #
+  def handle_return_escape(value_node)
+    return false if value_node.nil?
+
+    root = get_root_object(value_node)
+    return false unless root.is_a?(AST::Identifier)
+
+    var_name = root.name
+    owner_scope = lookup_scope_for(var_name)
+    return false unless owner_scope
+
+    type = owner_scope.resolve_type(var_name)
+    return false unless Type.new(type).requires_move?
+
+    # Mark as escaped and return whether it was promoted
+    owner_scope.mark_escaped(var_name)
+  end
+
   def verify_unrestricted!(node)
     # 1. Calculate the path being written to (e.g. foo.b)
     target_node = node.name # Identifier, GetField, or GetIndex

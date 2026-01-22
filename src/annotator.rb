@@ -403,21 +403,8 @@ private
     verify_return(node.value)
 
     # 2. Ownership Tracking
-    # TODO: Move to ownership tracker
-    root = get_root_object(node.value)
-    if root.is_a?(AST::Identifier)
-      var_name = root.name
-      owner_scope = lookup_scope_for(var_name)
-      if owner_scope
-        type = owner_scope.resolve_type(var_name)
-        if Type.new(type).requires_move?
-          was_promoted = owner_scope.mark_escaped(var_name)
-          if was_promoted
-            @frame_usage_count -= 1
-          end
-        end
-      end
-    end
+    was_promoted = handle_return_escape(node.value)
+    @frame_usage_count -= 1 if was_promoted
 
     actual = node.value.resolved_type
     expected = @function_context_stack.last[:type]
