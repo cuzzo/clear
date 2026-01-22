@@ -1027,63 +1027,10 @@ private
     end.join("\n")
   end
 
+  # Delegates to Type#zig_type for type-to-Zig conversion.
+  # This keeps the transpiler interface stable while the logic lives in Type.
   def transpile_type(type)
-    t = type.to_s
-
-    # 0a. Handle Error Union types: !T -> !zig_type (Zig-style error returns)
-    if t.start_with?("!")
-      inner = t[1..]  # Strip the ! prefix
-      zig_inner = transpile_type(inner)
-      return "!#{zig_inner}"
-    end
-
-    # 0b. Handle Optional types: ?T -> ?zig_type
-    if t.start_with?("?")
-      inner = t[1..]  # Strip the ? prefix
-      zig_inner = transpile_type(inner)
-      return "?#{zig_inner}"
-    end
-
-    is_pointer = t.start_with?("%")
-    t = t.gsub("%", "") # Strip explicit heap marker if present
-
-    # 1. SPECIAL CASE: "String[]" is the atomic "Text" type
-    #    We map this directly to Zig's string slice.
-    #    This prevents "String[][]" from becoming a 3D array.
-    if t == "String[]"
-      return "[]const u8"
-    end
-
-    # 2. Handle Generic Array Recursion
-    #    e.g. "String[][]" -> "[]" + transpile("String[]") -> "[][]const u8"
-    #    e.g. "Int64[]"    -> "[]" + transpile("Int64")    -> "[]i64"
-    if t.end_with?("[]")
-      base = t[0...-2]
-      zig_base = transpile_type(base)
-      return "[]#{zig_base}"
-    end
-
-    # 3. Handle HashMaps
-    #    HashMap<Int64> -> std.StringHashMapUnmanaged(i64)
-    if t.start_with?("HashMap")
-      if match = t.match(/HashMap<(.+)>/)
-        inner_flux = match[1]
-        inner_zig = transpile_type(inner_flux)
-        return "std.StringHashMapUnmanaged(#{inner_zig})"
-      end
-    end
-
-    zig_type =
-    case t
-    when "Number"          then "f64"
-    when "Int64"           then "i64"
-    when "String"          then "[]const u8"  # TODO: String isn't used
-    when "String[]"        then "[]const u8"
-    when "Void"            then "void"
-    else t # Fallback for Struct names (e.g. "User")
-    end
-
-    return is_pointer && zig_type != "void" ? "*#{zig_type}" : zig_type
+    Type.new(type).zig_type
   end
 
   # TODO: from_type/to_type may need to be simplified

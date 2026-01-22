@@ -3,7 +3,8 @@ BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :e
 
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
-  attr_accessor :location, :mutability, :ownership, :lifetime_constraint
+  attr_accessor :mutability, :ownership, :lifetime_constraint
+  attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
   LOCATIONS = [:stack, :frame, :heap]
@@ -323,6 +324,18 @@ class Type
     false
   end
 
+  # Custom setter for location that invalidates zig_type cache
+  def location=(value)
+    @zig_type_cache = nil
+    @location = value
+  end
+
+  # Returns the Zig type string representation of this type.
+  # Memoized for performance; cache is invalidated when location changes.
+  def zig_type
+    @zig_type_cache ||= compute_zig_type
+  end
+
   private
 
   def parse_raw_input
@@ -383,6 +396,63 @@ class Type
 
     # Keep the full type including ? prefix for resolved
     @resolved_cache = original_str.gsub("%", "").to_sym
+  end
+
+  # Computes the Zig type string for this CHEAT type.
+  # Handles: error unions, optionals, pointers, arrays, hashmaps, primitives, structs.
+  def compute_zig_type
+    # 1. Handle Error Union: !T -> !zig_type
+    if error_union?
+      inner_zig = payload_type.zig_type
+      return "!#{inner_zig}"
+    end
+
+    # 2. Handle Optional: ?T -> ?zig_type
+    if optional?
+      inner_zig = wrapped_type.zig_type
+      return "?#{inner_zig}"
+    end
+
+    is_pointer = heap?
+
+    # 3. Special case: String[] is the atomic "Text" type
+    #    This prevents "String[][]" from becoming a 3D array.
+    if resolved == :"String[]"
+      return is_pointer ? "*[]const u8" : "[]const u8"
+    end
+
+    # 4. Handle Arrays recursively
+    #    e.g. "Number[]" -> "[]i64", "String[][]" -> "[][]const u8"
+    if array?
+      base_zig = element_type.zig_type
+      zig = "[]#{base_zig}"
+      return is_pointer && zig != "void" ? "*#{zig}" : zig
+    end
+
+    # 5. Handle HashMaps
+    #    HashMap<Int64> -> std.StringHashMapUnmanaged(i64)
+    str = resolved.to_s
+    if str.start_with?("HashMap")
+      if match = str.match(/HashMap<(.+)>/)
+        inner_zig = Type.new(match[1]).zig_type
+        return "std.StringHashMapUnmanaged(#{inner_zig})"
+      end
+    end
+
+    # 6. Map primitives and fallback to struct names
+    zig = case resolved
+    when :Number     then "f64"
+    when :Int64      then "i64"
+    when :String     then "[]const u8"
+    when :"String[]" then "[]const u8"
+    when :Void       then "void"
+    when :Bool       then "bool"
+    when :Byte       then "u8"
+    else resolved.to_s  # Struct names (e.g., "User")
+    end
+
+    # 7. Add pointer prefix if heap-allocated and not void
+    is_pointer && zig != "void" ? "*#{zig}" : zig
   end
 end
 
