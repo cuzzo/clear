@@ -43,30 +43,28 @@ module AST
       @coerced_type_object
     end
 
-    # Attempts to coerce this node's type to target_type.
-    # Sets coerced_type if coercion is needed and valid.
-    # Returns a CoercionResult indicating success or failure.
+    # Resolves the final type, handling coercion if needed.
+    # Returns [final_type, error]. Error is nil if ok.
     #
-    # @param target_type [Type, Symbol, String] The type to coerce to
-    # @return [CoercionResult] Result with success status; caller handles errors
+    # @param declared_type [Symbol, nil] The explicitly declared type (or nil/:Any for inference)
+    # @return [Array(Symbol, String|nil)] [final_type, error_message]
     #
-    # Example usage in annotator:
-    #   result = node.value.coerce!(declared_type)
-    #   error!(node, result.error, *result.error_args) if result.failed?
-    #
-    def coerce!(target_type)
-      return CoercionResult.new(success: true) if target_type.nil?
+    def coerce!(declared_type)
+      inferred = @type_object&.resolved
 
-      source_type = @type_object
-      return CoercionResult.new(success: true) unless source_type
+      # No explicit type or :Any -> use inferred, no coercion needed
+      return [inferred, nil] if declared_type.nil? || declared_type == :Any
 
-      result = Type.coerce(source_type, target_type)
+      # Explicit type matches inferred -> no coercion needed
+      return [declared_type, nil] if declared_type == inferred
 
-      if result.ok? && result.coerced_type
-        self.coerced_type = result.coerced_type
-      end
+      # Check if coercion is valid
+      error = Type.coerce_error(@type_object, declared_type)
+      return [nil, error] if error
 
-      result
+      # Valid coercion - set coerced_type and return declared
+      self.coerced_type = declared_type
+      [declared_type, nil]
     end
 
     # -- NEW PREFERRED ACCESSOR --

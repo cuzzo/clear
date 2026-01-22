@@ -554,21 +554,9 @@ private
     handle_assign_move(node)
     handle_assign_borrow(node)
 
-    is_explicit = !node.type.nil? && node.type != :Any
-    inferred_type = node.value.resolved_type
-    final_type = is_explicit ? node.type : inferred_type
-
-    # 1. Check Conflicts & Coerce
-    if is_explicit && node.type != inferred_type
-      result = node.value.coerce!(node.type)
-      if result.failed?
-        if result.error.is_a?(Symbol)
-          error!(node, result.error, *result.error_args)
-        else
-          error!(node, result.error)
-        end
-      end
-    end
+    # 1. Resolve final type (handles coercion check internally)
+    final_type, error = node.value.coerce!(node.type)
+    error!(node, error) if error
 
     # 2. Finalize Storage
     type_size = get_type_slot_size(final_type)

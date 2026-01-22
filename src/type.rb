@@ -1,16 +1,6 @@
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
-# Result struct for type coercion
-# success: true if coercion is valid
-# coerced_type: the target type to coerce to (if different from source)
-# error: error code symbol or message string if coercion fails
-# error_args: additional arguments for error formatting
-CoercionResult = Struct.new(:success, :coerced_type, :error, :error_args, keyword_init: true) do
-  def ok?; success; end
-  def failed?; !success; end
-end
-
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :mutability, :ownership, :lifetime_constraint
@@ -52,49 +42,23 @@ class Type
     end
   end
 
-  # Checks if source_type can be coerced to target_type.
-  # Returns a CoercionResult indicating success or failure with error details.
+  # Returns error message if source cannot be coerced to target, nil if ok.
   #
   # @param source_type [Type, Symbol, String] The type being assigned
   # @param target_type [Type, Symbol, String] The declared/expected type
-  # @return [CoercionResult] Result with success status and error info if failed
+  # @return [String, nil] Error message or nil if coercion is valid
   #
-  # Example:
-  #   result = Type.coerce(:Int64, :Number)
-  #   result.ok?          # => true
-  #   result.coerced_type # => :Number
-  #
-  #   result = Type.coerce(:String, :Int64)
-  #   result.failed?      # => true
-  #   result.error        # => "Type Mismatch: Cannot assign String[] to Int64"
-  #
-  def self.coerce(source_type, target_type)
+  def self.coerce_error(source_type, target_type)
     source = source_type.is_a?(Type) ? source_type : Type.new(source_type)
     target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
 
-    # Check if coercion is valid
-    if target.accepts?(source)
-      # Coercion needed only if types differ
-      needs_coercion = source.resolved != target.resolved
-      return CoercionResult.new(
-        success: true,
-        coerced_type: needs_coercion ? target.resolved : nil
-      )
-    end
+    return nil if target.accepts?(source)
 
-    # Coercion failed - determine specific error
     if target.array_overflow?(source)
-      return CoercionResult.new(
-        success: false,
-        error: :FIXED_ARRAY_SIZE_MISMATCH,
-        error_args: [target.capacity, source.resolved]
-      )
+      "Cannot initialize array of size #{target.capacity} with #{source.capacity} elements"
+    else
+      "Type Mismatch: Cannot assign #{source.resolved} to #{target.resolved}"
     end
-
-    CoercionResult.new(
-      success: false,
-      error: "Type Mismatch: Cannot assign #{source.resolved} to #{target.resolved}"
-    )
   end
 
   private
