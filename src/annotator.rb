@@ -13,6 +13,7 @@ class SemanticAnnotator
   include PipeAnalysis
   include OwnershipTracker
   include ScopeHelper
+  include TypeHelper
 
   attr_reader :scope_stack
 
@@ -1102,53 +1103,6 @@ private
     else
       error!(node, "Unknown capability type: #{capability_type}")
     end
-  end
-
-  # ==========================================
-  # TYPE CHECKING & AUTOCAST LOGIC
-  # ==========================================
-
-  # Coerce input to Type object if needed
-  def to_type(input)
-    input.is_a?(Type) ? input : Type.new(input)
-  end
-
-  def is_safe_autocast?(source_type, target_type)
-    to_type(target_type).accepts?(to_type(source_type))
-  end
-
-  def throw_assign_mismatch_error!(node, source_type, target_type)
-    source = to_type(source_type)
-    target = to_type(target_type)
-    if target.array_overflow?(source)
-      error!(node, :FIXED_ARRAY_SIZE_MISMATCH, target.capacity, source.resolved)
-    else
-      error!(node, "Type Mismatch: Cannot assign #{source.resolved} to #{node.type}")
-    end
-  end
-
-  def finalize_storage(node, final_type, type_size)
-    # TODO: Move this logic to type.rb
-    # TODO: If over 64kb => automatic heap
-    # TODO: SROA & SIMD analysis -> if possible -> stack
-    if (node.value.storage.nil? || node.value.storage == :stack) && node.value.type_object.requires_move?
-      if type_size > 128
-        node.value.storage = :frame
-      else
-        node.value.storage = :stack
-      end
-    end
-
-    # Get storage info
-    # (Assuming your AST::Literal or Value nodes have a storage field)
-    storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
-    # Default to stack if storage is nil (e.g., primitives)
-    storage ||= :stack
-
-    # Increment frame after storage finalized
-    @frame_usage_count += 1 if storage == :frame
-
-    return storage
   end
 end
 
