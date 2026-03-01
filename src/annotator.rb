@@ -1019,6 +1019,26 @@ private
     node.storage = :shared
   end
 
+  def visit_MoveNode(node)
+    visit(node.value)
+
+    unless node.value.is_a?(AST::Identifier)
+      error!(node, "MOVE can only be applied to a variable identifier")
+    end
+
+    ti = node.value.type_info
+    unless ti&.multiowned? || ti&.shared?
+      error!(node, "MOVE can only be applied to @multiowned or @shared variables, got '#{node.value.resolved_type}'")
+    end
+
+    # Inherit the capability type so the VarDecl or ReturnNode can infer storage correctly
+    node.full_type = node.value.full_type
+    node.storage   = node.value.storage
+
+    # Consume the source variable — it is affinely transferred
+    current_scope.set_state(node.value.name, :moved)
+  end
+
   def visit_Give(node)
     visit(node.value)
 

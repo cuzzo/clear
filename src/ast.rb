@@ -191,6 +191,7 @@ module AST
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   MultiownedWrap = Struct.new(:token, :value) { include Locatable }  # expr @multiowned -> Rc(T)
   SharedWrap     = Struct.new(:token, :value) { include Locatable }  # expr @shared     -> Arc(T)
+  MoveNode       = Struct.new(:token, :value) { include Locatable }  # MOVE expr        -> transfer Rc/Arc handle without retain
 
   UNARY_OPS = ['-', '!', '~']
 

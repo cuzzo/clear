@@ -150,15 +150,29 @@ private
       is_rc         = is_multiowned || is_shared
       is_heap       = node.storage == :heap && !is_rc
 
-      # 2. Generate Declaration — for Rc/Arc identifier RHS, retain instead of move.
+      # Detect MOVE: explicit affine ownership transfer (no retain).
+      # VAR b = MOVE a; -> copy the Rc/Arc handle as-is, mark a as done.
+      is_move_rhs  = node.value.is_a?(AST::MoveNode)
+      rhs_ident    = if is_move_rhs && node.value.value.is_a?(AST::Identifier)
+                       node.value.value
+                     elsif node.value.is_a?(AST::Identifier)
+                       node.value
+                     end
+
+      # 2. Generate Declaration — default for Rc/Arc identifier RHS is retain (clone).
+      # MOVE overrides this to a raw handle transfer (no retain).
       # Exception: inside a WITH block the RHS is already the unwrapped plain value, not an Rc/Arc.
       rc_map = @rc_unwrap_map || {}
-      rhs_is_unwrapped = node.value.is_a?(AST::Identifier) && rc_map.key?(node.value.name)
-      rhs_ti = node.value.is_a?(AST::Identifier) ? node.value.type_info : nil
-      value_code = if is_rc && rhs_ti && (rhs_ti.multiowned? || rhs_ti.shared?) && !rhs_is_unwrapped
+      rhs_is_unwrapped = rhs_ident && rc_map.key?(rhs_ident.name)
+      rhs_ti = rhs_ident&.type_info
+      value_code = if is_rc && is_move_rhs && rhs_ident
+        # MOVE: transfer handle without incrementing ref count
+        rhs_ident.name
+      elsif is_rc && rhs_ti && (rhs_ti.multiowned? || rhs_ti.shared?) && !rhs_is_unwrapped
+        # Default: clone (retain) so both handles stay alive
         base_type = rhs_ti.resolved.to_s
         func = rhs_ti.shared? ? "arcRetain" : "rcRetain"
-        "CheatLib.#{func}(#{transpile_type(base_type)}, #{node.value.name})"
+        "CheatLib.#{func}(#{transpile_type(base_type)}, #{rhs_ident.name})"
       else
         visit(node.value)
       end
@@ -172,7 +186,10 @@ private
       if is_rc
         base_type = node.type_info.resolved.to_s
         release_func = is_shared ? "arcRelease" : "rcRelease"
-        affine_logic = "defer CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name});\n"
+        # Conditional defer so MOVE can suppress cleanup on the source variable.
+        # Even if this variable is never MOVEd, the flag overhead is negligible.
+        affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
+        affine_logic += "defer if (!#{node.name}_moved) CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name});\n"
 
         # Release any @multiowned/@shared fields BEFORE the struct itself (Zig LIFO: emit after struct defer)
         schema = (@struct_schemas ||= {})[node.type_info.resolved]
@@ -181,10 +198,10 @@ private
             field_type = Type.new(fdef[:type])
             if field_type.multiowned?
               inner = field_type.resolved.to_s
-              affine_logic += "defer CheatLib.rcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
+              affine_logic += "defer if (!#{node.name}_moved) CheatLib.rcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
             elsif field_type.shared?
               inner = field_type.resolved.to_s
-              affine_logic += "defer CheatLib.arcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
+              affine_logic += "defer if (!#{node.name}_moved) CheatLib.arcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
             end
           end
         end
@@ -198,9 +215,12 @@ private
       end
 
       move_source_logic = ""
-      if !is_rc && node.value.is_a?(AST::Identifier)
+      if is_rc && is_move_rhs && rhs_ident
+        # Suppress the source variable's defer — ownership has transferred
+        move_source_logic = "#{rhs_ident.name}_moved = true;"
+      elsif !is_rc && node.value.is_a?(AST::Identifier)
         if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
-           move_source_logic = "#{node.value.name}_moved = true;"
+          move_source_logic = "#{node.value.name}_moved = true;"
         end
       end
 
@@ -471,10 +491,18 @@ private
       end
 
     when AST::ReturnNode
-      # For multiowned (Rc) / shared (Arc) identifier returns: retain so caller gets a reference,
-      # and the local defer can still release its own reference.
-      # Exception: inside a WITH block the variable is already the plain unwrapped value.
       rc_map = @rc_unwrap_map || {}
+
+      # MOVE in return: transfer Rc/Arc handle to caller without retain.
+      # The source's conditional defer is suppressed by setting _moved = true.
+      if node.value.is_a?(AST::MoveNode) && node.value.value.is_a?(AST::Identifier)
+        src_name = node.value.value.name
+        return "#{src_name}_moved = true;\nreturn #{src_name};"
+      end
+
+      # Default: for Rc/Arc identifier returns, retain so caller gets its own reference
+      # and the local defer can still release the function's copy.
+      # Exception: inside a WITH block the variable is already the plain unwrapped value.
       if node.value.is_a?(AST::Identifier) && !rc_map.key?(node.value.name)
         ti = node.value.type_info
         if ti&.multiowned?
@@ -525,6 +553,10 @@ private
       inner_code = visit(node.value)
       base_type = node.value.resolved_type.to_s
       "try CheatLib.arcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
+
+    when AST::MoveNode
+      # MOVE expr — handled by parent VarDecl/ReturnNode; fallback emits raw value
+      visit(node.value)
 
     when AST::Copy
       # Zig copies structs by value on assignment, so just return the inner expression
