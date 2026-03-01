@@ -1011,6 +1011,14 @@ private
     node.storage = :multiowned
   end
 
+  def visit_SharedWrap(node)
+    visit(node.value)
+
+    base_type = node.value.resolved_type  # e.g. :Node
+    node.full_type = :"^#{base_type}"     # e.g. :"^Node"
+    node.storage = :shared
+  end
+
   def visit_Give(node)
     visit(node.value)
 
@@ -1070,8 +1078,9 @@ private
         storage = scope&.locals&.dig(var_node.name, :storage)
         cap[:capability] = case storage
                            when :multiowned then :multiowned
+                           when :shared     then :shared
                            else
-                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned or another capability type")
+                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, or another capability type")
                              :unknown
                            end
       end
@@ -1125,6 +1134,12 @@ private
       scope = lookup_scope_for(var_node.name)
       unless scope&.locals&.dig(var_node.name, :storage) == :multiowned
         error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
+      end
+
+    when :shared
+      scope = lookup_scope_for(var_node.name)
+      unless scope&.locals&.dig(var_node.name, :storage) == :shared
+        error!(node, "WITH #{var_node.name}: expected a @shared variable")
       end
 
     else

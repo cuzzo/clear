@@ -94,6 +94,7 @@ module AST
       self.full_type = case storage
                        when :heap       then :"%#{final_type}"
                        when :multiowned then :"@#{final_type}"
+                       when :shared     then :"^#{final_type}"
                        else                  final_type
                        end
 
@@ -189,6 +190,7 @@ module AST
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   MultiownedWrap = Struct.new(:token, :value) { include Locatable }  # expr @multiowned -> Rc(T)
+  SharedWrap     = Struct.new(:token, :value) { include Locatable }  # expr @shared     -> Arc(T)
 
   UNARY_OPS = ['-', '!', '~']
 

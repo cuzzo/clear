@@ -164,6 +164,12 @@ class Parser
     AST::MultiownedWrap.new(token, lhs)
   end
 
+  # Shared Wrap: expr @shared  ->  Arc(T)
+  suffix(:VAR_ID, '@shared') do |lhs|
+    token = consume(:VAR_ID)
+    AST::SharedWrap.new(token, lhs)
+  end
+
   def parse_literal(type, storage)
     token = consume(type)
     node = AST::Literal.new(token, type, token.value, storage)
@@ -727,15 +733,15 @@ class Parser
       end
     end
 
-    # Check for capability suffix: Type @multiowned  ->  @Type
+    # Check for capability suffix: Type @multiowned -> @Type, Type @shared -> ^Type
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
     cap_prefix = ""
-    if match?(:VAR_ID) && current.value == "@multiowned"
+    if match?(:VAR_ID) && (current.value == "@multiowned" || current.value == "@shared")
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
+      cap_prefix = current.value == "@shared" ? "^" : "@"
       consume(:VAR_ID)
-      cap_prefix = "@"
     end
 
     "#{error_prefix}#{optional_prefix}#{cap_prefix}#{heap_prefix}#{base}#{inner}".to_sym

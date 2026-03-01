@@ -144,17 +144,21 @@ private
 
       annotation = is_primitive ? ": #{zig_type}" : ""
 
-      # Detect multiowned (Rc) vs unique-heap storage
+      # Detect multiowned (Rc), shared (Arc), vs unique-heap storage
       is_multiowned = node.type_info&.multiowned?
-      is_heap = node.storage == :heap && !is_multiowned
+      is_shared     = node.type_info&.shared?
+      is_rc         = is_multiowned || is_shared
+      is_heap       = node.storage == :heap && !is_rc
 
-      # 2. Generate Declaration — for multiowned identifier RHS, retain instead of move.
-      # Exception: inside a WITH block the RHS is already the unwrapped plain value, not an Rc.
+      # 2. Generate Declaration — for Rc/Arc identifier RHS, retain instead of move.
+      # Exception: inside a WITH block the RHS is already the unwrapped plain value, not an Rc/Arc.
       rc_map = @rc_unwrap_map || {}
       rhs_is_unwrapped = node.value.is_a?(AST::Identifier) && rc_map.key?(node.value.name)
-      value_code = if is_multiowned && node.value.is_a?(AST::Identifier) && node.value.type_info&.multiowned? && !rhs_is_unwrapped
-        base_type = node.value.type_info.resolved.to_s
-        "CheatLib.rcRetain(#{transpile_type(base_type)}, #{node.value.name})"
+      rhs_ti = node.value.is_a?(AST::Identifier) ? node.value.type_info : nil
+      value_code = if is_rc && rhs_ti && (rhs_ti.multiowned? || rhs_ti.shared?) && !rhs_is_unwrapped
+        base_type = rhs_ti.resolved.to_s
+        func = rhs_ti.shared? ? "arcRetain" : "rcRetain"
+        "CheatLib.#{func}(#{transpile_type(base_type)}, #{node.value.name})"
       else
         visit(node.value)
       end
@@ -165,18 +169,23 @@ private
       suppression = "_ = &#{node.name};"
 
       affine_logic = ""
-      if is_multiowned
+      if is_rc
         base_type = node.type_info.resolved.to_s
-        affine_logic = "defer CheatLib.rcRelease(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name});\n"
+        release_func = is_shared ? "arcRelease" : "rcRelease"
+        affine_logic = "defer CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name});\n"
 
-        # Release any @multiowned fields BEFORE the struct itself (Zig LIFO: emit after struct defer)
+        # Release any @multiowned/@shared fields BEFORE the struct itself (Zig LIFO: emit after struct defer)
         schema = (@struct_schemas ||= {})[node.type_info.resolved]
         if schema
           schema.each do |fname, fdef|
             field_type = Type.new(fdef[:type])
-            next unless field_type.multiowned?
-            inner = field_type.resolved.to_s
-            affine_logic += "defer CheatLib.rcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
+            if field_type.multiowned?
+              inner = field_type.resolved.to_s
+              affine_logic += "defer CheatLib.rcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
+            elsif field_type.shared?
+              inner = field_type.resolved.to_s
+              affine_logic += "defer CheatLib.arcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
+            end
           end
         end
       elsif is_heap
@@ -189,7 +198,7 @@ private
       end
 
       move_source_logic = ""
-      if !is_multiowned && node.value.is_a?(AST::Identifier)
+      if !is_rc && node.value.is_a?(AST::Identifier)
         if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
            move_source_logic = "#{node.value.name}_moved = true;"
         end
@@ -263,11 +272,18 @@ private
           move_statements << "#{v.name}_moved = true;"
         end
 
-        # If field value is a multiowned identifier, retain so the struct co-owns the reference.
+        # If field value is a multiowned/shared identifier, retain so the struct co-owns the reference.
         # (Expression results like function calls already carry count=1; no extra retain needed.)
-        val_code = if v.is_a?(AST::Identifier) && v.type_info&.multiowned? && !rc_map.key?(v.name)
-          base_type = v.type_info.resolved.to_s
-          "CheatLib.rcRetain(#{transpile_type(base_type)}, #{v.name})"
+        val_code = if v.is_a?(AST::Identifier) && !rc_map.key?(v.name)
+          if v.type_info&.multiowned?
+            base_type = v.type_info.resolved.to_s
+            "CheatLib.rcRetain(#{transpile_type(base_type)}, #{v.name})"
+          elsif v.type_info&.shared?
+            base_type = v.type_info.resolved.to_s
+            "CheatLib.arcRetain(#{transpile_type(base_type)}, #{v.name})"
+          else
+            visit(v)
+          end
         else
           visit(v)
         end
@@ -406,7 +422,7 @@ private
       "while (#{cond}) {\n #{body} \n}"
 
     when AST::WithBlock
-      rc_caps = node.capabilities.select { |c| c[:capability] == :multiowned }
+      rc_caps = node.capabilities.select { |c| [:multiowned, :shared].include?(c[:capability]) }
 
       # Bind each unwrapped value under a mangled name so Zig's no-shadowing rule is satisfied.
       # CLEAR sees the same variable name; the mangled alias is purely a Zig detail.
@@ -455,13 +471,19 @@ private
       end
 
     when AST::ReturnNode
-      # For multiowned (Rc) identifier returns: retain so caller gets a reference,
+      # For multiowned (Rc) / shared (Arc) identifier returns: retain so caller gets a reference,
       # and the local defer can still release its own reference.
       # Exception: inside a WITH block the variable is already the plain unwrapped value.
       rc_map = @rc_unwrap_map || {}
-      if node.value.is_a?(AST::Identifier) && node.value.type_info&.multiowned? && !rc_map.key?(node.value.name)
-        base_type = node.value.type_info.resolved.to_s
-        return "return CheatLib.rcRetain(#{transpile_type(base_type)}, #{node.value.name});"
+      if node.value.is_a?(AST::Identifier) && !rc_map.key?(node.value.name)
+        ti = node.value.type_info
+        if ti&.multiowned?
+          base_type = ti.resolved.to_s
+          return "return CheatLib.rcRetain(#{transpile_type(base_type)}, #{node.value.name});"
+        elsif ti&.shared?
+          base_type = ti.resolved.to_s
+          return "return CheatLib.arcRetain(#{transpile_type(base_type)}, #{node.value.name});"
+        end
       end
 
       val_code = node.value.nil? ? "" : visit(node.value)
@@ -485,8 +507,8 @@ private
       # target_code is already the unwrapped alias when inside a WITH block,
       # so skip the .data. indirection in that case.
       is_unwrapped = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
-      if node.target.type_info&.multiowned? && !is_unwrapped
-        # Rc(T) stores the value as .data (*T); Zig auto-derefs through the pointer
+      if (node.target.type_info&.multiowned? || node.target.type_info&.shared?) && !is_unwrapped
+        # Rc(T)/Arc(T) store the value as .data (*T); Zig auto-derefs through the pointer
         "#{target_code}.data.#{node.field}"
       else
         "#{target_code}.#{node.field}"
@@ -497,6 +519,12 @@ private
       inner_code = visit(node.value)
       base_type = node.value.resolved_type.to_s
       "try CheatLib.rcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
+
+    when AST::SharedWrap
+      # expr @shared  ->  Arc wrapping the heap pointer
+      inner_code = visit(node.value)
+      base_type = node.value.resolved_type.to_s
+      "try CheatLib.arcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
 
     when AST::Copy
       # Zig copies structs by value on assignment, so just return the inner expression

@@ -83,6 +83,7 @@ class Scope
     prefix = case entry[:storage]
              when :heap       then "%"
              when :multiowned then "@"
+             when :shared     then "^"
              else                  ""
              end
     :"#{prefix}#{entry[:type]}"
@@ -166,7 +167,7 @@ class Scope
 
   def is_on_heap?(name)
     entry = @locals[name]
-    entry ? [:heap, :multiowned].include?(entry[:storage]) : false
+    entry ? [:heap, :multiowned, :shared].include?(entry[:storage]) : false
   end
 
   def set_state(name, state)

@@ -395,6 +395,48 @@ pub const CheatLib = struct {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Atomic Reference Counting (shared / Arc)
+    // -------------------------------------------------------------------------
+
+    /// Arc(T): an atomically reference-counted wrapper around a heap-allocated T.
+    /// Thread-safe: the ref-count is an atomic usize.
+    pub fn Arc(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            data: *T,
+            ref_count: *std.atomic.Value(usize),
+        };
+    }
+
+    /// Create a new Arc from an already-heap-allocated *T.
+    /// The Arc takes ownership of data_ptr; ref_count starts at 1.
+    pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !Arc(T) {
+        const ref_count = try alloc.create(std.atomic.Value(usize));
+        ref_count.* = std.atomic.Value(usize).init(1);
+        return Arc(T){ .data = data_ptr, .ref_count = ref_count };
+    }
+
+    /// Increment the reference count atomically and return a copy of the handle.
+    /// Both the original and the returned handle must eventually be released.
+    pub fn arcRetain(comptime T: type, arc: Arc(T)) Arc(T) {
+        _ = arc.ref_count.fetchAdd(1, .acquire);
+        return arc;
+    }
+
+    /// Decrement the reference count atomically. When it reaches 0 the data
+    /// and ref-count allocation are freed.
+    pub fn arcRelease(comptime T: type, alloc: std.mem.Allocator, arc: Arc(T)) void {
+        const prev = arc.ref_count.fetchSub(1, .release);
+        if (prev == 1) {
+            // Acquire the release-sequence so all writes before prior arcRelease()
+            // calls are visible before we free the data.
+            _ = arc.ref_count.load(.acquire);
+            alloc.destroy(arc.data);
+            alloc.destroy(arc.ref_count);
+        }
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});
