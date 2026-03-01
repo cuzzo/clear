@@ -90,8 +90,12 @@ module AST
         storage = type_obj.finalize_storage(@slot_size, nil)
       end
 
-      # Set full_type with % prefix if heap
-      self.full_type = storage == :heap ? :"%#{final_type}" : final_type
+      # Set full_type with appropriate capability marker
+      self.full_type = case storage
+                       when :heap       then :"%#{final_type}"
+                       when :multiowned then :"@#{final_type}"
+                       else                  final_type
+                       end
 
       # Override storage in case Type's default differs from finalized storage
       self.storage = storage
@@ -184,6 +188,7 @@ module AST
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
+  MultiownedWrap = Struct.new(:token, :value) { include Locatable }  # expr @multiowned -> Rc(T)
 
   UNARY_OPS = ['-', '!', '~']
 

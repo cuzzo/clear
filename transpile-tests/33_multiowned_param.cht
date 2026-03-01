@@ -1,0 +1,32 @@
+STRUCT Point { x: Int64, y: Int64 }
+
+-- Functions take plain Types, not Capabilities.
+-- This function has no idea whether the caller holds an Rc or a stack value.
+FN getX(p: Point) RETURNS Int64 ->
+    RETURN p.x;
+END
+
+FN sumFields(p: Point) RETURNS Int64 ->
+    RETURN p.x + p.y;
+END
+
+FN cheatMain() RETURNS Void ->
+    VAR pt = %Point{ x: 3, y: 4 } @multiowned;
+
+    -- WITH pt { } unwraps the Rc into a plain Point for this block.
+    -- Inside, pt refers to the inner Point value, not the Rc handle.
+    WITH pt {
+        VAR x = getX(pt);
+        ASSERT x == 3, "getX should return pt.x == 3";
+
+        VAR s = sumFields(pt);
+        ASSERT s == 7, "sumFields should return pt.x + pt.y == 7";
+
+        -- Field access also works directly on the unwrapped value.
+        ASSERT pt.x == 3, "pt.x should be 3 inside WITH block";
+        ASSERT pt.y == 4, "pt.y should be 4 inside WITH block";
+    }
+
+    -- pt's Rc is still alive here; the defer rcRelease runs at scope exit.
+    RETURN;
+END

@@ -139,24 +139,32 @@ private
 
       annotation = is_primitive ? ": #{zig_type}" : ""
 
-      # 2. Generate Declaration
-      #    var u = ...;
-      decl = "#{keyword} #{node.name}#{annotation} = #{visit(node.value)};"
+      # Detect multiowned (Rc) vs unique-heap storage
+      is_multiowned = node.type_info&.multiowned?
+      is_heap = node.storage == :heap && !is_multiowned
+
+      # 2. Generate Declaration — for multiowned identifier RHS, retain instead of move.
+      # Exception: inside a WITH block the RHS is already the unwrapped plain value, not an Rc.
+      rc_map = @rc_unwrap_map || {}
+      rhs_is_unwrapped = node.value.is_a?(AST::Identifier) && rc_map.key?(node.value.name)
+      value_code = if is_multiowned && node.value.is_a?(AST::Identifier) && node.value.type_info&.multiowned? && !rhs_is_unwrapped
+        base_type = node.value.type_info.resolved.to_s
+        "CheatLib.rcRetain(#{transpile_type(base_type)}, #{node.value.name})"
+      else
+        visit(node.value)
+      end
+
+      decl = "#{keyword} #{node.name}#{annotation} = #{value_code};"
 
       # 3. Generate Suppression
-      #    _ = &u;  <-- If mutable, we take address to silence "never mutated" check
-      #
-      # TODO: Have the annotator determine whether a var is used, and whether a mutable is mutated.
       suppression = "_ = &#{node.name};"
 
-      is_heap = node.storage == :heap
-
       affine_logic = ""
-      # TODO: If definitively returned, eliminate this deferral
-      if is_heap
-        # 1. Create the moved flag
-        # 2. Create the defer guard
-        # 3. TODO: use destroy, not free
+      if is_multiowned
+        base_type = node.type_info.resolved.to_s
+        affine_logic = "defer CheatLib.rcRelease(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name});\n"
+      elsif is_heap
+        # TODO: If definitively returned, eliminate this deferral
         affine_logic = <<~ZIG
           var #{node.name}_moved = false;
           _ = &#{node.name}_moved;
@@ -165,9 +173,7 @@ private
       end
 
       move_source_logic = ""
-      if node.value.is_a?(AST::Identifier)
-        # Check if the RHS variable requires a move (Heap types, etc.)
-        # The Annotator populates 'type_info' on identifiers.
+      if !is_multiowned && node.value.is_a?(AST::Identifier)
         if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
            move_source_logic = "#{node.value.name}_moved = true;"
         end
@@ -373,6 +379,28 @@ private
       body = transpile_block(node.do_branch)
       "while (#{cond}) {\n #{body} \n}"
 
+    when AST::WithBlock
+      rc_caps = node.capabilities.select { |c| c[:capability] == :multiowned }
+
+      # Bind each unwrapped value under a mangled name so Zig's no-shadowing rule is satisfied.
+      # CLEAR sees the same variable name; the mangled alias is purely a Zig detail.
+      bindings = rc_caps.map do |cap|
+        name = cap[:var_node].name
+        inner = "__#{name}_unwrap"
+        "const #{inner} = #{name}.data.*;\n_ = &#{inner};"
+      end.join("\n")
+
+      # Install alias map so Identifier / GetField / VarDecl use the unwrapped binding
+      prev_map = @rc_unwrap_map || {}
+      @rc_unwrap_map = prev_map.merge(
+        rc_caps.map { |c| [c[:var_node].name, "__#{c[:var_node].name}_unwrap"] }.to_h
+      )
+
+      body = transpile_block(node.body)
+      @rc_unwrap_map = prev_map
+
+      "{\n#{bindings}\n#{body}\n}"
+
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
       # Standard call (pass rt)
@@ -401,6 +429,15 @@ private
       end
 
     when AST::ReturnNode
+      # For multiowned (Rc) identifier returns: retain so caller gets a reference,
+      # and the local defer can still release its own reference.
+      # Exception: inside a WITH block the variable is already the plain unwrapped value.
+      rc_map = @rc_unwrap_map || {}
+      if node.value.is_a?(AST::Identifier) && node.value.type_info&.multiowned? && !rc_map.key?(node.value.name)
+        base_type = node.value.type_info.resolved.to_s
+        return "return CheatLib.rcRetain(#{transpile_type(base_type)}, #{node.value.name});"
+      end
+
       val_code = node.value.nil? ? "" : visit(node.value)
 
       # If we are returning a variable, we are moving it out.
@@ -417,7 +454,23 @@ private
       "#{prefix}return #{val_code};"
 
     when AST::GetField
-      "#{visit(node.target)}.#{node.field}"
+      target_code = visit(node.target)
+      rc_map = @rc_unwrap_map || {}
+      # target_code is already the unwrapped alias when inside a WITH block,
+      # so skip the .data. indirection in that case.
+      is_unwrapped = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
+      if node.target.type_info&.multiowned? && !is_unwrapped
+        # Rc(T) stores the value as .data (*T); Zig auto-derefs through the pointer
+        "#{target_code}.data.#{node.field}"
+      else
+        "#{target_code}.#{node.field}"
+      end
+
+    when AST::MultiownedWrap
+      # expr @multiowned  ->  Rc wrapping the heap pointer
+      inner_code = visit(node.value)
+      base_type = node.value.resolved_type.to_s
+      "try CheatLib.rcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
 
     when AST::Copy
       # Zig copies structs by value on assignment, so just return the inner expression
@@ -432,6 +485,10 @@ private
       if node.name == "_" && @placeholder_name
         return @placeholder_name
       end
+
+      # Inside a WITH block, use the unwrapped inner alias instead of the Rc handle
+      rc_map = @rc_unwrap_map || {}
+      return rc_map[node.name] if rc_map.key?(node.name)
 
       node.name
 

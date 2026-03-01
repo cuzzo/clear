@@ -356,6 +356,45 @@ pub const CheatLib = struct {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Reference Counting (multiowned / Rc)
+    // -------------------------------------------------------------------------
+
+    /// Rc(T): a reference-counted wrapper around a heap-allocated T.
+    /// The data pointer and ref-count are both allocated via the provided allocator.
+    pub fn Rc(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            data: *T,
+            ref_count: *usize,
+        };
+    }
+
+    /// Create a new Rc from an already-heap-allocated *T.
+    /// The Rc takes ownership of data_ptr; ref_count starts at 1.
+    pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !Rc(T) {
+        const ref_count = try alloc.create(usize);
+        ref_count.* = 1;
+        return Rc(T){ .data = data_ptr, .ref_count = ref_count };
+    }
+
+    /// Increment the reference count and return a copy of the handle.
+    /// Both the original and the returned handle must eventually be released.
+    pub fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
+        rc.ref_count.* += 1;
+        return rc;
+    }
+
+    /// Decrement the reference count.  When it reaches 0 the data and
+    /// ref-count allocation are freed.
+    pub fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
+        rc.ref_count.* -= 1;
+        if (rc.ref_count.* == 0) {
+            alloc.destroy(rc.data);
+            alloc.destroy(rc.ref_count);
+        }
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});

@@ -25,6 +25,10 @@ module OwnershipTracker
     rhs_name = node.value.name
     rhs_type = current_scope.resolve_type(rhs_name)
 
+    # Multiowned (Rc) variables are cloned via retain, not moved
+    rhs_storage = current_scope.locals[rhs_name]&.dig(:storage)
+    return if rhs_storage == :multiowned
+
     # Primitives COPY, everything else MOVES
     if Type.new(rhs_type).requires_move?
       current_scope.set_state(rhs_name, :moved)
@@ -152,6 +156,9 @@ module OwnershipTracker
     owner_scope = lookup_scope_for(var_name)
     return false unless owner_scope
 
+    # Multiowned (Rc) values manage their own lifetime via retain/release
+    return false if owner_scope.locals[var_name]&.dig(:storage) == :multiowned
+
     type = owner_scope.resolve_type(var_name)
     return false unless Type.new(type).requires_move?
 
@@ -185,7 +192,9 @@ module OwnershipTracker
       # We only care about variables that are:
       # 1. LIVE (Not moved yet)
       # 2. Linear (Have a destructor/need freeing)
-      if current_scope.get_state(name) == :live && Type.new(info[:type]).requires_move?
+      if current_scope.get_state(name) == :live &&
+         info[:storage] != :multiowned &&
+         Type.new(info[:type]).requires_move?
 
         # AUTOMATICALLY INSERT DROP
         # In a transpiler, you might attach this metadata to the AST node

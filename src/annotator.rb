@@ -1003,6 +1003,14 @@ private
     node.full_type = :Void
   end
 
+  def visit_MultiownedWrap(node)
+    visit(node.value)
+
+    base_type = node.value.resolved_type  # e.g. :Node
+    node.full_type = :"@#{base_type}"     # e.g. :"@Node"
+    node.storage = :multiowned
+  end
+
   def visit_Give(node)
     visit(node.value)
 
@@ -1050,11 +1058,24 @@ private
 
   def visit_WithBlock(node)
     # 1. Validate each capability's variable exists and resolve its type
-    capabilities = node.capabilities.map do |cap|
+    node.capabilities.each do |cap|
       var_node = cap[:var_node]
       visit(var_node)
       cap[:resolved_type] = var_node.full_type
       cap[:old_scope] = lookup_scope_for(var_node.name)
+
+      # Infer capability from the variable's storage when not stated explicitly
+      if cap[:capability] == :infer
+        scope = lookup_scope_for(var_node.name)
+        storage = scope&.locals&.dig(var_node.name, :storage)
+        cap[:capability] = case storage
+                           when :multiowned then :multiowned
+                           else
+                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned or another capability type")
+                             :unknown
+                           end
+      end
+
       validate_capability(node, cap[:capability], var_node)
     end
 
@@ -1098,6 +1119,12 @@ private
       scope = lookup_scope_for(var_node.name)
       if scope && scope.is_immutable?(var_node.name)
         error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
+      end
+
+    when :multiowned
+      scope = lookup_scope_for(var_node.name)
+      unless scope&.locals&.dig(var_node.name, :storage) == :multiowned
+        error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
       end
 
     else

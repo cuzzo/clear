@@ -7,7 +7,7 @@ class Type
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
-  LOCATIONS = [:stack, :frame, :heap]
+  LOCATIONS = [:stack, :frame, :heap, :multiowned]
   OWNERSHIP = [:unique, :borrowed, :shared, :static]
 
   # String type constants
@@ -263,6 +263,10 @@ class Type
     @location == :heap
   end
 
+  def multiowned?
+    @location == :multiowned
+  end
+
   def map?
     resolved.to_s.start_with?("HashMap")
   end
@@ -300,8 +304,8 @@ class Type
   def slot_size(lookup_arg = nil, &lookup_block)
     resolver = lookup_arg || lookup_block
 
-    # 1. Primitives / Pointers (Heap objects are 1 slot pointers)
-    return 1 if primitive? || heap? || dynamic? || any?
+    # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc is also pointer-sized)
+    return 1 if primitive? || heap? || dynamic? || any? || multiowned?
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
@@ -320,6 +324,7 @@ class Type
 
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
+    return false if multiowned?  # Rc uses retain/release, not linear move semantics
     return true if heap?
     return true if array?
     !primitive?
@@ -327,7 +332,8 @@ class Type
 
   def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    return false if heap?    # Heap-allocated types are not copyable
+    return false if multiowned?  # Rc must be explicitly retained, not silently copied
+    return false if heap?        # Heap-allocated types are not copyable
     return false if array?   # Arrays are not copyable
     return false if map?     # Maps are not copyable
 
@@ -363,6 +369,9 @@ class Type
   # @return [Symbol] One of :stack, :frame, or :heap
   #
   def finalize_storage(size, current_storage = nil)
+    # Multiowned (Rc) always stays multiowned
+    return :multiowned if multiowned? || current_storage == :multiowned
+
     # If already heap, keep it heap
     return :heap if current_storage == :heap || heap?
 
@@ -406,8 +415,11 @@ class Type
       @wrapped_type_raw = nil
     end
 
-    # C. Initialize location based on "%" prefix
-    if str.start_with?("%")
+    # C. Initialize location based on capability prefix (@ = multiowned/Rc, % = unique heap)
+    if str.start_with?("@")
+      @location = :multiowned
+      str = str[1..]
+    elsif str.start_with?("%")
       @location = :heap
       str = str[1..] # Strip the % so we can parse the inner type cleanly
     elsif primitive?
@@ -438,12 +450,13 @@ class Type
       @element_type_raw = nil
     end
 
-    # Keep the full type including ? prefix for resolved
-    @resolved_cache = original_str.gsub("%", "").to_sym
+    # Keep the full type including ! and ? prefixes for resolved,
+    # but strip capability markers (% = unique heap, @ = multiowned) since they are not type-level.
+    @resolved_cache = original_str.gsub("%", "").gsub("@", "").to_sym
   end
 
   # Computes the Zig type string for this CHEAT type.
-  # Handles: error unions, optionals, pointers, arrays, hashmaps, primitives, structs.
+  # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
   def compute_zig_type
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
@@ -455,6 +468,12 @@ class Type
     if optional?
       inner_zig = wrapped_type.zig_type
       return "?#{inner_zig}"
+    end
+
+    # 2b. Handle Multiowned: @T -> CheatLib.Rc(T)
+    if multiowned?
+      inner_zig = Type.new(resolved.to_s).zig_type
+      return "CheatLib.Rc(#{inner_zig})"
     end
 
     is_pointer = heap?

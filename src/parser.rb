@@ -158,6 +158,12 @@ class Parser
     AST::OptionalUnwrap.new(q_token, lhs)
   end
 
+  # Multiowned Wrap: expr @multiowned  ->  Rc(T)
+  suffix(:VAR_ID, '@multiowned') do |lhs|
+    token = consume(:VAR_ID)
+    AST::MultiownedWrap.new(token, lhs)
+  end
+
   def parse_literal(type, storage)
     token = consume(type)
     node = AST::Literal.new(token, type, token.value, storage)
@@ -340,7 +346,7 @@ class Parser
       p_type = :Any
 
       if match!(:CHAR, ":")
-        p_type = parse_type_annotation()
+        p_type = parse_type_annotation(allow_capabilities: false)
       end
 
       # TODO: This shouldn't be allowed for function calls
@@ -649,7 +655,7 @@ class Parser
   def parse_sigil_construct
     percent_token = consume(:PERCENT)
     lit = parse_lit(:heap)
-    return lit if !lit.nil?
+    return parse_suffixes(lit) if !lit.nil?
     if match?(:CHAR, '(')
       params = parse_argument_list()
       captures = []
@@ -677,7 +683,7 @@ class Parser
     AST::ReduceOp.new(reduce_token, initial_value, body)
   end
 
-  def parse_type_annotation
+  def parse_type_annotation(allow_capabilities: true)
     # Check for error union prefix: !Type (Zig-style error returns)
     error_prefix = ""
     if match!(:CHAR, '!')
@@ -721,19 +727,37 @@ class Parser
       end
     end
 
-    "#{error_prefix}#{optional_prefix}#{heap_prefix}#{base}#{inner}".to_sym
+    # Check for capability suffix: Type @multiowned  ->  @Type
+    # Not permitted on function parameters (functions take plain Types, not Capabilities).
+    cap_prefix = ""
+    if match?(:VAR_ID) && current.value == "@multiowned"
+      unless allow_capabilities
+        error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
+      end
+      consume(:VAR_ID)
+      cap_prefix = "@"
+    end
+
+    "#{error_prefix}#{optional_prefix}#{cap_prefix}#{heap_prefix}#{base}#{inner}".to_sym
   end
 
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')
 
-    # Parse comma-separated list of capability specifications
+    # Parse comma-separated list of capability specifications.
+    # Syntax: WITH var_name { } — capability is inferred from the variable's type.
+    # Legacy explicit form: WITH RESTRICT/EXCLUSIVE var_name { } still supported.
     capabilities = []
 
-    while match?(:KEYWORD) do
-      capability = match!(:KEYWORD).value.to_sym
-      unless AST::CAPABILITIES.include?(capability)
-        error!(current, "Expected EXCLUSIVE or RESTRICT, got #{capability}")
+    while match?(:KEYWORD) || match?(:VAR_ID) do
+      capability = if match?(:KEYWORD)
+        cap = consume(:KEYWORD).value.to_sym
+        unless AST::CAPABILITIES.include?(cap)
+          error!(previous, "Unknown WITH capability: #{cap}")
+        end
+        cap
+      else
+        :infer  # VAR_ID: capability inferred from variable's type at annotation time
       end
 
       # Parse variable (supports foo, foo.bar, foo.bar.baz, etc.)
