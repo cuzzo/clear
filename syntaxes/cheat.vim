@@ -25,7 +25,6 @@ syn match cheatFunctionCall "\w\+!\?("he=e-1 contains=cheatFunction
 
 " Sigils and Special Operators
 syn match cheatSigilHeap "%"
-syn match cheatSigilAtomic "\^"
 syn match cheatSigilBorrow "&"
 syn match cheatBind "@\w\+"
 syn match cheatPanic "!!"
@@ -63,7 +62,6 @@ hi def link cheatBinary Number
 
 " Special Highlighting for Sigils to enforce 'Explicit over Implicit'
 hi def link cheatSigilHeap Special
-hi def link cheatSigilAtomic Special
 hi def link cheatSigilBorrow Special
 hi def link cheatBind Identifier
 hi def link cheatPanic Error

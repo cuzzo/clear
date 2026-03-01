@@ -122,10 +122,6 @@
           "match": "%"
         },
         {
-          "name": "keyword.operator.sigil.atomic.cheat",
-          "match": "\\^"
-        },
-        {
           "name": "keyword.operator.sigil.borrow.cheat",
           "match": "&"
         },

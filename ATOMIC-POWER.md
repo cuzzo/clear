@@ -1,180 +1,75 @@
 # Atomic Power: Shared Memory Without the Garbage Collector
 
-In CHEAT, 99% of your data lives in **Arenas** (notebooks) that are incinerated when a function returns. This is fast and safe, but it has one flaw: **Data cannot survive the death of its creator.**
+In CLEAR, 99% of your data lives in **Arenas** (notebooks) that are incinerated when a function returns. This is fast and safe, but it has one flaw: **Data cannot survive the death of its creator.**
 
  * Sometimes, you need data to live longer than the function that created it.
  * Sometimes, you need data to be shared across multiple threads running in parallel.
 
-**Enter the Atomic (`^`).**
+**Enter the 'shared' Capability and `shared:atomic`.**
 
-## 1. What is an Atomic?
+## 1. What is the 'shared' Capability?
 
-An Atomic is a piece of memory that lives in the Global Ether (the Heap), not in a specific function's notebook (the Arena).
+In CLEAR, we separate **Types** from **Capabilities**.
 
-It has two special superpowers:
+*   **Type:** What the object *is* (e.g., `User`).
+*   **Capability:** How the object is *accessed* (e.g., `shared`).
 
- 1. Immortality (Conditional): It survives as long as someone is holding a handle to it.
- 2. Thread Safety: It can be safely mutated by multiple threads at the same time using the ! bang methods.
+The `shared` capability (Arc in Rust) allows an object to live in the **Global Heap**, survive outside its creator's arena, and be shared safely across threads.
 
-**The Sigil: `^`**
+```CLEAR
+-- Acquisition: Acquire 'shared' capability
+sharedU = SHARE(User.new());
 
-In CHEAT, any variable ending in `^` is an Atomic.
-
-```
-VAR counter^ = %0;          -- Create an atomic integer
-counter^.increment!();      -- Thread-safe mutation
-```
-
-## 2. When do you NEED them?
-
-You need Atomics when the "Birth -> Death" linear model of Arenas breaks down.
-
-### Scenario A: The Background Job
-
-You want to spawn a task that outlives the parent function.
-
-```
-FN trackLogin() ->
-  -- If this were a normal VAR, it would die when trackLogin returns.
-  VAR requestCount^ = %0;
-
-  SPAWN %(requestCount^) ->
-     -- This runs in the background for 5 seconds.
-     -- It holds a handle to requestCount^, keeping it alive.
-     network.send(requestCount^);
-  END
-
-  -- Function returns immediately.
-  -- Normal variables die here.
-  -- requestCount^ survives because the background job holds it.
-END
+-- Usage: Pass the 'raw' Type to functions
+process(sharedU);
 ```
 
-### Scenario B: Shared State
+## 2. Atomics: Primitives in the Ether
 
-You have 10 worker threads that need to update a single scorecard.
+For simple numeric types like counters, CLEAR uses the **`shared:atomic`** capability. An Atomic primitive lives in the Global Heap and can be safely mutated by multiple threads at the same time.
 
-```
-VAR score^ = %0;
-
-PARALLEL FOR i IN (1..100) ->
-   -- All threads safely increment the SAME memory address
-   score^.increment!();
-END
+```CLEAR
+VAR counter = SHARE:atomic(0);  -- Create an atomic integer
+counter.increment!();           -- Thread-safe mutation
 ```
 
-## 3. How CHEAT Handles Them: "The Magic Count"
+## 3. How CLEAR Handles Them: "The Magic Count"
 
-CHEAT does not use a Tracing Garbage Collector (like Java/Go) that pauses your program to scan memory.
+CLEAR does not use a Tracing Garbage Collector (like Java/Go) that pauses your program. Instead, CLEAR uses **Deterministic Reference Counting**.
 
-Instead, CHEAT uses **Deterministic Reference Counting.**
+Every `shared` object has a tiny backpack holding a number (the Reference Count). This number represents how many people are holding a handle to it.
 
-Every Atomic object has a tiny backpack holding a number (the Reference Count). This number represents how many people are holding a handle to it.
+ * **Creation:** Count = 1.
+ * **Sharing:** When you pass a `shared` object to a thread (`SPAWN`), Count increments.
+ * **Drop:** When a thread finishes, its handle goes out of scope and Count decrements.
+ * **Destruction:** The microsecond Count hits 0, the memory is freed instantly.
 
-### Visualizing the Lifecycle
+ * **The Result:** Zero "Stop the World" pauses. Memory is freed precisely when it's no longer needed.
 
- * **Step 1: Creation** `VAR x^ = %Data();` CHEAT calls malloc (system heap) and sets Count = 1.
+## 4. The Law: No Shared Cycles
 
-```
-[ Global Heap ]
-Address: 0x9999
-+------------------+
-| RefCount: 1      | <---- Main Function holds handle 'x^'
-| Data: "MyData"   |
-+------------------+
-```
+Reference counting has one fatal weakness: **Cycles.** If A holds B, and B holds A, their RefCounts will never hit 0. They will leak memory forever.
 
- * **Step 2: Sharing** `SPAWN %(x^) -> ...` The background thread grabs a handle. Count increments.
+CLEAR refuses to stop your program to scan for cycles. Therefore, CLEAR enforces **The Law**:
 
-```
-[ Global Heap ]
-Address: 0x9999
-+------------------+
-| RefCount: 2      | <---- Main Function holds handle 'x^'
-| Data: "MyData"   | <---- Background Thread holds handle 'x^'
-+------------------+
-```
-
- * **Step 3: Parent Exits** `Main` finishes. Its handle goes out of scope. Count decrements.
-
-```
-[ Global Heap ]
-Address: 0x9999
-+------------------+
-| RefCount: 1      |      (Main is gone)
-| Data: "MyData"   | <---- Background Thread still holding it
-+------------------+
-(Memory is NOT freed yet. It survives.)
-```
-
- * **Step 4: Child Exits** The background thread finishes. Its handle goes out of scope. Count decrements to 0.
-
-```
-[ Global Heap ]
-Address: 0x9999
-+------------------+
-| RefCount: 0      | <---- NO OWNERS
-| Data: "MyData"   |
-+------------------+
-!!! INSTANT DESTRUCTION !!!
-(free() is called immediately)
-```
-
- * **The Result:** Zero "Stop the World" pauses. Memory is freed the exact microsecond it is no longer needed.
-
-## 4. The Law: No Atomic Cycles
-
- * Reference counting has one fatal weakness: **Cycles.**
- * If A holds B, and B holds A, their RefCounts will never hit 0. They will leak memory forever.
-
-Garbage Collected languages solve this by periodically stopping your program and scanning for cycles. CHEAT refuses to stop your program.
-
-**Therefore, CHEAT enforces The Law:**
-
-An Atomic **CANNOT** hold a reference to another Atomic.
+**A `shared` object CANNOT hold a reference to another `shared` object.**
 
 ### The Topology
 
-This forces your memory to be a DAG (Directed Acyclic Graph). Data ownership always flows "Down" or "Across," never "Back Up."
+This forces your memory to be a **DAG** (Directed Acyclic Graph). Data ownership always flows "Down" or "Across," never "Back Up."
 
-**Allowed:**
-
-```
-      [ Global Config^ ]
-          /      \
-      [User^]  [User^]
-```
-
-*(A normal Struct can hold multiple Atomics, but an Atomic cannot hold them.)*
-
-**Forbidden (Compiler Error):**
-
-```
-      [ Atomic A^ ]
-           |
-           v
-      [ Atomic B^ ]  <--- ILLEGAL!
-           |
-           v
-      [ Atomic A^ ]
-```
-
-
-**Why this is a Feature, not a Bug**
-
-By forbidding cycles, CHEAT guarantees:
-
- * **No Memory Leaks:** It is mathematically impossible to leak an Atomic.
- * **No Deadlocks:** Since you can't create circular dependencies, you (mostly) avoid circular locking logic.
- * **No GC Pauses:** There's no need to scan the heap.
+By forbidding cycles, CLEAR guarantees:
+1.  **No Memory Leaks:** It is mathematically impossible to leak a `shared` object.
+2.  **No Deadlocks:** You avoid the circular dependencies that often lead to circular locking.
+3.  **No GC Pauses:** There's no need to scan the heap.
 
 ## Summary
 
-| Feature | Arena (`%`) | Atomic (`^`) |
+| Feature | Arena (Default) | Shared / Atomic |
 | :--- | :--- | :--- |
-| **Location** | Stack / Local Notebook | Global Heap |
+| **Location** | Local Arena | Global Heap |
 | **Lifetime** | Function Scope | Reference Counted |
-| **Speed** | Blazing Fast ($O(1)$) | Fast (System Malloc) |
-| **Concurrency** | Thread-Private (Safe) | Thread-Safe (Mutex/Atomic) |
+| **Speed** | Blazing Fast (O(1)) | Fast (System Malloc) |
+| **Concurrency** | Thread-Private (Safe) | Thread-Safe |
 | **Usage** | 99% of variables | Shared counters, Queues, Configs |
 | **Cost** | Zero GC | Zero GC (Deterministic) |

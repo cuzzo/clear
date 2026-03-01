@@ -1,4 +1,4 @@
-# CHEAT 
+# CLEAR
 
 ## PROPAGANDA
 
@@ -18,7 +18,13 @@ Being a genius like *antirez* isn't scalable. It's not something everyone can be
 
 Everyone else can CHEAT.
 
-## CORE CHEAT PHILOSPHY
+## WHAT IS CHEAT?
+
+CLEAR is a memory safe language like Rust, with better ergonomics than Swift.
+
+It runs on a Go-like Runtime (the CHEAT runtime) that makes concurrent code as easy, safe, and fast as possible.
+
+## CORE CLEAR PHILOSOPHY
 
 * Code should work.
 * Code that is easy to understand, write, AND test is more likely to work.
@@ -65,16 +71,16 @@ Everyone else can CHEAT.
     * Unless you're a rocket scientist, the right compiler can figure it out better than you can.
     * A good SQL engine beats all but the absolute most elite programmers.
     * A good compiler can also take an easy language and beat all but the most elite programmers (see LuaJIT).
-    * CHEAT *does* ask you think about *WHERE* an object lives.
+    * CLEAR *does* ask you think about *WHERE* an object lives.
       * Cache locality is literally 100x faster. If you wrote something cache-locality optimized in Ruby, it would crush a pointer cache miss in C.
-      * Therefore, CHEAT is designed around making it as easy as possible to ensure you DON'T cache miss unless you absolutely must.
+      * Therefore, CLEAR is designed around making it as easy as possible to ensure you DON'T cache miss unless you absolutely must.
         * This means you do need to think about if you want something on the STACK (default, fast) or the HEAP (slow, but sometimes required).
 13. You should not need to worry about a Global-Interpreter-Lock (GIL).
     * Code *should* be able to run in parallel or concurrently *EFFICIENTLY* by default.
 14. Code should be as left-sided as possible.
     * How many hours have *YOU* spent tracking down paren-syntax errors, figuring out which condition you're in, etc???
     * Time spent figuring out *WHERE* you even are logically, is time wasted, that could be spent getting things done.
-15. Someone who doesn't know *CHEAT* should be able to look at *CHEAT* code and intuit what it does.
+15. Someone who doesn't know *CLEAR* should be able to look at *CLEAR* code and intuit what it does.
 16. Publicly-Exported APIs *SHOULD* have style-enforcements.
     * At a minimum, if you're making a library, anyone should be able to understand the API.
     * All `PUBLIC` functions *MUST* either *explicitly* `RAISE` an error OR handle all errors.
@@ -89,46 +95,46 @@ Everyone else can CHEAT.
 ## Architecture
 
 **1. Arena-Based Memory & Isolation**
-  * CHEAT uses Arena-based memory instead of a global Garbage Collector.
-  * The "Handoff" Trick: When a function returns a large object (like a String or List), CHEAT does not copy the data.
+  * CLEAR uses Arena-based memory instead of a global Garbage Collector.
+  * The "Handoff" Trick: When a function returns a large object (like a String or List), CLEAR does not copy the data.
      * Instead, it performs Return-Value Optimization via Destination Passing.
        * The compiler instructs the function to write the data directly into the Caller's memory.
      * For dynamic data, it uses Page Handoffs: The memory page containing your data is detached from the dying function and stapled to the living Caller.
   * *The Result:* You can return a 1GB video file from a function instantly `O(1)` *without* a generic Heap or "Stop-the-World" jitter of Java or Go.
 
 **2. Implicit "Railway" Error Handling**
-  * CHEAT treats errors as data, but handles them via control flow.
-  * The `SMOOTH` operator `s>` (aka the `PIPE` or `|>` in Elixir, etc) acts as a guard.
+  * CLEAR treats errors as data, but handles them via control flow.
+  * The `SMOOTH` operator `s>` (aka the `PIPE` or `||> ` in Elixir, etc) acts as a guard.
     * It automatically bubbles errors down the chain, to be handled elsewhere, or allows them to be handled inline elegantly.
   * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- making it always clear what's desired vs what's the fallback.
   * *The Result:* No if [err != nil]() boilerplate. No [Pyramid of Doom](). No [checkOk]() clutter. No `if .nil?` everywhere.
 
 **3. Register-Based Virtual Machine**
-  * CHEAT runs on a custom Register-Based VM *OR* transpiles to Zig and runs natively.
+  * CLEAR runs on a custom Register-Based VM *OR* transpiles to Zig and runs natively.
   * This reduces instruction churn compared to traditional stack machines (Java/Python/Ruby/etc) which maps efficiently to hardware.
   * *The Result:* Rapid development, with real-time debugging as easy as Ruby, with guarantees your code won't crash in run-time.
 
 **4. Bi-Modal Type System**
-  * CHEAT is dynamic by default (using NaN-boxed values for ease of use) but supports optional "Systems Types" (`u8`, `u64`) and Struct definitions.
+  * CLEAR is dynamic by default (using NaN-boxed values for ease of use) but supports optional "Systems Types" (`u8`, `u64`) and Struct definitions.
   * *The Result:* You can write scripts fast, then optimize hot paths into raw machine instructions, bridging the gap between Python/Ruby and Zig/C.
 
 **5. Deterministic Shared-Memory for Concurrency**
   * Parallelism is achieved via `SPAWN`, which creates isolated execution contexts.
   * `SPAWN`ing a process creates a lightweight, isolated memory arena.
-  * Because memory is not shared between threads execpt Atomics (`^`), CHEAT code is lock-free and thread-safe by default.
-    * CHEAT avoids the latency spikes of a "Stop-the-World" Garbage Collector by using Reference Counting for Atomics.
-       * An Atomic dies the microsecond the last thread stops using it.
-    * The Law of Cycles: To make this work without leaks, CHEAT enforces a strict topology: An Atomic cannot hold a reference to another Atomic.
+  * Because memory is not shared between threads execpt `shared:atomic` capabilities, CLEAR code is lock-free and thread-safe by default.
+    * CLEAR avoids the latency spikes of a "Stop-the-World" Garbage Collector by using Reference Counting for `shared` objects.
+       * A `shared` object dies the microsecond the last thread stops using it.
+    * The Law of Cycles: To make this work without leaks, CLEAR enforces a strict topology: A `shared` object cannot hold a reference to another `shared` object.
        * This guarantees a Directed Acyclic Graph (DAG) of memory.
        * *The Result:* You get the safety of Java/Go concurrency with the predictable latency of C++.
 
 **6. A Type system that *just works***
-  * CHEAT is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference.
+  * CLEAR is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference.
   * The compiler takes care of the confusing parts of the type system for you.
-  * *The Result:* If you can write code in JavaScript, Lua, Python, or Ruby - you can write blazing fast CHEAT code.
+  * *The Result:* If you can write code in JavaScript, Lua, Python, or Ruby - you can write blazing fast CLEAR code.
 
 **7. True parallelism**
-  * CHEAT can Auto-Squish your structs (Structure-of-Arrays transformation).
+  * CLEAR can Auto-Squish your structs (Structure-of-Arrays transformation).
   * This allows efficient processing on GPUs in parallel (if compiling to a target).
   * If your struct can't be auto-squished given the code as currently written, you get a compiler error.
   * *The Result:* Either decorate it with @SLOW, or re-write so the data can be squished and screaming fast.
@@ -143,59 +149,49 @@ Everyone else can CHEAT.
 
 **9. Scoped Inlining (INSIDE) for Graphs**
   * Traditional Arena languages struggle with recursive structures (Trees/Graphs) because children die when the function returns.
-  * CHEAT solves this with the INSIDE keyword (e.g., VAR x = INSIDE buildTree()).
+  * CLEAR solves this with the INSIDE keyword (e.g., VAR x = INSIDE buildTree()).
   * This allows a child function to borrow the *Parent's Arena* for allocation.
   * *The Result:* You can build complex, pointer-heavy recursive data structures that exist contiguously in memory and are freed instantly when the root owner exits.
 
-## WHO IS CHEAT *NOT* FOR
+## WHO IS CLEAR *NOT* FOR
 
-CHEAT is opinionated. The specific optimizations that make it fast and safe for 99% of Business Logic make it extremely hostile to 1% of Architectural patterns.
+CLEAR is opinionated. The specific optimizations that make it fast and safe for 99% of Business Logic make it extremely hostile to 1% of Architectural patterns.
 
 1. You are building a Pointer-Heavy Engine (like a Graph Database).
-  * CHEAT prevents Memory Leaks by forbidding reference cycles in Atomics (Atomic A -> B, B -> A).
-  * If your architecture relies on a "Soup of Mutable Objects" where everything references everything else, CHEAT will fight you.
+  * CLEAR prevents Memory Leaks by forbidding reference cycles in `shared` objects (Shared A -> B, B -> A).
+  * If your architecture relies on a "Soup of Mutable Objects" where everything references everything else, CLEAR will fight you.
   * *The Alternative:* Architect your data using IDs and centralized lookups (like a relational database), or use Rust/C++ for manual pointer management.
 
 2. You need to model Inherently Unsafe / Cyclic Relationships
   * If your architecture relies on Rust-style "Weak Pointers" to manage reference cycles (A -> B -> A)
      * OR if you need recursive fine-grained locking, and you are strictly managing memory and deadlock risks manually.
-  * CHEAT guarantees safety by forbidding these patterns entirely! They're rare!
-  * *The Alternative:* If you absolutely need a doubly-linked list or a cyclic graph with individual node locking, that is "Engine Code," not "Business Logic." Write that specific component in Zig (where you can manage the unsafe pointers yourself) and import it into CHEAT as a safe handle.
+  * CLEAR guarantees safety by forbidding these patterns entirely! They're rare!
+  * *The Alternative:* If you absolutely need a doubly-linked list or a cyclic graph with individual node locking, that is "Engine Code," not "Business Logic." Write that specific component in Zig (where you can manage the unsafe pointers yourself) and import it into CLEAR as a safe handle.
 
-## WHY CHEAT
+## WHY CLEAR
 
 If you already know Logic (Javascript/Python), the only thing stopping you from writing System-Level code is Memory.
 
  * In Ruby/Python/JavaScript, Memory is "Magic."
  * In C, it's an incomprehensible arcana.
- * In CHEAT, Memory is "Physics."
+ * In CLEAR, Memory is "Physics."
 
-Here are the 7 Rules of Physics in CHEAT that don't exist in the simplest languages like Ruby.
+Here are the 9 Rules of Physics in CLEAR.
 
 ### 1. Physics of change: `MUTABLE` vs `IMMUTABLE` (Default)
 
-In Ruby or Python, you can change the value of any variable by default (the behave as `MUTABLE`).
+In Ruby or Python, you can change the value of any variable by default (they behave as `MUTABLE`).
 
 ```ruby
 name = "Bob"
 name = "Alice"
 ```
 
-If you didn't know, in Ruby, you can make it `IMMUTABLE`:
-
-```ruby
-name = "Bob"
-name.freeze
-name = "Alice"             -- RUN-TIME ERROR!
-```
-
-In CHEAT, there are no run-time errors!
-
-You can only change the value of `MUTABLE` variables.
+In CLEAR, you can only change the value of `MUTABLE` variables.
 
 ```ruby
 VAR name = "Bob";
-SET name = "Alice";         -- COMPILER ERROR! `x` is immutable.
+SET name = "Alice";         -- COMPILER ERROR! `name` is immutable.
 ```
 
  * `VAR x` = **READ** Only.
@@ -208,74 +204,23 @@ MUTABLE name = "Bob";
 SET name = "Alice";         -- OK
 ```
 
- * If you want to pass an object to a function that modifies it, that function must accept `MUTABLE`.
- * All functions that mutate/change something *must* end in a `!`.
+### 2. Physics of SHAPE: TYPES
 
-Let's look at Strings:
-
-```ruby
-x = "MISSISSIPPI"
-x.gsub!("I", "S")            -- OK: "MSSSSSSSPPS"
-```
-
-```ruby
-VAR x = "MISSISSPPI";
-x.gsub!("I", "S");           -- COMPILER ERROR! `x` is immutable.
-
-MUTABLE x = "MISSISSPPI";
-x.gsub!("I", "S");           -- OK: "MSSSSSSSPPS"
-```
-
-### 2. Physics of SHAPE (or size pt 1): TYPES
-
-In Ruby and other *easier* languages, variables do not have types.
-
-```ruby
-name = "Bob"
-name = 1                     -- OK
-```
-
-But this presents a laundry list of run-time errors. And run-time errors are NOT OKAY!
-
-```ruby
-name = "Bob"
-name = 1
-name.gsub!("o", "b")         -- RUN-TIME ERROR: missing method `gsub` on `name`.
-```
-
-In CHEAT, this is a compile time error (2x):
+In CLEAR, variables have types to ensure safety and speed.
 
 ```ruby
 MUTABLE name = "Bob";
-SET name = 1;                -- COMPILER ERROR: `name` is a String[], cannot assign to the Number `1`.
+SET name = 1;                -- COMPILER ERROR: `name` is a String, cannot assign a Number.
 ```
 
-```
-MUTABLE name = 1;
-name.gsub!("o", "b")         -- COMPILER ERROR: missing method: `name` is a Number, and Number does not have a method `gsub`.
-```
+### 3. Physics of Size: FIXED vs. DYNAMIC
 
-This pushes run-time errors to compile time errors so you can fix them BEFORE testing your code. Additionally, it allows your code to execute *much* faster. You'll see why after the next lesson.
+In CLEAR, you choose the physics you need.
 
-### 3. Physics of Size pt 2: FIXED vs. DYNAMIC
-
-In Ruby, lists are DYNAMIC by default. A list can hold 1 item or 1 million items, and Ruby handles the messy details in the background.
-
- * The Cost: This magic makes Ruby slow.
-
-In CHEAT, you choose the physics you need.
-
- * **FIXED** Size: Like a U.S. phone number (always 10 digits).
- * **DYNAMIC** Size: Like a chat log (grows indefinitely).
-
-Why the distinction? Because of where the data lives.
+ * **FIXED** Size: Optimized for speed and cache locality.
+ * **DYNAMIC** Size: Grows indefinitely, but requires the Warehouse (HEAP).
 
 ### 4. The Two Worlds: STACK vs. HEAP
-
-In Ruby, everything floats in a magic cloud (the HEAP).
-
- * The Problem: The HEAP is typically 100x slower than the Stack.
- * The Solution: CHEAT lets you use the fast lane.
 
 #### The STACK (Default)
 
@@ -285,33 +230,32 @@ Think of this as your **Backpack**.
  * Cons: Itty-bitty space. Fixed size.
  * Behavior: When you finish a task (Function returns), you dump your backpack into the incinerator. Everything inside is gone. *POOF*.
 
-#### The HEAP (The `%` Sigil)
+#### The HEAP
 
 Think of this as a **Warehouse**.
 
  * Pros: (nearly) Unlimited space. Can grow/shrink.
  * Cons: You have to drive there to get stuff (Slower).
- * The Rule: If you don't know how big it will get, OR if you know it IS big, it belongs on the HEAP.
 
 #### How to Choose
 
-You tell the compiler which world to store your variables with the `%` sigil.
+In CLEAR, the compiler and runtime handle the physics of where data lives for you in 99% of cases. You don't need to use a sigil to choose between stack and heap.
 
- * `VAR x = [1,2]` → In your Backpack. Fast. Cannot grow, must be small.
- * `VAR x = %[1,2]` → In the Warehouse. Slower. Can grow, can be huge.
+ * `VAR x = [1,2]` → CLEAR decides the most efficient location.
+ * `VAR list = [1, 2, 3]` → This list is optimized for performance and safety.
 
-#### The Why
+If you need to explicitly force an object onto the heap (e.g., for recursive structures or large buffers), you can use the `indirect` capability (similar to `Box` in Rust).
 
-Because the STACK is physically just a block of memory mapped to your function, it cannot grow (efficiently). You cannot shove an elephant into a backpack that is already full.
+```CLEAR
+-- Recursive structures use 'indirect' to avoid infinite size on stack
+STRUCT Node {
+  value: Int64,
+  left: indirect Node,
+  left: indirect Node
+}
+```
 
- * No `%` (STACK): The size is fixed at birth.
-   * `VAR list = [1, 2, 3]` → This list will be length 3 forever.
- * With `%` (HEAP): The Warehouse has forklifts. It can expand.
-   * `VAR list = %[1, 2, 3]` → This list can grow to 1,000,000 items.
-
-The "Gotcha": If you try to `.push!` or `.pop!` to a STACK array (fixed-size), the compiler will yell at you.
-
-  * It’s not being mean; it’s telling you that physics forbids it.
+The "Gotcha": If you try to `.push!` or `.pop!` to a fixed-size array, the compiler will yell at you. It’s not being mean; it’s telling you that physics forbids it.
 
 ```ruby
 VAR x = [1, 2, 3];
@@ -319,40 +263,74 @@ VAR x = [1, 2, 3];
 x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
 ```
 
-You can make the list Dynamic on the HEAP (not recommended):
+### 5. Physics of Capability: Capabilities vs Types
 
-```ruby
-MUTABLE x = %[1, 2, 3];
--- ...
-x.append!(4);                  -- OK
+In CLEAR, we separate **Types** from **Capabilities**.
+
+*   **Types** describe *what* the data is (e.g., `User`, `Account`).
+*   **Capabilities** describe *how* you access it (e.g., `shared`, `multiowned`, `alwaysMutable`).
+
+**The Rule:** Functions take **Types**, not **Capabilities**.
+
+### The CLEAR Model
+
+**Ownership:** Rc = `multiowned`, Arc = `shared`
+**Synchronization:** Mvcc = `shared:read`, RwLock = `shared:writeLocked`, Mutex = `shared:locked`
+**Future** -> `:actor` uses Object Actor Pattern combined with compiler aware SHARDING
+**Interior Mutability:** Cell, RefCell -> combined = `alwaysMutable`
+* Automatically acts like Cell for data under 16 bytes
+* `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
+**Existence:** Option, Result => not a capability -> a tense:
+* `T?` = Optional T
+* Unwrapped like in Rust and Zig with `.?`
+
+```CLEAR
+affUser = User.new();         -- creates `affine User` (default)
+a = affUser;                  -- OKAY, affine MOVE, affUser is dead
+b = affUser;                  -- Compiler error, affUser is dead
+
+sharedU = SHARE(User.new());  -- turns `affine User` into `shared User` (Arc)
+c = sharedU;                  -- OKAY, sharedU is not dead
 ```
 
-For this example, this is needlessly slow. You can also specify the size (to bigger than its birth size) AND keep it *fast* on the STACK.
+#### Why it's superior: Zero Blast Radius Refactoring
 
- * See the full WALKTHROUGH for more details.
+In Rust, capabilities like `Arc`, `Rc`, and `Mutex` infect function signatures. Changing from `Rc<User>` to `Arc<User>` forces a massive refactor because every function signature and call site must change.
 
-If variables were un-typed, it would be impossible to guarantee no run-time errors, and you wouldn't be able to put hardly anything on the STACK.
+In CLEAR, if you need thread-safety, you change **one line** at the definition site:
 
- * CHEAT thinks it's pretty easy to be aware of 3 properties for data
-   * If you are, we believe you'll arive at working code *much* faster.
-   * As a by-product, that code will also be *easier* to understand *AND* run *much* faster, too.
+```CLEAR
+-- Change multiowned (Rc) to shared (Arc)
+sharedU = SHARE(User.new());
+```
 
-### 4. The Physics of Sight (SCOPES)
+Your functions (which just take `User`) never knew about the capability, so they don't need to change.
 
-In JavasSript, functions can see variables outside of them (Closures are implicit). Figuring out what a variable can see is a dark art.
+#### Synchronization Strategies
 
-```ruby
-x = 10;
-function add() {
-  return x + 5;
+For multi-threaded `shared` objects, you choose the strategy:
+- `shared:read`: (MVCC) Optimized for massive read scaling.
+- `shared:writeLocked`: (`RwLock<Arc<T>>`) Multiple readers OR one writer.
+- `shared:locked`: (`Mutex<Arc<T>>`) One thread at a time.
+
+#### Interior Mutability
+
+For complex data, use `alwaysMutable` (`RefCell`). CLEAR handles the lock for you:
+
+```CLEAR
+-- 99% Case: Compiler handles temporary lock
+user.login_count += 1;
+
+-- 1% Case: Scoped mutation
+WITH user.config {
+  _.theme = "Light";
+  _.retries = 5;
 }
-x = 8;
-add(x);                         // WTF?
 ```
 
-In CHEAT, functions are simple!
+### 6. Physics of Sight (SCOPES)
 
-A function can ONLY see what is explicitly passed into it:
+Functions can ONLY see what is explicitly passed into them:
 
 ```ruby
 VAR x = 10;
@@ -361,242 +339,95 @@ FN add() ->
 END
 ```
 
-Let's say you want to create a function that always takes some variable, and you don't want to always pass it in. You do this with `UpValues` with the `USE` keyword:
+Use `USE` for upvalues:
 
 ```ruby
 VAR x = 10;
 FN add(n) USE (x) ->
   RETURN n + x;                 -- OK
 END
-
-add(5);                         -- 15
-add(x);                         -- 20;
-add(x);                         -- 20;
 ```
 
-The first example with JavaScript is particularly confusing because the value is changed after the function is defined. It's not clear what the function will do.
+### 7. Physics of Time: The ARENA (Lifetimes)
 
-In CHEAT, you cannot pass a `MUTABLE` as an UpValue:
-
-```ruby
-MUTABLE x = 10
-FN add(n) USE (x) ->            -- COMPILER ERROR, UpValues cannot be mutable.
--- ...
-```
-
- * There is a type of object that can be used for this, but this is rarely needed.
-   * See the WALKTHROUGH for more details.
-
-### 5. Physics of Time: The ARENA (Lifetimes)
-
-In JavaScript/Python/Ruby, variables live as long as someone is looking at them (Reference Counting/GC). But there are *many* problems with this.
-
- * In C, variables live until you shoot yourself in the foot.
- * In Rust, variables live in accordance with (nearly) incomprehensible laws.
-
-In CHEAT, variable lifetimes are arguably the simplest of all! They follow a simple birth/death cycle:
-
- * They live as long as the Function they were born in.
+Variable lifetimes follow a simple birth/death cycle: they live as long as the Function they were born in.
 
 #### The ARENA Rule:
 
-When a function starts, it opens a clean ARENA (A bank of memory).
+When a function starts, it opens a clean ARENA (A bank of memory). Any variable you create lives in this ARENA. When the function ends, the entire ARENA is wiped. *POOF*.
 
- * Any variable you create (VAR x, VAR y) lives in this ARENA.
- * When the function hits END (or RETURN), the entire ARENA is wiped. *POOF*.
+### 8. Cheating Death: The `GIVE` Keyword
 
-You don't need to free memory. It happens automatically when the function ends.
-
- * Zig makes this *nearly* as easy with `defer`, but you have to call it every time you create something on the HEAP.
- * CHEAT makes this easy and just does it automatically, because you *almost* always want to do it.
-
-### 6. Cheating Death: The `GIVE` Keyword
-
-If everything dies when the function ends, how do you return a result?! That's a pretty important thing for a function to do!
-
-When you're returning a fixed-size object (STACK), this is easy.
-
- * The calling function knows what it will get back, and it knows how big it is.
- * It gives the called function a magic tunnel to write that data directly into its backpack.
-
-But this magic tunnel doesn't work for HEAP objects, they're special. The called function CANNOT write these directly into your backpack (STACK) - they're on the HEAP for a reason.
-
-You have to `GIVE` heap objects to the caller.
-
- * The Problem: If you have a box in the Warehouse (HEAP Object), and your function ends. The box is incinerated. There's nothing left to GIVE/RETURN.
- * The Fix: `GIVE` that HEAP object to the caller, save it from death.
+When you return an object, you are `GIVING` it to the caller. CLEAR handles the transfer of ownership automatically for simple types. For complex capabilities, you use `GIVE` to satisfy `TAKES`.
 
 ```ruby
-FN makeUser() -> %User
-  VAR u = %User{name: "Neo"}; -- Created in my Arena
-  RETURN GIVE u;              -- I surrender ownership. It lives on in another function.
+FN makeUser() -> User
+  VAR u = User{name: "Neo"};
+  RETURN GIVE u;              -- Ownership moves to the caller.
 END
 ```
 
-### 7. Cheating Death pt 2: The `TAKES` Keyword
+### 9. Cheating Death pt 2: The `TAKES` Keyword
 
-There's always a GIVE and TAKE!
+In 99% of cases, when you pass a variable to a function, you are just letting that function **Borrow** it. If a function needs to store that object in a long-lived structure (like a Tree or Global List), it must explicitly **TAKE** responsibility for it.
 
-In 99% of cases, when you pass a variable to a function, you are just letting that function Borrow it.
-
- * You let `print(user)` look at the user.
- * You let `update!(user)` modify the user.
- * But **YOU** still own the user. When your function ends, the user is incinerated.
-
-99% of the time, this is what you want and fine. But what if you want to put that User into a List or a Tree that lives longer than you?
-
-If you just let the List "borrow" the User, and then your function ends... *POOF.* The User is incinerated. The List is now holding a pointer to ash. This is the notorious Dangling Pointer / Use-after-Free / Segfault problem.
-
-**The Solution:** The receiving function must explicitely say: "I am TAKING responsibility for this memory."
-
+```ruby
 -- This function promises to adopt the 'child'
-FN addChild(TAKES child: %Node) ->
-  -- I now own 'child'.
-  -- When you end, the child must live on, because I will attach it to something that *might* live longer than you.
+FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
+  parent.list.push!(GIVE child);
 END
 
-**The Consequence:** If a function TAKES something, you must GIVE it. And once you GIVE it, you can never touch it again.
-
-```ruby
-VAR node = %Node{};
-
-addChild(GIVE node);          -- I surrender ownership.
-
-node.print();                 -- COMPILER ERROR: Variable 'node' is dead. You GAVE it away!
+VAR node = Node.new();
+addChild!(root, GIVE node);   -- I surrender ownership.
+node.print();                 -- COMPILER ERROR: Variable 'node' is dead.
 ```
 
-This is a dramatically simplified version of Rust's notirously difficult lifetypes and borrow checker.
+### 10. Simplified Lifetimes: `WITH RESTRICT`
 
-  * If you're confused, don't worry! These last two topics are *rarely* necessary unless you're doing something pretty advanced.
+Rust's borrow checker is hard because its side effects are non-local and implicit. In CLEAR, borrows that "poison" (restrict) a mutable variable are explicitly scoped using `WITH RESTRICT`.
 
-## CONTROVERSIAL CHOICES
+```CLEAR
+MUT node = buildTree();
+WITH RESTRICT node.child {
+  -- Inside this block, node.child is immutable (restricted).
+  gc = node.grandChild();
 
-### The *SMOOTH* operator
+  node.child.name = "OK"; -- COMPILER ERROR: node.child is RESTRICTed.
+}
+-- Outside the block, node.child is mutable again.
+```
 
-**1. Ergonomics are King**
-  * The standard pipe `|>` is an ergonomic nightmare.
-    * It requires awkward pinky-stretches and holding Shift for two distinct keystrokes.
-  * `s>` is designed for speed.
-     * It rolls across the keyboard (Left hand `s` -> Right hand `>`).
-     * It is a literal "Cheat code" for typing pipes faster.
+**Path-Based Scoping:** CLEAR allows you to restrict only the specific part of a data structure you are using (e.g., `node.child`), leaving the rest of the object mutable. This minimizes "poison" and makes complex architectures easier to reason about.
 
-**2. Different Behavior = Different Syntax**
-  * In other languages, `|>` is a "dumb pipe." It passes data blindly.
-  * In CHEAT, the pipe is a logic gate. It unwraps results, checks for errors, and manages control flow.
-  * Using `|>` would be a lie. It would imply standard behavior where there is none.
-  * `s>` signals intent: This is a **S**afe, **S**mooth, **S**mart pipe.
-
-
-### DIVISION by 0
-  * In order to guarantee your code will not crash at run-time, you *MUST* guarantee you don't divide by zero.
-    * CHEAT did not invent the laws of Math.
-  * CHEAT makes this as easy and intuitive as possible, using `GUARD` like the common convention for [guard clauses]().
-
-
-### Frictionless Error Handling
-  * **The Problem:** In most languages, you may spend equal or more time guarding against the 0.1% of cases where things break.
-  * **The Solution:** CHEAT inverts this. The "Happy Path" is the default. Errors flow downstream automatically—skipping logic that can't handle them—until they hit a `CATCH` or `RECOVER` block.
-  * **The Tradeoff:**
-      * **Strictness vs. Velocity:** We trade static type checks for **Runtime Velocity**. CHEAT guarantees your program won't crash on an error, WITHOUT forcing you to manually unwrap every single variable.
-  * **The Defense:**
-      * **Telemetry over Taxonomy:** If you have to create or deal with 50 custom Error classes to use a function, you'll probably have MORE bugs, not less, then if you had one-simple error to handle.
-        * CHEAT provides one robust Error object that captures the **Context**, the **Kind**, and the **Data Snapshot** automatically.
-      * **Focus on Value:** CHEAT isn't for writing kernel drivers or flight controllers; It's for everything else.
-        * CHEAT allows you to write business logic fast, knowing the safety net is baked into the language semantics.
-
-
-### The "53-Bit" Lie (NaN Boxing)
-  * **The Controversy:** By default, every number in CHEAT is a 64-bit Float (Double).
-    * This means generic Integers are limited to 53 bits of precision (safe range up to ~9 quadrillion).
-  * **The Trade-off:** If you need a raw `Int64` or `u64` for bitwise pointer math, you have to explicitly ask for it. However, CHEAT natively supports value types, so there is no performance cost.
-  * **The Defense:**
-      * **99% Case:** You are counting loops, array indices, or database IDs. 53 bits handles this effortlessly.
-      * **The 1% Case:** If you are doing Cryptography, matrix multiplication, or care about exact 64-bit Integer limits - you can specify a type.
-
-### Death to the Garbage Collector
-   * **The Controversy:** CHEAT does not have a general-purpose Garbage Collector. It uses Arena Allocation.
-   * **The Trade-off:** You cannot create an object that lives "forever" without thinking about where it lives.
-   * **The Defense:**
-       * Garbage Collectors are the enemy of consistent frame rates and latency.
-       * CHEAT isolates memory by Process (Spawn) or Function Scope. When the task is done, the memory is nuked instantly.
-       * Global objects are generally considered an anti-pattern anyway. Good riddance.
-       * **The Result:** Your code runs at a predictable speed. There is no "Stop the World" pause while the VM cleans up your mess.
-
-
-### Explicit State Mutation (`VAR` vs `MUTABLE`)
-  * **The Controversy:** You cannot re-assign a variable declared with `VAR`. You must use the `MUTABLE` keyword.
-  * **The Trade-off:** It requires four extra keystrokes to create a variable, and four extra to re-assign.
-  * **The Defense:** Re-assignment is the root of 50% of debugging time.
-      * By forcing you to type `MUTABLE` and `SET`, CHEAT makes mutation visible (and easy to review).
-      * If you see a block of code with no `SET`, you know immediately that the state is stable.
-      * *The Result:* At code-time the editor knows this and can highlight functions that mutate to the user.
-
-
-### IMMUTABILITY BY DEFAULT
-  * **The Controvery:** It's tricky for beginners. You assign a variable, want to update it later, get a scary compiler error.
-  * **The Trade-off:** This is the default for a reason. It's what you want most of the time.
-
-
-### Different IMPLICIT default `collect` behavior at the end of stream chains
-  * **The Controversy:** If you assign a stream to a variable, the compiler *assumes* you want to do it sync and wait til finished to collect
-  * **The Catch:** The same statment *WITHOUT* an assignment, will immediately execute the next line without finishing.
-  * **The Defense:** CHEAT is supposed to be intuitive, if you assign `VAR x = myList s> reduce( ... )` on the next line, you assume x to be a val, not a stream.
-    * If you DON'T explicitly assign, it assumes it can be run in the background.
-    * You must either use `AWAIT` at the beginning or ` s> collect` at the end.
-    * In the majority of cases, it will either be a background task OR have a callback.
-    * A pipeline that ends in ` s> callback(myFn)` should almost always be async.
-    * The compiler will *WARN* but not reject if you don't prefix with ASYNC or AWAIT when not assigning
-    * If you want to assign to a stream and/or `RETURN` the stream later, you simply prefix with `ASYNC`
-
+This ensures that "poisoning" is always visible and local.
 
 ## EXAMPLES
 
 ### The *SMOOTH* operator
 
 ```ruby
-VAR bill = users AS @u                      -- AS binds @variables to be used later in SMOOTH operations
+VAR bill = users AS @u
   s> UNNEST _.orders
   s> SELECT _.price * @u.discount
   s> REDUCE(0, (acc, x) -> acc + x );
-
--- The above is equal to the below
-
-VAR bill = users AS @u
-  s> flatmap( %(x) -> x.orders )
-  s> map( %(x) -> x.price * @u.discount )
-  s> reduce(0, %(acc, x) -> acc + x )
-
--- Though SQL-like commands are substantially faster (built-into the VM/language) and preferred.
 ```
 
 ### Combine with in-line error handling
 
 ```ruby
 FN myFunc(a, b, c) ->
-  val = fetchData(a, b, c) OR RAISE         -- immediately stop, raise the error to the calling function
-   s> parseHeader OR EXIT "Invalid Header"  -- immediately stop, handle below
-   s> parseBody OR EXIT "Invalid Body"      -- immediately stop, handle below
+  val = fetchData(a, b, c) OR RAISE
+   s> parseHeader OR EXIT "Invalid Header"
+   s> parseBody OR EXIT "Invalid Body"
    s> fetchUser
-      s> RECOVER(DefaultUser())             -- handle error in place, and continue
+      s> RECOVER(DefaultUser())
    s> saveToDb(a, b, c, %%)
 
-CATCH ParseError WITH("Invalid Header")  -- ParseError does not acutally exist, that's the string error.type
-  -- CATCH sets %e to the as a local Error variable e
-  -- All errors have a context ("Invalid Header") set above
-  -- All errors also have a `snapshot`
-  -- That contains the value piped into the function that caused the error.
+CATCH ParseError WITH("Invalid Header")
   logInvalidHeader(%e.snapshot.header());
   RETURN defaultPage();
-CATCH ParseError WITH("Invalid Body")    -- Errors can contain :: namespacing `Network::IOError`, for example
-  -- Since we want to handle the same Error `ParseError` in 2 different ways
-  -- That is way we set the context above (after the `?` operator)
-  --
-  -- If we wanted to handle both errors the same
-  -- We wouldn't need to set a context
-  raise %e -- We EXPLICITLY bubble this up to the user
 DEFAULT
   logUnknownError(%e)
   raise %e
 END
 ```
-
