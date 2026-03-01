@@ -85,6 +85,11 @@ private
     when AST::StructDef
       # CHEAT: STRUCT User { id: Number }
       # ZIG:   const User = struct { id: i64, };
+
+      # Cache field schemas so VarDecl can generate field-level Rc cleanup
+      @struct_schemas ||= {}
+      @struct_schemas[node.name.to_sym] = node.fields
+
       fields = node.fields.map do |name, field_def|
         type_sym = field_def[:type]
 
@@ -163,6 +168,17 @@ private
       if is_multiowned
         base_type = node.type_info.resolved.to_s
         affine_logic = "defer CheatLib.rcRelease(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name});\n"
+
+        # Release any @multiowned fields BEFORE the struct itself (Zig LIFO: emit after struct defer)
+        schema = (@struct_schemas ||= {})[node.type_info.resolved]
+        if schema
+          schema.each do |fname, fdef|
+            field_type = Type.new(fdef[:type])
+            next unless field_type.multiowned?
+            inner = field_type.resolved.to_s
+            affine_logic += "defer CheatLib.rcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
+          end
+        end
       elsif is_heap
         # TODO: If definitively returned, eliminate this deferral
         affine_logic = <<~ZIG
@@ -240,12 +256,22 @@ private
 
       # Track heap variables that need to be marked as moved
       move_statements = []
+      rc_map = @rc_unwrap_map || {}
       field_inits = node.fields.map do |k, v|
         # If field value is a heap identifier, mark it as moved
         if v.is_a?(AST::Identifier) && v.type_info && v.type_info.requires_move? && v.storage == :heap
           move_statements << "#{v.name}_moved = true;"
         end
-        ".#{k} = #{visit(v)}"
+
+        # If field value is a multiowned identifier, retain so the struct co-owns the reference.
+        # (Expression results like function calls already carry count=1; no extra retain needed.)
+        val_code = if v.is_a?(AST::Identifier) && v.type_info&.multiowned? && !rc_map.key?(v.name)
+          base_type = v.type_info.resolved.to_s
+          "CheatLib.rcRetain(#{transpile_type(base_type)}, #{v.name})"
+        else
+          visit(v)
+        end
+        ".#{k} = #{val_code}"
       end.join(", ")
 
       struct_init = "#{node.name}{ #{field_inits} }"
