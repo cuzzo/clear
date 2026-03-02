@@ -90,16 +90,32 @@ module AST
         storage = type_obj.finalize_storage(@slot_size, nil)
       end
 
-      # Set full_type with appropriate capability marker
+      # Determine if value has a sync capability (needed for full_type sigil)
+      value_sync = nil
+      if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
+        vt = value.type_object
+        value_sync = vt.sync if vt.respond_to?(:sync)
+      end
+
+      # Set full_type (creates @type_object via the setter)
       self.full_type = case storage
-                       when :heap          then :"%#{final_type}"
-                       when :multiowned    then :"@#{final_type}"
-                       when :shared        then :"^#{final_type}"
-                       when :locked        then :"~#{final_type}"
-                       when :shared_locked then :"^~#{final_type}"
-                       when :locked_shared then :"~^#{final_type}"
-                       else                    final_type
+                       when :multiowned then :"@#{final_type}"
+                       when :shared     then :"^#{final_type}"
+                       when :heap
+                         if value_sync == :locked
+                           :"~#{final_type}"   # locked type — use ~ sigil
+                         else
+                           :"%#{final_type}"   # plain heap
+                         end
+                       else final_type
                        end
+
+      # Propagate capability fields from value's type_object to self's type_object
+      if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
+        vt = value.type_object
+        @type_object.ownership = vt.ownership if vt.respond_to?(:ownership) && vt.ownership && vt.ownership != :affine
+        @type_object.sync      = vt.sync      if vt.respond_to?(:sync) && vt.sync
+      end
 
       # Override storage in case Type's default differs from finalized storage
       self.storage = storage
@@ -192,11 +208,10 @@ module AST
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
-  MultiownedWrap    = Struct.new(:token, :value) { include Locatable }  # expr @multiowned        -> Rc(T)
-  SharedWrap        = Struct.new(:token, :value) { include Locatable }  # expr @shared            -> Arc(T)
-  LockedWrap        = Struct.new(:token, :value) { include Locatable }  # expr @locked            -> *Locked(T)
-  SharedLockedWrap  = Struct.new(:token, :value) { include Locatable }  # expr @shared:locked     -> Arc(Locked(T))
-  LockedSharedWrap  = Struct.new(:token, :value) { include Locatable }  # expr @locked:shared     -> *Locked(Arc(T))
+  # CapabilityWrap: single AST node for all capability wrapping.
+  # ownership: nil | :multiowned | :shared
+  # sync:      nil | :locked | :write_locked (future)
+  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
 
   UNARY_OPS = ['-', '!', '~']

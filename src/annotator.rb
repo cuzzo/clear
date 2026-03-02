@@ -499,7 +499,8 @@ private
     storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
     @frame_usage_count += 1 if storage == :frame
 
-    # 3. Declare in Scope
+    # 3. Declare in Scope (include sync capability if present)
+    node_sync = node.type_info&.sync
     current_scope.declare(
       node.name,
       node,          # reg
@@ -507,7 +508,10 @@ private
       node.mutable,
       false,         # rebindable? usually false for VAR
       node.slot_size,
-      storage
+      storage,
+      Set.new,       # capabilities
+      [],            # borrowed_paths
+      sync: node_sync
     )
 
     # 4. Set live
@@ -1003,44 +1007,25 @@ private
     node.full_type = :Void
   end
 
-  def visit_MultiownedWrap(node)
+  def visit_CapabilityWrap(node)
     visit(node.value)
 
     base_type = node.value.resolved_type  # e.g. :Node
-    node.full_type = :"@#{base_type}"     # e.g. :"@Node"
-    node.storage = :multiowned
-  end
+    ti = Type.new(base_type)
+    ti.ownership = node.ownership if node.ownership
+    ti.sync      = node.sync      if node.sync
+    node.instance_variable_set(:@type_object, ti)
 
-  def visit_SharedWrap(node)
-    visit(node.value)
-
-    base_type = node.value.resolved_type  # e.g. :Node
-    node.full_type = :"^#{base_type}"     # e.g. :"^Node"
-    node.storage = :shared
-  end
-
-  def visit_LockedWrap(node)
-    visit(node.value)
-
-    base_type = node.value.resolved_type  # e.g. :Node
-    node.full_type = :"~#{base_type}"     # e.g. :"~Node"
-    node.storage = :locked
-  end
-
-  def visit_SharedLockedWrap(node)
-    visit(node.value)
-
-    base_type = node.value.resolved_type  # e.g. :Node
-    node.full_type = :"^~#{base_type}"    # e.g. :"^~Node"
-    node.storage = :shared_locked
-  end
-
-  def visit_LockedSharedWrap(node)
-    visit(node.value)
-
-    base_type = node.value.resolved_type  # e.g. :Node
-    node.full_type = :"~^#{base_type}"    # e.g. :"~^Node"
-    node.storage = :locked_shared
+    # Set full_type symbol for downstream compatibility
+    node.full_type = if node.ownership == :multiowned
+      :"@#{base_type}"
+    elsif node.ownership == :shared
+      :"^#{base_type}"
+    elsif node.sync == :locked
+      :"~#{base_type}"
+    else
+      base_type
+    end
   end
 
   def visit_MoveNode(node)
@@ -1120,10 +1105,11 @@ private
       if cap[:capability] == :infer
         scope = lookup_scope_for(var_node.name)
         storage = scope&.locals&.dig(var_node.name, :storage)
-        cap[:capability] = case storage
-                           when :multiowned    then :multiowned
-                           when :shared        then :shared
-                           when :locked, :shared_locked, :locked_shared then :EXCLUSIVE
+        syn     = scope&.locals&.dig(var_node.name, :sync)
+        cap[:capability] = case
+                           when storage == :multiowned then :multiowned
+                           when storage == :shared     then :shared
+                           when syn                    then :EXCLUSIVE
                            else
                              error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, or another capability type")
                              :unknown
@@ -1138,8 +1124,8 @@ private
     with_new_scope do
       node.capabilities.each do |cap|
         var_name = cap[:var_node].name
-        storage = cap[:old_scope]&.locals&.dig(var_name, :storage)
-        if [:locked, :shared_locked, :locked_shared].include?(storage)
+        syn = cap[:old_scope]&.locals&.dig(var_name, :sync)
+        if syn
           # Locked: acquire gives mutable access to the inner T.
           # Declare the alias (if given) as the plain inner type.
           inner_type = cap[:old_scope].resolve_type(var_name)  # e.g. :Node
@@ -1182,9 +1168,10 @@ private
     case capability_type
     when :EXCLUSIVE
       scope = lookup_scope_for(var_node.name)
-      storage = scope&.locals&.dig(var_node.name, :storage)
-      unless [:locked, :shared_locked, :locked_shared].include?(storage)
-        error!(node, "EXCLUSIVE capability requires a @locked, @shared:locked, or @locked:shared variable, got #{storage || 'unknown'}")
+      syn = scope&.locals&.dig(var_node.name, :sync)
+      unless syn
+        storage = scope&.locals&.dig(var_node.name, :storage)
+        error!(node, "EXCLUSIVE capability requires a @locked variable, got #{storage || 'unknown'}")
       end
 
     when :RESTRICT
@@ -1211,6 +1198,5 @@ private
     end
   end
 
-  LOCKED_STORAGES = [:locked, :shared_locked, :locked_shared].freeze
 end
 

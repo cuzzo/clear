@@ -3,11 +3,13 @@ BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :e
 
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
-  attr_accessor :mutability, :ownership, :lifetime_constraint
+  attr_accessor :mutability, :lifetime_constraint
+  attr_accessor :ownership  # :affine (default), :multiowned (Rc), :shared (Arc)
+  attr_accessor :sync       # nil (default), :locked, :write_locked (future)
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
-  LOCATIONS = [:stack, :frame, :heap, :multiowned, :shared, :locked, :shared_locked, :locked_shared]
+  LOCATIONS = [:stack, :frame, :heap, :multiowned, :shared]
   OWNERSHIP = [:unique, :borrowed, :shared, :static]
 
   # String type constants
@@ -107,14 +109,17 @@ class Type
 
   public
 
-  def initialize(raw_input)
+  def initialize(raw_input, ownership: nil, sync: nil)
     @raw = raw_input
     parse_raw_input
 
     # Defaults
     @mutability = false
-    @ownership = :unique # Default to owned/linear unless specified
     @lifetime_constraint = nil # nil means local scope
+
+    # Capability fields — set after parse_raw_input so they can override
+    @ownership = ownership if ownership
+    @sync = sync if sync
   end
 
   # -----------------------------------------------
@@ -264,28 +269,31 @@ class Type
   end
 
   def multiowned?
-    @location == :multiowned
+    @ownership == :multiowned
   end
 
   def shared?
-    @location == :shared
+    @ownership == :shared
   end
 
   def locked?
-    @location == :locked
+    @sync == :locked
   end
 
-  def shared_locked?
-    @location == :shared_locked
+  # True for any sync capability
+  def any_sync?
+    !@sync.nil?
   end
 
-  def locked_shared?
-    @location == :locked_shared
+  # Backwards compat alias used in a few places
+  alias any_locked? any_sync?
+
+  def has_capabilities?
+    @ownership != :affine || any_sync?
   end
 
-  # True for any locked-based capability
-  def any_locked?
-    @location == :locked || @location == :shared_locked || @location == :locked_shared
+  def any_rc?
+    multiowned? || shared?
   end
 
   def map?
@@ -326,7 +334,7 @@ class Type
     resolver = lookup_arg || lookup_block
 
     # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc/Arc/Locked are also pointer-sized)
-    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared? || any_locked?
+    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared? || any_sync?
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
@@ -346,7 +354,7 @@ class Type
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
-    return false if any_locked?             # Locked vars manage their own lifecycle
+    return false if any_sync?               # Sync vars manage their own lifecycle
     return true if heap?
     return true if array?
     !primitive?
@@ -354,7 +362,7 @@ class Type
 
   def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    return false if multiowned? || shared? || any_locked?  # Rc/Arc/Locked must not be silently copied
+    return false if multiowned? || shared? || any_sync?  # Rc/Arc/Locked must not be silently copied
     return false if heap?                   # Heap-allocated types are not copyable
     return false if array?   # Arrays are not copyable
     return false if map?     # Maps are not copyable
@@ -377,6 +385,23 @@ class Type
     @location = value
   end
 
+  def ownership=(value)
+    @zig_type_cache = nil
+    @ownership = value
+    # Keep @location in sync for backwards compat
+    case value
+    when :multiowned then @location = :multiowned
+    when :shared     then @location = :shared
+    end
+  end
+
+  def sync=(value)
+    @zig_type_cache = nil
+    @sync = value
+    # Sync types need a stable heap address
+    @location = :heap if value && @ownership == :affine
+  end
+
   # Returns the Zig type string representation of this type.
   # Memoized for performance; cache is invalidated when location changes.
   def zig_type
@@ -397,10 +422,8 @@ class Type
     # Shared (Arc) always stays shared
     return :shared if shared? || current_storage == :shared
 
-    # Locked capabilities stay in their storage class
-    return :locked        if locked?        || current_storage == :locked
-    return :shared_locked if shared_locked? || current_storage == :shared_locked
-    return :locked_shared if locked_shared? || current_storage == :locked_shared
+    # Sync (locked) types need a stable heap address
+    return :heap if any_sync? || current_storage == :heap && any_sync?
 
     # If already heap, keep it heap
     return :heap if current_storage == :heap || heap?
@@ -445,23 +468,23 @@ class Type
       @wrapped_type_raw = nil
     end
 
-    # C. Initialize location based on capability prefix
-    #    ^~ = shared_locked (Arc(Locked(T))), ~^ = locked_shared (Locked(Arc(T))),
-    #    @ = multiowned/Rc, ^ = shared/Arc, ~ = locked/Locked, % = unique heap
-    if str.start_with?("^~")
-      @location = :shared_locked
-      str = str[2..]
-    elsif str.start_with?("~^")
-      @location = :locked_shared
-      str = str[2..]
-    elsif str.start_with?("@")
+    # C. Initialize ownership/sync capability from prefix
+    #    @ = multiowned/Rc, ^ = shared/Arc, ~ = locked (sync), % = unique heap
+    #    Note: ^~ and ~^ combinations are no longer supported (removed with test 42)
+    @ownership = :affine  # default
+    @sync      = nil      # default
+
+    if str.start_with?("@")
+      @ownership = :multiowned
       @location = :multiowned
       str = str[1..]
     elsif str.start_with?("^")
+      @ownership = :shared
       @location = :shared
       str = str[1..]
     elsif str.start_with?("~")
-      @location = :locked
+      @sync = :locked
+      @location = :heap    # locked types need stable heap address
       str = str[1..]
     elsif str.start_with?("%")
       @location = :heap
@@ -514,34 +537,23 @@ class Type
       return "?#{inner_zig}"
     end
 
-    # 2b. Handle Multiowned: @T -> CheatLib.Rc(T)
-    if multiowned?
+    # 2b. Derive Zig type from ownership × sync dimensions
+    # Only apply capability wrapping when there's an actual capability set
+    if @ownership != :affine || @sync
+      # Get the plain inner zig type (ownership=:affine creates a bare type with no wrapping)
       inner_zig = Type.new(resolved.to_s).zig_type
-      return "CheatLib.Rc(#{inner_zig})"
-    end
 
-    # 2c. Handle Shared: ^T -> CheatLib.Arc(T)
-    if shared?
-      inner_zig = Type.new(resolved.to_s).zig_type
-      return "CheatLib.Arc(#{inner_zig})"
-    end
+      inner_zig = "CheatLib.Locked(#{inner_zig})" if @sync == :locked
 
-    # 2d. Handle Locked: ~T -> *CheatLib.Locked(T)
-    if locked?
-      inner_zig = Type.new(resolved.to_s).zig_type
-      return "*CheatLib.Locked(#{inner_zig})"
-    end
-
-    # 2e. Handle SharedLocked: ^~T -> CheatLib.Arc(CheatLib.Locked(T))
-    if shared_locked?
-      inner_zig = Type.new(resolved.to_s).zig_type
-      return "CheatLib.Arc(CheatLib.Locked(#{inner_zig}))"
-    end
-
-    # 2f. Handle LockedShared: ~^T -> *CheatLib.Locked(CheatLib.Arc(T))
-    if locked_shared?
-      inner_zig = Type.new(resolved.to_s).zig_type
-      return "*CheatLib.Locked(CheatLib.Arc(#{inner_zig}))"
+      case @ownership
+      when :multiowned
+        return "CheatLib.Rc(#{inner_zig})"
+      when :shared
+        return "CheatLib.Arc(#{inner_zig})"
+      else
+        # affine + sync: needs pointer (stable heap address)
+        return "*#{inner_zig}"
+      end
     end
 
     is_pointer = heap?

@@ -144,15 +144,13 @@ private
 
       annotation = is_primitive ? ": #{zig_type}" : ""
 
-      # Detect multiowned (Rc), shared (Arc), locked, vs unique-heap storage
-      is_multiowned    = node.type_info&.multiowned?
-      is_shared        = node.type_info&.shared?
-      is_rc            = is_multiowned || is_shared
-      is_locked        = node.type_info&.locked?
-      is_shared_locked = node.type_info&.shared_locked?
-      is_locked_shared = node.type_info&.locked_shared?
-      is_any_locked    = is_locked || is_shared_locked || is_locked_shared
-      is_heap          = node.storage == :heap && !is_rc && !is_any_locked
+      # Detect multiowned (Rc), shared (Arc), locked (sync), vs unique-heap storage
+      is_multiowned = node.type_info&.multiowned?
+      is_shared     = node.type_info&.shared?
+      is_rc         = is_multiowned || is_shared
+      is_locked     = node.type_info&.locked?
+      is_any_sync   = is_locked  # future: || is_write_locked
+      is_heap       = node.storage == :heap && !is_rc && !is_any_sync
 
       # Detect MOVE: explicit affine ownership transfer (no retain).
       # VAR b = MOVE a; -> copy the Rc/Arc handle as-is, mark a as done.
@@ -169,14 +167,9 @@ private
       rc_map = @rc_unwrap_map || {}
       rhs_is_unwrapped = rhs_ident && rc_map.key?(rhs_ident.name)
       rhs_ti = rhs_ident&.type_info
-      value_code = if (is_rc || is_shared_locked) && is_move_rhs && rhs_ident
+      value_code = if is_rc && is_move_rhs && rhs_ident
         # MOVE: transfer handle without incrementing ref count
         rhs_ident.name
-      elsif is_shared_locked && rhs_ti&.shared_locked? && !rhs_is_unwrapped
-        # @shared:locked clone: arcRetain on Arc(Locked(T))
-        base_type = rhs_ti.resolved.to_s
-        zig_locked_t = "CheatLib.Locked(#{transpile_type(base_type)})"
-        "CheatLib.arcRetain(#{zig_locked_t}, #{rhs_ident.name})"
       elsif is_rc && rhs_ti && (rhs_ti.multiowned? || rhs_ti.shared?) && !rhs_is_unwrapped
         # Default: clone (retain) so both handles stay alive
         base_type = rhs_ti.resolved.to_s
@@ -214,26 +207,12 @@ private
             end
           end
         end
-      elsif is_shared_locked
-        # @shared:locked = Arc(Locked(T)): Arc ref-counting wraps a Locked(T) pointer.
+      elsif is_locked
+        # @locked = *Locked(T): single-ownership heap pointer
         base_type = node.type_info.resolved.to_s
-        zig_locked_t = "CheatLib.Locked(#{transpile_type(base_type)})"
+        zig_inner_t = transpile_type(base_type)
         affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
-        affine_logic += "defer if (!#{node.name}_moved) CheatLib.arcRelease(#{zig_locked_t}, rt.heapAlloc(), #{node.name});\n"
-      elsif is_locked || is_locked_shared
-        # @locked = *Locked(T), @locked:shared = *Locked(Arc(T)): single-ownership heap pointer.
-        base_type = node.type_info.resolved.to_s
-        if is_locked_shared
-          zig_inner_t = "CheatLib.Arc(#{transpile_type(base_type)})"
-          # Also release the inner Arc when destroying the Locked wrapper
-          affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
-          affine_logic += "defer if (!#{node.name}_moved) CheatLib.arcRelease(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name}.data);\n"
-          affine_logic += "defer if (!#{node.name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
-        else
-          zig_inner_t = transpile_type(base_type)
-          affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
-          affine_logic += "defer if (!#{node.name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
-        end
+        affine_logic += "defer if (!#{node.name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
       elsif is_heap
         # TODO: If definitively returned, eliminate this deferral
         affine_logic = <<~ZIG
@@ -486,31 +465,9 @@ private
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
-        old_scope  = cap[:old_scope]
-        storage    = old_scope&.locals&.dig(var_name, :storage)
-
-        acquire_expr = case storage
-                       when :locked
-                         # lockedVar: *Locked(T) — auto-deref acquire
-                         "#{var_name}.acquire()"
-                       when :shared_locked
-                         # sharedVar: Arc(Locked(T)) — .data is *Locked(T)
-                         "#{var_name}.data.acquire()"
-                       when :locked_shared
-                         # lockedArc: *Locked(Arc(T)) — auto-deref acquire
-                         "#{var_name}.acquire()"
-                       else
-                         "#{var_name}.acquire()"
-                       end
-
-        get_expr = case storage
-                   when :locked_shared
-                     # guard.get() is *Arc(T); alias = inner T via Arc.data
-                     "#{guard_var}.get().*.data"
-                   else
-                     # guard.get() is *T directly
-                     "#{guard_var}.get()"
-                   end
+        # All locked vars are now *Locked(T): auto-deref acquire
+        acquire_expr = "#{var_name}.acquire()"
+        get_expr     = "#{guard_var}.get()"
 
         <<~ZIG.chomp
           var #{guard_var} = #{acquire_expr};
@@ -604,7 +561,7 @@ private
       if node.value.is_a?(AST::Identifier)
         ti = node.value.type_info
         # Locked vars transfer ownership on return (suppress local defer, no retain needed)
-        if ti&.any_locked?
+        if ti&.locked?
           var_name = node.value.name
           prefix = "#{var_name}_moved = true;\n"
         # Only generate move tracking for heap variables that have _moved tracking set up
@@ -628,59 +585,35 @@ private
       if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
         # Rc(T)/Arc(T) store the value as .data (*T); Zig auto-derefs through the pointer
         "#{target_code}.data.#{node.field}"
-      elsif ti&.shared_locked? && !is_rc_unwrapped
-        # Arc(Locked(T)): .data is *Locked(T); go through data then .data field of Locked
-        "#{target_code}.data.data.#{node.field}"
-      elsif (ti&.locked? || ti&.locked_shared?) && !is_locked_unwrapped
-        # *Locked(T) or *Locked(Arc(T)): auto-deref pointer, then access .data field
+      elsif ti&.locked? && !is_locked_unwrapped
+        # *Locked(T): auto-deref pointer, then access .data field
         "#{target_code}.data.#{node.field}"
       else
         "#{target_code}.#{node.field}"
       end
 
-    when AST::MultiownedWrap
-      # expr @multiowned  ->  Rc wrapping the heap pointer
+    when AST::CapabilityWrap
       inner_code = visit(node.value)
-      base_type = node.value.resolved_type.to_s
-      "try CheatLib.rcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
+      base_type  = node.value.resolved_type.to_s
+      zig_base   = transpile_type(base_type)
 
-    when AST::SharedWrap
-      # expr @shared  ->  Arc wrapping the heap pointer
-      inner_code = visit(node.value)
-      base_type = node.value.resolved_type.to_s
-      "try CheatLib.arcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
-
-    when AST::LockedWrap
-      # expr @locked  ->  heap-allocated *Locked(T) wrapping the value
-      inner_code = visit(node.value)
-      base_type = node.value.resolved_type.to_s
-      "try CheatLib.lockedCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
-
-    when AST::SharedLockedWrap
-      # expr @shared:locked  ->  Arc(Locked(T))
-      # Allocate Locked(T) on heap first, then wrap in Arc.
-      inner_code = visit(node.value)
-      base_type = node.value.resolved_type.to_s
-      zig_base = transpile_type(base_type)
-      <<~ZIG.chomp
-        blk_sl: {
-            const __sl_inner = try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code});
-            break :blk_sl try CheatLib.arcCreate(CheatLib.Locked(#{zig_base}), rt.heapAlloc(), __sl_inner);
-        }
-      ZIG
-
-    when AST::LockedSharedWrap
-      # expr @locked:shared  ->  *Locked(Arc(T))
-      # Wrap value in Arc first, then allocate Locked(Arc(T)) on heap.
-      inner_code = visit(node.value)
-      base_type = node.value.resolved_type.to_s
-      zig_base = transpile_type(base_type)
-      <<~ZIG.chomp
-        blk_ls: {
-            const __ls_arc = try CheatLib.arcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code});
-            break :blk_ls try CheatLib.lockedCreate(CheatLib.Arc(#{zig_base}), rt.heapAlloc(), __ls_arc);
-        }
-      ZIG
+      if node.sync == :locked && node.ownership == :shared
+        # Arc(Locked(T)): lockedCreate then arcCreate
+        <<~ZIG.chomp
+          blk_sl: {
+              const __sl_inner = try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code});
+              break :blk_sl try CheatLib.arcCreate(CheatLib.Locked(#{zig_base}), rt.heapAlloc(), __sl_inner);
+          }
+        ZIG
+      elsif node.sync == :locked
+        "try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      elsif node.ownership == :shared
+        "try CheatLib.arcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      elsif node.ownership == :multiowned
+        "try CheatLib.rcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      else
+        inner_code
+      end
 
     when AST::MoveNode
       # MOVE expr — handled by parent VarDecl/ReturnNode; fallback emits raw value

@@ -11,12 +11,13 @@ class Scope
     @moved_paths = []  # Track moved sub-paths like [:foo, :child]
   end
 
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [])
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil)
     @locals[name] = {
       reg: reg,
       type: type,
       mutable: is_mutable,
       storage: storage,
+      sync: sync,
       rebindable: is_rebindable,
       size: size || 0,  # TODO: see if size is ever nil
       capabilities: capabilities,
@@ -81,13 +82,11 @@ class Scope
     return :Any if entry.nil?
     return entry[:type] if !entry[:type].is_a?(Symbol)
     prefix = case entry[:storage]
-             when :heap          then "%"
-             when :multiowned    then "@"
-             when :shared        then "^"
-             when :locked        then "~"
-             when :shared_locked then "^~"
-             when :locked_shared then "~^"
-             else                     ""
+             when :multiowned then "@"
+             when :shared     then "^"
+             when :heap
+               entry[:sync] == :locked ? "~" : "%"
+             else ""
              end
     :"#{prefix}#{entry[:type]}"
   end
@@ -170,7 +169,7 @@ class Scope
 
   def is_on_heap?(name)
     entry = @locals[name]
-    entry ? [:heap, :multiowned, :shared, :locked, :shared_locked, :locked_shared].include?(entry[:storage]) : false
+    entry ? [:heap, :multiowned, :shared].include?(entry[:storage]) : false
   end
 
   def set_state(name, state)

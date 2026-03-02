@@ -159,36 +159,20 @@ class Parser
     AST::OptionalUnwrap.new(q_token, lhs)
   end
 
-  # Multiowned Wrap: expr @multiowned  ->  Rc(T)
+  # Capability Wraps: expr @multiowned -> Rc(T), expr @shared -> Arc(T), expr @locked -> *Locked(T)
   suffix(:VAR_ID, '@multiowned') do |lhs|
     token = consume(:VAR_ID)
-    AST::MultiownedWrap.new(token, lhs)
+    AST::CapabilityWrap.new(token, lhs, :multiowned, nil)
   end
 
-  # Shared Wrap: expr @shared  ->  Arc(T)
-  # or  expr @shared:locked  ->  Arc(Locked(T))
   suffix(:VAR_ID, '@shared') do |lhs|
     token = consume(:VAR_ID)
-    if match?(:CHAR, ':') && peek.value == 'locked'
-      consume(:CHAR, ':')
-      consume(:VAR_ID)  # consume 'locked'
-      AST::SharedLockedWrap.new(token, lhs)
-    else
-      AST::SharedWrap.new(token, lhs)
-    end
+    AST::CapabilityWrap.new(token, lhs, :shared, nil)
   end
 
-  # Locked Wrap: expr @locked  ->  *Locked(T)
-  # or  expr @locked:shared  ->  *Locked(Arc(T))
   suffix(:VAR_ID, '@locked') do |lhs|
     token = consume(:VAR_ID)
-    if match?(:CHAR, ':') && peek.value == 'shared'
-      consume(:CHAR, ':')
-      consume(:VAR_ID)  # consume 'shared'
-      AST::LockedSharedWrap.new(token, lhs)
-    else
-      AST::LockedWrap.new(token, lhs)
-    end
+    AST::CapabilityWrap.new(token, lhs, nil, :locked)
   end
 
   def parse_literal(type, storage)
@@ -755,7 +739,7 @@ class Parser
     end
 
     # Check for capability suffix: Type @multiowned -> @Type, Type @shared -> ^Type,
-    # Type @locked -> ~Type, Type @shared:locked -> ^~Type, Type @locked:shared -> ~^Type
+    # Type @locked -> ~Type.
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
     cap_prefix = ""
     if match?(:VAR_ID) && %w[@multiowned @shared @locked].include?(current.value)
@@ -766,20 +750,8 @@ class Parser
       consume(:VAR_ID)
       cap_prefix = case cap_token_val
                    when "@multiowned" then "@"
-                   when "@shared"
-                     if match?(:CHAR, ':') && peek.value == 'locked'
-                       consume(:CHAR, ':'); consume(:VAR_ID)
-                       "^~"
-                     else
-                       "^"
-                     end
-                   when "@locked"
-                     if match?(:CHAR, ':') && peek.value == 'shared'
-                       consume(:CHAR, ':'); consume(:VAR_ID)
-                       "~^"
-                     else
-                       "~"
-                     end
+                   when "@shared"     then "^"
+                   when "@locked"     then "~"
                    end
     end
 
