@@ -217,7 +217,9 @@ module FunctionAnalysis
       error!(node, "Lifetime Error: Scoped lifetime '#{root_param_name}' is not a parameter.")
     end
 
-    current_type_name = param[:type]
+    # Extract the resolved type name (Type objects from parse_type_annotation)
+    param_type = param[:type]
+    current_type_name = param_type.is_a?(Type) ? param_type.resolved : param_type.to_sym
 
     path.drop(1).each do |field_sym|
       field_name = field_sym.to_s
@@ -238,8 +240,8 @@ module FunctionAnalysis
         error!(node, "Lifetime Error: Type '#{current_type_name}' has no field '#{field_name}'.")
       end
 
-      # Advance to the next type
-      current_type_name = next_type
+      # Advance to the next type name (Type objects carry the resolved name)
+      current_type_name = next_type.is_a?(Type) ? next_type.resolved : next_type.to_sym
     end
 
     return true

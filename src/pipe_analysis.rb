@@ -204,7 +204,7 @@ module PipeAnalysis
     sig = node.right.full_type
     func_name = node.right.name
 
-    if sig.is_a?(Hash)
+    if sig[:params]
       # Named Function or Lambda (both use standard signature format)
       analyze_pipe_to_named_function(node, sig, func_name)
     elsif sig == :Intrinsic || sig == :Nil

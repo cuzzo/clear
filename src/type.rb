@@ -110,16 +110,40 @@ class Type
   public
 
   def initialize(raw_input, ownership: nil, sync: nil)
-    @raw = raw_input
-    parse_raw_input
+    if raw_input.is_a?(Type)
+      # Copy constructor: preserve all parsed state from the source type
+      other = raw_input
+      @raw                = other.instance_variable_get(:@raw)
+      @mutability         = false
+      @lifetime_constraint = nil
+      @ownership          = other.ownership
+      @sync               = other.sync
+      @location           = other.instance_variable_get(:@location)
+      @is_error_union     = other.instance_variable_get(:@is_error_union)
+      @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
+      @is_optional        = other.instance_variable_get(:@is_optional)
+      @wrapped_type_raw   = other.instance_variable_get(:@wrapped_type_raw)
+      @is_array           = other.instance_variable_get(:@is_array)
+      @element_type_raw   = other.instance_variable_get(:@element_type_raw)
+      @capacity           = other.capacity
+      @resolved_cache     = other.instance_variable_get(:@resolved_cache)
+    else
+      @raw = raw_input
+      parse_raw_input
 
-    # Defaults
-    @mutability = false
-    @lifetime_constraint = nil # nil means local scope
+      # Defaults
+      @mutability = false
+      @lifetime_constraint = nil # nil means local scope
+    end
 
-    # Capability fields — set after parse_raw_input so they can override
+    # Capability fields — set after parse/copy so they can override
     @ownership = ownership if ownership
     @sync = sync if sync
+  end
+
+  # Delegate [] to the raw value for Hash-typed raws (function signatures).
+  def [](key)
+    @raw[key] if @raw.is_a?(Hash)
   end
 
   # -----------------------------------------------

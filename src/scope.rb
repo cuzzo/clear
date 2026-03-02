@@ -76,19 +76,32 @@ class Scope
     entry ? entry[:reg] : nil
   end
 
-  # TODO: Hack, types are registered as a single string, need to be registered as a struct
+  # Returns a Type carrying the variable's base type plus storage-derived capabilities.
   def resolve_full_type(name)
     entry = @locals[name]
-    return :Any if entry.nil?
-    return entry[:type] if !entry[:type].is_a?(Symbol)
-    prefix = case entry[:storage]
-             when :multiowned then "@"
-             when :shared     then "^"
-             when :heap
-               entry[:sync] == :locked ? "~" : "%"
-             else ""
-             end
-    :"#{prefix}#{entry[:type]}"
+    return Type.new(:Any) if entry.nil?
+
+    stored = entry[:type]
+
+    # If already a Type (e.g. from parse_type_annotation), clone and overlay storage
+    # If a non-Symbol (e.g. a function signature Hash), wrap as-is
+    base_type = stored.is_a?(Type) ? stored : Type.new(stored)
+
+    # Overlay storage-derived capabilities onto the type
+    case entry[:storage]
+    when :multiowned
+      base_type.ownership = :multiowned
+    when :shared
+      base_type.ownership = :shared
+    when :heap
+      if entry[:sync] == :locked
+        base_type.sync = :locked
+      else
+        base_type.location = :heap
+      end
+    end
+
+    base_type
   end
 
   def resolve_type(name)

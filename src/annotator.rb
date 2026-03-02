@@ -1014,18 +1014,9 @@ private
     ti = Type.new(base_type)
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
-    node.instance_variable_set(:@type_object, ti)
 
-    # Set full_type symbol for downstream compatibility
-    node.full_type = if node.ownership == :multiowned
-      :"@#{base_type}"
-    elsif node.ownership == :shared
-      :"^#{base_type}"
-    elsif node.sync == :locked
-      :"~#{base_type}"
-    else
-      base_type
-    end
+    # Store the Type directly — full_type= accepts Type objects
+    node.full_type = ti
   end
 
   def visit_MoveNode(node)

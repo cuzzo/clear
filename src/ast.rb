@@ -15,17 +15,16 @@ module AST
     attr_accessor :was_moved
     attr_accessor :slot_size
 
-    # -- BACKWARDS COMPATIBILITY SETTER --
-    # When existing code sets full_type = :Number, we wrap it.
+    # Set full_type. Accepts a Type object (stored directly) or any other
+    # value (wrapped in Type.new for backward compatibility).
     def full_type=(val)
-      @type_object = Type.new(val)
+      @type_object = val.is_a?(Type) ? val : Type.new(val)
     end
 
-    # -- BACKWARDS COMPATIBILITY GETTER --
-    # Returns the raw value so things like .is_a?(Hash) still work
-    # until you refactor them.
+    # Returns the Type object directly. Callers use type_info for rich access
+    # and == / .to_s / Type.new(full_type) for interop.
     def full_type
-      @type_object&.raw
+      @type_object
     end
 
     def coerced_type=(val)
@@ -90,32 +89,37 @@ module AST
         storage = type_obj.finalize_storage(@slot_size, nil)
       end
 
-      # Determine if value has a sync capability (needed for full_type sigil)
+      # Determine if value has a sync capability
       value_sync = nil
       if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
         vt = value.type_object
         value_sync = vt.sync if vt.respond_to?(:sync)
       end
 
-      # Set full_type (creates @type_object via the setter)
-      self.full_type = case storage
-                       when :multiowned then :"@#{final_type}"
-                       when :shared     then :"^#{final_type}"
-                       when :heap
-                         if value_sync == :locked
-                           :"~#{final_type}"   # locked type — use ~ sigil
-                         else
-                           :"%#{final_type}"   # plain heap
-                         end
-                       else final_type
-                       end
+      # Build a Type that carries the resolved base type plus storage-derived capabilities.
+      base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
+      t = Type.new(base_sym)
+      case storage
+      when :multiowned
+        t.ownership = :multiowned   # also sets t.location = :multiowned via setter
+      when :shared
+        t.ownership = :shared       # also sets t.location = :shared via setter
+      when :heap
+        if value_sync == :locked
+          t.sync = :locked          # sync= setter sets location = :heap
+        else
+          t.location = :heap
+        end
+      end
 
-      # Propagate capability fields from value's type_object to self's type_object
+      # Propagate additional capability fields from the value's type_object
       if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
         vt = value.type_object
-        @type_object.ownership = vt.ownership if vt.respond_to?(:ownership) && vt.ownership && vt.ownership != :affine
-        @type_object.sync      = vt.sync      if vt.respond_to?(:sync) && vt.sync
+        t.ownership = vt.ownership if vt.respond_to?(:ownership) && vt.ownership && vt.ownership != :affine
+        t.sync      = vt.sync      if vt.respond_to?(:sync) && vt.sync
       end
+
+      self.full_type = t
 
       # Override storage in case Type's default differs from finalized storage
       self.storage = storage

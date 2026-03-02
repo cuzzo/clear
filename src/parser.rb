@@ -738,24 +738,23 @@ class Parser
       end
     end
 
-    # Check for capability suffix: Type @multiowned -> @Type, Type @shared -> ^Type,
-    # Type @locked -> ~Type.
+    # Check for capability suffix: Type @multiowned, Type @shared, Type @locked.
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
-    cap_prefix = ""
+    ownership = nil
+    sync      = nil
     if match?(:VAR_ID) && %w[@multiowned @shared @locked].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
-      cap_token_val = current.value
-      consume(:VAR_ID)
-      cap_prefix = case cap_token_val
-                   when "@multiowned" then "@"
-                   when "@shared"     then "^"
-                   when "@locked"     then "~"
-                   end
+      case consume(:VAR_ID).value
+      when "@multiowned" then ownership = :multiowned
+      when "@shared"     then ownership = :shared
+      when "@locked"     then sync      = :locked
+      end
     end
 
-    "#{error_prefix}#{optional_prefix}#{cap_prefix}#{heap_prefix}#{base}#{inner}".to_sym
+    base_sym = "#{error_prefix}#{optional_prefix}#{heap_prefix}#{base}#{inner}".to_sym
+    Type.new(base_sym, ownership: ownership, sync: sync)
   end
 
   def parse_with_capability
