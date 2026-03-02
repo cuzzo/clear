@@ -92,10 +92,13 @@ module AST
 
       # Set full_type with appropriate capability marker
       self.full_type = case storage
-                       when :heap       then :"%#{final_type}"
-                       when :multiowned then :"@#{final_type}"
-                       when :shared     then :"^#{final_type}"
-                       else                  final_type
+                       when :heap          then :"%#{final_type}"
+                       when :multiowned    then :"@#{final_type}"
+                       when :shared        then :"^#{final_type}"
+                       when :locked        then :"~#{final_type}"
+                       when :shared_locked then :"^~#{final_type}"
+                       when :locked_shared then :"~^#{final_type}"
+                       else                    final_type
                        end
 
       # Override storage in case Type's default differs from finalized storage
@@ -189,9 +192,12 @@ module AST
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
-  MultiownedWrap = Struct.new(:token, :value) { include Locatable }  # expr @multiowned -> Rc(T)
-  SharedWrap     = Struct.new(:token, :value) { include Locatable }  # expr @shared     -> Arc(T)
-  MoveNode       = Struct.new(:token, :value) { include Locatable }  # MOVE expr        -> transfer Rc/Arc handle without retain
+  MultiownedWrap    = Struct.new(:token, :value) { include Locatable }  # expr @multiowned        -> Rc(T)
+  SharedWrap        = Struct.new(:token, :value) { include Locatable }  # expr @shared            -> Arc(T)
+  LockedWrap        = Struct.new(:token, :value) { include Locatable }  # expr @locked            -> *Locked(T)
+  SharedLockedWrap  = Struct.new(:token, :value) { include Locatable }  # expr @shared:locked     -> Arc(Locked(T))
+  LockedSharedWrap  = Struct.new(:token, :value) { include Locatable }  # expr @locked:shared     -> *Locked(Arc(T))
+  MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
 
   UNARY_OPS = ['-', '!', '~']
 

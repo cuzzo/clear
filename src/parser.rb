@@ -166,9 +166,29 @@ class Parser
   end
 
   # Shared Wrap: expr @shared  ->  Arc(T)
+  # or  expr @shared:locked  ->  Arc(Locked(T))
   suffix(:VAR_ID, '@shared') do |lhs|
     token = consume(:VAR_ID)
-    AST::SharedWrap.new(token, lhs)
+    if match?(:CHAR, ':') && peek.value == 'locked'
+      consume(:CHAR, ':')
+      consume(:VAR_ID)  # consume 'locked'
+      AST::SharedLockedWrap.new(token, lhs)
+    else
+      AST::SharedWrap.new(token, lhs)
+    end
+  end
+
+  # Locked Wrap: expr @locked  ->  *Locked(T)
+  # or  expr @locked:shared  ->  *Locked(Arc(T))
+  suffix(:VAR_ID, '@locked') do |lhs|
+    token = consume(:VAR_ID)
+    if match?(:CHAR, ':') && peek.value == 'shared'
+      consume(:CHAR, ':')
+      consume(:VAR_ID)  # consume 'shared'
+      AST::LockedSharedWrap.new(token, lhs)
+    else
+      AST::LockedWrap.new(token, lhs)
+    end
   end
 
   def parse_literal(type, storage)
@@ -734,15 +754,33 @@ class Parser
       end
     end
 
-    # Check for capability suffix: Type @multiowned -> @Type, Type @shared -> ^Type
+    # Check for capability suffix: Type @multiowned -> @Type, Type @shared -> ^Type,
+    # Type @locked -> ~Type, Type @shared:locked -> ^~Type, Type @locked:shared -> ~^Type
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
     cap_prefix = ""
-    if match?(:VAR_ID) && (current.value == "@multiowned" || current.value == "@shared")
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
-      cap_prefix = current.value == "@shared" ? "^" : "@"
+      cap_token_val = current.value
       consume(:VAR_ID)
+      cap_prefix = case cap_token_val
+                   when "@multiowned" then "@"
+                   when "@shared"
+                     if match?(:CHAR, ':') && peek.value == 'locked'
+                       consume(:CHAR, ':'); consume(:VAR_ID)
+                       "^~"
+                     else
+                       "^"
+                     end
+                   when "@locked"
+                     if match?(:CHAR, ':') && peek.value == 'shared'
+                       consume(:CHAR, ':'); consume(:VAR_ID)
+                       "~^"
+                     else
+                       "~"
+                     end
+                   end
     end
 
     "#{error_prefix}#{optional_prefix}#{cap_prefix}#{heap_prefix}#{base}#{inner}".to_sym
@@ -753,11 +791,12 @@ class Parser
 
     # Parse comma-separated list of capability specifications.
     # Syntax: WITH var_name { } — capability is inferred from the variable's type.
-    # Legacy explicit form: WITH RESTRICT/EXCLUSIVE var_name { } still supported.
+    # Explicit form: WITH RESTRICT/EXCLUSIVE var_name { } — traditional capabilities.
+    # Locked form:   WITH EXCLUSIVE lockedVar AS alias { } — acquire mutex, bind inner value.
     capabilities = []
 
     while match?(:KEYWORD) || match?(:VAR_ID) do
-      capability = if match?(:KEYWORD)
+      capability = if match?(:KEYWORD) && current.value != 'AS'
         cap = consume(:KEYWORD).value.to_sym
         unless AST::CAPABILITIES.include?(cap)
           error!(previous, "Unknown WITH capability: #{cap}")
@@ -770,7 +809,13 @@ class Parser
       # Parse variable (supports foo, foo.bar, foo.bar.baz, etc.)
       var_node = parse_var_id
 
-      capabilities << { capability: capability, var_node: var_node }
+      # Optional alias binding: WITH EXCLUSIVE lockedVar AS alias { }
+      alias_name = nil
+      if match!(:KEYWORD, 'AS')
+        alias_name = consume(:VAR_ID).value
+      end
+
+      capabilities << { capability: capability, var_node: var_node, alias: alias_name }
 
       # Check for comma (continue) or opening brace (done)
       break unless match!(:CHAR, ',')

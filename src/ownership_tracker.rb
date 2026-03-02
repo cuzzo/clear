@@ -25,9 +25,10 @@ module OwnershipTracker
     rhs_name = node.value.name
     rhs_type = current_scope.resolve_type(rhs_name)
 
-    # Multiowned (Rc) and Shared (Arc) variables are cloned via retain, not moved
+    # Multiowned (Rc), Shared (Arc), and Locked vars manage their own lifecycle
     rhs_storage = current_scope.locals[rhs_name]&.dig(:storage)
-    return if rhs_storage == :multiowned || rhs_storage == :shared
+    return if rhs_storage == :multiowned || rhs_storage == :shared ||
+              rhs_storage == :locked || rhs_storage == :shared_locked || rhs_storage == :locked_shared
 
     # Primitives COPY, everything else MOVES
     if Type.new(rhs_type).requires_move?
@@ -156,9 +157,10 @@ module OwnershipTracker
     owner_scope = lookup_scope_for(var_name)
     return false unless owner_scope
 
-    # Multiowned (Rc) and Shared (Arc) values manage their own lifetime via retain/release
+    # Multiowned (Rc), Shared (Arc), and Locked values manage their own lifetime
     storage = owner_scope.locals[var_name]&.dig(:storage)
-    return false if storage == :multiowned || storage == :shared
+    return false if storage == :multiowned || storage == :shared ||
+                    storage == :locked || storage == :shared_locked || storage == :locked_shared
 
     type = owner_scope.resolve_type(var_name)
     return false unless Type.new(type).requires_move?
@@ -196,6 +198,9 @@ module OwnershipTracker
       if current_scope.get_state(name) == :live &&
          info[:storage] != :multiowned &&
          info[:storage] != :shared &&
+         info[:storage] != :locked &&
+         info[:storage] != :shared_locked &&
+         info[:storage] != :locked_shared &&
          Type.new(info[:type]).requires_move?
 
         # AUTOMATICALLY INSERT DROP

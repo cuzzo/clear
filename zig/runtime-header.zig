@@ -437,6 +437,62 @@ pub const CheatLib = struct {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Mutex-Protected (locked / Locked)
+    // -------------------------------------------------------------------------
+
+    /// Locked(T): a mutex-protected heap-allocated value.
+    /// Must remain at a stable address — never copy or move after first use.
+    /// Acquire exclusive access via acquire(); release via guard.release().
+    pub fn Locked(comptime T: type) type {
+        return struct {
+            mutex: std.Thread.Mutex = .{},
+            data: T,
+
+            const Self = @This();
+
+            pub fn init(val: T) Self {
+                return .{ .data = val };
+            }
+
+            pub fn acquire(self: *Self) Guard {
+                self.mutex.lock();
+                return Guard{ .parent = self };
+            }
+
+            pub const Guard = struct {
+                parent: *Self,
+
+                pub fn get(self: *Guard) *T {
+                    return &self.parent.data;
+                }
+
+                pub fn getConst(self: *Guard) *const T {
+                    return &self.parent.data;
+                }
+
+                pub fn release(self: *Guard) void {
+                    self.parent.mutex.unlock();
+                }
+            };
+        };
+    }
+
+    /// Heap-allocate a new Locked(T) taking ownership of an already-heap-allocated *T.
+    /// The data is copied inline into Locked(T).data and data_ptr is freed.
+    /// Caller owns the returned pointer; free with lockedDestroy.
+    pub fn lockedCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !*Locked(T) {
+        const ptr = try alloc.create(Locked(T));
+        ptr.* = Locked(T).init(data_ptr.*);
+        alloc.destroy(data_ptr);
+        return ptr;
+    }
+
+    /// Free a heap-allocated Locked(T). Caller must ensure no active guards.
+    pub fn lockedDestroy(comptime T: type, alloc: std.mem.Allocator, locked: *Locked(T)) void {
+        alloc.destroy(locked);
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});

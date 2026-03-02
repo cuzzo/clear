@@ -81,10 +81,13 @@ class Scope
     return :Any if entry.nil?
     return entry[:type] if !entry[:type].is_a?(Symbol)
     prefix = case entry[:storage]
-             when :heap       then "%"
-             when :multiowned then "@"
-             when :shared     then "^"
-             else                  ""
+             when :heap          then "%"
+             when :multiowned    then "@"
+             when :shared        then "^"
+             when :locked        then "~"
+             when :shared_locked then "^~"
+             when :locked_shared then "~^"
+             else                     ""
              end
     :"#{prefix}#{entry[:type]}"
   end
@@ -167,7 +170,7 @@ class Scope
 
   def is_on_heap?(name)
     entry = @locals[name]
-    entry ? [:heap, :multiowned, :shared].include?(entry[:storage]) : false
+    entry ? [:heap, :multiowned, :shared, :locked, :shared_locked, :locked_shared].include?(entry[:storage]) : false
   end
 
   def set_state(name, state)

@@ -1,0 +1,32 @@
+STRUCT Score { pts: Int64 }
+
+FN readScore(s: Score) RETURNS Int64 ->
+    RETURN s.pts;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- Arc(Locked(Score)): shared ownership of a mutex-protected Score.
+    VAR sl = %Score{ pts: 7 } @shared:locked;
+
+    -- Clone: both sl and sl2 point to the same Locked(Score).
+    VAR sl2 = sl;
+
+    -- Both handles refer to the same underlying Locked(Score).
+    -- WITH EXCLUSIVE acquires the mutex via the Arc's .data pointer.
+    WITH EXCLUSIVE sl AS inner {
+        ASSERT inner.pts == 7, "inner.pts should be 7";
+        SET inner.pts = 21;
+        ASSERT inner.pts == 21, "inner.pts after mutation";
+
+        VAR v = readScore(inner);
+        ASSERT v == 21, "readScore should return 21";
+    }
+
+    -- Verify mutation is visible through the second handle.
+    WITH EXCLUSIVE sl2 AS inner2 {
+        ASSERT inner2.pts == 21, "mutation visible through sl2";
+    }
+
+    -- arcRelease for sl2 -> count 2->1, arcRelease for sl -> count 1->0, Locked freed.
+    RETURN;
+END

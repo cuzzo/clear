@@ -1019,6 +1019,30 @@ private
     node.storage = :shared
   end
 
+  def visit_LockedWrap(node)
+    visit(node.value)
+
+    base_type = node.value.resolved_type  # e.g. :Node
+    node.full_type = :"~#{base_type}"     # e.g. :"~Node"
+    node.storage = :locked
+  end
+
+  def visit_SharedLockedWrap(node)
+    visit(node.value)
+
+    base_type = node.value.resolved_type  # e.g. :Node
+    node.full_type = :"^~#{base_type}"    # e.g. :"^~Node"
+    node.storage = :shared_locked
+  end
+
+  def visit_LockedSharedWrap(node)
+    visit(node.value)
+
+    base_type = node.value.resolved_type  # e.g. :Node
+    node.full_type = :"~^#{base_type}"    # e.g. :"~^Node"
+    node.storage = :locked_shared
+  end
+
   def visit_MoveNode(node)
     visit(node.value)
 
@@ -1097,10 +1121,11 @@ private
         scope = lookup_scope_for(var_node.name)
         storage = scope&.locals&.dig(var_node.name, :storage)
         cap[:capability] = case storage
-                           when :multiowned then :multiowned
-                           when :shared     then :shared
+                           when :multiowned    then :multiowned
+                           when :shared        then :shared
+                           when :locked, :shared_locked, :locked_shared then :EXCLUSIVE
                            else
-                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, or another capability type")
+                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, or another capability type")
                              :unknown
                            end
       end
@@ -1111,7 +1136,22 @@ private
     # 2. Enter a new scope for the capability block
     # This isolates any variables declared inside
     with_new_scope do
-      node.capabilities.each { |cap| current_scope.declare_with_new_capability(cap) }
+      node.capabilities.each do |cap|
+        var_name = cap[:var_node].name
+        storage = cap[:old_scope]&.locals&.dig(var_name, :storage)
+        if [:locked, :shared_locked, :locked_shared].include?(storage)
+          # Locked: acquire gives mutable access to the inner T.
+          # Declare the alias (if given) as the plain inner type.
+          inner_type = cap[:old_scope].resolve_type(var_name)  # e.g. :Node
+          alias_name = cap[:alias] || var_name
+          current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+          current_scope.set_state(alias_name, :live)
+          # Also re-declare the locked var itself so it stays accessible in scope
+          current_scope.declare_with_new_capability(cap)
+        else
+          current_scope.declare_with_new_capability(cap)
+        end
+      end
       node.body.each { |stmt| visit(stmt) }
       finalize_scope(node)
     end
@@ -1141,7 +1181,11 @@ private
 
     case capability_type
     when :EXCLUSIVE
-      error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
+      scope = lookup_scope_for(var_node.name)
+      storage = scope&.locals&.dig(var_node.name, :storage)
+      unless [:locked, :shared_locked, :locked_shared].include?(storage)
+        error!(node, "EXCLUSIVE capability requires a @locked, @shared:locked, or @locked:shared variable, got #{storage || 'unknown'}")
+      end
 
     when :RESTRICT
       # TODO: RESTRICT only mutables for now. Probably want to allow anything, as it doesn't matter.
@@ -1166,5 +1210,7 @@ private
       error!(node, "Unknown capability type: #{capability_type}")
     end
   end
+
+  LOCKED_STORAGES = [:locked, :shared_locked, :locked_shared].freeze
 end
 

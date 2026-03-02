@@ -144,11 +144,15 @@ private
 
       annotation = is_primitive ? ": #{zig_type}" : ""
 
-      # Detect multiowned (Rc), shared (Arc), vs unique-heap storage
-      is_multiowned = node.type_info&.multiowned?
-      is_shared     = node.type_info&.shared?
-      is_rc         = is_multiowned || is_shared
-      is_heap       = node.storage == :heap && !is_rc
+      # Detect multiowned (Rc), shared (Arc), locked, vs unique-heap storage
+      is_multiowned    = node.type_info&.multiowned?
+      is_shared        = node.type_info&.shared?
+      is_rc            = is_multiowned || is_shared
+      is_locked        = node.type_info&.locked?
+      is_shared_locked = node.type_info&.shared_locked?
+      is_locked_shared = node.type_info&.locked_shared?
+      is_any_locked    = is_locked || is_shared_locked || is_locked_shared
+      is_heap          = node.storage == :heap && !is_rc && !is_any_locked
 
       # Detect MOVE: explicit affine ownership transfer (no retain).
       # VAR b = MOVE a; -> copy the Rc/Arc handle as-is, mark a as done.
@@ -159,15 +163,20 @@ private
                        node.value
                      end
 
-      # 2. Generate Declaration — default for Rc/Arc identifier RHS is retain (clone).
+      # 2. Generate Declaration — default for Rc/Arc/SharedLocked identifier RHS is retain (clone).
       # MOVE overrides this to a raw handle transfer (no retain).
       # Exception: inside a WITH block the RHS is already the unwrapped plain value, not an Rc/Arc.
       rc_map = @rc_unwrap_map || {}
       rhs_is_unwrapped = rhs_ident && rc_map.key?(rhs_ident.name)
       rhs_ti = rhs_ident&.type_info
-      value_code = if is_rc && is_move_rhs && rhs_ident
+      value_code = if (is_rc || is_shared_locked) && is_move_rhs && rhs_ident
         # MOVE: transfer handle without incrementing ref count
         rhs_ident.name
+      elsif is_shared_locked && rhs_ti&.shared_locked? && !rhs_is_unwrapped
+        # @shared:locked clone: arcRetain on Arc(Locked(T))
+        base_type = rhs_ti.resolved.to_s
+        zig_locked_t = "CheatLib.Locked(#{transpile_type(base_type)})"
+        "CheatLib.arcRetain(#{zig_locked_t}, #{rhs_ident.name})"
       elsif is_rc && rhs_ti && (rhs_ti.multiowned? || rhs_ti.shared?) && !rhs_is_unwrapped
         # Default: clone (retain) so both handles stay alive
         base_type = rhs_ti.resolved.to_s
@@ -204,6 +213,26 @@ private
               affine_logic += "defer if (!#{node.name}_moved) CheatLib.arcRelease(#{transpile_type(inner)}, rt.heapAlloc(), #{node.name}.data.#{fname});\n"
             end
           end
+        end
+      elsif is_shared_locked
+        # @shared:locked = Arc(Locked(T)): Arc ref-counting wraps a Locked(T) pointer.
+        base_type = node.type_info.resolved.to_s
+        zig_locked_t = "CheatLib.Locked(#{transpile_type(base_type)})"
+        affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
+        affine_logic += "defer if (!#{node.name}_moved) CheatLib.arcRelease(#{zig_locked_t}, rt.heapAlloc(), #{node.name});\n"
+      elsif is_locked || is_locked_shared
+        # @locked = *Locked(T), @locked:shared = *Locked(Arc(T)): single-ownership heap pointer.
+        base_type = node.type_info.resolved.to_s
+        if is_locked_shared
+          zig_inner_t = "CheatLib.Arc(#{transpile_type(base_type)})"
+          # Also release the inner Arc when destroying the Locked wrapper
+          affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
+          affine_logic += "defer if (!#{node.name}_moved) CheatLib.arcRelease(#{transpile_type(base_type)}, rt.heapAlloc(), #{node.name}.data);\n"
+          affine_logic += "defer if (!#{node.name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
+        else
+          zig_inner_t = transpile_type(base_type)
+          affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
+          affine_logic += "defer if (!#{node.name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
         end
       elsif is_heap
         # TODO: If definitively returned, eliminate this deferral
@@ -442,35 +471,88 @@ private
       "while (#{cond}) {\n #{body} \n}"
 
     when AST::WithBlock
-      rc_caps = node.capabilities.select { |c| [:multiowned, :shared].include?(c[:capability]) }
+      rc_caps     = node.capabilities.select { |c| [:multiowned, :shared].include?(c[:capability]) }
+      locked_caps = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE }
 
-      # Bind each unwrapped value under a mangled name so Zig's no-shadowing rule is satisfied.
-      # CLEAR sees the same variable name; the mangled alias is purely a Zig detail.
-      bindings = rc_caps.map do |cap|
+      # --- Rc/Arc (multiowned/shared) bindings (existing behaviour) ---
+      rc_bindings = rc_caps.map do |cap|
         name = cap[:var_node].name
         inner = "__#{name}_unwrap"
         "const #{inner} = #{name}.data.*;\n_ = &#{inner};"
       end.join("\n")
 
-      # Install alias map so Identifier / GetField / VarDecl use the unwrapped binding
-      prev_map = @rc_unwrap_map || {}
-      @rc_unwrap_map = prev_map.merge(
+      # --- Locked bindings: acquire guard, bind alias as *T via guard.get() ---
+      locked_bindings = locked_caps.map do |cap|
+        var_name   = cap[:var_node].name
+        alias_name = cap[:alias] || var_name
+        guard_var  = "__#{var_name}_guard"
+        old_scope  = cap[:old_scope]
+        storage    = old_scope&.locals&.dig(var_name, :storage)
+
+        acquire_expr = case storage
+                       when :locked
+                         # lockedVar: *Locked(T) — auto-deref acquire
+                         "#{var_name}.acquire()"
+                       when :shared_locked
+                         # sharedVar: Arc(Locked(T)) — .data is *Locked(T)
+                         "#{var_name}.data.acquire()"
+                       when :locked_shared
+                         # lockedArc: *Locked(Arc(T)) — auto-deref acquire
+                         "#{var_name}.acquire()"
+                       else
+                         "#{var_name}.acquire()"
+                       end
+
+        get_expr = case storage
+                   when :locked_shared
+                     # guard.get() is *Arc(T); alias = inner T via Arc.data
+                     "#{guard_var}.get().*.data"
+                   else
+                     # guard.get() is *T directly
+                     "#{guard_var}.get()"
+                   end
+
+        <<~ZIG.chomp
+          var #{guard_var} = #{acquire_expr};
+          defer #{guard_var}.release();
+          const #{alias_name} = #{get_expr};
+          _ = &#{alias_name};
+        ZIG
+      end.join("\n")
+
+      # Install Rc unwrap map
+      prev_rc_map = @rc_unwrap_map || {}
+      @rc_unwrap_map = prev_rc_map.merge(
         rc_caps.map { |c| [c[:var_node].name, "__#{c[:var_node].name}_unwrap"] }.to_h
       )
 
-      body = transpile_block(node.body)
-      @rc_unwrap_map = prev_map
+      # Install locked unwrap map so Identifier resolution uses the alias,
+      # and function-call arg transpilation knows to deref (*T → T).
+      prev_locked_map = @locked_unwrap_map || {}
+      @locked_unwrap_map = prev_locked_map.merge(
+        locked_caps.map { |c| [(c[:alias] || c[:var_node].name), true] }.to_h
+      )
 
-      "{\n#{bindings}\n#{body}\n}"
+      body = transpile_block(node.body)
+
+      @rc_unwrap_map     = prev_rc_map
+      @locked_unwrap_map = prev_locked_map
+
+      all_bindings = [rc_bindings, locked_bindings].reject(&:empty?).join("\n")
+      "{\n#{all_bindings}\n#{body}\n}"
 
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
       # Standard call (pass rt)
       # Note: We don't add 'try' here - let the caller decide via OR RAISE or context
+      locked_map = @locked_unwrap_map || {}
       args_zig = node.args.map do |a|
         arg_code = visit(a)
+        # Locked-unwrap aliases are Zig `*T` pointers; deref to pass as value to functions.
+        if a.is_a?(AST::Identifier) && locked_map.key?(a.name)
+          "#{arg_code}.*"
         # If argument is an array (ArrayList), convert to slice via .items for function params
-        if a.type_info&.array?
+        elsif a.type_info&.array?
           "#{arg_code}.items"
         else
           arg_code
@@ -520,8 +602,13 @@ private
       # We must disable the local free.
       prefix = ""
       if node.value.is_a?(AST::Identifier)
+        ti = node.value.type_info
+        # Locked vars transfer ownership on return (suppress local defer, no retain needed)
+        if ti&.any_locked?
+          var_name = node.value.name
+          prefix = "#{var_name}_moved = true;\n"
         # Only generate move tracking for heap variables that have _moved tracking set up
-        if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
+        elsif ti&.requires_move? && node.value.storage == :heap
           var_name = node.value.name
           prefix = "#{var_name}_moved = true;\n"
         end
@@ -531,12 +618,21 @@ private
 
     when AST::GetField
       target_code = visit(node.target)
-      rc_map = @rc_unwrap_map || {}
+      rc_map     = @rc_unwrap_map     || {}
+      locked_map = @locked_unwrap_map || {}
       # target_code is already the unwrapped alias when inside a WITH block,
       # so skip the .data. indirection in that case.
-      is_unwrapped = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
-      if (node.target.type_info&.multiowned? || node.target.type_info&.shared?) && !is_unwrapped
+      is_rc_unwrapped     = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
+      is_locked_unwrapped = node.target.is_a?(AST::Identifier) && locked_map.key?(node.target.name)
+      ti = node.target.type_info
+      if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
         # Rc(T)/Arc(T) store the value as .data (*T); Zig auto-derefs through the pointer
+        "#{target_code}.data.#{node.field}"
+      elsif ti&.shared_locked? && !is_rc_unwrapped
+        # Arc(Locked(T)): .data is *Locked(T); go through data then .data field of Locked
+        "#{target_code}.data.data.#{node.field}"
+      elsif (ti&.locked? || ti&.locked_shared?) && !is_locked_unwrapped
+        # *Locked(T) or *Locked(Arc(T)): auto-deref pointer, then access .data field
         "#{target_code}.data.#{node.field}"
       else
         "#{target_code}.#{node.field}"
@@ -553,6 +649,38 @@ private
       inner_code = visit(node.value)
       base_type = node.value.resolved_type.to_s
       "try CheatLib.arcCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
+
+    when AST::LockedWrap
+      # expr @locked  ->  heap-allocated *Locked(T) wrapping the value
+      inner_code = visit(node.value)
+      base_type = node.value.resolved_type.to_s
+      "try CheatLib.lockedCreate(#{transpile_type(base_type)}, rt.heapAlloc(), #{inner_code})"
+
+    when AST::SharedLockedWrap
+      # expr @shared:locked  ->  Arc(Locked(T))
+      # Allocate Locked(T) on heap first, then wrap in Arc.
+      inner_code = visit(node.value)
+      base_type = node.value.resolved_type.to_s
+      zig_base = transpile_type(base_type)
+      <<~ZIG.chomp
+        blk_sl: {
+            const __sl_inner = try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code});
+            break :blk_sl try CheatLib.arcCreate(CheatLib.Locked(#{zig_base}), rt.heapAlloc(), __sl_inner);
+        }
+      ZIG
+
+    when AST::LockedSharedWrap
+      # expr @locked:shared  ->  *Locked(Arc(T))
+      # Wrap value in Arc first, then allocate Locked(Arc(T)) on heap.
+      inner_code = visit(node.value)
+      base_type = node.value.resolved_type.to_s
+      zig_base = transpile_type(base_type)
+      <<~ZIG.chomp
+        blk_ls: {
+            const __ls_arc = try CheatLib.arcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code});
+            break :blk_ls try CheatLib.lockedCreate(CheatLib.Arc(#{zig_base}), rt.heapAlloc(), __ls_arc);
+        }
+      ZIG
 
     when AST::MoveNode
       # MOVE expr — handled by parent VarDecl/ReturnNode; fallback emits raw value

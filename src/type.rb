@@ -7,7 +7,7 @@ class Type
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
-  LOCATIONS = [:stack, :frame, :heap, :multiowned, :shared]
+  LOCATIONS = [:stack, :frame, :heap, :multiowned, :shared, :locked, :shared_locked, :locked_shared]
   OWNERSHIP = [:unique, :borrowed, :shared, :static]
 
   # String type constants
@@ -271,6 +271,23 @@ class Type
     @location == :shared
   end
 
+  def locked?
+    @location == :locked
+  end
+
+  def shared_locked?
+    @location == :shared_locked
+  end
+
+  def locked_shared?
+    @location == :locked_shared
+  end
+
+  # True for any locked-based capability
+  def any_locked?
+    @location == :locked || @location == :shared_locked || @location == :locked_shared
+  end
+
   def map?
     resolved.to_s.start_with?("HashMap")
   end
@@ -308,8 +325,8 @@ class Type
   def slot_size(lookup_arg = nil, &lookup_block)
     resolver = lookup_arg || lookup_block
 
-    # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc is also pointer-sized)
-    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared?
+    # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc/Arc/Locked are also pointer-sized)
+    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared? || any_locked?
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
@@ -329,6 +346,7 @@ class Type
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
+    return false if any_locked?             # Locked vars manage their own lifecycle
     return true if heap?
     return true if array?
     !primitive?
@@ -336,7 +354,7 @@ class Type
 
   def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    return false if multiowned? || shared?  # Rc/Arc must be explicitly retained, not silently copied
+    return false if multiowned? || shared? || any_locked?  # Rc/Arc/Locked must not be silently copied
     return false if heap?                   # Heap-allocated types are not copyable
     return false if array?   # Arrays are not copyable
     return false if map?     # Maps are not copyable
@@ -378,6 +396,11 @@ class Type
 
     # Shared (Arc) always stays shared
     return :shared if shared? || current_storage == :shared
+
+    # Locked capabilities stay in their storage class
+    return :locked        if locked?        || current_storage == :locked
+    return :shared_locked if shared_locked? || current_storage == :shared_locked
+    return :locked_shared if locked_shared? || current_storage == :locked_shared
 
     # If already heap, keep it heap
     return :heap if current_storage == :heap || heap?
@@ -422,12 +445,23 @@ class Type
       @wrapped_type_raw = nil
     end
 
-    # C. Initialize location based on capability prefix (@ = multiowned/Rc, ^ = shared/Arc, % = unique heap)
-    if str.start_with?("@")
+    # C. Initialize location based on capability prefix
+    #    ^~ = shared_locked (Arc(Locked(T))), ~^ = locked_shared (Locked(Arc(T))),
+    #    @ = multiowned/Rc, ^ = shared/Arc, ~ = locked/Locked, % = unique heap
+    if str.start_with?("^~")
+      @location = :shared_locked
+      str = str[2..]
+    elsif str.start_with?("~^")
+      @location = :locked_shared
+      str = str[2..]
+    elsif str.start_with?("@")
       @location = :multiowned
       str = str[1..]
     elsif str.start_with?("^")
       @location = :shared
+      str = str[1..]
+    elsif str.start_with?("~")
+      @location = :locked
       str = str[1..]
     elsif str.start_with?("%")
       @location = :heap
@@ -461,8 +495,8 @@ class Type
     end
 
     # Keep the full type including ! and ? prefixes for resolved,
-    # but strip capability markers (% = unique heap, @ = multiowned, ^ = shared) since they are not type-level.
-    @resolved_cache = original_str.gsub("%", "").gsub("@", "").gsub("^", "").to_sym
+    # but strip capability markers (% = unique heap, @ = multiowned, ^ = shared, ~ = locked) since they are not type-level.
+    @resolved_cache = original_str.gsub("%", "").gsub("@", "").gsub("^", "").gsub("~", "").to_sym
   end
 
   # Computes the Zig type string for this CHEAT type.
@@ -490,6 +524,24 @@ class Type
     if shared?
       inner_zig = Type.new(resolved.to_s).zig_type
       return "CheatLib.Arc(#{inner_zig})"
+    end
+
+    # 2d. Handle Locked: ~T -> *CheatLib.Locked(T)
+    if locked?
+      inner_zig = Type.new(resolved.to_s).zig_type
+      return "*CheatLib.Locked(#{inner_zig})"
+    end
+
+    # 2e. Handle SharedLocked: ^~T -> CheatLib.Arc(CheatLib.Locked(T))
+    if shared_locked?
+      inner_zig = Type.new(resolved.to_s).zig_type
+      return "CheatLib.Arc(CheatLib.Locked(#{inner_zig}))"
+    end
+
+    # 2f. Handle LockedShared: ~^T -> *CheatLib.Locked(CheatLib.Arc(T))
+    if locked_shared?
+      inner_zig = Type.new(resolved.to_s).zig_type
+      return "*CheatLib.Locked(CheatLib.Arc(#{inner_zig}))"
     end
 
     is_pointer = heap?
