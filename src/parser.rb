@@ -712,11 +712,11 @@ class Parser
       optional_prefix = "?"
     end
 
-    # Check for heap prefix: %Type
-    heap_prefix = ""
+    # Check for heap prefix: %Type — tracked as location, not embedded in the symbol.
+    is_heap = false
     if match?(:PERCENT)
       consume(:PERCENT)
-      heap_prefix = "%"
+      is_heap = true
     end
 
     base = consume(:TYPE_ID).value
@@ -759,8 +759,8 @@ class Parser
       end
     end
 
-    base_sym = "#{error_prefix}#{optional_prefix}#{heap_prefix}#{base}#{inner}".to_sym
-    Type.new(base_sym, ownership: ownership, sync: sync)
+    base_sym = "#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
+    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil)
   end
 
   def parse_with_capability

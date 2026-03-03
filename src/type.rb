@@ -14,7 +14,7 @@ class Type
 
   # String type constants
   STRING_TYPE = :"String[]"
-  HEAP_STRING_TYPE = :"%String[]"
+  HEAP_STRING_TYPE = :"String[]"
 
   # Operator categories
   BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
@@ -109,7 +109,7 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil)
+  def initialize(raw_input, ownership: nil, sync: nil, location: nil)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -136,9 +136,11 @@ class Type
       @lifetime_constraint = nil # nil means local scope
     end
 
-    # Capability fields — set after parse/copy so they can override
+    # Capability fields — set after parse/copy so they can override.
+    # location must come before ownership/sync so their setters can still adjust it.
+    @location  = location  if location
     @ownership = ownership if ownership
-    @sync = sync if sync
+    @sync      = sync      if sync
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -168,9 +170,7 @@ class Type
          elsif @raw.is_a?(Array); @raw[2]
          else; @raw; end
 
-    # Strip heap marker for the name
-    result = (ft.to_s.start_with?("%") ? ft[1..] : ft).to_sym
-    @resolved_cache = result
+    @resolved_cache = ft.to_sym
   end
 
   # Backward API: Deprecate
@@ -473,8 +473,19 @@ class Type
   private
 
   def parse_raw_input
+    # Hash and Array raws are function signatures — no string parsing applies.
+    # @resolved_cache is left nil and computed on-demand by the resolved() fallback.
+    if @raw.is_a?(Hash) || @raw.is_a?(Array)
+      @ownership = :affine
+      @sync      = nil
+      @is_error_union  = false; @payload_type_raw = nil
+      @is_optional     = false; @wrapped_type_raw  = nil
+      @is_array        = false; @capacity = nil; @element_type_raw = nil
+      @location        = :frame
+      return
+    end
+
     str = @raw.to_s
-    original_str = str  # Keep original for resolved_cache
 
     # A. Detect Error Union prefix: !Type (Zig-style error returns)
     if str.start_with?("!")
@@ -496,36 +507,9 @@ class Type
       @wrapped_type_raw = nil
     end
 
-    # C. Initialize ownership/sync capability from prefix
-    #    @ = multiowned/Rc, ^ = shared/Arc, ~ = locked (sync), % = unique heap
-    #    Note: ^~ and ~^ combinations are no longer supported (removed with test 42)
-    @ownership = :affine  # default
-    @sync      = nil      # default
-
-    if str.start_with?("@")
-      @ownership = :multiowned
-      @location = :multiowned
-      str = str[1..]
-    elsif str.start_with?("^")
-      @ownership = :shared
-      @location = :shared
-      str = str[1..]
-    elsif str.start_with?("~")
-      @sync = :locked
-      @location = :heap    # locked types need stable heap address
-      str = str[1..]
-    elsif str.start_with?("|")
-      @sync = :write_locked
-      @location = :heap    # write_locked types need stable heap address
-      str = str[1..]
-    elsif str.start_with?("%")
-      @location = :heap
-      str = str[1..] # Strip the % so we can parse the inner type cleanly
-    elsif primitive?
-      @location = :stack
-    else
-      @location = :frame
-    end
+    # C. Capability fields default — callers pass ownership:/sync:/location: as keyword args.
+    @ownership = :affine
+    @sync      = nil
 
     # D. Detect Array Structure
     # Regex Breakdown:
@@ -549,9 +533,11 @@ class Type
       @element_type_raw = nil
     end
 
-    # Keep the full type including ! and ? prefixes for resolved,
-    # but strip capability markers (% = unique heap, @ = multiowned, ^ = shared, ~ = locked) since they are not type-level.
-    @resolved_cache = original_str.gsub("%", "").gsub("@", "").gsub("^", "").gsub("~", "").gsub("|", "").to_sym
+    # E. Default location based on type structure (keyword arg location: overrides this in initialize).
+    @location = primitive? ? :stack : :frame
+
+    # Resolved name is the raw string as-is (! and ? are type-level modifiers, not stripped).
+    @resolved_cache = @raw.to_sym
   end
 
   # Computes the Zig type string for this CHEAT type.

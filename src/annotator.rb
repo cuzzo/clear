@@ -831,7 +831,7 @@ private
 
     if node.items.empty?
       if node.storage == :heap
-        node.full_type = :"%Any[]"
+        node.full_type = Type.new(:"Any[]", location: :heap)
       else
         node.full_type = :"Any[]"
       end
@@ -854,7 +854,7 @@ private
     if node.storage == :stack
       node.full_type = :"#{base_type}[#{node.items.size}]"
     else
-      node.full_type = :"%#{base_type}[]"
+      node.full_type = Type.new(:"#{base_type}[]", location: :heap)
     end
   end
 
@@ -867,7 +867,7 @@ private
         if node.storage == :stack
           :"Byte[#{node.value.length}]"
         else
-          :"%#{Type::STRING_TYPE}"
+          Type.new(Type::STRING_TYPE, location: :heap)
         end
       when :BYTE then :Byte
       when :BOOLEAN then :Bool

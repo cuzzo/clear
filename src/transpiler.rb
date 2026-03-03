@@ -360,8 +360,8 @@ private
       effective_type = node.coerced_type || node.full_type
       type_str = effective_type.to_s
 
-      # Strip leading % and one trailing [] to get element type
-      base_type_sym = type_str.gsub(/^%/, '').sub(/\[\]$/, '')
+      # Strip one trailing [] to get element type
+      base_type_sym = type_str.sub(/\[\]$/, '')
       zig_type = transpile_type(base_type_sym)
 
       # 2. Determine Allocator
@@ -419,7 +419,7 @@ private
         # For INDEX results (HashMap<T[]>), the runtime stores ArrayListUnmanaged(T)
         # We need to pass the actual stored type, not the conceptual slice type
         if inner_type.end_with?("[]")
-          element_type = inner_type.gsub(/[\[\]%]/, '')
+          element_type = inner_type.gsub(/[\[\]]/, '')
           zig_element = transpile_type(element_type)
           zig_type = "std.ArrayListUnmanaged(#{zig_element})"
         else
@@ -911,7 +911,7 @@ private
     list_flux_type = list_node.full_type
 
     # Extract the element type (e.g. "Number[]" -> "Number")
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
     element_zig_type = transpile_type(element_type_str)
 
     # 2. Transpile Inputs
@@ -953,7 +953,7 @@ private
     # 1. Setup Types
     #    Get the element type from the input list
     list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
     element_zig_type = transpile_type(element_type_str)
 
     # The result type is an array of the element type (for HashMap values)
@@ -1033,7 +1033,7 @@ private
 
     # 1. Setup Types
     list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
     element_zig_type = transpile_type(element_type_str)
 
     # 2. Transpile Inputs
@@ -1079,7 +1079,7 @@ private
 
     # 1. Setup Types
     list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
     element_zig_type = transpile_type(element_type_str)
 
     # 2. Transpile Inputs
@@ -1115,7 +1115,7 @@ private
 
     # 1. Setup Types - get the element type of the INNER array
     inner_array_type = unnest_node.full_type.to_s  # e.g., "Int64[]"
-    inner_element_type = inner_array_type.gsub(/[\[\]%]/, '')
+    inner_element_type = inner_array_type.gsub(/[\[\]]/, '')
     inner_zig_type = transpile_type(inner_element_type)
 
     # 2. Transpile Inputs
@@ -1158,7 +1158,7 @@ private
 
     # 1. Setup Types
     list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]%]/, '')
+    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
     element_zig_type = transpile_type(element_type_str)
 
     # Key type for uniqueness comparison
@@ -1318,8 +1318,7 @@ private
   end
 
   def get_zig_format(flux_type)
-    # 1. Clean the type string (remove % heap marker)
-    t = flux_type.to_s.gsub("%", "")
+    t = flux_type.to_s
 
     # 2. Handle Strings explicitly
     #    Flux might call it "String" or "String[]" depending on where it came from
