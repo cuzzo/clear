@@ -1098,11 +1098,12 @@ private
         storage = scope&.locals&.dig(var_node.name, :storage)
         syn     = scope&.locals&.dig(var_node.name, :sync)
         cap[:capability] = case
-                           when storage == :multiowned then :multiowned
-                           when storage == :shared     then :shared
-                           when syn                    then :EXCLUSIVE
+                           when storage == :multiowned    then :multiowned
+                           when storage == :shared        then :shared
+                           when syn == :locked            then :EXCLUSIVE
+                           when syn == :write_locked      then :write_locked_read
                            else
-                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, or another capability type")
+                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
                              :unknown
                            end
       end
@@ -1162,7 +1163,14 @@ private
       syn = scope&.locals&.dig(var_node.name, :sync)
       unless syn
         storage = scope&.locals&.dig(var_node.name, :storage)
-        error!(node, "EXCLUSIVE capability requires a @locked variable, got #{storage || 'unknown'}")
+        error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
+      end
+
+    when :write_locked_read
+      scope = lookup_scope_for(var_node.name)
+      syn = scope&.locals&.dig(var_node.name, :sync)
+      unless syn == :write_locked
+        error!(node, "WITH #{var_node.name}: read access requires a @writeLocked variable")
       end
 
     when :RESTRICT

@@ -5,7 +5,7 @@ class Type
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :mutability, :lifetime_constraint
   attr_accessor :ownership  # :affine (default), :multiowned (Rc), :shared (Arc)
-  attr_accessor :sync       # nil (default), :locked, :write_locked (future)
+  attr_accessor :sync       # nil (default), :locked, :write_locked
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
@@ -304,6 +304,10 @@ class Type
     @sync == :locked
   end
 
+  def write_locked?
+    @sync == :write_locked
+  end
+
   # True for any sync capability
   def any_sync?
     !@sync.nil?
@@ -510,6 +514,10 @@ class Type
       @sync = :locked
       @location = :heap    # locked types need stable heap address
       str = str[1..]
+    elsif str.start_with?("|")
+      @sync = :write_locked
+      @location = :heap    # write_locked types need stable heap address
+      str = str[1..]
     elsif str.start_with?("%")
       @location = :heap
       str = str[1..] # Strip the % so we can parse the inner type cleanly
@@ -543,7 +551,7 @@ class Type
 
     # Keep the full type including ! and ? prefixes for resolved,
     # but strip capability markers (% = unique heap, @ = multiowned, ^ = shared, ~ = locked) since they are not type-level.
-    @resolved_cache = original_str.gsub("%", "").gsub("@", "").gsub("^", "").gsub("~", "").to_sym
+    @resolved_cache = original_str.gsub("%", "").gsub("@", "").gsub("^", "").gsub("~", "").gsub("|", "").to_sym
   end
 
   # Computes the Zig type string for this CHEAT type.
@@ -567,7 +575,8 @@ class Type
       # Get the plain inner zig type (ownership=:affine creates a bare type with no wrapping)
       inner_zig = Type.new(resolved.to_s).zig_type
 
-      inner_zig = "CheatLib.Locked(#{inner_zig})" if @sync == :locked
+      inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
+      inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
 
       case @ownership
       when :multiowned

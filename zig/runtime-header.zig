@@ -493,6 +493,79 @@ pub const CheatLib = struct {
         alloc.destroy(locked);
     }
 
+    // -------------------------------------------------------------------------
+    // RwLock-Protected (writeLocked / RwLocked)
+    // -------------------------------------------------------------------------
+
+    /// RwLocked(T): a readers-writer-lock heap-allocated value.
+    /// Multiple concurrent readers allowed; writers are exclusive.
+    /// Acquire read access via read(); write access via write().
+    pub fn RwLocked(comptime T: type) type {
+        return struct {
+            lock: std.Thread.RwLock = .{},
+            data: T,
+
+            const Self = @This();
+
+            pub fn init(val: T) Self {
+                return .{ .data = val };
+            }
+
+            pub fn read(self: *Self) ReadGuard {
+                self.lock.lockShared();
+                return ReadGuard{ .parent = self };
+            }
+
+            pub fn write(self: *Self) WriteGuard {
+                self.lock.lock();
+                return WriteGuard{ .parent = self };
+            }
+
+            pub const ReadGuard = struct {
+                parent: *Self,
+
+                pub fn get(self: *ReadGuard) *const T {
+                    return &self.parent.data;
+                }
+
+                pub fn release(self: *ReadGuard) void {
+                    self.parent.lock.unlockShared();
+                }
+            };
+
+            pub const WriteGuard = struct {
+                parent: *Self,
+
+                pub fn get(self: *WriteGuard) *T {
+                    return &self.parent.data;
+                }
+
+                pub fn getConst(self: *WriteGuard) *const T {
+                    return &self.parent.data;
+                }
+
+                pub fn release(self: *WriteGuard) void {
+                    self.parent.lock.unlock();
+                }
+            };
+        };
+    }
+
+    /// Heap-allocate a new RwLocked(T) taking ownership of an already-heap-allocated *T.
+    /// The data is copied inline into RwLocked(T).data and data_ptr is freed.
+    /// Caller owns the returned pointer; free with rwLockedDestroy.
+    pub fn rwLockedCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !*RwLocked(T) {
+        const ptr = try alloc.create(RwLocked(T));
+        ptr.* = RwLocked(T).init(data_ptr.*);
+        alloc.destroy(data_ptr);
+        return ptr;
+    }
+
+    /// Free a heap-allocated RwLocked(T). Caller must ensure no active guards.
+    pub fn rwLockedDestroy(comptime T: type, alloc: std.mem.Allocator, locked: *RwLocked(T)) void {
+        alloc.destroy(locked);
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});

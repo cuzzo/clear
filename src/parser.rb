@@ -175,6 +175,11 @@ class Parser
     AST::CapabilityWrap.new(token, lhs, nil, :locked)
   end
 
+  suffix(:VAR_ID, '@writeLocked') do |lhs|
+    token = consume(:VAR_ID)
+    AST::CapabilityWrap.new(token, lhs, nil, :write_locked)
+  end
+
   def parse_literal(type, storage)
     token = consume(type)
     node = AST::Literal.new(token, type, token.value, storage)
@@ -742,14 +747,15 @@ class Parser
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
     ownership = nil
     sync      = nil
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked].include?(current.value)
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
       case consume(:VAR_ID).value
       when "@multiowned" then ownership = :multiowned
       when "@shared"     then ownership = :shared
-      when "@locked"     then sync      = :locked
+      when "@locked"       then sync      = :locked
+      when "@writeLocked"  then sync      = :write_locked
       end
     end
 

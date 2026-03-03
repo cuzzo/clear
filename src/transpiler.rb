@@ -148,8 +148,9 @@ private
       is_multiowned = node.type_info&.multiowned?
       is_shared     = node.type_info&.shared?
       is_rc         = is_multiowned || is_shared
-      is_locked     = node.type_info&.locked?
-      is_any_sync   = is_locked  # future: || is_write_locked
+      is_locked       = node.type_info&.locked?
+      is_write_locked = node.type_info&.write_locked?
+      is_any_sync     = is_locked || is_write_locked
       is_heap       = node.storage == :heap && !is_rc && !is_any_sync
 
       # Detect MOVE: explicit affine ownership transfer (no retain).
@@ -213,6 +214,12 @@ private
         zig_inner_t = transpile_type(base_type)
         affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
         affine_logic += "defer if (!#{node.name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
+      elsif is_write_locked
+        # @writeLocked = *RwLocked(T): single-ownership heap pointer
+        base_type = node.type_info.resolved.to_s
+        zig_inner_t = transpile_type(base_type)
+        affine_logic  = "var #{node.name}_moved = false; _ = &#{node.name}_moved;\n"
+        affine_logic += "defer if (!#{node.name}_moved) CheatLib.rwLockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{node.name});\n"
       elsif is_heap
         # TODO: If definitively returned, eliminate this deferral
         affine_logic = <<~ZIG
@@ -450,29 +457,53 @@ private
       "while (#{cond}) {\n #{body} \n}"
 
     when AST::WithBlock
-      rc_caps     = node.capabilities.select { |c| [:multiowned, :shared].include?(c[:capability]) }
-      locked_caps = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE }
+      rc_caps          = node.capabilities.select { |c| [:multiowned, :shared].include?(c[:capability]) }
+      mutex_caps       = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE && c[:resolved_type]&.locked? }
+      rw_write_caps    = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE && c[:resolved_type]&.write_locked? }
+      rw_read_caps     = node.capabilities.select { |c| c[:capability] == :write_locked_read }
 
-      # --- Rc/Arc (multiowned/shared) bindings (existing behaviour) ---
+      # --- Rc/Arc (multiowned/shared) bindings ---
       rc_bindings = rc_caps.map do |cap|
         name = cap[:var_node].name
         inner = "__#{name}_unwrap"
         "const #{inner} = #{name}.data.*;\n_ = &#{inner};"
       end.join("\n")
 
-      # --- Locked bindings: acquire guard, bind alias as *T via guard.get() ---
-      locked_bindings = locked_caps.map do |cap|
+      # --- Mutex bindings: acquire(), bind alias as *T ---
+      mutex_bindings = mutex_caps.map do |cap|
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
-        # All locked vars are now *Locked(T): auto-deref acquire
-        acquire_expr = "#{var_name}.acquire()"
-        get_expr     = "#{guard_var}.get()"
-
         <<~ZIG.chomp
-          var #{guard_var} = #{acquire_expr};
+          var #{guard_var} = #{var_name}.acquire();
           defer #{guard_var}.release();
-          const #{alias_name} = #{get_expr};
+          const #{alias_name} = #{guard_var}.get();
+          _ = &#{alias_name};
+        ZIG
+      end.join("\n")
+
+      # --- RwLock write bindings: write(), bind alias as *T (exclusive) ---
+      rw_write_bindings = rw_write_caps.map do |cap|
+        var_name   = cap[:var_node].name
+        alias_name = cap[:alias] || var_name
+        guard_var  = "__#{var_name}_guard"
+        <<~ZIG.chomp
+          var #{guard_var} = #{var_name}.write();
+          defer #{guard_var}.release();
+          const #{alias_name} = #{guard_var}.get();
+          _ = &#{alias_name};
+        ZIG
+      end.join("\n")
+
+      # --- RwLock read bindings: read(), bind alias as *const T (shared read) ---
+      rw_read_bindings = rw_read_caps.map do |cap|
+        var_name   = cap[:var_node].name
+        alias_name = cap[:alias] || var_name
+        guard_var  = "__#{var_name}_guard"
+        <<~ZIG.chomp
+          var #{guard_var} = #{var_name}.read();
+          defer #{guard_var}.release();
+          const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
         ZIG
       end.join("\n")
@@ -485,9 +516,10 @@ private
 
       # Install locked unwrap map so Identifier resolution uses the alias,
       # and function-call arg transpilation knows to deref (*T → T).
+      all_sync_caps = mutex_caps + rw_write_caps + rw_read_caps
       prev_locked_map = @locked_unwrap_map || {}
       @locked_unwrap_map = prev_locked_map.merge(
-        locked_caps.map { |c| [(c[:alias] || c[:var_node].name), true] }.to_h
+        all_sync_caps.map { |c| [(c[:alias] || c[:var_node].name), true] }.to_h
       )
 
       body = transpile_block(node.body)
@@ -495,7 +527,7 @@ private
       @rc_unwrap_map     = prev_rc_map
       @locked_unwrap_map = prev_locked_map
 
-      all_bindings = [rc_bindings, locked_bindings].reject(&:empty?).join("\n")
+      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings].reject(&:empty?).join("\n")
       "{\n#{all_bindings}\n#{body}\n}"
 
     when AST::FuncCall, AST::MethodCall
@@ -560,8 +592,8 @@ private
       prefix = ""
       if node.value.is_a?(AST::Identifier)
         ti = node.value.type_info
-        # Locked vars transfer ownership on return (suppress local defer, no retain needed)
-        if ti&.locked?
+        # Locked/RwLocked vars transfer ownership on return (suppress local defer, no retain needed)
+        if ti&.locked? || ti&.write_locked?
           var_name = node.value.name
           prefix = "#{var_name}_moved = true;\n"
         # Only generate move tracking for heap variables that have _moved tracking set up
@@ -585,8 +617,8 @@ private
       if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
         # Rc(T)/Arc(T) store the value as .data (*T); Zig auto-derefs through the pointer
         "#{target_code}.data.#{node.field}"
-      elsif ti&.locked? && !is_locked_unwrapped
-        # *Locked(T): auto-deref pointer, then access .data field
+      elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
+        # *Locked(T) / *RwLocked(T): auto-deref pointer, then access .data field
         "#{target_code}.data.#{node.field}"
       else
         "#{target_code}.#{node.field}"
@@ -607,6 +639,8 @@ private
         ZIG
       elsif node.sync == :locked
         "try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      elsif node.sync == :write_locked
+        "try CheatLib.rwLockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
       elsif node.ownership == :shared
         "try CheatLib.arcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
       elsif node.ownership == :multiowned

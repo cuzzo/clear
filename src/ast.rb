@@ -107,6 +107,8 @@ module AST
       when :heap
         if value_sync == :locked
           t.sync = :locked          # sync= setter sets location = :heap
+        elsif value_sync == :write_locked
+          t.sync = :write_locked    # sync= setter sets location = :heap
         else
           t.location = :heap
         end
@@ -214,7 +216,7 @@ module AST
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
-  # sync:      nil | :locked | :write_locked (future)
+  # sync:      nil | :locked | :write_locked
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
 
