@@ -7,7 +7,7 @@ END
 
 FN cheatMain() RETURNS Void ->
     -- Create a heap-allocated RwLock-protected Counter.
-    VAR c = %Counter{ value: 10 } @writeLocked;
+    VAR c = Counter{ value: 10 } @writeLocked;
 
     -- WITH EXCLUSIVE acquires the write lock (exclusive access).
     -- 'inner' is bound to *Counter (auto-deref in Zig).

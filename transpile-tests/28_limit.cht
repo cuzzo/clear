@@ -2,7 +2,7 @@ STRUCT Item { name: String[], value: Int64 }
 
 FN cheatMain() RETURNS Void ->
   -- Test 1: Basic LIMIT
-  VAR nums = %[1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+  VAR nums: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
   VAR first_three = nums s> LIMIT 3;
 
   ASSERT first_three.length() == 3, "Should have 3 items";
@@ -11,7 +11,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT first_three[2] == 3, "Third should be 3";
 
   -- Test 2: LIMIT larger than list size (should not crash)
-  VAR small = %[10_i64, 20_i64];
+  VAR small: Int64[] = [10_i64, 20_i64];
   VAR limited = small s> LIMIT 100;
 
   ASSERT limited.length() == 2, "Should have only 2 items";
@@ -19,10 +19,10 @@ FN cheatMain() RETURNS Void ->
   ASSERT limited[1] == 20, "Second should be 20";
 
   -- Test 3: LIMIT with structs
-  VAR items = %[
-    Item{ name: %"a", value: 1_i64 },
-    Item{ name: %"b", value: 2_i64 },
-    Item{ name: %"c", value: 3_i64 }
+  VAR items: Item[] = [
+    Item{ name: "a", value: 1_i64 },
+    Item{ name: "b", value: 2_i64 },
+    Item{ name: "c", value: 3_i64 }
   ];
   VAR first_two = items s> LIMIT 2;
 

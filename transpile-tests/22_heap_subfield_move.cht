@@ -3,7 +3,7 @@ STRUCT Container { node: %Node, id: Int64 }
 
 -- Create container with heap-allocated node
 FN makeContainer(v: Int64) RETURNS Container ->
-    VAR n = %Node{ value: v };
+    VAR n: %Node = Node{ value: v };
     VAR c = Container{ node: n, id: 1 };
     RETURN c;
 END

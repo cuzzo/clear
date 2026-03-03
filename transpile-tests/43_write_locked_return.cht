@@ -1,7 +1,7 @@
 STRUCT Node { v: Int64 }
 
 FN makeWriteLockedNode(n: Node) RETURNS Node @writeLocked ->
-    VAR locked = %Node{ v: n.v } @writeLocked;
+    VAR locked = Node{ v: n.v } @writeLocked;
     RETURN locked;
 END
 

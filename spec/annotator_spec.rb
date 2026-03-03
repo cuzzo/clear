@@ -1629,7 +1629,7 @@ RSpec.describe SemanticAnnotator do
     context "Basic Projection: list s> SELECT _.method()" do
       let(:code) {
         <<~FLUX
-          VAR words = [%"a", %"bb", %"ccc"];
+          VAR words: String[][] = ["a", "bb", "ccc"];
           -- Project List<String> -> List<Int64> using .length()
           VAR lengths = words s> SELECT _.length();
         FLUX
@@ -2423,7 +2423,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { id: Number, name: Byte[100] }
           STRUCT Container { item: %Item }
 
-          MUTABLE g = %Container { item: Item{id:0, name: [0]} }; -- Global Heap
+          MUTABLE g: %Container = Container { item: Item{id:0, name: [0]} }; -- Global Heap
 
           FN update() USE(MUTABLE g) ->
             VAR local = Item { id: 99, name: [1] };

@@ -11,7 +11,7 @@ FN sumFields(p: Point) RETURNS Int64 ->
 END
 
 FN cheatMain() RETURNS Void ->
-    VAR pt = %Point{ x: 3, y: 4 } @multiowned;
+    VAR pt = Point{ x: 3, y: 4 } @multiowned;
 
     -- WITH pt { } unwraps the Rc into a plain Point for this block.
     -- Inside, pt refers to the inner Point value, not the Rc handle.

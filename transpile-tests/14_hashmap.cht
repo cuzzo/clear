@@ -1,5 +1,5 @@
 FN cheatMain() RETURNS Void ->
-  MUTABLE counts = %{"dummy": 0_i64}; -- Init Map
+  MUTABLE counts = {"dummy": 0_i64}; -- Init Map
 
   VAR word_str = "apple banana apple";
   MUTABLE words = word_str.split(" ");

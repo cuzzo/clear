@@ -371,6 +371,17 @@ private
     actual = node.value.resolved_type
     expected = @function_context_stack.last[:type]
 
+    # Promote non-identifier literals to heap when the expected return type requires it.
+    # handle_return_escape only handles identifier variables; literals need this explicit check.
+    unless was_promoted || node.value.is_a?(AST::Identifier)
+      expected_type = Type.new(expected) if expected
+      if expected_type && (expected_type.heap? || expected_type.dynamic?) &&
+         node.value.respond_to?(:storage=) &&
+         node.value.type_info&.requires_move?
+        node.value.storage = :heap
+      end
+    end
+
     if expected && expected != :Void && expected != :Any && actual != expected
       # Basic check (you might want to allow Number[3] -> Number[] coercion)
       if !is_safe_autocast?(actual, expected)
@@ -838,15 +849,19 @@ private
       return
     end
 
-    # 2. Infer base type from the first element
-    base_type = node.items.first.resolved_type
-
-    # 3. Validate Consistency
-    #    Strict check: All items must match the inferred base type.
-    node.items.each_with_index do |item, index|
-      next if index == 0 # Skip first
-      if item.resolved_type != base_type
-        error!(node, "List literal contains mixed types: First item is #{base_type}, item #{index+1} is #{item.resolved_type}")
+    # 2. Infer base type from the first element.
+    #    If all items are string-like (Byte[N] or String[]), widen to String[] so mixed
+    #    string lengths ("a", "bb", "ccc") don't produce a type error.
+    if node.items.all? { |i| Type.new(i.resolved_type).string? }
+      base_type = Type::STRING_TYPE
+    else
+      base_type = node.items.first.resolved_type
+      # 3. Validate Consistency — all items must share the same type.
+      node.items.each_with_index do |item, index|
+        next if index == 0
+        if item.resolved_type != base_type
+          error!(node, "List literal contains mixed types: First item is #{base_type}, item #{index+1} is #{item.resolved_type}")
+        end
       end
     end
 

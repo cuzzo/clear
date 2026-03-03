@@ -1,10 +1,10 @@
 STRUCT Item { category: String[], value: Int64 }
 
 FN cheatMain() RETURNS Void ->
-  VAR items = %[
-    Item{ category: %"fruit", value: 10_i64 },
-    Item{ category: %"veggie", value: 20_i64 },
-    Item{ category: %"fruit", value: 30_i64 }
+  VAR items: Item[] = [
+    Item{ category: "fruit", value: 10_i64 },
+    Item{ category: "veggie", value: 20_i64 },
+    Item{ category: "fruit", value: 30_i64 }
   ];
 
   -- INDEX: Group items by category

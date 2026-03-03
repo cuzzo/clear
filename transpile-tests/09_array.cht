@@ -1,5 +1,5 @@
 FN cheatMain() RETURNS Void ->
-  MUTABLE list : Int64[] = %[];
+  MUTABLE list : Int64[] = [];
   list.append(10);
   list.append(20);
 

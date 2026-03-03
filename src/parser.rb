@@ -670,7 +670,8 @@ class Parser
 
   def parse_sigil_construct
     percent_token = consume(:PERCENT)
-    lit = parse_lit(:heap)
+    # % is now a no-op for storage: escape analysis and declared types determine heap vs stack.
+    lit = parse_lit(:stack)
     return parse_suffixes(lit) if !lit.nil?
     if match?(:CHAR, '(')
       params = parse_argument_list()
@@ -679,12 +680,8 @@ class Parser
         captures = parse_argument_list()
       end
       consume(:ARROW, '->')
-      # TODO - Lambdas can be multiple statements...
       body = parse_expression
-      # TODO: Parse
-      # consume(:CHAR, ';')
-      # TODO: Is this accurate?
-      return AST::LambdaLit.new(percent_token, params, captures, body, :heap)
+      return AST::LambdaLit.new(percent_token, params, captures, body, :stack)
     end
   end
 
@@ -740,6 +737,13 @@ class Parser
 
       else
         error!(current, "Syntax Error: Expected ']', '*', or size in array type.")
+      end
+
+      # Allow a second [] suffix for arrays of arrays (e.g., String[][] = list of String[])
+      if inner == "[]" && match?(:CHAR, '[') && peek.value == ']'
+        consume(:CHAR, '[')
+        consume(:CHAR, ']')
+        inner = "[][]"
       end
     end
 

@@ -1,8 +1,8 @@
 STRUCT User { id: Int64 }
 
 FN cheatMain() RETURNS Void ->
-    -- Heap allocation
-    VAR u = %User{ id: 99 };
+    -- Heap allocation (type annotation forces heap via declared pointer type)
+    VAR u: %User = User{ id: 99 };
 
     -- The transpiler is responsible for generating:
     -- defer CheatLib.free(rt, u);

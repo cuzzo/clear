@@ -4,7 +4,7 @@ STRUCT Node { id: Int64 }
 -- The local defer is suppressed (a_moved = true), so ref count stays at 1.
 -- The caller receives count = 1 and is responsible for cleanup.
 FN makeNode(id_val: Int64) RETURNS Node @multiowned ->
-    VAR n = %Node{ id: id_val } @multiowned;
+    VAR n = Node{ id: id_val } @multiowned;
     RETURN MOVE n;
 END
 

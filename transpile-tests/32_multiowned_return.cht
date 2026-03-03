@@ -4,7 +4,7 @@ STRUCT Node { id: Int64 }
 -- On return, the local Rc is retained (count 1->2) then the local defer
 -- releases it (count 2->1), so the caller receives count = 1.
 FN makeNode(id_val: Int64) RETURNS Node @multiowned ->
-    VAR n = %Node{ id: id_val } @multiowned;
+    VAR n = Node{ id: id_val } @multiowned;
     RETURN n;
 END
 

@@ -10,15 +10,15 @@ END
 
 FN cheatMain() RETURNS Void ->
   -- Build items with nested arrays
-  VAR tags1 = %[10_i64, 20_i64];
-  VAR tags2 = %[30_i64, 40_i64, 50_i64];
-  VAR tags3 = %[60_i64];
+  VAR tags1: Int64[] = [10_i64, 20_i64];
+  VAR tags2: Int64[] = [30_i64, 40_i64, 50_i64];
+  VAR tags3: Int64[] = [60_i64];
 
   VAR item1 = makeItem(1_i64, tags1);
   VAR item2 = makeItem(2_i64, tags2);
   VAR item3 = makeItem(3_i64, tags3);
 
-  MUTABLE items: Item[] = %[];
+  MUTABLE items: Item[] = [];
   items.append(item1);
   items.append(item2);
   items.append(item3);

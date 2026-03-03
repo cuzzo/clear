@@ -2,10 +2,10 @@ STRUCT Item { name: String[], value: Int64 }
 
 FN cheatMain() RETURNS Void ->
   -- Test 1: Sort structs by field
-  VAR items = %[
-    Item{ name: %"c", value: 30_i64 },
-    Item{ name: %"a", value: 10_i64 },
-    Item{ name: %"b", value: 20_i64 }
+  VAR items: Item[] = [
+    Item{ name: "c", value: 30_i64 },
+    Item{ name: "a", value: 10_i64 },
+    Item{ name: "b", value: 20_i64 }
   ];
   VAR sorted = items s> ORDER_BY _.value;
 
@@ -14,7 +14,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT sorted[2].value == 30, "Third should be 30";
 
   -- Test 2: Sort simple integers
-  VAR nums = %[5_i64, 2_i64, 8_i64, 1_i64, 9_i64];
+  VAR nums: Int64[] = [5_i64, 2_i64, 8_i64, 1_i64, 9_i64];
   VAR sorted_nums = nums s> ORDER_BY _;
 
   ASSERT sorted_nums[0] == 1, "First should be 1";

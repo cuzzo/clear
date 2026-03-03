@@ -1,7 +1,7 @@
 STRUCT User { id: Int64 }
 
 FN cheatMain() RETURNS Void ->
-    VAR a = %User{ id: 1 };
+    VAR a: %User = User{ id: 1 };
     -- 'a' should be marked moved here.
     -- 'b' is now the owner.
     VAR b = a;

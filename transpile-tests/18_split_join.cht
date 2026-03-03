@@ -7,7 +7,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT parts.length() == 3, "Should have 3 parts";
 
   -- 2. Modify
-  parts.append(%"date");
+  parts.append("date");
   ASSERT parts.length() == 4, "Should have 4 parts after append";
 
   -- 3. Join back together

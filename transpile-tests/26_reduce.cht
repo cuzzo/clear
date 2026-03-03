@@ -2,21 +2,21 @@ STRUCT Item { name: String[], value: Int64 }
 
 FN cheatMain() RETURNS Void ->
   -- Test 1: Simple sum
-  VAR nums = %[1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+  VAR nums: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
   VAR sum = nums s> REDUCE(0_i64) acc + _;
   ASSERT sum == 15, "Sum should be 15";
 
   -- Test 2: Reduce with struct field access
-  VAR items = %[
-    Item{ name: %"a", value: 10_i64 },
-    Item{ name: %"b", value: 20_i64 },
-    Item{ name: %"c", value: 30_i64 }
+  VAR items: Item[] = [
+    Item{ name: "a", value: 10_i64 },
+    Item{ name: "b", value: 20_i64 },
+    Item{ name: "c", value: 30_i64 }
   ];
   VAR total = items s> REDUCE(0_i64) acc + _.value;
   ASSERT total == 60, "Total should be 60";
 
   -- Test 3: Product
-  VAR factors = %[2_i64, 3_i64, 4_i64];
+  VAR factors: Int64[] = [2_i64, 3_i64, 4_i64];
   VAR product = factors s> REDUCE(1_i64) acc * _;
   ASSERT product == 24, "Product should be 24";
 END
