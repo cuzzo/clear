@@ -2861,5 +2861,496 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Capability Annotations: @multiowned, @shared, @locked, @writeLocked
+  # ---------------------------------------------------------------------------
+
+  describe "@multiowned (reference-counted Rc wrapper)" do
+    def multiowned_decl(source)
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+    end
+
+    context "creating a @multiowned variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @multiowned;
+        FLUX
+      }
+
+      it "annotates the variable as multiowned" do
+        expect(multiowned_decl(code).type_info.multiowned?).to be true
+      end
+
+      it "preserves the base resolved type" do
+        expect(multiowned_decl(code).type_info.resolved).to eq(:Counter)
+      end
+    end
+
+    context "direct field access on a @multiowned variable (no WITH needed)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 10 } @multiowned;
+          VAR v = c.value;
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "WITH on a plain (non-@multiowned) variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 };
+          WITH c { }
+        FLUX
+      }
+
+      it "raises a capability inference error" do
+        expect { ast }.to raise_error(/cannot infer capability/i)
+      end
+    end
+
+    context "WITH EXCLUSIVE on a @multiowned variable (wrong capability for mutex)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @multiowned;
+          WITH EXCLUSIVE c AS inner { }
+        FLUX
+      }
+
+      it "raises an error requiring @locked or @writeLocked" do
+        expect { ast }.to raise_error(/EXCLUSIVE capability requires a @locked or @writeLocked/i)
+      end
+    end
+
+    context "capability annotation on a function parameter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN bad(c: Counter @multiowned) RETURNS Number -> RETURN 0; END
+        FLUX
+      }
+
+      it "raises a parser error: capabilities are not allowed on function parameters" do
+        expect { ast }.to raise_error(/Capability annotations are not allowed on function parameters/i)
+      end
+    end
+  end
+
+  describe "@shared (atomically reference-counted Arc wrapper)" do
+    def shared_decl(source)
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+    end
+
+    context "creating a @shared variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number }
+          VAR p = Point{ x: 1 } @shared;
+        FLUX
+      }
+
+      it "annotates the variable as shared" do
+        expect(shared_decl(code).type_info.shared?).to be true
+      end
+
+      it "preserves the base resolved type" do
+        expect(shared_decl(code).type_info.resolved).to eq(:Point)
+      end
+    end
+
+    context "direct field access on a @shared variable (no WITH needed)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number }
+          VAR p = Point{ x: 5 } @shared;
+          VAR v = p.x;
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "WITH on a plain (non-@shared) variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number }
+          VAR p = Point{ x: 1 };
+          WITH p { }
+        FLUX
+      }
+
+      it "raises a capability inference error" do
+        expect { ast }.to raise_error(/cannot infer capability/i)
+      end
+    end
+
+    context "capability annotation on a function parameter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number }
+          FN bad(p: Point @shared) RETURNS Number -> RETURN 0; END
+        FLUX
+      }
+
+      it "raises a parser error: capabilities are not allowed on function parameters" do
+        expect { ast }.to raise_error(/Capability annotations are not allowed on function parameters/i)
+      end
+    end
+  end
+
+  describe "@locked (mutex-protected Locked(T) wrapper)" do
+    def locked_decl(source)
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+    end
+
+    context "creating a @locked variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @locked;
+        FLUX
+      }
+
+      it "annotates the variable as locked" do
+        expect(locked_decl(code).type_info.locked?).to be true
+      end
+
+      it "preserves the base resolved type" do
+        expect(locked_decl(code).type_info.resolved).to eq(:Counter)
+      end
+    end
+
+    context "WITH EXCLUSIVE acquires the mutex and binds an alias" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          VAR c = Counter{ value: 42 } @locked;
+          WITH EXCLUSIVE c AS inner {
+            getVal(inner);
+          }
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "WITH (implicit) on a @locked variable infers EXCLUSIVE" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          VAR c = Counter{ value: 0 } @locked;
+          WITH c AS inner {
+            getVal(inner);
+          }
+        FLUX
+      }
+
+      it "succeeds (infers EXCLUSIVE for @locked)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "WITH EXCLUSIVE on a plain (non-locked) variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 };
+          WITH EXCLUSIVE c AS inner { }
+        FLUX
+      }
+
+      it "raises an error: EXCLUSIVE requires @locked or @writeLocked" do
+        expect { ast }.to raise_error(/EXCLUSIVE capability requires a @locked or @writeLocked/i)
+      end
+    end
+
+    context "WITH EXCLUSIVE on a @shared variable (not a mutex)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @shared;
+          WITH EXCLUSIVE c AS inner { }
+        FLUX
+      }
+
+      it "raises an error: EXCLUSIVE requires a sync variable" do
+        expect { ast }.to raise_error(/EXCLUSIVE capability requires a @locked or @writeLocked/i)
+      end
+    end
+
+    context "WITH (implicit) on a plain (non-locked, non-owned) variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 };
+          WITH c { }
+        FLUX
+      }
+
+      it "raises a capability inference error" do
+        expect { ast }.to raise_error(/cannot infer capability/i)
+      end
+    end
+
+    context "SET mutation through the EXCLUSIVE alias" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @locked;
+          WITH EXCLUSIVE c AS inner {
+            SET inner.value = 99;
+          }
+        FLUX
+      }
+
+      it "allows mutation through the alias" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "capability annotation on a function parameter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN bad(c: Counter @locked) RETURNS Number -> RETURN 0; END
+        FLUX
+      }
+
+      it "raises a parser error: capabilities are not allowed on function parameters" do
+        expect { ast }.to raise_error(/Capability annotations are not allowed on function parameters/i)
+      end
+    end
+  end
+
+  describe "@writeLocked (readers-writer RwLocked(T) wrapper)" do
+    def write_locked_decl(source)
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+    end
+
+    context "creating a @writeLocked variable" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @writeLocked;
+        FLUX
+      }
+
+      it "annotates the variable as write_locked" do
+        expect(write_locked_decl(code).type_info.write_locked?).to be true
+      end
+
+      it "preserves the base resolved type" do
+        expect(write_locked_decl(code).type_info.resolved).to eq(:Counter)
+      end
+    end
+
+    context "WITH EXCLUSIVE acquires the write lock and binds an alias" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          VAR c = Counter{ value: 7 } @writeLocked;
+          WITH EXCLUSIVE c AS inner {
+            getVal(inner);
+          }
+        FLUX
+      }
+
+      it "succeeds (write access)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "WITH (implicit) on a @writeLocked variable acquires a read lock" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          VAR c = Counter{ value: 3 } @writeLocked;
+          WITH c AS inner {
+            getVal(inner);
+          }
+        FLUX
+      }
+
+      it "succeeds (read access)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "SET mutation through the EXCLUSIVE (write) alias" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @writeLocked;
+          WITH EXCLUSIVE c AS inner {
+            SET inner.value = 100;
+          }
+        FLUX
+      }
+
+      it "allows mutation through the write alias" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "WITH EXCLUSIVE on a plain variable (not write-locked)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 };
+          WITH EXCLUSIVE c AS inner { }
+        FLUX
+      }
+
+      it "raises an error: EXCLUSIVE requires @locked or @writeLocked" do
+        expect { ast }.to raise_error(/EXCLUSIVE capability requires a @locked or @writeLocked/i)
+      end
+    end
+
+    context "capability annotation on a function parameter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN bad(c: Counter @writeLocked) RETURNS Number -> RETURN 0; END
+        FLUX
+      }
+
+      it "raises a parser error: capabilities are not allowed on function parameters" do
+        expect { ast }.to raise_error(/Capability annotations are not allowed on function parameters/i)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # DO block (fork-join parallelism)
+  # ---------------------------------------------------------------------------
+
+  describe "DO block (fork-join parallelism)" do
+    context "simple expression branches" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Task { id: Number }
+          FN process(t: Task) RETURNS Void -> RETURN; END
+          VAR a = Task{ id: 1 };
+          VAR b = Task{ id: 2 };
+          DO {
+            process(a),
+            process(b)
+          }
+        FLUX
+      }
+
+      it "annotates as Void" do
+        expect(result).to eq(:Void)
+      end
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "block branches ({ stmts }) with @locked shared state" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @locked;
+          DO {
+            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
+            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } }
+          }
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "annotates as Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "block branches with @writeLocked shared state" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @writeLocked;
+          DO {
+            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
+            { WITH c AS inner_r { } }
+          }
+        FLUX
+      }
+
+      it "succeeds (one write branch, one read branch)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "single branch DO block" do
+      let(:code) {
+        <<~FLUX
+          FN work() RETURNS Void -> RETURN; END
+          DO {
+            work()
+          }
+        FLUX
+      }
+
+      it "succeeds and resolves to Void" do
+        expect { ast }.not_to raise_error
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "type error inside a DO branch" do
+      let(:code) {
+        <<~FLUX
+          FN add(a: Number, b: Number) RETURNS Number -> RETURN a + b; END
+          VAR x = "not-a-number";
+          DO {
+            add(x, 1)
+          }
+        FLUX
+      }
+
+      it "propagates the type error from inside the branch" do
+        expect { ast }.to raise_error(/Type Error/i)
+      end
+    end
+
+    context "three concurrent branches accessing the same @locked counter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          VAR c = Counter{ value: 0 } @locked;
+          DO {
+            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
+            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
+            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } }
+          }
+        FLUX
+      }
+
+      it "succeeds (mutex serialises concurrent mutations)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+  end
 end
 
