@@ -3264,14 +3264,14 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "block branches ({ stmts }) with @locked shared state" do
+    context "block branches with @locked shared state" do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
           VAR c = Counter{ value: 0 } @locked;
           DO {
-            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
-            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } }
+            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; }
           }
         FLUX
       }
@@ -3291,8 +3291,8 @@ RSpec.describe SemanticAnnotator do
           STRUCT Counter { value: Number }
           VAR c = Counter{ value: 0 } @writeLocked;
           DO {
-            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
-            { WITH c AS inner_r { } }
+            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
+            WITH c AS inner_r { }
           }
         FLUX
       }
@@ -3340,9 +3340,9 @@ RSpec.describe SemanticAnnotator do
           STRUCT Counter { value: Number }
           VAR c = Counter{ value: 0 } @locked;
           DO {
-            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
-            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } },
-            { WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; } }
+            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; }
           }
         FLUX
       }

@@ -8,9 +8,9 @@ FN cheatMain() RETURNS Void ->
     -- increments the counter once, then releases it.
     -- The DO block joins when all three fibers have completed.
     DO {
-        { WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; } },
-        { WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; } },
-        { WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; } }
+        WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; },
+        WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; },
+        WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; }
     }
 
     -- All branches must have finished before we reach here.

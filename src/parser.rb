@@ -817,17 +817,14 @@ class Parser
     branches = []
 
     until match?(:CHAR, '}') || match?(:EOF)
-      if match?(:CHAR, '{')
-        # Block branch: { stmts } — allows statements (WITH, SET, etc.) inside a branch.
-        consume(:CHAR, '{')
-        stmts = parse_block_body(['}'])
-        consume(:CHAR, '}')
-        branches << stmts
+      # A branch is either a block-statement (WITH, IF, etc.) starting with a keyword,
+      # or a bare expression. Keyword branches don't need a trailing semicolon.
+      stmt = if match?(:KEYWORD)
+        parse_statement
       else
-        # Expression branch (backward-compatible): processA(x), processB(y)
-        expr = parse_expression
-        branches << [expr]
+        parse_expression
       end
+      branches << [stmt].compact
       break unless match!(:CHAR, ',')
     end
 
