@@ -474,8 +474,10 @@ private
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
+        # Inside a DO branch, the outer variable is accessed via ctx pointer.
+        zig_var = @do_capture_map&.dig(var_name) || var_name
         <<~ZIG.chomp
-          var #{guard_var} = #{var_name}.acquire();
+          var #{guard_var} = #{zig_var}.acquire();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -487,8 +489,9 @@ private
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
+        zig_var = @do_capture_map&.dig(var_name) || var_name
         <<~ZIG.chomp
-          var #{guard_var} = #{var_name}.write();
+          var #{guard_var} = #{zig_var}.write();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -500,8 +503,9 @@ private
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
+        zig_var = @do_capture_map&.dig(var_name) || var_name
         <<~ZIG.chomp
-          var #{guard_var} = #{var_name}.read();
+          var #{guard_var} = #{zig_var}.read();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -546,7 +550,8 @@ private
         captured = collect_do_identifiers(branch_exprs)
 
         capture_fields = captured.map do |name, type_obj|
-          zig_type = transpile_type(type_obj&.resolved || :Any)
+          # Use the full type (including capabilities like Locked/RwLocked) for correct Zig field type.
+          zig_type = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
           "#{name}: *const #{zig_type},"
         end.join("\n    ")
 
@@ -1338,26 +1343,36 @@ private
     result
   end
 
-  def walk_do_identifiers(node, result)
+  def walk_do_identifiers(node, result, locally_bound = Set.new)
     return unless node.is_a?(AST::Locatable)
     if node.is_a?(AST::Identifier)
-      result[node.name] ||= node.type_info
+      result[node.name] ||= node.type_info unless locally_bound.include?(node.name)
+      return
+    end
+    # WithBlock: visit var_nodes as outer refs but exclude aliases from capture.
+    if node.is_a?(AST::WithBlock)
+      node.capabilities.each do |cap|
+        walk_do_identifiers(cap[:var_node], result, locally_bound) if cap[:var_node]
+      end
+      aliases = node.capabilities.filter_map { |cap| cap[:alias] || cap[:var_node]&.name }.to_set
+      new_bound = locally_bound | aliases
+      node.body.each { |stmt| walk_do_identifiers(stmt, result, new_bound) }
       return
     end
     node.members.each do |m|
       child = node.send(m)
-      do_walk_child(child, result)
+      do_walk_child(child, result, locally_bound)
     end
   end
 
-  def do_walk_child(child, result)
+  def do_walk_child(child, result, locally_bound = Set.new)
     case child
     when AST::Locatable
-      walk_do_identifiers(child, result)
+      walk_do_identifiers(child, result, locally_bound)
     when Array
-      child.each { |c| do_walk_child(c, result) }
+      child.each { |c| do_walk_child(c, result, locally_bound) }
     when Hash
-      child.each_value { |v| do_walk_child(v, result) }
+      child.each_value { |v| do_walk_child(v, result, locally_bound) }
     end
   end
 
@@ -1386,7 +1401,7 @@ private
 
     # A. Int -> Float (e.g. i64 -> f64)
     if [:Int64, :Byte].include?(from) && to == :Number
-      return "@floatFromInt(#{code})"
+      return "@as(f64, @floatFromInt(#{code}))"
     end
 
     # B. Float -> Int (e.g. f64 -> i64)

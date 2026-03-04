@@ -640,7 +640,7 @@ class Parser
     return instance_exec(&rule) if rule
     return parse_unary() if current.type == :CHAR && AST::UNARY_OPS.include?(current.value)
     lit = parse_lit(:stack)
-    return lit if !lit.nil?
+    return parse_suffixes(lit) if !lit.nil?
     error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")
   end
 
@@ -817,8 +817,17 @@ class Parser
     branches = []
 
     until match?(:CHAR, '}') || match?(:EOF)
-      expr = parse_expression
-      branches << [expr]
+      if match?(:CHAR, '{')
+        # Block branch: { stmts } — allows statements (WITH, SET, etc.) inside a branch.
+        consume(:CHAR, '{')
+        stmts = parse_block_body(['}'])
+        consume(:CHAR, '}')
+        branches << stmts
+      else
+        # Expression branch (backward-compatible): processA(x), processB(y)
+        expr = parse_expression
+        branches << [expr]
+      end
       break unless match!(:CHAR, ',')
     end
 

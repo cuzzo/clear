@@ -1,0 +1,23 @@
+STRUCT Counter { value: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    -- A mutex-protected counter shared across concurrent branches.
+    VAR counter = Counter{ value: 0 } @locked;
+
+    -- Three branches run concurrently; each acquires the mutex,
+    -- increments the counter once, then releases it.
+    -- The DO block joins when all three fibers have completed.
+    DO {
+        { WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; } },
+        { WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; } },
+        { WITH EXCLUSIVE counter AS c { SET c.value = c.value + 1; } }
+    }
+
+    -- All branches must have finished before we reach here.
+    -- The total must be exactly 3.
+    WITH counter AS c {
+        ASSERT c.value == 3, "DO block: all 3 branches must have incremented";
+    }
+
+    RETURN;
+END

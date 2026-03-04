@@ -18,9 +18,71 @@ class TestGenerator < ZigTranspiler
     # 2. Get Raw Zig Body
     transpiled_body = visit(ast)
 
-    # 3. Wrap in a standard Zig Test Block
+    # 3. Detect if test uses DO blocks (needs a running fiber scheduler).
+    needs_scheduler = cheat_code.include?("DO {")
+
+    # 4. Wrap in a standard Zig Test Block.
     #    We wrap the code in a struct so 'fn cheatMain' doesn't collide
     #    between different tests.
+    execution_block = if needs_scheduler
+      # DO block tests: run cheatMain inside the fiber scheduler so that
+      # WaitGroup.wait() can yield and submitSpawn() can enqueue fibers.
+      <<~ZIG
+          // ---------------------------------------------------------
+          // Scheduler Setup (required for DO block fork-join)
+          // ---------------------------------------------------------
+          const fm = @import("fiber-memory.zig");
+          const fp = @import("scheduler.zig");
+          var stack_pool = fm.StackPool.init(t_alloc);
+          defer stack_pool.deinit();
+          var sched = try fp.Scheduler.init(t_alloc, &global_ctx, &stack_pool);
+          defer {
+              sched.deinit();
+              // Free the global registry's hash map backing store.
+              fp.global_registry.deinit(t_alloc);
+          }
+          fp.active_scheduler = &sched;
+
+          // ---------------------------------------------------------
+          // Execution (inside a fiber so WaitGroup.wait() can yield)
+          // ---------------------------------------------------------
+          if (@hasDecl(S, "cheatMain")) {
+              const MainRunner = struct {
+                  fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                      _ = raw_args;
+                      const rt_ptr = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                      try S.cheatMain(rt_ptr);
+                  }
+              };
+              try sched.submitSpawn(
+                  @intFromPtr(&Runtime.entryWrapper),
+                  @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
+                  null,
+                  .{},
+              );
+              sched.run();
+          }
+      ZIG
+    else
+      # Standard tests: call cheatMain directly (no scheduler needed).
+      <<~ZIG
+          // ---------------------------------------------------------
+          // Execution
+          // ---------------------------------------------------------
+          // We assume every test script defines 'cheatMain'
+          if (@hasDecl(S, "cheatMain")) {
+             const result = try S.cheatMain(&rt);
+
+             // If result is an object pointer, we must simulate the
+             // "Caller owns the return" rule to prevent false-positive leaks.
+             const RType = @TypeOf(result);
+             if (@typeInfo(RType) == .pointer) {
+                 CheatLib.free(&rt, result);
+             }
+          }
+      ZIG
+    end
+
     <<~ZIG
       test "#{filename}" {
           // ---------------------------------------------------------
@@ -48,20 +110,7 @@ class TestGenerator < ZigTranspiler
           defer rt.deinit();
           rt.wireAllocator();
 
-          // ---------------------------------------------------------
-          // Execution
-          // ---------------------------------------------------------
-          // We assume every test script defines 'cheatMain'
-          if (@hasDecl(S, "cheatMain")) {
-             const result = try S.cheatMain(&rt);
-
-             // If result is an object pointer, we must simulate the
-             // "Caller owns the return" rule to prevent false-positive leaks.
-             const RType = @TypeOf(result);
-             if (@typeInfo(RType) == .pointer) {
-                 CheatLib.free(&rt, result);
-             }
-          }
+          #{execution_block}
       }
     ZIG
   end

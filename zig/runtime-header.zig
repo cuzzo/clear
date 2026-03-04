@@ -376,9 +376,11 @@ pub const CheatLib = struct {
 
     /// Create a new Rc from an already-heap-allocated *T.
     /// The Rc takes ownership of data_ptr; ref_count starts at 1.
-    pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !Rc(T) {
+    pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
         const ref_count = try alloc.create(usize);
         ref_count.* = 1;
+        const data_ptr = try alloc.create(T);
+        data_ptr.* = data;
         return Rc(T){ .data = data_ptr, .ref_count = ref_count };
     }
 
@@ -415,9 +417,11 @@ pub const CheatLib = struct {
 
     /// Create a new Arc from an already-heap-allocated *T.
     /// The Arc takes ownership of data_ptr; ref_count starts at 1.
-    pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !Arc(T) {
+    pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
         const ref_count = try alloc.create(std.atomic.Value(usize));
         ref_count.* = std.atomic.Value(usize).init(1);
+        const data_ptr = try alloc.create(T);
+        data_ptr.* = data;
         return Arc(T){ .data = data_ptr, .ref_count = ref_count };
     }
 
@@ -482,13 +486,11 @@ pub const CheatLib = struct {
         };
     }
 
-    /// Heap-allocate a new Locked(T) taking ownership of an already-heap-allocated *T.
-    /// The data is copied inline into Locked(T).data and data_ptr is freed.
+    /// Heap-allocate a new Locked(T) wrapping a value of type T.
     /// Caller owns the returned pointer; free with lockedDestroy.
-    pub fn lockedCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !*Locked(T) {
+    pub fn lockedCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*Locked(T) {
         const ptr = try alloc.create(Locked(T));
-        ptr.* = Locked(T).init(data_ptr.*);
-        alloc.destroy(data_ptr);
+        ptr.* = Locked(T).init(data);
         return ptr;
     }
 
@@ -555,13 +557,11 @@ pub const CheatLib = struct {
         };
     }
 
-    /// Heap-allocate a new RwLocked(T) taking ownership of an already-heap-allocated *T.
-    /// The data is copied inline into RwLocked(T).data and data_ptr is freed.
+    /// Heap-allocate a new RwLocked(T) wrapping a value of type T.
     /// Caller owns the returned pointer; free with rwLockedDestroy.
-    pub fn rwLockedCreate(comptime T: type, alloc: std.mem.Allocator, data_ptr: *T) !*RwLocked(T) {
+    pub fn rwLockedCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*RwLocked(T) {
         const ptr = try alloc.create(RwLocked(T));
-        ptr.* = RwLocked(T).init(data_ptr.*);
-        alloc.destroy(data_ptr);
+        ptr.* = RwLocked(T).init(data);
         return ptr;
     }
 

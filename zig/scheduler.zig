@@ -612,6 +612,16 @@ pub const SchedulerRegistry = struct {
         _ = self.map.remove(id);
     }
 
+    /// Free the registry's internal hash map storage.
+    /// Safe to call after all schedulers have been unregistered.
+    /// Resets to empty state so the registry can be reused.
+    pub fn deinit(self: *SchedulerRegistry, allocator: std.mem.Allocator) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.map.deinit(allocator);
+        self.map = .{};
+    }
+
     pub fn get(self: *SchedulerRegistry, id: std.Thread.Id) ?*Scheduler {
         self.mutex.lock();
         defer self.mutex.unlock();
