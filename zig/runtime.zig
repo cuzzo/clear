@@ -172,6 +172,12 @@ pub const Runtime = struct {
         // For now, just checking time is enough.
     }
 
+    // Returns the scheduler for the current thread.
+    // Used by the DO block fork-join primitive.
+    pub fn getSched(_: *Runtime) *fp.Scheduler {
+        return fp.active_scheduler;
+    }
+
     // Helper to spawn tasks easily from the Runtime
     // TODO: need to pass config here.
     pub fn spawn(_: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {

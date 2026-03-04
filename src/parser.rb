@@ -77,6 +77,7 @@ class Parser
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
   stmt(:KEYWORD, 'WITH') { parse_with_capability }
+  stmt(:KEYWORD, 'DO')   { parse_do_block }
 
 
   # Primaries
@@ -808,6 +809,21 @@ class Parser
     consume(:CHAR, '}')
 
     AST::WithBlock.new(with_token, capabilities, body)
+  end
+
+  def parse_do_block
+    do_token = consume(:KEYWORD, 'DO')
+    consume(:CHAR, '{')
+    branches = []
+
+    until match?(:CHAR, '}') || match?(:EOF)
+      expr = parse_expression
+      branches << [expr]
+      break unless match!(:CHAR, ',')
+    end
+
+    consume(:CHAR, '}')
+    AST::DoBlock.new(do_token, branches)
   end
 
   def parse_comma_seq(type, open, close)

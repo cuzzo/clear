@@ -530,6 +530,76 @@ private
       all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings].reject(&:empty?).join("\n")
       "{\n#{all_bindings}\n#{body}\n}"
 
+    when AST::DoBlock
+      @do_block_counter ||= 0
+      id = @do_block_counter
+      @do_block_counter += 1
+
+      n = node.branches.length
+      wg_var = "__do#{id}_wg"
+
+      branch_parts = node.branches.each_with_index.map do |branch_exprs, i|
+        ctx_type = "__DoBranchCtx#{id}_#{i}"
+        ctx_var  = "__do#{id}_ctx#{i}"
+
+        # Collect all Identifier nodes referenced in this branch for capture
+        captured = collect_do_identifiers(branch_exprs)
+
+        capture_fields = captured.map do |name, type_obj|
+          zig_type = transpile_type(type_obj&.resolved || :Any)
+          "#{name}: *const #{zig_type},"
+        end.join("\n    ")
+
+        capture_inits = ([".wg = &#{wg_var}"] + captured.map { |name, _| ".#{name} = &#{name}" }).join(", ")
+
+        # Transpile branch body with identifier → ctx.name.* rewrite
+        # and rt → __rt to avoid shadowing the outer function's rt parameter.
+        prev_capture_map = @do_capture_map || {}
+        prev_rt_name     = @do_rt_name
+        @do_capture_map = prev_capture_map.merge(
+          captured.map { |name, _| [name, "ctx.#{name}.*"] }.to_h
+        )
+        @do_rt_name = "__rt"
+        body_code = branch_exprs.map { |e|
+          code = visit(e)
+          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+          code
+        }.join("\n        ")
+        @do_capture_map = prev_capture_map
+        @do_rt_name     = prev_rt_name
+
+        <<~ZIG.chomp
+          const #{ctx_type} = struct {
+              wg: *CheatHeader.WaitGroup,
+              #{capture_fields}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  #{body_code}
+              }
+          };
+          var #{ctx_var} = #{ctx_type}{ #{capture_inits} };
+          try #{wg_var}.sched.submitSpawn(
+              @intFromPtr(&Runtime.entryWrapper),
+              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+              &#{ctx_var},
+              .{}
+          );
+        ZIG
+      end
+
+      inner = branch_parts.join("\n")
+      <<~ZIG.chomp
+        {
+            var #{wg_var} = CheatHeader.WaitGroup.init(rt.getSched());
+            #{wg_var}.add(#{n});
+            #{inner}
+            #{wg_var}.wait();
+        }
+      ZIG
+
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
       # Standard call (pass rt)
@@ -547,7 +617,8 @@ private
           arg_code
         end
       end
-      args = ["rt"] + args_zig
+      rt_name = @do_rt_name || "rt"
+      args = [rt_name] + args_zig
       call = "#{node.name}(#{args.join(', ')})"
 
       # If the call returns an error union and is not being handled by OR,
@@ -670,6 +741,10 @@ private
       # Inside a WITH block, use the unwrapped inner alias instead of the Rc handle
       rc_map = @rc_unwrap_map || {}
       return rc_map[node.name] if rc_map.key?(node.name)
+
+      # Inside a DO block branch, access captured outer variables via ctx pointer
+      capture_map = @do_capture_map || {}
+      return capture_map[node.name] if capture_map.key?(node.name)
 
       node.name
 
@@ -1253,6 +1328,37 @@ private
     end
 
     pattern
+  end
+
+  # Collect all AST::Identifier nodes in a list of expressions for DO block capture.
+  # Returns a hash of { name => type_info } for each unique local variable referenced.
+  def collect_do_identifiers(exprs)
+    result = {}
+    exprs.each { |e| walk_do_identifiers(e, result) }
+    result
+  end
+
+  def walk_do_identifiers(node, result)
+    return unless node.is_a?(AST::Locatable)
+    if node.is_a?(AST::Identifier)
+      result[node.name] ||= node.type_info
+      return
+    end
+    node.members.each do |m|
+      child = node.send(m)
+      do_walk_child(child, result)
+    end
+  end
+
+  def do_walk_child(child, result)
+    case child
+    when AST::Locatable
+      walk_do_identifiers(child, result)
+    when Array
+      child.each { |c| do_walk_child(c, result) }
+    when Hash
+      child.each_value { |v| do_walk_child(v, result) }
+    end
   end
 
   # Semi-colon helper

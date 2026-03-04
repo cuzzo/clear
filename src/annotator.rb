@@ -1152,6 +1152,15 @@ private
     node.full_type = :Void
   end
 
+  def visit_DoBlock(node)
+    # Each branch runs in a separate fiber (fork-join).
+    # Visit branches independently — no ownership transfer between parallel branches.
+    node.branches.each do |branch|
+      branch.each { |expr| visit(expr) }
+    end
+    node.full_type = :Void
+  end
+
   def get_type_slot_size(type_input)
     type_obj = type_input.is_a?(Type) ? type_input : Type.new(type_input)
     type_obj.slot_size { |name| lookup_type_schema(name) }

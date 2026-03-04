@@ -221,6 +221,9 @@ module AST
   # sync:      nil | :locked | :write_locked
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
+  # DoBlock: fork-join parallel execution.
+  # branches: Array of expression arrays — each sub-array is one parallel branch.
+  DoBlock           = Struct.new(:token, :branches) { include Locatable }
 
   UNARY_OPS = ['-', '!', '~']
 

@@ -8,6 +8,10 @@ pub const EbrContext = @import("ebr.zig").EbrContext;
 const Task = fc.Task;
 const Fiber = fc.Fiber;
 
+// Concurrency primitives re-exported for DO block fork-join support.
+pub const WaitGroup = fp.WaitGroup;
+pub const TaskFn = @import("queues.zig").TaskFn;
+
 
 // Helper Functions
 pub const CheatLib = struct {
