@@ -2382,12 +2382,19 @@ RSpec.describe SemanticAnnotator do
   describe "Escape Analysis (Heap Promotion)" do
     # Helper to check if a specific variable was promoted
     def expect_escape(var_name)
-      # We verify that ANY instance of Scope receives this message
-      expect_any_instance_of(Scope).to receive(:mark_escaped).with(var_name)
+      # We verify that mark_escaped is called with the target variable.
+      # We allow other calls (like for captured variables) to avoid strict arity/argument failures.
+      expect_any_instance_of(Scope).to receive(:mark_escaped).with(var_name).and_call_original
+      allow_any_instance_of(Scope).to receive(:mark_escaped).and_call_original
     end
 
-    def expect_no_escape
-      expect_any_instance_of(Scope).not_to receive(:mark_escaped)
+    def expect_no_escape(var_name = nil)
+      if var_name
+        expect_any_instance_of(Scope).not_to receive(:mark_escaped).with(var_name)
+      else
+        expect_any_instance_of(Scope).not_to receive(:mark_escaped)
+      end
+      allow_any_instance_of(Scope).to receive(:mark_escaped).and_call_original
     end
 
     context "Return Statements" do
@@ -2441,6 +2448,21 @@ RSpec.describe SemanticAnnotator do
             MUTABLE a = Item { id: 1 };
             b = Item { id: 2 };
             a = b; -- 'b' moves to 'a', but both are stack. No escape.
+          END
+        FLUX
+      end
+    end
+
+    context "Lambda/Function Captures (USE)" do
+      it "promotes a variable when it is captured by USE" do
+        expect_escape("x")
+        run(<<~FLUX)
+          STRUCT Node { id: Number }
+          FN main() ->
+            x = Node { id: 1 };
+            -- x is captured by lambda, must be on heap
+            f = %(n: Number) USE(x) -> x.id + n;
+            RETURN;
           END
         FLUX
       end

@@ -765,7 +765,7 @@ class Parser
       end
       consume(:ARROW, '->')
       body = parse_expression
-      return AST::LambdaLit.new(percent_token, params, captures, body, :stack)
+      return AST::LambdaLit.new(percent_token, params, captures, body, :stack, nil)
     end
   end
 

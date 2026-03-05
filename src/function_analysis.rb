@@ -278,20 +278,25 @@ module FunctionAnalysis
       cap_name = cap[:name]
 
       if !current_scope.locals.key?(cap_name)
-        # Check if it's in a higher scope (Globals are visible without capture in some langs,
-        # but if you require USE, we check here)
+        # Check if it's in a higher scope
         owner_scope = lookup_scope_for(cap_name)
         if owner_scope.nil?
            error!(node, "Cannot capture undefined variable '#{cap_name}'")
         end
-
-        # SAVE TYPE AND STORAGE
-        # We need to know if the outer var is on the Heap so the inner proxy reflects that.
-        entry = owner_scope.locals[cap_name]
       else
-        # Local capture (e.g. lambda inside function)
-        entry = current_scope.locals[cap_name]
+        # Local capture
+        owner_scope = current_scope
       end
+
+      # FORCE HEAP PROMOTION for captures:
+      # If captured by a closure, it must be on the heap so it outlives its stack frame.
+      entry = owner_scope.locals[cap_name]
+      if (entry[:storage] == :frame || entry[:storage] == :stack) && Type.new(entry[:type]).requires_move?
+        owner_scope.mark_escaped(cap_name)
+      end
+
+      # SAVE TYPE AND STORAGE (Re-fetch entry after potential promotion)
+      entry = owner_scope.locals[cap_name]
 
       if cap[:mutable] && !entry[:mutable]
         error!(node, "Cannot capture immutable variable '#{cap_name}' as MUTABLE")

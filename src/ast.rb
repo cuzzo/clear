@@ -186,7 +186,7 @@ module AST
   ListLit      = Struct.new(:token, :items, :storage) { include Locatable }
   HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage) { include Locatable }
-  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage) { include Locatable }
+  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) { include Locatable }
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) { include Locatable }
   BreakNode    = Struct.new(:token) { include Locatable }
