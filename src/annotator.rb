@@ -238,36 +238,58 @@ private
   # ==========================================
   # CONTROL FLOW
   # ==========================================
+  # Unifies logic for analyzing multiple code paths (branches).
+  # Snapshots initial variable states, executes each branch in a clean scope,
+  # and merges states back to the parent scope.
+  #
+  # @param branches [Array<Proc>] Procs that execute branch logic
+  # @return [Array<Array<Hash>>] Array of drops for each branch
+  def analyze_control_flow_branches(branches, merge_to_parent: true)
+    initial_state = current_scope.clone_states
+    branch_states = []
+    all_drops = []
+
+    branches.each do |branch_logic|
+      current_scope.var_states = initial_state.dup
+      with_new_scope(current_scope) do
+        all_drops << branch_logic.call
+        branch_states << current_scope.var_states.dup
+      end
+    end
+
+    # Merge States: If a variable died in ANY branch, it must be considered dead in the parent.
+    if merge_to_parent
+      initial_state.each_key do |var|
+        if branch_states.any? { |bs| bs[var] != :live }
+          current_scope.set_state(var, :moved)
+        end
+      end
+    else
+      # Just restore the initial state if merging is disabled (e.g. for WHILE loops)
+      current_scope.var_states = initial_state
+    end
+
+    all_drops
+  end
+
   def visit_IfStatement(node)
     visit(node.condition)
 
-    # 1. Snapshot state before branching
-    initial_state = current_scope.clone_states
+    branch_logic = [
+      proc {
+        node.then_branch.each { |stmt| visit(stmt) }
+        finalize_scope(node, branch: :then)
+        node.then_drops
+      },
+      proc {
+        node.else_branch.each { |stmt| visit(stmt) }
+        finalize_scope(node, branch: :else)
+        node.else_drops
+      }
+    ]
 
-    # Each branch gets its own scope to prevent leaking vars
-    with_new_scope(current_scope) do
-      node.then_branch.each { |stmt| visit(stmt) }
-      finalize_scope(node, branch: :then)
-      @then_state = current_scope.var_states # Conceptual
-    end
-
-    current_scope.var_states = initial_state # restore_states(initial_state)
-
-    with_new_scope(current_scope) do
-      node.else_branch.each { |stmt| visit(stmt) }
-      finalize_scope(node, branch: :else)
-      @else_state = current_scope.var_states
-    end
-
-    # 2. MERGE STATES (The Affine Logic)
-    # Iterate over all variables in the parent scope
-    initial_state.each do |var, state|
-      if @then_state[var] != :live || @else_state[var] != :live
-        # If it died in EITHER branch, it is dead in the main scope.
-        # (Because we can't be sure it's alive, we must assume it's unsafe to use)
-        current_scope.set_state(var, :moved) # or :invalid
-      end
-    end
+    analyze_control_flow_branches(branch_logic)
+    node.full_type = :Void
   end
 
   # Type-checks a struct destructuring pattern against the match subject type.
@@ -309,14 +331,9 @@ private
 
   def visit_MatchStatement(node)
     visit(node.expr)
-    initial_state = current_scope.clone_states
 
-    case_drops = []
-    branch_states = []
-
-    node.cases.each do |c|
-      current_scope.var_states = initial_state.dup
-      with_new_scope(current_scope) do
+    branch_logic = node.cases.map do |c|
+      proc {
         if c[:kind] == :when
           visit(c[:value])
           unless c[:value].resolved_type == :Bool
@@ -333,29 +350,23 @@ private
           end
         end
         c[:body].each { |s| visit(s) }
-        case_drops << collect_scope_drops
-        branch_states << current_scope.var_states.dup
-      end
+        collect_scope_drops
+      }
     end
 
-    default_drops = nil
     if node.default_case
-      current_scope.var_states = initial_state.dup
-      with_new_scope(current_scope) do
+      branch_logic << proc {
         node.default_case.each { |s| visit(s) }
-        default_drops = collect_scope_drops
-        branch_states << current_scope.var_states.dup
-      end
+        collect_scope_drops
+      }
     end
 
-    node.case_drops    = case_drops
-    node.default_drops = default_drops
+    all_drops = analyze_control_flow_branches(branch_logic)
 
-    initial_state.each do |var, _state|
-      if branch_states.any? { |bs| bs[var] != :live }
-        current_scope.set_state(var, :moved)
-      end
+    if node.default_case
+      node.default_drops = all_drops.pop
     end
+    node.case_drops = all_drops
 
     node.full_type = :Void
   end
@@ -368,32 +379,34 @@ private
       error!(node, "Condition must be a Boolean, got #{node.condition.resolved_type}")
     end
 
-    pre_loop_state = current_scope.clone_states
-
     # 2. Analyze Body in a New Scope AND increment loop depth
     @loop_depth += 1
-    with_new_scope(current_scope) do
-      if node.do_branch.is_a?(Array)
-        node.do_branch.each { |stmt| visit(stmt) }
-      else
-        visit(node.do_branch)
-      end
-
-      finalize_scope(node)
-
-      current_scope.var_states.each do |name, new_state|
-        old_state = pre_loop_state[name]
-
-        # If it was defined outside (exists in old_state)
-        # AND it was Live before
-        # AND it is Moved now (consumed without replacement)
-        if old_state == :live && new_state == :moved
-          error!(node, "Use of moved value '#{name}' in loop. The variable is moved in the first iteration and not available for the next.")
+    
+    # We use analyze_control_flow_branches to handle state merging and drops.
+    # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
+    pre_loop_state = current_scope.clone_states
+    
+    analyze_control_flow_branches([
+      proc {
+        if node.do_branch.is_a?(Array)
+          node.do_branch.each { |stmt| visit(stmt) }
+        else
+          visit(node.do_branch)
         end
-      end
-    end
-    @loop_depth -= 1
+        finalize_scope(node)
+        
+        # Post-analysis check for loop-specific errors (use of moved value in next iteration)
+        current_scope.var_states.each do |name, new_state|
+          old_state = pre_loop_state[name]
+          if old_state == :live && new_state == :moved
+            error!(node, "Use of moved value '#{name}' in loop. The variable is moved in the first iteration and not available for the next.")
+          end
+        end
+        node.deferred_drops
+      }
+    ], merge_to_parent: false)
 
+    @loop_depth -= 1
     node.full_type = :Void
   end
 
