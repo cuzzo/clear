@@ -450,80 +450,69 @@ class Parser
     stmts
   end
 
-  def parse_expression
-    # Start at the lowest level (Level 1)
-    parse_precedence_level(1)
-  end
+  def parse_expression(precedence = 0)
+    lhs = parse_unary
 
-  def parse_precedence_level(level)
-    # 1. Base Case: Unary/Primary
-    if level > AST::MAX_PRECEDENCE
-      return parse_unary
-    end
-
-    # 2. Recursive Step: Parse LHS at higher precedence
-    #    This ensures tight binding for *, +, ||, etc.
-    lhs = parse_precedence_level(level + 1)
-
-    level_data = AST::PRECEDENCE_MAP[level]
-    return lhs unless level_data
-
-    current_ops = level_data[:ops]
-
-    # 3. Left-Associativity Loop
-    #    Handles 'OR' and 's>' in the order they appear
-    while current_ops.include?(current.value)
-      # GUARD CLAUSE, AS is used as a keyword in CAST
-      break if current.value == 'AS' && (peek.type == :TYPE_ID || peek.value[0] != '@')
-
-      op_token = consume(current.type)
-      op_val = op_token.value
-
-      if op_val == 'AS'
-        # The Right-Hand Side MUST be an Identifier (e.g., @f)
-        # We parse it as a Primary to handle the identifier logic
-        rhs = parse_var_id
-
-        # Validate it is an Identifier (not a function call foo() or array arr[0])
-        unless rhs.is_a?(AST::Identifier)
-          error!(rhs, "Syntax Error: Expected identifier after 'AS', got #{rhs.class}")
-        end
-
-        lhs = AST::BinaryOp.new(op_token, lhs, :BIND_VAR, rhs)
-
-      elsif op_val == 'OR'
-        # Special handling for OR logic (RETURN/EXIT/ELSE)
-        # We assume parse_or_rescue parses a Primary or similar high-precedence node
-        rhs = parse_or_rescue
-        op_val = :OR_RESCUE
-
-      elsif op_val == 's>'
-        # RHS is parsed at the NEXT HIGHER level (Level 2)
-        # This prevents it from consuming the next 'OR' or 's>'
-        # allowing the loop to handle the chain.
-        rhs = parse_precedence_level(level + 1)
-        op_val = :SMOOTH
-
-      else
-        # Standard Operators
-        rhs = parse_precedence_level(level + 1)
+    while (op_token = current) && (op_prec = get_precedence(op_token)) && op_prec > precedence
+      # GUARD CLAUSE: AS is used as a keyword in CAST, and only binds if followed by an alias (@...)
+      if op_token.value == 'AS' && (peek.type == :TYPE_ID || peek.value[0] != '@')
+        break
       end
 
-      # Standard Operators (+, -, *, etc.)
-      # FIX: Look up the Symbol immediately. Never pass 'op_val' (String) to the AST.
-      # FALLBACK: USE existing symbol
-      op_sym = AST::OP_TO_OP_CODE[op_val] || op_val
-
-      # Guard against forgotten operators
-      if op_sym.nil?
-        error!(op_token, "Parser Error: Unknown operator '#{op_val}'")
-      end
-
-      # Wrap the tree (Left-Growing)
-      lhs = AST::BinaryOp.new(op_token, lhs, op_sym, rhs)
+      consume(op_token.type)
+      lhs = parse_binary_op(lhs, op_token, op_prec)
     end
 
     lhs
+  end
+
+  def get_precedence(token)
+    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH
+    
+    # Precedence levels (higher = tighter binding)
+    case token.value
+    when 'OR', 's>', 'AS' then 1
+    when '||'             then 3
+    when '&&'             then 4
+    when '==', '!=', '<', '>', '<=', '>=' then 5
+    when '+', '-'         then 6
+    when '*', '/', 'MOD'  then 7
+    when '**'             then 8
+    else nil
+    end
+  end
+
+  def parse_binary_op(lhs, op_token, op_prec)
+    op_val = op_token.value
+    
+    # 1. Handle Right-Associativity (e.g. power operator **)
+    #    Subtract 1 from precedence so the next call consumes subsequent terms
+    next_prec = (op_val == '**') ? op_prec - 1 : op_prec
+
+    # 2. Special Operators
+    case op_val
+    when 'AS'
+      rhs = parse_var_id
+      unless rhs.is_a?(AST::Identifier)
+        error!(rhs, "Syntax Error: Expected identifier after 'AS', got #{rhs.class}")
+      end
+      return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, rhs)
+
+    when 'OR'
+      rhs = parse_or_rescue
+      return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, rhs)
+
+    when 's>'
+      # SMOOTH binds Level 1, but its RHS allows chained pipe operators
+      rhs = parse_expression(next_prec)
+      return AST::BinaryOp.new(op_token, lhs, :SMOOTH, rhs)
+    end
+
+    # 3. Standard Operators (+, -, *, etc.)
+    rhs = parse_expression(next_prec)
+    op_sym = AST::OP_TO_OP_CODE[op_val] || op_val.to_sym
+    
+    AST::BinaryOp.new(op_token, lhs, op_sym, rhs)
   end
 
   def parse_or_rescue
