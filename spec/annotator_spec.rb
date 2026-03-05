@@ -3334,6 +3334,60 @@ RSpec.describe SemanticAnnotator do
         expect { ast }.to raise_error(/Type Error/i)
       end
     end
+  end
+
+  describe "MATCH statement" do
+    context "basic integer match with default" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 2;
+          MATCH x START
+            1 -> x = 10;,
+            2 -> x = 20;,
+            DEFAULT -> x = 99;
+          END
+        FLUX
+      }
+
+      it "resolves to Void" do
+        expect { ast }.not_to raise_error
+        expect(ast.statements.last.resolved_type).to eq(:Void)
+      end
+    end
+
+    context "match with no default" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 0;
+          MATCH x START
+            1 -> x = 1;,
+            2 -> x = 2;
+          END
+        FLUX
+      }
+
+      it "succeeds without a default case" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "case type mismatch" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 42;
+          MATCH x START
+            "hello" -> x = 0;
+          END
+        FLUX
+      }
+
+      it "raises an error when case type differs from expression type" do
+        expect { ast }.to raise_error(/MATCH case type/)
+      end
+    end
+  end
+
+  describe "DO block" do
 
     context "three concurrent branches accessing the same @locked counter" do
       let(:code) {

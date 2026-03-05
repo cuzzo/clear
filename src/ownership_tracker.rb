@@ -220,6 +220,21 @@ module OwnershipTracker
     end
   end
 
+  def collect_scope_drops
+    drops = []
+    current_scope.locals.each do |name, info|
+      if current_scope.get_state(name) == :live &&
+         info[:storage] != :multiowned &&
+         info[:storage] != :shared &&
+         !info[:sync] &&
+         Type.new(info[:type]).requires_move?
+        drops << { name: name, type: info[:type] }
+        current_scope.set_state(name, :dropped)
+      end
+    end
+    drops
+  end
+
   def get_path_to_root(node)
     path = []
     curr = node

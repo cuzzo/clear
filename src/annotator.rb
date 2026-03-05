@@ -270,6 +270,50 @@ private
     end
   end
 
+  def visit_MatchStatement(node)
+    visit(node.expr)
+    initial_state = current_scope.clone_states
+
+    case_drops = []
+    branch_states = []
+
+    node.cases.each do |c|
+      current_scope.var_states = initial_state.dup
+      with_new_scope(current_scope) do
+        visit(c[:value])
+        unless c[:value].resolved_type == node.expr.resolved_type ||
+               node.expr.resolved_type == :Any ||
+               c[:value].resolved_type == :Any
+          error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
+        end
+        c[:body].each { |s| visit(s) }
+        case_drops << collect_scope_drops
+        branch_states << current_scope.var_states.dup
+      end
+    end
+
+    default_drops = nil
+    if node.default_case
+      current_scope.var_states = initial_state.dup
+      with_new_scope(current_scope) do
+        node.default_case.each { |s| visit(s) }
+        default_drops = collect_scope_drops
+        branch_states << current_scope.var_states.dup
+      end
+    end
+
+    node.case_drops    = case_drops
+    node.default_drops = default_drops
+
+    initial_state.each do |var, _state|
+      if branch_states.any? { |bs| bs[var] != :live }
+        current_scope.set_state(var, :moved)
+      end
+    end
+
+    node.full_type = :Void
+  end
+
   def visit_WhileLoop(node)
     # 1. Analyze Condition
     visit(node.condition)

@@ -76,6 +76,7 @@ class Parser
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
   stmt(:KEYWORD, 'WITH') { parse_with_capability }
   stmt(:KEYWORD, 'DO')   { parse_do_block }
+  stmt(:KEYWORD, 'MATCH') { parse_match_statement }
 
 
   # Primaries
@@ -623,6 +624,33 @@ class Parser
     end
 
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+  end
+
+  def parse_match_statement
+    tok = consume(:KEYWORD, 'MATCH')
+    expr = parse_expression
+    consume(:KEYWORD, 'START')
+
+    cases = []
+    default_case = nil
+
+    until match?(:KEYWORD, 'END') || match?(:EOF)
+      if match?(:KEYWORD, 'DEFAULT')
+        consume(:KEYWORD, 'DEFAULT')
+        consume(:ARROW)
+        default_case = parse_block_body(['END'])
+        break
+      end
+
+      pattern = parse_expression
+      consume(:ARROW)
+      body = parse_block_body([',', 'DEFAULT', 'END'])
+      cases << { value: pattern, body: body }
+      match!(:CHAR, ',')  # consume comma separator between cases if present
+    end
+
+    consume(:KEYWORD, 'END')
+    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil)
   end
 
   def parse_raise_msg

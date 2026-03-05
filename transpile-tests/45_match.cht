@@ -1,0 +1,21 @@
+FN cheatMain() RETURNS Void ->
+  MUTABLE result = 0_i64;
+  n = 2_i64;
+
+  MATCH n START
+    1_i64 -> result = 10_i64;,
+    2_i64 -> result = 20_i64;,
+    3_i64 -> result = 30_i64;,
+    DEFAULT -> result = 99_i64;
+  END
+
+  ASSERT result == 20, "MATCH: should hit case 2";
+
+  MUTABLE result2 = 0_i64;
+  MATCH 5_i64 START
+    1_i64 -> result2 = 1_i64;,
+    DEFAULT -> result2 = 42_i64;
+  END
+
+  ASSERT result2 == 42, "MATCH: default case should fire";
+END

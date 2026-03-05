@@ -18,6 +18,7 @@ class Lexer
       SELECT WHERE INDEX REDUCE ORDER_BY LIMIT UNNEST DISTINCT
       GIVE TAKES COPY MOVE
       WITH EXCLUSIVE RESTRICT
+      MATCH START DEFAULT
     ].to_set
 
   def initialize(source)

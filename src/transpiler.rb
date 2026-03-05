@@ -471,6 +471,23 @@ private
 
       zig_code
 
+    when AST::MatchStatement
+      subject = visit(node.expr)
+      parts = node.cases.map do |c|
+        val  = visit(c[:value])
+        body = transpile_block(c[:body])
+        "if (#{subject} == #{val}) {\n    #{body}\n    }"
+      end
+
+      result = parts.join(" else ")
+
+      if node.default_case && !node.default_case.empty?
+        default_body = transpile_block(node.default_case)
+        result += " else {\n    #{default_body}\n    }"
+      end
+
+      result
+
     when AST::WhileLoop
       cond = visit(node.condition)
       body = transpile_block(node.do_branch)

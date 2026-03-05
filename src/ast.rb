@@ -227,6 +227,13 @@ module AST
   # branches: Array of expression arrays — each sub-array is one parallel branch.
   DoBlock           = Struct.new(:token, :branches) { include Locatable }
 
+  # MatchStatement: pattern-matching on a value.
+  # cases: Array of { value: ASTNode, body: [ASTNode] }
+  # default_case: [ASTNode] or nil
+  # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
+  # default_drops: drop-array for default branch (or nil), filled by annotator
+  MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops) { include Locatable }
+
   UNARY_OPS = ['-', '!', '~']
 
   PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64]
