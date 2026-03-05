@@ -454,12 +454,12 @@ private
     # 1. Lifetime Tracking
     verify_return(node.value)
 
-    # 2. Ownership Tracking
-    was_promoted = handle_return_escape(node.value)
-    @frame_usage_count -= 1 if was_promoted
-
     actual = node.value.resolved_type
     expected = @function_context_stack.last[:type]
+
+    # 2. Ownership Tracking
+    was_promoted = handle_return_escape(node.value, expected)
+    @frame_usage_count -= 1 if was_promoted
 
     # Promote non-identifier literals to heap when the expected return type requires it.
     # handle_return_escape only handles identifier variables; literals need this explicit check.

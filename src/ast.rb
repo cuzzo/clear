@@ -84,8 +84,8 @@ module AST
       if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
         value_type = value.type_object
         storage = value_type.finalize_storage(@slot_size, value.storage)
-        # Declared type may require heap: pointer types (%Type annotation) or dynamic arrays (Type[])
-        storage = :heap if type_obj.heap? || type_obj.dynamic?
+        # Declared type may require heap: pointer types (%Type annotation)
+        storage = :heap if type_obj.heap?
         value.storage = storage if value.respond_to?(:storage=)
       else
         storage = type_obj.finalize_storage(@slot_size, nil)

@@ -145,10 +145,17 @@ module OwnershipTracker
   # Returns true if the variable was promoted from frame to heap, false otherwise.
   #
   # @param value_node [AST::Node] The value being returned
+  # @param expected_type [Type, Symbol, nil] The declared return type of the function
   # @return [Boolean] Whether a frame-to-heap promotion occurred
   #
-  def handle_return_escape(value_node)
+  def handle_return_escape(value_node, expected_type = nil)
     return false if value_node.nil?
+
+    # Only promote if the function EXPECTS a heap return (or dynamic type like array)
+    if expected_type
+      expected = Type.new(expected_type)
+      return false unless expected.heap? || expected.dynamic?
+    end
 
     root = get_root_object(value_node)
     return false unless root.is_a?(AST::Identifier)
@@ -165,8 +172,12 @@ module OwnershipTracker
     type = owner_scope.resolve_type(var_name)
     return false unless Type.new(type).requires_move?
 
-    # Mark as escaped and return whether it was promoted
-    owner_scope.mark_escaped(var_name)
+    # Mark as escaped and return whether it was promoted from frame
+    is_frame_dec = owner_scope.mark_escaped(var_name)
+    if owner_scope.is_on_heap?(var_name) && root.respond_to?(:storage=)
+      root.storage = :heap
+    end
+    is_frame_dec
   end
 
   def verify_unrestricted!(node)

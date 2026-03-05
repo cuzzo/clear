@@ -432,7 +432,8 @@ class Type
 
   # Returns the Zig type string representation of this type.
   # Memoized for performance; cache is invalidated when location changes.
-  def zig_type
+  def zig_type(is_param: false, is_field: false)
+    return compute_zig_type(is_param: is_param, is_field: is_field) if is_param || is_field
     @zig_type_cache ||= compute_zig_type
   end
 
@@ -542,16 +543,16 @@ class Type
 
   # Computes the Zig type string for this CHEAT type.
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
-  def compute_zig_type
+  def compute_zig_type(is_param: false, is_field: false)
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
-      inner_zig = payload_type.zig_type
+      inner_zig = payload_type.zig_type(is_param: is_param, is_field: is_field)
       return "!#{inner_zig}"
     end
 
     # 2. Handle Optional: ?T -> ?zig_type
     if optional?
-      inner_zig = wrapped_type.zig_type
+      inner_zig = wrapped_type.zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
     end
 
@@ -559,7 +560,7 @@ class Type
     # Only apply capability wrapping when there's an actual capability set
     if @ownership != :affine || @sync
       # Get the plain inner zig type (ownership=:affine creates a bare type with no wrapping)
-      inner_zig = Type.new(resolved.to_s).zig_type
+      inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
 
       inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
       inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
@@ -584,10 +585,15 @@ class Type
     end
 
     # 4. Handle Arrays recursively
-    #    e.g. "Number[]" -> "[]i64", "String[][]" -> "[][]const u8"
+    #    Dynamic arrays use ArrayListUnmanaged only for local variables to support growth.
+    #    Struct fields and function parameters use slices.
     if array?
-      base_zig = element_type.zig_type
-      zig = "[]#{base_zig}"
+      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      if dynamic? && !is_param && !is_field && resolved != :"String[]"
+        zig = "std.ArrayListUnmanaged(#{base_zig})"
+      else
+        zig = "[]#{base_zig}"
+      end
       return is_pointer && zig != "void" ? "*#{zig}" : zig
     end
 

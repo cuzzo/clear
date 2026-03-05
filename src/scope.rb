@@ -219,6 +219,12 @@ class Scope
       if entry[:reg] && entry[:reg].respond_to?(:storage=)
          entry[:reg].storage = :heap
 
+         # Propagate promotion to the value node (e.g. for Assignment or VarDecl)
+         # This ensures that StructLit/ListLit initializers are also marked as :heap
+         if entry[:reg].respond_to?(:value) && entry[:reg].value.respond_to?(:storage=)
+            entry[:reg].value.storage = :heap
+         end
+
          # Only return true (to decrement counter) if it was actually on the Frame
          return is_frame_decrement
       end
