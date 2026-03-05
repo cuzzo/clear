@@ -113,112 +113,102 @@ private
 
   # TODO: Implement return_strategy for lambdas
   # TODO: Implement force heap for USE
-  def visit_LambdaLit(node)
-    # 1. Analyze Captures (Before entering the new scope)
-    # We need to look up the types of variables being captured from the OUTER scope.
-    # The Transpiler needs these types to build the 'Closure Struct'.
+  # Unifies analysis for callables (Functions and Lambdas).
+  # Handles scope entry, parameter/capture declaration, body analysis, 
+  # cleanup generation, and return-type inference.
+  #
+  # @param node [AST::FunctionDef, AST::LambdaLit]
+  # @param body [AST::Node, Array<AST::Node>]
+  # @param declared_return [Symbol] The explicitly declared return type (or :Any)
+  # @param is_implicit [Boolean] True if no return type was specified in source
+  # @return [Symbol] The final resolved/inferred return type
+  #
+  def analyze_routine(node, body, declared_return, is_implicit)
+    # 1. Routine Prologue (Before Scope)
     verify_captures!(node)
+    @return_collection_stack.push([])
 
-    # 2. Enter the Lambda's Scope
+    # 2. Body Analysis (Inside Scope)
     with_new_scope do
       declare_and_verify_params(node)
       declare_captures(node)
 
-      @return_collection_stack.push([])
-
-      # 3. Analyze the Body
-      # The body is usually an AST::Node (expression) or Array (statements)
-      if node.body.is_a?(Array)
-        node.body.each { |stmt| visit(stmt) }
-        found_returns = @return_collection_stack.pop().uniq.map { |r| r[:type] }
-        verify_returns(node, found_returns, :Any) # TODO: get declared_return
-        return_type = found_returns.any? ? found_returns.first : :Any
+      if body.is_a?(Array)
+        body.each { |stmt| visit(stmt) }
       else
-        visit(node.body)
-        return_type = node.body.resolved_type
-        @return_collection_stack.pop()
+        visit(body)
       end
 
-      # 4. Build standard signature (same format as user-defined functions)
-      # This enables verify_function_signature! to validate lambda calls
-      node.full_type = build_lambda_signature(node.params, return_type)
+      finalize_scope(node)
     end
+
+    # 3. Routine Epilogue (Process Returns)
+    found_returns = @return_collection_stack.pop.uniq
+    verify_returns(node, found_returns, is_implicit ? nil : declared_return)
+
+    # Resolve return type (infer if implicit or :Any)
+    return_type = if body.is_a?(Array)
+      found_returns.any? ? found_returns.first[:type] : :Any
+    else
+      body.resolved_type
+    end
+
+    # Update return type if we can narrow it
+    if (is_implicit || declared_return == :Any) && found_returns.any?
+      inferred = found_returns.first[:type]
+      if is_implicit || found_returns.size == 1
+        return_type = inferred
+      end
+    end
+
+    return_type
+  end
+
+  def visit_LambdaLit(node)
+    # Lambdas are always implicit return unless we add syntax for it later
+    return_type = analyze_routine(node, node.body, :Any, true)
+
+    # Build standard signature (same format as user-defined functions)
+    # This enables verify_function_signature! to validate lambda calls
+    node.full_type = build_lambda_signature(node.params, return_type)
   end
 
   def visit_FunctionDef(node)
     @frame_usage_count = 0
 
-    # 1. Distinguish between Implicit (nil) and Explicit (:Any) return types
+    # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
     declared_return = node.return_type || :Any
-
     lifetime_path = get_lifetime_path(node)
     @function_context_stack.push({type: declared_return, lifetime: lifetime_path})
 
-    # 2. Check Style (unchanged)
+    # 2. Validation & Lifetime
     has_mutable_param = node.params.any? { |p| p[:mutable] }
     if has_mutable_param && !node.name.end_with?("!")
       error!(node, "Style Error: Function '#{node.name}' has MUTABLE parameters. Its name must end in '!'")
     end
-
-    # Must happen BEFORE new scope
-    verify_captures!(node)
     verify_lifetime!(node)
 
-    # 3. Build Signature
-    # ENSURE this hash is never nil
+    # 3. Pre-declaration (so the function can be recursive)
     signature = {
       params: node.params.map { |p| {
-        name: p[:name],
-        type: p[:type],
-        required: p[:default].nil?,
-        mutable: p[:mutable],
-        takes: p[:takes]
+        name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable], takes: p[:takes]
       }},
-      return: {
-        type: declared_return,
-        lifetime: lifetime_path
-      }
+      return: { type: declared_return, lifetime: lifetime_path }
     }
-
-    # This overwrites the Pass 2 declaration. We must ensure signature is valid.
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
-    # 4. Analyze Body & Track Returns
-    @return_collection_stack.push([])
+    # 4. Routine Analysis
+    final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
 
-    with_new_scope do
-      # Register Parameters
-      declare_and_verify_params(node)
-      declare_captures(node)
-
-      # Visit Body
-      node.body.each { |stmt| visit(stmt) }
-
-      finalize_scope(node)
-    end
-
-    # 5. Process Returns (The inference logic from the previous fix)
-    found_returns = @return_collection_stack.pop.uniq
-    verify_returns(node, found_returns, is_implicit_return ? nil : declared_return)
-
-    # B. Inference Update
-    # If Implicit (nil) OR Explicitly :Any, try to narrow.
-    if (is_implicit_return || declared_return == :Any) && found_returns.any?
-      inferred = found_returns.first[:type]
-
-      # Only narrow if we are sure (Implicit always narrows, Any only narrows if unique)
-      if is_implicit_return || found_returns.size == 1
-        node.return_type = inferred
-
-        # MUTATE the existing signature hash so the Scope entry updates automatically
-        signature[:return][:type] = inferred
-      end
+    # 5. Finalize Signature
+    if (is_implicit_return || declared_return == :Any)
+      node.return_type = final_return_type
+      signature[:return][:type] = final_return_type
     end
 
     signature[:return_strategy] = get_return_strategy(signature[:return][:type])
     node.full_type = signature
-
     node.uses_frame = (@frame_usage_count > 0)
     @function_context_stack.pop
   end

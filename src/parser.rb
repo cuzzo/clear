@@ -467,7 +467,7 @@ class Parser
   end
 
   def get_precedence(token)
-    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH
+    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_RESCUE
     
     # Precedence levels (higher = tighter binding)
     case token.value
