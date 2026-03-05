@@ -1,0 +1,26 @@
+FN cheatMain() RETURNS Void ->
+  MUTABLE matrix: Number[][] = [[1, 2, 3], [4, 5, 6]];
+
+  ASSERT matrix.length() == 2, "Outer length should be 2";
+  ASSERT matrix[0].length() == 3, "Inner length should be 3";
+
+  ASSERT matrix[0][0] == 1, "matrix[0][0] should be 1";
+  ASSERT matrix[0][1] == 2, "matrix[0][1] should be 2";
+  ASSERT matrix[0][2] == 3, "matrix[0][2] should be 3";
+  ASSERT matrix[1][0] == 4, "matrix[1][0] should be 4";
+  ASSERT matrix[1][1] == 5, "matrix[1][1] should be 5";
+  ASSERT matrix[1][2] == 6, "matrix[1][2] should be 6";
+
+  -- Mutation
+  matrix[1][1] = 99;
+  ASSERT matrix[1][1] == 99, "matrix[1][1] should be 99 after mutation";
+
+  -- Nesting another level
+  MUTABLE cube: Number[][][] = [[[1, 2]], [[3, 4]]];
+  ASSERT cube.length() == 2, "Cube length should be 2";
+  ASSERT cube[0].length() == 1, "Cube[0] length should be 1";
+  ASSERT cube[0][0].length() == 2, "Cube[0][0] length should be 2";
+  ASSERT cube[0][0][1] == 2, "cube[0][0][1] should be 2";
+
+  RETURN;
+END

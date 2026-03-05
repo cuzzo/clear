@@ -345,30 +345,27 @@ private
     # TODO: Need overflow logic for frame to overflow to heap / malloc
     when AST::ListLit
       # 1. Determine the Zig Type (T)
-      #    The Annotator sets 'full_type' (e.g. :Number[] or :%User[])
-      #    We need the element type, so strip leading % and ONE trailing []
-      #    e.g., %Number[][] -> Number[] (element type for nested list)
-      effective_type = node.coerced_type || node.full_type
-      type_str = effective_type.to_s
-
-      # Strip one trailing [] to get element type
-      base_type_sym = type_str.sub(/\[\]$/, '')
-      zig_type = transpile_type(base_type_sym)
+      ti = node.coerced_type_info || node.type_info
+      element_ti = ti.element_type
+      zig_type = element_ti.zig_type
 
       # 2. Determine Allocator
-      #    The Annotator sets 'storage' (:heap or :stack)
       allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
 
       # 3. Generate Items Slice
-      #    Zig syntax for an array literal slice is: &.{ item1, item2 }
       if node.items.empty?
         items_slice = "&.{}"
       else
         items_list = node.items.map do |item|
           item_code = visit(item)
-          # If item is an array type (ArrayList), convert to slice via .items
-          if item.type_info&.array?
-            "#{item_code}.items"
+          target_zig = element_ti.zig_type
+          
+          # 1. If item is a ListLit, it ALWAYS returns an ArrayListUnmanaged.
+          # 2. If the target element type expects a slice ([]...), we must convert.
+          is_array_list = item.is_a?(AST::ListLit) || (item.type_info&.zig_type&.include?("ArrayListUnmanaged"))
+          
+          if target_zig&.start_with?("[]") && is_array_list
+            "(#{item_code}).items"
           else
             item_code
           end

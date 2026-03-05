@@ -866,9 +866,9 @@ private
          error!(node, "Map keys must be Strings, got #{node.index.resolved_type}")
       end
 
-    # Case 2: Array Access "Number[]" -> :Number
+    # Case 2: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
     elsif node.target.metatype == :array || node.target.metatype == :struct
-      node.full_type = node.target.base_type
+      node.full_type = node.target.type_info.element_type
 
     else
       error!(node, "Unsupported Index")
@@ -1014,7 +1014,6 @@ private
       end
     end
 
-    # TODO: Multi-dimensional arrays
     if node.storage == :stack
       node.full_type = :"#{base_type}[#{node.items.size}]"
     else

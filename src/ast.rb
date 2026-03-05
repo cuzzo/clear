@@ -183,7 +183,23 @@ module AST
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) { include Locatable }
   Literal      = Struct.new(:token, :type, :value, :storage) { include Locatable }
-  ListLit      = Struct.new(:token, :items, :storage) { include Locatable }
+  ListLit      = Struct.new(:token, :items, :storage) { 
+    include Locatable 
+
+    def coerce!(declared_type)
+      res, error = super(declared_type)
+      return [nil, error] if error
+
+      # Recursively coerce items if the container is being coerced
+      if res && items.any?
+        element_type = Type.new(res).element_type
+        if element_type
+          items.each { |item| item.coerce!(element_type.resolved) }
+        end
+      end
+      [res, nil]
+    end
+  }
   HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage) { include Locatable }
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }

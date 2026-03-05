@@ -823,11 +823,18 @@ class Parser
         error!(current, "Syntax Error: Expected ']', '*', or size in array type.")
       end
 
-      # Allow a second [] suffix for arrays of arrays (e.g., String[][] = list of String[])
-      if inner == "[]" && match?(:CHAR, '[') && peek.value == ']'
+      # Allow multiple dimensions (e.g., Number[][][])
+      while match?(:CHAR, '[')
         consume(:CHAR, '[')
-        consume(:CHAR, ']')
-        inner = "[][]"
+        if match!(:CHAR, ']')
+          inner += "[]"
+        elsif match?(:NUMBER)
+          size = consume(:NUMBER).value.to_i
+          consume(:CHAR, ']')
+          inner += "[#{size}]"
+        else
+          error!(current, "Syntax Error: Expected ']' or size in array type.")
+        end
       end
     end
 

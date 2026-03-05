@@ -2467,6 +2467,28 @@ RSpec.describe SemanticAnnotator do
         FLUX
       end
     end
+
+    context "Multi-dimensional Arrays" do
+      it "resolves a 2D array literal correctly" do
+        code = "MUTABLE matrix: Number[][] = [[1, 2], [3, 4]];"
+        local_ast = run(code)
+        expect(local_ast.statements.last.value.full_type.to_s).to eq("Number[2][2]")
+      end
+
+      it "resolves a 3D array literal correctly" do
+        code = "MUTABLE cube: Number[][][] = [[[1]]];"
+        local_ast = run(code)
+        expect(local_ast.statements.last.value.full_type.to_s).to eq("Number[1][1][1]")
+      end
+
+      it "fails when nested array types are inconsistent" do
+        expect {
+          run(<<~FLUX)
+            MUTABLE x: Number[][] = [[1, 2], ["a", "b"]];
+          FLUX
+        }.to raise_error(/List literal contains mixed types/i)
+      end
+    end
   end
 
   describe "Function Return Strategies (ABI)" do
