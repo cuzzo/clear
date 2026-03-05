@@ -1,9 +1,9 @@
 FN cheatMain() RETURNS Void ->
-  VAR raw: Number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  raw: Number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
   -- PROJECT multiple fields
   -- We create a new HashMap for every item in the list
-  VAR filtered = raw s> WHERE _ > 5;
+  filtered = raw s> WHERE _ > 5;
 
   ASSERT filtered.length() == 5, "Unexpected Length";
   ASSERT filtered[0] == 6, "Unexpected Value";

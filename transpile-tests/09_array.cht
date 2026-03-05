@@ -7,7 +7,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT list.length() == 2, "Array length should be 2";
 
   -- Access index 1
-  VAR val = list[1];
+  val = list[1];
   ASSERT val == 20, "Index 1 should be 20";
 
   -- Verify index 0

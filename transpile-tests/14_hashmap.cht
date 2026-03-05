@@ -1,16 +1,16 @@
 FN cheatMain() RETURNS Void ->
   MUTABLE counts = {"dummy": 0_i64}; -- Init Map
 
-  VAR word_str = "apple banana apple";
+  word_str = "apple banana apple";
   MUTABLE words = word_str.split(" ");
 
   -- Manual Loop
   MUTABLE i = 0_i64;
   WHILE i < words.length() DO
-    VAR w = words[i];
-    VAR current = counts[w]; -- mapGet (defaults to 0)
-    SET counts[w] = current + 1_i64; -- mapPut
-    SET i = i + 1_i64;
+    w = words[i];
+    current = counts[w]; -- mapGet (defaults to 0)
+    counts[w] = current + 1_i64; -- mapPut
+    i = i + 1_i64;
   END
 
   -- Verify counts

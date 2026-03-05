@@ -7,7 +7,7 @@ END
 
 FN cheatMain() RETURNS Void ->
     -- Create a heap-allocated RwLock-protected Counter.
-    VAR c = Counter{ value: 10 } @writeLocked;
+    c = Counter{ value: 10 } @writeLocked;
 
     -- WITH EXCLUSIVE acquires the write lock (exclusive access).
     -- 'inner' is bound to *Counter (auto-deref in Zig).
@@ -15,18 +15,18 @@ FN cheatMain() RETURNS Void ->
         ASSERT inner.value == 10, "inner.value should be 10";
 
         -- Mutate through the pointer (auto-deref assignment).
-        SET inner.value = 42;
+        inner.value = 42;
         ASSERT inner.value == 42, "inner.value should be 42 after mutation";
 
         -- Pass inner.* (deref) to a plain function.
-        VAR v = getVal(inner);
+        v = getVal(inner);
         ASSERT v == 42, "getVal should return 42";
     }
 
     -- WITH c (no keyword) auto-acquires the read lock (shared, read-only access).
     WITH c AS inner {
         ASSERT inner.value == 42, "inner.value should still be 42 after read";
-        VAR v = getVal(inner);
+        v = getVal(inner);
         ASSERT v == 42, "getVal should return 42 from read guard";
     }
 

@@ -10,13 +10,13 @@ END
 
 FN cheatMain() RETURNS Void ->
   -- Build items with nested arrays
-  VAR tags1: Int64[] = [10_i64, 20_i64];
-  VAR tags2: Int64[] = [30_i64, 40_i64, 50_i64];
-  VAR tags3: Int64[] = [60_i64];
+  tags1: Int64[] = [10_i64, 20_i64];
+  tags2: Int64[] = [30_i64, 40_i64, 50_i64];
+  tags3: Int64[] = [60_i64];
 
-  VAR item1 = makeItem(1_i64, tags1);
-  VAR item2 = makeItem(2_i64, tags2);
-  VAR item3 = makeItem(3_i64, tags3);
+  item1 = makeItem(1_i64, tags1);
+  item2 = makeItem(2_i64, tags2);
+  item3 = makeItem(3_i64, tags3);
 
   MUTABLE items: Item[] = [];
   items.append(item1);
@@ -24,7 +24,7 @@ FN cheatMain() RETURNS Void ->
   items.append(item3);
 
   -- Test UNNEST: flatten all tags from all items
-  VAR all_tags = items s> UNNEST _.tags;
+  all_tags = items s> UNNEST _.tags;
 
   ASSERT all_tags.length() == 6, "Should have 6 tags total";
   ASSERT all_tags[0] == 10, "First should be 10";

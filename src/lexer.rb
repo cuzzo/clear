@@ -6,7 +6,7 @@ class Lexer
 
   # We use a hash for O(1) lookups
   KEYWORDS = %w[
-      VAR MUTABLE SET
+      MUTABLE
       FN RETURN RETURNS USE
       IF THEN ELSE ELSE_IF END
       WHILE DO BREAK CONTINUE

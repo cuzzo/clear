@@ -40,7 +40,7 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 
 ## Design Principles
 
-- **Immutability:** Default, explicit mutation with `MUTABLE`/`SET`.
+- **Immutability:** Default. `x = value` declares an immutable binding; `MUTABLE x = value` declares a mutable one. Reassignment uses `x = value` (no keyword) and only works on mutable variables.
 - **Arena Memory:** Variables live for their function scope; large objects escape via RVO or page handoffs.
 - **Local Reasoning:** `WITH RESTRICT` ensures that mutable "poisoning" is always visible and scoped.
 - **Fortress Architecture:** Public APIs must be strictly defined and handle all errors.

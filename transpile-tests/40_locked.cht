@@ -7,7 +7,7 @@ END
 
 FN cheatMain() RETURNS Void ->
     -- Create a heap-allocated mutex-protected Counter.
-    VAR c = Counter{ value: 10 } @locked;
+    c = Counter{ value: 10 } @locked;
 
     -- WITH EXCLUSIVE acquires the mutex for the duration of the block.
     -- 'inner' is bound to *Counter (auto-deref in Zig).
@@ -15,11 +15,11 @@ FN cheatMain() RETURNS Void ->
         ASSERT inner.value == 10, "inner.value should be 10";
 
         -- Mutate through the pointer (auto-deref assignment).
-        SET inner.value = 42;
+        inner.value = 42;
         ASSERT inner.value == 42, "inner.value should be 42 after mutation";
 
         -- Pass inner.* (deref) to a plain function.
-        VAR v = getVal(inner);
+        v = getVal(inner);
         ASSERT v == 42, "getVal should return 42";
     }
 

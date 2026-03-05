@@ -1,5 +1,5 @@
 FN cheatMain() RETURNS Void ->
-  VAR raw_data = readFile("testdata/fruits.csv").trim();
+  raw_data = readFile("testdata/fruits.csv").trim();
 
   -- 1. Split into List
   MUTABLE parts = raw_data.split(",");
@@ -11,7 +11,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT parts.length() == 4, "Should have 4 parts after append";
 
   -- 3. Join back together
-  VAR new_csv = join(parts, " | ");
+  new_csv = join(parts, " | ");
 
   -- Verify join result length (apple=5 + banana=6 + cherry=6 + date=4 + 3 separators*3 = 30)
   ASSERT new_csv.length() == 30, "Joined string should have correct length";

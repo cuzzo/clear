@@ -42,9 +42,7 @@ A memory-safe language with Rust-level guarantees but substantially simpler synt
 ```
 
 ### Keywords
-- `VAR` - Immutable binding
-- `MUTABLE` - Mutable binding
-- `SET` - Assignment to mutable variable
+- `MUTABLE` - Mutable binding (immutable binding uses no keyword)
 - `FN` - Function definition
 - `RETURN` - Return from function
 - `IF/THEN/ELSE/END` - Conditionals
@@ -58,17 +56,17 @@ A memory-safe language with Rust-level guarantees but substantially simpler synt
 
 ### Immutable Variables (Default)
 ```
-VAR x = 5;                    -- Immutable binding
-VAR name = "Alice";           -- Immutable string
-VAR pi = 3.14159;             -- Immutable float
+x = 5;                        -- Immutable binding (no keyword)
+name = "Alice";               -- Immutable string
+pi = 3.14159;                 -- Immutable float
 
-SET x = 6;                    -- COMPILER ERROR: x is immutable
+x = 6;                        -- COMPILER ERROR: x is immutable
 ```
 
 ### Mutable Variables (Explicit)
 ```
 MUTABLE counter = 0;          -- Mutable binding
-SET counter = 1;              -- OK: can reassign
+counter = 1;                  -- OK: can reassign
 ```
 
 ---
@@ -98,10 +96,10 @@ When an object is `shared` across threads, you choose a synchronization strategy
 - `shared:locked`: Equivalent to `Arc<Mutex<T>>`.
 
 ```CLEAR
-VAR u = User.new();                     -- affine User (default)
-VAR s = SHARE(User.new());              -- shared User (thread-safe)
-VAR sa = SHARE:atomic(0);               -- shared:atomic Integer
-VAR sw = SHARE:writeLocked(User.new()); -- shared:writeLocked User
+u = User.new();                     -- affine User (default)
+s = SHARE(User.new());              -- shared User (thread-safe)
+sa = SHARE:atomic(0);               -- shared:atomic Integer
+sw = SHARE:writeLocked(User.new()); -- shared:writeLocked User
 ```
 
 ### Why This is Superior: Zero Blast Radius Refactoring
@@ -120,7 +118,7 @@ FN process(u: User) ->
 END
 
 -- At the call site, you unwrap/sync the capability
-VAR sharedU = SHARE(User.new());
+sharedU = SHARE(User.new());
 process(sharedU); -- CLEAR automatically handles the "unwrapping" for the call
 ```
 
@@ -160,7 +158,7 @@ END
 ### UpValues (Closures)
 Functions must explicitly declare captured variables:
 ```
-VAR x = 5;
+x = 5;
 FN readOnly() USE(x) ->
   PRINT(x);
 END
@@ -170,7 +168,7 @@ END
 Functions that mutate their parameters use the `!` suffix:
 ```
 FN increment!(MUTABLE counter) ->
-  SET counter = counter + 1;
+  counter = counter + 1;
 END
 ```
 
@@ -183,7 +181,7 @@ In CLEAR, arrays are optimized automatically. You do not need a sigil to disting
 
 ```
 -- Fixed-size immutable array
-VAR coords = [1, 2, 3];
+coords = [1, 2, 3];
 
 -- Dynamic mutable array
 MUTABLE items = [1, 2, 3];
@@ -247,7 +245,7 @@ MUTABLE node = buildTree();
 
 WITH RESTRICT node.child {
   -- 'node.child' is now immutable (restricted) inside this block.
-  VAR gc = node.grandChild();
+  gc = node.grandChild();
 
   -- node.child.name = "New Name"; -- COMPILER ERROR: node.child is restricted
 }
@@ -264,7 +262,7 @@ FN saveUser(TAKES u: User) ->
   -- This function now owns 'u'
 END
 
-VAR u = User.new();
+u = User.new();
 saveUser(GIVE u);             -- Explicitly move ownership
 -- u is now dead here
 ```
@@ -278,14 +276,14 @@ saveUser(GIVE u);             -- Explicitly move ownership
 CLEAR handles errors via control flow, keeping the "Happy Path" clear.
 
 ```
-VAR val = fetchData() OR RAISE;
-VAR name = getName() OR "Guest";
+val = fetchData() OR RAISE;
+name = getName() OR "Guest";
 ```
 
 ### The `!!` Operator
 Used for explicit panics:
 ```
-VAR item = list.get(idx)!!;   -- Panic if out of bounds
+item = list.get(idx)!!;       -- Panic if out of bounds
 ```
 
 ---
@@ -303,7 +301,7 @@ END
 
 For shared state, use the `shared` capability or `shared:atomic`:
 ```
-VAR counter = SHARE:atomic(0);  -- Atomic shared across threads
+counter = SHARE:atomic(0);      -- Atomic shared across threads
 counter.increment!();
 ```
 
@@ -315,7 +313,7 @@ counter.increment!();
 The `s>` operator is a "Safe, Smooth, Smart" pipe that manages unwrapping and error bubbling.
 
 ```
-VAR result = data
+result = data
   s> filter(%(x) -> x > 5)
   s> map(%(x) -> x * 2)
   s> sum();

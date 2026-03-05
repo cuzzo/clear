@@ -3,12 +3,12 @@ STRUCT Counter { value: Int64 }
 -- Test: basic multiowned creation and field access.
 -- The testing allocator verifies no leaks (cleanup happens correctly).
 FN cheatMain() RETURNS Void ->
-    VAR a = Counter{ value: 42 } @multiowned;
+    a = Counter{ value: 42 } @multiowned;
     ASSERT a.value == 42, "a.value should be 42";
 
     -- Clone: both a and b point to the same Counter (ref count = 2).
     -- If the Counter were freed when b is created, accessing a.value would be a use-after-free.
-    VAR b = a;
+    b = a;
     ASSERT a.value == 42, "a.value should still be 42 after clone";
     ASSERT b.value == 42, "b.value should equal a.value (same Counter)";
 

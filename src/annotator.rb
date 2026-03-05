@@ -529,6 +529,62 @@ private
     current_scope.set_state(node.name, :live)
   end
 
+  # Keywordless `x = val` or `x: Type = val`.
+  # If x is not yet in scope → immutable declaration (like old VAR x = val).
+  # If x is in scope and mutable → assignment (like old SET x = val).
+  # If x is in scope and immutable → error.
+  def visit_BindExpr(node)
+    visit(node.value)
+
+    scope = current_scope
+    if !scope.locals.key?(node.name)
+      # Declaration path
+      node.mode = :decl
+
+      verify_unrestricted!(node)
+      handle_assign_move(node)
+      handle_assign_borrow(node)
+
+      final_type, error = node.value.coerce!(node.type)
+      error!(node, error) if error
+
+      storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
+      @frame_usage_count += 1 if storage == :frame
+
+      node_sync = node.type_info&.sync
+      current_scope.declare(
+        node.name,
+        node,
+        final_type,
+        false,   # immutable
+        false,
+        node.slot_size,
+        storage,
+        Set.new,
+        [],
+        sync: node_sync
+      )
+      current_scope.set_state(node.name, :live)
+
+    elsif scope.is_immutable?(node.name)
+      error!(node, "Variable '#{node.name}' is immutable")
+
+    else
+      # Assignment path
+      node.mode = :assign
+
+      verify_unrestricted!(node)
+      validate_assignment_type(node, scope.resolve_type(node.name), node.value.resolved_type)
+      node.full_type = scope.resolve_type(node.name)
+
+      handle_assign_escape(node)
+      handle_assign_move(node)
+      handle_assign_borrow(node)
+
+      current_scope.set_state(node.name, :live)
+    end
+  end
+
   def visit_Identifier(node)
     if @smooth_depth > 0
       scope = lookup_scope_for(node.name)

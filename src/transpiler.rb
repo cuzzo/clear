@@ -241,6 +241,26 @@ private
 
       "#{decl} #{suppression}\n#{affine_logic}\n#{move_source_logic}"
 
+    when AST::BindExpr
+      if node.mode == :decl
+        # Transpile as immutable declaration — delegate to VarDecl logic via a proxy
+        proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
+        proxy.full_type = node.full_type
+        proxy.storage   = node.storage
+        proxy.slot_size = node.slot_size
+        visit(proxy)
+      else
+        # Transpile as simple assignment
+        value_str = visit(node.value)
+        move_logic = ""
+        if node.value.is_a?(AST::Identifier)
+          if node.value.type_info && node.value.type_info.requires_move? && node.value.storage == :heap
+            move_logic = "\n#{node.value.name}_moved = true;"
+          end
+        end
+        "#{node.name} = #{value_str}; #{move_logic}"
+      end
+
     when AST::Assignment
       # 1. Resolve the Target string
       #    The target might be a simple String ("i") or a complex Node (GetField/GetIndex)

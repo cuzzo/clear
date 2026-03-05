@@ -13,20 +13,18 @@ RSpec.describe Lexer do
 
   describe "#tokenize" do
     it "tokenizes a simple variable assignment with correct columns" do
-      #                  1234567890
-      lexer = Lexer.new("VAR x = 42")
+      #                  123456789
+      lexer = Lexer.new("x = 42")
       tokens = lexer.tokenize
 
-      # VAR
-      expect_token(tokens[0], :KEYWORD, "VAR", 1, 1)
       # x
-      expect_token(tokens[1], :VAR_ID, "x", 1, 5)
+      expect_token(tokens[0], :VAR_ID, "x", 1, 1)
       # =
-      expect_token(tokens[2], :CHAR, "=", 1, 7)
+      expect_token(tokens[1], :CHAR, "=", 1, 3)
       # 42
-      expect_token(tokens[3], :NUMBER, 42.0, 1, 9)
-      # EOF (Position is end of string + 1 usually, or last char)
-      expect(tokens[4].type).to eq(:EOF)
+      expect_token(tokens[2], :NUMBER, 42.0, 1, 5)
+      # EOF
+      expect(tokens[3].type).to eq(:EOF)
     end
 
     it "distinguishes Identifiers, Types, and Keywords" do
@@ -41,28 +39,26 @@ RSpec.describe Lexer do
 
     it "handles whitespace and newlines correctly" do
       source = <<~CODE
-        VAR x
+        x
           = 10
       CODE
       lexer = Lexer.new(source)
       tokens = lexer.tokenize
 
-      # VAR (Line 1, Col 1)
-      expect_token(tokens[0], :KEYWORD, "VAR", 1, 1)
-      # x (Line 1, Col 5)
-      expect_token(tokens[1], :VAR_ID, "x", 1, 5)
+      # x (Line 1, Col 1)
+      expect_token(tokens[0], :VAR_ID, "x", 1, 1)
       # = (Line 2, Col 3 -- indented by 2 spaces)
-      expect_token(tokens[2], :CHAR, "=", 2, 3)
+      expect_token(tokens[1], :CHAR, "=", 2, 3)
       # 10 (Line 2, Col 5)
-      expect_token(tokens[3], :NUMBER, 10.0, 2, 5)
+      expect_token(tokens[2], :NUMBER, 10.0, 2, 5)
     end
 
     it "skips comments but tracks position" do
-      #                  123456789012345_12
-      lexer = Lexer.new("VAR -- comment\n x")
+      #                  123456789012345678
+      lexer = Lexer.new("IF -- comment\n x")
       tokens = lexer.tokenize
 
-      expect_token(tokens[0], :KEYWORD, "VAR", 1, 1)
+      expect_token(tokens[0], :KEYWORD, "IF", 1, 1)
       # Should skip comment and newline, landing on x at Line 2, Col 2 (space + x)
       expect_token(tokens[1], :VAR_ID, "x", 2, 2)
     end
@@ -78,8 +74,8 @@ RSpec.describe Lexer do
         # """
         #  A
         # """
-        # VAR
-        source = "\"\"\"\n A\n\"\"\"\nVAR"
+        # IF
+        source = "\"\"\"\n A\n\"\"\"\nIF"
         lexer = Lexer.new(source)
         tokens = lexer.tokenize
 
@@ -89,12 +85,12 @@ RSpec.describe Lexer do
         expect(tokens[0].column).to eq(1)
         expect(tokens[0].value).to eq("\n A\n")
 
-        # The next token (VAR) should be on Line 4
+        # The next token (IF) should be on Line 4
         # Line 1: """
         # Line 2:  A
         # Line 3: """
-        # Line 4: VAR
-        expect_token(tokens[1], :KEYWORD, "VAR", 4, 1)
+        # Line 4: IF
+        expect_token(tokens[1], :KEYWORD, "IF", 4, 1)
       end
     end
 

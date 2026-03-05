@@ -62,9 +62,7 @@ class Parser
   end
 
   # COMMANDS
-  stmt(:KEYWORD, 'VAR', AST::VarDecl, ['VAR', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [false])
   stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
-  stmt(:KEYWORD, 'SET') { parse_set_var }  #, AST::Assignment, ['SET', :VAR_ID, '=', :expression, ';'])
   stmt(:KEYWORD, 'FN') { parse_function_def }
   stmt(:KEYWORD, 'IF') { parse_if_statement }
   stmt(:KEYWORD, 'STRUCT', AST::StructDef, ['STRUCT', :TYPE_ID, :struct_body])
@@ -285,6 +283,12 @@ class Parser
   end
 
   def parse_statement
+    # Keywordless bind/assign: x = ..., x: Type = ..., x.field = ..., x[0] = ...
+    if current.type == :VAR_ID
+      result = try_parse_bind_or_assign
+      return result if result
+    end
+
     rule = @@stmt_rules[[current.type, current.value]]
     return instance_exec(&rule) if rule
     expr = parse_expression
@@ -292,28 +296,41 @@ class Parser
     expr
   end
 
-  def parse_set_var
-    set_token = consume(:KEYWORD, 'SET')
+  # Speculatively parse `target [: Type] = expression ;` as a BindExpr or Assignment.
+  # Returns nil (and backtracks) if no `=` follows the target, so we fall through to
+  # expression-statement parsing (e.g. method calls like `foo();`).
+  def try_parse_bind_or_assign
+    saved_pos = @pos
+    target_token = current
+    target = parse_var_id  # handles x, x.field, x[0]
 
-    # 1. Parse the Target (L-Value)
-    # parse_var_id handles "x", "x.y", "x[0]", "x.y[1]", etc.
-    target = parse_var_id
+    # Optional type annotation for simple identifiers: x: Type = ...
+    opt_type = nil
+    if target.is_a?(AST::Identifier) && match?(:CHAR, ':')
+      consume(:CHAR, ':')
+      opt_type = parse_type_annotation
+    end
 
-    # Optional: Validation (Prevent "SET f() = 1")
-    unless target.is_a?(AST::Identifier) ||
-           target.is_a?(AST::GetField) ||
-           target.is_a?(AST::GetIndex)
-       error!(target, "Syntax Error: Invalid assignment target on line #{current.line}")
+    unless match?(:CHAR, '=')
+      @pos = saved_pos
+      return nil
+    end
+
+    unless target.is_a?(AST::Identifier) || target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
+      @pos = saved_pos
+      return nil
     end
 
     consume(:CHAR, '=')
     value = parse_expression
     consume(:CHAR, ';')
 
-    # 2. Return Assignment Node
-    # Note: 'target' is now a Node, not just a String name.
-    # Your Compiler already handles this!
-    AST::Assignment.new(set_token, target, value)
+    if target.is_a?(AST::Identifier)
+      AST::BindExpr.new(target_token, target.name, opt_type, value)
+    else
+      # Field or index assignment — always a reassignment, never a declaration
+      AST::Assignment.new(target_token, target, value)
+    end
   end
 
   def parse_return

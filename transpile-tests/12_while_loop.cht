@@ -3,8 +3,8 @@ FN cheatMain() RETURNS Void ->
 
   MUTABLE i = 0_i64;
   WHILE i < 10 DO
-    SET sum = sum + i;
-    SET i = i + 1_i64;
+    sum = sum + i;
+    i = i + 1_i64;
   END
 
   -- Verify loop ran 10 times: sum = 0+1+2+...+9 = 45

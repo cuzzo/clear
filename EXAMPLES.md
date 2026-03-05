@@ -5,24 +5,22 @@
 ```CLEAR
 FN processUsers(users: User[]) ->
   -- Pipelines with SMOOTH operator 's>'
-  VAR result = users AS @u
+  result = users AS @u
     s> UNNEST _.orders
     s> SELECT _.price * @u.discount
     s> REDUCE(0, (acc, x) -> acc + x );
 
-  VAR info;
-  IF result > 1000 THEN
-    -- No % sigil for collections
-    SET info = { "sum": [10, 9], "status": "high" };
-  ELSE
-    SET info = { "sum": [1, 0], "status": "low" };
+  -- Default to "high"; override if result is low
+  MUTABLE info = { "sum": [10, 9], "status": "high" };
+  IF result <= 1000 THEN
+    info = { "sum": [1, 0], "status": "low" };
   END
 
   RETURN info["sum"][0];
 END
 
 -- Lambda with % sigil
-VAR myLambda = %(x: Number) ->
+myLambda = %(x: Number) ->
   doIt();
   RETURN TRUE;
 END
@@ -58,11 +56,11 @@ FN Point::distance(self: Point, other: Point) -> Number
   -- ...
 END
 
-VAR myPoint = Point{ x: 10, y: 20 };
-VAR oPoint = Point{ x: 10, y: 10 };
+myPoint = Point{ x: 10, y: 20 };
+oPoint = Point{ x: 10, y: 10 };
 
 -- Method call syntax (UFCS)
-VAR d = myPoint.distance(oPoint);
+d = myPoint.distance(oPoint);
 ```
 
 ### CONTROL FLOW

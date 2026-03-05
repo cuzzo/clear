@@ -29,7 +29,7 @@ process(sharedU);
 For simple numeric types like counters, CLEAR uses the **`shared:atomic`** capability. An Atomic primitive lives in the Global Heap and can be safely mutated by multiple threads at the same time.
 
 ```CLEAR
-VAR counter = SHARE:atomic(0);  -- Create an atomic integer
+counter = SHARE:atomic(0);      -- Create an atomic integer
 counter.increment!();           -- Thread-safe mutation
 ```
 

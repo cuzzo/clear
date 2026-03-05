@@ -1,12 +1,12 @@
 STRUCT User { id: Int64 }
 
 FN makeUser() RETURNS %User ->
-    VAR u = User{ id: 1 };
+    u = User{ id: 1 };
     RETURN u; -- Should disable local free
 END
 
 FN cheatMain() RETURNS Void ->
-    VAR us2 = makeUser();
+    us2 = makeUser();
     -- u2 should be freed here
     RETURN;
 END

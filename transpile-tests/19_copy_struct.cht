@@ -3,13 +3,13 @@ STRUCT Outer { inner: Inner, count: Int64 }
 
 FN cheatMain() RETURNS Void ->
     -- Create outer struct with nested inner struct
-    VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+    outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
 
     -- COPY the nested struct (this would fail with move semantics)
     MUTABLE inner_copy = COPY outer.inner;
 
     -- Modify the copy
-    SET inner_copy.value = 100;
+    inner_copy.value = 100;
 
     -- Original should be unchanged
     ASSERT outer.inner.value == 42, "Original inner should be 42";

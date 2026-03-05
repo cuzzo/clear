@@ -177,6 +177,8 @@ module AST
   StructDef    = Struct.new(:token, :name, :fields) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
   Assignment   = Struct.new(:token, :name, :value) { include Locatable }
+  # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
+  BindExpr     = Struct.new(:token, :name, :type, :value) { include Locatable; attr_accessor :mode }
   BinaryOp     = Struct.new(:token, :left, :op, :right) { include Locatable }
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) { include Locatable }

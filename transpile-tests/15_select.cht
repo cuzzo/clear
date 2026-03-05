@@ -1,8 +1,8 @@
 FN cheatMain() RETURNS Void ->
-  VAR raw = "apple,banana,cherry";
+  raw = "apple,banana,cherry";
 
   -- PROJECT: get length of each word after split
-  VAR lengths = raw s> split(",") s> SELECT _.length();
+  lengths = raw s> split(",") s> SELECT _.length();
 
   -- Verify lengths: apple=5, banana=6, cherry=6
   ASSERT lengths[0] == 5, "apple length should be 5";

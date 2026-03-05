@@ -17,11 +17,11 @@ If you have an affine object and you need to pass it to a function that `TAKES` 
 -- CLEAR Example
 FN addToCache(TAKES u: User) -> ...
 
-VAR u = User.new();
+u = User.new();
 addToCache(GIVE u);           -- Explicit Move
 PRINT(u.name);                -- COMPILER ERROR: u is dead.
 
-VAR u2 = User.new();
+u2 = User.new();
 addToCache(COPY u2);          -- Explicit Copy
 PRINT(u2.name);               -- OKAY: u2 is still alive.
 ```

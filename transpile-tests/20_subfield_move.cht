@@ -3,10 +3,10 @@ STRUCT Outer { inner: Inner, count: Int64 }
 
 FN cheatMain() RETURNS Void ->
     -- Create nested struct
-    VAR outer = Outer{ inner: Inner{ value: 42 }, count: 10 };
+    outer = Outer{ inner: Inner{ value: 42 }, count: 10 };
 
     -- Move sub-field to new variable
-    VAR moved_inner = outer.inner;
+    moved_inner = outer.inner;
 
     -- Verify the moved value is correct
     ASSERT moved_inner.value == 42, "Moved inner value should be 42";

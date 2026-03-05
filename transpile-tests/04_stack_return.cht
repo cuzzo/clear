@@ -6,7 +6,7 @@ STRUCT Point { x: Int64, y: Int64 }
 FN makePoint(x: Int64, y: Int64) RETURNS Point ->
     -- 2. Create on Stack
     --    Zig: var p = Point{ .x = x, .y = y };
-    VAR p = Point{ x: x, y: y };
+    p = Point{ x: x, y: y };
 
     -- 3. Return by Copy
     --    Zig handles the copy (or RVO) automatically.
@@ -15,7 +15,7 @@ END
 
 FN cheatMain() RETURNS Void ->
     -- 4. Receive Stack Object
-    VAR p1 = makePoint(10, 20);
+    p1 = makePoint(10, 20);
 
     -- 5. Proof by Omission
     --    We do NOT call free(p1).
@@ -28,7 +28,7 @@ FN cheatMain() RETURNS Void ->
 
     -- Verify independence (copy behavior)
     MUTABLE p2 = p1;
-    SET p2.x = 999;
+    p2.x = 999;
 
     -- ASSERT p1.x == 10, "Mutation of p2 affected p1 (Reference detected!)";
     ASSERT p2.x == 999, "Mutation of p2 failed";

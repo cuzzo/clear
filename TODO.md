@@ -3,7 +3,7 @@
 ### DONE
   * Basic Types => Struct, List, Number, String
   * Basic Constants => TRUE/FALSE/NIL
-  * VAR declaration and reassignment (SET)
+  * Immutable declaration (`x = value`) and mutable reassignment (`MUTABLE x = value`)
   * BinaryOps and UnaryOps
   * Basic Control => IF/THEN/ELSE/ELSE_IF/END; WHILE/DO/END
   * Function Definitions, Calls, and Closures

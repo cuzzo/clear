@@ -2,8 +2,8 @@
 
 FN cheatMain() RETURNS Void ->
   -- Test 1: Basic DISTINCT on numbers
-  VAR nums: Number[] = [1, 2, 1, 3, 1, 4, 1];
-  VAR unique = nums s> DISTINCT _;
+  nums: Number[] = [1, 2, 1, 3, 1, 4, 1];
+  unique = nums s> DISTINCT _;
 
   ASSERT unique.length() == 4, "Should have 4 unique items";
   ASSERT unique[0] == 1, "First should be 1";
@@ -12,8 +12,8 @@ FN cheatMain() RETURNS Void ->
   ASSERT unique[3] == 4, "Fourth should be 4";
 
   -- Test 2: DISTINCT preserves order (first occurrence wins)
-  VAR ordered: Number[] = [3, 1, 2, 1, 3, 2];
-  VAR unique_ordered = ordered s> DISTINCT _;
+  ordered: Number[] = [3, 1, 2, 1, 3, 2];
+  unique_ordered = ordered s> DISTINCT _;
 
   ASSERT unique_ordered.length() == 3, "Should have 3 unique items";
   ASSERT unique_ordered[0] == 3, "First should be 3";
@@ -21,20 +21,20 @@ FN cheatMain() RETURNS Void ->
   ASSERT unique_ordered[2] == 2, "Third should be 2";
 
   -- Test 3: DISTINCT on already unique list
-  VAR already_unique: Number[] = [5, 6, 7, 8];
-  VAR still_unique = already_unique s> DISTINCT _;
+  already_unique: Number[] = [5, 6, 7, 8];
+  still_unique = already_unique s> DISTINCT _;
 
   ASSERT still_unique.length() == 4, "Should have 4 items";
 
   -- Test 4: DISTINCT on empty list
-  VAR empty: Number[] = [];
-  VAR empty_distinct = empty s> DISTINCT _;
+  empty: Number[] = [];
+  empty_distinct = empty s> DISTINCT _;
 
   ASSERT empty_distinct.length() == 0, "Should have 0 items";
 
   -- Test 5: DISTINCT with all duplicates
-  VAR all_same: Number[] = [42, 42, 42, 42];
-  VAR one_item = all_same s> DISTINCT _;
+  all_same: Number[] = [42, 42, 42, 42];
+  one_item = all_same s> DISTINCT _;
 
   ASSERT one_item.length() == 1, "Should have 1 item";
   ASSERT one_item[0] == 42, "Item should be 42";

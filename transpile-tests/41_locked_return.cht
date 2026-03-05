@@ -1,16 +1,16 @@
 STRUCT Node { v: Int64 }
 
 FN makeLockedNode(n: Node) RETURNS Node @locked ->
-    VAR locked = Node{ v: n.v } @locked;
+    locked = Node{ v: n.v } @locked;
     RETURN locked;
 END
 
 FN cheatMain() RETURNS Void ->
-    VAR ln = makeLockedNode(Node{ v: 99 });
+    ln = makeLockedNode(Node{ v: 99 });
 
     WITH EXCLUSIVE ln AS inner {
         ASSERT inner.v == 99, "inner.v should be 99";
-        SET inner.v = 100;
+        inner.v = 100;
         ASSERT inner.v == 100, "inner.v should be 100 after mutation";
     }
 

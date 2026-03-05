@@ -3,17 +3,17 @@ STRUCT Container { node: %Node, id: Int64 }
 
 -- Create container with heap-allocated node
 FN makeContainer(v: Int64) RETURNS Container ->
-    VAR n: %Node = Node{ value: v };
-    VAR c = Container{ node: n, id: 1 };
+    n: %Node = Node{ value: v };
+    c = Container{ node: n, id: 1 };
     RETURN c;
 END
 
 FN cheatMain() RETURNS Void ->
     -- Container owns a heap-allocated Node
-    VAR container = makeContainer(777);
+    container = makeContainer(777);
 
     -- Move the heap node out of container
-    VAR extracted = container.node;
+    extracted = container.node;
 
     -- Verify value
     ASSERT extracted.value == 777, "Extracted node value should be 777";

@@ -1,15 +1,15 @@
 FN cheatMain() RETURNS Void ->
     -- Optional with value
-    VAR maybe_num: ?Int64 = 42;
+    maybe_num: ?Int64 = 42;
     ASSERT maybe_num? == 42, "Optional should unwrap to 42";
 
     -- Optional set to nil
-    VAR empty: ?Int64 = NIL;
+    empty: ?Int64 = NIL;
 
     -- Conditional check (Zig handles null checks)
     MUTABLE result = 0_i64;
     IF maybe_num? == 42 THEN
-        SET result = 1_i64;
+        result = 1_i64;
     END
 
     ASSERT result == 1, "Conditional on optional should work";

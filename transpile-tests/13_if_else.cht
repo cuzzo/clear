@@ -1,12 +1,12 @@
 FN cheatMain() RETURNS Void ->
   MUTABLE score = 10;
-  VAR is_valid = score > 5;
+  is_valid = score > 5;
 
   IF is_valid THEN
-    VAR bonus = 100;
-    SET score = score + bonus;
+    bonus = 100;
+    score = score + bonus;
   ELSE
-    SET score = 0;
+    score = 0;
   END
 
   -- Should be 110 since is_valid is true
@@ -15,9 +15,9 @@ FN cheatMain() RETURNS Void ->
   -- Test else branch
   MUTABLE low_score = 3;
   IF low_score > 5 THEN
-    SET low_score = 999;
+    low_score = 999;
   ELSE
-    SET low_score = 0;
+    low_score = 0;
   END
 
   ASSERT low_score == 0, "Low score should be 0 from else branch";

@@ -1,9 +1,9 @@
 FN cheatMain() RETURNS Void ->
-  VAR s1 = "Hello";
-  VAR s2 = " ";
-  VAR s3 = "World";
+  s1 = "Hello";
+  s2 = " ";
+  s3 = "World";
 
-  VAR result = s1 + s2 + s3;
+  result = s1 + s2 + s3;
 
   -- Verify concatenation
   ASSERT eql(result, "Hello World"), "String concatenation failed";

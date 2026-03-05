@@ -3,15 +3,15 @@ STRUCT Outer { inner: Inner, count: Int64 }
 
 -- Function that extracts and returns sub-field
 FN extractInner(TAKES o: Outer) RETURNS Inner ->
-    VAR result = o.inner;
+    result = o.inner;
     RETURN result;
 END
 
 FN cheatMain() RETURNS Void ->
-    VAR outer = Outer{ inner: Inner{ value: 99 }, count: 5 };
+    outer = Outer{ inner: Inner{ value: 99 }, count: 5 };
 
     -- Move entire outer into function, get inner back
-    VAR inner = extractInner(outer);
+    inner = extractInner(outer);
 
     ASSERT inner.value == 99, "Extracted inner value should be 99";
 

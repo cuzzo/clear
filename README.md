@@ -149,7 +149,7 @@ It runs on a Go-like Runtime (the CHEAT runtime) that makes concurrent code as e
 
 **9. Scoped Inlining (INSIDE) for Graphs**
   * Traditional Arena languages struggle with recursive structures (Trees/Graphs) because children die when the function returns.
-  * CLEAR solves this with the INSIDE keyword (e.g., VAR x = INSIDE buildTree()).
+  * CLEAR solves this with the INSIDE keyword (e.g., `x = INSIDE buildTree()`).
   * This allows a child function to borrow the *Parent's Arena* for allocation.
   * *The Result:* You can build complex, pointer-heavy recursive data structures that exist contiguously in memory and are freed instantly when the root owner exits.
 
@@ -187,21 +187,21 @@ name = "Bob"
 name = "Alice"
 ```
 
-In CLEAR, you can only change the value of `MUTABLE` variables.
+In CLEAR, binding a name for the first time creates an **immutable** variable. Reassigning it is a compiler error.
 
 ```ruby
-VAR name = "Bob";
-SET name = "Alice";         -- COMPILER ERROR! `name` is immutable.
+name = "Bob";
+name = "Alice";             -- COMPILER ERROR! `name` is immutable.
 ```
 
- * `VAR x` = **READ** Only.
- * `MUTABLE x` = **READ/WRITE**.
+ * `x = value` = **READ** Only (immutable, no keyword needed).
+ * `MUTABLE x = value` = **READ/WRITE**.
 
 **The "Gotcha":** If you want to modify a variable, it must be `MUTABLE`.
 
 ```ruby
 MUTABLE name = "Bob";
-SET name = "Alice";         -- OK
+name = "Alice";             -- OK
 ```
 
 ### 2. Physics of SHAPE: TYPES
@@ -210,7 +210,7 @@ In CLEAR, variables have types to ensure safety and speed.
 
 ```ruby
 MUTABLE name = "Bob";
-SET name = 1;                -- COMPILER ERROR: `name` is a String, cannot assign a Number.
+name = 1;                   -- COMPILER ERROR: `name` is a String, cannot assign a Number.
 ```
 
 ### 3. Physics of Size: FIXED vs. DYNAMIC
@@ -241,8 +241,8 @@ Think of this as a **Warehouse**.
 
 In CLEAR, the compiler and runtime handle the physics of where data lives for you in 99% of cases. You don't need to use a sigil to choose between stack and heap.
 
- * `VAR x = [1,2]` → CLEAR decides the most efficient location.
- * `VAR list = [1, 2, 3]` → This list is optimized for performance and safety.
+ * `x = [1, 2]` → CLEAR decides the most efficient location.
+ * `list = [1, 2, 3]` → This list is optimized for performance and safety.
 
 If you need to explicitly force an object onto the heap (e.g., for recursive structures or large buffers), you can use the `indirect` capability (similar to `Box` in Rust).
 
@@ -258,7 +258,7 @@ STRUCT Node {
 The "Gotcha": If you try to `.push!` or `.pop!` to a fixed-size array, the compiler will yell at you. It’s not being mean; it’s telling you that physics forbids it.
 
 ```ruby
-VAR x = [1, 2, 3];
+x = [1, 2, 3];
 -- ... do something, now I need to add to `x`, what do I do?
 x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
 ```
@@ -333,7 +333,7 @@ WITH user.config {
 Functions can ONLY see what is explicitly passed into them:
 
 ```ruby
-VAR x = 10;
+x = 10;
 FN add() ->
   RETURN x + 5;                 -- COMPILER ERROR: I don't know what 'x' is.
 END
@@ -342,7 +342,7 @@ END
 Use `USE` for upvalues:
 
 ```ruby
-VAR x = 10;
+x = 10;
 FN add(n) USE (x) ->
   RETURN n + x;                 -- OK
 END
@@ -362,7 +362,7 @@ When you return an object, you are `GIVING` it to the caller. CLEAR handles the 
 
 ```ruby
 FN makeUser() -> User
-  VAR u = User{name: "Neo"};
+  u = User{name: "Neo"};
   RETURN GIVE u;              -- Ownership moves to the caller.
 END
 ```
@@ -377,7 +377,7 @@ FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
   parent.list.push!(GIVE child);
 END
 
-VAR node = Node.new();
+node = Node.new();
 addChild!(root, GIVE node);   -- I surrender ownership.
 node.print();                 -- COMPILER ERROR: Variable 'node' is dead.
 ```
@@ -406,7 +406,7 @@ This ensures that "poisoning" is always visible and local.
 ### The *SMOOTH* operator
 
 ```ruby
-VAR bill = users AS @u
+bill = users AS @u
   s> UNNEST _.orders
   s> SELECT _.price * @u.discount
   s> REDUCE(0, (acc, x) -> acc + x );

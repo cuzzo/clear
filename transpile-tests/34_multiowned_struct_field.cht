@@ -4,11 +4,11 @@ STRUCT Wrapper { inner: Node @multiowned }
 -- Test: a struct with a @multiowned field correctly manages the Rc lifetime.
 -- The testing allocator detects any leaks or double-frees.
 FN cheatMain() RETURNS Void ->
-    VAR n = Node{ id: 7 } @multiowned;
+    n = Node{ id: 7 } @multiowned;
 
     -- Storing n in the struct retains the Rc (count 1->2).
     -- Both n and w.inner co-own the same Node.
-    VAR w = Wrapper{ inner: n } @multiowned;
+    w = Wrapper{ inner: n } @multiowned;
 
     -- Verify the field is accessible through the struct.
     ASSERT w.inner.id == 7, "w.inner.id should be 7";

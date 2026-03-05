@@ -3,29 +3,29 @@
 CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how it's accessed).
 
 ```CLEAR
--- IMMUTABLE BY DEFAULT
-VAR x = 5;                  -- Type: Number (inferred)
-SET x = 6;                  -- COMPILER ERROR: x is immutable
+-- IMMUTABLE BY DEFAULT (no keyword needed)
+x = 5;                      -- Type: Number (inferred), immutable
+x = 6;                      -- COMPILER ERROR: x is immutable
 
 -- MUTABLE EXPLICITLY
 MUTABLE x = 5;
-SET x = 6;                  -- OKAY
+x = 6;                      -- OKAY
 
 -- TYPE SPECIFICATION
-VAR x: UInt64 = 5;
+x: UInt64 = 5;
 
 -- COLLECTIONS (No % sigil needed)
-VAR coords = [1, 2, 3];     -- IMMUTABLE array
+coords = [1, 2, 3];         -- IMMUTABLE array
 coords.push!(4);            -- COMPILER ERROR: coords is immutable
 
 MUTABLE items = [1, 2, 3];  -- MUTABLE array
 items.push!(4);             -- OKAY
 
 -- CAPABILITIES (Acquired at edges)
-VAR sharedU = SHARE(User.new());               -- shared User (Arc)
-VAR multiU = MULTIOWN(User.new());             -- multiowned User (Rc)
-VAR lockedU = SHARE:locked(User.new());        -- shared:locked User (Mutex<Arc>)
-VAR rwLockedU = SHARE:writeLocked(User.new()); -- shared:writeLocked User (RwLock<Arc>)
+sharedU = SHARE(User.new());               -- shared User (Arc)
+multiU = MULTIOWN(User.new());             -- multiowned User (Rc)
+lockedU = SHARE:locked(User.new());        -- shared:locked User (Mutex<Arc>)
+rwLockedU = SHARE:writeLocked(User.new()); -- shared:writeLocked User (RwLock<Arc>)
 
 -- RULE: Functions take TYPES, not CAPABILITIES
 FN process(u: User) -> 
@@ -55,7 +55,7 @@ END
 -- This must be explicitly scoped to ensure local reasoning.
 MUTABLE node = buildTree();
 WITH RESTRICT node.child {
-  VAR gc = node.grandChild();
+  gc = node.grandChild();
   -- node.child is immutable here.
   -- node.child.name = "New"; -- COMPILER ERROR: node.child is RESTRICTed.
 }
@@ -72,10 +72,10 @@ list.push!(10) OR EXIT "Buffer Overflow";
 list.push!(10) OR list.clear!();
 
 -- SAFE NAVIGATION (?.)
-VAR name = getUser(id)?.name OR "Guest";
+name = getUser(id)?.name OR "Guest";
 
 -- PIPELINES (s>)
-VAR result = data
+result = data
   s> filter(%(x) -> x > 10)
   s> map(%(x) -> x * 2)
   s> sum();

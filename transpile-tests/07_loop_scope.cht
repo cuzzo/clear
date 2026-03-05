@@ -4,8 +4,8 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i = 0;
     WHILE i < 10 DO
         -- This variable dies every iteration (stack allocated, no escape)
-        VAR u = User{ id: i };
-        SET i = i + 1;
+        u = User{ id: i };
+        i = i + 1;
     END
     RETURN;
 END

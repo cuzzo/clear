@@ -33,7 +33,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Pipe 1 (Number) into identity()
-          VAR result = 1 s> identity();
+          result = 1 s> identity();
         FLUX
       }
 
@@ -50,7 +50,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- 1 is 'a', 2 is 'b'
-          VAR result = 1 s> add(2);
+          result = 1 s> add(2);
         FLUX
      }
 
@@ -67,7 +67,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Passing Number (1) into String expectation
-          VAR result = 1 s> require_string();
+          result = 1 s> require_string();
         FLUX
       }
 
@@ -84,7 +84,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Pipe to identifier 'identity' without parens
-          VAR result = 1 s> identity;
+          result = 1 s> identity;
         FLUX
       }
 
@@ -102,7 +102,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Pipe 1 to add. 'add' needs 2 args. We only provided 1 (via pipe).
-          VAR result = 1 s> add;
+          result = 1 s> add;
         FLUX
       }
 
@@ -114,7 +114,7 @@ RSpec.describe SemanticAnnotator do
     context "when piping to Native/Intrinsics" do
       let(:code) {
         <<~FLUX
-          VAR x = 10 s> print();
+          x = 10 s> print();
         FLUX
       }
 
@@ -131,7 +131,7 @@ RSpec.describe SemanticAnnotator do
           FN to_bool(n: Number) RETURNS Bool -> RETURN n > 10; END
 
           -- Number -> Number -> Bool
-          VAR result = 5
+          result = 5
             s> double()
             s> to_bool();
         FLUX
@@ -149,7 +149,7 @@ RSpec.describe SemanticAnnotator do
           FN s2(n: Number) -> RETURN n * 2; END
           FN s3(n: Number) -> RETURN n + 5; END
 
-          VAR result = s1() s> s2 s> s3;
+          result = s1() s> s2 s> s3;
         FLUX
       }
 
@@ -167,7 +167,7 @@ RSpec.describe SemanticAnnotator do
           FN get_num() RETURNS Number ->
             RETURN 10;
           END
-          VAR x = get_num();
+          x = get_num();
         FLUX
       }
       it "passes when types match exactly" do
@@ -193,7 +193,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN get_number() RETURNS Number ->
-              VAR i : Int64 = 10;
+              i : Int64 = 10;
               RETURN i;
             END
           FLUX
@@ -211,7 +211,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN get_number() RETURNS Number ->
-              VAR b : Byte = 255;
+              b : Byte = 255;
               RETURN b;
             END
           FLUX
@@ -246,7 +246,7 @@ RSpec.describe SemanticAnnotator do
           FN get_anything() ->
             RETURN "hello";
           END
-          VAR x = get_anything();
+          x = get_anything();
         FLUX
       }
       it "defaults to Any and allows returning anything" do
@@ -261,7 +261,7 @@ RSpec.describe SemanticAnnotator do
     #  let(:code) {
     #    <<~FLUX
     #      FN do_nothing() RETURNS Void ->
-    #         VAR x = 1;
+    #         x = 1;
     #         RETURN;
     #      END
     #    FLUX
@@ -339,7 +339,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN update(MUTABLE x: Number) ->
-              SET x = x + 1;
+              x = x + 1;
               RETURN x;
             END
           FLUX
@@ -353,7 +353,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN update!(MUTABLE x: Number) ->
-              SET x = x + 1;
+              x = x + 1;
               RETURN x;
             END
           FLUX
@@ -441,7 +441,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN process_int(i: Int64) RETURNS Int64 -> RETURN i; END
-            VAR n : Number = 100;
+            n : Number = 100;
             process_int(n);
           FLUX
         }
@@ -461,7 +461,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN process_num(n: Number) RETURNS Number -> RETURN n; END
-            VAR b : Byte = 255;
+            b : Byte = 255;
             process_num(b);
           FLUX
         }
@@ -475,7 +475,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN sum_list(list: Number[]) RETURNS Number -> RETURN 0; END
-            VAR fixed : Number[3] = [1, 2, 3];
+            fixed : Number[3] = [1, 2, 3];
             sum_list(fixed);
           FLUX
         }
@@ -509,7 +509,7 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts a HEAP string" do
         code = base_code + <<~FLUX
-          VAR local_args = %[1, 2, 3];
+          local_args = %[1, 2, 3];
           print_args(local_args);
         FLUX
         expect { run(code) }.not_to raise_error
@@ -518,7 +518,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts a STACK string" do
         # This creates a String[2] on the stack
         code = base_code + <<~FLUX
-          VAR local_args = [1, 2, 3];
+          local_args = [1, 2, 3];
           print_args(local_args);
         FLUX
         expect { run(code) }.not_to raise_error
@@ -529,14 +529,14 @@ RSpec.describe SemanticAnnotator do
       let(:mutable_func) {
         <<~FLUX
           FN modify!(MUTABLE x: Number) ->
-            SET x = x + 1;
+            x = x + 1;
           END
         FLUX
       }
 
       it "errors when passing an immutable variable to a MUTABLE parameter" do
         code = mutable_func + <<~FLUX
-          VAR im = 10; -- Implicitly immutable
+          im = 10; -- Implicitly immutable
           modify!(im);
         FLUX
         expect { run(code) }.to raise_error(/but you passed immutable variable/i)
@@ -564,8 +564,8 @@ RSpec.describe SemanticAnnotator do
 
           -- This doesn't actually work, but it's just for testing aliasing...
           FN swap!(MUTABLE u1: User, MUTABLE u2: User) ->
-            SET u1 = u2;
-            SET u2 = User{ id: 20 };
+            u1 = u2;
+            u2 = User{ id: 20 };
           END
         FLUX
       }
@@ -607,7 +607,7 @@ RSpec.describe SemanticAnnotator do
 
       it "resolves to Void for functions with no return" do
         code = <<~FLUX
-          FN do_work() RETURNS Void -> VAR x = 1; END
+          FN do_work() RETURNS Void -> x = 1; END
           do_work();
         FLUX
         expect(get_last_type(code)).to eq(:Void)
@@ -615,7 +615,7 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
-  describe "Assignments (SET x = ...)" do
+  describe "Assignments (x = ...)" do
     # Common Struct Definition for field tests
     let(:struct_def) {
       <<~FLUX
@@ -631,7 +631,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE x = 10;
-            SET x = 20;
+            x = 20;
           FLUX
         }
 
@@ -641,11 +641,11 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "when assigning to a VAR (Immutable)" do
+      context "when assigning to an immutable variable" do
         let(:code) {
           <<~FLUX
-            VAR x = 10;
-            SET x = 20;
+            x = 10;
+            x = 20;
           FLUX
         }
 
@@ -654,15 +654,16 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "when assigning to an undefined variable" do
+      context "when reassigning to an immutable variable" do
         let(:code) {
           <<~FLUX
-            SET y = 20;
+            y = 20;
+            y = 30;
           FLUX
         }
 
-        it "raises an undefined variable error" do
-          expect { ast }.to raise_error(/Cannot assign to undefined variable 'y'/)
+        it "raises an immutable variable error" do
+          expect { ast }.to raise_error(/Variable 'y' is immutable/)
         end
       end
 
@@ -670,7 +671,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE x = 10;
-            SET x = "hello";
+            x = "hello";
           FLUX
         }
 
@@ -683,8 +684,8 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE x : Number = 10;
-            VAR b : Byte = 255;
-            SET x = b;
+            b : Byte = 255;
+            x = b;
           FLUX
         }
 
@@ -700,7 +701,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE list = [1, 2, 3];
-            SET list[0] = 99;
+            list[0] = 99;
           FLUX
         }
 
@@ -710,11 +711,11 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "when modifying a VAR (Immutable) list index" do
+      context "when modifying an immutable list index" do
         let(:code) {
           <<~FLUX
-            VAR list = [1, 2, 3];
-            SET list[0] = 99;
+            list = [1, 2, 3];
+            list[0] = 99;
           FLUX
         }
 
@@ -727,7 +728,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE list = [1, 2, 3];
-            SET list[0] = "string";
+            list[0] = "string";
           FLUX
         }
 
@@ -742,7 +743,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           struct_def + <<~FLUX
             MUTABLE p = Point{ x: 1, y: 2 };
-            SET p.x = 100;
+            p.x = 100;
           FLUX
         }
 
@@ -752,11 +753,11 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "when modifying a field of a VAR (Immutable) struct" do
+      context "when modifying a field of an immutable struct" do
         let(:code) {
           struct_def + <<~FLUX
-            VAR p = Point{ x: 1, y: 2 };
-            SET p.x = 100;
+            p = Point{ x: 1, y: 2 };
+            p.x = 100;
           FLUX
         }
 
@@ -769,7 +770,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           struct_def + <<~FLUX
             MUTABLE p = Point{ x: 1, y: 2 };
-            SET p.x = "wrong";
+            p.x = "wrong";
           FLUX
         }
 
@@ -782,7 +783,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           struct_def + <<~FLUX
             MUTABLE p = Point{ x: 1, y: 2 };
-            SET p.z = 100;
+            p.z = 100;
           FLUX
         }
 
@@ -797,8 +798,8 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE data = [1, 2, 3];
-            VAR slice = data[0..1];        -- Immutable borrow because VAR
-            SET slice[0] = 99;
+            slice = data[0..1];        -- Immutable borrow because VAR
+            slice[0] = 99;
           FLUX
         }
 
@@ -813,8 +814,8 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             MUTABLE n : Number = 0;
-            VAR b : Byte = 255;
-            SET n = b;
+            b : Byte = 255;
+            n = b;
           FLUX
         }
 
@@ -831,7 +832,7 @@ RSpec.describe SemanticAnnotator do
          let(:code) {
            <<~FLUX
              MUTABLE list : Number[] = [];
-             SET list = [1, 2, 3]; -- Literal is Number[3]
+             list = [1, 2, 3]; -- Literal is Number[3]
            FLUX
          }
 
@@ -850,7 +851,7 @@ RSpec.describe SemanticAnnotator do
           <<~FLUX
             -- 100 is treated as Number or Int64 depending on context
             -- Here we test explicit Int64 literal if supported, or just flow
-            VAR x : Number = 100;
+            x : Number = 100;
           FLUX
         }
         it "succeeds" do
@@ -862,8 +863,8 @@ RSpec.describe SemanticAnnotator do
       context "when assigning Byte to Number" do
         let(:code) {
           <<~FLUX
-            VAR b : Byte = 255;
-            VAR x : Number = b;
+            b : Byte = 255;
+            x : Number = b;
           FLUX
         }
         it "succeeds" do
@@ -877,7 +878,7 @@ RSpec.describe SemanticAnnotator do
       context "when types are incompatible (String -> Number)" do
         let(:code) {
           <<~FLUX
-            VAR x : Number = "hello";
+            x : Number = "hello";
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -891,7 +892,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- [1, 2, 3] is inferred as Number[3]
-            VAR list : Number[3] = [1, 2, 3];
+            list : Number[3] = [1, 2, 3];
           FLUX
         }
         it "succeeds" do
@@ -904,7 +905,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Assigning size 2 to capacity 3
-            VAR list : Number[3] = [1, 2];
+            list : Number[3] = [1, 2];
           FLUX
         }
         it "succeeds (fills remaining with default/garbage)" do
@@ -915,7 +916,7 @@ RSpec.describe SemanticAnnotator do
       context "Oversized Assignment (Size > Capacity)" do
         let(:code) {
           <<~FLUX
-            VAR list : Number[1] = [1, 2, 3];
+            list : Number[1] = [1, 2, 3];
           FLUX
         }
         it "raises a Fixed Array Size Mismatch error" do
@@ -927,7 +928,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Any[] -> Number[5]
-            VAR list : Number[5] = [];
+            list : Number[5] = [];
           FLUX
         }
         it "succeeds (safe autocast from empty)" do
@@ -939,7 +940,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Number[3] -> Number[]
-            VAR list : Number[] = [1, 2, 3];
+            list : Number[] = [1, 2, 3];
           FLUX
         }
         it "succeeds (Slice Coercion)" do
@@ -952,7 +953,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Number[3] -> Number[*]
-            VAR list : Number[*] = [1, 2, 3];
+            list : Number[*] = [1, 2, 3];
           FLUX
         }
         it "succeeds" do
@@ -964,7 +965,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- %[...] creates Heap Array (Number[])
-            VAR list : Number[] = %[1, 2, 3];
+            list : Number[] = %[1, 2, 3];
           FLUX
         }
         it "succeeds" do
@@ -976,7 +977,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- String[3] -> Number[3]
-            VAR list : Number[3] = ["a", "b", "c"];
+            list : Number[3] = ["a", "b", "c"];
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -988,7 +989,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Trying to assign Number[][1] to Number[]
-            VAR list : Number[] = [[1]];
+            list : Number[] = [[1]];
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -1021,7 +1022,7 @@ RSpec.describe SemanticAnnotator do
       context "Exact Type Match" do
         let(:code) {
           struct_def + <<~FLUX
-            VAR p = Point{ x: 1, y: 2 };
+            p = Point{ x: 1, y: 2 };
           FLUX
         }
 
@@ -1035,9 +1036,9 @@ RSpec.describe SemanticAnnotator do
         context "Byte/Int64 -> Number Field" do
           let(:code) {
             struct_def + <<~FLUX
-              VAR b : Byte = 255;
+              b : Byte = 255;
               -- x takes literal Int64 (10), y takes Byte variable
-              VAR p = Point{ x: 10, y: b };
+              p = Point{ x: 10, y: b };
             FLUX
           }
 
@@ -1062,7 +1063,7 @@ RSpec.describe SemanticAnnotator do
       context "Nested Structs" do
         let(:code) {
           struct_def + <<~FLUX
-            VAR w = Wrapper{
+            w = Wrapper{
               inner: Point{ x: 10, y: 20 }
             };
           FLUX
@@ -1081,7 +1082,7 @@ RSpec.describe SemanticAnnotator do
       #  let(:code) {
       #    struct_def + <<~FLUX
       #      -- Missing 'y'
-      #      VAR p = Point{ x: 1 };
+      #      p = Point{ x: 1 };
       #    FLUX
       #  }
 
@@ -1094,7 +1095,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           struct_def + <<~FLUX
             -- 'z' does not exist on Point
-            VAR p = Point{ x: 1, y: 2, z: 3 };
+            p = Point{ x: 1, y: 2, z: 3 };
           FLUX
         }
 
@@ -1107,7 +1108,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           struct_def + <<~FLUX
             -- 'x' expects Number, got String
-            VAR p = Point{ x: "bad", y: 2 };
+            p = Point{ x: "bad", y: 2 };
           FLUX
         }
 
@@ -1119,7 +1120,7 @@ RSpec.describe SemanticAnnotator do
       context "Unknown Struct Name" do
         let(:code) {
           <<~FLUX
-            VAR g = Ghost{ boo: 1 };
+            g = Ghost{ boo: 1 };
           FLUX
         }
 
@@ -1135,7 +1136,7 @@ RSpec.describe SemanticAnnotator do
       context "Simple Primitive List" do
         let(:code) {
           <<~FLUX
-            VAR list = [1, 2, 3];
+            list = [1, 2, 3];
           FLUX
         }
         it "infers the type based on the first element (Number[3])" do
@@ -1149,7 +1150,7 @@ RSpec.describe SemanticAnnotator do
           <<~FLUX
             -- [1, 2] is Number[2]
             -- So outer list is Number[2] of size 2 -> Number[2][2]
-            VAR matrix = [[1, 2], [3, 4]];
+            matrix = [[1, 2], [3, 4]];
           FLUX
         }
         it "infers nested array types correctly" do
@@ -1161,7 +1162,7 @@ RSpec.describe SemanticAnnotator do
       context "Empty List" do
         let(:code) {
           <<~FLUX
-            VAR list = [];
+            list = [];
           FLUX
         }
         it "defaults to Any[]" do
@@ -1176,7 +1177,7 @@ RSpec.describe SemanticAnnotator do
       context "Mixed Primitives" do
         let(:code) {
           <<~FLUX
-            VAR list = [1, "string"];
+            list = [1, "string"];
           FLUX
         }
         it "raises error when types differ" do
@@ -1188,7 +1189,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- First item is Number[1], Second is String[1]
-            VAR list = [[1], ["A"]];
+            list = [[1], ["A"]];
           FLUX
         }
         it "raises error when inner array types differ" do
@@ -1201,7 +1202,7 @@ RSpec.describe SemanticAnnotator do
           <<~FLUX
             -- First item is Number[2], Second is Number[1]
             -- In CHEAT, arrays are rectangular. Types Number[2] and Number[1] are distinct.
-            VAR list = [[1, 2], [3]];
+            list = [[1, 2], [3]];
           FLUX
         }
         it "raises error because Number[2] != Number[1]" do
@@ -1218,7 +1219,7 @@ RSpec.describe SemanticAnnotator do
           <<~FLUX
             MUTABLE i = 0;
             WHILE i < 10 DO
-              SET i = i + 1;
+              i = i + 1;
             END
           FLUX
         }
@@ -1232,7 +1233,7 @@ RSpec.describe SemanticAnnotator do
           <<~FLUX
             -- "string" is not a Bool
             WHILE "true" DO
-              VAR x = 1;
+              x = 1;
             END
           FLUX
         }
@@ -1246,10 +1247,10 @@ RSpec.describe SemanticAnnotator do
       #  let(:code) {
       #    <<~FLUX
       #      WHILE TRUE DO
-      #        VAR inner_var = 10;
+      #        inner_var = 10;
       #      END
       #      -- Should fail: inner_var is out of scope
-      #      VAR y = inner_var;
+      #      y = inner_var;
       #    FLUX
       #  }
       #  it "prevents leaking variables from the loop scope" do
@@ -1276,7 +1277,7 @@ RSpec.describe SemanticAnnotator do
       context "Orphaned Break (Outside Loop)" do
         let(:code) {
           <<~FLUX
-            VAR x = 1;
+            x = 1;
             BREAK;
           FLUX
         }
@@ -1341,11 +1342,11 @@ RSpec.describe SemanticAnnotator do
       context "Simple Transformation: p.add(p2) -> add(p, p2)" do
         let(:code) {
           base_funcs + <<~FLUX
-            VAR p1 = Point{ x: 1, y: 2 };
-            VAR p2 = Point{ x: 3, y: 4 };
+            p1 = Point{ x: 1, y: 2 };
+            p2 = Point{ x: 3, y: 4 };
 
             -- Should resolve to add(p1, p2)
-            VAR res = p1.add(p2);
+            res = p1.add(p2);
           FLUX
         }
 
@@ -1358,13 +1359,13 @@ RSpec.describe SemanticAnnotator do
       context "Chained Calls: p.add(p2).get_x().to_list()" do
         let(:code) {
           base_funcs + <<~FLUX
-            VAR p1 = Point{ x: 1, y: 2 };
-            VAR p2 = Point{ x: 3, y: 4 };
+            p1 = Point{ x: 1, y: 2 };
+            p2 = Point{ x: 3, y: 4 };
 
             -- 1. p1.add(p2)    -> Point
             -- 2. .get_x()      -> Number
             -- 3. .to_list()    -> Number[]
-            VAR res = p1.add(p2).get_x().to_list();
+            res = p1.add(p2).get_x().to_list();
           FLUX
         }
 
@@ -1379,7 +1380,7 @@ RSpec.describe SemanticAnnotator do
       context "Undefined Method" do
         let(:code) {
           base_funcs + <<~FLUX
-            VAR p = Point{ x: 1, y: 2 };
+            p = Point{ x: 1, y: 2 };
             p.unknown_method();
           FLUX
         }
@@ -1391,7 +1392,7 @@ RSpec.describe SemanticAnnotator do
       context "Type Mismatch (UCS Argument)" do
         let(:code) {
           base_funcs + <<~FLUX
-            VAR p1 = Point{ x: 1, y: 2 };
+            p1 = Point{ x: 1, y: 2 };
             -- add expects (Point, Point). We pass (Point, Number)
             p1.add(5);
           FLUX
@@ -1404,7 +1405,7 @@ RSpec.describe SemanticAnnotator do
       context "Arity Mismatch" do
         let(:code) {
           base_funcs + <<~FLUX
-            VAR p1 = Point{ x: 1, y: 2 };
+            p1 = Point{ x: 1, y: 2 };
             -- add expects 2 args (Point, Point). We provide only 1 (self) via dot syntax.
             p1.add();
           FLUX
@@ -1421,7 +1422,7 @@ RSpec.describe SemanticAnnotator do
     #  let(:code) {
     #    base_funcs + <<~FLUX
     #      -- print(x) -> Void/Nil
-    #      VAR p = Point{ x: 1, y: 2 };
+    #      p = Point{ x: 1, y: 2 };
     #      p.print();
     #    FLUX
     #  }
@@ -1437,7 +1438,7 @@ RSpec.describe SemanticAnnotator do
     context "when capturing a single scalar variable" do
       let(:code) {
         <<~FLUX
-          VAR x = 100;
+          x = 100;
 
           -- Define a lambda that explicitly captures 'x'
           FN getter() USE(x) RETURNS Number ->
@@ -1457,8 +1458,8 @@ RSpec.describe SemanticAnnotator do
     context "when capturing multiple variables" do
       let(:code) {
         <<~FLUX
-          VAR a = 10;
-          VAR b = 20;
+          a = 10;
+          b = 20;
 
           -- Capture both 'a' and 'b'
           FN adder() USE(a, b) RETURNS Number ->
@@ -1477,7 +1478,7 @@ RSpec.describe SemanticAnnotator do
     context "when mixing Parameters and USE captures" do
       let(:code) {
         <<~FLUX
-          VAR scalar = 5;
+          scalar = 5;
 
           -- 'n' is a parameter, 'scalar' is an upvalue
           FN multiplier(n: Number) USE(scalar) RETURNS Number ->
@@ -1511,7 +1512,7 @@ RSpec.describe SemanticAnnotator do
     context "when accessing a variable NOT in the USE list" do
       let(:code) {
         <<~FLUX
-          VAR secret = 42;
+          secret = 42;
 
           -- We forgot USE(secret)
           FN leak() RETURNS Number ->
@@ -1536,9 +1537,9 @@ RSpec.describe SemanticAnnotator do
     context "String Manipulation (split)" do
       let(:code) {
         <<~FLUX
-          VAR data = "a,b,c";
+          data = "a,b,c";
           -- split returns a List of Strings (String[][])
-          VAR parts = data.split(",");
+          parts = data.split(",");
         FLUX
       }
       it "resolves split to a List of Strings" do
@@ -1549,9 +1550,9 @@ RSpec.describe SemanticAnnotator do
     context "String Manipulation (join)" do
       let(:code) {
         <<~FLUX
-          VAR parts = ["a", "b"];
+          parts = ["a", "b"];
           -- join takes a List of Strings and returns a Heap String
-          VAR s = parts.join("-");
+          s = parts.join("-");
         FLUX
       }
       it "resolves join to a Heap String" do
@@ -1563,7 +1564,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           -- trim returns a String slice (String[])
-          VAR clean = "  abc  ".trim();
+          clean = "  abc  ".trim();
         FLUX
       }
       it "resolves trim to a String slice" do
@@ -1573,14 +1574,14 @@ RSpec.describe SemanticAnnotator do
 
     context "Polymorphic Conversion (toInt)" do
       context "when parsing a String" do
-        let(:code) { 'VAR i = "123".toInt();' }
+        let(:code) { 'i = "123".toInt();' }
         it "resolves to Int64" do
           expect(result).to eq(:Int64)
         end
       end
 
       context "when casting a Float" do
-        let(:code) { 'VAR i = 12.5.toInt();' }
+        let(:code) { 'i = 12.5.toInt();' }
         it "resolves to Int64" do
           expect(result).to eq(:Int64)
         end
@@ -1588,7 +1589,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Polymorphic Conversion (toFloat)" do
-      let(:code) { 'VAR f = "12.5".toFloat();' }
+      let(:code) { 'f = "12.5".toFloat();' }
       it "resolves to Number" do
         expect(result).to eq(:Number)
       end
@@ -1597,8 +1598,8 @@ RSpec.describe SemanticAnnotator do
     context "Collection Utilities (length/len)" do
       let(:code) {
         <<~FLUX
-          VAR list = [1, 2, 3];
-          VAR l = length(list);
+          list = [1, 2, 3];
+          l = length(list);
         FLUX
       }
       it "resolves length of a list to Int64" do
@@ -1629,9 +1630,9 @@ RSpec.describe SemanticAnnotator do
     context "Basic Projection: list s> SELECT _.method()" do
       let(:code) {
         <<~FLUX
-          VAR words: String[][] = ["a", "bb", "ccc"];
+          words: String[][] = ["a", "bb", "ccc"];
           -- Project List<String> -> List<Int64> using .length()
-          VAR lengths = words s> SELECT _.length();
+          lengths = words s> SELECT _.length();
         FLUX
       }
 
@@ -1644,11 +1645,11 @@ RSpec.describe SemanticAnnotator do
     context "Chained Pipe: string s> split s> SELECT" do
       let(:code) {
         <<~FLUX
-          VAR raw = "apple,banana";
+          raw = "apple,banana";
           -- 1. split returns String[][]
           -- 2. SELECT iterates Strings
           -- 3. _.length() returns Int64
-          VAR lengths = raw s> split(",") s> SELECT _.length();
+          lengths = raw s> split(",") s> SELECT _.length();
         FLUX
       }
 
@@ -1660,10 +1661,10 @@ RSpec.describe SemanticAnnotator do
     context "Struct/Hash Projection: list s> SELECT %{...}" do
       let(:code) {
         <<~FLUX
-          VAR nums = [10, 20];
+          nums = [10, 20];
 
           -- Create a List of HashMaps
-          VAR complex = nums s> SELECT %{
+          complex = nums s> SELECT %{
             "original": _,
             "doubled": _ * 2
           };
@@ -1680,9 +1681,9 @@ RSpec.describe SemanticAnnotator do
     context "Array Projection: list s> SELECT [_]" do
       let(:code) {
         <<~FLUX
-          VAR nums = [1_i64, 2_i64];
+          nums = [1_i64, 2_i64];
           -- Wrap each item in a list -> [[1], [2]]
-          VAR nested = nums s> SELECT [_];
+          nested = nums s> SELECT [_];
         FLUX
       }
 
@@ -1697,8 +1698,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: Selecting on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> SELECT _ + 1;
+          num = 100;
+          bad = num s> SELECT _ + 1;
         FLUX
       }
 
@@ -1718,12 +1719,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT User { name: String[], age: Int64 }
-          VAR users = [
+          users = [
             User{ name: %"Alice", age: 30_i64 },
             User{ name: %"Bob", age: 30_i64 },
             User{ name: %"Charlie", age: 25_i64 }
           ];
-          VAR grouped = users s> INDEX _.age;
+          grouped = users s> INDEX _.age;
         FLUX
       }
 
@@ -1737,12 +1738,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { category: String[], price: Number }
-          VAR items = [
+          items = [
             Item{ category: %"food", price: 10 },
             Item{ category: %"electronics", price: 100 },
             Item{ category: %"food", price: 20 }
           ];
-          VAR byCategory = items s> INDEX _.category;
+          byCategory = items s> INDEX _.category;
         FLUX
       }
 
@@ -1754,8 +1755,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: INDEX on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> INDEX _;
+          num = 100;
+          bad = num s> INDEX _;
         FLUX
       }
 
@@ -1774,8 +1775,8 @@ RSpec.describe SemanticAnnotator do
     context "Basic REDUCE: sum of numbers" do
       let(:code) {
         <<~FLUX
-          VAR nums = [1, 2, 3, 4, 5];
-          VAR sum = nums s> REDUCE(0) acc + _;
+          nums = [1, 2, 3, 4, 5];
+          sum = nums s> REDUCE(0) acc + _;
         FLUX
       }
 
@@ -1788,12 +1789,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Int64 }
-          VAR items = [
+          items = [
             Item{ value: 10_i64 },
             Item{ value: 20_i64 },
             Item{ value: 30_i64 }
           ];
-          VAR total = items s> REDUCE(0_i64) acc + _.value;
+          total = items s> REDUCE(0_i64) acc + _.value;
         FLUX
       }
 
@@ -1805,8 +1806,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: REDUCE on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> REDUCE(0) acc + _;
+          num = 100;
+          bad = num s> REDUCE(0) acc + _;
         FLUX
       }
 
@@ -1826,12 +1827,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { name: String[], value: Int64 }
-          VAR items = [
+          items = [
             Item{ name: %"c", value: 30_i64 },
             Item{ name: %"a", value: 10_i64 },
             Item{ name: %"b", value: 20_i64 }
           ];
-          VAR sorted = items s> ORDER_BY _.value;
+          sorted = items s> ORDER_BY _.value;
         FLUX
       }
 
@@ -1843,8 +1844,8 @@ RSpec.describe SemanticAnnotator do
     context "ORDER_BY with simple values" do
       let(:code) {
         <<~FLUX
-          VAR nums = [3_i64, 1_i64, 2_i64];
-          VAR sorted = nums s> ORDER_BY _;
+          nums = [3_i64, 1_i64, 2_i64];
+          sorted = nums s> ORDER_BY _;
         FLUX
       }
 
@@ -1856,8 +1857,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: ORDER_BY on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> ORDER_BY _;
+          num = 100;
+          bad = num s> ORDER_BY _;
         FLUX
       }
 
@@ -1876,8 +1877,8 @@ RSpec.describe SemanticAnnotator do
     context "Basic LIMIT: take first n items" do
       let(:code) {
         <<~FLUX
-          VAR nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
-          VAR first_three = nums s> LIMIT 3;
+          nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+          first_three = nums s> LIMIT 3;
         FLUX
       }
 
@@ -1890,12 +1891,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Int64 }
-          VAR items = [
+          items = [
             Item{ value: 10_i64 },
             Item{ value: 20_i64 },
             Item{ value: 30_i64 }
           ];
-          VAR limited = items s> LIMIT 2;
+          limited = items s> LIMIT 2;
         FLUX
       }
 
@@ -1907,8 +1908,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: LIMIT on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> LIMIT 5;
+          num = 100;
+          bad = num s> LIMIT 5;
         FLUX
       }
 
@@ -1928,11 +1929,11 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Container { values: Int64[] }
-          VAR containers = [
+          containers = [
             Container{ values: [1_i64, 2_i64] },
             Container{ values: [3_i64, 4_i64] }
           ];
-          VAR flattened = containers s> UNNEST _.values;
+          flattened = containers s> UNNEST _.values;
         FLUX
       }
 
@@ -1945,12 +1946,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Batch { nums: Number[] }
-          VAR batches = [
+          batches = [
             Batch{ nums: [10, 20, 30] },
             Batch{ nums: [40] },
             Batch{ nums: [50, 60] }
           ];
-          VAR all_nums = batches s> UNNEST _.nums;
+          all_nums = batches s> UNNEST _.nums;
         FLUX
       }
 
@@ -1963,8 +1964,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Int64 }
-          VAR items = [Item{ value: 10_i64 }];
-          VAR bad = items s> UNNEST _.value;
+          items = [Item{ value: 10_i64 }];
+          bad = items s> UNNEST _.value;
         FLUX
       }
 
@@ -1976,8 +1977,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: UNNEST on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> UNNEST _;
+          num = 100;
+          bad = num s> UNNEST _;
         FLUX
       }
 
@@ -1996,8 +1997,8 @@ RSpec.describe SemanticAnnotator do
     context "Basic DISTINCT: unique elements by value" do
       let(:code) {
         <<~FLUX
-          VAR nums = [1, 2, 1, 3, 2, 4];
-          VAR unique = nums s> DISTINCT _;
+          nums = [1, 2, 1, 3, 2, 4];
+          unique = nums s> DISTINCT _;
         FLUX
       }
 
@@ -2010,12 +2011,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { id: Int64, name: String[] }
-          VAR items = [
+          items = [
             Item{ id: 1_i64, name: %"a" },
             Item{ id: 2_i64, name: %"b" },
             Item{ id: 1_i64, name: %"c" }
           ];
-          VAR unique_by_id = items s> DISTINCT _.id;
+          unique_by_id = items s> DISTINCT _.id;
         FLUX
       }
 
@@ -2027,8 +2028,8 @@ RSpec.describe SemanticAnnotator do
     context "Error Handling: DISTINCT on a non-list" do
       let(:code) {
         <<~FLUX
-          VAR num = 100;
-          VAR bad = num s> DISTINCT _;
+          num = 100;
+          bad = num s> DISTINCT _;
         FLUX
       }
 
@@ -2049,9 +2050,9 @@ RSpec.describe SemanticAnnotator do
       context "Copy Types (Primitives)" do
         let(:code) { preamble + <<~FLUX
             FN test() ->
-              VAR a = 10;
-              VAR b = a;    -- Copy
-              VAR c = a;    -- 'a' should still be alive
+              a = 10;
+              b = a;    -- Copy
+              c = a;    -- 'a' should still be alive
             END
           FLUX
         }
@@ -2063,9 +2064,9 @@ RSpec.describe SemanticAnnotator do
       context "Linear Types (Structs)" do
         let(:code) { preamble + <<~FLUX
             FN test() ->
-              VAR a = Config { id: 1 };
-              VAR b = a;    -- MOVE occurs here because Config is not primitive
-              VAR c = a;    -- ERROR: Use after move
+              a = Config { id: 1 };
+              b = a;    -- MOVE occurs here because Config is not primitive
+              c = a;    -- ERROR: Use after move
             END
           FLUX
         }
@@ -2078,9 +2079,9 @@ RSpec.describe SemanticAnnotator do
         let(:code) { preamble + <<~FLUX
             FN test() ->
               MUTABLE a = Config { id: 1 };
-              VAR b = a;                -- 'a' is moved
-              SET a = Config { id: 2 }; -- 'a' is reborn (live)
-              VAR c = a;                -- Should be valid
+              b = a;                -- 'a' is moved
+              a = Config { id: 2 }; -- 'a' is reborn (live)
+              c = a;                -- Should be valid
             END
           FLUX
         }
@@ -2096,9 +2097,9 @@ RSpec.describe SemanticAnnotator do
               STRUCT Outer { inner: Inner, count: Int64 }
 
               FN test() ->
-                VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
-                VAR x = outer.inner;  -- moves outer.inner
-                VAR y = outer.inner;  -- ERROR: outer.inner is moved
+                outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+                x = outer.inner;  -- moves outer.inner
+                y = outer.inner;  -- ERROR: outer.inner is moved
               END
             FLUX
           }
@@ -2113,9 +2114,9 @@ RSpec.describe SemanticAnnotator do
               STRUCT Outer { inner: Inner, count: Int64 }
 
               FN test() ->
-                VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
-                VAR x = outer.inner;   -- moves outer.inner
-                VAR y = outer.count;   -- OK: outer.count is still valid
+                outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+                x = outer.inner;   -- moves outer.inner
+                y = outer.count;   -- OK: outer.count is still valid
               END
             FLUX
           }
@@ -2131,9 +2132,9 @@ RSpec.describe SemanticAnnotator do
               STRUCT Outer { inner: Inner }
 
               FN test() ->
-                VAR outer = Outer{ inner: Inner{ deep: Deep{ val: 1 } } };
-                VAR x = outer.inner;       -- moves outer.inner
-                VAR y = outer.inner.deep;  -- ERROR: outer.inner is moved, so outer.inner.deep is dead
+                outer = Outer{ inner: Inner{ deep: Deep{ val: 1 } } };
+                x = outer.inner;       -- moves outer.inner
+                y = outer.inner.deep;  -- ERROR: outer.inner is moved, so outer.inner.deep is dead
               END
             FLUX
           }
@@ -2147,9 +2148,9 @@ RSpec.describe SemanticAnnotator do
               STRUCT Point { x: Int64, y: Int64 }
 
               FN test() ->
-                VAR p = Point{ x: 10, y: 20 };
-                VAR a = p.x;  -- primitives copy
-                VAR b = p.x;  -- still valid
+                p = Point{ x: 10, y: 20 };
+                a = p.x;  -- primitives copy
+                b = p.x;  -- still valid
               END
             FLUX
           }
@@ -2165,8 +2166,8 @@ RSpec.describe SemanticAnnotator do
               STRUCT Point { x: Int64, y: Int64 }
 
               FN test() ->
-                VAR p = Point{ x: 10, y: 20 };
-                VAR copy = COPY p;  -- COPY creates independent value
+                p = Point{ x: 10, y: 20 };
+                copy = COPY p;  -- COPY creates independent value
               END
             FLUX
           }
@@ -2181,8 +2182,8 @@ RSpec.describe SemanticAnnotator do
               STRUCT Outer { inner: Inner, count: Int64 }
 
               FN test() ->
-                VAR outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
-                VAR inner_copy = COPY outer.inner;  -- COPY nested struct
+                outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
+                inner_copy = COPY outer.inner;  -- COPY nested struct
               END
             FLUX
           }
@@ -2194,8 +2195,8 @@ RSpec.describe SemanticAnnotator do
         context "copying a non-copyable type (array)" do
           let(:code) { <<~FLUX
               FN test() ->
-                VAR arr = [1, 2, 3];
-                VAR copy = COPY arr;
+                arr = [1, 2, 3];
+                copy = COPY arr;
               END
             FLUX
           }
@@ -2209,8 +2210,8 @@ RSpec.describe SemanticAnnotator do
               STRUCT Container { data: Byte[] }
 
               FN test() ->
-                VAR c = Container{ data: "hello" };
-                VAR copy = COPY c;
+                c = Container{ data: "hello" };
+                copy = COPY c;
               END
             FLUX
           }
@@ -2227,9 +2228,9 @@ RSpec.describe SemanticAnnotator do
             FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
 
             FN test() ->
-              VAR x = Config { id: 1 };
+              x = Config { id: 1 };
               consume(x);   -- 'x' is moved into 'consume'
-              VAR y = x;    -- ERROR: 'x' is dead
+              y = x;    -- ERROR: 'x' is dead
             END
           FLUX
         }
@@ -2249,7 +2250,7 @@ RSpec.describe SemanticAnnotator do
             FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
 
             FN test(n: Number) ->
-              VAR x = Config { id: 1 };
+              x = Config { id: 1 };
 
               IF n > 10 THEN
                 consume(x); -- 'x' moved here
@@ -2258,7 +2259,7 @@ RSpec.describe SemanticAnnotator do
               END
 
               -- Merge: x is dead because it died in the THEN branch
-              VAR y = x;
+              y = x;
             END
           FLUX
         }
@@ -2272,7 +2273,7 @@ RSpec.describe SemanticAnnotator do
             FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
 
             FN test(n: Number) ->
-              VAR x = Config { id: 1 };
+              x = Config { id: 1 };
 
               IF n > 10 THEN
                 consume(x);
@@ -2281,7 +2282,7 @@ RSpec.describe SemanticAnnotator do
               END
 
               -- x should definitely be dead
-              VAR y = x;
+              y = x;
             END
           FLUX
         }
@@ -2295,7 +2296,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + <<~FLUX
           FN test() ->
             IF TRUE THEN
-              VAR x = Config { id: 1 };
+              x = Config { id: 1 };
               -- x is unused and Affine
               -- Should auto-drop here
             END
@@ -2315,9 +2316,9 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + <<~FLUX
           FN test() ->
             IF TRUE THEN
-              VAR z = 1;
+              z = 1;
             ELSE
-              VAR x = Config { id: 1 };
+              x = Config { id: 1 };
               -- x is unused and Affine
               -- Should auto-drop here
             END
@@ -2337,8 +2338,8 @@ RSpec.describe SemanticAnnotator do
     context "Function Scope (Deferred Drops)" do
       let(:code) { preamble + <<~FLUX
           FN test() ->
-            VAR a = Config { id: 1 };
-            VAR b = 10; -- Primitive, no drop needed
+            a = Config { id: 1 };
+            b = 10; -- Primitive, no drop needed
             -- 'a' is never moved. It must be dropped here.
           END
         FLUX
@@ -2361,7 +2362,7 @@ RSpec.describe SemanticAnnotator do
           FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
 
           FN test() ->
-            VAR x = Config { id: 1 };
+            x = Config { id: 1 };
 
             WHILE TRUE DO
               consume(x); -- Error: Moves 'x' in first iteration, 2nd iteration crashes
@@ -2395,7 +2396,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~FLUX)
           STRUCT Config { id: Number }
           FN create() RETURNS Config ->
-            VAR x = Config { id: 1 };
+            x = Config { id: 1 };
             RETURN x; -- x must be on heap to survive return
           END
         FLUX
@@ -2409,7 +2410,7 @@ RSpec.describe SemanticAnnotator do
         expect_no_escape
         run(<<~FLUX)
           FN get_num() RETURNS Number ->
-            VAR x = 10;
+            x = 10;
             RETURN x;
           END
         FLUX
@@ -2426,8 +2427,8 @@ RSpec.describe SemanticAnnotator do
           MUTABLE g: %Container = Container { item: Item{id:0, name: [0]} }; -- Global Heap
 
           FN update() USE(MUTABLE g) ->
-            VAR local = Item { id: 99, name: [1] };
-            SET g.item = local; -- 'local' escapes to Global
+            local = Item { id: 99, name: [1] };
+            g.item = local; -- 'local' escapes to Global
           END
         FLUX
       end
@@ -2438,8 +2439,8 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { id: Number }
           FN test() ->
             MUTABLE a = Item { id: 1 };
-            VAR b = Item { id: 2 };
-            SET a = b; -- 'b' moves to 'a', but both are stack. No escape.
+            b = Item { id: 2 };
+            a = b; -- 'b' moves to 'a', but both are stack. No escape.
           END
         FLUX
       end
@@ -2481,7 +2482,7 @@ RSpec.describe SemanticAnnotator do
         # Pointers fit in registers.
         code = preamble + <<~FLUX
           FN make_heap() RETURNS %Config ->
-            VAR c = %Config{id:1};
+            c = %Config{id:1};
             RETURN c;
           END
         FLUX
@@ -2494,7 +2495,7 @@ RSpec.describe SemanticAnnotator do
         # A Stack Struct is a "Value Type". It must be written to memory provided by the caller.
         code = preamble + <<~FLUX
           FN make_stack() RETURNS Config ->
-            VAR c = Config{id:1};
+            c = Config{id:1};
             RETURN c;
           END
         FLUX
@@ -2519,7 +2520,7 @@ RSpec.describe SemanticAnnotator do
 
       it "uses :void for procedures with no return" do
         code = <<~FLUX
-          FN do_thing() RETURNS Void -> VAR x = 1; END
+          FN do_thing() RETURNS Void -> x = 1; END
         FLUX
         expect(get_strategy(code)).to eq(:void)
       end
@@ -2731,7 +2732,7 @@ RSpec.describe SemanticAnnotator do
 
           MUTABLE foo = Foo{ b: Bar{ index: 1 }};
           WITH RESTRICT foo {
-            VAR x = identity(foo);
+            MUTABLE x = identity(foo);
             MUTABLE y = identity(foo);
           }
         FLUX
@@ -2756,7 +2757,7 @@ RSpec.describe SemanticAnnotator do
           MUTABLE foo = Foo{ b: Bar{ index: 1 }};
           WITH RESTRICT foo {
             MUTABLE y = identity(foo);
-            SET foo.b = Bar{index: 10};
+            foo.b = Bar{index: 10};
           }
         FLUX
       }
@@ -2773,7 +2774,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Foo { b: Bar }
 
           FN changeBar!(MUTABLE f: Foo) ->
-            SET f.b = Bar{index: 10};
+            f.b = Bar{index: 10};
           END
 
           -- Define function that returns a Number
@@ -2827,7 +2828,7 @@ RSpec.describe SemanticAnnotator do
             RETURN r.foo.bar;
           END
 
-          VAR r = Root{ foo: Foo{ bar: Bar{ index: 1 }, baz: Baz{ name: "Test"}}};
+          r = Root{ foo: Foo{ bar: Bar{ index: 1 }, baz: Baz{ name: "Test"}}};
           identity(r);
         FLUX
       }
@@ -2868,14 +2869,14 @@ RSpec.describe SemanticAnnotator do
 
   describe "@multiowned (reference-counted Rc wrapper)" do
     def multiowned_decl(source)
-      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr) }
     end
 
     context "creating a @multiowned variable" do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @multiowned;
+          c = Counter{ value: 0 } @multiowned;
         FLUX
       }
 
@@ -2892,8 +2893,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 10 } @multiowned;
-          VAR v = c.value;
+          c = Counter{ value: 10 } @multiowned;
+          v = c.value;
         FLUX
       }
 
@@ -2906,7 +2907,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 };
+          c = Counter{ value: 0 };
           WITH c { }
         FLUX
       }
@@ -2920,7 +2921,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @multiowned;
+          c = Counter{ value: 0 } @multiowned;
           WITH EXCLUSIVE c AS inner { }
         FLUX
       }
@@ -2946,14 +2947,14 @@ RSpec.describe SemanticAnnotator do
 
   describe "@shared (atomically reference-counted Arc wrapper)" do
     def shared_decl(source)
-      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr) }
     end
 
     context "creating a @shared variable" do
       let(:code) {
         <<~FLUX
           STRUCT Point { x: Number }
-          VAR p = Point{ x: 1 } @shared;
+          p = Point{ x: 1 } @shared;
         FLUX
       }
 
@@ -2970,8 +2971,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Point { x: Number }
-          VAR p = Point{ x: 5 } @shared;
-          VAR v = p.x;
+          p = Point{ x: 5 } @shared;
+          v = p.x;
         FLUX
       }
 
@@ -2984,7 +2985,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Point { x: Number }
-          VAR p = Point{ x: 1 };
+          p = Point{ x: 1 };
           WITH p { }
         FLUX
       }
@@ -3010,14 +3011,14 @@ RSpec.describe SemanticAnnotator do
 
   describe "@locked (mutex-protected Locked(T) wrapper)" do
     def locked_decl(source)
-      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr) }
     end
 
     context "creating a @locked variable" do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @locked;
+          c = Counter{ value: 0 } @locked;
         FLUX
       }
 
@@ -3035,7 +3036,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Counter { value: Number }
           FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
-          VAR c = Counter{ value: 42 } @locked;
+          c = Counter{ value: 42 } @locked;
           WITH EXCLUSIVE c AS inner {
             getVal(inner);
           }
@@ -3052,7 +3053,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Counter { value: Number }
           FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
-          VAR c = Counter{ value: 0 } @locked;
+          c = Counter{ value: 0 } @locked;
           WITH c AS inner {
             getVal(inner);
           }
@@ -3068,7 +3069,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 };
+          c = Counter{ value: 0 };
           WITH EXCLUSIVE c AS inner { }
         FLUX
       }
@@ -3082,7 +3083,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @shared;
+          c = Counter{ value: 0 } @shared;
           WITH EXCLUSIVE c AS inner { }
         FLUX
       }
@@ -3096,7 +3097,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 };
+          c = Counter{ value: 0 };
           WITH c { }
         FLUX
       }
@@ -3106,13 +3107,13 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "SET mutation through the EXCLUSIVE alias" do
+    context "mutation through the EXCLUSIVE alias" do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @locked;
+          c = Counter{ value: 0 } @locked;
           WITH EXCLUSIVE c AS inner {
-            SET inner.value = 99;
+            inner.value = 99;
           }
         FLUX
       }
@@ -3138,14 +3139,14 @@ RSpec.describe SemanticAnnotator do
 
   describe "@writeLocked (readers-writer RwLocked(T) wrapper)" do
     def write_locked_decl(source)
-      run(source).statements.find { |s| s.is_a?(AST::VarDecl) }
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr) }
     end
 
     context "creating a @writeLocked variable" do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @writeLocked;
+          c = Counter{ value: 0 } @writeLocked;
         FLUX
       }
 
@@ -3163,7 +3164,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Counter { value: Number }
           FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
-          VAR c = Counter{ value: 7 } @writeLocked;
+          c = Counter{ value: 7 } @writeLocked;
           WITH EXCLUSIVE c AS inner {
             getVal(inner);
           }
@@ -3180,7 +3181,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Counter { value: Number }
           FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
-          VAR c = Counter{ value: 3 } @writeLocked;
+          c = Counter{ value: 3 } @writeLocked;
           WITH c AS inner {
             getVal(inner);
           }
@@ -3192,13 +3193,13 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "SET mutation through the EXCLUSIVE (write) alias" do
+    context "mutation through the EXCLUSIVE (write) alias" do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @writeLocked;
+          c = Counter{ value: 0 } @writeLocked;
           WITH EXCLUSIVE c AS inner {
-            SET inner.value = 100;
+            inner.value = 100;
           }
         FLUX
       }
@@ -3212,7 +3213,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 };
+          c = Counter{ value: 0 };
           WITH EXCLUSIVE c AS inner { }
         FLUX
       }
@@ -3246,8 +3247,8 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Task { id: Number }
           FN process(t: Task) RETURNS Void -> RETURN; END
-          VAR a = Task{ id: 1 };
-          VAR b = Task{ id: 2 };
+          a = Task{ id: 1 };
+          b = Task{ id: 2 };
           DO {
             process(a),
             process(b)
@@ -3268,10 +3269,10 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @locked;
+          c = Counter{ value: 0 } @locked;
           DO {
-            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
-            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; }
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
           }
         FLUX
       }
@@ -3289,9 +3290,9 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @writeLocked;
+          c = Counter{ value: 0 } @writeLocked;
           DO {
-            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
             WITH c AS inner_r { }
           }
         FLUX
@@ -3322,7 +3323,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           FN add(a: Number, b: Number) RETURNS Number -> RETURN a + b; END
-          VAR x = "not-a-number";
+          x = "not-a-number";
           DO {
             add(x, 1)
           }
@@ -3338,11 +3339,11 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Number }
-          VAR c = Counter{ value: 0 } @locked;
+          c = Counter{ value: 0 } @locked;
           DO {
-            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
-            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; },
-            WITH EXCLUSIVE c AS inner { SET inner.value = inner.value + 1; }
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
           }
         FLUX
       }

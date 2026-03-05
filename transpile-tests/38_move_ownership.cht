@@ -4,15 +4,15 @@ STRUCT Node { id: Int64 }
 -- After MOVE, the source variable is consumed (cannot be used again).
 -- The testing allocator verifies no leaks and no double-frees.
 FN cheatMain() RETURNS Void ->
-    VAR a = Node{ id: 42 } @multiowned;
+    a = Node{ id: 42 } @multiowned;
 
     -- Default clone: both a and b own the Node (ref count = 2).
-    VAR b = a;
+    b = a;
     ASSERT b.id == 42, "clone: b.id should be 42";
 
     -- MOVE: transfer a's handle to c without retain (ref count stays 2).
     -- After this, a is consumed; only b and c are valid.
-    VAR c = MOVE a;
+    c = MOVE a;
     ASSERT c.id == 42, "move: c.id should be 42";
 
     -- On scope exit (LIFO):
