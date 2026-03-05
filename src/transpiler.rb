@@ -944,348 +944,221 @@ private
   end
 
   # --- HIGHER ORDER FUNCTIONS ---
-  def transpile_select_projection(list_node, expression_node)
-    # 1. Setup Types
-    #    We need the Result Type to create the new List
-    result_flux_type = expression_node.full_type
-    result_zig_type  = transpile_type(result_flux_type)
+  # --- Pipeline Helpers ---
 
-    # 2. Transpile Inputs
+  # Consolidates boilerplate for collection operators (SELECT, WHERE, etc.)
+  # Handles source list extraction, allocator selection, and Zig block wrapping.
+  def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil)
     list_code = visit(list_node)
+    alloc = storage_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+    
+    # Optional result initialization (e.g. creating the output ArrayList)
+    res_init = if init
+      init.gsub("{alloc}", alloc)
+    elsif res_type
+      "var res_list = try CheatLib.makeList(#{transpile_type(res_type)}, #{alloc}, &.{});"
+    else
+      ""
+    end
 
-    # 3. Handle the '_' placeholder
-    #    We tell the Transpiler: "When you see _, print 'it'"
-    #    We can use a temporary instance variable or a context stack.
+    body_code = yield(alloc)
+
+    <<~ZIG
+      blk: {
+          const pipe_src_list = #{list_code};
+          // Handle both ArrayList and Slice
+          const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else pipe_src_list;
+          #{res_init}
+
+          #{body_code}
+      }
+    ZIG
+
+  end
+
+  def transpile_select_projection(list_node, expression_node)
     @placeholder_name = "it"
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
-    alloc = expression_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
-
-    # 4. Generate Inline Loop
-    #    We use a Zig block: { ... break :blk list; }
-    <<~ZIG
-      blk: {
-          const src_list = #{list_code};
-          var res_list = try CheatLib.makeList(#{result_zig_type}, #{alloc}, &.{});
-
-          // Handle both ArrayList and Slice
-          const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
-
-          for (items) |it| {
-              const val = #{expr_code};
-              try res_list.append(#{alloc}, val);
-          }
-          break :blk res_list;
-      }
-    ZIG
+    transpile_pipeline_macro(list_node, expression_node, res_type: expression_node.full_type) do |alloc|
+      <<~ZIG
+        for (pipe_items) |it| {
+            const val = #{expr_code};
+            try res_list.append(#{alloc}, val);
+        }
+        break :blk res_list;
+      ZIG
+    end
   end
 
   def transpile_where_filter(list_node, expression_node)
-    # 1. Setup Types
-    #    WHERE preserves the input type - if we filter Number[], we get Number[]
-    #    We can read the list's type directly
-    list_flux_type = list_node.full_type
-
     # Extract the element type (e.g. "Number[]" -> "Number")
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
-    element_zig_type = transpile_type(element_type_str)
+    element_type_str = list_node.full_type.to_s.gsub(/[\[\]]/, '')
 
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
-
-    # 3. Handle the '_' placeholder
-    #    Same pattern as SELECT - the expression can reference 'it'
     @placeholder_name = "it"
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
-    alloc = expression_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
-
-    # 4. Generate Inline Loop with Conditional Append
-    #    Only append items where the expression evaluates to true
-    <<~ZIG
-      blk: {
-          const src_list = #{list_code};
-          var res_list = try CheatLib.makeList(#{element_zig_type}, #{alloc}, &.{});
-
-          // Handle both ArrayList and Slice
-          const items = if (@hasField(@TypeOf(src_list), "items")) src_list.items else src_list;
-
-          for (items) |it| {
-              const matches = #{expr_code};
-              if (matches) {
-                  try res_list.append(#{alloc}, it);
-              }
-          }
-          break :blk res_list;
-      }
-    ZIG
+    transpile_pipeline_macro(list_node, expression_node, res_type: element_type_str) do |alloc|
+      <<~ZIG
+        for (pipe_items) |it| {
+            const matches = #{expr_code};
+            if (matches) {
+                try res_list.append(#{alloc}, it);
+            }
+        }
+        break :blk res_list;
+      ZIG
+    end
   end
 
   def transpile_index_grouping(list_node, expression_node, smooth_node)
-    # INDEX groups elements by a key, returning HashMap<KeyType, ElementType[]>
-    # e.g., users s> INDEX _.age  returns HashMap<Int64, User[]>
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
 
-    # 1. Setup Types
-    #    Get the element type from the input list
-    list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
-    element_zig_type = transpile_type(element_type_str)
-
-    # The result type is an array of the element type (for HashMap values)
-    value_zig_type = "[]#{element_zig_type}"
-
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
-
-    # 3. Handle the '_' placeholder
     @placeholder_name = "it"
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
-    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+    init = "var idx_result: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(#{element_zig_type})) = .{};"
 
-    # 4. Generate Zig code for grouping
-    #    We create a StringHashMap where values are ArrayLists of elements
-    <<~ZIG
-      blk: {
-          const idx_src_list = #{list_code};
-          var idx_result: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(#{element_zig_type})) = .{};
-
-          // Handle both ArrayList and Slice
-          const idx_items = if (@hasField(@TypeOf(idx_src_list), "items")) idx_src_list.items else idx_src_list;
-
-          for (idx_items) |it| {
-              const idx_key = #{expr_code};
-              const gop = idx_result.getOrPut(#{alloc}, idx_key) catch @panic("INDEX allocation failed");
-              if (!gop.found_existing) {
-                  gop.value_ptr.* = std.ArrayListUnmanaged(#{element_zig_type}){};
-              }
-              gop.value_ptr.append(#{alloc}, it) catch @panic("INDEX append failed");
-          }
-          break :blk idx_result;
-      }
-    ZIG
+    transpile_pipeline_macro(list_node, smooth_node, init: init) do |alloc|
+      <<~ZIG
+        for (pipe_items) |it| {
+            const idx_key = #{expr_code};
+            const gop = idx_result.getOrPut(#{alloc}, idx_key) catch @panic("INDEX allocation failed");
+            if (!gop.found_existing) {
+                gop.value_ptr.* = std.ArrayListUnmanaged(#{element_zig_type}){};
+            }
+            gop.value_ptr.append(#{alloc}, it) catch @panic("INDEX append failed");
+        }
+        break :blk idx_result;
+      ZIG
+    end
   end
 
   def transpile_reduce(list_node, reduce_node)
-    # REDUCE: list s> REDUCE(initial) acc + _.value
-    # Generates a loop that accumulates values
-
-    # 1. Setup Types
     acc_type = transpile_type(reduce_node.full_type)
-
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
     initial_code = visit(reduce_node.initial_value)
 
-    # 3. Handle placeholders for 'acc' and '_'
     @placeholder_name = "it"
     @acc_placeholder = "acc"
     expr_code = visit(reduce_node.expression)
     @placeholder_name = nil
     @acc_placeholder = nil
 
-    # 4. Generate Zig code for reduce loop
-    <<~ZIG
-      blk: {
-          const red_src_list = #{list_code};
-          var acc: #{acc_type} = #{initial_code};
+    init = "var acc: #{acc_type} = #{initial_code};"
 
-          // Handle both ArrayList and Slice
-          const red_items = if (@hasField(@TypeOf(red_src_list), "items")) red_src_list.items else red_src_list;
-
-          for (red_items) |it| {
-              acc = #{expr_code};
-          }
-          break :blk acc;
-      }
-    ZIG
+    transpile_pipeline_macro(list_node, reduce_node, init: init) do
+      <<~ZIG
+        for (pipe_items) |it| {
+            acc = #{expr_code};
+        }
+        break :blk acc;
+      ZIG
+    end
   end
 
   def transpile_order_by(list_node, order_node, smooth_node)
-    # ORDER_BY: list s> ORDER_BY _.field
-    # Generates code that copies and sorts the list
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
 
-    # 1. Setup Types
-    list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
-    element_zig_type = transpile_type(element_type_str)
-
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
-
-    # 3. Handle the '_' placeholder - use 'a' and 'b' for comparison
-    # We need to generate the key expression for both 'a' and 'b'
     @placeholder_name = "a"
     key_expr_a = visit(order_node.expression)
     @placeholder_name = "b"
     key_expr_b = visit(order_node.expression)
     @placeholder_name = nil
 
-    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
-
-    # 4. Generate Zig code for sorting
-    <<~ZIG
-      blk: {
-          const ord_src_list = #{list_code};
-
-          // Handle both ArrayList and Slice
-          const ord_src_items = if (@hasField(@TypeOf(ord_src_list), "items")) ord_src_list.items else ord_src_list;
-
-          // Copy to new list
-          var ord_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, ord_src_items);
-          _ = &ord_result; // Suppress mutability warning (contents are mutated via .items)
-
-          // Sort using custom comparator
-          std.mem.sort(#{element_zig_type}, ord_result.items, {}, struct {
-              pub fn lessThan(_: void, a: #{element_zig_type}, b: #{element_zig_type}) bool {
-                  return #{key_expr_a} < #{key_expr_b};
-              }
-          }.lessThan);
-
-          break :blk ord_result;
-      }
+    init = <<~ZIG
+      var ord_result = try CheatLib.makeList(#{element_zig_type}, {alloc}, pipe_items);
+      _ = &ord_result;
     ZIG
+
+    transpile_pipeline_macro(list_node, smooth_node, init: init) do
+      <<~ZIG
+        // Sort using custom comparator
+        std.mem.sort(#{element_zig_type}, ord_result.items, {}, struct {
+            pub fn lessThan(_: void, a: #{element_zig_type}, b: #{element_zig_type}) bool {
+                return #{key_expr_a} < #{key_expr_b};
+            }
+        }.lessThan);
+
+        break :blk ord_result;
+      ZIG
+    end
   end
 
   def transpile_limit(list_node, limit_node, smooth_node)
-    # LIMIT: list s> LIMIT n
-    # Returns at most n items from the list
-
-    # 1. Setup Types
-    list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
-    element_zig_type = transpile_type(element_type_str)
-
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
     count_code = visit(limit_node.count)
 
-    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+    transpile_pipeline_macro(list_node, smooth_node) do |alloc|
+      <<~ZIG
+        // Calculate actual count (min of requested and available)
+        const lim_requested: usize = @intCast(#{count_code});
+        const lim_actual = @min(lim_requested, pipe_items.len);
 
-    # 3. Generate Zig code for limit
-    #    Use @min to handle case where list is smaller than limit
-    <<~ZIG
-      blk: {
-          const lim_src_list = #{list_code};
-
-          // Handle both ArrayList and Slice
-          const lim_src_items = if (@hasField(@TypeOf(lim_src_list), "items")) lim_src_list.items else lim_src_list;
-
-          // Calculate actual count (min of requested and available)
-          const lim_requested: usize = @intCast(#{count_code});
-          const lim_actual = @min(lim_requested, lim_src_items.len);
-
-          // Create new list with limited items
-          const lim_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, lim_src_items[0..lim_actual]);
-          break :blk lim_result;
-      }
-
-    ZIG
+        // Create new list with limited items
+        break :blk try CheatLib.makeList(#{element_zig_type}, #{alloc}, pipe_items[0..lim_actual]);
+      ZIG
+    end
   end
 
   def transpile_unnest(list_node, unnest_node, smooth_node)
-    # UNNEST: list s> UNNEST _.arr (flatmap)
-    # Flattens nested arrays into a single list
-
-    # 1. Setup Types - get the element type of the INNER array
-    inner_array_type = unnest_node.full_type.to_s  # e.g., "Int64[]"
-    inner_element_type = inner_array_type.gsub(/[\[\]]/, '')
+    inner_element_type = unnest_node.full_type.to_s.gsub(/[\[\]]/, '')
     inner_zig_type = transpile_type(inner_element_type)
 
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
-
-    # 3. Handle the '_' placeholder
     @placeholder_name = "it"
     expr_code = visit(unnest_node.expression)
     @placeholder_name = nil
 
-    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+    transpile_pipeline_macro(list_node, smooth_node, res_type: inner_element_type) do |alloc|
+      <<~ZIG
+        for (pipe_items) |it| {
+            // Get the inner array from each element
+            const unn_inner = #{expr_code};
+            const unn_inner_items = if (@hasField(@TypeOf(unn_inner), "items")) unn_inner.items else unn_inner;
 
-    # 4. Generate Zig code for flattening
-    <<~ZIG
-      blk: {
-          const unn_src_list = #{list_code};
-          var unn_result = try CheatLib.makeList(#{inner_zig_type}, #{alloc}, &.{});
-
-          // Handle both ArrayList and Slice
-          const unn_outer_items = if (@hasField(@TypeOf(unn_src_list), "items")) unn_src_list.items else unn_src_list;
-
-          for (unn_outer_items) |it| {
-              // Get the inner array from each element
-              const unn_inner = #{expr_code};
-              const unn_inner_items = if (@hasField(@TypeOf(unn_inner), "items")) unn_inner.items else unn_inner;
-
-              // Append all inner items to result
-              for (unn_inner_items) |inner_it| {
-                  try unn_result.append(#{alloc}, inner_it);
-              }
-          }
-          break :blk unn_result;
-      }
-    ZIG
+            // Append all inner items to result
+            for (unn_inner_items) |inner_it| {
+                try res_list.append(#{alloc}, inner_it);
+            }
+        }
+        break :blk res_list;
+      ZIG
+    end
   end
 
   def transpile_distinct(list_node, distinct_node, smooth_node)
-    # DISTINCT: list s> DISTINCT _.field (or DISTINCT _)
-    # Returns unique elements, preserving insertion order
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
 
-    # 1. Setup Types
-    list_flux_type = list_node.full_type
-    element_type_str = list_flux_type.to_s.gsub(/[\[\]]/, '')
-    element_zig_type = transpile_type(element_type_str)
-
-    # Key type for uniqueness comparison
-    key_flux_type = distinct_node.full_type
-    key_zig_type = transpile_type(key_flux_type.to_s)
-
-    # 2. Transpile Inputs
-    list_code = visit(list_node)
-
-    # 3. Handle the '_' placeholder - we need two versions
-    #    One for the outer loop (it) and one for the inner check (it2)
     @placeholder_name = "it"
     expr_code = visit(distinct_node.expression)
     @placeholder_name = "it2"
     expr_code_inner = visit(distinct_node.expression)
     @placeholder_name = nil
 
-    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+    transpile_pipeline_macro(list_node, smooth_node, res_type: list_node.full_type.to_s.gsub(/[\[\]]/, '')) do |alloc|
+      <<~ZIG
+        for (pipe_items) |it| {
+            const dist_key = #{expr_code};
 
-    # 4. Generate Zig code for order-preserving distinct
-    #    Using linear scan for correctness with all types (including floats)
-    <<~ZIG
-      blk: {
-          const dist_src_list = #{list_code};
-          var dist_result = try CheatLib.makeList(#{element_zig_type}, #{alloc}, &.{});
+            // Check if this key already exists in result (linear scan)
+            var dist_found = false;
+            for (res_list.items) |it2| {
+                const dist_existing_key = #{expr_code_inner};
+                if (CheatLib.eql(dist_key, dist_existing_key)) {
+                    dist_found = true;
+                    break;
+                }
+            }
 
-          // Handle both ArrayList and Slice
-          const dist_items = if (@hasField(@TypeOf(dist_src_list), "items")) dist_src_list.items else dist_src_list;
-
-          for (dist_items) |it| {
-              const dist_key = #{expr_code};
-
-              // Check if this key already exists in result (linear scan)
-              var dist_found = false;
-              const dist_result_items = dist_result.items;
-              for (dist_result_items) |it2| {
-                  const dist_existing_key = #{expr_code_inner};
-                  if (CheatLib.eql(dist_key, dist_existing_key)) {
-                      dist_found = true;
-                      break;
-                  }
-              }
-
-              if (!dist_found) {
-                  try dist_result.append(#{alloc}, it);
-              }
-          }
-          break :blk dist_result;
-      }
-    ZIG
+            if (!dist_found) {
+                try res_list.append(#{alloc}, it);
+            }
+        }
+        break :blk res_list;
+      ZIG
+    end
   end
 
   def visit_Placeholder(node)
