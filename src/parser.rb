@@ -642,10 +642,18 @@ class Parser
         break
       end
 
-      pattern = parse_expression
-      consume(:ARROW)
-      body = parse_block_body([',', 'DEFAULT', 'END'])
-      cases << { value: pattern, body: body }
+      if match?(:KEYWORD, 'WHEN')
+        consume(:KEYWORD, 'WHEN')
+        condition = parse_expression
+        consume(:ARROW)
+        body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
+        cases << { kind: :when, value: condition, body: body }
+      else
+        pattern = parse_expression
+        consume(:ARROW)
+        body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
+        cases << { kind: :eq, value: pattern, body: body }
+      end
       match!(:CHAR, ',')  # consume comma separator between cases if present
     end
 

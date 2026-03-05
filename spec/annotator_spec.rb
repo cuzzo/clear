@@ -3385,6 +3385,39 @@ RSpec.describe SemanticAnnotator do
         expect { ast }.to raise_error(/MATCH case type/)
       end
     end
+
+    context "WHEN conditional arm" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 7;
+          MATCH x START
+            1 -> x = 1;,
+            WHEN x MOD 2 == 0 -> x = 0;,
+            DEFAULT -> x = 99;
+          END
+        FLUX
+      }
+
+      it "resolves to Void without errors" do
+        expect { ast }.not_to raise_error
+        expect(ast.statements.last.resolved_type).to eq(:Void)
+      end
+    end
+
+    context "WHEN arm with non-Bool condition" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 7;
+          MATCH x START
+            WHEN x + 1 -> x = 0;
+          END
+        FLUX
+      }
+
+      it "raises an error" do
+        expect { ast }.to raise_error(/WHEN condition must be Bool/)
+      end
+    end
   end
 
   describe "DO block" do

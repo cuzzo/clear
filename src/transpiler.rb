@@ -476,7 +476,8 @@ private
       parts = node.cases.map do |c|
         val  = visit(c[:value])
         body = transpile_block(c[:body])
-        "if (#{subject} == #{val}) {\n    #{body}\n    }"
+        cond = c[:kind] == :when ? val : "#{subject} == #{val}"
+        "if (#{cond}) {\n    #{body}\n    }"
       end
 
       result = parts.join(" else ")

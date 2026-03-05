@@ -281,10 +281,16 @@ private
       current_scope.var_states = initial_state.dup
       with_new_scope(current_scope) do
         visit(c[:value])
-        unless c[:value].resolved_type == node.expr.resolved_type ||
-               node.expr.resolved_type == :Any ||
-               c[:value].resolved_type == :Any
-          error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
+        if c[:kind] == :when
+          unless c[:value].resolved_type == :Bool
+            error!(node, "WHEN condition must be Bool, got #{c[:value].resolved_type}")
+          end
+        else
+          unless c[:value].resolved_type == node.expr.resolved_type ||
+                 node.expr.resolved_type == :Any ||
+                 c[:value].resolved_type == :Any
+            error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
+          end
         end
         c[:body].each { |s| visit(s) }
         case_drops << collect_scope_drops
