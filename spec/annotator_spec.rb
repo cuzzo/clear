@@ -2395,7 +2395,7 @@ RSpec.describe SemanticAnnotator do
         expect_escape("x")
         run(<<~FLUX)
           STRUCT Config { id: Number }
-          FN create() RETURNS Config ->
+          FN create() RETURNS %Config ->
             x = Config { id: 1 };
             RETURN x; -- x must be on heap to survive return
           END
