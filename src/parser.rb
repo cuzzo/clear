@@ -77,6 +77,11 @@ class Parser
   stmt(:KEYWORD, 'WITH') { parse_with_capability }
   stmt(:KEYWORD, 'DO')   { parse_do_block }
   stmt(:KEYWORD, 'MATCH') { parse_match_statement }
+  stmt(:KEYWORD, 'PASS') do
+    tok = consume(:KEYWORD, 'PASS')
+    match!(:CHAR, ';')  # optional semicolon — PASS may appear bare before a ','
+    AST::PassStmt.new(tok)
+  end
 
 
   # Primaries
@@ -648,6 +653,11 @@ class Parser
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
         cases << { kind: :when, value: condition, body: body }
+      elsif match?(:CHAR, '{')
+        pattern = parse_struct_pattern
+        consume(:ARROW)
+        body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
+        cases << { kind: :struct_pattern, value: pattern, body: body }
       else
         pattern = parse_expression
         consume(:ARROW)
@@ -659,6 +669,37 @@ class Parser
 
     consume(:KEYWORD, 'END')
     AST::MatchStatement.new(tok, expr, cases, default_case, [], nil)
+  end
+
+  def parse_struct_pattern
+    tok = consume(:CHAR, '{')
+    fields = []
+    partial = false
+
+    until match?(:CHAR, '}') || match?(:EOF)
+      # `...` means "ignore all remaining fields" (partial match)
+      if match?(:ELLIPSIS, '...')
+        consume(:ELLIPSIS, '...')
+        partial = true
+        break
+      end
+
+      name = consume(:VAR_ID).value
+      consume(:CHAR, ':')
+
+      # `_` as value means wildcard — ignore this field's value
+      if current.type == :VAR_ID && current.value == '_'
+        consume(:VAR_ID)
+        fields << { name: name, value: :wildcard }
+      else
+        fields << { name: name, value: parse_expression }
+      end
+
+      match!(:CHAR, ',')  # optional comma between fields
+    end
+
+    consume(:CHAR, '}')
+    AST::StructPattern.new(tok, fields, partial)
   end
 
   def parse_raise_msg

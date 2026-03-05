@@ -270,6 +270,43 @@ private
     end
   end
 
+  # Type-checks a struct destructuring pattern against the match subject type.
+  # Verifies field names exist and value types match the struct schema.
+  def annotate_struct_pattern!(match_node, pat)
+    expr_type = match_node.expr.resolved_type
+    primitives = [:Number, :Bool, :Byte, :Int64, :Float64, :String, :NIL, :BOOLEAN, :Any, :Void]
+
+    if primitives.include?(expr_type)
+      error!(match_node, "MATCH struct pattern requires a struct type, got #{expr_type}")
+    end
+
+    schema = lookup_type_schema(expr_type)
+
+    pat.fields.each do |f|
+      next if f[:value] == :wildcard
+
+      if schema
+        unless schema.key?(f[:name])
+          error!(match_node, "MATCH struct pattern: field '#{f[:name]}' does not exist on type #{expr_type}")
+        end
+      end
+
+      visit(f[:value])
+
+      if schema
+        field_type = schema[f[:name]]&.resolved
+        val_type   = f[:value].resolved_type
+        unless val_type == field_type || val_type == :Any || field_type == :Any
+          error!(match_node, "MATCH struct pattern: field '#{f[:name]}' has type #{field_type}, but pattern value has type #{val_type}")
+        end
+      end
+    end
+  end
+
+  def visit_PassStmt(node)
+    node.full_type = :Void
+  end
+
   def visit_MatchStatement(node)
     visit(node.expr)
     initial_state = current_scope.clone_states
@@ -280,12 +317,15 @@ private
     node.cases.each do |c|
       current_scope.var_states = initial_state.dup
       with_new_scope(current_scope) do
-        visit(c[:value])
         if c[:kind] == :when
+          visit(c[:value])
           unless c[:value].resolved_type == :Bool
             error!(node, "WHEN condition must be Bool, got #{c[:value].resolved_type}")
           end
+        elsif c[:kind] == :struct_pattern
+          annotate_struct_pattern!(node, c[:value])
         else
+          visit(c[:value])
           unless c[:value].resolved_type == node.expr.resolved_type ||
                  node.expr.resolved_type == :Any ||
                  c[:value].resolved_type == :Any

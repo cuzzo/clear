@@ -3418,6 +3418,150 @@ RSpec.describe SemanticAnnotator do
         expect { ast }.to raise_error(/WHEN condition must be Bool/)
       end
     end
+
+    # ── PASS statement ──────────────────────────────────────────────────────────
+
+    context "PASS as case body (with semicolon)" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 1;
+          MATCH x START
+            1 -> PASS;,
+            DEFAULT -> x = 99;
+          END
+        FLUX
+      }
+
+      it "resolves to Void without errors" do
+        expect { ast }.not_to raise_error
+        expect(ast.statements.last.resolved_type).to eq(:Void)
+      end
+    end
+
+    context "PASS as case body (without semicolon)" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE x = 1;
+          MATCH x START
+            1 -> PASS,
+            DEFAULT -> x = 99;
+          END
+        FLUX
+      }
+
+      it "resolves to Void without errors" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    # ── Struct destructuring ─────────────────────────────────────────────────────
+
+    context "partial match with ..." do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number, y: Number }
+          p = Point{ x: 10, y: 5 };
+          MUTABLE result = 0;
+          MATCH p START
+            {x: 10, ...} -> result = 1;,
+            {x: 20, ...} -> result = 2;,
+            DEFAULT -> result = 3;
+          END
+        FLUX
+      }
+
+      it "resolves to Void without errors" do
+        expect { ast }.not_to raise_error
+        expect(ast.statements.last.resolved_type).to eq(:Void)
+      end
+    end
+
+    context "wildcard field with _" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number, y: Number, z: Number }
+          p = Point{ x: 1, y: 99, z: 3 };
+          MUTABLE result = 0;
+          MATCH p START
+            {x: 1, y: _, z: 3} -> result = 42;,
+            DEFAULT -> result = 0;
+          END
+        FLUX
+      }
+
+      it "resolves to Void without errors" do
+        expect { ast }.not_to raise_error
+        expect(ast.statements.last.resolved_type).to eq(:Void)
+      end
+    end
+
+    context "mixed eq and struct pattern arms" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Msg { code: Number }
+          MUTABLE x = 0;
+          m = Msg{ code: 5 };
+          MATCH m START
+            {code: 5, ...} -> x = 1;,
+            {code: 10, ...} -> x = 2;,
+            DEFAULT -> x = 3;
+          END
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "struct pattern against a primitive type" do
+      let(:code) {
+        <<~FLUX
+          x = 42;
+          MATCH x START
+            {value: 42, ...} -> PASS;
+          END
+        FLUX
+      }
+
+      it "raises an error" do
+        expect { ast }.to raise_error(/MATCH struct pattern requires a struct type/)
+      end
+    end
+
+    context "struct pattern field not on struct" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number, y: Number }
+          p = Point{ x: 1, y: 2 };
+          MUTABLE result = 0;
+          MATCH p START
+            {z: 99, ...} -> result = 1;
+          END
+        FLUX
+      }
+
+      it "raises an error for unknown field" do
+        expect { ast }.to raise_error(/MATCH struct pattern: field 'z' does not exist on type Point/)
+      end
+    end
+
+    context "struct pattern field type mismatch" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Number, y: Number }
+          p = Point{ x: 1, y: 2 };
+          MUTABLE result = 0;
+          MATCH p START
+            {x: "hello", ...} -> result = 1;
+          END
+        FLUX
+      }
+
+      it "raises an error for wrong field value type" do
+        expect { ast }.to raise_error(/MATCH struct pattern: field 'x' has type Number, but pattern value has type/)
+      end
+    end
   end
 
   describe "DO block" do

@@ -223,6 +223,12 @@ module AST
   # sync:      nil | :locked | :write_locked
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
+  # PassStmt: no-op statement (like Python's `pass`).
+  PassStmt          = Struct.new(:token) { include Locatable }
+  # StructPattern: destructuring pattern for MATCH.
+  # fields: Array of { name: String, value: ASTNode | :wildcard }
+  # partial: Boolean — true when `...` is present (remaining fields ignored)
+  StructPattern     = Struct.new(:token, :fields, :partial) { include Locatable }
   # DoBlock: fork-join parallel execution.
   # branches: Array of expression arrays — each sub-array is one parallel branch.
   DoBlock           = Struct.new(:token, :branches) { include Locatable }

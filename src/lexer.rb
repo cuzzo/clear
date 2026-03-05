@@ -40,6 +40,7 @@ class Lexer
 
       # --- TOKENS (Auto-advance via add) ---
       # TODO: Change range syntax to ..< and ..=
+      when @s.scan(/\.\.\./) then add(:ELLIPSIS, '...', start_col)
       when @s.scan(/\.\./) then add(:RANGE, '..', start_col)
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
       when @s.scan(/s>/) then add(:SMOOTH, 's>', start_col)

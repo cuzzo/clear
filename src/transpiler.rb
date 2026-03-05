@@ -471,12 +471,18 @@ private
 
       zig_code
 
+    when AST::PassStmt
+      "{}"
+
     when AST::MatchStatement
       subject = visit(node.expr)
       parts = node.cases.map do |c|
-        val  = visit(c[:value])
         body = transpile_block(c[:body])
-        cond = c[:kind] == :when ? val : "#{subject} == #{val}"
+        cond = case c[:kind]
+               when :when           then visit(c[:value])
+               when :struct_pattern then transpile_struct_pattern(subject, c[:value])
+               else                      "#{subject} == #{visit(c[:value])}"
+               end
         "if (#{cond}) {\n    #{body}\n    }"
       end
 
@@ -1415,6 +1421,16 @@ private
   end
 
   # Semi-colon helper
+  # Builds the Zig boolean condition for a StructPattern case.
+  # Non-wildcard fields produce `subject.field == value` joined with ` and `.
+  # Returns "true" when all fields are wildcards / only `...` was given.
+  def transpile_struct_pattern(subject, pat)
+    conditions = pat.fields
+      .reject { |f| f[:value] == :wildcard }
+      .map { |f| "#{subject}.#{f[:name]} == #{visit(f[:value])}" }
+    conditions.empty? ? "true" : conditions.join(" and ")
+  end
+
   def transpile_block(statements)
     statements.map do |stmt|
       code = visit(stmt)
