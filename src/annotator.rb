@@ -885,6 +885,11 @@ private
     type = node.target.resolved_type
 
     # Struct Field Lookup
+    if node.wildcard?
+      node.full_type = :Void
+      return
+    end
+
     schema = lookup_type_schema(type)
     if schema && schema[node.field]
       node.full_type = schema[node.field]
@@ -1243,10 +1248,15 @@ private
 
   def visit_WithBlock(node)
     # 1. Validate each capability's variable exists and resolve its type
+    expanded_capabilities = []
+
     node.capabilities.each do |cap|
       var_node = cap[:var_node]
       visit(var_node)
       cap[:resolved_type] = var_node.full_type
+      
+      # For node.*, var_node.name will correctly return the root variable name
+      # because it's a GetField on Identifier.
       cap[:old_scope] = lookup_scope_for(var_node.name)
 
       # Infer capability from the variable's storage when not stated explicitly
@@ -1266,15 +1276,38 @@ private
       end
 
       validate_capability(node, cap[:capability], var_node)
+
+      # Handle Wildcard Borrow: WITH RESTRICT node.* { ... }
+      if var_node.is_a?(AST::GetField) && var_node.wildcard?
+        # Retrieve the struct's schema for the target
+        target_type = var_node.target.resolved_type
+        schema = lookup_type_schema(target_type)
+        
+        unless schema
+          error!(node, "Wildcard borrow '*' requires a struct type, but '#{var_node.target.name}' is #{target_type}")
+        end
+
+        schema.each do |field_name, _|
+          # Create a synthetic GetField for each field in the struct
+          field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
+          expanded_capabilities << {
+            capability: cap[:capability],
+            var_node: field_node,
+            old_scope: cap[:old_scope]
+          }
+        end
+      else
+        expanded_capabilities << cap
+      end
     end
 
     # 2. Enter a new scope for the capability block
     # This isolates any variables declared inside
     with_new_scope do
-      node.capabilities.each do |cap|
+      expanded_capabilities.each do |cap|
         var_name = cap[:var_node].name
         syn = cap[:old_scope]&.locals&.dig(var_name, :sync)
-        if syn
+        if syn && !cap[:var_node].is_a?(AST::GetField)
           # Locked: acquire gives mutable access to the inner T.
           # Declare the alias (if given) as the plain inner type.
           inner_type = cap[:old_scope].resolve_type(var_name)  # e.g. :Node
@@ -1319,8 +1352,8 @@ private
 
   def validate_capability(node, capability_type, var_node)
     var_type = var_node.full_type
-    if !var_node.is_a?(AST::Identifier)
-      error!(var_node, "WITH #{capability_type} expects an identifier, got '#{var_node.class}'.")
+    if !var_node.is_a?(AST::Identifier) && !var_node.is_a?(AST::GetField)
+      error!(var_node, "WITH #{capability_type} expects an identifier or field, got '#{var_node.class}'.")
     end
 
     case capability_type

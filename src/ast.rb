@@ -181,7 +181,11 @@ module AST
   BindExpr     = Struct.new(:token, :name, :type, :value) { include Locatable; attr_accessor :mode }
   BinaryOp     = Struct.new(:token, :left, :op, :right) { include Locatable }
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
-  Identifier   = Struct.new(:token, :name) { include Locatable }
+  Identifier   = Struct.new(:token, :name) do
+    include Locatable
+    def wildcard?; false end
+    def name; self[:name].to_s end
+  end
   Literal      = Struct.new(:token, :type, :value, :storage) { include Locatable }
   ListLit      = Struct.new(:token, :items, :storage) { 
     include Locatable 
@@ -207,9 +211,22 @@ module AST
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) { include Locatable }
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }
-  FuncCall     = Struct.new(:token, :name, :args) { include Locatable }
-  MethodCall   = Struct.new(:token, :object, :name, :args) { include Locatable }
-  GetField     = Struct.new(:token, :target, :field) { include Locatable }
+  FuncCall     = Struct.new(:token, :name, :args) do
+    include Locatable
+    def wildcard?; false end
+    def name; self[:name].to_s end
+  end
+
+  MethodCall   = Struct.new(:token, :object, :name, :args) do
+    include Locatable
+    def wildcard?; false end
+    def name; self[:name].to_s end
+  end
+  GetField     = Struct.new(:token, :target, :field) do
+    include Locatable
+    def wildcard?; field == '*' end
+    def name; target.name end
+  end
   GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) { include Locatable }

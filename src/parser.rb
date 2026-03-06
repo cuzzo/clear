@@ -139,15 +139,21 @@ class Parser
   # Dot Access: obj.field OR obj.method()
   suffix(:CHAR, '.') do |lhs|
     dot_token = consume(:CHAR, '.')
-    name_token = consume(:VAR_ID)
-
-    if match?(:CHAR, '(')
-      # Method Call
-      _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-      AST::MethodCall.new(name_token, lhs, name_token.value, args)
+    
+    if match?(:CHAR, '*')
+      star_token = consume(:CHAR, '*')
+      AST::GetField.new(star_token, lhs, '*')
     else
-      # Field Access
-      AST::GetField.new(name_token, lhs, name_token.value)
+      name_token = consume(:VAR_ID)
+
+      if match?(:CHAR, '(')
+        # Method Call
+        _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+        AST::MethodCall.new(name_token, lhs, name_token.value, args)
+      else
+        # Field Access
+        AST::GetField.new(name_token, lhs, name_token.value)
+      end
     end
   end
 

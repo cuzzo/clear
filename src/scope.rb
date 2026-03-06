@@ -237,8 +237,32 @@ class Scope
     local = capability[:old_scope].locals[name]
     error!("Cannot add capability: #{name}") if local.nil?
     local = local.dup
-    local[:capabilities] << capability[:capability]
+
+    if capability[:var_node].is_a?(AST::GetField)
+      # This is a field-specific restriction (e.g. WITH RESTRICT foo.child)
+      path = get_path_to_root(capability[:var_node])
+      local[:borrowed_paths] << { path: path, type: :mutable }
+    else
+      # Whole-variable restriction
+      local[:capabilities] << capability[:capability]
+    end
+    
     @locals[name] = local
+  end
+
+  def get_path_to_root(node)
+    path = []
+    curr = node
+    while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
+      if curr.is_a?(AST::GetField)
+        path.unshift(curr.field.to_sym)
+      elsif curr.is_a?(AST::GetIndex)
+        path.unshift(:*)
+      end
+      curr = curr.target
+    end
+    path.unshift(curr.name.to_sym)
+    path
   end
 
   def register_dependency(owner_name, dependent_name)
