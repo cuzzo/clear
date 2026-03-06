@@ -847,17 +847,11 @@ private
     visit(node.target)
     visit(node.index)
 
-    target_type = node.target.full_type.to_s
+    target_type_info = node.target.type_info
 
     # Case 1: HashMap Access
-    if node.target.metatype == :hashmap
-      # Extract "Int64" from "HashMap<Int64>"
-      match = target_type.match(/HashMap<(.+)>/)
-      if match
-        node.full_type = match[1].to_sym
-      else
-        node.full_type = :Any
-      end
+    if target_type_info.map?
+      node.full_type = target_type_info.value_type
 
       # Validate Key Type
       # Allow String (stack), %String[] (heap), or Byte[] (raw)
@@ -867,8 +861,8 @@ private
       end
 
     # Case 2: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
-    elsif node.target.metatype == :array || node.target.metatype == :struct
-      node.full_type = node.target.type_info.element_type
+    elsif target_type_info.array? || node.target.metatype == :struct
+      node.full_type = target_type_info.element_type
 
     else
       error!(node, "Unsupported Index")

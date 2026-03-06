@@ -2,7 +2,7 @@
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
 class Type
-  attr_reader :raw, :name, :generic_args, :capacity
+  attr_reader :raw, :name, :generic_args, :capacity, :value_type_raw
   attr_accessor :mutability, :lifetime_constraint
   attr_accessor :ownership  # :affine (default), :multiowned (Rc), :shared (Arc)
   attr_accessor :sync       # nil (default), :locked, :write_locked
@@ -125,6 +125,7 @@ class Type
       @wrapped_type_raw   = other.instance_variable_get(:@wrapped_type_raw)
       @is_array           = other.instance_variable_get(:@is_array)
       @element_type_raw   = other.instance_variable_get(:@element_type_raw)
+      @value_type_raw     = other.instance_variable_get(:@value_type_raw)
       @capacity           = other.capacity
       @resolved_cache     = other.instance_variable_get(:@resolved_cache)
     else
@@ -325,7 +326,12 @@ class Type
   end
 
   def map?
-    resolved.to_s.start_with?("HashMap")
+    @is_map
+  end
+
+  def value_type
+    return nil unless map?
+    @value_type_obj ||= Type.new(@value_type_raw || :Any)
   end
 
   # TODO: keep metatype from ast, use that
@@ -482,6 +488,7 @@ class Type
       @is_error_union  = false; @payload_type_raw = nil
       @is_optional     = false; @wrapped_type_raw  = nil
       @is_array        = false; @capacity = nil; @element_type_raw = nil
+      @is_map          = false; @value_type_raw = nil
       @location        = :frame
       return
     end
@@ -534,7 +541,16 @@ class Type
       @element_type_raw = nil
     end
 
-    # E. Default location based on type structure (keyword arg location: overrides this in initialize).
+    # E. Detect HashMap Structure: HashMap<ValueType>
+    if match = str.match(/^HashMap<(.+)>$/)
+      @is_map = true
+      @value_type_raw = match[1].to_sym
+    else
+      @is_map = false
+      @value_type_raw = nil
+    end
+
+    # F. Default location based on type structure (keyword arg location: overrides this in initialize).
     @location = primitive? ? :stack : :frame
 
     # Resolved name is the raw string as-is (! and ? are type-level modifiers, not stripped).
@@ -599,12 +615,9 @@ class Type
 
     # 5. Handle HashMaps
     #    HashMap<Int64> -> std.StringHashMapUnmanaged(i64)
-    str = resolved.to_s
-    if str.start_with?("HashMap")
-      if match = str.match(/HashMap<(.+)>/)
-        inner_zig = Type.new(match[1]).zig_type
-        return "std.StringHashMapUnmanaged(#{inner_zig})"
-      end
+    if map?
+      inner_zig = value_type.zig_type
+      return "std.StringHashMapUnmanaged(#{inner_zig})"
     end
 
     # 6. Map primitives and fallback to struct names
