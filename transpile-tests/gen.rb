@@ -8,11 +8,14 @@ class TestGenerator < ZigTranspiler
   # Make 'visit' public so we can grab the raw body
   public :visit
 
-  def generate_test_block(filename, cheat_code)
+  def generate_test_block(filename, cheat_code, source_dir: Dir.pwd)
+    @source_dir = File.expand_path(source_dir)
+    @compiler   = ModuleCompiler.new(base_dir: @source_dir)
+
     # 1. Parse AST
     tokens = Lexer.new(cheat_code).tokenize
     ast = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new
+    annotator = SemanticAnnotator.new(compiler: @compiler, source_dir: @source_dir)
     annotator.annotate!(ast)
 
     # 2. Get Raw Zig Body
@@ -141,7 +144,9 @@ File.open(OUTPUT_FILE, "w") do |f|
   end
 
   # 2. Iterate through all .cht files in the test directory
-  Dir.glob("#{TEST_DIR}/*.cht").each do |test_file|
+  test_source_dir = File.expand_path(TEST_DIR)
+
+  Dir.glob("#{TEST_DIR}/*.cht").sort.each do |test_file|
     filename = File.basename(test_file)
     puts "  - Processing #{filename}"
 
@@ -149,7 +154,7 @@ File.open(OUTPUT_FILE, "w") do |f|
     generator = TestGenerator.new
 
     begin
-      block = generator.generate_test_block(filename, code)
+      block = generator.generate_test_block(filename, code, source_dir: test_source_dir)
       f.puts "\n// --- TEST: #{filename} ---"
       f.puts block
     rescue => e

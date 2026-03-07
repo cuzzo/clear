@@ -12,21 +12,30 @@ require_relative "./annotator"
 require_relative "./pipeline_generator"
 require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
+require_relative "./compiler"
 
 class ZigTranspiler
   include PipelineGenerator
   include OwnershipGenerator
   include ZigTypeMapper
 
-  def transpile(cheat_code)
-    # 1. Parse
-    tokens = Lexer.new(cheat_code).tokenize
-    ast = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new()
+  attr_reader :struct_schemas
+
+  def initialize(compiler: nil, source_dir: nil)
+    @compiler   = compiler
+    @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
+  end
+
+  # Single-file entry point (used by the CLI and simple callers).
+  def transpile(cheat_code, source_dir: @source_dir)
+    @source_dir = File.expand_path(source_dir)
+    @compiler ||= ModuleCompiler.new(base_dir: @source_dir)
+
+    tokens    = Lexer.new(cheat_code).tokenize
+    ast       = Parser.new(tokens, cheat_code).parse
+    annotator = SemanticAnnotator.new(compiler: @compiler, source_dir: @source_dir)
     annotator.annotate!(ast)
 
-    # 2. Generate Zig
-    # We output the Runtime preamble + Transpiled Code + Main
     <<~ZIG
       const std = @import("std");
       const CheatHeader = @import("runtime-header.zig");
@@ -46,6 +55,28 @@ class ZigTranspiler
     ZIG
   end
 
+  # Module entry point: transpile a pre-parsed+annotated AST, emitting only
+  # declarations that are importable (non-private). Used by ModuleCompiler.
+  def transpile_module(ast)
+    parts = []
+    ast.statements.each do |stmt|
+      case stmt
+      when AST::FunctionDef
+        next if stmt.visibility == :private
+        parts << visit(stmt)
+      when AST::StructDef
+        next if stmt.visibility == :private
+        parts << visit(stmt)
+      when AST::RequireNode
+        # Re-export nested REQUIRE namespaces into this module's namespace.
+        parts << visit(stmt)
+      # Top-level executable statements (VarDecl, BindExpr, etc.) are not
+      # exported — module files are declaration-only at the top level.
+      end
+    end
+    parts.compact.join("\n\n")
+  end
+
 private
 
   def visit(node)
@@ -60,6 +91,25 @@ private
     case node
     when AST::Program
       node.statements.map { |stmt| visit(stmt) }.join("\n\n")
+
+    when AST::RequireNode
+      # Inline the required module as a Zig const struct namespace.
+      # The module body was already transpiled (and cached) by ModuleCompiler.
+      return "" unless @compiler
+
+      mod = @compiler.compile_file(node.path, caller_dir: @source_dir)
+
+      # Merge the module's struct schemas so RC cleanup works for imported types.
+      if mod.struct_schemas
+        @struct_schemas ||= {}
+        @struct_schemas.merge!(mod.struct_schemas)
+      end
+
+      body = mod.transpiled_body.strip
+      # Indent each line of the module body for readability inside the struct.
+      indented = body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
+
+      "const #{node.namespace} = struct {\n#{indented}\n};"
 
     when AST::StructDef
       # CHEAT: STRUCT User { id: Number }
@@ -546,7 +596,8 @@ private
       end
       rt_name = @do_rt_name || "rt"
       args = [rt_name] + args_zig
-      call = "#{node.name}(#{args.join(', ')})"
+      mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias}." : ""
+      call = "#{mod_prefix}#{node.name}(#{args.join(', ')})"
 
       # If the call returns an error union and is not being handled by OR,
       # we need to add 'try' to propagate errors implicitly
@@ -1011,11 +1062,13 @@ $logger.formatter = proc do |severity, datetime, progname, msg|
   "[#{severity}] #{msg}\n"
 end
 
-OptionParser.new do |opts|
-  opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
-    $logger.level = Logger.const_get(level.upcase)
-  end
-end.parse!
+if __FILE__ == $0
+  OptionParser.new do |opts|
+    opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
+      $logger.level = Logger.const_get(level.upcase)
+    end
+  end.parse!
+end
 
 
 if __FILE__ == $0
@@ -1027,8 +1080,9 @@ if __FILE__ == $0
 
   script_file = ARGV.first
   if script_file
-    code = File.read(script_file)
-    puts ZigTranspiler.new.transpile(code)
+    code       = File.read(script_file)
+    source_dir = File.dirname(File.expand_path(script_file))
+    puts ZigTranspiler.new.transpile(code, source_dir: source_dir)
   else
     $stderr.puts "Usage: ruby transpiler.rb <script.ct>"
   end

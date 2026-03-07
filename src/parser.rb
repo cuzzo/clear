@@ -62,6 +62,7 @@ class Parser
   end
 
   # COMMANDS
+  stmt(:KEYWORD, 'REQUIRE') { parse_require }
   stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
   stmt(:KEYWORD, 'FN')      { parse_function_def }
   stmt(:KEYWORD, 'PUB')     { parse_visibility_decl(:pub) }
@@ -406,6 +407,21 @@ class Parser
       { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes }
     end
      .last # always ignore the first token
+  end
+
+  def parse_require
+    tok  = consume(:KEYWORD, 'REQUIRE')
+    path = consume(:STRING).value
+    # Derive a Zig-safe identifier from the filename: strip extension,
+    # replace non-alphanumeric chars with underscore, prefix digit-starts with _.
+    namespace = File.basename(path, '.cht')
+                    .gsub(/[^a-zA-Z0-9_]/, '_')
+                    .sub(/\A(\d)/, '_\1')
+    if match!(:KEYWORD, 'AS')
+      namespace = consume(:VAR_ID).value
+    end
+    match!(:CHAR, ';')
+    AST::RequireNode.new(tok, path, namespace)
   end
 
   def parse_visibility_decl(visibility)

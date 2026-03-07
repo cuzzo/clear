@@ -1,0 +1,14 @@
+-- require_helper.cht — used by 50_require.cht
+-- Tests that visibility is respected at import boundaries.
+
+PUB FN addPub(a: Number, b: Number) RETURNS Number ->
+  RETURN a + b;
+END
+
+FN multiplyPackage(x: Number, y: Number) RETURNS Number ->
+  RETURN x * y;
+END
+
+PRIVATE FN secretPrivate(x: Number) RETURNS Number ->
+  RETURN x + 999;
+END

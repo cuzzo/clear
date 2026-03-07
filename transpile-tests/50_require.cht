@@ -1,0 +1,14 @@
+-- 50_require: REQUIRE "file.cht" imports pub and package-private functions.
+-- PRIVATE functions from the required file are NOT importable.
+
+REQUIRE "require_helper.cht";
+
+FN cheatMain() RETURNS Void ->
+  -- PUB FN: importable from any file
+  sum = addPub(3, 4);
+  ASSERT sum == 7, "addPub: 3 + 4 should equal 7";
+
+  -- package-private FN: importable because helper is in the same directory
+  product = multiplyPackage(5, 6);
+  ASSERT product == 30, "multiplyPackage: 5 * 6 should equal 30";
+END

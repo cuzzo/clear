@@ -1,9 +1,9 @@
 require "rspec"
 require "byebug"
+require "tmpdir"
+require "fileutils"
 
-require_relative "../src/lexer"
-require_relative "../src/parser"
-require_relative "../src/annotator"
+require_relative "../src/transpiler"  # loads compiler, annotator, lexer, parser, ast
 require_relative "../src/ast"
 
 RSpec.describe SemanticAnnotator do
@@ -3806,6 +3806,167 @@ RSpec.describe SemanticAnnotator do
         expect(stmts[0].visibility).to eq(:pub)
         expect(stmts[1].visibility).to eq(:package)
         expect(stmts[2].visibility).to eq(:private)
+      end
+    end
+  end
+
+  # ==========================================
+  describe "REQUIRE (multi-file imports)" do
+  # ==========================================
+
+    # Helper: write helper files to a tmpdir, annotate the main code using
+    # a ModuleCompiler rooted in that tmpdir, and return the AST.
+    def annotate_with_require(main_code, helpers: {})
+      dir = Dir.mktmpdir
+      helpers.each { |filename, code| File.write(File.join(dir, filename), code) }
+
+      compiler  = ModuleCompiler.new(base_dir: dir)
+      tokens    = Lexer.new(main_code).tokenize
+      ast       = Parser.new(tokens, main_code).parse
+      annotator = SemanticAnnotator.new(compiler: compiler, source_dir: dir)
+      annotator.annotate!(ast)
+      ast
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+
+    context "importing a PUB function" do
+      let(:helper) { "PUB FN add(a: Number, b: Number) RETURNS Number -> RETURN a + b; END" }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Number ->
+            RETURN add(1, 2);
+          END
+        FLUX
+      }
+
+      it "annotates without error" do
+        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+      end
+
+      it "resolves the call return type from the imported signature" do
+        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        fn_node = ast.statements.last
+        return_node = fn_node.body.last
+        expect(return_node.value.full_type).to eq(:Number)
+      end
+
+      it "tags the FuncCall node with the module namespace alias" do
+        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        fn_node   = ast.statements.last
+        call_node = fn_node.body.last.value
+        expect(call_node.module_alias).to eq("helper")
+      end
+    end
+
+    context "importing a package-private function from the same directory" do
+      let(:helper) { "FN multiply(x: Number, y: Number) RETURNS Number -> RETURN x * y; END" }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Number ->
+            RETURN multiply(3, 4);
+          END
+        FLUX
+      }
+
+      it "annotates without error (same-dir package access is allowed)" do
+        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+      end
+    end
+
+    context "attempting to call a PRIVATE function from a required file" do
+      let(:helper) { "PRIVATE FN secret(x: Number) RETURNS Number -> RETURN x; END" }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Number ->
+            RETURN secret(1);
+          END
+        FLUX
+      }
+
+      it "raises an Undefined function error" do
+        expect {
+          annotate_with_require(main, helpers: { "helper.cht" => helper })
+        }.to raise_error(/Undefined function 'secret'/)
+      end
+    end
+
+    context "REQUIRE with AS alias" do
+      let(:helper) { "PUB FN greet() RETURNS Number -> RETURN 42; END" }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht" AS myLib;
+          FN caller() RETURNS Number ->
+            RETURN greet();
+          END
+        FLUX
+      }
+
+      it "uses the alias as the namespace on the parsed RequireNode" do
+        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        require_node = ast.statements.first
+        expect(require_node.namespace).to eq("myLib")
+      end
+
+      it "tags the FuncCall with the alias" do
+        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        fn_node   = ast.statements.last
+        call_node = fn_node.body.last.value
+        expect(call_node.module_alias).to eq("myLib")
+      end
+    end
+
+    context "circular dependency detection" do
+      it "raises a circular dependency error" do
+        dir = Dir.mktmpdir
+        # a.cht REQUIREs b.cht, b.cht REQUIREs a.cht
+        File.write(File.join(dir, "a.cht"), 'REQUIRE "b.cht";')
+        File.write(File.join(dir, "b.cht"), 'REQUIRE "a.cht";')
+
+        compiler  = ModuleCompiler.new(base_dir: dir)
+        main_code = 'REQUIRE "a.cht";'
+        tokens    = Lexer.new(main_code).tokenize
+        ast       = Parser.new(tokens, main_code).parse
+        annotator = SemanticAnnotator.new(compiler: compiler, source_dir: dir)
+
+        expect { annotator.annotate!(ast) }.to raise_error(/Circular dependency/)
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    context "missing required file" do
+      it "raises a file-not-found error" do
+        expect {
+          annotate_with_require('REQUIRE "nonexistent.cht";', helpers: {})
+        }.to raise_error(/file not found/)
+      end
+    end
+
+    context "importing struct types from a required file" do
+      let(:helper) {
+        <<~FLUX
+          PUB STRUCT Point { x: Number, y: Number }
+          PUB FN makePoint(x: Number, y: Number) RETURNS Point ->
+            RETURN %Point{ x: x, y: y };
+          END
+        FLUX
+      }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Number ->
+            p = makePoint(1, 2);
+            RETURN p.x;
+          END
+        FLUX
+      }
+
+      it "makes the imported struct type available" do
+        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
       end
     end
   end

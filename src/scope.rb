@@ -2,6 +2,7 @@ require "set"
 
 class Scope
   attr_accessor :locals, :var_states, :dependencies, :var_states, :moved_paths
+  attr_reader   :types
 
   def initialize
     @locals = {}

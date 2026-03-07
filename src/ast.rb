@@ -173,6 +173,7 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) { include Locatable }
+  RequireNode  = Struct.new(:token, :path, :namespace) { include Locatable }
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :visibility, :deferred_drops, :uses_frame) { include Locatable }
   StructDef    = Struct.new(:token, :name, :fields, :visibility) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
@@ -213,6 +214,7 @@ module AST
   ContinueNode = Struct.new(:token) { include Locatable }
   FuncCall     = Struct.new(:token, :name, :args) do
     include Locatable
+    attr_accessor :module_alias
     def wildcard?; false end
     def name; self[:name].to_s end
   end

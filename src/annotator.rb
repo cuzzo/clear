@@ -17,7 +17,9 @@ class SemanticAnnotator
 
   attr_reader :scope_stack
 
-  def initialize
+  def initialize(compiler: nil, source_dir: nil)
+    @compiler   = compiler
+    @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
     # We start with a global scope
     @scope_stack = [Scope.new]
     @function_context_stack = [] # Stack of expected return types
@@ -56,6 +58,12 @@ private
   end
 
   def visit_Program(node)
+    # PASS 0: Process REQUIRE statements — import symbols from required files
+    # before any types or functions in this file are registered.
+    node.statements.each do |stmt|
+      visit_RequireNode(stmt) if stmt.is_a?(AST::RequireNode)
+    end
+
     # PASS 1: Hoist Types (StructDefs)
     # Register all struct types first so they can be used in function signatures.
     node.statements.each do |stmt|
@@ -74,9 +82,8 @@ private
     # - VarDecls will be registered here (linear scoping).
     # - FunctionDefs will be visited "fully" here (analyzing their bodies).
     node.statements.each do |stmt|
-      # Skip Structs (done in Pass 1) to avoid redundant work,
-      # though re-visiting them is harmless.
-      next if stmt.is_a?(AST::StructDef)
+      # Skip Structs (done in Pass 1) and REQUIRE nodes (done in Pass 0).
+      next if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::RequireNode)
 
       visit(stmt)
     end
@@ -86,6 +93,37 @@ private
       node.full_type = node.statements.last.full_type
     else
       node.full_type = :Void
+    end
+  end
+
+  def visit_RequireNode(node)
+    unless @compiler
+      error!(node, "REQUIRE is only supported when using the Compiler. " \
+                   "Pass compiler: and source_dir: to SemanticAnnotator.new.")
+    end
+
+    mod = @compiler.compile_file(node.path, caller_dir: @source_dir)
+    node.full_type = :Void
+
+    same_dir = (mod.source_dir == @source_dir)
+
+    # Import function signatures that are visible from this call site.
+    mod.global_scope.locals.each do |name, entry|
+      sig = entry[:type]
+      next unless sig.is_a?(Hash) && sig.key?(:params)
+
+      vis = sig[:visibility] || :package
+      importable = (vis == :pub) || (vis == :package && same_dir)
+      next unless importable
+
+      # Tag the signature with the namespace so the transpiler can qualify calls.
+      imported_sig = sig.merge(module_alias: node.namespace)
+      current_scope.declare(name, nil, imported_sig, false, false, nil, :static)
+    end
+
+    # Import type definitions (structs) — pub and package types from same dir.
+    mod.global_scope.types.each do |type_name, type_entry|
+      current_scope.declare_type(type_name, type_entry[:schema])
     end
   end
 
@@ -542,6 +580,8 @@ private
       call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
       verify_function_signature!(call_node, func_type)
       node.full_type = func_type[:return][:type]
+      # Tag cross-module calls so the transpiler can qualify them (e.g. mod.fn(rt, ...))
+      node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
 
     elsif func_type.is_a?(Symbol)
       node.full_type = func_type
