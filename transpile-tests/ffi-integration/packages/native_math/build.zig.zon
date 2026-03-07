@@ -1,0 +1,7 @@
+.{
+    .name = .native_math,
+    .fingerprint = 0xd04ab266224b01da,
+    .version = "0.1.0",
+    .dependencies = .{},
+    .paths = .{""},
+}

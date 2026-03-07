@@ -3970,5 +3970,181 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ---------------------------------------------------------------------------
+  describe "EXTERN (FFI declarations)" do
+    def annotate_extern(source)
+      tokens = Lexer.new(source).tokenize
+      ast    = Parser.new(tokens, source).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      ast
+    end
+
+    context "EXTERN FN declaration" do
+      let(:code) {
+        <<~CLEAR
+          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          FN caller() RETURNS Number ->
+            RETURN native_add(1, 2);
+          END
+        CLEAR
+      }
+
+      it "parses without error" do
+        expect { annotate_extern(code) }.not_to raise_error
+      end
+
+      it "registers the extern function in scope" do
+        ast = annotate_extern(code)
+        decl = ast.statements.first
+        expect(decl).to be_a(AST::ExternFnDecl)
+        expect(decl.name).to eq("native_add")
+        expect(decl.from_module).to eq("native_math")
+      end
+
+      it "resolves calls to the extern function with the correct return type" do
+        ast = annotate_extern(code)
+        caller_fn = ast.statements.last
+        ret_node  = caller_fn.body.last
+        expect(ret_node.value.resolved_type).to eq(:Number)
+      end
+
+      it "marks the FuncCall node as an extern call" do
+        ast = annotate_extern(code)
+        caller_fn = ast.statements.last
+        ret_node  = caller_fn.body.last
+        call = ret_node.value
+        expect(call).to be_a(AST::FuncCall)
+        expect(call.extern_call).to be true
+      end
+
+      it "sets module_alias on the FuncCall to the from_module name" do
+        ast = annotate_extern(code)
+        caller_fn = ast.statements.last
+        ret_node  = caller_fn.body.last
+        call = ret_node.value
+        expect(call.module_alias).to eq("native_math")
+      end
+    end
+
+    context "multiple EXTERN FN declarations from the same module" do
+      let(:code) {
+        <<~CLEAR
+          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math";
+          FN caller() RETURNS Number ->
+            RETURN native_add(native_multiply(2, 3), 1);
+          END
+        CLEAR
+      }
+
+      it "annotates without error" do
+        expect { annotate_extern(code) }.not_to raise_error
+      end
+
+      it "both calls are marked as extern" do
+        ast = annotate_extern(code)
+        caller_fn = ast.statements.last
+        ret_node  = caller_fn.body.last
+        outer_call = ret_node.value
+        inner_call = outer_call.args.first
+        expect(outer_call.extern_call).to be true
+        expect(inner_call.extern_call).to be true
+      end
+    end
+
+    context "EXTERN FN with no return type" do
+      let(:code) {
+        <<~CLEAR
+          EXTERN FN native_log(val: Number) FROM "native_io";
+          FN caller() RETURNS Void ->
+            native_log(42);
+          END
+        CLEAR
+      }
+
+      it "annotates without error" do
+        expect { annotate_extern(code) }.not_to raise_error
+      end
+    end
+
+    context "EXTERN STRUCT declaration" do
+      let(:code) {
+        <<~CLEAR
+          EXTERN STRUCT Vec2 { x: Number, y: Number } FROM "native_math";
+          FN use_vec() RETURNS Number ->
+            v = Vec2{ x: 1, y: 2 };
+            RETURN v.x;
+          END
+        CLEAR
+      }
+
+      it "registers the extern struct type" do
+        expect { annotate_extern(code) }.not_to raise_error
+      end
+
+      it "makes fields accessible via dot access" do
+        ast = annotate_extern(code)
+        fn  = ast.statements.last
+        ret = fn.body.last
+        expect(ret.value.resolved_type).to eq(:Number)
+      end
+    end
+
+    context "calling an undefined extern function" do
+      it "raises an Undefined function error" do
+        code = <<~CLEAR
+          FN bad() RETURNS Number ->
+            RETURN nonexistent_native(1, 2);
+          END
+        CLEAR
+        expect { annotate_extern(code) }.to raise_error(/Undefined function/)
+      end
+    end
+
+    context "EXTERN FN transpilation" do
+      it "emits @import once per native module (deduplication)" do
+        code = <<~CLEAR
+          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math";
+          FN cheatMain() RETURNS Void ->
+            x = native_add(1, 2);
+          END
+        CLEAR
+        tokens = Lexer.new(code).tokenize
+        ast    = Parser.new(tokens, code).parse
+        annotator = SemanticAnnotator.new
+        annotator.annotate!(ast)
+        transpiler = ZigTranspiler.new
+        output = transpiler.transpile_as_module(code)
+        imports = output.scan(/@import\("native_math"\)/)
+        expect(imports.length).to eq(1)
+      end
+
+      it "emits the native call without rt and without try" do
+        code = <<~CLEAR
+          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          FN cheatMain() RETURNS Void ->
+            x = native_add(3, 4);
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("native_math.native_add(3, 4)")
+        expect(output).not_to match(/try native_math\.native_add/)
+        expect(output).not_to match(/native_math\.native_add\(rt,/)
+      end
+
+      it "emits a type alias for EXTERN STRUCT" do
+        code = <<~CLEAR
+          EXTERN STRUCT Vec2 { x: Number, y: Number } FROM "native_math";
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("const Vec2 = native_math.Vec2;")
+      end
+    end
+  end
 end
 

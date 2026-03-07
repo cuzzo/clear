@@ -14,9 +14,14 @@ bundle exec rspec           # Run all Ruby specs (278 examples)
 
 # Package integration test (requires Zig)
 cd transpile-tests/module-integration && zig build test
+
+# FFI integration test (requires Zig)
+cd transpile-tests/ffi-integration && zig build test
 ```
 
-Run **both** test suites after making changes to the compiler. The Zig integration test exercises the full package import pipeline (`REQUIRE "pkg:name"`, `--module` CLI flag, cross-package symbol resolution, and the Zig build system wiring).
+Run **all three** test suites after making changes to the compiler. The Zig integration tests exercise the full pipeline end-to-end:
+- **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution, `--module` CLI flag
+- **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites (no rt/try), `@import` deduplication
 
 ## Architecture
 

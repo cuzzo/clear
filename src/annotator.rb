@@ -64,17 +64,18 @@ private
       visit_RequireNode(stmt) if stmt.is_a?(AST::RequireNode)
     end
 
-    # PASS 1: Hoist Types (StructDefs)
+    # PASS 1: Hoist Types (StructDefs + ExternStructDecl)
     # Register all struct types first so they can be used in function signatures.
     node.statements.each do |stmt|
-      visit(stmt) if stmt.is_a?(AST::StructDef)
+      visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl)
     end
 
-    # PASS 2: Hoist Function Signatures
+    # PASS 2: Hoist Function Signatures (FunctionDef + ExternFnDecl)
     # Register function signatures in the global scope.
     # This allows functions to call other functions defined later in the file.
     node.statements.each do |stmt|
       pre_register_function(stmt) if stmt.is_a?(AST::FunctionDef)
+      visit_ExternFnDecl(stmt)    if stmt.is_a?(AST::ExternFnDecl)
     end
 
     # PASS 3: Analyze Logic
@@ -82,8 +83,9 @@ private
     # - VarDecls will be registered here (linear scoping).
     # - FunctionDefs will be visited "fully" here (analyzing their bodies).
     node.statements.each do |stmt|
-      # Skip Structs (done in Pass 1) and REQUIRE nodes (done in Pass 0).
-      next if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::RequireNode)
+      # Skip nodes already processed in earlier passes.
+      next if stmt.is_a?(AST::StructDef)    || stmt.is_a?(AST::RequireNode) ||
+              stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
 
       visit(stmt)
     end
@@ -136,6 +138,34 @@ private
     mod.global_scope.types.each do |type_name, type_entry|
       current_scope.declare_type(type_name, type_entry[:schema])
     end
+  end
+
+  # EXTERN FN name(params) RETURNS type FROM "module"
+  # Registers a native Zig/C function in the current scope.
+  # At call sites, no rt is injected and no try is emitted.
+  def visit_ExternFnDecl(node)
+    signature = {
+      params: node.params.map { |p| {
+        name: p[:name],
+        type: p[:type],
+        required: p[:default].nil?,
+        mutable: p[:mutable] || false
+      }},
+      return:     { type: node.return_type || :Any, lifetime: nil },
+      visibility: :pub,
+      extern:     true,
+      module_alias: node.from_module
+    }
+    node.full_type = :Void
+    current_scope.declare(node.name, nil, signature, false, false, nil, :static)
+  end
+
+  # EXTERN STRUCT Name { fields } FROM "module"
+  # Registers a native Zig/C struct type for CLEAR type-checking.
+  def visit_ExternStructDecl(node)
+    schema = node.fields.transform_keys(&:to_s).transform_values { |f| f[:type] }
+    current_scope.declare_type(node.name.to_sym, schema)
+    node.full_type = :Void
   end
 
   def pre_register_function(node)
@@ -593,6 +623,8 @@ private
       node.full_type = func_type[:return][:type]
       # Tag cross-module calls so the transpiler can qualify them (e.g. mod.fn(rt, ...))
       node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
+      # Tag extern calls so the transpiler skips rt injection and try
+      node.extern_call = true if node.respond_to?(:extern_call=) && func_type[:extern]
 
     elsif func_type.is_a?(Symbol)
       node.full_type = func_type

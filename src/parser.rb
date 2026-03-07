@@ -63,6 +63,7 @@ class Parser
 
   # COMMANDS
   stmt(:KEYWORD, 'REQUIRE') { parse_require }
+  stmt(:KEYWORD, 'EXTERN')  { parse_extern_decl }
   stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
   stmt(:KEYWORD, 'FN')      { parse_function_def }
   stmt(:KEYWORD, 'PUB')     { parse_visibility_decl(:pub) }
@@ -444,6 +445,40 @@ class Parser
     else
       error!(current, "Expected FN or STRUCT after visibility modifier, got '#{current.value}'")
     end
+  end
+
+  # EXTERN FN name(params) RETURNS type FROM "module_name";
+  # EXTERN STRUCT Name { fields } FROM "module_name";
+  def parse_extern_decl
+    tok = consume(:KEYWORD, 'EXTERN')
+    if match?(:KEYWORD, 'FN')
+      parse_extern_fn(tok)
+    elsif match?(:KEYWORD, 'STRUCT')
+      parse_extern_struct(tok)
+    else
+      error!(current, "Expected FN or STRUCT after EXTERN, got '#{current.value}'")
+    end
+  end
+
+  def parse_extern_fn(extern_tok)
+    consume(:KEYWORD, 'FN')
+    name = consume(:VAR_ID).value
+    params = parse_argument_list
+    return_type = match!(:KEYWORD, 'RETURNS') ? parse_type_annotation : nil
+    consume(:KEYWORD, 'FROM')
+    from_module = consume(:STRING).value
+    match!(:CHAR, ';')
+    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module)
+  end
+
+  def parse_extern_struct(extern_tok)
+    consume(:KEYWORD, 'STRUCT')
+    name = consume(:TYPE_ID).value
+    fields = parse_struct_body
+    consume(:KEYWORD, 'FROM')
+    from_module = consume(:STRING).value
+    match!(:CHAR, ';')
+    AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
   end
 
   def parse_struct_def(visibility = :package)

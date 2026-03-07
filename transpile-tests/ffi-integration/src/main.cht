@@ -1,0 +1,32 @@
+-- FFI integration test: call native Zig functions from CLEAR via EXTERN.
+-- Each function is declared with EXTERN FN and lives in the "native_math" module.
+
+EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math";
+EXTERN FN native_clamp(val: Number, min: Number, max: Number) RETURNS Number FROM "native_math";
+EXTERN FN native_abs(val: Number) RETURNS Number FROM "native_math";
+
+FN cheatMain() RETURNS Void ->
+  -- Basic arithmetic via native Zig
+  sum = native_add(3, 4);
+  ASSERT sum == 7;
+
+  prod = native_multiply(6, 7);
+  ASSERT prod == 42;
+
+  -- Clamp: 15 clamped to [0, 10] = 10
+  clamped = native_clamp(15, 0, 10);
+  ASSERT clamped == 10;
+
+  -- Clamp: -5 clamped to [0, 10] = 0
+  low = native_clamp(-5, 0, 10);
+  ASSERT low == 0;
+
+  -- Abs: |-7| = 7
+  abs_val = native_abs(-7);
+  ASSERT abs_val == 7;
+
+  -- Composed calls: native_add(native_multiply(3, 3), native_multiply(4, 4)) = 25
+  dist_sq = native_add(native_multiply(3, 3), native_multiply(4, 4));
+  ASSERT dist_sq == 25;
+END

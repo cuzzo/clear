@@ -1,0 +1,9 @@
+.{
+    .name = .ffi_integration,
+    .fingerprint = 0x92ef9fd58de40978,
+    .version = "0.1.0",
+    .dependencies = .{
+        .native_math = .{ .path = "packages/native_math" },
+    },
+    .paths = .{""},
+}

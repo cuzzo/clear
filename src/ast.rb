@@ -216,6 +216,7 @@ module AST
   FuncCall     = Struct.new(:token, :name, :args) do
     include Locatable
     attr_accessor :module_alias
+    attr_accessor :extern_call   # true when calling a native EXTERN FN (no rt, no try)
     def wildcard?; false end
     def name; self[:name].to_s end
   end
@@ -268,6 +269,13 @@ module AST
   # RangeLit: a range expression (start..<end) or (start..<=end).
   # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
   RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
+  # ExternFnDecl: EXTERN FN name(params) RETURNS type FROM "module"
+  # Declares a native Zig/C function importable via @import("module").
+  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module) { include Locatable }
+  # ExternStructDecl: EXTERN STRUCT Name { fields } FROM "module"
+  # Declares a native Zig/C struct type for CLEAR type-checking purposes.
+  ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) { include Locatable }
+
   # DoBlock: fork-join parallel execution.
   # branches: Array of expression arrays — each sub-array is one parallel branch.
   DoBlock           = Struct.new(:token, :branches) { include Locatable }

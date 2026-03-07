@@ -20,6 +20,7 @@ class Lexer
       WITH EXCLUSIVE RESTRICT
       MATCH START DEFAULT WHEN
       PUB PRIVATE
+      EXTERN FROM
     ].to_set
 
   def initialize(source)

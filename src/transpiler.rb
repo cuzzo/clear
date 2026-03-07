@@ -59,6 +59,7 @@ class ZigTranspiler
   # Module entry point: transpile a pre-parsed+annotated AST, emitting only
   # declarations that are importable (non-private). Used by ModuleImporter.
   def transpile_module(ast)
+    @emitted_extern_modules = Set.new
     parts = []
     ast.statements.each do |stmt|
       case stmt
@@ -70,6 +71,9 @@ class ZigTranspiler
         parts << visit(stmt)
       when AST::RequireNode
         # Re-export nested REQUIRE namespaces into this module's namespace.
+        parts << visit(stmt)
+      when AST::ExternFnDecl, AST::ExternStructDecl
+        # Emit @import for the native module and (for structs) a type alias.
         parts << visit(stmt)
       # Top-level executable statements (VarDecl, BindExpr, etc.) are not
       # exported — module files are declaration-only at the top level.
@@ -139,7 +143,25 @@ private
   def visit_node(node)
     case node
     when AST::Program
-      node.statements.map { |stmt| visit(stmt) }.join("\n\n")
+      @emitted_extern_modules = Set.new
+      node.statements.map { |stmt| visit(stmt) }.compact.join("\n\n")
+
+    when AST::ExternFnDecl
+      # Emit a Zig @import for the native module (once per unique module name).
+      @emitted_extern_modules ||= Set.new
+      if @emitted_extern_modules.add?(node.from_module)
+        "const #{node.from_module} = @import(\"#{node.from_module}\");"
+      else
+        nil
+      end
+
+    when AST::ExternStructDecl
+      # Emit @import (once) and a type alias: const TypeName = module.TypeName;
+      @emitted_extern_modules ||= Set.new
+      parts = []
+      parts << "const #{node.from_module} = @import(\"#{node.from_module}\");" if @emitted_extern_modules.add?(node.from_module)
+      parts << "const #{node.name} = #{node.from_module}.#{node.name};"
+      parts.join("\n")
 
     when AST::RequireNode
       if node.kind == :package
@@ -649,20 +671,16 @@ private
           arg_code
         end
       end
-      rt_name = @do_rt_name || "rt"
-      args = [rt_name] + args_zig
       mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias}." : ""
-      call = "#{mod_prefix}#{node.name}(#{args.join(', ')})"
 
-      # If the call returns an error union and is not being handled by OR,
-      # we need to add 'try' to propagate errors implicitly
-      return_type = Type.new(node.full_type)
-      if return_type.error_union?
-        # Error union - caller should use OR to handle, or we propagate with try
-        "try #{call}"
+      if node.respond_to?(:extern_call) && node.extern_call
+        # Native FFI call: no rt injection, no try (native Zig/C return convention)
+        "#{mod_prefix}#{node.name}(#{args_zig.join(', ')})"
       else
-        # Non-error return - just call
-        "try #{call}"  # All functions can error in CHEAT (runtime allocations)
+        rt_name = @do_rt_name || "rt"
+        args = [rt_name] + args_zig
+        call = "#{mod_prefix}#{node.name}(#{args.join(', ')})"
+        "try #{call}"
       end
 
     when AST::ReturnNode
