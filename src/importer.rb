@@ -2,7 +2,7 @@ require "set"
 
 # Orchestrates multi-file compilation with a shared module cache.
 # Prevents circular dependencies and compiles each .cht file exactly once.
-class ModuleCompiler
+class ModuleImporter
   CompiledModule = Struct.new(
     :ast,
     :global_scope,   # annotator's global Scope (for importing symbols)
@@ -40,10 +40,10 @@ class ModuleCompiler
     tokens = Lexer.new(source).tokenize
     ast    = Parser.new(tokens, source).parse
 
-    annotator = SemanticAnnotator.new(compiler: self, source_dir: source_dir)
+    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir)
     annotator.annotate!(ast)
 
-    transpiler = ZigTranspiler.new(compiler: self, source_dir: source_dir)
+    transpiler = ZigTranspiler.new(importer: self, source_dir: source_dir)
     zig_body   = transpiler.transpile_module(ast)
 
     mod = CompiledModule.new(

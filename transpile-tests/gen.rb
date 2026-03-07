@@ -10,12 +10,12 @@ class TestGenerator < ZigTranspiler
 
   def generate_test_block(filename, cheat_code, source_dir: Dir.pwd)
     @source_dir = File.expand_path(source_dir)
-    @compiler   = ModuleCompiler.new(base_dir: @source_dir)
+    @importer   = ModuleImporter.new(base_dir: @source_dir)
 
     # 1. Parse AST
     tokens = Lexer.new(cheat_code).tokenize
     ast = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new(compiler: @compiler, source_dir: @source_dir)
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
     # 2. Get Raw Zig Body

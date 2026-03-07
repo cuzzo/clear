@@ -3815,15 +3815,15 @@ RSpec.describe SemanticAnnotator do
   # ==========================================
 
     # Helper: write helper files to a tmpdir, annotate the main code using
-    # a ModuleCompiler rooted in that tmpdir, and return the AST.
+    # a ModuleImporter rooted in that tmpdir, and return the AST.
     def annotate_with_require(main_code, helpers: {})
       dir = Dir.mktmpdir
       helpers.each { |filename, code| File.write(File.join(dir, filename), code) }
 
-      compiler  = ModuleCompiler.new(base_dir: dir)
+      compiler  = ModuleImporter.new(base_dir: dir)
       tokens    = Lexer.new(main_code).tokenize
       ast       = Parser.new(tokens, main_code).parse
-      annotator = SemanticAnnotator.new(compiler: compiler, source_dir: dir)
+      annotator = SemanticAnnotator.new(importer: compiler, source_dir: dir)
       annotator.annotate!(ast)
       ast
     ensure
@@ -3926,11 +3926,11 @@ RSpec.describe SemanticAnnotator do
         File.write(File.join(dir, "a.cht"), 'REQUIRE "b.cht";')
         File.write(File.join(dir, "b.cht"), 'REQUIRE "a.cht";')
 
-        compiler  = ModuleCompiler.new(base_dir: dir)
+        compiler  = ModuleImporter.new(base_dir: dir)
         main_code = 'REQUIRE "a.cht";'
         tokens    = Lexer.new(main_code).tokenize
         ast       = Parser.new(tokens, main_code).parse
-        annotator = SemanticAnnotator.new(compiler: compiler, source_dir: dir)
+        annotator = SemanticAnnotator.new(importer: compiler, source_dir: dir)
 
         expect { annotator.annotate!(ast) }.to raise_error(/Circular dependency/)
       ensure

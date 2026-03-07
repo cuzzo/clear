@@ -12,7 +12,7 @@ require_relative "./annotator"
 require_relative "./pipeline_generator"
 require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
-require_relative "./compiler"
+require_relative "./importer"
 
 class ZigTranspiler
   include PipelineGenerator
@@ -21,19 +21,19 @@ class ZigTranspiler
 
   attr_reader :struct_schemas
 
-  def initialize(compiler: nil, source_dir: nil)
-    @compiler   = compiler
+  def initialize(importer: nil, source_dir: nil)
+    @importer   = importer
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
   end
 
   # Single-file entry point (used by the CLI and simple callers).
   def transpile(cheat_code, source_dir: @source_dir)
     @source_dir = File.expand_path(source_dir)
-    @compiler ||= ModuleCompiler.new(base_dir: @source_dir)
+    @importer ||= ModuleImporter.new(base_dir: @source_dir)
 
     tokens    = Lexer.new(cheat_code).tokenize
     ast       = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new(compiler: @compiler, source_dir: @source_dir)
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
     <<~ZIG
@@ -56,7 +56,7 @@ class ZigTranspiler
   end
 
   # Module entry point: transpile a pre-parsed+annotated AST, emitting only
-  # declarations that are importable (non-private). Used by ModuleCompiler.
+  # declarations that are importable (non-private). Used by ModuleImporter.
   def transpile_module(ast)
     parts = []
     ast.statements.each do |stmt|
@@ -94,10 +94,10 @@ private
 
     when AST::RequireNode
       # Inline the required module as a Zig const struct namespace.
-      # The module body was already transpiled (and cached) by ModuleCompiler.
-      return "" unless @compiler
+      # The module body was already transpiled (and cached) by ModuleImporter.
+      return "" unless @importer
 
-      mod = @compiler.compile_file(node.path, caller_dir: @source_dir)
+      mod = @importer.compile_file(node.path, caller_dir: @source_dir)
 
       # Merge the module's struct schemas so RC cleanup works for imported types.
       if mod.struct_schemas

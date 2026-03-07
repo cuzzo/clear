@@ -17,8 +17,8 @@ class SemanticAnnotator
 
   attr_reader :scope_stack
 
-  def initialize(compiler: nil, source_dir: nil)
-    @compiler   = compiler
+  def initialize(importer: nil, compiler: nil, source_dir: nil)
+    @importer   = importer || compiler  # compiler: kept for one-release backward compat
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
     # We start with a global scope
     @scope_stack = [Scope.new]
@@ -97,12 +97,12 @@ private
   end
 
   def visit_RequireNode(node)
-    unless @compiler
-      error!(node, "REQUIRE is only supported when using the Compiler. " \
-                   "Pass compiler: and source_dir: to SemanticAnnotator.new.")
+    unless @importer
+      error!(node, "REQUIRE is only supported when using the Importer. " \
+                   "Pass importer: and source_dir: to SemanticAnnotator.new.")
     end
 
-    mod = @compiler.compile_file(node.path, caller_dir: @source_dir)
+    mod = @importer.compile_file(node.path, caller_dir: @source_dir)
     node.full_type = :Void
 
     same_dir = (mod.source_dir == @source_dir)
