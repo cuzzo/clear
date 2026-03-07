@@ -102,15 +102,26 @@ private
                    "Pass importer: and source_dir: to SemanticAnnotator.new.")
     end
 
-    mod = @importer.compile_file(node.path, caller_dir: @source_dir)
+    mod = if node.kind == :package
+      @importer.compile_package(node.path, caller_dir: @source_dir)
+    else
+      @importer.compile_file(node.path, caller_dir: @source_dir)
+    end
     node.full_type = :Void
 
-    same_dir = (mod.source_dir == @source_dir)
+    # Packages are always external — only :pub symbols are importable.
+    same_dir = (node.kind != :package) && (mod.source_dir == @source_dir)
 
     # Import function signatures that are visible from this call site.
     mod.global_scope.locals.each do |name, entry|
       sig = entry[:type]
       next unless sig.is_a?(Hash) && sig.key?(:params)
+
+      # For package imports: skip functions that were themselves imported from
+      # another module (they have a pre-existing module_alias). Those functions
+      # live in their own package's Zig module and must be accessed through it.
+      # For local file imports (inline struct): re-exporting is fine.
+      next if node.kind == :package && sig[:module_alias]
 
       vis = sig[:visibility] || :package
       importable = (vis == :pub) || (vis == :package && same_dir)

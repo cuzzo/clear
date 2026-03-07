@@ -410,18 +410,29 @@ class Parser
   end
 
   def parse_require
-    tok  = consume(:KEYWORD, 'REQUIRE')
-    path = consume(:STRING).value
-    # Derive a Zig-safe identifier from the filename: strip extension,
-    # replace non-alphanumeric chars with underscore, prefix digit-starts with _.
-    namespace = File.basename(path, '.cht')
-                    .gsub(/[^a-zA-Z0-9_]/, '_')
-                    .sub(/\A(\d)/, '_\1')
+    tok = consume(:KEYWORD, 'REQUIRE')
+    raw = consume(:STRING).value
+
+    if raw.start_with?("pkg:")
+      # Package import: REQUIRE "pkg:math"  →  kind=:package, path="math"
+      pkg_name  = raw.sub(/\Apkg:/, '')
+      path      = pkg_name
+      namespace = pkg_name.gsub(/[^a-zA-Z0-9_]/, '_').sub(/\A(\d)/, '_\1')
+      kind      = :package
+    else
+      # Local file import: REQUIRE "file.cht"
+      path      = raw
+      namespace = File.basename(path, '.cht')
+                      .gsub(/[^a-zA-Z0-9_]/, '_')
+                      .sub(/\A(\d)/, '_\1')
+      kind      = :local
+    end
+
     if match!(:KEYWORD, 'AS')
       namespace = consume(:VAR_ID).value
     end
     match!(:CHAR, ';')
-    AST::RequireNode.new(tok, path, namespace)
+    AST::RequireNode.new(tok, path, namespace, kind)
   end
 
   def parse_visibility_decl(visibility)

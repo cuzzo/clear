@@ -1,0 +1,16 @@
+REQUIRE "pkg:math";
+REQUIRE "pkg:geometry";
+
+FN cheatMain() RETURNS Void ->
+  sum = add(3, 4);
+  ASSERT sum == 7;
+
+  prod = multiply(2, 6);
+  ASSERT prod == 12;
+
+  sq = square(5);
+  ASSERT sq == 25;
+
+  dist = distance_sq(3, 4);
+  ASSERT dist == 25;
+END

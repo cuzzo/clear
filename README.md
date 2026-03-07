@@ -401,6 +401,51 @@ WITH RESTRICT node.child {
 
 This ensures that "poisoning" is always visible and local.
 
+## BUILDING & TESTING
+
+### Prerequisites
+
+- **Ruby** (for the compiler)
+- **Bundler** (`gem install bundler`)
+- **Zig 0.15.x** (for the Zig integration test and runtime)
+
+### Ruby Compiler Tests
+
+```bash
+bundle install
+bundle exec rspec
+```
+
+This runs all 278 Ruby specs covering the lexer, parser, annotator, and transpiler.
+
+### Zig Package Integration Test
+
+The integration test exercises multi-package compilation using Zig's build system. It transpiles two CLEAR packages (`math` and `geometry`) and a main program, wires them as Zig modules, and runs assertions end-to-end.
+
+```bash
+cd transpile-tests/module-integration
+zig build test
+```
+
+The test covers:
+- `REQUIRE "pkg:math"` — cross-package imports
+- `PUB FN` visibility (only public symbols are importable)
+- Transitive dependencies (geometry depends on math)
+- The `--module` transpiler flag (emits `@import("cheat_runtime")` and an embedded test block)
+- Zig `build.zig` module wiring via `captureStdOut()`
+
+### Transpiling a Single File
+
+```bash
+ruby src/transpiler.rb my_script.cht
+```
+
+With package dependencies:
+
+```bash
+ruby src/transpiler.rb --module src/lib.cht --pkg math=/abs/path/to/math/src/lib.cht
+```
+
 ## EXAMPLES
 
 ### The *SMOOTH* operator

@@ -11,10 +11,23 @@ class ModuleImporter
     :struct_schemas  # transpiler's @struct_schemas for RC cleanup propagation
   )
 
-  def initialize(base_dir: Dir.pwd)
-    @base_dir = File.expand_path(base_dir)
+  def initialize(base_dir: Dir.pwd, pkg_paths: {})
+    @base_dir     = File.expand_path(base_dir)
     @module_cache = {}  # abs_path => CompiledModule
     @compiling    = Set.new  # abs_paths currently being compiled (cycle detection)
+    # pkg_paths: { "name" => "/abs/path/to/lib.cht" } — registered package sources.
+    @pkg_paths    = pkg_paths.transform_keys(&:to_s)
+  end
+
+  # Compile a .cht package by name and return a CompiledModule.
+  # Looks up the source path from @pkg_paths.
+  #
+  # @param pkg_name [String] Package name (e.g. "math")
+  def compile_package(pkg_name, caller_dir: @base_dir)
+    path = @pkg_paths[pkg_name.to_s]
+    raise "REQUIRE error: unknown package '#{pkg_name}'. " \
+          "Register it with --pkg #{pkg_name}=/path/to/lib.cht" unless path
+    compile_file(path, caller_dir: File.dirname(File.expand_path(path)))
   end
 
   # Compile a .cht file and return a CompiledModule (cached after first call).

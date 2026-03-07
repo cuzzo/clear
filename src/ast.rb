@@ -173,7 +173,8 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) { include Locatable }
-  RequireNode  = Struct.new(:token, :path, :namespace) { include Locatable }
+  # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
+  RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :visibility, :deferred_drops, :uses_frame) { include Locatable }
   StructDef    = Struct.new(:token, :name, :fields, :visibility) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }

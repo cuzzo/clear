@@ -1,0 +1,5 @@
+REQUIRE "pkg:math";
+
+PUB FN distance_sq(x: Number, y: Number) RETURNS Number ->
+  RETURN add(square(x), square(y));
+END

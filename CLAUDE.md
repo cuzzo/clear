@@ -10,8 +10,13 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ```bash
 bundle install              # Install Ruby dependencies
-bundle exec rspec           # Run all tests
+bundle exec rspec           # Run all Ruby specs (278 examples)
+
+# Package integration test (requires Zig)
+cd transpile-tests/module-integration && zig build test
 ```
+
+Run **both** test suites after making changes to the compiler. The Zig integration test exercises the full package import pipeline (`REQUIRE "pkg:name"`, `--module` CLI flag, cross-package symbol resolution, and the Zig build system wiring).
 
 ## Architecture
 

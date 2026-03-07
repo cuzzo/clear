@@ -1,0 +1,10 @@
+.{
+    .name = .module_integration,
+    .fingerprint = 0x73c2674914866165,
+    .version = "0.1.0",
+    .dependencies = .{
+        .math = .{ .path = "packages/math" },
+        .geometry = .{ .path = "packages/geometry" },
+    },
+    .paths = .{""},
+}

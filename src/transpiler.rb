@@ -27,9 +27,10 @@ class ZigTranspiler
   end
 
   # Single-file entry point (used by the CLI and simple callers).
-  def transpile(cheat_code, source_dir: @source_dir)
+  # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {})
     @source_dir = File.expand_path(source_dir)
-    @importer ||= ModuleImporter.new(base_dir: @source_dir)
+    @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
     tokens    = Lexer.new(cheat_code).tokenize
     ast       = Parser.new(tokens, cheat_code).parse
@@ -77,6 +78,54 @@ class ZigTranspiler
     parts.compact.join("\n\n")
   end
 
+  # CLI --module entry point: emit a Zig module file (no runtime footer).
+  # Uses @import("cheat_runtime") instead of inlining runtime-header.zig.
+  # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name".
+  def transpile_as_module(cheat_code, source_dir: @source_dir, pkg_paths: {})
+    @source_dir = File.expand_path(source_dir)
+    @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
+
+    tokens    = Lexer.new(cheat_code).tokenize
+    ast       = Parser.new(tokens, cheat_code).parse
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
+    annotator.annotate!(ast)
+
+    body = transpile_module(ast)
+
+    # If the module defines cheatMain, emit a Zig test block so the module
+    # can be used directly as the root of `zig test` without a wrapper file.
+    has_cheat_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+    test_block = if has_cheat_main
+      <<~ZIG_TEST
+
+        test "cheat main" {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            defer _ = gpa.deinit();
+            const allocator = gpa.allocator();
+            var global_ctx = EbrContext{};
+            defer global_ctx.deinit(allocator);
+            var rt = try Runtime.init(allocator, 1024 * 1024, &global_ctx);
+            defer rt.deinit();
+            rt.wireAllocator();
+            try cheatMain(&rt);
+        }
+      ZIG_TEST
+    else
+      ""
+    end
+
+    <<~ZIG
+      const std = @import("std");
+      const CheatHeader = @import("cheat_runtime");
+      const CheatLib = CheatHeader.CheatLib;
+      const Runtime = CheatHeader.Runtime;
+      const EbrContext = CheatHeader.EbrContext;
+
+      #{body}
+      #{test_block}
+    ZIG
+  end
+
 private
 
   def visit(node)
@@ -93,23 +142,29 @@ private
       node.statements.map { |stmt| visit(stmt) }.join("\n\n")
 
     when AST::RequireNode
-      # Inline the required module as a Zig const struct namespace.
-      # The module body was already transpiled (and cached) by ModuleImporter.
-      return "" unless @importer
+      if node.kind == :package
+        # Package imports use Zig's named module system (@import).
+        # The build system wires the actual module; we just emit the import.
+        "const #{node.namespace} = @import(\"#{node.namespace}\");"
+      else
+        # Local file imports: inline the compiled module as a Zig const struct namespace.
+        # The module body was already transpiled (and cached) by ModuleImporter.
+        return "" unless @importer
 
-      mod = @importer.compile_file(node.path, caller_dir: @source_dir)
+        mod = @importer.compile_file(node.path, caller_dir: @source_dir)
 
-      # Merge the module's struct schemas so RC cleanup works for imported types.
-      if mod.struct_schemas
-        @struct_schemas ||= {}
-        @struct_schemas.merge!(mod.struct_schemas)
+        # Merge the module's struct schemas so RC cleanup works for imported types.
+        if mod.struct_schemas
+          @struct_schemas ||= {}
+          @struct_schemas.merge!(mod.struct_schemas)
+        end
+
+        body = mod.transpiled_body.strip
+        # Indent each line of the module body for readability inside the struct.
+        indented = body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
+
+        "const #{node.namespace} = struct {\n#{indented}\n};"
       end
-
-      body = mod.transpiled_body.strip
-      # Indent each line of the module body for readability inside the struct.
-      indented = body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
-
-      "const #{node.namespace} = struct {\n#{indented}\n};"
 
     when AST::StructDef
       # CHEAT: STRUCT User { id: Number }
@@ -1063,28 +1118,35 @@ $logger.formatter = proc do |severity, datetime, progname, msg|
 end
 
 if __FILE__ == $0
+  options = { mode: :standalone, pkg_paths: {} }
+
   OptionParser.new do |opts|
     opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
       $logger.level = Logger.const_get(level.upcase)
     end
+    opts.on('--module', 'Emit as a Zig module (uses @import("cheat_runtime"), no runtime footer)') do
+      options[:mode] = :module
+    end
+    opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.cht"') do |spec|
+      name, path = spec.split('=', 2)
+      options[:pkg_paths][name] = File.expand_path(path)
+    end
   end.parse!
-end
-
-
-if __FILE__ == $0
-  # Assuming you have runtime.zig in zig/runtime.zig
-  if !File.exist?("zig/runtime.zig")
-    puts "Please ensure zig/runtime.zig exists (from your prompt)!"
-    exit
-  end
 
   script_file = ARGV.first
   if script_file
     code       = File.read(script_file)
     source_dir = File.dirname(File.expand_path(script_file))
-    puts ZigTranspiler.new.transpile(code, source_dir: source_dir)
+    transpiler = ZigTranspiler.new
+
+    case options[:mode]
+    when :module
+      puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
+    else
+      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
+    end
   else
-    $stderr.puts "Usage: ruby transpiler.rb <script.ct>"
+    $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.cht] <script.cht>"
   end
 end
 

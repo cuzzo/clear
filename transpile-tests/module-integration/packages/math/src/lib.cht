@@ -1,0 +1,11 @@
+PUB FN add(a: Number, b: Number) RETURNS Number ->
+  RETURN a + b;
+END
+
+PUB FN multiply(a: Number, b: Number) RETURNS Number ->
+  RETURN a * b;
+END
+
+PUB FN square(x: Number) RETURNS Number ->
+  RETURN multiply(x, x);
+END
