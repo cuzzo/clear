@@ -473,11 +473,12 @@ class Parser
   end
 
   def get_precedence(token)
-    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_RESCUE
-    
+    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_RESCUE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
+
     # Precedence levels (higher = tighter binding)
     case token.value
     when 'OR', 's>', 'AS' then 1
+    when '..<', '..<=', '..=' then 2
     when '||'             then 3
     when '&&'             then 4
     when '==', '!=', '<', '>', '<=', '>=' then 5
@@ -512,6 +513,14 @@ class Parser
       # SMOOTH binds Level 1, but its RHS allows chained pipe operators
       rhs = parse_expression(next_prec)
       return AST::BinaryOp.new(op_token, lhs, :SMOOTH, rhs)
+
+    when '..<'
+      rhs = parse_expression(next_prec)
+      return AST::RangeLit.new(op_token, lhs, rhs, false)
+
+    when '..<=', '..='
+      rhs = parse_expression(next_prec)
+      return AST::RangeLit.new(op_token, lhs, rhs, true)
     end
 
     # 3. Standard Operators (+, -, *, etc.)

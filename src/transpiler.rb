@@ -640,6 +640,15 @@ private
       # Zig uses .? for optional unwrapping
       "#{visit(node.target)}.?"
 
+    when AST::RangeLit
+      start_code = visit(node.start)
+      end_code   = visit(node.finish)
+      if node.inclusive
+        "CheatLib.Range{ .start = #{start_code}, .end = #{end_code} + 1 }"
+      else
+        "CheatLib.Range{ .start = #{start_code}, .end = #{end_code} }"
+      end
+
     when AST::Identifier
       # [FIX] Handle '_' Identifier acting as a Placeholder
       if node.name == "_" && @placeholder_name

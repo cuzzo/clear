@@ -262,6 +262,9 @@ module AST
   # fields: Array of { name: String, value: ASTNode | :wildcard }
   # partial: Boolean — true when `...` is present (remaining fields ignored)
   StructPattern     = Struct.new(:token, :fields, :partial) { include Locatable }
+  # RangeLit: a range expression (start..<end) or (start..<=end).
+  # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
+  RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
   # DoBlock: fork-join parallel execution.
   # branches: Array of expression arrays — each sub-array is one parallel branch.
   DoBlock           = Struct.new(:token, :branches) { include Locatable }

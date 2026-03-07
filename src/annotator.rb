@@ -41,6 +41,9 @@ private
 
     # Setup Globals
     current_scope.declare("argv", nil, Type::STRING_TYPE, false, false, nil, :heap)
+
+    # Built-in Range type: fields accessible via dot access
+    current_scope.declare_type(:Range, {"start" => :Number, "end" => :Number})
   end
 
   def visit(node)
@@ -1018,6 +1021,28 @@ private
     else
       node.full_type = Type.new(:"#{base_type}[]", location: :heap)
     end
+  end
+
+  def visit_RangeLit(node)
+    visit(node.start)
+    visit(node.finish)
+
+    start_type = node.start.resolved_type
+    finish_type = node.finish.resolved_type
+
+    unless [:Number, :Int64, :Byte].include?(start_type)
+      error!(node, "Range start must be a numeric type, got #{start_type}")
+    end
+
+    unless [:Number, :Int64, :Byte].include?(finish_type)
+      error!(node, "Range end must be a numeric type, got #{finish_type}")
+    end
+
+    # Coerce integer types to Number (f64) for uniform Range representation
+    node.start.coerced_type = :Number if [:Int64, :Byte].include?(start_type)
+    node.finish.coerced_type = :Number if [:Int64, :Byte].include?(finish_type)
+
+    node.full_type = :Range
   end
 
   def visit_Literal(node)

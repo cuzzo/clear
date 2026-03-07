@@ -15,6 +15,23 @@ pub const TaskFn = @import("queues.zig").TaskFn;
 
 // Helper Functions
 pub const CheatLib = struct {
+    // -----------------------------------------------------------------------
+    // Range: a contiguous numeric range [start, end) (end is always exclusive)
+    // Created via (start..<end) or (start..<=end) in CLEAR source.
+    pub const Range = struct {
+        start: f64,
+        end: f64,  // exclusive end
+
+        pub fn len(self: Range) f64 {
+            return self.end - self.start;
+        }
+
+        pub fn contains(self: Range, val: f64) bool {
+            return val >= self.start and val < self.end;
+        }
+    };
+
+
     // Mostly for green fibers
     // Read from a non-blocking socket
     // Only works on Linux

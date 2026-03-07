@@ -39,8 +39,9 @@ class Lexer
       when @s.scan(/--.*$/) then advance_pos(@s.matched)
 
       # --- TOKENS (Auto-advance via add) ---
-      # TODO: Change range syntax to ..< and ..=
       when @s.scan(/\.\.\./) then add(:ELLIPSIS, '...', start_col)
+      when @s.scan(/\.\.<=/) then add(:RANGE_INCL, '..<=', start_col)
+      when @s.scan(/\.\.</) then add(:RANGE_EXCL, '..<', start_col)
       when @s.scan(/\.\./) then add(:RANGE, '..', start_col)
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
       when @s.scan(/s>/) then add(:SMOOTH, 's>', start_col)

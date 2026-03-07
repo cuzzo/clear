@@ -3628,5 +3628,93 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Range Literals (..<  and  ..<=)
+  # ---------------------------------------------------------------------------
+  describe "Range literals" do
+    context "exclusive range (1..<10)" do
+      let(:code) { "r = (1..<10);" }
+
+      it "resolves to :Range" do
+        expect(result).to eq(:Range)
+      end
+
+      it "does not raise an error" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "inclusive range (1..<=10)" do
+      let(:code) { "r = (1..<=10);" }
+
+      it "resolves to :Range" do
+        expect(result).to eq(:Range)
+      end
+
+      it "does not raise an error" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "field access on range (.start and .end)" do
+      let(:code) {
+        <<~FLUX
+          r = (2..<8);
+          s = r.start;
+          e = r.end;
+        FLUX
+      }
+
+      it "resolves .start to Number" do
+        start_decl = ast.statements[-2]
+        expect(start_decl.resolved_type).to eq(:Number)
+      end
+
+      it "resolves .end to Number" do
+        end_decl = ast.statements.last
+        expect(end_decl.resolved_type).to eq(:Number)
+      end
+    end
+
+    context "range with Int64 bounds (auto-coerced to Number)" do
+      let(:code) { "r = (0_i64..<5_i64);" }
+
+      it "resolves to :Range without error" do
+        expect { ast }.not_to raise_error
+        expect(result).to eq(:Range)
+      end
+
+      it "coerces Int64 start to Number" do
+        range_node = ast.statements.last.value
+        expect(range_node.start.coerced_type).to eq(:Number)
+      end
+    end
+
+    context "range with arithmetic bounds" do
+      let(:code) { "r = ((1 + 2)..<(3 * 4));" }
+
+      it "resolves to :Range without error" do
+        expect { ast }.not_to raise_error
+        expect(result).to eq(:Range)
+      end
+    end
+
+    context "range with String start (type error)" do
+      let(:code) { 'r = ("bad"..<10);' }
+
+      it "raises a type error" do
+        expect { ast }.to raise_error(/Range start must be a numeric type/)
+      end
+    end
+
+    context "range with Bool end (type error)" do
+      let(:code) { "r = (1..<TRUE);" }
+
+      it "raises a type error" do
+        expect { ast }.to raise_error(/Range end must be a numeric type/)
+      end
+    end
+  end
 end
 

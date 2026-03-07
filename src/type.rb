@@ -630,6 +630,7 @@ class Type
     when :Bool       then "bool"
     when :Byte       then "u8"
     when :Any        then "f64" # Default to Number for Any in Zig
+    when :Range      then "CheatLib.Range"
     else resolved.to_s  # Struct names (e.g., "User")
     end
 
