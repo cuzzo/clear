@@ -173,8 +173,8 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) { include Locatable }
-  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :deferred_drops, :uses_frame) { include Locatable }
-  StructDef    = Struct.new(:token, :name, :fields) { include Locatable }
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :visibility, :deferred_drops, :uses_frame) { include Locatable }
+  StructDef    = Struct.new(:token, :name, :fields, :visibility) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
   Assignment   = Struct.new(:token, :name, :value) { include Locatable }
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.

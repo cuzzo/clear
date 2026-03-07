@@ -19,6 +19,7 @@ class Lexer
       GIVE TAKES COPY MOVE
       WITH EXCLUSIVE RESTRICT
       MATCH START DEFAULT WHEN
+      PUB PRIVATE
     ].to_set
 
   def initialize(source)
