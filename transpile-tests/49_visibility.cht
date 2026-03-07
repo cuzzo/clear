@@ -1,0 +1,28 @@
+-- 49_visibility: PUB / PRIVATE / package-private function visibility
+--
+-- PUB FN    -> emits `pub fn` in Zig (importable by other modules)
+-- FN        -> emits `fn` in Zig (package-private, same directory)
+-- PRIVATE FN -> emits `fn` in Zig (private, not importable even within directory)
+
+PUB FN publicAdd(a: Number, b: Number) RETURNS Number ->
+  RETURN a + b;
+END
+
+FN packageHelper(x: Number) RETURNS Number ->
+  RETURN x * 2;
+END
+
+PRIVATE FN privateImpl(x: Number) RETURNS Number ->
+  RETURN x + 99;
+END
+
+FN cheatMain() RETURNS Void ->
+  result = publicAdd(3, 4);
+  ASSERT result == 7, "PUB FN: 3 + 4 should equal 7";
+
+  doubled = packageHelper(5);
+  ASSERT doubled == 10, "package FN: 5 * 2 should equal 10";
+
+  secret = privateImpl(1);
+  ASSERT secret == 100, "PRIVATE FN: 1 + 99 should equal 100";
+END

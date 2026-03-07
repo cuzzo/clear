@@ -3716,5 +3716,98 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ==========================================
+  describe "Visibility modifiers" do
+  # ==========================================
+
+    def run_with_annotator(source)
+      tokens = Lexer.new(source).tokenize
+      ast = Parser.new(tokens, source).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      [ast, annotator]
+    end
+
+    context "PUB FN" do
+      let(:code) { "PUB FN foo() RETURNS Number -> RETURN 1; END" }
+
+      it "sets :pub visibility on the FunctionDef node" do
+        expect(ast.statements.first.visibility).to eq(:pub)
+      end
+
+      it "stores :pub visibility in the scope signature" do
+        _, annotator = run_with_annotator(code)
+        sig = annotator.scope_stack.first.locals["foo"][:type]
+        expect(sig[:visibility]).to eq(:pub)
+      end
+    end
+
+    context "PRIVATE FN" do
+      let(:code) { "PRIVATE FN foo() RETURNS Number -> RETURN 1; END" }
+
+      it "sets :private visibility on the FunctionDef node" do
+        expect(ast.statements.first.visibility).to eq(:private)
+      end
+
+      it "stores :private visibility in the scope signature" do
+        _, annotator = run_with_annotator(code)
+        sig = annotator.scope_stack.first.locals["foo"][:type]
+        expect(sig[:visibility]).to eq(:private)
+      end
+    end
+
+    context "FN (no modifier)" do
+      let(:code) { "FN foo() RETURNS Number -> RETURN 1; END" }
+
+      it "defaults to :package visibility on the FunctionDef node" do
+        expect(ast.statements.first.visibility).to eq(:package)
+      end
+
+      it "stores :package visibility in the scope signature" do
+        _, annotator = run_with_annotator(code)
+        sig = annotator.scope_stack.first.locals["foo"][:type]
+        expect(sig[:visibility]).to eq(:package)
+      end
+    end
+
+    context "STRUCT visibility" do
+      it "PUB STRUCT sets :pub visibility" do
+        result = run("PUB STRUCT Point { x: Number, y: Number }")
+        expect(result.statements.first.visibility).to eq(:pub)
+      end
+
+      it "PRIVATE STRUCT sets :private visibility" do
+        result = run("PRIVATE STRUCT Point { x: Number, y: Number }")
+        expect(result.statements.first.visibility).to eq(:private)
+      end
+
+      it "STRUCT (no modifier) defaults to :package visibility" do
+        result = run("STRUCT Point { x: Number, y: Number }")
+        expect(result.statements.first.visibility).to eq(:package)
+      end
+    end
+
+    context "mixed visibility in same file" do
+      let(:code) {
+        <<~FLUX
+          PUB FN exported() RETURNS Number -> RETURN 1; END
+          FN internal() RETURNS Number -> RETURN 2; END
+          PRIVATE FN hidden() RETURNS Number -> RETURN 3; END
+        FLUX
+      }
+
+      it "annotates without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "assigns correct visibility to each function" do
+        stmts = ast.statements
+        expect(stmts[0].visibility).to eq(:pub)
+        expect(stmts[1].visibility).to eq(:package)
+        expect(stmts[2].visibility).to eq(:private)
+      end
+    end
+  end
 end
 

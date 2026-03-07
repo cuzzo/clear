@@ -63,9 +63,11 @@ class Parser
 
   # COMMANDS
   stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
-  stmt(:KEYWORD, 'FN') { parse_function_def }
+  stmt(:KEYWORD, 'FN')      { parse_function_def }
+  stmt(:KEYWORD, 'PUB')     { parse_visibility_decl(:pub) }
+  stmt(:KEYWORD, 'PRIVATE') { parse_visibility_decl(:private) }
   stmt(:KEYWORD, 'IF') { parse_if_statement }
-  stmt(:KEYWORD, 'STRUCT', AST::StructDef, ['STRUCT', :TYPE_ID, :struct_body])
+  stmt(:KEYWORD, 'STRUCT') { parse_struct_def }
   stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
@@ -406,7 +408,25 @@ class Parser
      .last # always ignore the first token
   end
 
-  def parse_function_def
+  def parse_visibility_decl(visibility)
+    consume(:KEYWORD)  # consume PUB or PRIVATE
+    if match?(:KEYWORD, 'FN')
+      parse_function_def(visibility)
+    elsif match?(:KEYWORD, 'STRUCT')
+      parse_struct_def(visibility)
+    else
+      error!(current, "Expected FN or STRUCT after visibility modifier, got '#{current.value}'")
+    end
+  end
+
+  def parse_struct_def(visibility = :package)
+    tok = consume(:KEYWORD, 'STRUCT')
+    name = consume(:TYPE_ID).value
+    fields = parse_struct_body
+    AST::StructDef.new(tok, name, fields, visibility)
+  end
+
+  def parse_function_def(visibility = :package)
     fn_token = consume(:KEYWORD, 'FN')
     name = consume(:VAR_ID).value
 
@@ -441,7 +461,7 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var)
+    AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var, visibility)
   end
 
   def parse_block_body(stop_words = ['END'])
@@ -948,4 +968,3 @@ class Parser
     [start_token, items]
   end
 end
-

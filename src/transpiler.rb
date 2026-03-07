@@ -97,7 +97,8 @@ private
       all_params = ["rt: *Runtime"] + params_zig
       # Don't add ! if the type is already an error union
       return_type_str = final_type.start_with?("!") ? final_type : "!#{final_type}"
-      signature = "pub fn #{node.name}(#{all_params.join(', ')}) #{return_type_str}"
+      vis = node.visibility == :pub ? "pub " : ""
+      signature = "#{vis}fn #{node.name}(#{all_params.join(', ')}) #{return_type_str}"
 
       prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
       prologue = node.uses_frame ? prologue : "_ = &rt;"

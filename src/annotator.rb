@@ -100,7 +100,8 @@ private
       return: {
         type: (node.return_type || :Any),
         lifetime: get_lifetime_path(node)
-      }
+      },
+      visibility: node.visibility
     }
 
     current_scope.declare(
@@ -197,7 +198,8 @@ private
       params: node.params.map { |p| {
         name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable], takes: p[:takes]
       }},
-      return: { type: declared_return, lifetime: lifetime_path }
+      return: { type: declared_return, lifetime: lifetime_path },
+      visibility: node.visibility
     }
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
