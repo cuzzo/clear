@@ -587,6 +587,62 @@ pub const CheatLib = struct {
         alloc.destroy(locked);
     }
 
+    // -----------------------------------------------------------------------
+    // Promise(T): A linear handle to the result of a BG (background) fiber.
+    // Corresponds to ~T in CLEAR source. Must be consumed with NEXT exactly once.
+    //
+    // Lifecycle:
+    //   Spawn site:  var p = try CheatLib.Promise(f64).spawn(rt.heapAlloc(), rt.getSched());
+    //   In BG run(): ctx.inner.result = val;
+    //                defer ctx.inner.wg.done();   // signals waiter
+    //   NEXT site:   const val = p.next();        // blocks, then frees Inner
+    //
+    // The Inner is heap-allocated so it outlives both fiber stacks — the BG
+    // fiber's stack is gone by the time NEXT is called, and the caller's stack
+    // may have advanced past the spawn site.
+    pub fn Promise(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            /// Heap-resident result cell shared between producer (BG fiber) and
+            /// consumer (NEXT caller). Allocated at spawn, freed by next().
+            pub const Inner = struct {
+                result: T = undefined,
+                wg: WaitGroup,
+            };
+
+            inner: *Inner,
+            alloc: std.mem.Allocator,
+
+            /// Allocate an Inner on the heap and return the Promise handle.
+            /// Pass `promise.inner` into the BG context struct so the fiber can
+            /// write the result and signal completion.
+            /// `sched` must be the calling fiber's scheduler (`rt.getSched()`).
+            pub fn spawn(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
+                const inner = try alloc.create(Inner);
+                inner.* = .{
+                    .result = undefined,
+                    .wg = WaitGroup.init(sched),
+                };
+                inner.wg.add(1);
+                return Self{ .inner = inner, .alloc = alloc };
+            }
+
+            /// Block the current fiber until the BG fiber has written its result
+            /// (via `inner.result = val` before calling `inner.wg.done()`), then
+            /// return that result and free the heap-allocated Inner.
+            ///
+            /// Safe ordering: the BG fiber's store to `inner.result` happens-before
+            /// the seq_cst `wg.done()`, which happens-before this function returns.
+            pub fn next(self: Self) T {
+                self.inner.wg.wait();
+                const val = self.inner.result;
+                self.alloc.destroy(self.inner);
+                return val;
+            }
+        };
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});
