@@ -314,6 +314,96 @@ pub const CheatLib = struct {
         return stdout;
     }
 
+    // -------------------------------------------------------------------------
+    // TCP SOCKETS — fiber-aware, epoll-backed, Linux only
+    // -------------------------------------------------------------------------
+
+    // Create a non-blocking TCP server socket, bind it to `port`, and begin
+    // listening. Returns the raw server fd; caller owns it (must socketClose).
+    pub fn socketListen(port: u16) !i32 {
+        const fd = try std.posix.socket(
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
+            0,
+        );
+        errdefer std.posix.close(fd);
+
+        // SO_REUSEADDR so we can restart quickly without TIME_WAIT stalls.
+        try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
+
+        const addr = std.posix.sockaddr.in{
+            .family = std.posix.AF.INET,
+            .port   = std.mem.nativeToBig(u16, port),
+            .addr   = 0, // INADDR_ANY
+            .zero   = [_]u8{0} ** 8,
+        };
+        try std.posix.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
+        try std.posix.listen(fd, 128);
+        return fd;
+    }
+
+    // Accept one incoming connection on `server_fd`.
+    // If no connection is ready yet (EAGAIN/WouldBlock), registers with epoll
+    // and yields the current fiber until a connection arrives.
+    // Returns the client fd (set non-blocking via fcntl). Caller owns it.
+    pub fn socketAccept(server_fd: i32) !i32 {
+        const sched = fp.active_scheduler;
+        const task  = sched.getCurrent();
+
+        while (true) {
+            var client_addr: std.posix.sockaddr = undefined;
+            var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
+
+            // Use the high-level posix wrapper — it maps kernel errors to Zig errors
+            // (same pattern as std.posix.read used in CheatLib.read above).
+            const client_fd = std.posix.accept(
+                server_fd, &client_addr, &addr_len,
+                std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
+            ) catch |err| {
+                if (err == error.WouldBlock) {
+                    // No client yet — register for read-readiness and yield.
+                    try sched.registerFd(server_fd, task);
+                    task.status = .Blocked;
+                    task.base.yield();
+                    continue;
+                }
+                return err;
+            };
+
+            return client_fd;
+        }
+    }
+
+    // Write `data` to a non-blocking socket fd.
+    // Loops until all bytes are sent, yielding the fiber on EAGAIN.
+    // Returns the total bytes sent (== data.len on success).
+    pub fn socketWrite(fd: i32, data: []const u8) !usize {
+        const sched = fp.active_scheduler;
+        const task  = sched.getCurrent();
+
+        var sent: usize = 0;
+        while (sent < data.len) {
+            const n = std.posix.write(fd, data[sent..]) catch |err| {
+                if (err == error.WouldBlock) {
+                    // Socket send buffer is full — wait for write-readiness.
+                    try sched.registerWriteFd(fd, task);
+                    task.status = .Blocked;
+                    task.base.yield();
+                    continue;
+                }
+                return err;
+            };
+            sent += n;
+        }
+        return sent;
+    }
+
+    // Close a TCP socket fd, removing it from epoll first so no stale events fire.
+    pub fn socketClose(fd: i32) void {
+        fp.active_scheduler.unregisterFd(fd);
+        std.posix.close(fd);
+    }
+
     // Threading
     // THE INTERNAL WRAPPER
     // This runs INSIDE the new thread. It handles the boilerplate.

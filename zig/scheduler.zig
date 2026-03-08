@@ -572,6 +572,16 @@ pub const Scheduler = struct {
         // We cast the task pointer to usize to store it in epoll user_data
         try self.poller.register(fd, @intFromPtr(task));
     }
+
+    // Register fd for write-readiness (used by socketWrite EAGAIN path).
+    pub fn registerWriteFd(self: *Scheduler, fd: i32, task: *Task) !void {
+        try self.poller.registerWrite(fd, @intFromPtr(task));
+    }
+
+    // Remove fd from epoll (called by socketClose before closing the fd).
+    pub fn unregisterFd(self: *Scheduler, fd: i32) void {
+        self.poller.unregister(fd);
+    }
 };
 
 pub const SchedulerRegistry = struct {
@@ -736,6 +746,25 @@ pub const Poller = struct {
             .data = .{ .ptr = user_data },
         };
         try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event);
+    }
+
+    // Register a file descriptor to watch for WRITE readiness (non-blocking sends).
+    pub fn registerWrite(self: *Poller, fd: i32, user_data: usize) !void {
+        var event = std.os.linux.epoll_event{
+            .events = std.os.linux.EPOLL.OUT | std.os.linux.EPOLL.ET,
+            .data = .{ .ptr = user_data },
+        };
+        // Use MOD if already registered for reads, ADD if new.
+        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, fd, &event) catch |err| {
+            if (err == error.FileDescriptorNotRegistered) {
+                try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event);
+            } else return err;
+        };
+    }
+
+    // Remove a fd from epoll. Safe to call even if fd was never registered.
+    pub fn unregister(self: *Poller, fd: i32) void {
+        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
     }
 
     // Wait for events. Returns the number of events ready.
