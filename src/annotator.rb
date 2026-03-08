@@ -442,6 +442,20 @@ private
   def visit_MatchStatement(node)
     visit(node.expr)
 
+    # Determine whether the subject is an enum or union for exhaustiveness / payload capture
+    expr_t    = Type.new(node.expr.resolved_type || :Any)
+    type_name = expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved
+    schema    = lookup_type_schema(type_name)
+    is_enum   = schema.is_a?(Hash) && schema[:kind] == :enum
+    is_union  = schema.is_a?(Hash) && schema[:kind] == :union
+
+    # Build type-param substitution for generic union payload capture
+    # e.g. Option<Number> → { T: :Number }
+    union_subst = {}
+    if is_union && expr_t.generic_instance? && schema[:type_params]&.any?
+      schema[:type_params].zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
+    end
+
     branch_logic = node.cases.map do |c|
       proc {
         if c[:kind] == :when
@@ -453,14 +467,36 @@ private
           annotate_struct_pattern!(node, c[:value])
         else
           visit(c[:value])
-          expr_t = Type.new(node.expr.resolved_type || :Any)
-          # Allow union cases (e.g. :Option) to match a generic instance (e.g. :"Option<Number>")
-          base_match = expr_t.generic_instance? && expr_t.generic_base == c[:value].resolved_type
+          expr_t2 = Type.new(node.expr.resolved_type || :Any)
+          # Allow union base type (e.g. :Option) to match a generic instance (e.g. :"Option<Number>")
+          base_match = expr_t2.generic_instance? && expr_t2.generic_base == c[:value].resolved_type
           unless c[:value].resolved_type == node.expr.resolved_type ||
                  node.expr.resolved_type == :Any ||
                  c[:value].resolved_type == :Any ||
                  base_match
             error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
+          end
+
+          # Payload capture: `Shape.Circle AS r ->`
+          if c[:binding]
+            if is_enum
+              error!(node, "Cannot capture payload from enum variant: enums have no payload. Remove 'AS #{c[:binding]}'.")
+            elsif is_union
+              variant_name = case c[:value]
+                             when AST::GetField   then c[:value].field
+                             when AST::MethodCall then c[:value].name
+                             end
+              if variant_name
+                raw_payload = schema[:variants][variant_name]
+                if raw_payload.nil?
+                  error!(node, "Cannot bind 'AS #{c[:binding]}': '#{variant_name}' is a unit variant with no payload.")
+                else
+                  payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
+                  current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
+                  current_scope.set_state(c[:binding], :live)
+                end
+              end
+            end
           end
         end
         c[:body].each { |s| visit(s) }
@@ -481,6 +517,29 @@ private
       node.default_drops = all_drops.pop
     end
     node.case_drops = all_drops
+
+    # Exhaustiveness check: when MATCH subject is an enum or union and there is no
+    # DEFAULT branch, every variant must appear as an :eq case.
+    # We skip the check when any case is a :when or :struct_pattern guard — those
+    # introduce arbitrary conditions so we cannot prove exhaustiveness statically.
+    if !node.default_case && (is_enum || is_union) &&
+       node.cases.all? { |c| c[:kind] == :eq }
+      covered = node.cases.flat_map do |c|
+        variant_name = case c[:value]
+                       when AST::GetField   then c[:value].field
+                       when AST::MethodCall then c[:value].name
+                       else nil
+                       end
+        variant_name ? [variant_name] : []
+      end.to_set
+
+      all_variants = is_enum ? schema[:variants] : schema[:variants].keys.to_set
+      missing = all_variants - covered
+      unless missing.empty?
+        type_label = is_enum ? "enum" : "union"
+        error!(node, "MATCH on #{type_label} '#{type_name}' is non-exhaustive: missing variants: #{missing.sort.join(', ')}")
+      end
+    end
 
     node.full_type = :Void
   end

@@ -1,0 +1,66 @@
+-- MATCH on unions with AS payload capture
+
+UNION Shape { Circle: Number, Rectangle: Number, Point }
+UNION Result { Ok: Number, Err: Number, Empty }
+UNION Option<T> { Some: T, None }
+
+FN area(s: Shape) RETURNS Number ->
+  MUTABLE a = 0.0;
+  MATCH s START
+    Shape.Circle    AS r -> a = r * 3.14;,
+    Shape.Rectangle AS w -> a = w * w;,
+    Shape.Point          -> a = 0.0;
+  END
+  RETURN a;
+END
+
+FN unwrap_ok(r: Result) RETURNS Number ->
+  MUTABLE val = 0.0;
+  MATCH r START
+    Result.Ok    AS v -> val = v;,
+    Result.Err   AS e -> val = e * -1.0;,
+    Result.Empty      -> val = 0.0;
+  END
+  RETURN val;
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Payload capture: Circle with radius 2.0 → area = 2.0 * 3.14 = 6.28
+  c: Shape = Shape{ Circle: 2.0 };
+  ASSERT area(c) == 6.28, "Circle AS r: area = r * 3.14";
+
+  -- Payload capture: Rectangle with width 3.0 → area = 9.0
+  rect: Shape = Shape{ Rectangle: 3.0 };
+  ASSERT area(rect) == 9.0, "Rectangle AS w: area = w * w";
+
+  -- Unit variant: no capture needed
+  p: Shape = Shape.Point;
+  ASSERT area(p) == 0.0, "Point: area = 0";
+
+  -- Result union payload capture
+  ok: Result = Result{ Ok: 42.0 };
+  ASSERT unwrap_ok(ok) == 42.0, "Result.Ok AS v";
+
+  err: Result = Result{ Err: 5.0 };
+  ASSERT unwrap_ok(err) == -5.0, "Result.Err AS e: negated";
+
+  empty: Result = Result.Empty;
+  ASSERT unwrap_ok(empty) == 0.0, "Result.Empty: default";
+
+  -- Inline match with AS capture
+  MUTABLE got = 0.0;
+  opt = Option<Number>{ Some: 99.0 };
+  MATCH opt START
+    Option.Some AS x -> got = x;,
+    Option.None      -> got = -1.0;
+  END
+  ASSERT got == 99.0, "Option.Some AS x: extracts payload";
+
+  MUTABLE got2 = 0.0;
+  none_val = Option<Number>{ Some: 0.0 };
+  MATCH none_val START
+    Option.Some AS x -> got2 = x;,
+    Option.None      -> got2 = -1.0;
+  END
+  ASSERT got2 == 0.0, "Option.Some AS x = 0.0";
+END

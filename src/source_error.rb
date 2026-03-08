@@ -34,6 +34,9 @@ module ErrorDefinitions
     UNION_UNKNOWN_VARIANT:     "Type Error: Union '%s' has no variant '%s'.",
     UNION_PAYLOAD_MISMATCH:    "Type Error: Union variant '%s' expects %s, got %s.",
     UNION_FIELD_ACCESS:        "Type Error: '%s' is a union type. Access variants with 'Type.Variant(payload)'.",
+    MATCH_NON_EXHAUSTIVE:      "MATCH on %s '%s' is non-exhaustive: missing variants: %s.",
+    MATCH_ENUM_CAPTURE:        "Cannot capture payload from enum variant: enums have no payload. Remove 'AS %s'.",
+    MATCH_UNIT_CAPTURE:        "Cannot bind 'AS %s': '%s' is a unit variant with no payload.",
 
     GENERIC_DUPLICATE_TYPE_PARAM: "Type Error: Duplicate type parameter '%s' in generic struct '%s'.",
     GENERIC_TYPE_PARAM_SHADOWS_BUILTIN: "Type Error: Type parameter '%s' shadows built-in type '%s'.",

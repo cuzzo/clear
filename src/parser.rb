@@ -817,9 +817,14 @@ class Parser
         cases << { kind: :struct_pattern, value: pattern, body: body }
       else
         pattern = parse_expression
+        binding = nil
+        if match?(:KEYWORD, 'AS')
+          consume(:KEYWORD, 'AS')
+          binding = consume(:VAR_ID).value
+        end
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :eq, value: pattern, body: body }
+        cases << { kind: :eq, value: pattern, binding: binding, body: body }
       end
       match!(:CHAR, ',')  # consume comma separator between cases if present
     end

@@ -539,20 +539,25 @@ private
       is_union = @union_schemas&.key?(union_lookup)
       parts = node.cases.map do |c|
         body = transpile_block(c[:body])
-        cond = if is_union
+        if is_union
           # Tagged union: compare active tag rather than value equality
           variant = case c[:value]
                     when AST::GetField   then c[:value].field
                     when AST::MethodCall then c[:value].name
                     else visit(c[:value])
                     end
-          "std.meta.activeTag(#{subject}) == .#{variant}"
-        else
-          case c[:kind]
-          when :when           then visit(c[:value])
-          when :struct_pattern then transpile_struct_pattern(subject, c[:value])
-          else                      "#{subject} == #{visit(c[:value])}"
+          cond = "std.meta.activeTag(#{subject}) == .#{variant}"
+          # Emit payload binding: `const r = subject.Variant;`
+          if c[:binding]
+            binding_decl = "const #{c[:binding]} = #{subject}.#{variant};\n    "
+            body = "#{binding_decl}#{body}"
           end
+        else
+          cond = case c[:kind]
+                 when :when           then visit(c[:value])
+                 when :struct_pattern then transpile_struct_pattern(subject, c[:value])
+                 else                      "#{subject} == #{visit(c[:value])}"
+                 end
         end
         "if (#{cond}) {\n    #{body}\n    }"
       end

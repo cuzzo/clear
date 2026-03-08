@@ -1,0 +1,58 @@
+-- MATCH on enums: exhaustiveness + edge cases
+
+ENUM Color { Red, Green, Blue }
+ENUM Direction { North, South, East, West }
+ENUM Bit { Zero, One }
+
+FN color_name(c: Color) RETURNS Number ->
+  MUTABLE n = 0_i64;
+  MATCH c START
+    Color.Red   -> n = 1_i64;,
+    Color.Green -> n = 2_i64;,
+    Color.Blue  -> n = 3_i64;
+  END
+  RETURN n;
+END
+
+FN direction_code(d: Direction) RETURNS Number ->
+  MUTABLE code = 0_i64;
+  MATCH d START
+    Direction.North -> code = 1_i64;,
+    Direction.South -> code = 2_i64;,
+    Direction.East  -> code = 3_i64;,
+    Direction.West  -> code = 4_i64;
+  END
+  RETURN code;
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Exhaustive MATCH covers all variants without DEFAULT
+  ASSERT color_name(Color.Red)   == 1, "Exhaustive MATCH: Red = 1";
+  ASSERT color_name(Color.Green) == 2, "Exhaustive MATCH: Green = 2";
+  ASSERT color_name(Color.Blue)  == 3, "Exhaustive MATCH: Blue = 3";
+
+  -- All four directions
+  ASSERT direction_code(Direction.North) == 1, "Direction: North";
+  ASSERT direction_code(Direction.South) == 2, "Direction: South";
+  ASSERT direction_code(Direction.East)  == 3, "Direction: East";
+  ASSERT direction_code(Direction.West)  == 4, "Direction: West";
+
+  -- MATCH with DEFAULT still works for partial coverage
+  b: Bit = Bit.Zero;
+  MUTABLE out = 0_i64;
+  MATCH b START
+    Bit.Zero -> out = 0_i64;,
+    DEFAULT  -> out = 1_i64;
+  END
+  ASSERT out == 0, "Bit.Zero with DEFAULT";
+
+  -- Inline enum MATCH
+  MUTABLE result = 0_i64;
+  c2: Color = Color.Blue;
+  MATCH c2 START
+    Color.Red   -> result = 10_i64;,
+    Color.Green -> result = 20_i64;,
+    Color.Blue  -> result = 30_i64;
+  END
+  ASSERT result == 30, "Inline Color.Blue = 30";
+END
