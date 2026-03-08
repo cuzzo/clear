@@ -294,6 +294,15 @@ module AST
   # branches: Array of expression arrays — each sub-array is one parallel branch.
   DoBlock           = Struct.new(:token, :branches) { include Locatable }
 
+  # BgBlock: background execution — spawns a fiber and returns a linear Promise (~T).
+  # body: Array of expression nodes. The last expression's type determines T.
+  # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
+  BgBlock           = Struct.new(:token, :body, :deferred_drops) { include Locatable }
+
+  # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
+  # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
+  NextExpr          = Struct.new(:token, :expr) { include Locatable }
+
   # MatchStatement: pattern-matching on a value.
   # cases: Array of { value: ASTNode, body: [ASTNode] }
   # default_case: [ASTNode] or nil

@@ -1006,6 +1006,12 @@ class Parser
   end
 
   def parse_type_annotation(allow_capabilities: true)
+    # Check for tense (Promise) prefix: ~Type
+    tense_prefix = ""
+    if match!(:CHAR, '~')
+      tense_prefix = "~"
+    end
+
     # Check for error union prefix: !Type (Zig-style error returns)
     error_prefix = ""
     if match!(:CHAR, '!')
@@ -1092,7 +1098,7 @@ class Parser
       end
     end
 
-    base_sym = "#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
+    base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
     Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil)
   end
 

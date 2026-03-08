@@ -5970,6 +5970,108 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 2: Annotator & Ownership
+  # ===================================================================
+  describe "BG / ~T Phase 2: annotator and ownership" do
+    # Helper: construct and annotate a BgBlock directly (no parser needed yet)
+    def make_bg_block(body_nodes)
+      token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+      AST::BgBlock.new(token, body_nodes)
+    end
+
+    def make_next_expr(expr_node)
+      token = Lexer::Token.new(:KEYWORD, 'NEXT', 1, 1)
+      AST::NextExpr.new(token, expr_node)
+    end
+
+    # Helper: AST::Literal for a Number value (no scope lookup required by visit_Literal)
+    def make_num_lit(val = 42.0)
+      tok = Lexer::Token.new(:NUMBER, val, 1, 1)
+      AST::Literal.new(tok, :NUMBER, val, nil)
+    end
+
+    describe "visit_BgBlock" do
+      it "sets full_type to ~Void when body is empty" do
+        annotator = SemanticAnnotator.new
+        node = make_bg_block([])
+        annotator.send(:visit_BgBlock, node)
+        expect(node.full_type).to eq(:"~Void")
+      end
+
+      it "wraps the last expression's type in ~ (Number literal body)" do
+        annotator = SemanticAnnotator.new
+        bg = make_bg_block([make_num_lit])
+        annotator.send(:visit_BgBlock, bg)
+        expect(bg.full_type).to eq(:"~Number")
+      end
+    end
+
+    describe "visit_NextExpr" do
+      it "raises when NEXT is called on a Number literal (non-tense)" do
+        annotator = SemanticAnnotator.new
+        next_node = make_next_expr(make_num_lit)
+        expect { annotator.send(:visit_NextExpr, next_node) }
+          .to raise_error(SourceError, /NEXT requires a Promise/)
+      end
+    end
+
+    describe "~T in type annotations (lexer + parser)" do
+      it "tokenises ~ as a CHAR token" do
+        tokens = Lexer.new("~Number").tokenize
+        expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
+        expect(tokens[1]).to have_attributes(type: :TYPE_ID, value: 'Number')
+      end
+
+      it "tokenises ~!Number with tilde, bang, type" do
+        tokens = Lexer.new("~!Number").tokenize
+        expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
+        expect(tokens[1]).to have_attributes(type: :CHAR, value: '!')
+        expect(tokens[2]).to have_attributes(type: :TYPE_ID, value: 'Number')
+      end
+
+      it "parse_type_annotation produces a tense Type for ~Number" do
+        tokens = Lexer.new("~Number").tokenize
+        parser = Parser.new(tokens, "~Number")
+        t = parser.send(:parse_type_annotation)
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Number)
+        expect(t.zig_type).to eq("CheatLib.Promise(f64)")
+      end
+    end
+
+    describe "ownership tracker linear check" do
+      it "raises when a tense variable is live at scope end" do
+        annotator = SemanticAnnotator.new
+        dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+        dummy_node  = AST::BgBlock.new(dummy_token, [])
+
+        # with_new_scope yields and then pops — we call finalize_scope inside the block
+        expect {
+          annotator.send(:with_new_scope) do
+            annotator.send(:current_scope).declare('p', nil, :"~Number", false, false, nil, :stack)
+            annotator.send(:current_scope).set_state('p', :live)
+            annotator.send(:finalize_scope, dummy_node)
+          end
+        }.to raise_error(SourceError, /Promise 'p' must be consumed/)
+      end
+
+      it "does NOT raise when the tense variable has been moved (consumed)" do
+        annotator = SemanticAnnotator.new
+        dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+        dummy_node  = AST::BgBlock.new(dummy_token, [])
+
+        expect {
+          annotator.send(:with_new_scope) do
+            annotator.send(:current_scope).declare('p', nil, :"~Number", false, false, nil, :stack)
+            annotator.send(:current_scope).set_state('p', :moved)
+            annotator.send(:finalize_scope, dummy_node)
+          end
+        }.not_to raise_error
+      end
+    end
+  end
+
+  # ===================================================================
   # BG / ~T (Tense / Promise) — Phase 1: Type System
   # ===================================================================
   describe "~T (tense/promise) type system" do

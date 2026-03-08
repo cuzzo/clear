@@ -500,14 +500,14 @@ private
           end
         end
         c[:body].each { |s| visit(s) }
-        collect_scope_drops
+        collect_scope_drops(node: node)
       }
     end
 
     if node.default_case
       branch_logic << proc {
         node.default_case.each { |s| visit(s) }
-        collect_scope_drops
+        collect_scope_drops(node: node)
       }
     end
 
@@ -1685,6 +1685,36 @@ private
       branch.each { |expr| visit(expr) }
     end
     node.full_type = :Void
+  end
+
+  def visit_BgBlock(node)
+    # Body runs in a separate fiber. The last expression's type determines T in ~T.
+    # Affine variables captured from the enclosing scope are MOVED (not borrowed),
+    # because the caller may return before the fiber finishes.
+    last_type = :Void
+    node.body.each do |expr|
+      visit(expr)
+      last_type = expr.respond_to?(:full_type) ? (expr.full_type || :Void) : :Void
+    end
+    node.full_type = :"~#{last_type}"
+  end
+
+  def visit_NextExpr(node)
+    visit(node.expr)
+    promise_type = Type.new(node.expr.full_type || :Void)
+
+    unless promise_type.tense?
+      error!(node, "NEXT requires a Promise (~T) value, got #{node.expr.full_type}")
+    end
+
+    # Consuming the promise marks the variable as moved — it cannot be used again.
+    if node.expr.is_a?(AST::Identifier)
+      scope = lookup_scope_for(node.expr.name)
+      scope&.set_state(node.expr.name, :moved)
+    end
+
+    # The result type is the inner T from ~T
+    node.full_type = promise_type.tense_type.to_sym
   end
 
   def get_type_slot_size(type_input)
