@@ -679,19 +679,13 @@ private
 
         # Transpile branch body with identifier → ctx.name.* rewrite
         # and rt → __rt to avoid shadowing the outer function's rt parameter.
-        prev_capture_map = @do_capture_map || {}
-        prev_rt_name     = @do_rt_name
-        @do_capture_map = prev_capture_map.merge(
-          captured.map { |name, _| [name, "ctx.#{name}.*"] }.to_h
-        )
-        @do_rt_name = "__rt"
-        body_code = branch_exprs.map { |e|
-          code = visit(e)
-          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-          code
-        }.join("\n        ")
-        @do_capture_map = prev_capture_map
-        @do_rt_name     = prev_rt_name
+        body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}.*"] }.to_h) do
+          branch_exprs.map { |e|
+            code = visit(e)
+            code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+            code
+          }.join("\n        ")
+        end
 
         <<~ZIG.chomp
           const #{ctx_type} = struct {
@@ -754,31 +748,23 @@ private
 
       rt_name = @do_rt_name || "rt"
 
-      # Transpile body inside fiber — captured vars rewritten to ctx.name (by-value capture)
-      prev_capture_map = @do_capture_map || {}
-      prev_rt_name     = @do_rt_name
-      @do_capture_map  = prev_capture_map.merge(
-        captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
-      )
-      @do_rt_name = "__rt"
-
+      # Transpile body inside fiber — captured vars rewritten to ctx.name (by-value, not pointer)
       body_stmts = node.body.dup
       last_expr  = body_stmts.pop
 
-      stmt_code = body_stmts.map { |e|
-        code = visit(e)
-        code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-        code
-      }.join("\n            ")
-
-      result_line = if last_expr.nil? || is_void
-        last_expr ? "#{visit(last_expr)};" : ""
-      else
-        "ctx.inner.result = #{visit(last_expr)};"
+      stmt_code, result_line = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h) do
+        stmts = body_stmts.map { |e|
+          code = visit(e)
+          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+          code
+        }.join("\n            ")
+        result = if last_expr.nil? || is_void
+          last_expr ? "#{visit(last_expr)};" : ""
+        else
+          "ctx.inner.result = #{visit(last_expr)};"
+        end
+        [stmts, result]
       end
-
-      @do_capture_map = prev_capture_map
-      @do_rt_name     = prev_rt_name
 
       <<~ZIG.chomp
         #{blk_label}: {
@@ -1192,6 +1178,19 @@ private
     end
 
     pattern
+  end
+
+  # Temporarily installs a new fiber capture map and rt alias, runs the block, then restores.
+  # Used by both DoBlock (per-branch) and BgBlock to rewrite identifier access inside fiber bodies.
+  def with_fiber_capture_map(new_entries, &blk)
+    prev_map = @do_capture_map || {}
+    prev_rt  = @do_rt_name
+    @do_capture_map = prev_map.merge(new_entries)
+    @do_rt_name     = "__rt"
+    result = blk.call
+    @do_capture_map = prev_map
+    @do_rt_name     = prev_rt
+    result
   end
 
   # Collect all AST::Identifier nodes in a list of expressions for DO/BG block capture.

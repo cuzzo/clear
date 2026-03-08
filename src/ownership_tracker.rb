@@ -197,6 +197,12 @@ module OwnershipTracker
     end
   end
 
+  def check_tense_linear!(node, name, info)
+    if Type.new(info[:type]).tense?
+      error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
+    end
+  end
+
   def finalize_scope(node, branch: nil)
     drops = []
 
@@ -214,9 +220,7 @@ module OwnershipTracker
 
         # Tense (Promise) variables are linear — they cannot be silently dropped.
         # The programmer must NEXT, COLLECT, RETURN, or GIVE them before scope ends.
-        if Type.new(info[:type]).tense?
-          error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
-        end
+        check_tense_linear!(node, name, info)
 
         # AUTOMATICALLY INSERT DROP
         drops << { name: name, type: info[:type] }
@@ -243,9 +247,7 @@ module OwnershipTracker
          info[:storage] != :shared &&
          !info[:sync] &&
          Type.new(info[:type]).requires_move?
-        if Type.new(info[:type]).tense? && node
-          error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
-        end
+        check_tense_linear!(node, name, info) if node
         drops << { name: name, type: info[:type] }
         current_scope.set_state(name, :dropped)
       end
