@@ -868,11 +868,49 @@ class Parser
     error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")
   end
 
+  # Returns true if current position looks like: < TYPE_ID (, TYPE_ID)* > {
+  # Used to disambiguate `Pair<Number>{` (generic struct literal) from `Pair < Number` (comparison).
+  def peek_is_generic_struct_lit?
+    saved = @pos
+    begin
+      return false unless current.type == :CHAR && current.value == '<'
+      @pos += 1 # skip '<'
+      loop do
+        return false unless current.type == :TYPE_ID
+        @pos += 1 # skip TYPE_ID
+        if current.type == :CHAR && current.value == ','
+          @pos += 1 # skip ','
+        elsif current.type == :CHAR && current.value == '>'
+          @pos += 1 # skip '>'
+          return current.type == :CHAR && current.value == '{'
+        else
+          return false
+        end
+      end
+    ensure
+      @pos = saved
+    end
+  end
+
   def parse_lit(storage)
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
       name = type_token.value
-      if match?(:CHAR, '{')
+      if match?(:CHAR, '<') && peek_is_generic_struct_lit?
+        # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }
+        consume(:CHAR, '<')
+        type_args = []
+        until match?(:CHAR, '>')
+          type_args << consume(:TYPE_ID).value
+          match!(:CHAR, ',')
+        end
+        consume(:CHAR, '>')
+        _, fields = parse_comma_seq(:CHAR, '{', '}') do
+          k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
+          [k, v]
+        end
+        return AST::StructLit.new(type_token, name, fields.to_h, storage, type_args)
+      elsif match?(:CHAR, '{')
         # Struct literal: User{ id: 1 }
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
           k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression

@@ -379,14 +379,21 @@ private
         ".#{k} = #{val_code}"
       end.join(", ")
 
-      struct_init = "#{node.name}{ #{field_inits} }"
+      struct_name = if node.type_args&.any?
+        zig_args = node.type_args.map { |a| Type.new(a.to_sym).zig_type }.join(", ")
+        "#{node.name}(#{zig_args})"
+      else
+        node.name
+      end
+
+      struct_init = "#{struct_name}{ #{field_inits} }"
       move_logic = move_statements.reject(&:empty?).join("\n")
 
       if node.storage == :heap # You set this in the Annotator!
        <<~ZIG
           blk: {
              #{move_logic}
-             const ptr = try rt.heapAlloc().create(#{node.name});
+             const ptr = try rt.heapAlloc().create(#{struct_name});
              ptr.* = #{struct_init};
              break :blk ptr;
           }

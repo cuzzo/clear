@@ -1045,7 +1045,18 @@ private
     elsif schema.is_a?(Hash) && schema[:kind] == :union
       error!(node, :UNION_FIELD_ACCESS, type)
     elsif schema && schema[node.field]
-      node.full_type = schema[node.field]
+      field_type = schema[node.field]
+      # For generic instances (e.g. Pair<Number>), substitute type params into field type.
+      type_obj = Type.new(type)
+      if type_obj.generic_instance? && schema[:type_params] && field_type.is_a?(Type)
+        subst = {}
+        schema[:type_params].zip(type_obj.generic_args).each do |param, arg|
+          subst[param] = arg.resolved
+        end
+        resolved_param = field_type.resolved
+        field_type = Type.new(subst[resolved_param]) if subst.key?(resolved_param)
+      end
+      node.full_type = field_type
     else
       error!(node, :ILLEGAL_FIELD_LOOKUP, node.field, type)
     end
@@ -1137,15 +1148,39 @@ private
       return
     end
 
-    # 2. Iterate Fields (Validation)
-    # Unlike Compiler, we don't need to merge defaults for code gen,
-    # we just need to verify that provided fields match the schema.
+    # Build type param substitution map for generic struct instantiation.
+    # e.g. Pair<Number>{ first: 1.0 } → { :T => :Number }
+    type_params = schema[:type_params]
+    type_subst = {}
+    if node.type_args&.any?
+      if type_params.nil? || type_params.empty?
+        error!(node, "Type Error: '#{node.name}' is not a generic type — remove the type arguments.")
+      end
+      if node.type_args.length != type_params.length
+        error!(node, "Type Error: '#{node.name}' expects #{type_params.length} type argument(s), got #{node.type_args.length}.")
+      end
+      type_params.zip(node.type_args).each do |param, arg|
+        type_subst[param] = arg.to_sym
+      end
+    elsif type_params&.any?
+      params_hint = type_params.map(&:to_s).join(', ')
+      error!(node, "Type Error: '#{node.name}' is a generic type — type arguments are required (e.g., #{node.name}<#{params_hint}>).")
+    end
+
+    # Iterate Fields (Validation)
     node.fields.each do |field_name, val_node|
       visit(val_node) # Resolve value type
 
-      expected_type = schema[field_name]
-      if expected_type.nil?
+      raw_expected = schema[field_name]
+      if raw_expected.nil?
         error!(node, "Struct '#{node.name}' has no field '#{field_name}'")
+      end
+
+      # Apply type param substitution (e.g., T → Number)
+      expected_type = if raw_expected.is_a?(Type) && type_subst.key?(raw_expected.resolved)
+        Type.new(type_subst[raw_expected.resolved])
+      else
+        raw_expected
       end
 
       # Simple Type Check
@@ -1157,7 +1192,12 @@ private
       end
     end
 
-    node.full_type = node.name.to_sym
+    # Set full_type to the generic instance name or plain struct name
+    node.full_type = if node.type_args&.any?
+      :"#{node.name}<#{node.type_args.join(',')}>"
+    else
+      node.name.to_sym
+    end
   end
 
   def visit_ListLit(node)

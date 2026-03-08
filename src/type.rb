@@ -201,6 +201,7 @@ class Type
     # 2. Primitives (Widening)
     return true if self.numeric? && other_type.numeric? # Simplified logic
     return true if self.string? && other_type.byte?
+    return true if self.string? && other_type.string?  # Byte[N] → String widening
 
     # 3. Optional Coercion: ?T accepts T, NIL, or ?T
     if self.optional?

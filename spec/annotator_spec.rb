@@ -5084,6 +5084,133 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("fn Triple(comptime A: type, comptime B: type, comptime C: type) type")
       end
     end
+
+    # --------------------------------------------------
+    # Phase 3: Generic Struct Literals
+    # --------------------------------------------------
+    describe "generic struct literals" do
+      def generic_lit_src(extra = "")
+        <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          STRUCT KeyValue<K, V> { key: K, value: V }
+          FN cheatMain() RETURNS Void ->
+            #{extra}
+          END
+        CLEAR
+      end
+
+      it "parses and annotates Pair<Number>{ first: 1.0, second: 2.0 } without error" do
+        expect {
+          run(generic_lit_src("p = Pair<Number>{ first: 1.0, second: 2.0 };"))
+        }.not_to raise_error
+      end
+
+      it "sets full_type to :\"Pair<Number>\" on the StructLit node" do
+        ast = run(generic_lit_src("p = Pair<Number>{ first: 1.0, second: 2.0 };"))
+        fn = ast.statements.last
+        bind = fn.body.first
+        lit = bind.value
+        expect(lit).to be_a(AST::StructLit)
+        expect(lit.resolved_type).to eq(:"Pair<Number>")
+      end
+
+      it "stores type_args on the StructLit AST node" do
+        ast = run(generic_lit_src("p = Pair<Number>{ first: 1.0, second: 2.0 };"))
+        fn = ast.statements.last
+        bind = fn.body.first
+        lit = bind.value
+        expect(lit.type_args).to eq(["Number"])
+      end
+
+      it "accepts KeyValue<String, Number>{ key: \"x\", value: 42.0 }" do
+        expect {
+          run(generic_lit_src('kv = KeyValue<String, Number>{ key: "x", value: 42.0 };'))
+        }.not_to raise_error
+      end
+
+      it "resolves field access on a generic struct literal" do
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN cheatMain() RETURNS Void ->
+            p = Pair<Number>{ first: 1.0, second: 2.0 };
+            x = p.first;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "infers field type as Number when accessing .first on Pair<Number>" do
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN cheatMain() RETURNS Void ->
+            p = Pair<Number>{ first: 1.0, second: 2.0 };
+            x = p.first;
+          END
+        CLEAR
+        ast = run(src)
+        fn = ast.statements.last
+        bind_x = fn.body[1]
+        get_field = bind_x.value
+        expect(get_field).to be_a(AST::GetField)
+        expect(get_field.resolved_type).to eq(:Number)
+      end
+
+      describe "error messages" do
+        it "raises a type error when a field value has the wrong type" do
+          expect {
+            run(generic_lit_src('p = Pair<Number>{ first: "oops", second: 2.0 };'))
+          }.to raise_error(CompilerError, /expected.*Number|got.*String/i)
+        end
+
+        it "raises a type error when wrong number of type args in literal" do
+          expect {
+            run(generic_lit_src("p = Pair<Number, Bool>{ first: 1.0, second: true };"))
+          }.to raise_error(CompilerError, /expects 1 type argument/)
+        end
+
+        it "raises a type error when a non-generic struct gets type args in literal" do
+          src = <<~CLEAR
+            STRUCT User { id: Number }
+            FN cheatMain() RETURNS Void ->
+              u = User<Number>{ id: 1.0 };
+            END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError, /not a generic type/)
+        end
+
+        it "raises a type error when a generic struct literal has no type args" do
+          expect {
+            run(generic_lit_src("p = Pair{ first: 1.0, second: 2.0 };"))
+          }.to raise_error(CompilerError, /type arguments are required/)
+        end
+      end
+
+      describe "Phase 3 Zig code generation" do
+        it "emits Pair(f64){ .first = ..., .second = ... } for Pair<Number>" do
+          src = <<~CLEAR
+            STRUCT Pair<T> { first: T, second: T }
+            FN cheatMain() RETURNS Void ->
+              p = Pair<Number>{ first: 1.0, second: 2.0 };
+            END
+          CLEAR
+          out = ZigTranspiler.new.transpile(src)
+          expect(out).to include("Pair(f64)")
+          expect(out).to include(".first =")
+          expect(out).to include(".second =")
+        end
+
+        it "emits KeyValue([]const u8, f64){ ... } for KeyValue<String, Number>" do
+          src = <<~CLEAR
+            STRUCT KeyValue<K, V> { key: K, value: V }
+            FN cheatMain() RETURNS Void ->
+              kv = KeyValue<String, Number>{ key: "x", value: 42.0 };
+            END
+          CLEAR
+          out = ZigTranspiler.new.transpile(src)
+          expect(out).to include("KeyValue([]const u8, f64)")
+        end
+      end
+    end
   end
 end
 
