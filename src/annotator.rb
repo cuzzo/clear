@@ -1635,8 +1635,15 @@ private
 
       inner.generic_args.each do |arg|
         next if BUILTIN_TYPES.include?(arg.resolved)
-        next if lookup_type_schema(arg.resolved)
-        error!(node, :GENERIC_UNKNOWN_TYPE_ARG, arg.resolved)
+        arg_schema = lookup_type_schema(arg.resolved)
+        if arg_schema.nil?
+          error!(node, :GENERIC_UNKNOWN_TYPE_ARG, arg.resolved)
+        end
+        # If the type arg is itself a generic type, it must carry its own args
+        if arg_schema.is_a?(Hash) && arg_schema[:type_params]&.any?
+          params_hint = arg_schema[:type_params].map(&:to_s).join(', ')
+          error!(node, :GENERIC_MISSING_TYPE_ARGS, arg.resolved, arg.resolved, params_hint)
+        end
       end
 
     else

@@ -4851,6 +4851,34 @@ RSpec.describe SemanticAnnotator do
         expect { run(fn_with_param("Map<String, Number>")) }.not_to raise_error
       end
 
+      it "allows other built-in type args: Pair<Bool>" do
+        expect { run(fn_with_param("Pair<Bool>")) }.not_to raise_error
+      end
+
+      it "allows other built-in type args: Pair<String>" do
+        expect { run(fn_with_param("Pair<String>")) }.not_to raise_error
+      end
+
+      it "allows other built-in type args: Pair<Int64>" do
+        expect { run(fn_with_param("Pair<Int64>")) }.not_to raise_error
+      end
+
+      it "allows a user-defined struct as a type argument: Pair<User>" do
+        src = <<~CLEAR
+          STRUCT User { id: Number }
+          STRUCT Pair<T> { first: T, second: T }
+          FN use(p: Pair<User>) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows ?Pair<Number> as an optional generic param type" do
+        expect { run(fn_with_param("?Pair<Number>")) }.not_to raise_error
+      end
+
       it "allows a generic type as a function return type annotation" do
         # The return type annotation Pair<Number> is valid even without a body that returns one.
         # Full round-trip (function body returning a struct literal) is Phase 3.
@@ -4935,6 +4963,20 @@ RSpec.describe SemanticAnnotator do
             run(fn_with_bad_param("Pair<42>"))
           }.to raise_error(ParserError)
         end
+
+        it "raises 'missing type args' when a generic type is used as a type arg without its own args" do
+          # Pair<Pair> — the inner 'Pair' is itself generic and needs args
+          # Note: nested generics Pair<Pair<Number>> are not yet supported by the parser (Phase 4+).
+          # This test documents that the bare Pair inside <> is caught as missing args.
+          src = <<~CLEAR
+            STRUCT Pair<T> { first: T, second: T }
+            FN bad(p: Pair<Pair>) RETURNS Number ->
+              RETURN 0.0;
+            END
+            FN cheatMain() RETURNS Void -> PASS END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError, /Type Error: 'Pair' is a generic type — type arguments are required/)
+        end
       end
     end
 
@@ -4973,6 +5015,43 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("!Pair(f64)")
+      end
+
+      it "emits Pair(bool) for Pair<Bool>" do
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN use(p: Pair<Bool>) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("Pair(bool)")
+      end
+
+      it "emits Pair(User) for Pair<User> where User is a plain struct" do
+        src = <<~CLEAR
+          STRUCT User { id: Number }
+          STRUCT Pair<T> { first: T, second: T }
+          FN use(p: Pair<User>) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("Pair(User)")
+      end
+
+      it "emits ?Pair(f64) for an optional generic param" do
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN use(p: ?Pair<Number>) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("?Pair(f64)")
       end
     end
 
