@@ -3608,28 +3608,10 @@ RSpec.describe SemanticAnnotator do
     end
 
     # --------------------------------------------------
-    # Enum exhaustiveness
+    # Regular MATCH: no exhaustiveness enforced
     # --------------------------------------------------
-    context "enum exhaustiveness" do
-      it "accepts a fully exhaustive enum MATCH (all variants, no DEFAULT)" do
-        expect {
-          run(<<~CLEAR)
-            ENUM Dir { North, South, East, West }
-            FN cheatMain() RETURNS Void ->
-              d: Dir = Dir.North;
-              MUTABLE n = 0_i64;
-              MATCH d START
-                Dir.North -> n = 1_i64;,
-                Dir.South -> n = 2_i64;,
-                Dir.East  -> n = 3_i64;,
-                Dir.West  -> n = 4_i64;
-              END
-            END
-          CLEAR
-        }.not_to raise_error
-      end
-
-      it "raises an error when an enum MATCH is non-exhaustive and has no DEFAULT" do
+    context "regular MATCH has no exhaustiveness requirement" do
+      it "accepts a partial enum MATCH with no DEFAULT" do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South, East, West }
@@ -3642,10 +3624,25 @@ RSpec.describe SemanticAnnotator do
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH on enum 'Dir' is non-exhaustive: missing variants: East, West/)
+        }.not_to raise_error
       end
 
-      it "does not raise for a partial enum MATCH that has a DEFAULT branch" do
+      it "accepts a partial union MATCH with no DEFAULT" do
+        expect {
+          run(<<~CLEAR)
+            UNION Result { Ok: Number, Err: Number, Empty }
+            FN cheatMain() RETURNS Void ->
+              r: Result = Result{ Ok: 1 };
+              MUTABLE n = 0_i64;
+              MATCH r START
+                Result.Ok -> n = 1_i64;
+              END
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts a partial enum MATCH with DEFAULT" do
         expect {
           run(<<~CLEAR)
             ENUM Color { Red, Green, Blue }
@@ -3661,7 +3658,7 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "skips exhaustiveness check when a WHEN guard is present" do
+      it "accepts a MATCH with a WHEN guard and missing enum variants" do
         expect {
           run(<<~CLEAR)
             ENUM Bit { Zero, One }
@@ -3679,17 +3676,102 @@ RSpec.describe SemanticAnnotator do
     end
 
     # --------------------------------------------------
-    # Union exhaustiveness
+    # MATCH IFF: exhaustiveness enforced
     # --------------------------------------------------
-    context "union exhaustiveness" do
-      it "accepts a fully exhaustive union MATCH (all variants, no DEFAULT)" do
+    context "MATCH IFF enum exhaustiveness" do
+      it "accepts a fully exhaustive MATCH IFF on an enum" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Dir { North, South, East, West }
+            FN cheatMain() RETURNS Void ->
+              d: Dir = Dir.North;
+              MUTABLE n = 0_i64;
+              MATCH IFF d START
+                Dir.North -> n = 1_i64;,
+                Dir.South -> n = 2_i64;,
+                Dir.East  -> n = 3_i64;,
+                Dir.West  -> n = 4_i64;
+              END
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises an error when MATCH IFF on enum is non-exhaustive" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Dir { North, South, East, West }
+            FN cheatMain() RETURNS Void ->
+              d: Dir = Dir.North;
+              MUTABLE n = 0_i64;
+              MATCH IFF d START
+                Dir.North -> n = 1_i64;,
+                Dir.South -> n = 2_i64;
+              END
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MATCH IFF on enum 'Dir' is non-exhaustive: missing variants: East, West/)
+      end
+
+      it "raises an error when MATCH IFF has a DEFAULT branch" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Color { Red, Green, Blue }
+            FN cheatMain() RETURNS Void ->
+              c: Color = Color.Red;
+              MUTABLE n = 0_i64;
+              MATCH IFF c START
+                Color.Red   -> n = 1_i64;,
+                Color.Green -> n = 2_i64;,
+                Color.Blue  -> n = 3_i64;,
+                DEFAULT     -> n = 99_i64;
+              END
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MATCH IFF cannot have a DEFAULT branch/)
+      end
+
+      it "raises an error when MATCH IFF contains a WHEN guard" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Bit { Zero, One }
+            FN cheatMain() RETURNS Void ->
+              b: Bit = Bit.Zero;
+              MUTABLE n = 0_i64;
+              MATCH IFF b START
+                Bit.Zero    -> n = 0_i64;,
+                WHEN n == 0 -> n = 99_i64;
+              END
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MATCH IFF cannot contain WHEN guards/)
+      end
+
+      it "raises an error when MATCH IFF subject is not an enum or union" do
+        expect {
+          run(<<~CLEAR)
+            FN cheatMain() RETURNS Void ->
+              x = 42_i64;
+              MUTABLE n = 0_i64;
+              MATCH IFF x START
+                1_i64 -> n = 1_i64;,
+                2_i64 -> n = 2_i64;
+              END
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MATCH IFF requires an enum or union type/)
+      end
+    end
+
+    context "MATCH IFF union exhaustiveness" do
+      it "accepts a fully exhaustive MATCH IFF on a union" do
         expect {
           run(<<~CLEAR)
             UNION Shape { Circle: Number, Point }
             FN cheatMain() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
-              MATCH s START
+              MATCH IFF s START
                 Shape.Circle -> n = 1_i64;,
                 Shape.Point  -> n = 2_i64;
               END
@@ -3698,22 +3780,22 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "raises an error when a union MATCH is non-exhaustive and has no DEFAULT" do
+      it "raises an error when MATCH IFF on union is non-exhaustive" do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number, Err: Number, Empty }
             FN cheatMain() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
-              MATCH r START
+              MATCH IFF r START
                 Result.Ok -> n = 1_i64;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH on union 'Result' is non-exhaustive: missing variants: Empty, Err/)
+        }.to raise_error(CompilerError, /MATCH IFF on union 'Result' is non-exhaustive: missing variants: Empty, Err/)
       end
 
-      it "does not raise for a partial union MATCH with DEFAULT" do
+      it "accepts a partial union MATCH (not IFF) with DEFAULT" do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number, Err: Number }
@@ -3729,14 +3811,14 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "accepts exhaustive generic union MATCH" do
+      it "accepts exhaustive MATCH IFF on a generic union" do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN cheatMain() RETURNS Void ->
               opt = Option<Number>{ Some: 1.0 };
               MUTABLE n = 0.0;
-              MATCH opt START
+              MATCH IFF opt START
                 Option.Some -> n = 1.0;,
                 Option.None -> n = 2.0;
               END
@@ -3745,19 +3827,19 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "raises an error for non-exhaustive generic union MATCH" do
+      it "raises an error for non-exhaustive MATCH IFF on generic union" do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN cheatMain() RETURNS Void ->
               opt = Option<Number>{ Some: 1.0 };
               MUTABLE n = 0.0;
-              MATCH opt START
+              MATCH IFF opt START
                 Option.Some -> n = 1.0;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH on union 'Option' is non-exhaustive: missing variants: None/)
+        }.to raise_error(CompilerError, /MATCH IFF on union 'Option' is non-exhaustive: missing variants: None/)
       end
     end
 
@@ -3867,7 +3949,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # --------------------------------------------------
-    # Zig code generation for AS capture and exhaustiveness
+    # Zig code generation for AS capture and MATCH IFF
     # --------------------------------------------------
     context "Zig code generation" do
       def transpile(src)
@@ -3880,7 +3962,7 @@ RSpec.describe SemanticAnnotator do
           FN cheatMain() RETURNS Void ->
             s: Shape = Shape{ Circle: 2.0 };
             MUTABLE a = 0.0;
-            MATCH s START
+            MATCH IFF s START
               Shape.Circle AS r -> a = r;,
               Shape.Point       -> a = 0.0;
             END
@@ -3890,13 +3972,13 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("const r = s.Circle;")
       end
 
-      it "emits == comparison (not activeTag) for enum MATCH" do
+      it "emits == comparison (not activeTag) for enum MATCH IFF" do
         out = transpile(<<~CLEAR)
           ENUM Dir { North, South }
           FN cheatMain() RETURNS Void ->
             d: Dir = Dir.North;
             MUTABLE n = 0_i64;
-            MATCH d START
+            MATCH IFF d START
               Dir.North -> n = 1_i64;,
               Dir.South -> n = 2_i64;
             END
@@ -3907,13 +3989,13 @@ RSpec.describe SemanticAnnotator do
         expect(out).not_to include("activeTag")
       end
 
-      it "emits payload capture for generic union MATCH" do
+      it "emits payload capture for generic union MATCH IFF" do
         out = transpile(<<~CLEAR)
           UNION Option<T> { Some: T, None }
           FN cheatMain() RETURNS Void ->
             opt = Option<Number>{ Some: 7.0 };
             MUTABLE got = 0.0;
-            MATCH opt START
+            MATCH IFF opt START
               Option.Some AS x -> got = x;,
               Option.None      -> got = -1.0;
             END
@@ -3921,6 +4003,22 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         expect(out).to include("std.meta.activeTag(opt) == .Some")
         expect(out).to include("const x = opt.Some;")
+      end
+
+      it "MATCH IFF and MATCH produce identical Zig output for the same exhaustive case" do
+        src_iff = <<~CLEAR
+          UNION Shape { Circle: Number, Point }
+          FN cheatMain() RETURNS Void ->
+            s: Shape = Shape.Point;
+            MUTABLE n = 0_i64;
+            MATCH IFF s START
+              Shape.Circle -> n = 1_i64;,
+              Shape.Point  -> n = 2_i64;
+            END
+          END
+        CLEAR
+        src_plain = src_iff.sub("MATCH IFF", "MATCH")
+        expect(transpile(src_iff)).to eq(transpile(src_plain))
       end
     end
   end

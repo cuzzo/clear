@@ -1,4 +1,5 @@
--- MATCH on unions with AS payload capture
+-- MATCH IFF on unions with AS payload capture
+-- Regular MATCH: partial coverage allowed
 
 UNION Shape { Circle: Number, Rectangle: Number, Point }
 UNION Result { Ok: Number, Err: Number, Empty }
@@ -6,7 +7,7 @@ UNION Option<T> { Some: T, None }
 
 FN area(s: Shape) RETURNS Number ->
   MUTABLE a = 0.0;
-  MATCH s START
+  MATCH IFF s START
     Shape.Circle    AS r -> a = r * 3.14;,
     Shape.Rectangle AS w -> a = w * w;,
     Shape.Point          -> a = 0.0;
@@ -16,7 +17,7 @@ END
 
 FN unwrap_ok(r: Result) RETURNS Number ->
   MUTABLE val = 0.0;
-  MATCH r START
+  MATCH IFF r START
     Result.Ok    AS v -> val = v;,
     Result.Err   AS e -> val = e * -1.0;,
     Result.Empty      -> val = 0.0;
@@ -47,10 +48,10 @@ FN cheatMain() RETURNS Void ->
   empty: Result = Result.Empty;
   ASSERT unwrap_ok(empty) == 0.0, "Result.Empty: default";
 
-  -- Inline match with AS capture
+  -- MATCH IFF inline with AS capture on generic union
   MUTABLE got = 0.0;
   opt = Option<Number>{ Some: 99.0 };
-  MATCH opt START
+  MATCH IFF opt START
     Option.Some AS x -> got = x;,
     Option.None      -> got = -1.0;
   END
@@ -58,9 +59,18 @@ FN cheatMain() RETURNS Void ->
 
   MUTABLE got2 = 0.0;
   none_val = Option<Number>{ Some: 0.0 };
-  MATCH none_val START
+  MATCH IFF none_val START
     Option.Some AS x -> got2 = x;,
     Option.None      -> got2 = -1.0;
   END
   ASSERT got2 == 0.0, "Option.Some AS x = 0.0";
+
+  -- Regular MATCH with partial coverage is fine
+  MUTABLE partial = 0.0;
+  s2: Shape = Shape{ Circle: 5.0 };
+  MATCH s2 START
+    Shape.Circle AS r -> partial = r;,
+    DEFAULT          -> partial = -1.0;
+  END
+  ASSERT partial == 5.0, "Regular MATCH with DEFAULT: Circle AS r";
 END

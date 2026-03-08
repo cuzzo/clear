@@ -518,12 +518,25 @@ private
     end
     node.case_drops = all_drops
 
-    # Exhaustiveness check: when MATCH subject is an enum or union and there is no
-    # DEFAULT branch, every variant must appear as an :eq case.
-    # We skip the check when any case is a :when or :struct_pattern guard — those
-    # introduce arbitrary conditions so we cannot prove exhaustiveness statically.
-    if !node.default_case && (is_enum || is_union) &&
-       node.cases.all? { |c| c[:kind] == :eq }
+    # Exhaustiveness check — only enforced for MATCH IFF.
+    if node.exhaustive
+      # MATCH IFF requires an enum or union subject.
+      unless is_enum || is_union
+        type_label = expr_t.resolved
+        error!(node, "MATCH IFF requires an enum or union type, got '#{type_label}'.")
+      end
+
+      # MATCH IFF forbids DEFAULT (defeats exhaustiveness).
+      if node.default_case
+        error!(node, "MATCH IFF cannot have a DEFAULT branch — every variant must be handled explicitly.")
+      end
+
+      # MATCH IFF forbids WHEN guards (arbitrary conditions break static exhaustiveness).
+      if node.cases.any? { |c| c[:kind] == :when }
+        error!(node, "MATCH IFF cannot contain WHEN guards — every variant must be handled by an exact case.")
+      end
+
+      # Every variant must appear exactly once.
       covered = node.cases.flat_map do |c|
         variant_name = case c[:value]
                        when AST::GetField   then c[:value].field
@@ -536,8 +549,8 @@ private
       all_variants = is_enum ? schema[:variants] : schema[:variants].keys.to_set
       missing = all_variants - covered
       unless missing.empty?
-        type_label = is_enum ? "enum" : "union"
-        error!(node, "MATCH on #{type_label} '#{type_name}' is non-exhaustive: missing variants: #{missing.sort.join(', ')}")
+        type_label2 = is_enum ? "enum" : "union"
+        error!(node, "MATCH IFF on #{type_label2} '#{type_name}' is non-exhaustive: missing variants: #{missing.sort.join(', ')}")
       end
     end
 
