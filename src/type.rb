@@ -123,11 +123,14 @@ class Type
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
       @is_optional        = other.instance_variable_get(:@is_optional)
       @wrapped_type_raw   = other.instance_variable_get(:@wrapped_type_raw)
-      @is_array           = other.instance_variable_get(:@is_array)
-      @element_type_raw   = other.instance_variable_get(:@element_type_raw)
-      @value_type_raw     = other.instance_variable_get(:@value_type_raw)
-      @capacity           = other.capacity
-      @resolved_cache     = other.instance_variable_get(:@resolved_cache)
+      @is_array              = other.instance_variable_get(:@is_array)
+      @element_type_raw      = other.instance_variable_get(:@element_type_raw)
+      @value_type_raw        = other.instance_variable_get(:@value_type_raw)
+      @capacity              = other.capacity
+      @resolved_cache        = other.instance_variable_get(:@resolved_cache)
+      @is_generic_instance   = other.instance_variable_get(:@is_generic_instance)
+      @generic_base_raw      = other.instance_variable_get(:@generic_base_raw)
+      @generic_args_raw      = other.instance_variable_get(:@generic_args_raw)
     else
       @raw = raw_input
       parse_raw_input
@@ -334,6 +337,22 @@ class Type
     @value_type_obj ||= Type.new(@value_type_raw || :Any)
   end
 
+  # Generic struct instance: Pair<Number>, Map<String, Number>
+  def generic_instance?
+    !!@is_generic_instance
+  end
+
+  # The base type name of a generic instance: :"Pair<Number>" → :Pair
+  def generic_base
+    @generic_base_raw
+  end
+
+  # The type arguments as Type objects: [Type(:Number), Type(:String)]
+  def generic_args
+    return nil unless @is_generic_instance
+    @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
+  end
+
   # TODO: keep metatype from ast, use that
   def struct?
     !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union?
@@ -489,11 +508,12 @@ class Type
     if @raw.is_a?(Hash) || @raw.is_a?(Array)
       @ownership = :affine
       @sync      = nil
-      @is_error_union  = false; @payload_type_raw = nil
-      @is_optional     = false; @wrapped_type_raw  = nil
-      @is_array        = false; @capacity = nil; @element_type_raw = nil
-      @is_map          = false; @value_type_raw = nil
-      @location        = :frame
+      @is_error_union      = false; @payload_type_raw = nil
+      @is_optional         = false; @wrapped_type_raw  = nil
+      @is_array            = false; @capacity = nil; @element_type_raw = nil
+      @is_map              = false; @value_type_raw = nil
+      @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
+      @location            = :frame
       return
     end
 
@@ -552,6 +572,18 @@ class Type
     else
       @is_map = false
       @value_type_raw = nil
+    end
+
+    # E2. Detect Generic Struct Instance: Pair<Number> or Map<String,Number>
+    # Only for non-HashMap types (HashMap is handled above).
+    if !@is_map && !@is_array && (match = str.match(/^([A-Z]\w*)<(.+)>$/))
+      @is_generic_instance = true
+      @generic_base_raw    = match[1].to_sym
+      @generic_args_raw    = match[2].split(',').map(&:strip).map(&:to_sym)
+    else
+      @is_generic_instance = false
+      @generic_base_raw    = nil
+      @generic_args_raw    = nil
     end
 
     # F. Default location based on type structure (keyword arg location: overrides this in initialize).
@@ -622,6 +654,14 @@ class Type
     if map?
       inner_zig = value_type.zig_type
       return "std.StringHashMapUnmanaged(#{inner_zig})"
+    end
+
+    # 5b. Handle Generic Struct Instances
+    #    Pair<Number> -> Pair(f64),  Map<String,Number> -> Map([]const u8, f64)
+    if generic_instance?
+      args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
+      zig = "#{@generic_base_raw}(#{args_zig})"
+      return is_pointer && zig != "void" ? "*#{zig}" : zig
     end
 
     # 6. Map primitives and fallback to struct names

@@ -274,6 +274,10 @@ private
     end
     verify_lifetime!(node)
 
+    # Validate generic type annotations in param types and return type
+    node.params.each { |p| validate_type_annotation!(node, p[:type]) if p[:type].is_a?(Type) }
+    validate_type_annotation!(node, node.return_type) if node.return_type.is_a?(Type)
+
     # 3. Pre-declaration (so the function can be recursive)
     signature = {
       params: node.params.map { |p| {
@@ -757,6 +761,8 @@ private
       verify_unrestricted!(node)
       handle_assign_move(node)
       handle_assign_borrow(node)
+
+      validate_type_annotation!(node, node.type) if node.type
 
       final_type, error = node.value.coerce!(node.type)
       error!(node, error) if error
@@ -1585,6 +1591,62 @@ private
 
     else
       error!(node, "Unknown capability type: #{capability_type}")
+    end
+  end
+
+  # Validates a type annotation where generics are involved.
+  # Called whenever a user-written type annotation is resolved (variable decls, params, returns).
+  # Covers four cases:
+  #   1. Generic type used correctly: Pair<Number>    — validate arg count + arg types
+  #   2. Non-generic type with args:  User<Number>    — error: not generic
+  #   3. Generic type without args:   Pair            — error: args required
+  #   4. Non-generic type without args: User          — nothing to validate (normal path)
+  def validate_type_annotation!(node, type_obj)
+    return unless type_obj.is_a?(Type)
+
+    # Unwrap error-union and optional wrappers to get the inner type
+    inner = if type_obj.error_union?
+      type_obj.payload_type
+    elsif type_obj.optional?
+      type_obj.wrapped_type
+    else
+      type_obj
+    end
+    return unless inner.is_a?(Type)
+
+    if inner.generic_instance?
+      # Case 1 / 2: Generic annotation provided — validate it
+      base_name = inner.generic_base
+      schema = lookup_type_schema(base_name)
+
+      if schema.nil?
+        error!(node, "Type Error: Unknown type '#{base_name}'.")
+      end
+
+      unless schema.is_a?(Hash) && schema[:type_params]
+        error!(node, :GENERIC_NOT_GENERIC, base_name)
+      end
+
+      expected = schema[:type_params].length
+      actual   = inner.generic_args.length
+      if actual != expected
+        error!(node, :GENERIC_WRONG_ARG_COUNT, base_name, expected, actual)
+      end
+
+      inner.generic_args.each do |arg|
+        next if BUILTIN_TYPES.include?(arg.resolved)
+        next if lookup_type_schema(arg.resolved)
+        error!(node, :GENERIC_UNKNOWN_TYPE_ARG, arg.resolved)
+      end
+
+    else
+      # Case 3: Plain type name — check if it's actually a generic struct missing args
+      base_name = inner.resolved
+      schema = lookup_type_schema(base_name)
+      if schema.is_a?(Hash) && schema[:type_params]&.any?
+        params_hint = schema[:type_params].map(&:to_s).join(', ')
+        error!(node, :GENERIC_MISSING_TYPE_ARGS, base_name, base_name, params_hint)
+      end
     end
   end
 

@@ -336,9 +336,11 @@ module ScopeHelper
   end
 
   def lookup_type_schema(name)
+    # For generic instances like :"Pair<Number>", look up the base type ":Pair"
+    base_name = name.to_s.sub(/<.*>$/, '').to_sym
     # Search from Top (newest) to Bottom (global)
     @scope_stack.reverse_each do |scope|
-      schema = scope.resolve_type_definition(name)
+      schema = scope.resolve_type_definition(base_name)
       return schema if schema
     end
     nil

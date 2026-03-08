@@ -951,6 +951,19 @@ class Parser
     base = consume(:TYPE_ID).value
     inner = ""
 
+    # Generic type arguments: Pair<Number> or Map<String, Number>
+    # In type-annotation context, '<' is always a generic argument list, never a comparison.
+    if match?(:CHAR, '<')
+      consume(:CHAR, '<')
+      type_args = []
+      until match?(:CHAR, '>')
+        type_args << consume(:TYPE_ID).value
+        match!(:CHAR, ',')
+      end
+      consume(:CHAR, '>')
+      base = "#{base}<#{type_args.join(',')}>"
+    end
+
     if match!(:CHAR, '[')
       # Case 1: Dynamic "Number[]"
       if match!(:CHAR, ']')

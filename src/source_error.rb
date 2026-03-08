@@ -37,6 +37,10 @@ module ErrorDefinitions
 
     GENERIC_DUPLICATE_TYPE_PARAM: "Type Error: Duplicate type parameter '%s' in generic struct '%s'.",
     GENERIC_TYPE_PARAM_SHADOWS_BUILTIN: "Type Error: Type parameter '%s' shadows built-in type '%s'.",
+    GENERIC_MISSING_TYPE_ARGS:    "Type Error: '%s' is a generic type — type arguments are required (e.g., %s<%s>).",
+    GENERIC_WRONG_ARG_COUNT:      "Type Error: '%s' expects %d type argument(s), got %d.",
+    GENERIC_UNKNOWN_TYPE_ARG:     "Type Error: Unknown type argument '%s'.",
+    GENERIC_NOT_GENERIC:          "Type Error: '%s' is not a generic type — remove the type arguments.",
 
     # FUNCTION ERRORS
     MISSING_FUNCTION: "Missing function '%s'.",

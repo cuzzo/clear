@@ -4806,6 +4806,176 @@ RSpec.describe SemanticAnnotator do
       #   - Value supplied instead of type: `x: Pair<42>` (parser-level check)
     end
 
+    # --------------------------------------------------
+    # Phase 2: Generic Type Annotations
+    # --------------------------------------------------
+    describe "generic type annotations" do
+      # Helpers: use function params/returns to test annotations without needing struct literals.
+      # (Phase 3 adds struct literal instantiation: Pair<Number>{ first: 1, second: 2 })
+
+      def fn_with_param(param_annotation)
+        <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          STRUCT Map<K, V> { key: K, value: V }
+          STRUCT User { id: Number }
+          FN use(p: #{param_annotation}) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+      end
+
+      def fn_with_bad_param(param_annotation)
+        <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          STRUCT Map<K, V> { key: K, value: V }
+          STRUCT User { id: Number }
+          FN bad(p: #{param_annotation}) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+      end
+
+      it "allows Pair<Number> as a function parameter type" do
+        expect { run(fn_with_param("Pair<Number>")) }.not_to raise_error
+      end
+
+      it "stores the generic type on the param" do
+        ast = run(fn_with_param("Pair<Number>"))
+        fn = ast.statements[3]  # FunctionDef for 'use'
+        expect(fn.params.first[:type].to_s).to eq("Pair<Number>")
+      end
+
+      it "allows multi-param generic Map<String, Number> as a param type" do
+        expect { run(fn_with_param("Map<String, Number>")) }.not_to raise_error
+      end
+
+      it "allows a generic type as a function return type annotation" do
+        # The return type annotation Pair<Number> is valid even without a body that returns one.
+        # Full round-trip (function body returning a struct literal) is Phase 3.
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN make() RETURNS Pair<Number> ->
+            PASS
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows a generic variable declaration when given a value from a function" do
+        # Define make() with implicit return (avoids needing a struct literal for now)
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN make() RETURNS Pair<Number> ->
+            PASS
+          END
+          FN cheatMain() RETURNS Void ->
+            p: Pair<Number> = make();
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      describe "error messages" do
+        it "raises 'missing type args' when a generic param type has no args" do
+          expect {
+            run(fn_with_bad_param("Pair"))
+          }.to raise_error(CompilerError, /Type Error: 'Pair' is a generic type — type arguments are required/)
+        end
+
+        it "raises 'missing type args' when a generic return type has no args" do
+          src = <<~CLEAR
+            STRUCT Pair<T> { first: T, second: T }
+            FN bad() RETURNS Pair ->
+              PASS
+            END
+            FN cheatMain() RETURNS Void -> PASS END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError, /Type Error: 'Pair' is a generic type — type arguments are required/)
+        end
+
+        it "raises 'missing type args' in a variable declaration" do
+          src = <<~CLEAR
+            STRUCT Pair<T> { first: T, second: T }
+            FN cheatMain() RETURNS Void ->
+              x: Pair = 0.0;
+            END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError, /Type Error: 'Pair' is a generic type — type arguments are required/)
+        end
+
+        it "raises 'wrong arg count' for too many type arguments" do
+          expect {
+            run(fn_with_bad_param("Pair<Number, Bool>"))
+          }.to raise_error(CompilerError, /Type Error: 'Pair' expects 1 type argument\(s\), got 2/)
+        end
+
+        it "raises 'wrong arg count' for too few type arguments" do
+          expect {
+            run(fn_with_bad_param("Map<Number>"))
+          }.to raise_error(CompilerError, /Type Error: 'Map' expects 2 type argument\(s\), got 1/)
+        end
+
+        it "raises 'not generic' when a non-generic struct is given type args" do
+          expect {
+            run(fn_with_bad_param("User<Number>"))
+          }.to raise_error(CompilerError, /Type Error: 'User' is not a generic type — remove the type arguments/)
+        end
+
+        it "raises 'unknown type arg' for an unrecognised type argument" do
+          expect {
+            run(fn_with_bad_param("Pair<Blorp>"))
+          }.to raise_error(CompilerError, /Type Error: Unknown type argument 'Blorp'/)
+        end
+
+        it "raises a parser error when a value literal is used as a type arg" do
+          expect {
+            run(fn_with_bad_param("Pair<42>"))
+          }.to raise_error(ParserError)
+        end
+      end
+    end
+
+    describe "Phase 2 Zig code generation" do
+      it "emits Pair(f64) for Pair<Number> in a function param" do
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN use(p: Pair<Number>) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("Pair(f64)")
+      end
+
+      it "emits Map([]const u8, f64) for Map<String, Number>" do
+        src = <<~CLEAR
+          STRUCT Map<K, V> { key: K, value: V }
+          FN use(m: Map<String, Number>) RETURNS Number ->
+            RETURN 0.0;
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("Map([]const u8, f64)")
+      end
+
+      it "emits !Pair(f64) as the Zig return type for RETURNS Pair<Number>" do
+        src = <<~CLEAR
+          STRUCT Pair<T> { first: T, second: T }
+          FN make() RETURNS Pair<Number> ->
+            PASS
+          END
+          FN cheatMain() RETURNS Void -> PASS END
+        CLEAR
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("!Pair(f64)")
+      end
+    end
+
     describe "Zig code generation" do
       it "emits a comptime function for a single-param generic struct" do
         out = ZigTranspiler.new.transpile("STRUCT Pair<T> { first: T, second: T }\nFN cheatMain() RETURNS Void -> PASS END")
