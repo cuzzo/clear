@@ -1,0 +1,64 @@
+-- BG concurrent integration tests.
+-- Exercises: multiple concurrent fibers, outer-variable capture by value,
+-- NEXT in reverse-spawn order, and BG inside a helper function.
+
+FN double(x: Number) RETURNS Number ->
+    RETURN x * 2.0;
+END
+
+FN add(a: Number, b: Number) RETURNS Number ->
+    RETURN a + b;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: Three concurrent BG fibers, NEXT'd in reverse.
+    -- -------------------------------------------------------
+    -- Spawn in order a, b, c.  NEXT in reverse c, b, a.
+    -- The scheduler may run them all before any NEXT is called
+    -- (fast-path) or interleave them (slow-path).
+    -- Either way each promise must return exactly its own value.
+
+    a: ~Number = BG { 10.0; };
+    b: ~Number = BG { 20.0; };
+    c: ~Number = BG { 30.0; };
+
+    rc: Number = NEXT c;
+    rb: Number = NEXT b;
+    ra: Number = NEXT a;
+
+    ASSERT ra == 10.0, "concurrent BG a";
+    ASSERT rb == 20.0, "concurrent BG b";
+    ASSERT rc == 30.0, "concurrent BG c";
+
+    -- -------------------------------------------------------
+    -- Test 2: Outer-variable capture by VALUE.
+    -- Mutating the outer variable after spawning must not
+    -- affect the fiber (fiber owns its own copy).
+    -- -------------------------------------------------------
+    MUTABLE base: Number = 5.0;
+    p: ~Number = BG { double(base); };
+    base = 99.0;          -- change outer copy after spawn
+    r_base: Number = NEXT p;
+    ASSERT r_base == 10.0, "BG captures by value: mutation of outer does not affect fiber";
+
+    -- -------------------------------------------------------
+    -- Test 3: BG using a helper function with captured arg.
+    -- -------------------------------------------------------
+    x: Number = 7.0;
+    y: Number = 3.0;
+    q: ~Number = BG { add(x, y); };
+    r_sum: Number = NEXT q;
+    ASSERT r_sum == 10.0, "BG with helper function call using two captured args";
+
+    -- -------------------------------------------------------
+    -- Test 4: Chained BG — result of one feeds the next.
+    -- -------------------------------------------------------
+    step1: ~Number = BG { double(4.0); };
+    v1: Number = NEXT step1;
+    step2: ~Number = BG { double(v1); };
+    v2: Number = NEXT step2;
+    ASSERT v2 == 16.0, "chained BG: double(double(4)) == 16";
+
+    RETURN;
+END

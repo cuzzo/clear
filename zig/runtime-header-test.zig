@@ -207,3 +207,245 @@ test "Promise(f64): next() fast-path when producer finishes first" {
     try std.testing.expectEqual(@as(f64, 99.0), state.result);
 }
 
+// ---------------------------------------------------------------------------
+// BG-pattern integration tests
+// ---------------------------------------------------------------------------
+//
+// These tests simulate the exact Zig code that the CLEAR transpiler generates
+// for BG blocks: a heap-allocated context struct with by-value captures, a
+// fiber that writes to Promise.Inner and signals done, and a caller fiber that
+// calls promise.next() to block until the result is ready.
+//
+// Running them here (rather than only through all-tests.zig) gives us direct
+// visibility into the runtime behaviour at the Zig level, independent of the
+// Ruby compiler pipeline.
+// ---------------------------------------------------------------------------
+
+// Shared result state for BG integration tests.
+// Lives on the test stack for the duration of sched.run().
+const BgResult = struct {
+    value: f64 = 0.0,
+};
+
+// Simulates the cheatMain fiber for:
+//   x: Number = 10.0;
+//   p: ~Number = BG { x + 5.0; };
+//   result: Number = NEXT p;
+fn bgCheatMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const out = @as(*BgResult, @ptrCast(@alignCast(raw_args.?)));
+    const x: f64 = 10.0;
+
+    // --- Transpiler output for: p: ~Number = BG { x + 5.0; } ---
+    const BgCtx = struct {
+        inner: *CheatLib.Promise(f64).Inner,
+        alloc: std.mem.Allocator,
+        x: f64, // captured by value
+
+        fn run(raw_rt: *anyopaque, raw_args_inner: ?*anyopaque) anyerror!void {
+            const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+            _ = &__rt;
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args_inner.?)));
+            defer ctx.alloc.destroy(ctx);
+            defer ctx.inner.wg.done();
+            ctx.inner.result = ctx.x + 5.0;
+        }
+    };
+    const alloc = rt.getSched().allocator;
+    const p = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
+    const bg_ctx = try alloc.create(BgCtx);
+    bg_ctx.* = .{ .inner = p.inner, .alloc = alloc, .x = x };
+    try rt.getSched().submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&BgCtx.run)),
+        bg_ctx,
+        .{},
+    );
+    // --- Transpiler output for: result: Number = NEXT p ---
+    out.value = p.next();
+}
+
+test "BG pattern: cheatMain-fiber spawns BG-fiber with by-value capture, NEXTs result" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    defer fp.global_registry.deinit(allocator);
+
+    fp.active_scheduler = &sched;
+
+    var result = BgResult{};
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&bgCheatMain)),
+        &result,
+        .{},
+    );
+    sched.run();
+
+    // 10.0 + 5.0 = 15.0
+    try std.testing.expectEqual(@as(f64, 15.0), result.value);
+}
+
+// ---------------------------------------------------------------------------
+// Shared state for the 3-concurrent-BG test.
+
+const BgConcurrentResult = struct {
+    a: f64 = 0.0,
+    b: f64 = 0.0,
+    c: f64 = 0.0,
+};
+
+// Simulates:
+//   a: ~Number = BG { 10.0 };
+//   b: ~Number = BG { 20.0 };
+//   c: ~Number = BG { 30.0 };
+//   rc = NEXT c; rb = NEXT b; ra = NEXT a;
+fn bgConcurrentMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const out = @as(*BgConcurrentResult, @ptrCast(@alignCast(raw_args.?)));
+
+    // Generic BG context carrying a constant f64 result.
+    const BgFixed = struct {
+        inner: *CheatLib.Promise(f64).Inner,
+        alloc: std.mem.Allocator,
+        value: f64,
+
+        fn run(raw_rt: *anyopaque, raw_args_inner: ?*anyopaque) anyerror!void {
+            const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+            _ = &__rt;
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args_inner.?)));
+            defer ctx.alloc.destroy(ctx);
+            defer ctx.inner.wg.done();
+            ctx.inner.result = ctx.value;
+        }
+    };
+
+    const alloc = rt.getSched().allocator;
+
+    // Spawn three concurrent BG fibers.
+    const pa = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
+    const ctx_a = try alloc.create(BgFixed);
+    ctx_a.* = .{ .inner = pa.inner, .alloc = alloc, .value = 10.0 };
+    try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_a, .{});
+
+    const pb = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
+    const ctx_b = try alloc.create(BgFixed);
+    ctx_b.* = .{ .inner = pb.inner, .alloc = alloc, .value = 20.0 };
+    try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_b, .{});
+
+    const pc = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
+    const ctx_c = try alloc.create(BgFixed);
+    ctx_c.* = .{ .inner = pc.inner, .alloc = alloc, .value = 30.0 };
+    try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_c, .{});
+
+    // NEXT in reverse order — tests both slow-path (yield) and fast-path (already done).
+    out.c = pc.next();
+    out.b = pb.next();
+    out.a = pa.next();
+}
+
+test "BG pattern: 3 concurrent fibers, NEXT in reverse-spawn order" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    defer fp.global_registry.deinit(allocator);
+
+    fp.active_scheduler = &sched;
+
+    var result = BgConcurrentResult{};
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&bgConcurrentMain)),
+        &result,
+        .{},
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(f64, 10.0), result.a);
+    try std.testing.expectEqual(@as(f64, 20.0), result.b);
+    try std.testing.expectEqual(@as(f64, 30.0), result.c);
+}
+
+// ---------------------------------------------------------------------------
+// Value-isolation test: mutating the outer variable after spawning a BG fiber
+// must not affect the fiber's result (since BG captures by VALUE, not pointer).
+
+const BgIsolationResult = struct {
+    value: f64 = 0.0,
+};
+
+fn bgIsolationMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const out = @as(*BgIsolationResult, @ptrCast(@alignCast(raw_args.?)));
+
+    const BgCapture = struct {
+        inner: *CheatLib.Promise(f64).Inner,
+        alloc: std.mem.Allocator,
+        captured: f64, // by-value copy of the outer variable
+
+        fn run(raw_rt: *anyopaque, raw_args_inner: ?*anyopaque) anyerror!void {
+            const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+            _ = &__rt;
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args_inner.?)));
+            defer ctx.alloc.destroy(ctx);
+            defer ctx.inner.wg.done();
+            // The fiber uses the snapshotted value, not whatever `base` is now.
+            ctx.inner.result = ctx.captured * 2.0;
+        }
+    };
+
+    const alloc = rt.getSched().allocator;
+    var base: f64 = 5.0;
+
+    // Spawn BG fiber — captures base=5.0 by value.
+    const p = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
+    const bg_ctx = try alloc.create(BgCapture);
+    bg_ctx.* = .{ .inner = p.inner, .alloc = alloc, .captured = base };
+    try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgCapture.run)), bg_ctx, .{});
+
+    // Mutate base AFTER spawning — should not affect the fiber's captured copy.
+    base = 99.0;
+    _ = &base; // keep base alive to show mutation doesn't affect fiber
+
+    // NEXT — fiber must return 5.0 * 2.0 = 10.0, not 99.0 * 2.0 = 198.0.
+    out.value = p.next();
+}
+
+test "BG pattern: by-value capture is isolated from post-spawn mutation of outer variable" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    defer fp.global_registry.deinit(allocator);
+
+    fp.active_scheduler = &sched;
+
+    var result = BgIsolationResult{};
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&bgIsolationMain)),
+        &result,
+        .{},
+    );
+    sched.run();
+
+    // Must be 5.0 * 2.0 = 10.0 (snapshot at spawn), NOT 99.0 * 2.0.
+    try std.testing.expectEqual(@as(f64, 10.0), result.value);
+}

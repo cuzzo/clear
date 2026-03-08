@@ -1194,11 +1194,21 @@ private
     pattern
   end
 
-  # Collect all AST::Identifier nodes in a list of expressions for DO block capture.
-  # Returns a hash of { name => type_info } for each unique local variable referenced.
+  # Collect all AST::Identifier nodes in a list of expressions for DO/BG block capture.
+  # Returns a hash of { name => type_info } for each unique outer variable referenced.
+  # Variables declared inside the body (BindExpr/VarDecl) are tracked as locally bound
+  # so they are not incorrectly added as outer captures.
   def collect_do_identifiers(exprs)
     result = {}
-    exprs.each { |e| walk_do_identifiers(e, result) }
+    locally_bound = Set.new
+    exprs.each do |e|
+      walk_do_identifiers(e, result, locally_bound)
+      # After processing a declaration, mark the name as locally bound so that
+      # subsequent expressions in the same body don't try to capture it from outside.
+      if (e.is_a?(AST::BindExpr) || e.is_a?(AST::VarDecl)) && e.name.is_a?(String)
+        locally_bound = locally_bound | Set[e.name]
+      end
+    end
     result
   end
 

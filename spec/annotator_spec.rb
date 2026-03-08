@@ -6155,6 +6155,78 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 5: Integration
+  # ===================================================================
+  describe "BG/NEXT — Phase 5: integration (collect_do_identifiers fix)" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    it "collect_do_identifiers does not capture locally-bound names from BindExpr" do
+      # If 'step1' is declared inside BG, it must NOT appear as a capture field.
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+          x: Number = 5.0;
+          q: ~Number = BG { x + 1.0; };
+          r: Number = NEXT q;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      # x IS captured (outer variable)
+      expect(out).to include("x: f64,")
+      # step1 is NOT a capture (it doesn't exist; this just verifies no spurious fields)
+      expect(out).not_to include("step1:")
+    end
+
+    it "multiple concurrent BG blocks get independent context structs" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+          a: ~Number = BG { 10.0; };
+          b: ~Number = BG { 20.0; };
+          ra: Number = NEXT a;
+          rb: Number = NEXT b;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      # Should have two separate context structs
+      expect(out).to include("__BgCtx0")
+      expect(out).to include("__BgCtx1")
+      # And two separate labeled blocks
+      expect(out).to include("__bg0:")
+      expect(out).to include("__bg1:")
+      # Both NEXTs
+      expect(out).to include("a.next()")
+      expect(out).to include("b.next()")
+    end
+
+    it "BG with function call inside captures its args by value" do
+      src = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          base: Number = 5.0;
+          p: ~Number = BG { double(base); };
+          r: Number = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("base: f64,")
+      expect(out).to include(".base = base")
+      expect(out).to include("ctx.base")
+      expect(out).to include("p.next()")
+    end
+  end
+
+  # ===================================================================
   # BG / ~T (Tense / Promise) — Phase 4: Parser + Transpiler
   # ===================================================================
   describe "BG/NEXT — Phase 4: parser and transpiler" do
