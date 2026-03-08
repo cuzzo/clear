@@ -497,7 +497,7 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "String[] Handling (Heap vs Stack)" do
+    context "String Handling (Heap vs Stack)" do
       let(:base_code) {
         <<~FLUX
           -- expects Number[]
@@ -591,10 +591,10 @@ RSpec.describe SemanticAnnotator do
     context "Resolved Type Correctness" do
       it "resolves to the explicit return type" do
         code = <<~FLUX
-          FN get_str() RETURNS String[] -> RETURN %"hi"; END
+          FN get_str() RETURNS String -> RETURN %"hi"; END
           get_str();
         FLUX
-        expect(get_last_type(code)).to eq(:"String[]")
+        expect(get_last_type(code)).to eq(:"String")
       end
 
       it "resolves to the inferred return type" do
@@ -1538,12 +1538,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           data = "a,b,c";
-          -- split returns a List of Strings (String[][])
+          -- split returns a List of Strings (String)
           parts = data.split(",");
         FLUX
       }
       it "resolves split to a List of Strings" do
-        expect(result).to eq(:"String[][]")
+        expect(result).to eq(:"String")
       end
     end
 
@@ -1556,19 +1556,19 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
       it "resolves join to a Heap String" do
-        expect(result).to eq(:"String[]")
+        expect(result).to eq(:"String")
       end
     end
 
     context "String Manipulation (trim & chaining)" do
       let(:code) {
         <<~FLUX
-          -- trim returns a String slice (String[])
+          -- trim returns a String slice (String)
           clean = "  abc  ".trim();
         FLUX
       }
       it "resolves trim to a String slice" do
-        expect(result).to eq(:"String[]")
+        expect(result).to eq(:"String")
       end
     end
 
@@ -1630,7 +1630,7 @@ RSpec.describe SemanticAnnotator do
     context "Basic Projection: list s> SELECT _.method()" do
       let(:code) {
         <<~FLUX
-          words: String[][] = ["a", "bb", "ccc"];
+          words: String = ["a", "bb", "ccc"];
           -- Project List<String> -> List<Int64> using .length()
           lengths = words s> SELECT _.length();
         FLUX
@@ -1646,7 +1646,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           raw = "apple,banana";
-          -- 1. split returns String[][]
+          -- 1. split returns String
           -- 2. SELECT iterates Strings
           -- 3. _.length() returns Int64
           lengths = raw s> split(",") s> SELECT _.length();
@@ -1718,7 +1718,7 @@ RSpec.describe SemanticAnnotator do
     context "Basic INDEX: list s> INDEX _.field" do
       let(:code) {
         <<~FLUX
-          STRUCT User { name: String[], age: Int64 }
+          STRUCT User { name: String, age: Int64 }
           users = [
             User{ name: %"Alice", age: 30_i64 },
             User{ name: %"Bob", age: 30_i64 },
@@ -1737,7 +1737,7 @@ RSpec.describe SemanticAnnotator do
     context "INDEX with string keys: list s> INDEX _.name" do
       let(:code) {
         <<~FLUX
-          STRUCT Item { category: String[], price: Number }
+          STRUCT Item { category: String, price: Number }
           items = [
             Item{ category: %"food", price: 10 },
             Item{ category: %"electronics", price: 100 },
@@ -1826,7 +1826,7 @@ RSpec.describe SemanticAnnotator do
     context "Basic ORDER_BY: sort by field" do
       let(:code) {
         <<~FLUX
-          STRUCT Item { name: String[], value: Int64 }
+          STRUCT Item { name: String, value: Int64 }
           items = [
             Item{ name: %"c", value: 30_i64 },
             Item{ name: %"a", value: 10_i64 },
@@ -2010,7 +2010,7 @@ RSpec.describe SemanticAnnotator do
     context "DISTINCT by struct field" do
       let(:code) {
         <<~FLUX
-          STRUCT Item { id: Int64, name: String[] }
+          STRUCT Item { id: Int64, name: String }
           items = [
             Item{ id: 1_i64, name: %"a" },
             Item{ id: 2_i64, name: %"b" },

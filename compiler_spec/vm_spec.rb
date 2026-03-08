@@ -1383,10 +1383,10 @@ RSpec.describe "RVO (Return Value Optimization) & Heap Safety" do
     it "returns a Closure that captures a Heap Value" do
       source = <<~FLUX
         FN make_greeter() ->
-          VAR name : String[] = %"World";
+          VAR name : String = %"World";
           -- The closure captures 'name' (a Heap String).
           -- Both the Closure AND 'name' must survive.
-          RETURN %(prefix: String[]) USE(name: String[]) -> prefix + %" " + name;
+          RETURN %(prefix: String) USE(name: String) -> prefix + %" " + name;
         END
         VAR greet = make_greeter();
         RETURN greet("Hello");

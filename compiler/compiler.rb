@@ -702,7 +702,7 @@ class Compiler
       @chunk.emit(node, :CAST, "R#{lhs}", "String")
       return :CONCAT_STR
 
-    # Since String[] is the type for a String array,
+    # Since String is the type for a String,
     # This *MUST* come after the string comparison
     elsif type_left.to_s.include?("[") && type_right.to_s.include?("[")
       return :CONCAT_ARR
@@ -1376,8 +1376,8 @@ private
   def is_string_type?(type)
     t = type.to_s
     return true if t == "String" || t == "STRING"
-    # Matches "String[]" (Heap String) and "Byte[...]" (Stack String)
-    return true if t.start_with?("String") || t.start_with?("Byte")
+    # Matches "Byte[...]" (Stack String)
+    return true if t.start_with?("Byte")
     false
   end
   # --- OLD IFT ---

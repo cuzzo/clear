@@ -13,8 +13,8 @@ class Type
   OWNERSHIP = [:unique, :borrowed, :shared, :static]
 
   # String type constants
-  STRING_TYPE = :"String[]"
-  HEAP_STRING_TYPE = :"String[]"
+  STRING_TYPE = :String
+  HEAP_STRING_TYPE = :String
 
   # Operator categories
   BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
@@ -88,8 +88,8 @@ class Type
 
     # C. String Concatenation
     if t_left == HEAP_STRING_TYPE || t_right == HEAP_STRING_TYPE
-      left_coercion = (t_left != STRING_TYPE && safe_autocast?(t_left, STRING_TYPE)) ? STRING_TYPE : nil
-      right_coercion = (t_right != STRING_TYPE && safe_autocast?(t_right, STRING_TYPE)) ? STRING_TYPE : nil
+      left_coercion = (t_left != :String && safe_autocast?(t_left, :String)) ? :String : nil
+      right_coercion = (t_right != :String && safe_autocast?(t_right, :String)) ? :String : nil
       return BinaryOpResult.new(type: HEAP_STRING_TYPE, left_coercion: left_coercion, right_coercion: right_coercion, storage: :frame)
     end
 
@@ -278,7 +278,7 @@ class Type
   end
 
   def string?
-    resolved == :String || resolved == :"String[]" || (array? && (base_type == :Byte || base_type == :String))
+    resolved == :String || (array? && base_type == :Byte)
   end
 
   def any?
@@ -677,9 +677,8 @@ class Type
 
     is_pointer = heap?
 
-    # 3. Special case: String[] is the atomic "Text" type
-    #    This prevents "String[][]" from becoming a 3D array.
-    if resolved == :"String[]"
+    # 3. Handle Special primitive mapping
+    if resolved == :String
       return is_pointer ? "*[]const u8" : "[]const u8"
     end
 
@@ -688,7 +687,7 @@ class Type
     #    Struct fields and function parameters use slices.
     if array?
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
-      if dynamic? && !is_param && !is_field && resolved != :"String[]"
+      if dynamic? && !is_param && !is_field
         zig = "std.ArrayListUnmanaged(#{base_zig})"
       else
         zig = "[]#{base_zig}"
@@ -716,7 +715,6 @@ class Type
     when :Number     then "f64"
     when :Int64      then "i64"
     when :String     then "[]const u8"
-    when :"String[]" then "[]const u8"
     when :Void       then "void"
     when :Bool       then "bool"
     when :Byte       then "u8"

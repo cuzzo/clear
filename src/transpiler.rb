@@ -985,10 +985,9 @@ private
 
       if node.op == :ADD || node.op == "+"
         # Check if we are operating on Strings
-        # Annotator ensures full_type is set (e.g. "String[]" or "%String[]")
+        # Annotator ensures full_type is set (e.g. "String" or "%String")
         t_left = node.left.full_type.to_s
         t_right = node.right.full_type.to_s
-
         alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
 
         if Type.new(t_left).string? || Type.new(t_right).string?
@@ -1269,7 +1268,6 @@ private
     t = flux_type.to_s
 
     # 2. Handle Strings explicitly
-    #    Flux might call it "String" or "String[]" depending on where it came from
     return "{s}" if t.include?("String")
 
     # 3. Handle Primitives

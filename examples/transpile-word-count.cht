@@ -4,7 +4,7 @@ FN cheatMain() RETURNS User ->
   VAR raw_data = readFile("testdata/fruits.csv").trim();
 
   -- 1. Split into List
-  --    Note: split returns %String[], so 'parts' is a Heap List
+  --    Note: split returns %String, so 'parts' is a Heap List
 
   -- TODO: Figure this out...
   MUTABLE parts = raw_data.split(",");

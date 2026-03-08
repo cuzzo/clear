@@ -1,7 +1,7 @@
 STRUCT User {
   id: Int64,
   score: Int64,
-  name: %String[]
+  name: %String
 }
 
 -- TODO: %User should work

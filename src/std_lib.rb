@@ -1,5 +1,5 @@
-STRING_TYPE = "String[]".to_sym
-HEAP_STRING_TYPE = "%String[]".to_sym
+STRING_TYPE = :String
+HEAP_STRING_TYPE = :String
 
 STD_LIB = {
   # Method Name => { args: [Type...], return: Type, zig: Pattern }
@@ -76,13 +76,13 @@ STD_LIB = {
   # 6. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE], # str, delimiter
-    return: :"String[][]",         # Returns a Heap List of Strings
+    return: :"String[]",         # Returns a Heap List of Strings
     zig: "try CheatLib.split({alloc}, {0}, {1})"
   },
 
   # 7. Join (String[] -> String)
   "join" => {
-    args: [:"String[][]", STRING_TYPE], # list, delimiter
+    args: [:"String[]", STRING_TYPE], # list, delimiter
     return: STRING_TYPE,
     zig: "try CheatLib.join({alloc}, {0}, {1})"
   },
@@ -140,8 +140,7 @@ STD_LIB = {
 
   "shell" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE, # Returns %String[] (Heap String)
+    return: STRING_TYPE, # Returns %String (Heap String)
     zig: "try CheatLib.shell({alloc}, {0})"
   },
 }
-

@@ -1070,7 +1070,7 @@ private
       node.full_type = target_type_info.value_type
 
       # Validate Key Type
-      # Allow String (stack), %String[] (heap), or Byte[] (raw)
+      # Allow String (stack), %String (heap), or Byte[] (raw)
       index_type_info = node.index.type_info
       unless index_type_info&.string?
          error!(node, "Map keys must be Strings, got #{node.index.resolved_type}")
@@ -1327,10 +1327,10 @@ private
     end
 
     # 2. Infer base type from the first element.
-    #    If all items are string-like (Byte[N] or String[]), widen to String[] so mixed
+    #    If all items are string-like (Byte[N] or String), widen to String so mixed
     #    string lengths ("a", "bb", "ccc") don't produce a type error.
     if node.items.all? { |i| Type.new(i.resolved_type).string? }
-      base_type = Type::STRING_TYPE
+      base_type = :String
     else
       base_type = node.items.first.resolved_type
       # 3. Validate Consistency — all items must share the same type.

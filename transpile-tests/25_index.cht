@@ -1,4 +1,4 @@
-STRUCT Item { category: String[], value: Int64 }
+STRUCT Item { category: String, value: Int64 }
 
 FN cheatMain() RETURNS Void ->
   items: Item[] = [
