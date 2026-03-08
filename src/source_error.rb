@@ -35,6 +35,9 @@ module ErrorDefinitions
     UNION_PAYLOAD_MISMATCH:    "Type Error: Union variant '%s' expects %s, got %s.",
     UNION_FIELD_ACCESS:        "Type Error: '%s' is a union type. Access variants with 'Type.Variant(payload)'.",
 
+    GENERIC_DUPLICATE_TYPE_PARAM: "Type Error: Duplicate type parameter '%s' in generic struct '%s'.",
+    GENERIC_TYPE_PARAM_SHADOWS_BUILTIN: "Type Error: Type parameter '%s' shadows built-in type '%s'.",
+
     # FUNCTION ERRORS
     MISSING_FUNCTION: "Missing function '%s'.",
     ARITY_MISMATCH: "Function '%s' expects %d arguments, got %d.",

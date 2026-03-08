@@ -299,19 +299,33 @@ private
     @function_context_stack.pop
   end
 
+  BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
+
   def visit_StructDef(node)
-    # 1. Register the Type Name (e.g., "Config")
-    # We store the field definition so we can validate field access later
+    # Validate generic type parameters
+    if node.type_params&.any?
+      seen = {}
+      node.type_params.each do |param|
+        param_sym = param.to_sym
+        if seen[param_sym]
+          error!(node, :GENERIC_DUPLICATE_TYPE_PARAM, param, node.name)
+        end
+        if BUILTIN_TYPES.include?(param_sym)
+          error!(node, :GENERIC_TYPE_PARAM_SHADOWS_BUILTIN, param, param)
+        end
+        seen[param_sym] = true
+      end
+    end
+
+    # Register the Type Name with its field schema.
     schema = node.fields.transform_values { |f| f[:type] }
 
     # For generic structs, record the type parameter names so field-type
     # lookups don't reject them as unknown types.
     schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
 
-    # Register as a Type, not a Variable
     current_scope.declare_type(node.name.to_sym, schema)
-
-    node.full_type = :Void # Struct defs don't return values
+    node.full_type = :Void
   end
 
   def visit_EnumDef(node)

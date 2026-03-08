@@ -1,6 +1,12 @@
+-- Phase 1: Generic Struct Definitions
+-- Instantiation (Pair<Number>{...}) is tested in Phase 2.
+
 STRUCT Pair<T> { first: T, second: T }
 STRUCT Triple<A, B, C> { a: A, b: B, c: C }
+STRUCT Wrapper<T> { value: T }
+STRUCT KeyValue<K, V> { key: K, value: V }
 
 FN cheatMain() RETURNS Void ->
+  -- Definitions compile. Instantiation is Phase 2.
   PASS
 END

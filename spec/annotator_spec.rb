@@ -4781,6 +4781,31 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    describe "error messages" do
+      it "raises an error for duplicate type parameter names" do
+        expect {
+          run("STRUCT Pair<T, T> { first: T, second: T }")
+        }.to raise_error(CompilerError, /Type Error: Duplicate type parameter 'T' in generic struct 'Pair'/)
+      end
+
+      it "raises an error when a type parameter shadows a built-in type" do
+        expect {
+          run("STRUCT Foo<Number> { value: Number }")
+        }.to raise_error(CompilerError, /Type Error: Type parameter 'Number' shadows built-in type/)
+      end
+
+      it "raises an error when a type parameter shadows Bool" do
+        expect {
+          run("STRUCT Foo<Bool> { flag: Bool }")
+        }.to raise_error(CompilerError, /Type Error: Type parameter 'Bool' shadows built-in type/)
+      end
+
+      # NOTE: The following validations are Phase 2 (type annotation instantiation):
+      #   - Using a generic type without type args: `x: Pair` should error
+      #   - Wrong number of type args: `x: Pair<Number, String>` when Pair<T> expects 1
+      #   - Value supplied instead of type: `x: Pair<42>` (parser-level check)
+    end
+
     describe "Zig code generation" do
       it "emits a comptime function for a single-param generic struct" do
         out = ZigTranspiler.new.transpile("STRUCT Pair<T> { first: T, second: T }\nFN cheatMain() RETURNS Void -> PASS END")
@@ -4798,6 +4823,16 @@ RSpec.describe SemanticAnnotator do
         out = ZigTranspiler.new.transpile("STRUCT User { id: Number }\nFN cheatMain() RETURNS Void -> PASS END")
         expect(out).to include("const User = struct")
         expect(out).not_to include("comptime")
+      end
+
+      it "correctly emits field types that are type parameters" do
+        out = ZigTranspiler.new.transpile("STRUCT Wrapper<T> { value: T }\nFN cheatMain() RETURNS Void -> PASS END")
+        expect(out).to include("value: T")
+      end
+
+      it "emits three comptime params for a triple-param struct" do
+        out = ZigTranspiler.new.transpile("STRUCT Triple<A, B, C> { a: A, b: B, c: C }\nFN cheatMain() RETURNS Void -> PASS END")
+        expect(out).to include("fn Triple(comptime A: type, comptime B: type, comptime C: type) type")
       end
     end
   end
