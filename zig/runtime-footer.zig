@@ -23,7 +23,9 @@ pub fn main() !void {
     // 4. Run Main
     // Call the function defined in CHEAT
     const result = try cheatMain(&rt);
-    std.debug.print("Result ID: {d}\n", .{result.id});
-    CheatLib.free(&rt, result); // manual free, or else we leak
-}
 
+    const RType = @TypeOf(result);
+    if (@typeInfo(RType) == .pointer) {
+        CheatLib.free(&rt, result); // manual free, or else we leak
+    }
+}
