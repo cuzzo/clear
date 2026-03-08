@@ -6153,5 +6153,94 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 4: Parser + Transpiler
+  # ===================================================================
+  describe "BG/NEXT — Phase 4: parser and transpiler" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    describe "Parser" do
+      it "parses BG { expr; } as a BgBlock node" do
+        tokens = Lexer.new("BG { 42.0; }").tokenize
+        parser = Parser.new(tokens, "BG { 42.0; }")
+        node   = parser.send(:parse_bg_block)
+        expect(node).to be_a(AST::BgBlock)
+        expect(node.body.length).to eq(1)
+      end
+
+      it "parses NEXT expr as a NextExpr node" do
+        tokens = Lexer.new("NEXT p").tokenize
+        parser = Parser.new(tokens, "NEXT p")
+        node   = parser.send(:parse_next_expr)
+        expect(node).to be_a(AST::NextExpr)
+        expect(node.expr).to be_a(AST::Identifier)
+        expect(node.expr.name).to eq("p")
+      end
+
+      it "parses BG { expr; } as the RHS of a bind expression" do
+        src    = "FN f() RETURNS Void -> p: ~Number = BG { 1.0; }; RETURN; END"
+        tokens = Lexer.new(src).tokenize
+        ast    = Parser.new(tokens, src).parse
+        fn_node = ast.statements.first
+        bind    = fn_node.body.first
+        expect(bind.value).to be_a(AST::BgBlock)
+      end
+
+      it "parses NEXT as an expression in a bind" do
+        src    = "FN f() RETURNS Void -> p: ~Number = BG { 1.0; }; r: Number = NEXT p; RETURN; END"
+        tokens = Lexer.new(src).tokenize
+        ast    = Parser.new(tokens, src).parse
+        fn_node = ast.statements.first
+        next_bind = fn_node.body[1]
+        expect(next_bind.value).to be_a(AST::NextExpr)
+      end
+    end
+
+    describe "Transpiler" do
+      it "BgBlock emits a labeled block with Promise spawn and submitSpawn" do
+        src = "FN f() RETURNS Void -> p: ~Number = BG { 42.0; }; r: Number = NEXT p; RETURN; END"
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.Promise(f64).spawn(")
+        expect(out).to include("submitSpawn(")
+        expect(out).to include("break :")
+        expect(out).to include("ctx.inner.result = 42")
+      end
+
+      it "BgBlock captures outer variable by value (no pointer)" do
+        src = "FN f() RETURNS Void -> x: Number = 7.0; q: ~Number = BG { x + 1.0; }; r: Number = NEXT q; RETURN; END"
+        out = transpile_fn(src)
+        # Captured as value field, not pointer
+        expect(out).to include("x: f64,")
+        # Initialized as .x = x  (not .x = &x)
+        expect(out).to include(".x = x")
+        # Accessed without deref: ctx.x (not ctx.x.*)
+        expect(out).to include("ctx.x")
+        expect(out).not_to include("ctx.x.*")
+      end
+
+      it "NextExpr emits .next() on the promise" do
+        src = "FN f() RETURNS Void -> p: ~Number = BG { 99.0; }; r: Number = NEXT p; RETURN; END"
+        out = transpile_fn(src)
+        expect(out).to include("p.next()")
+      end
+
+      it "Promise(void) Zig type string is correct at the type level" do
+        expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
+      end
+
+      it "NEXT on a non-tense type raises an annotator error" do
+        src = "FN f() RETURNS Void -> x: Number = 1.0; r: Number = NEXT x; RETURN; END"
+        expect { transpile_fn(src) }.to raise_error(SourceError, /NEXT requires a Promise/)
+      end
+    end
+  end
 end
 

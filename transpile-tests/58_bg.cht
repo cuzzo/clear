@@ -1,0 +1,17 @@
+-- BG block: spawn a background fiber that returns a value via Promise (~T).
+-- NEXT blocks the caller fiber until the result is ready.
+
+FN cheatMain() RETURNS Void ->
+    -- Simple case: BG block with a literal result.
+    p: ~Number = BG { 42.0; };
+    result: Number = NEXT p;
+    ASSERT result == 42.0, "BG block: simple literal result";
+
+    -- Capture an outer variable by value into the fiber.
+    x: Number = 7.0;
+    q: ~Number = BG { x + 1.0; };
+    result2: Number = NEXT q;
+    ASSERT result2 == 8.0, "BG block: captures outer variable by value";
+
+    RETURN;
+END

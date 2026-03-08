@@ -82,6 +82,7 @@ class Parser
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
   stmt(:KEYWORD, 'WITH') { parse_with_capability }
   stmt(:KEYWORD, 'DO')   { parse_do_block }
+  stmt(:KEYWORD, 'BG')   { parse_bg_block }
   stmt(:KEYWORD, 'MATCH') { parse_match_statement }
   stmt(:KEYWORD, 'PASS') do
     tok = consume(:KEYWORD, 'PASS')
@@ -103,6 +104,8 @@ class Parser
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
+  primary(:KEYWORD, 'BG')   { parse_bg_block }
+  primary(:KEYWORD, 'NEXT') { parse_next_expr }
   primary(:PERCENT, '%') { parse_sigil_construct }
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
 
@@ -1164,6 +1167,20 @@ class Parser
 
     consume(:CHAR, '}')
     AST::DoBlock.new(do_token, branches)
+  end
+
+  def parse_bg_block
+    bg_token = consume(:KEYWORD, 'BG')
+    consume(:CHAR, '{')
+    body = parse_block_body(['}'])
+    consume(:CHAR, '}')
+    AST::BgBlock.new(bg_token, body, nil)
+  end
+
+  def parse_next_expr
+    tok = consume(:KEYWORD, 'NEXT')
+    expr = parse_expression
+    AST::NextExpr.new(tok, expr)
   end
 
   def parse_comma_seq(type, open, close)

@@ -725,6 +725,94 @@ private
         }
       ZIG
 
+    when AST::BgBlock
+      @bg_block_counter ||= 0
+      id = @bg_block_counter
+      @bg_block_counter += 1
+
+      tense_t     = Type.new(node.full_type || :"~Void")
+      inner_t     = Type.new(tense_t.tense_type)
+      inner_zig   = inner_t.zig_type
+      promise_zig = tense_t.zig_type
+      is_void     = inner_zig == "void"
+
+      ctx_type    = "__BgCtx#{id}"
+      alloc_var   = "__bg#{id}_alloc"
+      promise_var = "__bg#{id}_promise"
+      ctx_var     = "__bg#{id}_ctx"
+      blk_label   = "__bg#{id}"
+
+      captured = collect_do_identifiers(node.body)
+
+      capture_fields = captured.map do |name, type_obj|
+        zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
+        "#{name}: #{zig_t},"
+      end.join("\n        ")
+
+      capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
+        captured.map { |name, _| ".#{name} = #{name}" }).join(", ")
+
+      rt_name = @do_rt_name || "rt"
+
+      # Transpile body inside fiber — captured vars rewritten to ctx.name (by-value capture)
+      prev_capture_map = @do_capture_map || {}
+      prev_rt_name     = @do_rt_name
+      @do_capture_map  = prev_capture_map.merge(
+        captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
+      )
+      @do_rt_name = "__rt"
+
+      body_stmts = node.body.dup
+      last_expr  = body_stmts.pop
+
+      stmt_code = body_stmts.map { |e|
+        code = visit(e)
+        code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+        code
+      }.join("\n            ")
+
+      result_line = if last_expr.nil? || is_void
+        last_expr ? "#{visit(last_expr)};" : ""
+      else
+        "ctx.inner.result = #{visit(last_expr)};"
+      end
+
+      @do_capture_map = prev_capture_map
+      @do_rt_name     = prev_rt_name
+
+      <<~ZIG.chomp
+        #{blk_label}: {
+            const #{ctx_type} = struct {
+                inner: *#{promise_zig}.Inner,
+                alloc: std.mem.Allocator,
+                #{capture_fields}
+                fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                    const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                    _ = &__rt;
+                    const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                    defer ctx.alloc.destroy(ctx);
+                    defer ctx.inner.wg.done();
+                    #{stmt_code}
+                    #{result_line}
+                }
+            };
+            const #{alloc_var} = #{rt_name}.getSched().allocator;
+            const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
+            const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
+            #{ctx_var}.* = .{ #{capture_inits} };
+            try #{rt_name}.getSched().submitSpawn(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                #{ctx_var},
+                .{},
+            );
+            break :#{blk_label} #{promise_var};
+        }
+      ZIG
+
+    when AST::NextExpr
+      "#{visit(node.expr)}.next()"
+
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
 

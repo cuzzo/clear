@@ -21,8 +21,8 @@ class TestGenerator < ZigTranspiler
     # 2. Get Raw Zig Body
     transpiled_body = visit(ast)
 
-    # 3. Detect if test uses DO blocks (needs a running fiber scheduler).
-    needs_scheduler = cheat_code.include?("DO {")
+    # 3. Detect if test uses DO or BG blocks (needs a running fiber scheduler).
+    needs_scheduler = cheat_code.include?("DO {") || cheat_code.include?("BG {")
 
     # 4. Wrap in a standard Zig Test Block.
     #    We wrap the code in a struct so 'fn cheatMain' doesn't collide
