@@ -131,6 +131,8 @@ class Type
       @is_generic_instance   = other.instance_variable_get(:@is_generic_instance)
       @generic_base_raw      = other.instance_variable_get(:@generic_base_raw)
       @generic_args_raw      = other.instance_variable_get(:@generic_args_raw)
+      @is_tense              = other.instance_variable_get(:@is_tense)
+      @tense_type_raw        = other.instance_variable_get(:@tense_type_raw)
     else
       @raw = raw_input
       parse_raw_input
@@ -218,6 +220,12 @@ class Type
       return payload_type.accepts?(other_type) if !other_type.error_union?
       # Accept same error union type
       return payload_type.accepts?(other_type.payload_type) if other_type.error_union?
+    end
+
+    # 5a. Tense (Promise) Coercion: ~T only accepts ~T with a compatible inner type
+    if self.tense?
+      return false unless other_type.tense?
+      return tense_type.accepts?(other_type.tense_type)
     end
 
     # 5. Array Coercion (The complex part from your Annotator)
@@ -356,7 +364,7 @@ class Type
 
   # TODO: keep metatype from ast, use that
   def struct?
-    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union?
+    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union? && !tense?
   end
 
   def optional?
@@ -376,6 +384,16 @@ class Type
   def payload_type
     return nil unless error_union?
     @payload_type_obj ||= Type.new(@payload_type_raw || :Any)
+  end
+
+  # Tense (Promise) types: ~T — a background task that will produce T
+  def tense?
+    !!@is_tense
+  end
+
+  def tense_type
+    return nil unless tense?
+    @tense_type_obj ||= Type.new(@tense_type_raw || :Void)
   end
 
   def element_type
@@ -411,6 +429,7 @@ class Type
 
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
+    return true if tense?                   # Promises are linear — must be consumed (NEXT/COLLECT/GIVE)
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle
     return true if heap?
@@ -520,6 +539,27 @@ class Type
 
     str = @raw.to_s
 
+    # A0. Detect Tense prefix: ~T (Future/Promise — a BG task producing T)
+    # Parsed first so ~!T = "promise of failable T", ~?T = "promise of optional T".
+    # When tense, we bail early — tense_type handles its own inner parsing.
+    if str.start_with?("~")
+      @is_tense       = true
+      @tense_type_raw = str[1..].to_sym
+      @is_error_union = false; @payload_type_raw = nil
+      @is_optional    = false; @wrapped_type_raw  = nil
+      @is_array       = false; @capacity = nil; @element_type_raw = nil
+      @is_map              = false; @value_type_raw = nil
+      @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
+      @ownership      = :affine
+      @sync           = nil
+      @location       = :stack  # Promise handle lives on the stack; result_cell is heap
+      @resolved_cache = @raw.to_sym
+      return
+    else
+      @is_tense       = false
+      @tense_type_raw = nil
+    end
+
     # A. Detect Error Union prefix: !Type (Zig-style error returns)
     if str.start_with?("!")
       @is_error_union = true
@@ -597,6 +637,12 @@ class Type
   # Computes the Zig type string for this CHEAT type.
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
   def compute_zig_type(is_param: false, is_field: false)
+    # 0. Handle Tense (Promise): ~T -> CheatLib.Promise(T)
+    if tense?
+      inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.Promise(#{inner_zig})"
+    end
+
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
       inner_zig = payload_type.zig_type(is_param: is_param, is_field: is_field)

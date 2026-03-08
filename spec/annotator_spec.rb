@@ -5968,5 +5968,88 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 1: Type System
+  # ===================================================================
+  describe "~T (tense/promise) type system" do
+    describe "Type parsing" do
+      it "recognises ~Number as a tense type" do
+        t = Type.new(:"~Number")
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Number)
+      end
+
+      it "recognises ~Void as a tense type" do
+        t = Type.new(:"~Void")
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Void)
+      end
+
+      it "recognises ~!Number as a promise of a failable Number" do
+        t = Type.new(:"~!Number")
+        expect(t.tense?).to be true
+        expect(t.tense_type.error_union?).to be true
+        expect(t.tense_type.payload_type).to eq(:Number)
+      end
+
+      it "is not a struct, primitive, optional, or error_union" do
+        t = Type.new(:"~Number")
+        expect(t.struct?).to be false
+        expect(t.primitive?).to be false
+        expect(t.optional?).to be false
+        expect(t.error_union?).to be false
+      end
+    end
+
+    describe "Type#requires_move?" do
+      it "returns true for tense types — promises are linear" do
+        expect(Type.new(:"~Number").requires_move?).to be true
+        expect(Type.new(:"~Void").requires_move?).to be true
+      end
+    end
+
+    describe "Type#accepts?" do
+      it "accepts the same tense type" do
+        expect(Type.new(:"~Number").accepts?(Type.new(:"~Number"))).to be true
+      end
+
+      it "does not accept a non-tense type" do
+        expect(Type.new(:"~Number").accepts?(Type.new(:Number))).to be false
+      end
+
+      it "does not accept a different tense type" do
+        expect(Type.new(:"~Number").accepts?(Type.new(:"~Bool"))).to be false
+      end
+    end
+
+    describe "Type#zig_type" do
+      it "emits CheatLib.Promise(f64) for ~Number" do
+        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      end
+
+      it "emits CheatLib.Promise(void) for ~Void" do
+        expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
+      end
+
+      it "emits CheatLib.Promise(!f64) for ~!Number" do
+        expect(Type.new(:"~!Number").zig_type).to eq("CheatLib.Promise(!f64)")
+      end
+    end
+
+    describe "Lexer" do
+      it "tokenises BG as a keyword" do
+        tokens = Lexer.new("BG").tokenize
+        expect(tokens[0].type).to eq(:KEYWORD)
+        expect(tokens[0].value).to eq("BG")
+      end
+
+      it "tokenises NEXT as a keyword" do
+        tokens = Lexer.new("NEXT").tokenize
+        expect(tokens[0].type).to eq(:KEYWORD)
+        expect(tokens[0].value).to eq("NEXT")
+      end
+    end
+  end
 end
 
