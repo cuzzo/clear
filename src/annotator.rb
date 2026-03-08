@@ -601,36 +601,6 @@ private
   end
 
   def visit_MethodCall(node)
-    # Union constructor: UnionType.Variant(payload)
-    # e.g. Result.Ok(42)  — checked BEFORE visiting object (type name, not a variable).
-    if node.object.is_a?(AST::Identifier)
-      type_name = node.object.name.to_sym
-      schema = lookup_type_schema(type_name)
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        variant_name = node.name
-        unless schema[:variants].key?(variant_name)
-          error!(node, :UNION_UNKNOWN_VARIANT, type_name, variant_name)
-        end
-        # Visit and type-check payload argument
-        expected_type = schema[:variants][variant_name]  # Type object or nil
-        if expected_type
-          if node.args.empty?
-            error!(node, "Union variant '#{variant_name}' requires a payload of type #{expected_type.resolved}.")
-          end
-          visit(node.args.first)
-          actual = node.args.first.type_info
-          unless expected_type.accepts?(actual)
-            error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
-          end
-        elsif !node.args.empty?
-          error!(node, "Union variant '#{variant_name}' is a unit variant and takes no payload.")
-        end
-        node.object.full_type = type_name
-        node.full_type = type_name
-        return
-      end
-    end
-
     visit(node.object)
     node.args.each { |arg| visit(arg) }
 
@@ -1118,6 +1088,29 @@ private
     schema = lookup_type_schema(node.name.to_sym)
     if schema.nil?
       error!(node, "Unknown struct type: '#{node.name}'")
+    end
+
+    # Union literal: Result{ Ok: 42 }
+    # Reuses struct-literal syntax — no new parser changes required.
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      if node.fields.length != 1
+        error!(node, "Union literal '#{node.name}' must specify exactly one variant, got #{node.fields.length}.")
+      end
+      variant_name, val_node = node.fields.first
+      unless schema[:variants].key?(variant_name)
+        error!(node, :UNION_UNKNOWN_VARIANT, node.name, variant_name)
+      end
+      expected_type = schema[:variants][variant_name]
+      if expected_type.nil?
+        error!(node, "Union variant '#{variant_name}' is a unit variant — use '#{node.name}.#{variant_name}' (no payload).")
+      end
+      visit(val_node)
+      actual = val_node.type_info
+      unless expected_type.accepts?(actual)
+        error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
+      end
+      node.full_type = node.name.to_sym
+      return
     end
 
     # 2. Iterate Fields (Validation)

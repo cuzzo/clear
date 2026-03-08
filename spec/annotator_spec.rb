@@ -4470,16 +4470,16 @@ RSpec.describe SemanticAnnotator do
     # Variant construction
     # --------------------------------------------------
     describe "variant construction" do
-      context "payload variant: UnionType.Variant(value)" do
+      context "payload variant: UnionType{ Variant: value }" do
         let(:code) {
           <<~CLEAR
             UNION Result { Ok: Number, Err: Number }
-            r: Result = Result.Ok(42);
+            r: Result = Result{ Ok: 42 };
           CLEAR
         }
 
-        it "resolves the constructor call to the union type" do
-          # The value of the BindExpr is a MethodCall resolved to :Result
+        it "resolves the struct literal to the union type" do
+          # The value of the BindExpr is a StructLit resolved to :Result
           expect(ast.statements.last.value.resolved_type).to eq(:Result)
         end
 
@@ -4488,7 +4488,7 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "unit variant: UnionType.Variant (no payload)" do
+      context "unit variant: UnionType.Variant (no payload — GetField)" do
         let(:code) {
           <<~CLEAR
             UNION Maybe { Some: Number, None }
@@ -4508,8 +4508,8 @@ RSpec.describe SemanticAnnotator do
       it "resolves all variants to the same union type" do
         ast = run(<<~CLEAR)
           UNION Shape { Circle: Number, Rectangle: Number, Point }
-          a: Shape = Shape.Circle(1.0);
-          b: Shape = Shape.Rectangle(2.0);
+          a: Shape = Shape{ Circle: 1.0 };
+          b: Shape = Shape{ Rectangle: 2.0 };
           c: Shape = Shape.Point;
         CLEAR
         ast.statements.drop(1).each do |stmt|
@@ -4529,7 +4529,7 @@ RSpec.describe SemanticAnnotator do
             RETURN r;
           END
           FN cheatMain() RETURNS Void ->
-            out = mirror(Result.Ok(1));
+            out = mirror(Result{ Ok: 1 });
           END
         CLEAR
       }
@@ -4583,7 +4583,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Payload { Data: Number, Empty }
             FN risky() RETURNS !Payload ->
-              RETURN Payload.Data(1);
+              RETURN Payload{ Data: 1 };
             END
           CLEAR
         }.not_to raise_error
@@ -4640,12 +4640,12 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /Type Error: Union 'Result' has no variant 'Missing'/)
       end
 
-      it "raises 'Type Error: Union ... has no variant' for an unknown constructor call" do
+      it "raises 'Type Error: Union ... has no variant' for an unknown variant in struct literal" do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number }
             FN cheatMain() RETURNS Void ->
-              x: Result = Result.Nope(1);
+              x: Result = Result{ Nope: 1 };
             END
           CLEAR
         }.to raise_error(CompilerError, /Type Error: Union 'Result' has no variant 'Nope'/)
@@ -4656,7 +4656,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Result { Ok: Number }
             FN cheatMain() RETURNS Void ->
-              x: Result = Result.Ok(TRUE);
+              x: Result = Result{ Ok: TRUE };
             END
           CLEAR
         }.to raise_error(CompilerError, /Type Error: Union variant 'Ok' expects Number, got Bool/)
@@ -4667,7 +4667,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Shape { Circle: Number }
             FN cheatMain() RETURNS Void ->
-              s: Shape = Shape.Circle(1.0);
+              s: Shape = Shape{ Circle: 1.0 };
               bad = s.Circle;
             END
           CLEAR
@@ -4698,7 +4698,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile(<<~CLEAR)
           UNION Result { Ok: Number }
           FN cheatMain() RETURNS Void ->
-            r: Result = Result.Ok(42);
+            r: Result = Result{ Ok: 42 };
           END
         CLEAR
         expect(out).to include("Result{ .Ok = 42 }")

@@ -691,17 +691,6 @@ private
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
 
-      # Union constructor: UnionType.Variant(payload)  e.g. Result{ .Ok = 42 }
-      if node.is_a?(AST::MethodCall) && node.object.is_a?(AST::Identifier)
-        schema = @union_schemas&.dig(node.object.name.to_sym)
-        if schema
-          variant  = node.name
-          payload  = node.args.first
-          zig_val  = payload ? visit(payload) : "{}"
-          return "#{node.object.name}{ .#{variant} = #{zig_val} }"
-        end
-      end
-
       # Standard call (pass rt)
       # Note: We don't add 'try' here - let the caller decide via OR RAISE or context
       locked_map = @locked_unwrap_map || {}

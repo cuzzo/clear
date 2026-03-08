@@ -866,7 +866,7 @@ class Parser
       if match?(:CHAR, '{')
         # Struct literal: User{ id: 1 }
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
-          k = consume(:VAR_ID).value; consume(:CHAR, ':'); v = parse_expression
+          k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
           [k, v]
         end
         return AST::StructLit.new(type_token, name, fields.to_h, storage)
