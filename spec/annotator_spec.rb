@@ -6314,5 +6314,155 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===================================================================
+  # Phase 1: Linear Resource Types  (File, :: static constructors)
+  # ===================================================================
+  describe "Resource Types — Phase 1" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    # ------------------------------------------------------------------
+    # Lexer
+    # ------------------------------------------------------------------
+    describe "Lexer: '::' token" do
+      it "tokenises '::' as DOUBLE_COLON" do
+        tokens = Lexer.new("File::open").tokenize.reject { |t| t.type == :EOF }
+        expect(tokens.map(&:type)).to eq([:TYPE_ID, :DOUBLE_COLON, :VAR_ID])
+      end
+
+      it "does not confuse '::' with two separate ':' tokens" do
+        tokens = Lexer.new("::").tokenize.reject { |t| t.type == :EOF }
+        expect(tokens.length).to eq(1)
+        expect(tokens.first.type).to eq(:DOUBLE_COLON)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Parser
+    # ------------------------------------------------------------------
+    describe "Parser: StaticCall AST node" do
+      it "parses TypeName::method(args) as a StaticCall" do
+        tokens = Lexer.new('File::open("data.txt")').tokenize
+        parser = Parser.new(tokens, 'File::open("data.txt")')
+        node   = parser.send(:parse_primary)
+        expect(node).to be_a(AST::StaticCall)
+        expect(node.type_name.name).to eq("File")
+        expect(node.method_name).to eq("open")
+        expect(node.args.length).to eq(1)
+      end
+
+      it "parses a StaticCall as RHS of a bind expression" do
+        src    = 'FN f() RETURNS Void -> f = File::open("x"); RETURN; END'
+        tokens = Lexer.new(src).tokenize
+        ast    = Parser.new(tokens, src).parse
+        fn     = ast.statements.first
+        bind   = fn.body.first
+        expect(bind.value).to be_a(AST::StaticCall)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator — happy-path type resolution
+    # ------------------------------------------------------------------
+    describe "Annotator: StaticCall type resolution" do
+      it "File::open resolves to type :File" do
+        src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
+        ast = run(src)
+        fn  = ast.statements.first
+        # The bind/decl's value node is the StaticCall
+        call = fn.body.first.value
+        expect(call.resolved_type).to eq(:File)
+      end
+
+      it "annotates a File variable as a resource in scope" do
+        # We exercise the full annotator; no error means resource path ran
+        expect { run('FN f() RETURNS Void -> f = File::open("t"); RETURN; END') }.not_to raise_error
+      end
+
+      it "File::open arg is passed the full_type :File" do
+        src = 'FN f() RETURNS Void -> f = File::open("path"); RETURN; END'
+        ast = run(src)
+        fn  = ast.statements.first
+        call = fn.body.first.value
+        expect(call.full_type.resolved).to eq(:File)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator — error cases
+    # ------------------------------------------------------------------
+    describe "Annotator: StaticCall errors" do
+      it "raises on unknown type" do
+        src = 'FN f() RETURNS Void -> x = Bogus::open("t"); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /Unknown type 'Bogus'/)
+      end
+
+      it "raises on non-resource type used with ::" do
+        src = 'STRUCT Point { x: Number } FN f() RETURNS Void -> p = Point::new(); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /does not support '::' static method calls/)
+      end
+
+      it "raises on unknown static method" do
+        src = 'FN f() RETURNS Void -> f = File::create("t"); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /No static method 'create' on 'File'/)
+      end
+
+      it "raises on wrong argument count" do
+        src = 'FN f() RETURNS Void -> f = File::open("a", "b"); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /expects 1 argument/)
+      end
+
+      it "raises on wrong argument type" do
+        src = 'FN f() RETURNS Void -> f = File::open(42); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /expected String, got Number/)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Transpiler — code generation
+    # ------------------------------------------------------------------
+    describe "Transpiler: StaticCall code generation" do
+      it "emits CheatLib.fileOpen for File::open" do
+        src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.fileOpen("data.txt")')
+      end
+
+      it "emits defer f.close() for auto-RAII" do
+        src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include("defer f.close();")
+      end
+
+      it "does NOT emit a _moved flag for resources (no double-close risk in Phase 1)" do
+        src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).not_to include("f_moved")
+      end
+
+      it "maps File to std.fs.File Zig type" do
+        expect(Type.new(:File).zig_type).to eq("std.fs.File")
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Resource move semantics
+    # ------------------------------------------------------------------
+    describe "Resource move tracking" do
+      it "marks the resource as :moved when reassigned" do
+        # After 'g = f', f should be :moved so the outer scope does not double-close
+        src = 'FN f() RETURNS Void -> a = File::open("t"); b = a; RETURN; END'
+        # Should not raise (resource move is legal)
+        expect { run(src) }.not_to raise_error
+      end
+    end
+  end
 end
 

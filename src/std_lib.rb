@@ -143,4 +143,12 @@ STD_LIB = {
     return: STRING_TYPE, # Returns %String (Heap String)
     zig: "try CheatLib.shell({alloc}, {0})"
   },
+
+  # Read all bytes from an open File resource into a heap-allocated String.
+  # Usage: contents = fileReadAll(f)
+  "fileReadAll" => {
+    args: [:File],
+    return: STRING_TYPE,
+    zig: "try CheatLib.fileReadAll({alloc}, {0})"
+  },
 }

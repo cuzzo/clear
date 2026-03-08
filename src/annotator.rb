@@ -49,6 +49,15 @@ private
 
     # Built-in Range type: fields accessible via dot access
     current_scope.declare_type(:Range, {"start" => :Number, "end" => :Number})
+
+    # Built-in File resource type
+    current_scope.declare_type(:File, {
+      kind: :resource,
+      close_zig: "{0}.close()",
+      static_methods: {
+        "open" => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})" }
+      }
+    })
   end
 
   def visit(node)
@@ -686,6 +695,45 @@ private
     end
   end
 
+  def visit_StaticCall(node)
+    node.args.each { |arg| visit(arg) }
+
+    type_name = node.type_name.name.to_sym
+    schema    = lookup_type_schema(type_name)
+
+    unless schema
+      error!(node, :STATIC_UNKNOWN_TYPE, type_name)
+    end
+
+    unless schema[:kind] == :resource
+      error!(node, :STATIC_NOT_RESOURCE, type_name)
+    end
+
+    static_methods = schema[:static_methods] || {}
+    method_def     = static_methods[node.method_name]
+
+    unless method_def
+      available = static_methods.keys.join(", ")
+      available = "(none)" if available.empty?
+      error!(node, :STATIC_UNKNOWN_METHOD, node.method_name, type_name, available)
+    end
+
+    expected_args = method_def[:args]
+    if node.args.length != expected_args.length
+      error!(node, :STATIC_ARITY, type_name, node.method_name, expected_args.length, node.args.length)
+    end
+
+    node.args.zip(expected_args).each_with_index do |(arg, expected), i|
+      actual = arg.resolved_type
+      unless expected == :Any || actual == :Any || is_safe_autocast?(actual, expected)
+        error!(node, :STATIC_ARG_TYPE, i + 1, type_name, node.method_name, expected, actual)
+      end
+    end
+
+    node.zig_pattern = method_def[:zig]
+    node.full_type   = method_def[:return]
+  end
+
   def visit_FuncCall(node)
     node.args.each { |arg| visit(arg) }
 
@@ -790,9 +838,11 @@ private
     end
     # Varargs functions skip verify_function_signature! (arity is flexible)
 
-    # 3. Resolve return type (may be dynamic via method call)
+    # 3. Resolve return type (may be dynamic via method call).
+    # Dynamic resolver methods are named `infer_*` to avoid collisions with
+    # Ruby Kernel conversion methods (Integer, String, Array, etc.).
     ret = matched_def[:return]
-    if ret.is_a?(Symbol) && respond_to?(ret, true)
+    if ret.is_a?(Symbol) && ret.to_s.start_with?("infer_") && respond_to?(ret, true)
       node.full_type = send(ret, args, node)
     else
       node.full_type = ret
@@ -817,6 +867,12 @@ private
     storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
     @frame_usage_count += 1 if storage == :frame
 
+    # 2b. Check if the declared type is a resource — tag node and scope entry
+    resource_schema   = lookup_type_schema(final_type)
+    is_resource       = resource_schema&.dig(:kind) == :resource
+    resource_close    = is_resource ? resource_schema[:close_zig] : nil
+    node.resource_close_zig = resource_close
+
     # 3. Declare in Scope (include sync capability if present)
     node_sync = node.type_info&.sync
     current_scope.declare(
@@ -829,7 +885,9 @@ private
       storage,
       Set.new,       # capabilities
       [],            # borrowed_paths
-      sync: node_sync
+      sync: node_sync,
+      resource: is_resource,
+      close_zig: resource_close
     )
 
     # 4. Set live
@@ -860,6 +918,11 @@ private
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
       @frame_usage_count += 1 if storage == :frame
 
+      resource_schema   = lookup_type_schema(final_type)
+      is_resource       = resource_schema&.dig(:kind) == :resource
+      resource_close    = is_resource ? resource_schema[:close_zig] : nil
+      node.resource_close_zig = resource_close
+
       node_sync = node.type_info&.sync
       current_scope.declare(
         node.name,
@@ -871,7 +934,9 @@ private
         storage,
         Set.new,
         [],
-        sync: node_sync
+        sync: node_sync,
+        resource: is_resource,
+        close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
 

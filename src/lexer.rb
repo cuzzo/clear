@@ -62,6 +62,8 @@ class Lexer
         content = @s.matched[3..-4]
         add(:STRING, content, start_col)
 
+      when @s.scan(/::/) then add(:DOUBLE_COLON, '::', start_col)
+
       when @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~]/)
         add(:CHAR, @s.matched, start_col)
 

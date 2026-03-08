@@ -1,6 +1,12 @@
 module OwnershipGenerator
   # Generates the `_moved` flag and `defer` cleanup block for a variable.
-  def emit_cleanup(name, type_info, storage)
+  def emit_cleanup(name, type_info, storage, resource_close: nil)
+    # Resources use a simple `defer close()` — no moved-flag needed in Phase 1.
+    if resource_close
+      close_stmt = resource_close.gsub("{0}", name)
+      return "defer #{close_stmt};\n"
+    end
+
     return "" unless type_info&.requires_move? || type_info&.any_rc? || type_info&.any_sync?
 
     is_rc           = type_info&.any_rc?

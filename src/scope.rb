@@ -12,7 +12,7 @@ class Scope
     @moved_paths = []  # Track moved sub-paths like [:foo, :child]
   end
 
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil)
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
     @locals[name] = {
       reg: reg,
       type: type,
@@ -24,7 +24,9 @@ class Scope
       capabilities: capabilities,
       borrowed_paths: borrowed_paths,
       valid: true,
-      invalid_reason: nil
+      invalid_reason: nil,
+      resource: resource,
+      close_zig: close_zig,
     }
   end
 

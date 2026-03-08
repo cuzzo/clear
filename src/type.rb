@@ -417,8 +417,8 @@ class Type
     if struct?
       raise "Need lookup context for struct size" unless resolver
       schema = resolver.call(resolved)
-      # Enum/Union types — treat as slot size 1 (tagged unions are small headers).
-      return 1 if schema.is_a?(Hash) && (schema[:kind] == :enum || schema[:kind] == :union)
+      # Enum/Union/Resource types — treat as slot size 1.
+      return 1 if schema.is_a?(Hash) && (schema[:kind] == :enum || schema[:kind] == :union || schema[:kind] == :resource)
       # Generic structs: treat as 1 slot (size depends on type args, unknown at this point)
       return 1 if schema.is_a?(Hash) && schema[:type_params]
       return schema.values.sum { |t| Type.new(t).slot_size(resolver) }
@@ -720,6 +720,7 @@ class Type
     when :Byte       then "u8"
     when :Any        then "f64" # Default to Number for Any in Zig
     when :Range      then "CheatLib.Range"
+    when :File       then "std.fs.File"
     else resolved.to_s  # Struct names (e.g., "User")
     end
 

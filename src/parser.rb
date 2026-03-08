@@ -145,6 +145,14 @@ class Parser
     end
   end
 
+  # Static Call: TypeName::method(args)
+  suffix(:DOUBLE_COLON, '::') do |lhs|
+    colon_token = consume(:DOUBLE_COLON, '::')
+    method_token = consume(:VAR_ID)
+    _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
+    AST::StaticCall.new(colon_token, lhs, method_token.value, args)
+  end
+
   # Dot Access: obj.field OR obj.method() OR EnumType.Variant
   suffix(:CHAR, '.') do |lhs|
     dot_token = consume(:CHAR, '.')

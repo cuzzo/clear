@@ -177,6 +177,22 @@ pub const CheatLib = struct {
 
     // FILE
 
+    // Open a file as a linear resource. Caller is responsible for calling .close().
+    // Designed for use with CLEAR's resource system: `f = File::open("path")`.
+    // The compiler auto-injects `defer f.close()` at the declaration site.
+    pub fn fileOpen(path: []const u8) !std.fs.File {
+        return std.fs.cwd().openFile(path, .{ .mode = .read_only });
+    }
+
+    // Read all bytes from an open file resource into a heap-allocated buffer.
+    // Intended for use as `f.readAll()` on a File resource.
+    pub fn fileReadAll(allocator: std.mem.Allocator, file: std.fs.File) ![]const u8 {
+        const stat = try file.stat();
+        const buffer = try allocator.alloc(u8, stat.size);
+        _ = try file.readAll(buffer);
+        return buffer;
+    }
+
     // Read File (Allocates on HEAP)
     pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         // 1. Open File

@@ -62,6 +62,13 @@ module ErrorDefinitions
     IMMUTABLE_ARG_PASSED_AS_EXPRESSION: "Argument %d ('%s') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.",
     ILLEGAL_UPVALUE: "Cannot capture '%s' - undefined in outer scope.",
     RETURN_MISMATCH: "Type Error: Function expected to return '%s', but returned '%s'",
+
+    # RESOURCE ERRORS
+    STATIC_UNKNOWN_TYPE:   "Type Error: Unknown type '%s'. Cannot perform '::' static method call.",
+    STATIC_NOT_RESOURCE:   "Type Error: '%s' does not support '::' static method calls. Only resource types have static constructors.",
+    STATIC_UNKNOWN_METHOD: "Type Error: No static method '%s' on '%s'. Available: %s.",
+    STATIC_ARITY:          "Type Error: '%s::%s' expects %d argument(s), got %d.",
+    STATIC_ARG_TYPE:       "Type Error: Argument %d to '%s::%s': expected %s, got %s.",
   }
 end
 

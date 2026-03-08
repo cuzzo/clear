@@ -309,7 +309,7 @@ private
       suppression = "_ = &#{node.name};"
 
       # 2. Cleanup & Move Suppression
-      affine_logic = emit_cleanup(node.name, node.type_info, node.storage)
+      affine_logic = emit_cleanup(node.name, node.type_info, node.storage, resource_close: node.resource_close_zig)
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
 
@@ -320,9 +320,10 @@ private
       if node.mode == :decl
         # Transpile as immutable declaration — delegate to VarDecl logic via a proxy
         proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
-        proxy.full_type = node.full_type
-        proxy.storage   = node.storage
-        proxy.slot_size = node.slot_size
+        proxy.full_type         = node.full_type
+        proxy.storage           = node.storage
+        proxy.slot_size         = node.slot_size
+        proxy.resource_close_zig = node.resource_close_zig
         visit(proxy)
       else
         # Transpile as simple assignment
@@ -798,6 +799,13 @@ private
 
     when AST::NextExpr
       "#{visit(node.expr)}.next()"
+
+    when AST::StaticCall
+      pattern  = node.zig_pattern
+      arg_strs = node.args.map { |a| visit(a) }
+      result   = pattern.dup
+      arg_strs.each_with_index { |arg, i| result = result.gsub("{#{i}}", arg) }
+      result
 
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
