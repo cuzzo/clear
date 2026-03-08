@@ -4749,5 +4749,57 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ==================================================
+  # GENERICS — Phase 1: Generic Struct Definitions
+  # ==================================================
+  describe "GENERICS" do
+    describe "generic struct definition" do
+      it "parses a single type param without error" do
+        expect { run("STRUCT Pair<T> { first: T, second: T }") }.not_to raise_error
+      end
+
+      it "parses multiple type params without error" do
+        expect { run("STRUCT Map<K, V> { key: K, value: V }") }.not_to raise_error
+      end
+
+      it "stores type_params in the schema" do
+        ast = run("STRUCT Pair<T> { first: T, second: T }")
+        node = ast.statements.first
+        expect(node).to be_a(AST::StructDef)
+        expect(node.type_params).to eq(["T"])
+      end
+
+      it "stores multiple type params" do
+        ast = run("STRUCT Map<K, V> { key: K, value: V }")
+        expect(ast.statements.first.type_params).to eq(["K", "V"])
+      end
+
+      it "a non-generic struct has empty type_params" do
+        ast = run("STRUCT User { id: Number }")
+        expect(ast.statements.first.type_params).to be_nil.or(be_empty)
+      end
+    end
+
+    describe "Zig code generation" do
+      it "emits a comptime function for a single-param generic struct" do
+        out = ZigTranspiler.new.transpile("STRUCT Pair<T> { first: T, second: T }\nFN cheatMain() RETURNS Void -> PASS END")
+        expect(out).to include("fn Pair(comptime T: type) type")
+        expect(out).to include("first: T")
+        expect(out).to include("second: T")
+      end
+
+      it "emits multiple comptime params for a multi-param generic struct" do
+        out = ZigTranspiler.new.transpile("STRUCT Map<K, V> { key: K, value: V }\nFN cheatMain() RETURNS Void -> PASS END")
+        expect(out).to include("fn Map(comptime K: type, comptime V: type) type")
+      end
+
+      it "emits a plain const struct for a non-generic struct" do
+        out = ZigTranspiler.new.transpile("STRUCT User { id: Number }\nFN cheatMain() RETURNS Void -> PASS END")
+        expect(out).to include("const User = struct")
+        expect(out).not_to include("comptime")
+      end
+    end
+  end
 end
 

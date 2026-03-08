@@ -212,25 +212,29 @@ private
       "const #{node.name} = union(enum) {\n#{variants}\n};"
 
     when AST::StructDef
-      # CHEAT: STRUCT User { id: Number }
-      # ZIG:   const User = struct { id: i64, };
-
       # Cache field schemas so VarDecl can generate field-level Rc cleanup
       @struct_schemas ||= {}
       @struct_schemas[node.name.to_sym] = node.fields
 
       fields = node.fields.map do |name, field_def|
-        type_sym = field_def[:type]
-
-        zig_type = transpile_type(type_sym, is_field: true)
-        "    #{name}: #{zig_type},"
+        zig_type = transpile_type(field_def[:type], is_field: true)
+        "        #{name}: #{zig_type},"
       end.join("\n")
 
-      <<~ZIG
-        const #{node.name} = struct {
-        #{fields}
-        };
-      ZIG
+      if node.type_params&.any?
+        # CLEAR: STRUCT Pair<T> { first: T, second: T }
+        # ZIG:   fn Pair(comptime T: type) type { return struct { first: T, second: T }; }
+        params = node.type_params.map { |p| "comptime #{p}: type" }.join(", ")
+        "fn #{node.name}(#{params}) type {\n    return struct {\n#{fields}\n    };\n}"
+      else
+        # CLEAR: STRUCT User { id: Number }
+        # ZIG:   const User = struct { id: f64, };
+        fields_dedented = node.fields.map do |name, field_def|
+          zig_type = transpile_type(field_def[:type], is_field: true)
+          "    #{name}: #{zig_type},"
+        end.join("\n")
+        "const #{node.name} = struct {\n#{fields_dedented}\n};"
+      end
 
     when AST::FunctionDef
       # CHEAT: FN test() RETURNS User ->

@@ -304,6 +304,10 @@ private
     # We store the field definition so we can validate field access later
     schema = node.fields.transform_values { |f| f[:type] }
 
+    # For generic structs, record the type parameter names so field-type
+    # lookups don't reject them as unknown types.
+    schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
+
     # Register as a Type, not a Variable
     current_scope.declare_type(node.name.to_sym, schema)
 

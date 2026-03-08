@@ -490,8 +490,17 @@ class Parser
   def parse_struct_def(visibility = :package)
     tok = consume(:KEYWORD, 'STRUCT')
     name = consume(:TYPE_ID).value
+    type_params = []
+    if match?(:CHAR, '<')
+      consume(:CHAR, '<')
+      until match?(:CHAR, '>')
+        type_params << consume(:TYPE_ID).value
+        match!(:CHAR, ',')
+      end
+      consume(:CHAR, '>')
+    end
     fields = parse_struct_body
-    AST::StructDef.new(tok, name, fields, visibility)
+    AST::StructDef.new(tok, name, fields, visibility, type_params)
   end
 
   def parse_enum_def(visibility = :package)
