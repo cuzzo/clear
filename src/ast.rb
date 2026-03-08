@@ -175,7 +175,10 @@ module AST
   Program      = Struct.new(:token, :statements) { include Locatable }
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
-  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :visibility, :deferred_drops, :uses_frame) { include Locatable }
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :visibility, :deferred_drops, :uses_frame) do
+    include Locatable
+    attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
+  end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
   Assignment   = Struct.new(:token, :name, :value) { include Locatable }
@@ -216,7 +219,8 @@ module AST
   FuncCall     = Struct.new(:token, :name, :args) do
     include Locatable
     attr_accessor :module_alias
-    attr_accessor :extern_call   # true when calling a native EXTERN FN (no rt, no try)
+    attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
+    attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     def wildcard?; false end
     def name; self[:name].to_s end
   end

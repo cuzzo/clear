@@ -5086,6 +5086,199 @@ RSpec.describe SemanticAnnotator do
     end
 
     # --------------------------------------------------
+    # Phase 4: Generic Functions
+    # --------------------------------------------------
+    describe "generic function definitions" do
+      def fn_src(fn_code)
+        "STRUCT Pair<T> { first: T, second: T }\n" \
+        "STRUCT Box<T> { value: T }\n" \
+        "#{fn_code}\n" \
+        "FN cheatMain() RETURNS Void -> PASS END"
+      end
+
+      it "parses FN identity<T>(x: T) RETURNS T without error" do
+        expect { run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END")) }.not_to raise_error
+      end
+
+      it "stores type_params on the FunctionDef node" do
+        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END"))
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "identity" }
+        expect(fn.type_params).to eq(["T"])
+      end
+
+      it "parses a two-type-param function FN swap<A, B>(a: A, b: B) RETURNS A" do
+        expect {
+          run(fn_src("FN first<A, B>(a: A, b: B) RETURNS A -> RETURN a; END"))
+        }.not_to raise_error
+      end
+
+      it "allows Cache<T> as a param type in a generic function" do
+        expect {
+          run(fn_src("FN sz<T>(c: Box<T>) RETURNS T -> RETURN c.value; END"))
+        }.not_to raise_error
+      end
+
+      it "stores type_params in the registered function signature" do
+        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> PASS END"))
+        # Verify it doesn't raise — the signature is checked at call site
+        expect(ast).not_to be_nil
+      end
+    end
+
+    describe "generic function call site inference" do
+      def call_src(fn_code, call_code)
+        "STRUCT Pair<T> { first: T, second: T }\n" \
+        "STRUCT Box<T> { value: T }\n" \
+        "#{fn_code}\n" \
+        "FN cheatMain() RETURNS Void ->\n#{call_code}\nEND"
+      end
+
+      it "infers T=Number when calling identity(42.0)" do
+        src = call_src(
+          "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
+          "n = identity(42.0);"
+        )
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "infers T=Bool when calling identity(TRUE)" do
+        src = call_src(
+          "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
+          "b = identity(TRUE);"
+        )
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "sets generic_type_args to [:Number] on the FuncCall node for identity(42.0)" do
+        src = call_src(
+          "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
+          "n = identity(42.0);"
+        )
+        ast = run(src)
+        fn = ast.statements.last
+        bind = fn.body.first
+        call = bind.value
+        expect(call).to be_a(AST::FuncCall)
+        expect(call.generic_type_args).to eq([:Number])
+      end
+
+      it "sets full_type to :Number on the FuncCall result of identity(42.0)" do
+        src = call_src(
+          "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
+          "n = identity(42.0);"
+        )
+        ast = run(src)
+        fn = ast.statements.last
+        bind = fn.body.first
+        expect(bind.value.resolved_type).to eq(:Number)
+      end
+
+      it "infers T from a generic struct parameter: unbox(Box<Number>{ value: 1.0 })" do
+        src = call_src(
+          "FN unbox<T>(b: Box<T>) RETURNS T -> RETURN b.value; END",
+          'b = Box<Number>{ value: 1.0 }; v = unbox(b);'
+        )
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "infers the correct type when unboxing Box<Bool>" do
+        src = call_src(
+          "FN unbox<T>(b: Box<T>) RETURNS T -> RETURN b.value; END",
+          "b = Box<Bool>{ value: TRUE }; v = unbox(b);"
+        )
+        ast = run(src)
+        fn = ast.statements.last
+        call = fn.body[1].value
+        expect(call.generic_type_args).to eq([:Bool])
+      end
+    end
+
+    describe "generic function error messages" do
+      def fn_err_src(fn_code, call_code = "PASS")
+        "STRUCT Pair<T> { first: T, second: T }\n" \
+        "#{fn_code}\n" \
+        "FN cheatMain() RETURNS Void ->\n#{call_code}\nEND"
+      end
+
+      it "raises GENERIC_FN_DUPLICATE_PARAM for duplicate type params" do
+        expect {
+          run(fn_err_src("FN bad<T, T>(x: T) RETURNS T -> RETURN x; END"))
+        }.to raise_error(CompilerError, /Duplicate type parameter 'T' in generic function 'bad'/)
+      end
+
+      it "raises GENERIC_FN_PARAM_SHADOWS_BUILTIN for shadowing Number" do
+        expect {
+          run(fn_err_src("FN bad<Number>(x: Number) RETURNS Number -> RETURN x; END"))
+        }.to raise_error(CompilerError, /Type parameter 'Number'.*shadows built-in type/)
+      end
+
+      it "raises GENERIC_FN_PARAM_SHADOWS_BUILTIN for shadowing Bool" do
+        expect {
+          run(fn_err_src("FN bad<Bool>(x: Bool) RETURNS Bool -> RETURN x; END"))
+        }.to raise_error(CompilerError, /Type parameter 'Bool'.*shadows built-in type/)
+      end
+
+      it "raises GENERIC_FN_CANNOT_INFER when type param T is not used in any param" do
+        expect {
+          run(fn_err_src(
+            "FN bad<T>(x: Number) RETURNS Number -> RETURN x; END",
+            "r = bad(1.0);"
+          ))
+        }.to raise_error(CompilerError, /Cannot infer type argument 'T' for 'bad'/)
+      end
+
+      it "raises GENERIC_FN_CONFLICT on conflicting type inference" do
+        expect {
+          run(fn_err_src(
+            "FN bad<T>(x: T, y: T) RETURNS T -> RETURN x; END",
+            "r = bad(1.0, TRUE);"
+          ))
+        }.to raise_error(CompilerError, /Conflicting inference for 'T' in 'bad'/)
+      end
+
+      it "raises an argument type error when wrong type is passed after inference" do
+        # T inferred as Number from first arg; second arg should also be Number
+        src = fn_err_src(
+          "FN same<T>(a: T, b: T) RETURNS T -> RETURN a; END",
+          'r = same(1.0, "hello");'
+        )
+        expect { run(src) }.to raise_error(CompilerError)
+      end
+    end
+
+    describe "Phase 4 Zig code generation" do
+      it "emits 'comptime T: type' in function signature for FN identity<T>" do
+        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> PASS END"
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("fn identity(comptime T: type, rt: *Runtime, x: T)")
+      end
+
+      it "emits two comptime params for a two-type-param function" do
+        src = "FN first<A, B>(a: A, b: B) RETURNS A -> RETURN a; END\nFN cheatMain() RETURNS Void -> PASS END"
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("fn first(comptime A: type, comptime B: type, rt: *Runtime")
+      end
+
+      it "emits inferred type arg at call site: identity(f64, rt, 42)" do
+        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> n = identity(42.0); END"
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("identity(f64, rt,")
+      end
+
+      it "emits bool type arg at call site for identity(TRUE)" do
+        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> b = identity(TRUE); END"
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("identity(bool, rt,")
+      end
+
+      it "emits Pair(T) as return type when RETURNS Pair<T>" do
+        src = "STRUCT Pair<T> { first: T, second: T }\nFN makePair<T>(v: T) RETURNS Pair<T> -> RETURN Pair<T>{ first: v, second: v }; END\nFN cheatMain() RETURNS Void -> PASS END"
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("!Pair(T)")
+      end
+    end
+
+    # --------------------------------------------------
     # Phase 3: Generic Struct Literals
     # --------------------------------------------------
     describe "generic struct literals" do

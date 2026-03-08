@@ -27,6 +27,7 @@ class SemanticAnnotator
     @loop_depth = 0 # Track if we are inside a loop
     @smooth_depth = 0
     @frame_usage_count = 0
+    @current_fn_type_params = [] # Type params of the function currently being validated
     setup_builtins
   end
 
@@ -265,7 +266,8 @@ private
     is_implicit_return = node.return_type.nil?
     declared_return = node.return_type || :Any
     lifetime_path = get_lifetime_path(node)
-    @function_context_stack.push({type: declared_return, lifetime: lifetime_path})
+    fn_type_params = (node.type_params || []).map(&:to_sym)
+    @function_context_stack.push({type: declared_return, lifetime: lifetime_path, type_params: fn_type_params})
 
     # 2. Validation & Lifetime
     has_mutable_param = node.params.any? { |p| p[:mutable] }
@@ -274,9 +276,22 @@ private
     end
     verify_lifetime!(node)
 
-    # Validate generic type annotations in param types and return type
+    # Validate generic type params on the function definition
+    if fn_type_params.any?
+      seen = {}
+      node.type_params.each do |param|
+        param_sym = param.to_sym
+        error!(node, :GENERIC_FN_DUPLICATE_PARAM, param, node.name) if seen[param_sym]
+        error!(node, :GENERIC_FN_PARAM_SHADOWS_BUILTIN, param, node.name, param) if BUILTIN_TYPES.include?(param_sym)
+        seen[param_sym] = true
+      end
+    end
+
+    # Make type params visible during type annotation validation
+    @current_fn_type_params = fn_type_params
     node.params.each { |p| validate_type_annotation!(node, p[:type]) if p[:type].is_a?(Type) }
     validate_type_annotation!(node, node.return_type) if node.return_type.is_a?(Type)
+    @current_fn_type_params = []
 
     # 3. Pre-declaration (so the function can be recursive)
     signature = {
@@ -284,7 +299,8 @@ private
         name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable], takes: p[:takes]
       }},
       return: { type: declared_return, lifetime: lifetime_path },
-      visibility: node.visibility
+      visibility: node.visibility,
+      type_params: fn_type_params.any? ? fn_type_params : nil
     }
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
@@ -652,15 +668,29 @@ private
       visit_IntrinsicFunc(node, args)
 
     elsif func_type.is_a?(Hash)
-      # Named Function or Lambda (both use standard signature format)
-      # Create synthetic node with correct args for UFCS method calls
-      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
-      verify_function_signature!(call_node, func_type)
-      node.full_type = func_type[:return][:type]
       # Tag cross-module calls so the transpiler can qualify them (e.g. mod.fn(rt, ...))
       node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
       # Tag extern calls so the transpiler skips rt injection and try
       node.extern_call = true if node.respond_to?(:extern_call=) && func_type[:extern]
+
+      type_params = func_type[:type_params]
+      if type_params&.any?
+        # Generic function: infer type args from actual arguments
+        subst = infer_generic_type_args!(node, func_type, args, type_params)
+        # Store inferred types on node so the transpiler can emit them
+        node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
+        # Build a substituted signature and validate with concrete types
+        substituted = substitute_type_params(func_type, subst)
+        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+        verify_function_signature!(call_node, substituted)
+        node.full_type = substituted[:return][:type]
+      else
+        # Named Function or Lambda (both use standard signature format)
+        # Create synthetic node with correct args for UFCS method calls
+        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+        verify_function_signature!(call_node, func_type)
+        node.full_type = func_type[:return][:type]
+      end
 
     elsif func_type.is_a?(Symbol)
       node.full_type = func_type
@@ -1638,6 +1668,82 @@ private
   # Called whenever a user-written type annotation is resolved (variable decls, params, returns).
   # Covers four cases:
   #   1. Generic type used correctly: Pair<Number>    — validate arg count + arg types
+  # ==========================================
+  # GENERIC FUNCTION HELPERS
+  # ==========================================
+
+  # Infer type argument substitution map from actual argument types.
+  # Mutates +subst+ in place and errors on conflicts or missing bindings.
+  #
+  # @param node [AST::FuncCall] The call site node (for error reporting)
+  # @param signature [Hash] The function's type signature
+  # @param actual_args [Array<AST node>] Visited argument nodes
+  # @param type_params [Array<Symbol>] e.g. [:T, :K]
+  # @return [Hash] e.g. { T: :Number, K: :String }
+  def infer_generic_type_args!(node, signature, actual_args, type_params)
+    subst = {}
+    signature[:params].each_with_index do |param, i|
+      arg = actual_args[i]
+      next unless arg
+      param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
+      actual_type = Type.new(arg.resolved_type || :Any)
+      extract_type_bindings!(node, param_type, actual_type, type_params, subst)
+    end
+    type_params.each do |tp|
+      unless subst.key?(tp)
+        error!(node, :GENERIC_FN_CANNOT_INFER, tp, node.name, tp)
+      end
+    end
+    subst
+  end
+
+  # Recursively bind type params to concrete types by matching param_type against actual_type.
+  def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
+    p_res = param_type.resolved
+    a_res = actual_type.resolved
+    if type_params.include?(p_res)
+      existing = subst[p_res]
+      if existing && existing != a_res
+        error!(node, :GENERIC_FN_CONFLICT, p_res, node.name, existing, a_res)
+      end
+      subst[p_res] = a_res
+    elsif param_type.generic_instance? && actual_type.generic_instance? &&
+          param_type.generic_base == actual_type.generic_base
+      param_type.generic_args.zip(actual_type.generic_args).each do |p_arg, a_arg|
+        next unless p_arg && a_arg
+        extract_type_bindings!(node, p_arg, a_arg, type_params, subst)
+      end
+    end
+  end
+
+  # Apply a type param substitution map to a type object.
+  # e.g. apply_type_subst(Type.new(:T), { T: :Number }) → Type.new(:Number)
+  def apply_type_subst(type_obj, subst)
+    return Type.new(:Any) if type_obj.nil?
+    t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
+    resolved = t.resolved
+    if subst.key?(resolved)
+      Type.new(subst[resolved])
+    elsif t.generic_instance?
+      new_args = t.generic_args.map { |arg| apply_type_subst(arg, subst).resolved }
+      Type.new(:"#{t.generic_base}<#{new_args.join(',')}>")
+    else
+      t
+    end
+  end
+
+  # Build a concrete version of a generic signature with all type params substituted.
+  def substitute_type_params(signature, subst)
+    {
+      params: signature[:params].map do |p|
+        p.merge(type: apply_type_subst(p[:type], subst))
+      end,
+      return: { type: apply_type_subst(signature[:return][:type], subst),
+                lifetime: signature[:return][:lifetime] },
+      visibility: signature[:visibility]
+    }
+  end
+
   #   2. Non-generic type with args:  User<Number>    — error: not generic
   #   3. Generic type without args:   Pair            — error: args required
   #   4. Non-generic type without args: User          — nothing to validate (normal path)
@@ -1675,6 +1781,7 @@ private
 
       inner.generic_args.each do |arg|
         next if BUILTIN_TYPES.include?(arg.resolved)
+        next if @current_fn_type_params.include?(arg.resolved)  # e.g. Cache<T> where T is fn type param
         arg_schema = lookup_type_schema(arg.resolved)
         if arg_schema.nil?
           error!(node, :GENERIC_UNKNOWN_TYPE_ARG, arg.resolved)

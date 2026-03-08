@@ -41,6 +41,10 @@ module ErrorDefinitions
     GENERIC_WRONG_ARG_COUNT:      "Type Error: '%s' expects %d type argument(s), got %d.",
     GENERIC_UNKNOWN_TYPE_ARG:     "Type Error: Unknown type argument '%s'.",
     GENERIC_NOT_GENERIC:          "Type Error: '%s' is not a generic type — remove the type arguments.",
+    GENERIC_FN_DUPLICATE_PARAM:   "Type Error: Duplicate type parameter '%s' in generic function '%s'.",
+    GENERIC_FN_PARAM_SHADOWS_BUILTIN: "Type Error: Type parameter '%s' in function '%s' shadows built-in type '%s'.",
+    GENERIC_FN_CANNOT_INFER:      "Type Error: Cannot infer type argument '%s' for '%s' — no parameter uses type '%s'.",
+    GENERIC_FN_CONFLICT:          "Type Error: Conflicting inference for '%s' in '%s': got '%s' and '%s'.",
 
     # FUNCTION ERRORS
     MISSING_FUNCTION: "Missing function '%s'.",

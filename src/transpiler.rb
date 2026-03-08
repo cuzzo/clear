@@ -247,8 +247,11 @@ private
         "#{p_name}: #{p_type}"
       end
 
+      # For generic functions, prepend comptime type params before rt
+      comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
+
       # We inject 'rt' into every function signature
-      all_params = ["rt: *Runtime"] + params_zig
+      all_params = comptime_params + ["rt: *Runtime"] + params_zig
       # Don't add ! if the type is already an error union
       return_type_str = final_type.start_with?("!") ? final_type : "!#{final_type}"
       vis = node.visibility == :pub ? "pub " : ""
@@ -724,7 +727,13 @@ private
         "#{mod_prefix}#{node.name}(#{args_zig.join(', ')})"
       else
         rt_name = @do_rt_name || "rt"
-        args = [rt_name] + args_zig
+        # For generic function calls, inject inferred comptime type args after rt
+        type_arg_strs = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
+          node.generic_type_args.map { |t| Type.new(t).zig_type }
+        else
+          []
+        end
+        args = type_arg_strs + [rt_name] + args_zig
         call = "#{mod_prefix}#{node.name}(#{args.join(', ')})"
         "try #{call}"
       end

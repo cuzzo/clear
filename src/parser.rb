@@ -536,6 +536,17 @@ class Parser
     fn_token = consume(:KEYWORD, 'FN')
     name = consume(:VAR_ID).value
 
+    # Parse optional generic type parameters: FN name<T, U>(...)
+    type_params = []
+    if match?(:CHAR, '<')
+      consume(:CHAR, '<')
+      until match?(:CHAR, '>')
+        type_params << consume(:TYPE_ID).value
+        match!(:CHAR, ',')
+      end
+      consume(:CHAR, '>')
+    end
+
     params = parse_argument_list()
 
     # 2. Parse USE() UpValues
@@ -567,7 +578,9 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var, visibility)
+    node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var, visibility)
+    node.type_params = type_params unless type_params.empty?
+    node
   end
 
   def parse_block_body(stop_words = ['END'])
@@ -868,9 +881,10 @@ class Parser
     error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")
   end
 
-  # Returns true if current position looks like: < TYPE_ID (, TYPE_ID)* > {
-  # Used to disambiguate `Pair<Number>{` (generic struct literal) from `Pair < Number` (comparison).
-  def peek_is_generic_struct_lit?
+  # Returns true if, starting from current position '<', the token stream matches:
+  #   < TYPE_ID (, TYPE_ID)* > end_char
+  # Used to disambiguate generic annotations from comparison operators.
+  def peek_generic_angle_params?(end_char)
     saved = @pos
     begin
       return false unless current.type == :CHAR && current.value == '<'
@@ -882,7 +896,7 @@ class Parser
           @pos += 1 # skip ','
         elsif current.type == :CHAR && current.value == '>'
           @pos += 1 # skip '>'
-          return current.type == :CHAR && current.value == '{'
+          return current.type == :CHAR && current.value == end_char
         else
           return false
         end
@@ -890,6 +904,11 @@ class Parser
     ensure
       @pos = saved
     end
+  end
+
+  # Struct literal: Pair<Number>{ ... }
+  def peek_is_generic_struct_lit?
+    peek_generic_angle_params?('{')
   end
 
   def parse_lit(storage)

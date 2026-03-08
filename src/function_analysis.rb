@@ -360,8 +360,12 @@ module FunctionAnalysis
     has_lifetime = !lifetime_path.nil?
     is_copyable = type_info.copyable?
     has_give = false
+    # Type params (e.g. T in a generic function) are always returnable —
+    # the Zig comptime system handles copies/moves at specialization time.
+    fn_type_params = @function_context_stack.last&.dig(:type_params) || []
+    is_type_param = fn_type_params.include?(type_info&.resolved)
 
-    if !has_lifetime && !is_copyable && !has_give
+    if !has_lifetime && !is_copyable && !has_give && !is_type_param
       if node.is_a?(AST::GetField)
         access_type = "field"
         access_name = "field '#{node.field}'"
