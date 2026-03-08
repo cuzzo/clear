@@ -64,10 +64,10 @@ private
       visit_RequireNode(stmt) if stmt.is_a?(AST::RequireNode)
     end
 
-    # PASS 1: Hoist Types (StructDefs + ExternStructDecl)
-    # Register all struct types first so they can be used in function signatures.
+    # PASS 1: Hoist Types (StructDefs, ExternStructDecl, EnumDef)
+    # Register all type definitions first so they can be used in function signatures.
     node.statements.each do |stmt|
-      visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl)
+      visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl) || stmt.is_a?(AST::EnumDef)
     end
 
     # PASS 2: Hoist Function Signatures (FunctionDef + ExternFnDecl)
@@ -85,7 +85,8 @@ private
     node.statements.each do |stmt|
       # Skip nodes already processed in earlier passes.
       next if stmt.is_a?(AST::StructDef)    || stmt.is_a?(AST::RequireNode) ||
-              stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
+              stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl) ||
+              stmt.is_a?(AST::EnumDef)
 
       visit(stmt)
     end
@@ -306,6 +307,12 @@ private
     current_scope.declare_type(node.name.to_sym, schema)
 
     node.full_type = :Void # Struct defs don't return values
+  end
+
+  def visit_EnumDef(node)
+    schema = { kind: :enum, variants: node.variants.to_set }
+    current_scope.declare_type(node.name.to_sym, schema)
+    node.full_type = :Void
   end
 
 
@@ -958,6 +965,21 @@ private
   end
 
   def visit_GetField(node)
+    # Enum variant access: EnumType.Variant
+    # Must be checked BEFORE visiting target to avoid "variable not found" error.
+    if node.target.is_a?(AST::Identifier)
+      type_name = node.target.name.to_sym
+      schema = lookup_type_schema(type_name)
+      if schema.is_a?(Hash) && schema[:kind] == :enum
+        unless schema[:variants].include?(node.field)
+          error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
+        end
+        node.target.full_type = type_name
+        node.full_type = type_name
+        return
+      end
+    end
+
     visit(node.target)
 
     # Check if this path has been moved
@@ -979,7 +1001,9 @@ private
     end
 
     schema = lookup_type_schema(type)
-    if schema && schema[node.field]
+    if schema.is_a?(Hash) && schema[:kind] == :enum
+      error!(node, :ENUM_FIELD_ACCESS, type)
+    elsif schema && schema[node.field]
       node.full_type = schema[node.field]
     else
       error!(node, :ILLEGAL_FIELD_LOOKUP, node.field, type)

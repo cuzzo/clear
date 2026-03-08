@@ -69,6 +69,9 @@ class ZigTranspiler
       when AST::StructDef
         next if stmt.visibility == :private
         parts << visit(stmt)
+      when AST::EnumDef
+        next if stmt.visibility == :private
+        parts << visit(stmt)
       when AST::RequireNode
         # Re-export nested REQUIRE namespaces into this module's namespace.
         parts << visit(stmt)
@@ -187,6 +190,12 @@ private
 
         "const #{node.namespace} = struct {\n#{indented}\n};"
       end
+
+    when AST::EnumDef
+      # CHEAT: ENUM Direction { North, South }
+      # ZIG:   const Direction = enum { North, South };
+      variants = node.variants.map { |v| "    #{v}," }.join("\n")
+      "const #{node.name} = enum {\n#{variants}\n};"
 
     when AST::StructDef
       # CHEAT: STRUCT User { id: Number }

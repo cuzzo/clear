@@ -275,6 +275,9 @@ module AST
   # ExternStructDecl: EXTERN STRUCT Name { fields } FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) { include Locatable }
+  # EnumDef: ENUM Name { Variant1, Variant2, ... }
+  # Declares a Zig enum type. variants is an Array of variant name strings.
+  EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }
 
   # DoBlock: fork-join parallel execution.
   # branches: Array of expression arrays — each sub-array is one parallel branch.

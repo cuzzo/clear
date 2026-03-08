@@ -4146,5 +4146,285 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ==========================================
+  # ENUM
+  # ==========================================
+  describe "ENUM" do
+    # --------------------------------------------------
+    # Declaration
+    # --------------------------------------------------
+    describe "declaration" do
+      it "registers the enum type in scope without error" do
+        expect { run("ENUM Direction { North, South, East, West }") }.not_to raise_error
+      end
+
+      it "resolves the EnumDef node as Void (like StructDef)" do
+        ast = run("ENUM Direction { North, South, East, West }")
+        expect(ast.statements.first.resolved_type).to eq(:Void)
+      end
+
+      it "accepts PUB ENUM without error" do
+        expect { run("PUB ENUM Color { Red, Green, Blue }") }.not_to raise_error
+      end
+
+      it "accepts PRIVATE ENUM without error" do
+        expect { run("PRIVATE ENUM Size { Small, Medium, Large }") }.not_to raise_error
+      end
+
+      it "allows multiple independent enum types in the same file" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Direction { North, South }
+            ENUM Status { Active, Inactive }
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+
+    # --------------------------------------------------
+    # Variant access (EnumType.Variant)
+    # --------------------------------------------------
+    describe "variant access" do
+      let(:code) {
+        <<~CLEAR
+          ENUM Color { Red, Green, Blue }
+          x: Color = Color.Red;
+        CLEAR
+      }
+
+      it "resolves variant access to the enum's own type" do
+        rhs = ast.statements.last.value
+        expect(rhs.resolved_type).to eq(:Color)
+      end
+
+      it "resolves the declared variable to the enum type" do
+        expect(ast.statements.last.resolved_type).to eq(:Color)
+      end
+
+      it "resolves all variants to the same enum type" do
+        ast = run(<<~CLEAR)
+          ENUM Dir { North, South, East, West }
+          a: Dir = Dir.North;
+          b: Dir = Dir.South;
+          c: Dir = Dir.East;
+          d: Dir = Dir.West;
+        CLEAR
+        ast.statements.drop(1).each do |stmt|
+          expect(stmt.resolved_type).to eq(:Dir)
+        end
+      end
+    end
+
+    # --------------------------------------------------
+    # Functions with enum params / return types
+    # --------------------------------------------------
+    describe "enum in function signatures" do
+      let(:code) {
+        <<~CLEAR
+          ENUM Dir { North, South }
+          FN mirror(d: Dir) RETURNS Dir ->
+            RETURN d;
+          END
+          FN cheatMain() RETURNS Void ->
+            result = mirror(Dir.North);
+          END
+        CLEAR
+      }
+
+      it "accepts enum as a parameter type without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves the call result to the enum type" do
+        fn        = ast.statements.last
+        call_stmt = fn.body.last
+        expect(call_stmt.resolved_type).to eq(:Dir)
+      end
+
+      it "raises Type Error when wrong type is passed to enum param" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Dir { North, South }
+            FN use(d: Dir) RETURNS Void ->
+            END
+            FN cheatMain() RETURNS Void ->
+              use(42);
+            END
+          CLEAR
+        }.to raise_error(/Type Error/i)
+      end
+    end
+
+    # --------------------------------------------------
+    # Equality and comparison
+    # --------------------------------------------------
+    describe "equality" do
+      it "resolves == comparison between enum values to Bool" do
+        result = get_last_type(<<~CLEAR)
+          ENUM Status { Active, Inactive }
+          a: Status = Status.Active;
+          b: Status = Status.Inactive;
+          a == b;
+        CLEAR
+        expect(result).to eq(:Bool)
+      end
+
+      it "resolves != comparison between enum values to Bool" do
+        result = get_last_type(<<~CLEAR)
+          ENUM Status { Active, Inactive }
+          a: Status = Status.Active;
+          b: Status = Status.Inactive;
+          a != b;
+        CLEAR
+        expect(result).to eq(:Bool)
+      end
+    end
+
+    # --------------------------------------------------
+    # MATCH on enum values
+    # --------------------------------------------------
+    describe "MATCH" do
+      it "type-checks MATCH cases against the enum type without error" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Dir { North, South }
+            FN cheatMain() RETURNS Void ->
+              d: Dir = Dir.North;
+              MUTABLE n = 0_i64;
+              MATCH d START
+                Dir.North -> n = 1_i64;,
+                Dir.South -> n = 2_i64;
+              END
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises an error when a MATCH case is a different enum type" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Dir { North, South }
+            ENUM Color { Red, Blue }
+            FN cheatMain() RETURNS Void ->
+              d: Dir = Dir.North;
+              MUTABLE n = 0_i64;
+              MATCH d START
+                Color.Red -> n = 1_i64;
+              END
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MATCH case type Color does not match expression type Dir/)
+      end
+    end
+
+    # --------------------------------------------------
+    # Error messages
+    # --------------------------------------------------
+    describe "error messages" do
+      it "raises 'Type Error: Enum ... has no variant' for an unknown variant" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Season { Spring, Summer, Autumn }
+            x: Season = Season.Winter;
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: Enum 'Season' has no variant 'Winter'/)
+      end
+
+      it "raises 'Type Error: ... is an enum type' when accessing a field on an enum value" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Dir { North, South }
+            FN cheatMain() RETURNS Void ->
+              d: Dir = Dir.North;
+              bad = d.name;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: 'Dir' is an enum type/)
+      end
+
+      it "raises 'Type Error: Enum ... has no variant' for a variant typo" do
+        expect {
+          run(<<~CLEAR)
+            ENUM Color { Red, Green, Blue }
+            x: Color = Color.Purple;
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: Enum 'Color' has no variant 'Purple'/)
+      end
+    end
+
+    # --------------------------------------------------
+    # Zig code generation
+    # --------------------------------------------------
+    describe "Zig code generation" do
+      def transpile(src)
+        ZigTranspiler.new.transpile(src)
+      end
+
+      it "emits a Zig enum type declaration with all variants" do
+        out = transpile(<<~CLEAR)
+          ENUM Planet { Mercury, Venus, Earth }
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).to include("const Planet = enum {")
+        expect(out).to include("    Mercury,")
+        expect(out).to include("    Venus,")
+        expect(out).to include("    Earth,")
+      end
+
+      it "emits enum variant access as TypeName.Variant" do
+        out = transpile(<<~CLEAR)
+          ENUM Color { Red, Green }
+          FN cheatMain() RETURNS Void ->
+            c: Color = Color.Red;
+          END
+        CLEAR
+        expect(out).to include("Color.Red")
+      end
+
+      it "emits the enum type annotation on a const declaration" do
+        out = transpile(<<~CLEAR)
+          ENUM Dir { North, South }
+          FN cheatMain() RETURNS Void ->
+            d: Dir = Dir.North;
+          END
+        CLEAR
+        expect(out).to include("Dir")
+        expect(out).to include("Dir.North")
+      end
+
+      it "emits enum as a function parameter type" do
+        out = transpile(<<~CLEAR)
+          ENUM Dir { North, South }
+          FN turn(d: Dir) RETURNS Dir ->
+            RETURN d;
+          END
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).to include("d: Dir")
+        expect(out).to match(/fn turn.*Dir/)
+      end
+
+      it "includes PUB ENUM in transpile_module output" do
+        out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+          PUB ENUM Status { Active, Inactive }
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).to include("const Status = enum {")
+      end
+
+      it "excludes PRIVATE ENUM from transpile_module output" do
+        out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+          PRIVATE ENUM Internal { A, B }
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).not_to include("const Internal = enum {")
+      end
+    end
+  end
 end
 

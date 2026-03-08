@@ -379,6 +379,8 @@ class Type
     if struct?
       raise "Need lookup context for struct size" unless resolver
       schema = resolver.call(resolved)
+      # Enum types are integer-sized in Zig — treat as slot size 1.
+      return 1 if schema.is_a?(Hash) && schema[:kind] == :enum
       return schema.values.sum { |t| Type.new(t).slot_size(resolver) }
     end
 

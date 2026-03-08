@@ -29,6 +29,8 @@ module ErrorDefinitions
     LIST_TYPE_MISMATCH: "List contains mixed types. Item %d is '%s', expected '%s'.",
     ILLEGAL_FIELD_LOOKUP: "Type Error: Cannot determine struct type for field access '%s'. Object is '%s'.",
     STRUCT_FIELD_UNRESOLVABLE: "Type Error: Struct '%s' has no field '%s'",
+    ENUM_UNKNOWN_VARIANT:      "Type Error: Enum '%s' has no variant '%s'.",
+    ENUM_FIELD_ACCESS:         "Type Error: '%s' is an enum type. Enum values do not have fields.",
 
     # FUNCTION ERRORS
     MISSING_FUNCTION: "Missing function '%s'.",

@@ -70,6 +70,7 @@ class Parser
   stmt(:KEYWORD, 'PRIVATE') { parse_visibility_decl(:private) }
   stmt(:KEYWORD, 'IF') { parse_if_statement }
   stmt(:KEYWORD, 'STRUCT') { parse_struct_def }
+  stmt(:KEYWORD, 'ENUM')   { parse_enum_def }
   stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
@@ -140,15 +141,15 @@ class Parser
     end
   end
 
-  # Dot Access: obj.field OR obj.method()
+  # Dot Access: obj.field OR obj.method() OR EnumType.Variant
   suffix(:CHAR, '.') do |lhs|
     dot_token = consume(:CHAR, '.')
-    
+
     if match?(:CHAR, '*')
       star_token = consume(:CHAR, '*')
       AST::GetField.new(star_token, lhs, '*')
     else
-      name_token = consume(:VAR_ID)
+      name_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
 
       if match?(:CHAR, '(')
         # Method Call
@@ -442,8 +443,10 @@ class Parser
       parse_function_def(visibility)
     elsif match?(:KEYWORD, 'STRUCT')
       parse_struct_def(visibility)
+    elsif match?(:KEYWORD, 'ENUM')
+      parse_enum_def(visibility)
     else
-      error!(current, "Expected FN or STRUCT after visibility modifier, got '#{current.value}'")
+      error!(current, "Expected FN, STRUCT, or ENUM after visibility modifier, got '#{current.value}'")
     end
   end
 
@@ -486,6 +489,19 @@ class Parser
     name = consume(:TYPE_ID).value
     fields = parse_struct_body
     AST::StructDef.new(tok, name, fields, visibility)
+  end
+
+  def parse_enum_def(visibility = :package)
+    tok = consume(:KEYWORD, 'ENUM')
+    name = consume(:TYPE_ID).value
+    consume(:CHAR, '{')
+    variants = []
+    until match?(:CHAR, '}')
+      variants << consume(:TYPE_ID).value
+      match!(:CHAR, ',')
+    end
+    consume(:CHAR, '}')
+    AST::EnumDef.new(tok, name, variants, visibility)
   end
 
   def parse_function_def(visibility = :package)
@@ -828,11 +844,18 @@ class Parser
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
       name = type_token.value
-      _, fields = parse_comma_seq(:CHAR, '{', '}') do
-        k = consume(:VAR_ID).value; consume(:CHAR, ':'); v = parse_expression
-        [k, v]
+      if match?(:CHAR, '{')
+        # Struct literal: User{ id: 1 }
+        _, fields = parse_comma_seq(:CHAR, '{', '}') do
+          k = consume(:VAR_ID).value; consume(:CHAR, ':'); v = parse_expression
+          [k, v]
+        end
+        return AST::StructLit.new(type_token, name, fields.to_h, storage)
+      else
+        # Type name reference — e.g. enum variant access: Color.Red
+        node = AST::Identifier.new(type_token, name)
+        return parse_suffixes(node)
       end
-      return AST::StructLit.new(type_token, name, fields.to_h, storage)
     elsif match?(:CHAR, '[')
       bracket_token, items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
       return AST::ListLit.new(bracket_token, items, storage)
