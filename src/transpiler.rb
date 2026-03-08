@@ -203,13 +203,27 @@ private
     when AST::UnionDef
       # CHEAT: UNION Result { Ok: Number, Err: String, Empty }
       # ZIG:   const Result = union(enum) { Ok: f64, Err: []const u8, Empty: void };
+      # CHEAT: UNION Option<T> { Some: T, None }
+      # ZIG:   fn Option(comptime T: type) type { return union(enum) { Some: T, None: void }; }
       @union_schemas ||= {}
       @union_schemas[node.name.to_sym] = node.variants
       variants = node.variants.map do |var_name, type_obj|
         zig_t = type_obj ? transpile_type(type_obj) : "void"
         "    #{var_name}: #{zig_t},"
       end.join("\n")
-      "const #{node.name} = union(enum) {\n#{variants}\n};"
+
+      if node.type_params&.any?
+        params = node.type_params.map { |p| "comptime #{p}: type" }.join(", ")
+        <<~ZIG.strip
+          fn #{node.name}(#{params}) type {
+              return union(enum) {
+          #{variants}
+              };
+          }
+        ZIG
+      else
+        "const #{node.name} = union(enum) {\n#{variants}\n};"
+      end
 
     when AST::StructDef
       # Cache field schemas so VarDecl can generate field-level Rc cleanup
@@ -518,7 +532,11 @@ private
 
     when AST::MatchStatement
       subject = visit(node.expr)
-      is_union = @union_schemas&.key?(node.expr.resolved_type)
+      union_lookup = begin
+        t = Type.new(node.expr.resolved_type || :Any)
+        t.generic_instance? ? t.generic_base : t.resolved
+      end
+      is_union = @union_schemas&.key?(union_lookup)
       parts = node.cases.map do |c|
         body = transpile_block(c[:body])
         cond = if is_union

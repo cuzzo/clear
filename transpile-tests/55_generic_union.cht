@@ -1,0 +1,47 @@
+-- Phase 5: Generic Unions
+
+UNION Option<T> { Some: T, None }
+UNION Result<T, E> { Ok: T, Err: E }
+
+FN safeDivide(a: Number, b: Number) RETURNS Result<Number, Bool> ->
+  IF b == 0.0 THEN RETURN Result<Number, Bool>{ Err: TRUE }; END
+  RETURN Result<Number, Bool>{ Ok: a };
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Option<Number> with a payload variant
+  opt = Option<Number>{ Some: 42.0 };
+  MUTABLE got = 0.0;
+  MATCH opt START
+    Option.Some -> got = 1.0;,
+    Option.None -> got = 2.0;
+  END
+  ASSERT got == 1.0;
+
+  -- Option<Number> with unit variant
+  none_val = Option<Number>{ Some: 0.0 };
+  MUTABLE got2 = 0.0;
+  MATCH none_val START
+    Option.Some -> got2 = 10.0;,
+    Option.None -> got2 = 20.0;
+  END
+  ASSERT got2 == 10.0;
+
+  -- Result<Number, Bool>: Ok path
+  ok = safeDivide(10.0, 2.0);
+  MUTABLE ok_matched = 0.0;
+  MATCH ok START
+    Result.Ok  -> ok_matched = 1.0;,
+    Result.Err -> ok_matched = 2.0;
+  END
+  ASSERT ok_matched == 1.0;
+
+  -- Result<Number, Bool>: Err path
+  err = safeDivide(10.0, 0.0);
+  MUTABLE err_matched = 0.0;
+  MATCH err START
+    Result.Ok  -> err_matched = 1.0;,
+    Result.Err -> err_matched = 2.0;
+  END
+  ASSERT err_matched == 2.0;
+END

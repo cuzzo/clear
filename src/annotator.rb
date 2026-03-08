@@ -5,6 +5,7 @@ require_relative "./std_lib"
 require_relative "./function_analysis"
 require_relative "./pipe_analysis"
 require_relative "./ownership_tracker"
+require_relative "./generic_analysis"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -14,6 +15,7 @@ class SemanticAnnotator
   include OwnershipTracker
   include ScopeHelper
   include TypeHelper
+  include GenericAnalysis
 
   attr_reader :scope_stack
 
@@ -277,15 +279,7 @@ private
     verify_lifetime!(node)
 
     # Validate generic type params on the function definition
-    if fn_type_params.any?
-      seen = {}
-      node.type_params.each do |param|
-        param_sym = param.to_sym
-        error!(node, :GENERIC_FN_DUPLICATE_PARAM, param, node.name) if seen[param_sym]
-        error!(node, :GENERIC_FN_PARAM_SHADOWS_BUILTIN, param, node.name, param) if BUILTIN_TYPES.include?(param_sym)
-        seen[param_sym] = true
-      end
-    end
+    validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
 
     # Make type params visible during type annotation validation
     @current_fn_type_params = fn_type_params
@@ -319,23 +313,9 @@ private
     @function_context_stack.pop
   end
 
-  BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
-
   def visit_StructDef(node)
-    # Validate generic type parameters
-    if node.type_params&.any?
-      seen = {}
-      node.type_params.each do |param|
-        param_sym = param.to_sym
-        if seen[param_sym]
-          error!(node, :GENERIC_DUPLICATE_TYPE_PARAM, param, node.name)
-        end
-        if BUILTIN_TYPES.include?(param_sym)
-          error!(node, :GENERIC_TYPE_PARAM_SHADOWS_BUILTIN, param, param)
-        end
-        seen[param_sym] = true
-      end
-    end
+    # Validate generic type parameters (duplicate / builtin-shadow)
+    validate_type_param_list!(node, node.type_params, "struct") if node.type_params&.any?
 
     # Register the Type Name with its field schema.
     schema = node.fields.transform_values { |f| f[:type] }
@@ -355,7 +335,11 @@ private
   end
 
   def visit_UnionDef(node)
+    # Validate generic type parameters (duplicate / builtin-shadow)
+    validate_type_param_list!(node, node.type_params, "union") if node.type_params&.any?
+
     schema = { kind: :union, variants: node.variants }
+    schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
@@ -469,9 +453,13 @@ private
           annotate_struct_pattern!(node, c[:value])
         else
           visit(c[:value])
+          expr_t = Type.new(node.expr.resolved_type || :Any)
+          # Allow union cases (e.g. :Option) to match a generic instance (e.g. :"Option<Number>")
+          base_match = expr_t.generic_instance? && expr_t.generic_base == c[:value].resolved_type
           unless c[:value].resolved_type == node.expr.resolved_type ||
                  node.expr.resolved_type == :Any ||
-                 c[:value].resolved_type == :Any
+                 c[:value].resolved_type == :Any ||
+                 base_match
             error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
           end
         end
@@ -1155,26 +1143,49 @@ private
       error!(node, "Unknown struct type: '#{node.name}'")
     end
 
-    # Union literal: Result{ Ok: 42 }
+    # Union literal: Result{ Ok: 42 } or Option<Number>{ Some: 42.0 }
     # Reuses struct-literal syntax — no new parser changes required.
     if schema.is_a?(Hash) && schema[:kind] == :union
       if node.fields.length != 1
         error!(node, "Union literal '#{node.name}' must specify exactly one variant, got #{node.fields.length}.")
       end
+
+      # Build type param substitution for generic unions
+      union_type_params = schema[:type_params]
+      union_subst = {}
+      if node.type_args&.any?
+        if union_type_params.nil? || union_type_params.empty?
+          error!(node, "Type Error: '#{node.name}' is not a generic type — remove the type arguments.")
+        end
+        if node.type_args.length != union_type_params.length
+          error!(node, "Type Error: '#{node.name}' expects #{union_type_params.length} type argument(s), got #{node.type_args.length}.")
+        end
+        union_type_params.zip(node.type_args).each { |p, a| union_subst[p] = a.to_sym }
+      elsif union_type_params&.any?
+        params_hint = union_type_params.map(&:to_s).join(', ')
+        error!(node, "Type Error: '#{node.name}' is a generic type — type arguments are required (e.g., #{node.name}<#{params_hint}>).")
+      end
+
       variant_name, val_node = node.fields.first
       unless schema[:variants].key?(variant_name)
         error!(node, :UNION_UNKNOWN_VARIANT, node.name, variant_name)
       end
-      expected_type = schema[:variants][variant_name]
-      if expected_type.nil?
+      raw_expected = schema[:variants][variant_name]
+      if raw_expected.nil?
         error!(node, "Union variant '#{variant_name}' is a unit variant — use '#{node.name}.#{variant_name}' (no payload).")
       end
+      # Apply type param substitution (e.g. T → Number for generic unions)
+      expected_type = union_subst.any? ? apply_type_subst(raw_expected, union_subst) : raw_expected
       visit(val_node)
       actual = val_node.type_info
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
       end
-      node.full_type = node.name.to_sym
+      node.full_type = if node.type_args&.any?
+        :"#{node.name}<#{node.type_args.join(',')}>"
+      else
+        node.name.to_sym
+      end
       return
     end
 
@@ -1668,141 +1679,8 @@ private
   # Called whenever a user-written type annotation is resolved (variable decls, params, returns).
   # Covers four cases:
   #   1. Generic type used correctly: Pair<Number>    — validate arg count + arg types
-  # ==========================================
-  # GENERIC FUNCTION HELPERS
-  # ==========================================
-
-  # Infer type argument substitution map from actual argument types.
-  # Mutates +subst+ in place and errors on conflicts or missing bindings.
-  #
-  # @param node [AST::FuncCall] The call site node (for error reporting)
-  # @param signature [Hash] The function's type signature
-  # @param actual_args [Array<AST node>] Visited argument nodes
-  # @param type_params [Array<Symbol>] e.g. [:T, :K]
-  # @return [Hash] e.g. { T: :Number, K: :String }
-  def infer_generic_type_args!(node, signature, actual_args, type_params)
-    subst = {}
-    signature[:params].each_with_index do |param, i|
-      arg = actual_args[i]
-      next unless arg
-      param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
-      actual_type = Type.new(arg.resolved_type || :Any)
-      extract_type_bindings!(node, param_type, actual_type, type_params, subst)
-    end
-    type_params.each do |tp|
-      unless subst.key?(tp)
-        error!(node, :GENERIC_FN_CANNOT_INFER, tp, node.name, tp)
-      end
-    end
-    subst
-  end
-
-  # Recursively bind type params to concrete types by matching param_type against actual_type.
-  def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
-    p_res = param_type.resolved
-    a_res = actual_type.resolved
-    if type_params.include?(p_res)
-      existing = subst[p_res]
-      if existing && existing != a_res
-        error!(node, :GENERIC_FN_CONFLICT, p_res, node.name, existing, a_res)
-      end
-      subst[p_res] = a_res
-    elsif param_type.generic_instance? && actual_type.generic_instance? &&
-          param_type.generic_base == actual_type.generic_base
-      param_type.generic_args.zip(actual_type.generic_args).each do |p_arg, a_arg|
-        next unless p_arg && a_arg
-        extract_type_bindings!(node, p_arg, a_arg, type_params, subst)
-      end
-    end
-  end
-
-  # Apply a type param substitution map to a type object.
-  # e.g. apply_type_subst(Type.new(:T), { T: :Number }) → Type.new(:Number)
-  def apply_type_subst(type_obj, subst)
-    return Type.new(:Any) if type_obj.nil?
-    t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
-    resolved = t.resolved
-    if subst.key?(resolved)
-      Type.new(subst[resolved])
-    elsif t.generic_instance?
-      new_args = t.generic_args.map { |arg| apply_type_subst(arg, subst).resolved }
-      Type.new(:"#{t.generic_base}<#{new_args.join(',')}>")
-    else
-      t
-    end
-  end
-
-  # Build a concrete version of a generic signature with all type params substituted.
-  def substitute_type_params(signature, subst)
-    {
-      params: signature[:params].map do |p|
-        p.merge(type: apply_type_subst(p[:type], subst))
-      end,
-      return: { type: apply_type_subst(signature[:return][:type], subst),
-                lifetime: signature[:return][:lifetime] },
-      visibility: signature[:visibility]
-    }
-  end
-
-  #   2. Non-generic type with args:  User<Number>    — error: not generic
-  #   3. Generic type without args:   Pair            — error: args required
-  #   4. Non-generic type without args: User          — nothing to validate (normal path)
-  def validate_type_annotation!(node, type_obj)
-    return unless type_obj.is_a?(Type)
-
-    # Unwrap error-union and optional wrappers to get the inner type
-    inner = if type_obj.error_union?
-      type_obj.payload_type
-    elsif type_obj.optional?
-      type_obj.wrapped_type
-    else
-      type_obj
-    end
-    return unless inner.is_a?(Type)
-
-    if inner.generic_instance?
-      # Case 1 / 2: Generic annotation provided — validate it
-      base_name = inner.generic_base
-      schema = lookup_type_schema(base_name)
-
-      if schema.nil?
-        error!(node, "Type Error: Unknown type '#{base_name}'.")
-      end
-
-      unless schema.is_a?(Hash) && schema[:type_params]
-        error!(node, :GENERIC_NOT_GENERIC, base_name)
-      end
-
-      expected = schema[:type_params].length
-      actual   = inner.generic_args.length
-      if actual != expected
-        error!(node, :GENERIC_WRONG_ARG_COUNT, base_name, expected, actual)
-      end
-
-      inner.generic_args.each do |arg|
-        next if BUILTIN_TYPES.include?(arg.resolved)
-        next if @current_fn_type_params.include?(arg.resolved)  # e.g. Cache<T> where T is fn type param
-        arg_schema = lookup_type_schema(arg.resolved)
-        if arg_schema.nil?
-          error!(node, :GENERIC_UNKNOWN_TYPE_ARG, arg.resolved)
-        end
-        # If the type arg is itself a generic type, it must carry its own args
-        if arg_schema.is_a?(Hash) && arg_schema[:type_params]&.any?
-          params_hint = arg_schema[:type_params].map(&:to_s).join(', ')
-          error!(node, :GENERIC_MISSING_TYPE_ARGS, arg.resolved, arg.resolved, params_hint)
-        end
-      end
-
-    else
-      # Case 3: Plain type name — check if it's actually a generic struct missing args
-      base_name = inner.resolved
-      schema = lookup_type_schema(base_name)
-      if schema.is_a?(Hash) && schema[:type_params]&.any?
-        params_hint = schema[:type_params].map(&:to_s).join(', ')
-        error!(node, :GENERIC_MISSING_TYPE_ARGS, base_name, base_name, params_hint)
-      end
-    end
-  end
+  # Generic helpers (validate_type_annotation!, infer_generic_type_args!, etc.)
+  # live in src/generic_analysis.rb (included via GenericAnalysis module).
 
 end
 

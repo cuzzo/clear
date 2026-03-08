@@ -5378,6 +5378,154 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
+      # --------------------------------------------------
+      # Phase 5: Generic Unions
+      # --------------------------------------------------
+      describe "generic union definitions" do
+        def union_src(extra = "")
+          <<~CLEAR
+            UNION Option<T> { Some: T, None }
+            UNION Result<T, E> { Ok: T, Err: E }
+            FN cheatMain() RETURNS Void ->
+              #{extra}
+            END
+          CLEAR
+        end
+
+        it "declares Option<T> without error" do
+          expect { run(union_src) }.not_to raise_error
+        end
+
+        it "declares Result<T, E> without error" do
+          expect { run(union_src) }.not_to raise_error
+        end
+
+        it "raises on duplicate type parameter in union" do
+          src = <<~CLEAR
+            UNION Bad<T, T> { A: T, B: T }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError,
+            /Duplicate type parameter 'T' in generic union 'Bad'/)
+        end
+
+        it "raises when type parameter shadows a builtin" do
+          src = <<~CLEAR
+            UNION Bad<Number> { A: Number }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError,
+            /Type parameter 'Number' shadows built-in type 'Number'/)
+        end
+
+        it "accepts Option<Number>{ Some: 42.0 } without error" do
+          expect { run(union_src("opt = Option<Number>{ Some: 42.0 };")) }.not_to raise_error
+        end
+
+        it "sets full_type to :\"Option<Number>\" on the union literal" do
+          ast = run(union_src("opt = Option<Number>{ Some: 42.0 };"))
+          fn = ast.statements.last
+          bind = fn.body.first
+          lit = bind.value
+          expect(lit).to be_a(AST::StructLit)
+          expect(lit.resolved_type).to eq(:"Option<Number>")
+        end
+
+        it "accepts Option<Number>{ Some: 0.0 } (second Some variant) without error" do
+          expect { run(union_src("n = Option<Number>{ Some: 0.0 };")) }.not_to raise_error
+        end
+
+        it "accepts Result<Number, Bool>{ Err: TRUE } without error" do
+          expect { run(union_src("r = Result<Number, Bool>{ Err: TRUE };")) }.not_to raise_error
+        end
+
+        it "raises when instantiating a generic union without type args" do
+          src = <<~CLEAR
+            UNION Option<T> { Some: T, None }
+            FN cheatMain() RETURNS Void ->
+              bad = Option{ Some: 1.0 };
+            END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError,
+            /generic type.*type arguments are required/i)
+        end
+
+        it "raises when a union variant value type is wrong" do
+          src = <<~CLEAR
+            UNION Option<T> { Some: T, None }
+            FN cheatMain() RETURNS Void ->
+              bad = Option<Number>{ Some: TRUE };
+            END
+          CLEAR
+          expect { run(src) }.to raise_error(CompilerError, /Type Error/)
+        end
+
+        it "allows MATCH on Option<Number> without type error" do
+          src = union_src(<<~BODY)
+            opt = Option<Number>{ Some: 42.0 };
+            MUTABLE got = 0.0;
+            MATCH opt START
+              Option.Some -> got = 1.0;,
+              Option.None -> got = 2.0;
+            END
+          BODY
+          expect { run(src) }.not_to raise_error
+        end
+      end
+
+      describe "Phase 5 Zig code generation" do
+        def union_zig(src)
+          ZigTranspiler.new.transpile(src)
+        end
+
+        it "emits a comptime function for Option<T>" do
+          src = <<~CLEAR
+            UNION Option<T> { Some: T, None }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          out = union_zig(src)
+          expect(out).to include("fn Option(comptime T: type)")
+          expect(out).to include("union(enum)")
+          expect(out).to include("Some: T")
+          expect(out).to include("None: void")
+        end
+
+        it "emits a comptime function for Result<T, E>" do
+          src = <<~CLEAR
+            UNION Result<T, E> { Ok: T, Err: E }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          out = union_zig(src)
+          expect(out).to include("fn Result(comptime T: type, comptime E: type)")
+          expect(out).to include("Ok: T")
+          expect(out).to include("Err: E")
+        end
+
+        it "emits Option(f64){ .Some = 42 } for Option<Number>{ Some: 42.0 }" do
+          src = <<~CLEAR
+            UNION Option<T> { Some: T, None }
+            FN cheatMain() RETURNS Void ->
+              opt = Option<Number>{ Some: 42.0 };
+            END
+          CLEAR
+          out = union_zig(src)
+          expect(out).to include("Option(f64)")
+          expect(out).to include(".Some =")
+        end
+
+        it "emits Result(f64, bool){ .Err = true } for generic Result literal" do
+          src = <<~CLEAR
+            UNION Result<T, E> { Ok: T, Err: E }
+            FN cheatMain() RETURNS Void ->
+              r = Result<Number, Bool>{ Err: TRUE };
+            END
+          CLEAR
+          out = union_zig(src)
+          expect(out).to include("Result(f64, bool)")
+          expect(out).to include(".Err =")
+        end
+      end
+
       describe "Phase 3 Zig code generation" do
         it "emits Pair(f64){ .first = ..., .second = ... } for Pair<Number>" do
           src = <<~CLEAR

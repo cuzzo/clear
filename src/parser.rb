@@ -519,6 +519,18 @@ class Parser
   def parse_union_def(visibility = :package)
     tok = consume(:KEYWORD, 'UNION')
     name = consume(:TYPE_ID).value
+
+    # Parse optional generic type parameters: UNION Option<T> { ... }
+    type_params = []
+    if match?(:CHAR, '<')
+      consume(:CHAR, '<')
+      until match?(:CHAR, '>')
+        type_params << consume(:TYPE_ID).value
+        match!(:CHAR, ',')
+      end
+      consume(:CHAR, '>')
+    end
+
     consume(:CHAR, '{')
     variants = {}
     until match?(:CHAR, '}')
@@ -529,7 +541,9 @@ class Parser
       match!(:CHAR, ',')
     end
     consume(:CHAR, '}')
-    AST::UnionDef.new(tok, name, variants, visibility)
+    node = AST::UnionDef.new(tok, name, variants, visibility)
+    node.type_params = type_params unless type_params.empty?
+    node
   end
 
   def parse_function_def(visibility = :package)
