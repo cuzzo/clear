@@ -151,4 +151,36 @@ STD_LIB = {
     return: STRING_TYPE,
     zig: "try CheatLib.fileReadAll({alloc}, {0})"
   },
+
+  # -------------------------------------------------------------------------
+  # TCP Socket — Phase 3
+  # -------------------------------------------------------------------------
+
+  # Accept one incoming TCP connection on a listening server socket.
+  # Yields the current fiber (via epoll) until a client connects.
+  # Returns a TCPClient resource; auto-closes via RAII defer.
+  # Usage: client = accept(server)
+  "accept" => {
+    args: [:TCPServer],
+    return: :TCPClient,
+    zig: "try CheatLib.socketAccept({0})"
+  },
+
+  # Read up to 4096 bytes from a connected TCP client into a heap String.
+  # Yields the fiber if no data is ready (epoll-backed).
+  # Usage: data = tcpRead(client)
+  "tcpRead" => {
+    args: [:TCPClient],
+    return: STRING_TYPE,
+    zig: "try CheatLib.socketRead({alloc}, {0})"
+  },
+
+  # Write a String to a connected TCP client.
+  # Yields the fiber if the send buffer is full (epoll-backed).
+  # Usage: tcpWrite(client, "hello")
+  "tcpWrite" => {
+    args: [:TCPClient, STRING_TYPE],
+    return: :Void,
+    zig: "try CheatLib.socketWriteVoid({0}, {1})"
+  },
 }

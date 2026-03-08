@@ -404,6 +404,22 @@ pub const CheatLib = struct {
         std.posix.close(fd);
     }
 
+    // Read up to 4096 bytes from a connected client socket into a heap-allocated String.
+    // Yields the fiber (via epoll) until data is available.
+    // Usage: data = tcpRead(client)
+    pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
+        var buf: [4096]u8 = undefined;
+        const n = try CheatLib.read(fd, &buf);
+        return allocator.dupe(u8, buf[0..n]);
+    }
+
+    // Write all bytes from `data` to a connected client socket, discarding the byte count.
+    // Yields the fiber if the send buffer is temporarily full (epoll-backed).
+    // Usage: tcpWrite(client, "hello")
+    pub fn socketWriteVoid(fd: i32, data: []const u8) !void {
+        _ = try CheatLib.socketWrite(fd, data);
+    }
+
     // Threading
     // THE INTERNAL WRAPPER
     // This runs INSIDE the new thread. It handles the boilerplate.

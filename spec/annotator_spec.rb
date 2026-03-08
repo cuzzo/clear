@@ -6464,5 +6464,180 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===================================================================
+  # Phase 3: TCP Resource Types (TCPServer, TCPClient)
+  # ===================================================================
+  describe "Resource Types — Phase 3 (TCP)" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    # ------------------------------------------------------------------
+    # Type system
+    # ------------------------------------------------------------------
+    describe "Type mapping" do
+      it "TCPServer maps to i32 Zig type" do
+        expect(Type.new(:TCPServer).zig_type).to eq("i32")
+      end
+
+      it "TCPClient maps to i32 Zig type" do
+        expect(Type.new(:TCPClient).zig_type).to eq("i32")
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator — TCPServer::listen
+    # ------------------------------------------------------------------
+    describe "Annotator: TCPServer::listen" do
+      it "resolves TCPServer::listen(port) to type :TCPServer" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(8080); RETURN; END'
+        ast = run(src)
+        call = ast.statements.first.body.first.value
+        expect(call.resolved_type).to eq(:TCPServer)
+      end
+
+      it "annotates TCPServer variable as a resource in scope" do
+        expect {
+          run('FN f() RETURNS Void -> s = TCPServer::listen(8080); RETURN; END')
+        }.not_to raise_error
+      end
+
+      it "raises on wrong argument type (String instead of Int64)" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen("8080"); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /expected Int64, got/)
+      end
+
+      it "raises on wrong argument count" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(80, 90); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /expects 1 argument/)
+      end
+
+      it "raises on unknown static method" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::connect(80); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /No static method 'connect' on 'TCPServer'/)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator — accept / tcpRead / tcpWrite intrinsics
+    # ------------------------------------------------------------------
+    describe "Annotator: accept intrinsic" do
+      it "accept(server) resolves to type :TCPClient" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(8080); c = accept(s); RETURN; END'
+        ast = run(src)
+        fn = ast.statements.first
+        accept_call = fn.body[1].value  # second statement
+        expect(accept_call.resolved_type).to eq(:TCPClient)
+      end
+
+      it "annotates the accepted client as a resource (gets defer close)" do
+        expect {
+          run('FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END')
+        }.not_to raise_error
+      end
+
+      it "raises if accept is called with a non-TCPServer arg" do
+        src = 'FN f() RETURNS Void -> accept(42); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError)
+      end
+    end
+
+    describe "Annotator: tcpRead intrinsic" do
+      it "tcpRead(client) resolves to String" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); data = tcpRead(c); RETURN; END'
+        ast = run(src)
+        fn = ast.statements.first
+        # data is the third statement
+        data_bind = fn.body[2]
+        expect(data_bind.value.resolved_type).to eq(:String)
+      end
+    end
+
+    describe "Annotator: tcpWrite intrinsic" do
+      it "tcpWrite(client, string) resolves to Void" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, "hello"); RETURN; END'
+        ast = run(src)
+        fn = ast.statements.first
+        write_call = fn.body[2]
+        expect(write_call.resolved_type).to eq(:Void)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Transpiler — code generation
+    # ------------------------------------------------------------------
+    describe "Transpiler: TCPServer code generation" do
+      it "emits CheatLib.socketListen for TCPServer::listen" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(8080); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.socketListen(@intCast(8080))')
+      end
+
+      it "emits defer CheatLib.socketClose for server RAII" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(8080); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include("defer CheatLib.socketClose(s);")
+      end
+
+      it "emits CheatLib.socketAccept for accept()" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.socketAccept(s)')
+      end
+
+      it "emits defer CheatLib.socketClose for client RAII" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include("defer CheatLib.socketClose(c);")
+      end
+
+      it "emits CheatLib.socketRead for tcpRead()" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.socketRead(')
+      end
+
+      it "emits CheatLib.socketWriteVoid for tcpWrite()" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, "hi"); RETURN; END'
+        out = transpile_fn(src)
+        # The string literal may be wrapped in @as([]const u8, ...) — check the function name and first arg
+        expect(out).to include('CheatLib.socketWriteVoid(c,')
+        expect(out).to include('"hi"')
+      end
+
+      it "TCPServer Zig type is i32 (via Type#zig_type)" do
+        # The transpiler infers the type from the expression; check via the type system directly.
+        expect(Type.new(:TCPServer).zig_type).to eq("i32")
+        expect(Type.new(:TCPClient).zig_type).to eq("i32")
+      end
+
+      it "does NOT emit a _moved flag for TCPServer resources" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).not_to include("s_moved")
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Resource move semantics
+    # ------------------------------------------------------------------
+    describe "Resource move tracking" do
+      it "allows moving a TCPServer to another variable" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); s2 = s; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows moving a TCPClient to another variable" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+    end
+  end
 end
 

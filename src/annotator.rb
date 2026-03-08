@@ -58,6 +58,24 @@ private
         "open" => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})" }
       }
     })
+
+    # Built-in TCPServer resource type — a non-blocking server socket (i32 fd).
+    # TCPServer::listen(port) returns the server fd; auto-closes via RAII.
+    current_scope.declare_type(:TCPServer, {
+      kind: :resource,
+      close_zig: "CheatLib.socketClose({0})",
+      static_methods: {
+        "listen" => { args: [:Int64], return: :TCPServer, zig: "try CheatLib.socketListen(@intCast({0}))" }
+      }
+    })
+
+    # Built-in TCPClient resource type — a connected client socket (i32 fd).
+    # Produced by accept(server); auto-closes via RAII.
+    current_scope.declare_type(:TCPClient, {
+      kind: :resource,
+      close_zig: "CheatLib.socketClose({0})",
+      static_methods: {}
+    })
   end
 
   def visit(node)

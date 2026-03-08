@@ -246,3 +246,112 @@ test "socketClose: safe to call on freshly-opened server fd" {
         }
     }.body);
 }
+
+// ---------------------------------------------------------------------------
+// Test 5: socketRead + socketWriteVoid — Phase 3 echo with higher-level helpers
+// ---------------------------------------------------------------------------
+// These are the functions the CLEAR compiler calls for tcpRead() / tcpWrite().
+// socketRead allocates a heap String; socketWriteVoid discards the byte count.
+
+const EchoShared2 = struct {
+    server_fd: i32,
+    port: u16,
+    server_ready: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    server_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    echo_correct: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+fn clientThread2(shared: *EchoShared2) void {
+    while (!shared.server_ready.load(.seq_cst)) {
+        std.Thread.sleep(1 * std.time.ns_per_ms);
+    }
+
+    const fd = std.posix.socket(
+        std.posix.AF.INET,
+        std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC,
+        0,
+    ) catch return;
+    defer std.posix.close(fd);
+
+    const addr = std.posix.sockaddr.in{
+        .family = std.posix.AF.INET,
+        .port   = std.mem.nativeToBig(u16, shared.port),
+        .addr   = std.mem.nativeToBig(u32, 0x7F000001),
+        .zero   = [_]u8{0} ** 8,
+    };
+    std.posix.connect(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch return;
+
+    const msg = "hello from phase3";
+    _ = std.posix.write(fd, msg) catch return;
+
+    var buf: [64]u8 = undefined;
+    const n = std.posix.read(fd, &buf) catch return;
+    if (std.mem.eql(u8, buf[0..n], msg)) {
+        shared.echo_correct.store(true, .seq_cst);
+    }
+}
+
+test "socketRead + socketWriteVoid: heap-string echo roundtrip" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 512 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer {
+        sched.deinit();
+        fp.global_registry.deinit(allocator);
+    }
+    fp.active_scheduler = &sched;
+
+    const server_fd = try CheatLib.socketListen(0);
+    defer CheatLib.socketClose(server_fd);
+
+    var bound_addr: std.posix.sockaddr.in = undefined;
+    var addr_len: std.posix.socklen_t = @sizeOf(@TypeOf(bound_addr));
+    try std.posix.getsockname(server_fd, @ptrCast(&bound_addr), &addr_len);
+    const actual_port = std.mem.bigToNative(u16, bound_addr.port);
+
+    var shared2 = EchoShared2{ .server_fd = server_fd, .port = actual_port };
+
+    const ServerFiber2 = struct {
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const rt_ptr: *Runtime = @ptrCast(@alignCast(raw_rt));
+            const s: *EchoShared2 = @ptrCast(@alignCast(raw_args.?));
+
+            s.server_ready.store(true, .seq_cst);
+
+            const client_fd = try CheatLib.socketAccept(s.server_fd);
+            defer CheatLib.socketClose(client_fd);
+
+            // Use the Phase 3 CLEAR-facing helpers instead of raw read/write.
+            const data = try CheatLib.socketRead(rt_ptr.heapAlloc(), client_fd);
+            defer rt_ptr.heapAlloc().free(data);
+
+            try CheatLib.socketWriteVoid(client_fd, data);
+
+            s.server_done.store(true, .seq_cst);
+        }
+    };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&ServerFiber2.run)),
+        &shared2,
+        .{},
+    );
+
+    const thread = try std.Thread.spawn(.{}, clientThread2, .{&shared2});
+    sched.run();
+    thread.join();
+
+    try std.testing.expect(shared2.server_done.load(.seq_cst));
+    try std.testing.expect(shared2.echo_correct.load(.seq_cst));
+}

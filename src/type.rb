@@ -721,6 +721,8 @@ class Type
     when :Any        then "f64" # Default to Number for Any in Zig
     when :Range      then "CheatLib.Range"
     when :File       then "std.fs.File"
+    when :TCPServer  then "i32"
+    when :TCPClient  then "i32"
     else resolved.to_s  # Struct names (e.g., "User")
     end
 
