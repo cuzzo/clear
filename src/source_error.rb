@@ -31,6 +31,9 @@ module ErrorDefinitions
     STRUCT_FIELD_UNRESOLVABLE: "Type Error: Struct '%s' has no field '%s'",
     ENUM_UNKNOWN_VARIANT:      "Type Error: Enum '%s' has no variant '%s'.",
     ENUM_FIELD_ACCESS:         "Type Error: '%s' is an enum type. Enum values do not have fields.",
+    UNION_UNKNOWN_VARIANT:     "Type Error: Union '%s' has no variant '%s'.",
+    UNION_PAYLOAD_MISMATCH:    "Type Error: Union variant '%s' expects %s, got %s.",
+    UNION_FIELD_ACCESS:        "Type Error: '%s' is a union type. Access variants with 'Type.Variant(payload)'.",
 
     # FUNCTION ERRORS
     MISSING_FUNCTION: "Missing function '%s'.",

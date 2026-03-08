@@ -71,6 +71,7 @@ class Parser
   stmt(:KEYWORD, 'IF') { parse_if_statement }
   stmt(:KEYWORD, 'STRUCT') { parse_struct_def }
   stmt(:KEYWORD, 'ENUM')   { parse_enum_def }
+  stmt(:KEYWORD, 'UNION')  { parse_union_def }
   stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
@@ -445,8 +446,10 @@ class Parser
       parse_struct_def(visibility)
     elsif match?(:KEYWORD, 'ENUM')
       parse_enum_def(visibility)
+    elsif match?(:KEYWORD, 'UNION')
+      parse_union_def(visibility)
     else
-      error!(current, "Expected FN, STRUCT, or ENUM after visibility modifier, got '#{current.value}'")
+      error!(current, "Expected FN, STRUCT, ENUM, or UNION after visibility modifier, got '#{current.value}'")
     end
   end
 
@@ -502,6 +505,22 @@ class Parser
     end
     consume(:CHAR, '}')
     AST::EnumDef.new(tok, name, variants, visibility)
+  end
+
+  def parse_union_def(visibility = :package)
+    tok = consume(:KEYWORD, 'UNION')
+    name = consume(:TYPE_ID).value
+    consume(:CHAR, '{')
+    variants = {}
+    until match?(:CHAR, '}')
+      var_name = consume(:TYPE_ID).value
+      # Optional payload type after ':'
+      payload_type = match!(:CHAR, ':') ? parse_type_annotation : nil
+      variants[var_name] = payload_type
+      match!(:CHAR, ',')
+    end
+    consume(:CHAR, '}')
+    AST::UnionDef.new(tok, name, variants, visibility)
   end
 
   def parse_function_def(visibility = :package)

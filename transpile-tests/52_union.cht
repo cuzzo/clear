@@ -1,0 +1,49 @@
+UNION Shape { Circle: Number, Rectangle: Number, Point }
+UNION Result { Ok: Number, Err: Number, Empty }
+
+FN area(s: Shape) RETURNS Number ->
+  MUTABLE a = 0.0;
+  MATCH s START
+    Shape.Circle    -> a = 3.14;,
+    Shape.Rectangle -> a = 4.0;,
+    Shape.Point     -> a = 0.0;
+  END
+  RETURN a;
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Unit variant construction
+  p: Shape = Shape.Point;
+  a = area(p);
+  ASSERT a == 0.0, "Union: unit variant Point has area 0";
+
+  -- Payload variant construction
+  c: Shape = Shape.Circle(5.0);
+  MUTABLE result = 0.0;
+  MATCH c START
+    Shape.Circle    -> result = 1.0;,
+    Shape.Rectangle -> result = 2.0;,
+    Shape.Point     -> result = 3.0;
+  END
+  ASSERT result == 1.0, "Union: Circle variant matches correctly";
+
+  -- Result-style union
+  r: Result = Result.Ok(42.0);
+  MUTABLE got = 0.0;
+  MATCH r START
+    Result.Ok    -> got = 1.0;,
+    Result.Err   -> got = 2.0;,
+    Result.Empty -> got = 3.0;
+  END
+  ASSERT got == 1.0, "Union: Result.Ok matches";
+
+  -- Error variant
+  e: Result = Result.Err(99.0);
+  MUTABLE got2 = 0.0;
+  MATCH e START
+    Result.Ok  -> got2 = 1.0;,
+    Result.Err -> got2 = 2.0;,
+    DEFAULT    -> got2 = 0.0;
+  END
+  ASSERT got2 == 2.0, "Union: Result.Err matches";
+END

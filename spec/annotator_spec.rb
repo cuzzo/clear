@@ -4426,5 +4426,328 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ==========================================
+  # UNION (Tagged Sum Types)
+  # ==========================================
+  describe "UNION" do
+    # --------------------------------------------------
+    # Declaration
+    # --------------------------------------------------
+    describe "declaration" do
+      it "registers the union type in scope without error" do
+        expect { run("UNION Shape { Circle: Number, Point }") }.not_to raise_error
+      end
+
+      it "resolves the UnionDef node as Void (like StructDef)" do
+        ast = run("UNION Shape { Circle: Number, Point }")
+        expect(ast.statements.first.resolved_type).to eq(:Void)
+      end
+
+      it "accepts PUB UNION without error" do
+        expect { run("PUB UNION Result { Ok: Number, Err: Number }") }.not_to raise_error
+      end
+
+      it "accepts PRIVATE UNION without error" do
+        expect { run("PRIVATE UNION Internal { A: Number, B }") }.not_to raise_error
+      end
+
+      it "allows unit variants (no payload type)" do
+        expect { run("UNION Maybe { Some: Number, None }") }.not_to raise_error
+      end
+
+      it "allows multiple independent union types in the same file" do
+        expect {
+          run(<<~CLEAR)
+            UNION Shape { Circle: Number, Point }
+            UNION Result { Ok: Number, Err: Number }
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+
+    # --------------------------------------------------
+    # Variant construction
+    # --------------------------------------------------
+    describe "variant construction" do
+      context "payload variant: UnionType.Variant(value)" do
+        let(:code) {
+          <<~CLEAR
+            UNION Result { Ok: Number, Err: Number }
+            r: Result = Result.Ok(42);
+          CLEAR
+        }
+
+        it "resolves the constructor call to the union type" do
+          # The value of the BindExpr is a MethodCall resolved to :Result
+          expect(ast.statements.last.value.resolved_type).to eq(:Result)
+        end
+
+        it "resolves the declared variable to the union type" do
+          expect(ast.statements.last.resolved_type).to eq(:Result)
+        end
+      end
+
+      context "unit variant: UnionType.Variant (no payload)" do
+        let(:code) {
+          <<~CLEAR
+            UNION Maybe { Some: Number, None }
+            x: Maybe = Maybe.None;
+          CLEAR
+        }
+
+        it "resolves the unit variant access to the union type" do
+          expect(ast.statements.last.value.resolved_type).to eq(:Maybe)
+        end
+
+        it "resolves the declared variable to the union type" do
+          expect(ast.statements.last.resolved_type).to eq(:Maybe)
+        end
+      end
+
+      it "resolves all variants to the same union type" do
+        ast = run(<<~CLEAR)
+          UNION Shape { Circle: Number, Rectangle: Number, Point }
+          a: Shape = Shape.Circle(1.0);
+          b: Shape = Shape.Rectangle(2.0);
+          c: Shape = Shape.Point;
+        CLEAR
+        ast.statements.drop(1).each do |stmt|
+          expect(stmt.resolved_type).to eq(:Shape)
+        end
+      end
+    end
+
+    # --------------------------------------------------
+    # Functions with union params / return types
+    # --------------------------------------------------
+    describe "union in function signatures" do
+      let(:code) {
+        <<~CLEAR
+          UNION Result { Ok: Number, Err: Number }
+          FN mirror(r: Result) RETURNS Result ->
+            RETURN r;
+          END
+          FN cheatMain() RETURNS Void ->
+            out = mirror(Result.Ok(1));
+          END
+        CLEAR
+      }
+
+      it "accepts union as parameter type without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves the call result to the union type" do
+        fn   = ast.statements.last
+        stmt = fn.body.last
+        expect(stmt.resolved_type).to eq(:Result)
+      end
+
+      it "raises Type Error when wrong type is passed to union param" do
+        expect {
+          run(<<~CLEAR)
+            UNION Result { Ok: Number }
+            FN use(r: Result) RETURNS Void ->
+            END
+            FN cheatMain() RETURNS Void ->
+              use(42);
+            END
+          CLEAR
+        }.to raise_error(/Type Error/i)
+      end
+    end
+
+    # --------------------------------------------------
+    # Optional union: ?UnionType
+    # --------------------------------------------------
+    describe "optional union (?UnionType)" do
+      it "parses and type-checks ?Union as a valid type annotation" do
+        expect {
+          run(<<~CLEAR)
+            UNION Result { Ok: Number, Err: Number }
+            FN maybe_result() RETURNS ?Result ->
+              RETURN NIL;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+
+    # --------------------------------------------------
+    # Error union: !UnionType
+    # --------------------------------------------------
+    describe "error union (!UnionType)" do
+      it "parses and type-checks !Union as a valid return type" do
+        expect {
+          run(<<~CLEAR)
+            UNION Payload { Data: Number, Empty }
+            FN risky() RETURNS !Payload ->
+              RETURN Payload.Data(1);
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+
+    # --------------------------------------------------
+    # MATCH on union values
+    # --------------------------------------------------
+    describe "MATCH" do
+      it "type-checks MATCH cases against the union type without error" do
+        expect {
+          run(<<~CLEAR)
+            UNION Shape { Circle: Number, Point }
+            FN cheatMain() RETURNS Void ->
+              s: Shape = Shape.Point;
+              MUTABLE n = 0_i64;
+              MATCH s START
+                Shape.Circle -> n = 1_i64;,
+                Shape.Point  -> n = 2_i64;
+              END
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises an error when a MATCH case is a different union type" do
+        expect {
+          run(<<~CLEAR)
+            UNION Shape { Circle: Number, Point }
+            UNION Color  { Red, Blue }
+            FN cheatMain() RETURNS Void ->
+              s: Shape = Shape.Point;
+              MUTABLE n = 0_i64;
+              MATCH s START
+                Color.Red -> n = 1_i64;
+              END
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MATCH case type Color does not match expression type Shape/)
+      end
+    end
+
+    # --------------------------------------------------
+    # Error messages
+    # --------------------------------------------------
+    describe "error messages" do
+      it "raises 'Type Error: Union ... has no variant' for an unknown variant (dot access)" do
+        expect {
+          run(<<~CLEAR)
+            UNION Result { Ok: Number }
+            x: Result = Result.Missing;
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: Union 'Result' has no variant 'Missing'/)
+      end
+
+      it "raises 'Type Error: Union ... has no variant' for an unknown constructor call" do
+        expect {
+          run(<<~CLEAR)
+            UNION Result { Ok: Number }
+            FN cheatMain() RETURNS Void ->
+              x: Result = Result.Nope(1);
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: Union 'Result' has no variant 'Nope'/)
+      end
+
+      it "raises 'Type Error: Union variant ... expects ...' for a payload type mismatch" do
+        expect {
+          run(<<~CLEAR)
+            UNION Result { Ok: Number }
+            FN cheatMain() RETURNS Void ->
+              x: Result = Result.Ok(TRUE);
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: Union variant 'Ok' expects Number, got Bool/)
+      end
+
+      it "raises 'Type Error: ... is a union type' when accessing a field on a union value" do
+        expect {
+          run(<<~CLEAR)
+            UNION Shape { Circle: Number }
+            FN cheatMain() RETURNS Void ->
+              s: Shape = Shape.Circle(1.0);
+              bad = s.Circle;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Type Error: 'Shape' is a union type/)
+      end
+    end
+
+    # --------------------------------------------------
+    # Zig code generation
+    # --------------------------------------------------
+    describe "Zig code generation" do
+      def transpile(src)
+        ZigTranspiler.new.transpile(src)
+      end
+
+      it "emits a Zig tagged union declaration" do
+        out = transpile(<<~CLEAR)
+          UNION Shape { Circle: Number, Point }
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).to include("const Shape = union(enum) {")
+        expect(out).to include("    Circle: f64,")
+        expect(out).to include("    Point: void,")
+      end
+
+      it "emits payload variant constructor as UnionType{ .Variant = payload }" do
+        out = transpile(<<~CLEAR)
+          UNION Result { Ok: Number }
+          FN cheatMain() RETURNS Void ->
+            r: Result = Result.Ok(42);
+          END
+        CLEAR
+        expect(out).to include("Result{ .Ok = 42 }")
+      end
+
+      it "emits unit variant constructor as UnionType{ .Variant = {} }" do
+        out = transpile(<<~CLEAR)
+          UNION Maybe { Some: Number, None }
+          FN cheatMain() RETURNS Void ->
+            x: Maybe = Maybe.None;
+          END
+        CLEAR
+        expect(out).to include("Maybe{ .None = {} }")
+      end
+
+      it "emits MATCH on union using std.meta.activeTag" do
+        out = transpile(<<~CLEAR)
+          UNION Shape { Circle: Number, Point }
+          FN cheatMain() RETURNS Void ->
+            s: Shape = Shape.Point;
+            MUTABLE n = 0_i64;
+            MATCH s START
+              Shape.Circle -> n = 1_i64;,
+              Shape.Point  -> n = 2_i64;
+            END
+          END
+        CLEAR
+        expect(out).to include("std.meta.activeTag(s) == .Circle")
+        expect(out).to include("std.meta.activeTag(s) == .Point")
+      end
+
+      it "includes PUB UNION in transpile_module output" do
+        out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+          PUB UNION Result { Ok: Number, Err: Number }
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).to include("const Result = union(enum) {")
+      end
+
+      it "excludes PRIVATE UNION from transpile_module output" do
+        out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+          PRIVATE UNION Internal { A: Number, B }
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        expect(out).not_to include("const Internal = union(enum) {")
+      end
+    end
+  end
 end
 

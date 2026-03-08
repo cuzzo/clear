@@ -72,6 +72,9 @@ class ZigTranspiler
       when AST::EnumDef
         next if stmt.visibility == :private
         parts << visit(stmt)
+      when AST::UnionDef
+        next if stmt.visibility == :private
+        parts << visit(stmt)
       when AST::RequireNode
         # Re-export nested REQUIRE namespaces into this module's namespace.
         parts << visit(stmt)
@@ -196,6 +199,17 @@ private
       # ZIG:   const Direction = enum { North, South };
       variants = node.variants.map { |v| "    #{v}," }.join("\n")
       "const #{node.name} = enum {\n#{variants}\n};"
+
+    when AST::UnionDef
+      # CHEAT: UNION Result { Ok: Number, Err: String, Empty }
+      # ZIG:   const Result = union(enum) { Ok: f64, Err: []const u8, Empty: void };
+      @union_schemas ||= {}
+      @union_schemas[node.name.to_sym] = node.variants
+      variants = node.variants.map do |var_name, type_obj|
+        zig_t = type_obj ? transpile_type(type_obj) : "void"
+        "    #{var_name}: #{zig_t},"
+      end.join("\n")
+      "const #{node.name} = union(enum) {\n#{variants}\n};"
 
     when AST::StructDef
       # CHEAT: STRUCT User { id: Number }
@@ -490,13 +504,24 @@ private
 
     when AST::MatchStatement
       subject = visit(node.expr)
+      is_union = @union_schemas&.key?(node.expr.resolved_type)
       parts = node.cases.map do |c|
         body = transpile_block(c[:body])
-        cond = case c[:kind]
-               when :when           then visit(c[:value])
-               when :struct_pattern then transpile_struct_pattern(subject, c[:value])
-               else                      "#{subject} == #{visit(c[:value])}"
-               end
+        cond = if is_union
+          # Tagged union: compare active tag rather than value equality
+          variant = case c[:value]
+                    when AST::GetField   then c[:value].field
+                    when AST::MethodCall then c[:value].name
+                    else visit(c[:value])
+                    end
+          "std.meta.activeTag(#{subject}) == .#{variant}"
+        else
+          case c[:kind]
+          when :when           then visit(c[:value])
+          when :struct_pattern then transpile_struct_pattern(subject, c[:value])
+          else                      "#{subject} == #{visit(c[:value])}"
+          end
+        end
         "if (#{cond}) {\n    #{body}\n    }"
       end
 
@@ -665,6 +690,18 @@ private
 
     when AST::FuncCall, AST::MethodCall
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
+
+      # Union constructor: UnionType.Variant(payload)  e.g. Result{ .Ok = 42 }
+      if node.is_a?(AST::MethodCall) && node.object.is_a?(AST::Identifier)
+        schema = @union_schemas&.dig(node.object.name.to_sym)
+        if schema
+          variant  = node.name
+          payload  = node.args.first
+          zig_val  = payload ? visit(payload) : "{}"
+          return "#{node.object.name}{ .#{variant} = #{zig_val} }"
+        end
+      end
+
       # Standard call (pass rt)
       # Note: We don't add 'try' here - let the caller decide via OR RAISE or context
       locked_map = @locked_unwrap_map || {}
@@ -719,6 +756,12 @@ private
       end
 
     when AST::GetField
+      # Union unit-variant constructor: Result{ .Empty = {} }
+      if node.target.is_a?(AST::Identifier)
+        schema = @union_schemas&.dig(node.target.name.to_sym)
+        return "#{node.target.name}{ .#{node.field} = {} }" if schema
+      end
+
       target_code = visit(node.target)
       rc_map     = @rc_unwrap_map     || {}
       locked_map = @locked_unwrap_map || {}

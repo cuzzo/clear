@@ -92,6 +92,12 @@ module OwnershipTracker
 
     call_node = node.value
 
+    # Union constructors (e.g. Result.Ok(42)) are not function calls — skip borrow tracking.
+    if call_node.is_a?(AST::MethodCall) && call_node.object.is_a?(AST::Identifier)
+      schema = lookup_type_schema(call_node.object.name.to_sym)
+      return if schema.is_a?(Hash) && schema[:kind] == :union
+    end
+
     func_name = call_node.is_a?(AST::MethodCall) ? call_node.name : call_node.name
     scope = lookup_scope_for(func_name)
     if scope.nil?

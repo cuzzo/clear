@@ -278,6 +278,10 @@ module AST
   # EnumDef: ENUM Name { Variant1, Variant2, ... }
   # Declares a Zig enum type. variants is an Array of variant name strings.
   EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }
+  # UnionDef: UNION Name { Variant1: Type, Variant2: Type, UnitVariant }
+  # Declares a Zig tagged union (union(enum)). variants is a Hash of
+  # { "VariantName" => Type_object_or_nil } where nil means void (unit variant).
+  UnionDef         = Struct.new(:token, :name, :variants, :visibility) { include Locatable }
 
   # DoBlock: fork-join parallel execution.
   # branches: Array of expression arrays — each sub-array is one parallel branch.

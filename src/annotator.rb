@@ -64,10 +64,11 @@ private
       visit_RequireNode(stmt) if stmt.is_a?(AST::RequireNode)
     end
 
-    # PASS 1: Hoist Types (StructDefs, ExternStructDecl, EnumDef)
+    # PASS 1: Hoist Types (StructDefs, ExternStructDecl, EnumDef, UnionDef)
     # Register all type definitions first so they can be used in function signatures.
     node.statements.each do |stmt|
-      visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl) || stmt.is_a?(AST::EnumDef)
+      visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl) ||
+                     stmt.is_a?(AST::EnumDef)   || stmt.is_a?(AST::UnionDef)
     end
 
     # PASS 2: Hoist Function Signatures (FunctionDef + ExternFnDecl)
@@ -86,7 +87,7 @@ private
       # Skip nodes already processed in earlier passes.
       next if stmt.is_a?(AST::StructDef)    || stmt.is_a?(AST::RequireNode) ||
               stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl) ||
-              stmt.is_a?(AST::EnumDef)
+              stmt.is_a?(AST::EnumDef)      || stmt.is_a?(AST::UnionDef)
 
       visit(stmt)
     end
@@ -311,6 +312,12 @@ private
 
   def visit_EnumDef(node)
     schema = { kind: :enum, variants: node.variants.to_set }
+    current_scope.declare_type(node.name.to_sym, schema)
+    node.full_type = :Void
+  end
+
+  def visit_UnionDef(node)
+    schema = { kind: :union, variants: node.variants }
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
@@ -594,6 +601,36 @@ private
   end
 
   def visit_MethodCall(node)
+    # Union constructor: UnionType.Variant(payload)
+    # e.g. Result.Ok(42)  — checked BEFORE visiting object (type name, not a variable).
+    if node.object.is_a?(AST::Identifier)
+      type_name = node.object.name.to_sym
+      schema = lookup_type_schema(type_name)
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        variant_name = node.name
+        unless schema[:variants].key?(variant_name)
+          error!(node, :UNION_UNKNOWN_VARIANT, type_name, variant_name)
+        end
+        # Visit and type-check payload argument
+        expected_type = schema[:variants][variant_name]  # Type object or nil
+        if expected_type
+          if node.args.empty?
+            error!(node, "Union variant '#{variant_name}' requires a payload of type #{expected_type.resolved}.")
+          end
+          visit(node.args.first)
+          actual = node.args.first.type_info
+          unless expected_type.accepts?(actual)
+            error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
+          end
+        elsif !node.args.empty?
+          error!(node, "Union variant '#{variant_name}' is a unit variant and takes no payload.")
+        end
+        node.object.full_type = type_name
+        node.full_type = type_name
+        return
+      end
+    end
+
     visit(node.object)
     node.args.each { |arg| visit(arg) }
 
@@ -965,7 +1002,7 @@ private
   end
 
   def visit_GetField(node)
-    # Enum variant access: EnumType.Variant
+    # Enum/Union variant access: TypeName.Variant
     # Must be checked BEFORE visiting target to avoid "variable not found" error.
     if node.target.is_a?(AST::Identifier)
       type_name = node.target.name.to_sym
@@ -973,6 +1010,14 @@ private
       if schema.is_a?(Hash) && schema[:kind] == :enum
         unless schema[:variants].include?(node.field)
           error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
+        end
+        node.target.full_type = type_name
+        node.full_type = type_name
+        return
+      end
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        unless schema[:variants].key?(node.field)
+          error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
         end
         node.target.full_type = type_name
         node.full_type = type_name
@@ -1003,6 +1048,8 @@ private
     schema = lookup_type_schema(type)
     if schema.is_a?(Hash) && schema[:kind] == :enum
       error!(node, :ENUM_FIELD_ACCESS, type)
+    elsif schema.is_a?(Hash) && schema[:kind] == :union
+      error!(node, :UNION_FIELD_ACCESS, type)
     elsif schema && schema[node.field]
       node.full_type = schema[node.field]
     else
