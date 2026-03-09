@@ -6410,8 +6410,8 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "raises on unknown static method" do
-        src = 'FN f() RETURNS Void -> f = File::create("t"); RETURN; END'
-        expect { run(src) }.to raise_error(SourceError, /No static method 'create' on 'File'/)
+        src = 'FN f() RETURNS Void -> f = File::flush("t"); RETURN; END'
+        expect { run(src) }.to raise_error(SourceError, /No static method 'flush' on 'File'/)
       end
 
       it "raises on wrong argument count" do
@@ -6636,6 +6636,138 @@ RSpec.describe SemanticAnnotator do
       it "allows moving a TCPClient to another variable" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; RETURN; END'
         expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Phase 4 — File::create, fileWrite, TCPClient::connect
+    # ------------------------------------------------------------------
+    describe "Phase 4 — File::create" do
+      it "resolves File::create return type as File" do
+        src = 'FN f() RETURNS Void -> f = File::create("out.txt"); RETURN; END'
+        tree = run(src)
+        fn_node = tree.statements.first
+        bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "f" }
+        expect(bind.full_type.to_sym).to eq(:File)
+      end
+
+      it "emits try CheatLib.fileCreate for File::create" do
+        src = 'FN f() RETURNS Void -> f = File::create("out.txt"); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.fileCreate(')
+      end
+
+      it "emits defer f.close() RAII for File::create" do
+        src = 'FN f() RETURNS Void -> f = File::create("out.txt"); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include("defer f.close();")
+      end
+
+      it "raises on File::create with wrong arg count" do
+        src = 'FN f() RETURNS Void -> f = File::create("a.txt", "b.txt"); RETURN; END'
+        expect { run(src) }.to raise_error(/expects 1 argument|argument.*got 2/i)
+      end
+
+      it "raises on unknown File static method" do
+        src = 'FN f() RETURNS Void -> f = File::flush("out.txt"); RETURN; END'
+        expect { run(src) }.to raise_error(/unknown static method|flush/i)
+      end
+    end
+
+    describe "Phase 4 — fileWrite intrinsic" do
+      it "resolves fileWrite return type as Void" do
+        src = 'FN f() RETURNS Void -> ff = File::create("o.txt"); fileWrite(ff, "hello"); RETURN; END'
+        tree = run(src)
+        fn_node = tree.statements.first
+        call = fn_node.body.find { |n| n.is_a?(AST::FuncCall) && n.name == "fileWrite" }
+        expect(call.full_type.to_sym).to eq(:Void)
+      end
+
+      it "emits try CheatLib.fileWrite for fileWrite()" do
+        src = 'FN f() RETURNS Void -> ff = File::create("o.txt"); fileWrite(ff, "hello"); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.fileWrite(ff,')
+      end
+
+      it "raises on fileWrite with non-File first argument" do
+        src = 'FN f() RETURNS Void -> fileWrite("not_a_file", "hello"); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'fileWrite'|fileWrite/)
+      end
+
+      it "raises on fileWrite with non-String second argument" do
+        src = 'FN f() RETURNS Void -> ff = File::create("o.txt"); fileWrite(ff, 42); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'fileWrite'|fileWrite/)
+      end
+
+      it "raises on fileWrite with wrong arg count" do
+        src = 'FN f() RETURNS Void -> ff = File::create("o.txt"); fileWrite(ff); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'fileWrite'|fileWrite/)
+      end
+    end
+
+    describe "Phase 4 — TCPClient::connect" do
+      it "resolves TCPClient::connect return type as TCPClient" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
+        tree = run(src)
+        fn_node = tree.statements.first
+        bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "c" }
+        expect(bind.full_type.to_sym).to eq(:TCPClient)
+      end
+
+      it "emits try CheatLib.socketConnect for TCPClient::connect" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.socketConnect(')
+      end
+
+      it "emits defer CheatLib.socketClose RAII for TCPClient::connect" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
+        out = transpile_fn(src)
+        expect(out).to include("defer CheatLib.socketClose(c);")
+      end
+
+      it "raises on TCPClient::connect with wrong arg count" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1"); RETURN; END'
+        expect { run(src) }.to raise_error(/expects 2 argument|argument.*got 1/i)
+      end
+
+      it "raises on unknown TCPClient static method" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::bind("127.0.0.1", 8080); RETURN; END'
+        expect { run(src) }.to raise_error(/unknown static method|bind/i)
+      end
+
+      it "can send after TCPClient::connect — codegen includes tcpWrite" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            c = TCPClient::connect("127.0.0.1", 8080);
+            tcpWrite(c, "hello");
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include('CheatLib.socketWriteVoid(c,')
+      end
+    end
+
+    describe "Phase 4 — tcpRead / tcpWrite / accept error cases" do
+      it "raises on tcpRead with non-TCPClient argument" do
+        src = 'FN f() RETURNS Void -> tcpRead("not_a_client"); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'tcpRead'|tcpRead/)
+      end
+
+      it "raises on tcpWrite with non-TCPClient first argument" do
+        src = 'FN f() RETURNS Void -> tcpWrite("not_a_client", "data"); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'tcpWrite'|tcpWrite/)
+      end
+
+      it "raises on tcpWrite with non-String second argument" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, 42); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'tcpWrite'|tcpWrite/)
+      end
+
+      it "raises on accept with non-TCPServer argument" do
+        src = 'FN f() RETURNS Void -> x = accept(42); RETURN; END'
+        expect { run(src) }.to raise_error(/No overload for 'accept'|accept/)
       end
     end
   end

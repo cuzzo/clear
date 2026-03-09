@@ -745,7 +745,13 @@ pub const Poller = struct {
             .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET, // Read + Edge Triggered
             .data = .{ .ptr = user_data },
         };
-        try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event);
+        // Try CTL_ADD first; if the fd is already registered (e.g. after a prior
+        // socketConnect registered it for EPOLLOUT), fall back to CTL_MOD.
+        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event) catch |err| {
+            if (err == error.FileDescriptorAlreadyPresentInSet) {
+                try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, fd, &event);
+            } else return err;
+        };
     }
 
     // Register a file descriptor to watch for WRITE readiness (non-blocking sends).

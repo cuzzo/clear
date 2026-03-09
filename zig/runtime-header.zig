@@ -193,6 +193,18 @@ pub const CheatLib = struct {
         return buffer;
     }
 
+    // Create (or truncate) a file for writing. Caller owns the returned File resource.
+    // The compiler auto-injects `defer f.close()` at the declaration site.
+    pub fn fileCreate(path: []const u8) !std.fs.File {
+        return std.fs.cwd().createFile(path, .{ .truncate = true });
+    }
+
+    // Write `data` to an open writable File resource.
+    // Usage: fileWrite(f, "hello world")
+    pub fn fileWrite(file: std.fs.File, data: []const u8) !void {
+        return file.writeAll(data);
+    }
+
     // Read File (Allocates on HEAP)
     pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         // 1. Open File
@@ -418,6 +430,76 @@ pub const CheatLib = struct {
     // Usage: tcpWrite(client, "hello")
     pub fn socketWriteVoid(fd: i32, data: []const u8) !void {
         _ = try CheatLib.socketWrite(fd, data);
+    }
+
+    // Connect to a TCP server at `host:port` (dotted-decimal IPv4 only).
+    // Non-blocking: if the kernel returns EINPROGRESS the fiber yields until
+    // epoll signals write-readiness, then the connection result is verified.
+    // Returns the client fd; caller owns it (close via socketClose / RAII).
+    pub fn socketConnect(host: []const u8, port: u16) !i32 {
+        const sched = fp.active_scheduler;
+        const task  = sched.getCurrent();
+
+        const fd = try std.posix.socket(
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
+            0,
+        );
+        errdefer std.posix.close(fd);
+
+        const s_addr = try parseIpv4Addr(host);
+        const addr = std.posix.sockaddr.in{
+            .family = std.posix.AF.INET,
+            .port   = std.mem.nativeToBig(u16, port),
+            .addr   = s_addr,
+            .zero   = [_]u8{0} ** 8,
+        };
+
+        std.posix.connect(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch |err| {
+            // Non-blocking connect returns WouldBlock (EINPROGRESS) immediately.
+            if (err != error.WouldBlock) return err;
+            // Wait for epoll OUT event — kernel signals it when the 3-way handshake completes.
+            try sched.registerWriteFd(fd, task);
+            task.status = .Blocked;
+            task.base.yield();
+            // Check SO_ERROR to distinguish success from async errors (e.g. ECONNREFUSED).
+            try std.posix.getsockoptError(fd);
+        };
+
+        return fd;
+    }
+
+    // Parse a dotted-decimal IPv4 address ("127.0.0.1") into a network-byte-order u32.
+    fn parseIpv4Addr(host: []const u8) !u32 {
+        var parts: [4]u8 = .{0} ** 4;
+        var part_idx: usize = 0;
+        var cur: u32 = 0;
+        var has_digit: bool = false;
+
+        for (host) |c| {
+            switch (c) {
+                '0'...'9' => {
+                    cur = cur * 10 + (c - '0');
+                    if (cur > 255) return error.InvalidHost;
+                    has_digit = true;
+                },
+                '.' => {
+                    if (!has_digit or part_idx >= 3) return error.InvalidHost;
+                    parts[part_idx] = @intCast(cur);
+                    part_idx += 1;
+                    cur = 0;
+                    has_digit = false;
+                },
+                else => return error.InvalidHost,
+            }
+        }
+        if (!has_digit or part_idx != 3) return error.InvalidHost;
+        parts[3] = @intCast(cur);
+
+        // Assemble as host-byte-order then flip to network byte order.
+        const host_order: u32 = (@as(u32, parts[0]) << 24) | (@as(u32, parts[1]) << 16) |
+                                 (@as(u32, parts[2]) << 8)  |  @as(u32, parts[3]);
+        return std.mem.nativeToBig(u32, host_order);
     }
 
     // Threading

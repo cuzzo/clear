@@ -55,7 +55,8 @@ private
       kind: :resource,
       close_zig: "{0}.close()",
       static_methods: {
-        "open" => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})" }
+        "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})" },
+        "create" => { args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})" }
       }
     })
 
@@ -70,11 +71,15 @@ private
     })
 
     # Built-in TCPClient resource type — a connected client socket (i32 fd).
-    # Produced by accept(server); auto-closes via RAII.
+    # Produced by accept(server) or TCPClient::connect(host, port).
+    # Auto-closes via RAII.
     current_scope.declare_type(:TCPClient, {
       kind: :resource,
       close_zig: "CheatLib.socketClose({0})",
-      static_methods: {}
+      static_methods: {
+        "connect" => { args: [:String, :Int64], return: :TCPClient,
+                       zig: "try CheatLib.socketConnect({0}, @intCast({1}))" }
+      }
     })
   end
 

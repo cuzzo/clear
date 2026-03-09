@@ -355,3 +355,225 @@ test "socketRead + socketWriteVoid: heap-string echo roundtrip" {
     try std.testing.expect(shared2.server_done.load(.seq_cst));
     try std.testing.expect(shared2.echo_correct.load(.seq_cst));
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — parseIpv4Addr unit tests
+// ---------------------------------------------------------------------------
+
+// parseIpv4Addr is private, so we re-expose it via a test-only shim.
+// We replicate the logic here to avoid coupling to runtime-header internals.
+fn parseIpv4Addr(host: []const u8) !u32 {
+    var parts: [4]u8 = .{0} ** 4;
+    var part_idx: usize = 0;
+    var cur: u32 = 0;
+    var has_digit: bool = false;
+    for (host) |c| {
+        switch (c) {
+            '0'...'9' => {
+                cur = cur * 10 + (c - '0');
+                if (cur > 255) return error.InvalidHost;
+                has_digit = true;
+            },
+            '.' => {
+                if (!has_digit or part_idx >= 3) return error.InvalidHost;
+                parts[part_idx] = @intCast(cur);
+                part_idx += 1;
+                cur = 0;
+                has_digit = false;
+            },
+            else => return error.InvalidHost,
+        }
+    }
+    if (!has_digit or part_idx != 3) return error.InvalidHost;
+    parts[3] = @intCast(cur);
+    const host_order: u32 = (@as(u32, parts[0]) << 24) | (@as(u32, parts[1]) << 16) |
+                             (@as(u32, parts[2]) << 8) | @as(u32, parts[3]);
+    return std.mem.nativeToBig(u32, host_order);
+}
+
+test "parseIpv4Addr — loopback resolves to 0x7f000001 in network byte order" {
+    const result = try parseIpv4Addr("127.0.0.1");
+    // Network byte order (big-endian) for 127.0.0.1 is 0x7f000001.
+    try std.testing.expectEqual(@as(u32, std.mem.nativeToBig(u32, 0x7f000001)), result);
+}
+
+test "parseIpv4Addr — arbitrary address 192.168.1.5" {
+    const result = try parseIpv4Addr("192.168.1.5");
+    const expected = std.mem.nativeToBig(u32, (@as(u32, 192) << 24) | (@as(u32, 168) << 16) | (@as(u32, 1) << 8) | 5);
+    try std.testing.expectEqual(expected, result);
+}
+
+test "parseIpv4Addr — rejects hostname (non-numeric)" {
+    const err = parseIpv4Addr("localhost");
+    try std.testing.expectError(error.InvalidHost, err);
+}
+
+test "parseIpv4Addr — rejects too few octets" {
+    const err = parseIpv4Addr("127.0.1");
+    try std.testing.expectError(error.InvalidHost, err);
+}
+
+test "parseIpv4Addr — rejects octet > 255" {
+    const err = parseIpv4Addr("256.0.0.1");
+    try std.testing.expectError(error.InvalidHost, err);
+}
+
+test "parseIpv4Addr — rejects empty string" {
+    const err = parseIpv4Addr("");
+    try std.testing.expectError(error.InvalidHost, err);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — socketConnect tests
+// ---------------------------------------------------------------------------
+// socketConnect uses fp.active_scheduler + getCurrent() and MUST run inside a
+// fiber.  We use the same "server fiber + OS-thread client" pattern as
+// tests 3 and 5, but the client thread calls socketConnect so we can verify
+// the non-blocking connect + EINPROGRESS → yield path.
+//
+// Strategy:
+//   • A fiber runs the server: socketAccept (yields via epoll).
+//   • An OS thread runs the client: calls CheatLib.socketConnect, which
+//     internally registers the client fd with the *scheduler's* epoll and
+//     yields the current *fiber*.  But since the OS thread is NOT a fiber,
+//     we instead use a plain posix connect here to keep the OS thread simple
+//     and exercise socketConnect from within a second client fiber.
+//
+// Two-fiber approach (server fiber + client fiber):
+//   • Pre-create the server socket in the test body (socketListen is
+//     scheduler-free) so the port is known before either fiber spawns.
+//   • Server fiber: socketAccept → read ping → write pong.
+//   • Client fiber: socketConnect → write ping → read pong.
+//   Both fibers are spawned into the same single-threaded scheduler.
+
+const ConnectCtx = struct {
+    server_fd: i32,
+    port: u16,
+    server_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    connect_ok: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+test "socketConnect — connect to loopback server, send/receive round-trip" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var rt = try Runtime.init(allocator, 512 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer {
+        sched.deinit();
+        fp.global_registry.deinit(allocator);
+    }
+    fp.active_scheduler = &sched;
+
+    // Bind server socket before spawning fibers (socketListen is scheduler-free).
+    const sfd = try CheatLib.socketListen(0);
+    var sa: std.posix.sockaddr.in = undefined;
+    var sa_len: std.posix.socklen_t = @sizeOf(@TypeOf(sa));
+    try std.posix.getsockname(sfd, @ptrCast(&sa), &sa_len);
+    const port = std.mem.bigToNative(u16, sa.port);
+
+    var ctx = ConnectCtx{ .server_fd = sfd, .port = port };
+
+    // Server fiber: accept one client, echo ping→pong.
+    const ServerFiber = struct {
+        fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const c: *ConnectCtx = @ptrCast(@alignCast(raw_args.?));
+            defer CheatLib.socketClose(c.server_fd);
+            const cfd = try CheatLib.socketAccept(c.server_fd);
+            defer CheatLib.socketClose(cfd);
+            var buf: [32]u8 = undefined;
+            const n = try CheatLib.read(cfd, &buf);
+            if (std.mem.eql(u8, buf[0..n], "ping"))
+                _ = try CheatLib.socketWrite(cfd, "pong");
+            c.server_done.store(true, .seq_cst);
+        }
+    };
+
+    // Client fiber: socketConnect → write ping → read pong.
+    // getCurrent() works because this is a proper fiber inside the scheduler.
+    const ClientFiber = struct {
+        fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const c: *ConnectCtx = @ptrCast(@alignCast(raw_args.?));
+            const fd = try CheatLib.socketConnect("127.0.0.1", c.port);
+            defer CheatLib.socketClose(fd);
+            _ = try CheatLib.socketWrite(fd, "ping");
+            var buf: [32]u8 = undefined;
+            const n = try CheatLib.read(fd, &buf);
+            if (std.mem.eql(u8, buf[0..n], "pong"))
+                c.connect_ok.store(true, .seq_cst);
+        }
+    };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&ServerFiber.run)),
+        &ctx, .{},
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&ClientFiber.run)),
+        &ctx, .{},
+    );
+
+    sched.run();
+
+    try std.testing.expect(ctx.server_done.load(.seq_cst));
+    try std.testing.expect(ctx.connect_ok.load(.seq_cst));
+}
+
+// ---------------------------------------------------------------------------
+// socketConnect: ECONNREFUSED on a port that isn't listening.
+// ---------------------------------------------------------------------------
+
+const ConnRefusedCtx = struct {
+    got_error: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+test "socketConnect — ECONNREFUSED on closed port" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var rt = try Runtime.init(allocator, 512 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer {
+        sched.deinit();
+        fp.global_registry.deinit(allocator);
+    }
+    fp.active_scheduler = &sched;
+
+    var cr = ConnRefusedCtx{};
+
+    const Fiber = struct {
+        fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const s: *ConnRefusedCtx = @ptrCast(@alignCast(raw_args.?));
+            // Port 1 is not listening; expect ECONNREFUSED (or any connect error).
+            const result = CheatLib.socketConnect("127.0.0.1", 1);
+            if (result == error.ConnectionRefused) {
+                s.got_error.store(true, .seq_cst);
+            } else if (result) |fd| {
+                CheatLib.socketClose(fd); // unexpected success
+            } else |_| {
+                s.got_error.store(true, .seq_cst); // any error is acceptable
+            }
+        }
+    };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&Fiber.run)),
+        &cr, .{},
+    );
+    sched.run();
+
+    try std.testing.expect(cr.got_error.load(.seq_cst));
+}

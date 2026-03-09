@@ -152,6 +152,14 @@ STD_LIB = {
     zig: "try CheatLib.fileReadAll({alloc}, {0})"
   },
 
+  # Write a String to an open writable File resource (created via File::create).
+  # Usage: fileWrite(f, "hello")
+  "fileWrite" => {
+    args: [:File, STRING_TYPE],
+    return: :Void,
+    zig: "try CheatLib.fileWrite({0}, {1})"
+  },
+
   # -------------------------------------------------------------------------
   # TCP Socket — Phase 3
   # -------------------------------------------------------------------------
