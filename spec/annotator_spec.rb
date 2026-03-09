@@ -6213,6 +6213,121 @@ RSpec.describe SemanticAnnotator do
           expect(out).to include("fn perimeter(")
         end
       end
+
+      describe "Phase 4 — PUB/PRIVATE visibility on method stubs" do
+        it "accepts PUB FN stub when concrete implementation is PUB" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, PUB FN area(s: Shape) RETURNS Number }
+              PUB FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "raises UNION_METHOD_WRONG_VISIBILITY when PUB stub has package function" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, PUB FN area(s: Shape) RETURNS Number }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /method 'area' is declared PUB but function 'area' is package/)
+        end
+
+        it "raises UNION_METHOD_WRONG_VISIBILITY when PRIVATE stub has package function" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, PRIVATE FN area(s: Shape) RETURNS Number }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /method 'area' is declared PRIVATE but function 'area' is package/)
+        end
+
+        it "synthesized default from PUB FN stub is emitted as pub fn in Zig" do
+          out = transpile(<<~CLEAR)
+            UNION Shape {
+              Point,
+              PUB FN area(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END
+            }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          expect(out).to include("pub fn area(")
+        end
+
+        it "synthesized default from plain FN stub is NOT pub" do
+          out = transpile(<<~CLEAR)
+            UNION Shape {
+              Point,
+              FN area(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END
+            }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          expect(out).to include("fn area(")
+          expect(out).not_to include("pub fn area(")
+        end
+
+        it "plain FN stub accepts either pub or package implementation without visibility check" do
+          # Plain (package) stubs do not enforce visibility — only PUB/PRIVATE stubs do.
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Point, FN area(s: Shape) RETURNS Number }
+              PUB FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+      end
+
+      describe "Phase 5 — duplicate method stub detection" do
+        it "raises UNION_METHOD_DUPLICATE when the same method name appears twice" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Point,
+                FN area(s: Shape) RETURNS Number,
+                FN area(s: Shape) RETURNS Number
+              }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /Union 'Shape' declares method 'area' more than once/)
+        end
+
+        it "allows different method names without error" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Point,
+                FN area(s: Shape) RETURNS Number,
+                FN perimeter(s: Shape) RETURNS Number
+              }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN perimeter(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "duplicate detection fires before signature validation" do
+          # Even if the concrete fn is missing, duplicate error fires first.
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Point,
+                FN area(s: Shape) RETURNS Number,
+                FN area(s: Shape) RETURNS Number
+              }
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /declares method 'area' more than once/)
+        end
+      end
     end
   end
 

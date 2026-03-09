@@ -412,10 +412,21 @@ private
   # Verifies that every method requirement declared inside the UNION body
   # is satisfied by a concrete top-level function with a matching signature.
   def validate_union_methods!(node)
+    union_name = node.name
+
+    # Phase 5: detect duplicate method stub declarations in the same UNION.
+    seen_names = {}
     node.methods.each do |req|
-      fn_name    = req[:name]
-      req_tok    = req[:token]
-      union_name = node.name
+      if seen_names.key?(req[:name])
+        error!(req[:token], :UNION_METHOD_DUPLICATE, union_name, req[:name])
+      end
+      seen_names[req[:name]] = true
+    end
+
+    node.methods.each do |req|
+      fn_name = req[:name]
+      req_tok = req[:token]
+      req_vis = req[:visibility] || :package
 
       scope = lookup_scope_for(fn_name)
       local = scope&.locals&.[](fn_name)
@@ -423,12 +434,13 @@ private
       if local.nil?
         if req[:body]
           # No concrete override — synthesize a top-level function from the default body.
+          # Synthesized function inherits the stub's declared visibility.
           fn_params = req[:params].map { |rp|
             { name: rp[:name], type: rp[:type], default: nil, mutable: false, takes: false }
           }
           fn_node = AST::FunctionDef.new(
             req[:token], req[:name], fn_params, [], req[:return_type],
-            nil, req[:body], nil, nil, :package, nil, nil
+            nil, req[:body], nil, nil, req_vis, nil, nil
           )
           @synthetic_fns << fn_node
           next  # signature will be pre-registered in visit_Program after this loop
@@ -440,6 +452,16 @@ private
       sig = local[:type]
       unless sig.is_a?(Hash) && sig.key?(:params)
         error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+      end
+
+      # Phase 4: visibility check — concrete function must match the stub's declared visibility.
+      if req_vis != :package
+        actual_vis = sig[:visibility] || :package
+        unless actual_vis == req_vis
+          vis_label = { pub: "PUB", private: "PRIVATE", package: "package" }
+          error!(req_tok, :UNION_METHOD_WRONG_VISIBILITY,
+                 union_name, fn_name, vis_label[req_vis], fn_name, vis_label[actual_vis])
+        end
       end
 
       # Arity check

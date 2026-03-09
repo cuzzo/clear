@@ -44,6 +44,8 @@ module ErrorDefinitions
     UNION_METHOD_WRONG_ARITY:           "Type Error: Union '%s' method '%s' requires %d parameter(s), but function '%s' has %d.",
     UNION_METHOD_PARAM_TYPE:            "Type Error: Union '%s' method '%s' parameter %d expects '%s', but function '%s' has '%s'.",
     UNION_METHOD_RETURN_TYPE:           "Type Error: Union '%s' method '%s' requires return type '%s', but function '%s' returns '%s'.",
+    UNION_METHOD_WRONG_VISIBILITY:      "Type Error: Union '%s' method '%s' is declared %s but function '%s' is %s — visibility must match.",
+    UNION_METHOD_DUPLICATE:             "Type Error: Union '%s' declares method '%s' more than once.",
     MATCH_IFF_NON_EXHAUSTIVE:  "MATCH IFF on %s '%s' is non-exhaustive: missing variants: %s.",
     MATCH_IFF_WRONG_TYPE:      "MATCH IFF requires an enum or union type, got '%s'.",
     MATCH_IFF_DEFAULT:         "MATCH IFF cannot have a DEFAULT branch — every variant must be handled explicitly.",

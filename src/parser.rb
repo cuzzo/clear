@@ -575,8 +575,17 @@ class Parser
     variants = {}
     method_reqs = []
     until match?(:CHAR, '}')
-      if match?(:KEYWORD, 'FN')
-        # Method requirement stub: FN name(param: Type, ...) RETURNS Type
+      if match?(:KEYWORD, 'FN') || (match?(:KEYWORD, 'PUB') && peek.type == :KEYWORD && peek.value == 'FN') ||
+         (match?(:KEYWORD, 'PRIVATE') && peek.type == :KEYWORD && peek.value == 'FN')
+        # Method requirement stub: [PUB|PRIVATE] FN name(param: Type, ...) RETURNS Type
+        stub_vis = :package
+        if match?(:KEYWORD, 'PUB')
+          consume(:KEYWORD, 'PUB')
+          stub_vis = :pub
+        elsif match?(:KEYWORD, 'PRIVATE')
+          consume(:KEYWORD, 'PRIVATE')
+          stub_vis = :private
+        end
         fn_tok = consume(:KEYWORD, 'FN')
         fn_name = consume(:VAR_ID).value
         _, raw_params = parse_comma_seq(:CHAR, '(', ')') do
@@ -597,7 +606,7 @@ class Parser
           consume(:KEYWORD, 'END')
         end
         method_reqs << { token: fn_tok, name: fn_name, params: raw_params,
-                         return_type: ret_type, body: default_body }
+                         return_type: ret_type, body: default_body, visibility: stub_vis }
       else
         var_name = consume(:TYPE_ID).value
         if match?(:CHAR, '{')

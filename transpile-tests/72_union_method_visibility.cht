@@ -1,0 +1,40 @@
+-- Phase 4: PUB visibility on method stubs.
+-- A PUB FN stub in a UNION body requires the concrete implementation to be PUB.
+-- A PUB FN stub with a default body synthesizes a pub fn in Zig.
+-- Package-level (plain FN) stubs continue to work as before.
+
+UNION Color {
+  Red,
+  Green,
+  Blue,
+
+  -- PUB stub with a default body — synthesized as pub fn.
+  PUB FN name(c: Color) RETURNS Number ->
+    RETURN -1.0;
+  END,
+
+  -- Plain package stub satisfied by a concrete package function.
+  FN code(c: Color) RETURNS Number
+}
+
+-- Satisfies the plain FN stub.
+FN code(c: Color) RETURNS Number ->
+  MUTABLE result = 0.0;
+  MATCH IFF c START
+    Color.Red   -> result = 1.0;,
+    Color.Green -> result = 2.0;,
+    Color.Blue  -> result = 3.0;
+  END
+  RETURN result;
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Default PUB method used for all variants.
+  ASSERT name(Color.Red)   == -1.0, "default name Red";
+  ASSERT name(Color.Green) == -1.0, "default name Green";
+
+  -- Concrete package function.
+  ASSERT code(Color.Red)   == 1.0, "code Red";
+  ASSERT code(Color.Green) == 2.0, "code Green";
+  ASSERT code(Color.Blue)  == 3.0, "code Blue";
+END
