@@ -9380,6 +9380,256 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
+  # ~T@shared Shared Promises — Phase 2
+  # ===================================================================
+  describe "~T@shared Shared Promises" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    # ------------------------------------------------------------------
+    # Type system
+    # ------------------------------------------------------------------
+    describe "Type predicates" do
+      it "shared_promise? is true for ~Number@shared" do
+        tokens = Lexer.new("~Number @shared").tokenize
+        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+        expect(t.shared_promise?).to be true
+      end
+
+      it "shared_promise? is false for plain ~Number" do
+        expect(Type.new(:"~Number").shared_promise?).to be false
+      end
+
+      it "shared_promise? is false for ~Number[3] (bounded stream)" do
+        expect(Type.new(:"~Number[3]").shared_promise?).to be false
+      end
+
+      it "shared_promise? is false for plain Number@shared" do
+        tokens = Lexer.new("Number @shared").tokenize
+        t = Parser.new(tokens, "Number @shared").send(:parse_type_annotation)
+        expect(t.shared_promise?).to be false
+      end
+
+      it "requires_move? is false for shared promises (non-affine)" do
+        tokens = Lexer.new("~Number @shared").tokenize
+        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+        expect(t.requires_move?).to be false
+      end
+
+      it "requires_move? is still true for plain ~Number" do
+        expect(Type.new(:"~Number").requires_move?).to be true
+      end
+
+      it "any_rc? is false for shared promises (SharedPromise is not Rc/Arc)" do
+        tokens = Lexer.new("~Number @shared").tokenize
+        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+        expect(t.any_rc?).to be false
+      end
+
+      it "any_rc? is still true for plain Number@shared (Arc wrapper)" do
+        tokens = Lexer.new("Number @shared").tokenize
+        t = Parser.new(tokens, "Number @shared").send(:parse_type_annotation)
+        expect(t.any_rc?).to be true
+      end
+    end
+
+    describe "Zig type emission" do
+      it "emits CheatLib.SharedPromise(f64) for ~Number@shared" do
+        tokens = Lexer.new("~Number @shared").tokenize
+        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+        expect(t.zig_type).to eq("CheatLib.SharedPromise(f64)")
+      end
+
+      it "emits CheatLib.SharedPromise(bool) for ~Bool@shared" do
+        tokens = Lexer.new("~Bool @shared").tokenize
+        t = Parser.new(tokens, "~Bool @shared").send(:parse_type_annotation)
+        expect(t.zig_type).to eq("CheatLib.SharedPromise(bool)")
+      end
+
+      it "still emits CheatLib.Promise(f64) for plain ~Number" do
+        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      end
+
+      it "still emits CheatLib.Rc(f64) for Number@multiOwned" do
+        tokens = Lexer.new("Number @multiowned").tokenize
+        t = Parser.new(tokens, "Number @multiowned").send(:parse_type_annotation)
+        expect(t.zig_type).to eq("CheatLib.Rc(f64)")
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Compiler error: ~T@multiOwned is invalid
+    # ------------------------------------------------------------------
+    describe "~T@multiOwned compiler error" do
+      it "raises a directed error when a binding declares ~T@multiOwned" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @multiowned = BG { 1.0; };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /~T@multiOwned is not valid/)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator: BgBlock type propagation
+    # ------------------------------------------------------------------
+    describe "BgBlock full_type propagation" do
+      it "annotates the BgBlock as shared when the declared type is ~T@shared" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 42.0; };
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        bind = fn_node.body.first
+        bg = bind.value
+        bg_type = Type.new(bg.full_type)
+        expect(bg_type.tense?).to be true
+        expect(bg_type.shared_promise?).to be true
+      end
+
+      it "does not mark a plain ~T BgBlock as shared" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            p: ~Number = BG { 1.0; };
+            r: Number = NEXT p;
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        bind = fn_node.body.first
+        bg = bind.value
+        bg_type = Type.new(bg.full_type)
+        expect(bg_type.shared_promise?).to be false
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator: visit_NextExpr on shared promises
+    # ------------------------------------------------------------------
+    describe "visit_NextExpr on shared promises" do
+      it "returns the inner type T when NEXT is applied to ~Number@shared" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 1.0; };
+            r: Number = NEXT sp;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows NEXT to be called multiple times on the same shared promise" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 10.0; };
+            a: Number = NEXT sp;
+            b: Number = NEXT sp;
+            c: Number = NEXT sp;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not mark the shared promise variable as moved after NEXT" do
+        # If it were moved, the second NEXT would raise 'Use of moved value'.
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 5.0; };
+            x: Number = NEXT sp;
+            y: Number = NEXT sp;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Transpiler output
+    # ------------------------------------------------------------------
+    describe "Transpiler output" do
+      it "emits CheatLib.SharedPromise in the BG block spawn" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 1.0; };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.SharedPromise(f64).spawn(")
+      end
+
+      it "emits var (not const) for shared promise declarations" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 1.0; };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to match(/var sp /)
+      end
+
+      it "emits .next() for NEXT on a shared promise" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 1.0; };
+            r: Number = NEXT sp;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("sp.next()")
+      end
+
+      it "emits .next() twice when NEXT is called twice on the same handle" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 1.0; };
+            a: Number = NEXT sp;
+            b: Number = NEXT sp;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out.scan("sp.next()").size).to eq(2)
+      end
+
+      it "emits SharedPromise Inner type in the BG context struct" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            sp: ~Number @shared = BG { 99.0; };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.SharedPromise(f64).Inner")
+      end
+
+      it "plain BG block still emits Promise (not SharedPromise)" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            p: ~Number = BG { 1.0; };
+            r: Number = NEXT p;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.Promise(f64).spawn(")
+        expect(out).not_to include("SharedPromise")
+      end
+    end
+  end
+
+  # ===================================================================
   # ~T[N] Bounded Streams — Phase 1
   # ===================================================================
   describe "~T[N] Bounded Streams" do

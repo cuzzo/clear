@@ -345,6 +345,8 @@ class Type
   end
 
   def any_rc?
+    # SharedPromise uses its own ref-counting internally — it is NOT an Rc/Arc wrapper.
+    return false if shared_promise?
     multiowned? || shared?
   end
 
@@ -428,6 +430,13 @@ class Type
     tense? && tense_type.fixed?
   end
 
+  # Shared promise: ~T@shared — a memoized promise backed by Arc-style ref counting.
+  # Multiple holders can call NEXT independently; NEXT is idempotent per handle.
+  # NOT linearly affine — can be retained (cloned) without consuming it.
+  def shared_promise?
+    tense? && shared?
+  end
+
   # The element type T in ~T[N].
   def stream_element_type
     return nil unless bounded_stream?
@@ -475,6 +484,7 @@ class Type
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
     return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
+    return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
     return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle
@@ -686,11 +696,18 @@ class Type
   # Computes the Zig type string for this CHEAT type.
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
   def compute_zig_type(is_param: false, is_field: false)
-    # 0. Handle Tense types: ~T[N] -> CheatLib.BoundedStream(T, N), ~T -> CheatLib.Promise(T)
+    # 0. Handle Tense types:
+    #    ~T[N]      -> CheatLib.BoundedStream(T, N)
+    #    ~T@shared  -> CheatLib.SharedPromise(T)
+    #    ~T         -> CheatLib.Promise(T)
     if tense?
       if bounded_stream?
         elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
+      end
+      if shared_promise?
+        inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
+        return "CheatLib.SharedPromise(#{inner_zig})"
       end
       inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Promise(#{inner_zig})"

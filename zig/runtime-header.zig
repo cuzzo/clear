@@ -856,6 +856,83 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------------
+    // SharedPromise(T): A memoized, non-linear promise that can be consumed by
+    // multiple concurrent holders.  Corresponds to ~T@shared in CLEAR source.
+    //
+    // Unlike Promise(T), next() is idempotent per handle:
+    //   - First call blocks until the BG fiber writes its result, then caches it.
+    //   - Subsequent calls on the same handle return the cached value instantly.
+    //   - The heap-allocated Inner is freed when the last outstanding handle
+    //     calls next() (ref_count reaches 0).
+    //
+    // Use retain() to clone a handle before passing it to another fiber.
+    // retain() increments the ref_count; the new handle must also call next().
+    //
+    // Lifecycle:
+    //   Spawn:      var sp = try CheatLib.SharedPromise(f64).spawn(alloc, sched);
+    //   Clone:      var sp2 = sp.retain();       // ref_count: 1 -> 2
+    //   In BG:      ctx.inner.result = val;
+    //               defer ctx.inner.wg.done();
+    //   Consume:    const v1 = sp.next();         // blocks, caches, ref_count: 2->1
+    //               const v2 = sp2.next();        // blocks, caches, ref_count: 1->0 -> free
+    //               const v3 = sp.next();         // instant: returns cached value
+    pub fn SharedPromise(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            /// Heap-resident result cell.  Outlives all handles: freed only when
+            /// ref_count reaches 0 (i.e. all handles have called next() once).
+            pub const Inner = struct {
+                result: T = undefined,
+                wg: WaitGroup,
+                ref_count: std.atomic.Value(usize),
+            };
+
+            inner: *Inner,
+            alloc: std.mem.Allocator,
+            /// Cached result after the first next() call on this handle.
+            /// null = not yet resolved by this handle.
+            resolved: ?T = null,
+
+            pub fn spawn(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
+                const inner = try alloc.create(Inner);
+                inner.* = .{
+                    .result = undefined,
+                    .wg = WaitGroup.init(sched),
+                    .ref_count = std.atomic.Value(usize).init(1),
+                };
+                inner.wg.add(1);
+                return Self{ .inner = inner, .alloc = alloc, .resolved = null };
+            }
+
+            /// Block until the BG fiber delivers its result, then return it.
+            /// Idempotent: once resolved, subsequent calls return the cached value
+            /// without touching the Inner (which may already have been freed).
+            /// Decrements the ref_count on the first call; frees Inner at zero.
+            pub fn next(self: *Self) T {
+                if (self.resolved) |val| return val;
+                self.inner.wg.wait();
+                const val = self.inner.result;
+                self.resolved = val;
+                const prev = self.inner.ref_count.fetchSub(1, .release);
+                if (prev == 1) {
+                    _ = self.inner.ref_count.load(.acquire);
+                    self.alloc.destroy(self.inner);
+                }
+                return val;
+            }
+
+            /// Clone this handle, incrementing the shared ref_count.
+            /// The returned handle must also eventually call next() to release its
+            /// reference.  Call retain() before passing a handle to another fiber.
+            pub fn retain(self: Self) Self {
+                _ = self.inner.ref_count.fetchAdd(1, .acquire);
+                return Self{ .inner = self.inner, .alloc = self.alloc, .resolved = null };
+            }
+        };
+    }
+
+    // -----------------------------------------------------------------------
     // BoundedStream(T, N): A fixed-size ordered stream of N concurrent BG fibers.
     // Corresponds to ~T[N] in CLEAR source.
     //

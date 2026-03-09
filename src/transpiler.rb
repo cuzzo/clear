@@ -317,9 +317,10 @@ private
     # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
-      # Bounded streams must be `var` even when declared immutable in CLEAR, because
-      # BoundedStream.next() takes *Self (mutates the internal head counter).
-      is_mutable ||= Type.new(node.full_type || :Void).bounded_stream?
+      # Bounded streams and shared promises must be `var` even when declared immutable
+      # in CLEAR, because their next() methods take *Self (mutate internal state).
+      ft = Type.new(node.full_type || :Void)
+      is_mutable ||= ft.bounded_stream? || ft.shared_promise?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       annotation = ZIG_PRIMITIVES.include?(zig_type) ? ": #{zig_type}" : ""

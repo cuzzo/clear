@@ -1179,8 +1179,19 @@ private
 
       validate_type_annotation!(node, node.type) if node.type
 
+      # Reject ~T@multiOwned — promises are multi-fiber by nature; only @shared is valid.
+      if node.type.is_a?(Type) && node.type.tense? && node.type.multiowned?
+        error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
+      end
+
       final_type, error = node.value.coerce!(node.type)
       error!(node, error) if error
+
+      # Propagate @shared ownership into the BgBlock so the transpiler emits
+      # SharedPromise.spawn() instead of Promise.spawn().
+      if node.value.is_a?(AST::BgBlock) && node.type.is_a?(Type) && node.type.shared_promise?
+        node.value.full_type = Type.new(node.value.full_type, ownership: :shared)
+      end
 
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
       @frame_usage_count += 1 if storage == :frame
@@ -2084,6 +2095,10 @@ private
       # NEXT on ~T[N]: returns T (the element type).
       # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
       node.full_type = promise_type.stream_element_type.to_sym
+    elsif promise_type.shared_promise?
+      # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
+      # Does NOT mark as moved; multiple consumers may hold their own handles.
+      node.full_type = promise_type.tense_type.to_sym
     else
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)
