@@ -3628,6 +3628,68 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "Collection Types — Phase 5: Pool FIND operator" do
+    subject(:ast) { run(code) }
+    let(:result) { ast.statements.last.full_type&.resolved }
+
+    context "pool s> FIND predicate resolves to optional element type" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          found = pool s> FIND _.value == 10.0;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to ?Item (optional Item)" do
+        expect(result.to_s).to match(/\?Item|Item/)
+      end
+    end
+
+    context "pool s> FIND on empty pool resolves without error" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          found = pool s> FIND _.value == 99.0;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "Zig output: pool s> FIND emits slot materialization and find loop" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE pool: Item[]@pool = [];
+            found = pool s> FIND _.value == 10.0;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "emits alive-slot materialization before the find loop" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("__pslot.alive")
+        expect(zig).to include("pipe_mat.append")
+      end
+
+      it "emits find_found flag and optional return" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("find_found")
+        expect(zig).to include("find_result")
+      end
+    end
+  end
+
   describe "Collection Types — Phase 5: @list:sharded pipeline operators" do
     subject(:ast) { run(code) }
     let(:result) { ast.statements.last.full_type&.resolved }
