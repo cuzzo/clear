@@ -1082,6 +1082,18 @@ private
 
     elsif node.right.is_a?(AST::EachOp)
       return transpile_each(node)
+
+    elsif node.right.is_a?(AST::FindOp)
+      return transpile_find(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::AnyOp)
+      return transpile_any(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::AllOp)
+      return transpile_all(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::CountOp)
+      return transpile_count(node.left, node.right, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.

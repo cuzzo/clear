@@ -38,7 +38,11 @@ module PipeAnalysis
     node.is_a?(AST::LimitOp) ||
     node.is_a?(AST::UnnestOp) ||
     node.is_a?(AST::DistinctOp) ||
-    node.is_a?(AST::EachOp)
+    node.is_a?(AST::EachOp) ||
+    node.is_a?(AST::FindOp) ||
+    node.is_a?(AST::AnyOp) ||
+    node.is_a?(AST::AllOp) ||
+    node.is_a?(AST::CountOp)
   end
 
   def analyze_higher_order_op(node)
@@ -55,6 +59,14 @@ module PipeAnalysis
       analyze_distinct_op(node)
     when AST::EachOp
       analyze_each_op(node)
+    when AST::FindOp
+      analyze_find_op(node)
+    when AST::AnyOp
+      analyze_any_op(node)
+    when AST::AllOp
+      analyze_all_op(node)
+    when AST::CountOp
+      analyze_count_op(node)
     end
   end
 
@@ -276,6 +288,83 @@ module PipeAnalysis
 
     node.full_type = :Void
     node.storage   = :frame
+  end
+
+  # =========================================================
+  # Phase 3: Predicate Query Operators (FIND, ANY, ALL, COUNT)
+  # =========================================================
+
+  def analyze_find_op(node)
+    # FIND: list s> FIND predicate  → ?ElemType (first match or null)
+    require_array_input!(node, "FIND")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    unless node.right.expression.resolved_type == :Bool
+      error!(node.right, "FIND clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+    end
+
+    node.full_type = :"?#{item_type}"
+    node.storage   = :stack
+  end
+
+  def analyze_any_op(node)
+    # ANY: list s> ANY predicate  → Bool (true if any element matches; short-circuits)
+    require_array_input!(node, "ANY")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    unless node.right.expression.resolved_type == :Bool
+      error!(node.right, "ANY clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+    end
+
+    node.full_type = :Bool
+    node.storage   = :stack
+  end
+
+  def analyze_all_op(node)
+    # ALL: list s> ALL predicate  → Bool (true iff every element matches; short-circuits on first failure)
+    # Vacuous truth: ALL on an empty list returns true.
+    require_array_input!(node, "ALL")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    unless node.right.expression.resolved_type == :Bool
+      error!(node.right, "ALL clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+    end
+
+    node.full_type = :Bool
+    node.storage   = :stack
+  end
+
+  def analyze_count_op(node)
+    # COUNT: list s> COUNT predicate  → Int64 (number of elements matching predicate)
+    require_array_input!(node, "COUNT")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    unless node.right.expression.resolved_type == :Bool
+      error!(node.right, "COUNT clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+    end
+
+    node.full_type = :Int64
+    node.storage   = :stack
   end
 
   # Helper to validate array input for higher-order ops

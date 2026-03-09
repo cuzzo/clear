@@ -261,6 +261,12 @@ module AST
   # Syntax: collection s> EACH { _.field = value; };
   # On sharded pools, auto-dispatches N parallel fibers (one per shard).
   EachOp       = Struct.new(:token, :body) { include Locatable }
+  # Phase 3 predicate query operators — return scalar values (not new lists).
+  # All use `_` as the implicit item binding (like SELECT/WHERE).
+  FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType
+  AnyOp    = Struct.new(:token, :expression) { include Locatable } # Bool
+  AllOp    = Struct.new(:token, :expression) { include Locatable } # Bool
+  CountOp  = Struct.new(:token, :expression) { include Locatable } # Int64
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }

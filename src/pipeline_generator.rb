@@ -323,6 +323,90 @@ module PipelineGenerator
     ZIG
   end
 
+  # =========================================================
+  # Phase 3: Predicate Query Operators
+  # =========================================================
+
+  def transpile_find(list_node, find_node, smooth_node)
+    elem_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
+
+    @placeholder_name = "it"
+    expr_code = visit(find_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        var find_result: #{elem_zig_type} = undefined;
+        var find_found = false;
+        for (pipe_items) |it| {
+            const find_matches = #{expr_code};
+            if (find_matches) {
+                find_result = it;
+                find_found = true;
+                break;
+            }
+        }
+        break :blk if (find_found) @as(?#{elem_zig_type}, find_result) else null;
+      ZIG
+    end
+  end
+
+  def transpile_any(list_node, any_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(any_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        var any_result = false;
+        for (pipe_items) |it| {
+            if (#{expr_code}) {
+                any_result = true;
+                break;
+            }
+        }
+        break :blk any_result;
+      ZIG
+    end
+  end
+
+  def transpile_all(list_node, all_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(all_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        var all_result = true;
+        for (pipe_items) |it| {
+            if (!(#{expr_code})) {
+                all_result = false;
+                break;
+            }
+        }
+        break :blk all_result;
+      ZIG
+    end
+  end
+
+  def transpile_count(list_node, count_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(count_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        var count_result: i64 = 0;
+        for (pipe_items) |it| {
+            if (#{expr_code}) {
+                count_result += 1;
+            }
+        }
+        break :blk count_result;
+      ZIG
+    end
+  end
+
   def visit_Placeholder(node)
     # Return the name of the loop variable
     @placeholder_name || (raise "Use of '_' outside of SELECT context")

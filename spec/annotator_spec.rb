@@ -7497,5 +7497,350 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===========================================================================
+  # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
+  # ===========================================================================
+  describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # FIND — returns ?ElemType
+    # -------------------------------------------------------------------------
+    describe "FIND predicate operator" do
+      it "infers ?Number for a FIND on Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> FIND _ > 2.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.full_type.to_s).to eq("?Number")
+      end
+
+      it "infers ?Item for a FIND on a struct array" do
+        tree = run(<<~CLEAR)
+          STRUCT Item { x: Number }
+          FN f() RETURNS Void ->
+            items: Item[] = [];
+            result = items s> FIND _.x > 0.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.full_type.to_s).to eq("?Item")
+      end
+
+      it "raises a clear error when FIND is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> FIND _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot FIND non-list type/)
+      end
+
+      it "raises when FIND predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> FIND _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /FIND clause must evaluate to Bool/)
+      end
+
+      it "emits find_found flag and find_result variable in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> FIND _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("find_found")
+        expect(out).to include("find_result")
+        expect(out).to include("null")
+      end
+
+      it "emits the optional type cast in the break expression" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> FIND _ > 0.5;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("@as(?")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # ANY — returns Bool
+    # -------------------------------------------------------------------------
+    describe "ANY predicate operator" do
+      it "infers Bool for ANY on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> ANY _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Bool)
+      end
+
+      it "raises when ANY is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> ANY _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot ANY non-list type/)
+      end
+
+      it "raises when ANY predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> ANY _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /ANY clause must evaluate to Bool/)
+      end
+
+      it "emits any_result variable and short-circuit break in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> ANY _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("any_result = true")
+        expect(out).to include("break;")
+      end
+
+      it "emits a for loop over pipe_items" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> ANY _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("for (pipe_items)")
+        expect(out).to include("any_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # ALL — returns Bool
+    # -------------------------------------------------------------------------
+    describe "ALL predicate operator" do
+      it "infers Bool for ALL on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> ALL _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Bool)
+      end
+
+      it "raises when ALL is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> ALL _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot ALL non-list type/)
+      end
+
+      it "raises when ALL predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> ALL _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /ALL clause must evaluate to Bool/)
+      end
+
+      it "emits all_result initialized to true and negated short-circuit in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> ALL _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("all_result = true")
+        expect(out).to include("all_result = false")
+        expect(out).to include("!(")
+      end
+
+      it "vacuous truth: all_result starts as true (correct for empty list)" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [];
+            result = nums s> ALL _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("var all_result = true")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # COUNT — returns Int64
+    # -------------------------------------------------------------------------
+    describe "COUNT predicate operator" do
+      it "infers Int64 for COUNT on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> COUNT _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Int64)
+      end
+
+      it "raises when COUNT is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> COUNT _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot COUNT non-list type/)
+      end
+
+      it "raises when COUNT predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> COUNT _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /COUNT clause must evaluate to Bool/)
+      end
+
+      it "emits an i64 counter and increment in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> COUNT _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("count_result: i64")
+        expect(out).to include("count_result += 1")
+      end
+
+      it "wraps the predicate in an if condition in the loop" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> COUNT _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("for (pipe_items)")
+        expect(out).to include("count_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Cross-operator and chaining
+    # -------------------------------------------------------------------------
+    describe "operator chaining and combined usage" do
+      it "allows COUNT after WHERE (chained pipeline)" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0, 3.0, 4.0];
+              filtered: Number[] = nums s> WHERE _ > 2.0;
+              n: Int64 = filtered s> COUNT _ > 3.0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows ANY on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT User { active: Bool }
+            FN f() RETURNS Void ->
+              users: User[] = [];
+              result = users s> ANY _.active == TRUE;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows ALL on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT User { score: Number }
+            FN f() RETURNS Void ->
+              users: User[] = [];
+              result = users s> ALL _.score > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "FIND on a struct array infers the optional struct type" do
+        tree = run(<<~CLEAR)
+          STRUCT User { score: Number }
+          FN f() RETURNS Void ->
+            users: User[] = [];
+            found = users s> FIND _.score > 50.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "found" }
+        expect(bind.full_type.to_s).to eq("?User")
+      end
+    end
+  end
 end
 
