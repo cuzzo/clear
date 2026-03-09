@@ -314,7 +314,8 @@ module AST
   StaticCall        = Struct.new(:token, :type_name, :method_name, :args) { include Locatable }
 
   # DoBlock: fork-join parallel execution.
-  # branches: Array of expression arrays — each sub-array is one parallel branch.
+  # branches: Array of { body: Array<ASTNode>, pinned: Boolean }
+  # pinned=true → dispatch to least-loaded scheduler (spawnBest) instead of current (submitSpawn)
   DoBlock           = Struct.new(:token, :branches) { include Locatable }
 
   # BgBlock: background execution — spawns a fiber and returns a linear Promise (~T).

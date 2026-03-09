@@ -3380,6 +3380,335 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "DO block — Phase 5: @pinned branch syntax" do
+    subject(:ast) { run(code) }
+    let(:result) { ast.statements.last.full_type&.resolved }
+
+    context "@pinned branch in single-branch DO block" do
+      let(:code) {
+        <<~FLUX
+          FN work() RETURNS Void -> RETURN; END
+          DO { @pinned -> work() }
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "mixed pinned and unpinned branches" do
+      let(:code) {
+        <<~FLUX
+          FN alpha() RETURNS Void -> RETURN; END
+          FN beta()  RETURNS Void -> RETURN; END
+          DO {
+            alpha(),
+            @pinned -> beta()
+          }
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "all pinned branches" do
+      let(:code) {
+        <<~FLUX
+          FN a() RETURNS Void -> RETURN; END
+          FN b() RETURNS Void -> RETURN; END
+          DO {
+            @pinned -> a(),
+            @pinned -> b()
+          }
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "type error inside @pinned branch is still reported" do
+      let(:code) {
+        <<~FLUX
+          FN add(x: Number, y: Number) RETURNS Number -> RETURN x + y; END
+          bad = "not-a-number";
+          DO { @pinned -> add(bad, 1) }
+        FLUX
+      }
+
+      it "raises a Type Error" do
+        expect { ast }.to raise_error(/Type Error/i)
+      end
+    end
+
+    context "Zig output: @pinned branch emits spawnBest" do
+      let(:code) {
+        <<~FLUX
+          FN work() RETURNS Void -> RETURN; END
+          DO { @pinned -> work() }
+        FLUX
+      }
+
+      it "emits spawnBest for pinned branch" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatHeader.spawnBest")
+        expect(zig).not_to include("submitSpawn")
+      end
+    end
+
+    context "Zig output: unpinned branch emits submitSpawn, pinned emits spawnBest" do
+      let(:code) {
+        <<~FLUX
+          FN a() RETURNS Void -> RETURN; END
+          FN b() RETURNS Void -> RETURN; END
+          DO { a(), @pinned -> b() }
+        FLUX
+      }
+
+      it "emits both submitSpawn (regular) and spawnBest (pinned)" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("submitSpawn")
+        expect(zig).to include("CheatHeader.spawnBest")
+      end
+    end
+  end
+
+  describe "Collection Types — Phase 5: Pool pipeline operators" do
+    subject(:ast) { run(code) }
+    let(:result) { ast.statements.last.full_type&.resolved }
+
+    context "pool s> SUM _.field resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          total = pool s> SUM _.value;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "pool s> WHERE _.value > 0 resolves to Item[]" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          result = pool s> WHERE _.value > 0.0;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Item[]" do
+        expect(result).to eq(:"Item[]")
+      end
+    end
+
+    context "pool s> COUNT predicate resolves to Int64" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          n = pool s> COUNT _.value > 0.0;
+        FLUX
+      }
+
+      it "resolves to Int64" do
+        expect(result).to eq(:Int64)
+      end
+    end
+
+    context "pool s> ANY predicate resolves to Bool" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          found = pool s> ANY _.value > 0.0;
+        FLUX
+      }
+
+      it "resolves to Bool" do
+        expect(result).to eq(:Bool)
+      end
+    end
+
+    context "pool s> ALL predicate resolves to Bool" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          all_pos = pool s> ALL _.value > 0.0;
+        FLUX
+      }
+
+      it "resolves to Bool" do
+        expect(result).to eq(:Bool)
+      end
+    end
+
+    context "pool s> MIN _.field resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          mn = pool s> MIN _.value;
+        FLUX
+      }
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "pool s> MAX _.field resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          mx = pool s> MAX _.value;
+        FLUX
+      }
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "pool s> AVERAGE _.field resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          avg = pool s> AVERAGE _.value;
+        FLUX
+      }
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "Zig output: pool pipeline materializes live slots" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE pool: Item[]@pool = [];
+          total = pool s> SUM _.value;
+        FLUX
+      }
+
+      it "emits slot materialization loop" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("pipe_src_list.slots.items")
+        expect(zig).to include("__pslot.alive")
+        expect(zig).to include("pipe_mat.append")
+        expect(zig).to include("sum_result")
+      end
+    end
+  end
+
+  describe "Collection Types — Phase 5: @list:sharded pipeline operators" do
+    subject(:ast) { run(code) }
+    let(:result) { ast.statements.last.full_type&.resolved }
+
+    context "sharded list s> SUM _ resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          total = slist s> SUM _;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "sharded list s> COUNT predicate resolves to Int64" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          n = slist s> COUNT _ > 0.0;
+        FLUX
+      }
+
+      it "resolves to Int64" do
+        expect(result).to eq(:Int64)
+      end
+    end
+
+    context "sharded list s> ANY predicate resolves to Bool" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          found = slist s> ANY _ > 0.0;
+        FLUX
+      }
+
+      it "resolves to Bool" do
+        expect(result).to eq(:Bool)
+      end
+    end
+
+    context "Zig output: sharded list pipeline flattens shards" do
+      let(:code) {
+        <<~FLUSH
+          MUTABLE slist: Number[]@list:sharded(3) = [];
+          total = slist s> SUM _;
+        FLUSH
+      }
+
+      it "emits shard flattening with appendSlice" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("appendSlice")
+        expect(zig).to include("shards[__psi].items")
+        expect(zig).to include("sum_result")
+      end
+    end
+
+    context "Zig output: @list:sharded EACH emits parallel fibers" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE slist: Item[]@list:sharded(2) = [];
+          slist s> EACH { _.value = 0.0; };
+        FLUX
+      }
+
+      it "emits parallel fiber structs for EACH shard" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("EachListShardCtx")
+        expect(zig).to include("ctx.shard.items")
+        expect(zig).to include("WaitGroup")
+      end
+    end
+  end
+
   describe "MATCH statement" do
     context "basic integer match with default" do
       let(:code) {

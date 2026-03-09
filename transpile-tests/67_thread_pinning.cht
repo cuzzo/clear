@@ -1,0 +1,93 @@
+-- Test: Phase 5 Thread Pinning and Pool/Sharded-List Pipeline Ops
+-- Exercises DO { @pinned -> expr } syntax and pipeline ops on @pool / @list:sharded.
+
+STRUCT Item { value: Number }
+
+FN noop() RETURNS Void ->
+    RETURN;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- -------------------------
+    -- 1. @pinned DO branch
+    -- -------------------------
+    -- Single @pinned branch dispatches to least-loaded scheduler.
+    -- In a single-scheduler test harness it falls back to the same scheduler.
+    DO { @pinned -> noop() }
+
+    -- Mixed: one regular branch, one pinned branch
+    DO {
+        noop(),
+        @pinned -> noop()
+    }
+
+    -- -------------------------
+    -- 2. @pool pipeline operators
+    -- -------------------------
+    MUTABLE pool: Item[]@pool = [];
+    id1: Id<Item> = pool.insert(Item{ value: 10.0 });
+    id2: Id<Item> = pool.insert(Item{ value: 20.0 });
+    id3: Id<Item> = pool.insert(Item{ value: 30.0 });
+
+    -- SUM of a pool field
+    total = pool s> SUM _.value;
+    ASSERT total == 60.0, "pool SUM should be 60";
+
+    -- WHERE on pool returns regular array
+    big = pool s> WHERE _.value > 15.0;
+
+    -- COUNT on pool
+    n = pool s> COUNT _.value > 15.0;
+    ASSERT n == 2, "pool COUNT should be 2";
+
+    -- ANY on pool
+    has_ten = pool s> ANY _.value == 10.0;
+    ASSERT has_ten == TRUE, "pool ANY should find 10";
+
+    -- ALL on pool
+    all_pos = pool s> ALL _.value > 0.0;
+    ASSERT all_pos == TRUE, "pool ALL positive should be true";
+
+    -- MIN / MAX on pool
+    mn = pool s> MIN _.value;
+    mx = pool s> MAX _.value;
+    ASSERT mn == 10.0, "pool MIN should be 10";
+    ASSERT mx == 30.0, "pool MAX should be 30";
+
+    -- After removing one slot, SUM reflects only live items
+    pool.remove(id1);
+    total2 = pool s> SUM _.value;
+    ASSERT total2 == 50.0, "pool SUM after remove should be 50";
+
+    -- -------------------------
+    -- 3. @list:sharded pipeline operators
+    -- -------------------------
+    MUTABLE slist: Number[]@list:sharded(2) = [];
+    append(slist, 1.0);
+    append(slist, 2.0);
+    append(slist, 3.0);
+    append(slist, 4.0);
+
+    sl_sum = slist s> SUM _;
+    ASSERT sl_sum == 10.0, "sharded list SUM should be 10";
+
+    sl_count = slist s> COUNT _ > 2.0;
+    ASSERT sl_count == 2, "sharded list COUNT > 2 should be 2";
+
+    sl_any = slist s> ANY _ == 3.0;
+    ASSERT sl_any == TRUE, "sharded list ANY should find 3";
+
+    sl_all = slist s> ALL _ > 0.0;
+    ASSERT sl_all == TRUE, "sharded list ALL positive";
+
+    -- -------------------------
+    -- 4. @list:sharded EACH (parallel)
+    -- -------------------------
+    MUTABLE slist2: Item[]@list:sharded(2) = [];
+    append(slist2, Item{ value: 5.0 });
+    append(slist2, Item{ value: 6.0 });
+    -- EACH runs N parallel fibers, one per shard (side-effect mutation)
+    slist2 s> EACH { _.value = 0.0; };
+
+    RETURN;
+END

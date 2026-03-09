@@ -528,6 +528,14 @@ pub const CheatLib = struct {
         }
     }
 
+    /// Submits a task to the least-loaded scheduler from the global registry.
+    /// Used by @pinned DO branches to pin execution to the best available thread.
+    /// Errors if no scheduler is registered (i.e. running outside a scheduler context).
+    pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+        const sched = fp.global_registry.getLeastLoaded() orelse return error.NoSchedulerAvailable;
+        try sched.submitSpawn(trampoline_addr, user_fn, args, config);
+    }
+
     // TODO: When does this get cleaned up?
     pub fn spawnThread(sys_allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, comptime func: anytype, args: anytype) !std.Thread {
         // We don't call 'func' directly. We call the wrapper.
@@ -1047,5 +1055,13 @@ pub const CheatLib = struct {
         return frame.ret;
     }
 };
+
+/// Module-level spawnBest: submits a task to the least-loaded scheduler
+/// from the global registry. Used by @pinned DO branches.
+/// Errors if no scheduler is registered (outside a scheduler context).
+pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+    const sched = fp.global_registry.getLeastLoaded() orelse return error.NoSchedulerAvailable;
+    try sched.submitSpawn(trampoline_addr, user_fn, args, config);
+}
 
 

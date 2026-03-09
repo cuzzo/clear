@@ -1,10 +1,18 @@
 module PipelineGenerator
   # Consolidates boilerplate for collection operators (SELECT, WHERE, etc.)
   # Handles source list extraction, allocator selection, and Zig block wrapping.
+  #
+  # For @pool and @pool:sharded(N): materializes live slot values into a frame
+  # buffer before iteration so all pipeline ops work correctly.
+  # For @list:sharded(N): flattens all shard slices into a frame buffer.
   def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil)
     list_code = visit(list_node)
     alloc = storage_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
-    
+    lhs_type = list_node.type_info
+
+    # Build items extraction / materialization block
+    items_block = build_pipe_items_block(lhs_type, alloc)
+
     # Optional result initialization (e.g. creating the output ArrayList)
     res_init = if init
       init.gsub("{alloc}", alloc)
@@ -19,14 +27,59 @@ module PipelineGenerator
     <<~ZIG
       blk: {
           const pipe_src_list = #{list_code};
-          // Handle both ArrayList and Slice
-          const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else pipe_src_list;
+          #{items_block}
           #{res_init}
 
           #{body_code}
       }
     ZIG
+  end
 
+  # Emits Zig lines that produce `pipe_items` (a slice) from `pipe_src_list`.
+  # Handles regular arrays, @pool, @pool:sharded(N), @list, and @list:sharded(N).
+  #
+  # Pools and sharded lists materialise live items into a temporary buffer.
+  # We always use rt.heapAlloc() for that buffer because the fiber frame is
+  # small (4 KB) and running many pipeline ops in one function would overflow it.
+  def build_pipe_items_block(lhs_type, _alloc)
+    if lhs_type&.pool? && lhs_type&.sharded?
+      n = lhs_type.shard_count
+      elem_zig = lhs_type.element_type.zig_type
+      <<~ZIG.strip
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        defer pipe_mat.deinit(rt.heapAlloc());
+        for (0..#{n}) |__psi| {
+            for (pipe_src_list.shards[__psi].slots.items) |*__pslot| {
+                if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);
+            }
+        }
+        const pipe_items = pipe_mat.items;
+      ZIG
+    elsif lhs_type&.pool?
+      elem_zig = lhs_type.element_type.zig_type
+      <<~ZIG.strip
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        defer pipe_mat.deinit(rt.heapAlloc());
+        for (pipe_src_list.slots.items) |*__pslot| {
+            if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);
+        }
+        const pipe_items = pipe_mat.items;
+      ZIG
+    elsif lhs_type&.list_collection? && lhs_type&.sharded?
+      n = lhs_type.shard_count
+      elem_zig = lhs_type.element_type.zig_type
+      <<~ZIG.strip
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        defer pipe_mat.deinit(rt.heapAlloc());
+        for (0..#{n}) |__psi| {
+            try pipe_mat.appendSlice(rt.heapAlloc(), pipe_src_list.shards[__psi].items);
+        }
+        const pipe_items = pipe_mat.items;
+      ZIG
+    else
+      # Standard array or @list: use .items if available, otherwise treat as slice
+      "const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else pipe_src_list;"
+    end
   end
 
   def transpile_select_projection(list_node, expression_node)
@@ -237,6 +290,8 @@ module PipelineGenerator
       else
         transpile_each_pool(lhs, body_code)
       end
+    elsif lhs_type&.list_collection? && lhs_type&.sharded?
+      transpile_each_sharded_list(lhs, body_code, lhs_type)
     else
       transpile_each_array(lhs, body_code)
     end
@@ -315,6 +370,60 @@ module PipelineGenerator
     <<~ZIG.chomp
       {
           const __each#{id}_src = &#{pool_code};
+          var #{wg_var} = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          #{wg_var}.add(#{n});
+          #{shard_parts.join("\n    ")}
+          #{wg_var}.wait();
+      }
+    ZIG
+  end
+
+  # Parallel EACH over @list:sharded(N) — dispatches N fibers, one per shard.
+  def transpile_each_sharded_list(list_node, body_code, list_type)
+    n         = list_type.shard_count
+    list_code = visit(list_node)
+    elem_zig  = list_type.element_type.zig_type
+    rt_name   = @do_rt_name || "rt"
+
+    @each_counter ||= 0
+    id = @each_counter
+    @each_counter += 1
+
+    wg_var = "__each#{id}_wg"
+
+    shard_parts = (0...n).map do |i|
+      ctx_type = "__EachListShardCtx#{id}_#{i}"
+      ctx_var  = "__each#{id}_ctx#{i}"
+
+      shard_body = with_fiber_capture_map({}) do
+        "for (ctx.shard.items) |*__each_item| {\n            #{body_code}\n        }"
+      end
+
+      <<~ZIG.chomp
+        const #{ctx_type} = struct {
+            wg: *CheatHeader.WaitGroup,
+            shard: *std.ArrayListUnmanaged(#{elem_zig}),
+            fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                _ = &__rt;
+                const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                defer ctx.wg.done();
+                #{shard_body}
+            }
+        };
+        var #{ctx_var} = #{ctx_type}{ .wg = &#{wg_var}, .shard = &__each#{id}_src.shards[#{i}] };
+        try #{wg_var}.sched.submitSpawn(
+            @intFromPtr(&Runtime.entryWrapper),
+            @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+            &#{ctx_var},
+            .{}
+        );
+      ZIG
+    end
+
+    <<~ZIG.chomp
+      {
+          const __each#{id}_src = &#{list_code};
           var #{wg_var} = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
           #{wg_var}.add(#{n});
           #{shard_parts.join("\n    ")}

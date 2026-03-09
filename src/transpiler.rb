@@ -669,7 +669,9 @@ private
       n = node.branches.length
       wg_var = "__do#{id}_wg"
 
-      branch_parts = node.branches.each_with_index.map do |branch_exprs, i|
+      branch_parts = node.branches.each_with_index.map do |branch, i|
+        branch_exprs = branch[:body]
+        pinned       = branch[:pinned]
         ctx_type = "__DoBranchCtx#{id}_#{i}"
         ctx_var  = "__do#{id}_ctx#{i}"
 
@@ -694,6 +696,28 @@ private
           }.join("\n        ")
         end
 
+        # @pinned branches use spawnBest (least-loaded scheduler from global registry).
+        # Regular branches use the current scheduler's submitSpawn.
+        spawn_call = if pinned
+          <<~ZIG.chomp
+            try CheatHeader.spawnBest(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                &#{ctx_var},
+                .{}
+            );
+          ZIG
+        else
+          <<~ZIG.chomp
+            try #{wg_var}.sched.submitSpawn(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                &#{ctx_var},
+                .{}
+            );
+          ZIG
+        end
+
         <<~ZIG.chomp
           const #{ctx_type} = struct {
               wg: *CheatHeader.WaitGroup,
@@ -707,12 +731,7 @@ private
               }
           };
           var #{ctx_var} = #{ctx_type}{ #{capture_inits} };
-          try #{wg_var}.sched.submitSpawn(
-              @intFromPtr(&Runtime.entryWrapper),
-              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-              &#{ctx_var},
-              .{}
-          );
+          #{spawn_call}
         ZIG
       end
 
@@ -1209,7 +1228,18 @@ private
     #    {alloc} -> determine allocator automatically
     #    For method calls, use the object's storage (not the result's storage)
     if pattern.include?("{alloc}")
-      target_storage = if node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
+      # @list / @list:sharded backing buffers must live on the heap so that
+      # fiber-frame data isn't corrupted by stack growth inside a 16 KB fiber.
+      # append(slist, x) is a FuncCall where args[0] is the list.
+      first_arg_type = node.respond_to?(:args) ? node.args&.first&.type_info : nil
+      force_heap = if node.is_a?(AST::MethodCall)
+        node.object.respond_to?(:type_info) && node.object.type_info&.list_collection?
+      else
+        first_arg_type&.list_collection?
+      end
+      target_storage = if force_heap
+        :heap
+      elsif node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
         node.object.storage
       else
         node.storage

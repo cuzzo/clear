@@ -1849,8 +1849,9 @@ private
   def visit_DoBlock(node)
     # Each branch runs in a separate fiber (fork-join).
     # Visit branches independently — no ownership transfer between parallel branches.
+    # branches: Array of { body: Array<ASTNode>, pinned: Boolean }
     node.branches.each do |branch|
-      branch.each { |expr| visit(expr) }
+      branch[:body].each { |expr| visit(expr) }
     end
     node.full_type = :Void
   end

@@ -13,7 +13,7 @@ const AtomicInbox = qs.AtomicInbox;
 const RunQueue = qs.RunQueue;
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;
-const TaskConfig = qs.TaskConfig;
+pub const TaskConfig = qs.TaskConfig;
 const TaskFn = qs.TaskFn;
 
 const Context = fc.Context;
@@ -636,6 +636,25 @@ pub const SchedulerRegistry = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         return self.map.get(id);
+    }
+
+    /// Returns the scheduler with the fewest active tasks (least loaded).
+    /// Falls back to current scheduler's registry entry if only one is registered.
+    pub fn getLeastLoaded(self: *SchedulerRegistry) ?*Scheduler {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var best: ?*Scheduler = null;
+        var best_load: usize = std.math.maxInt(usize);
+        var it = self.map.valueIterator();
+        while (it.next()) |ptr| {
+            const sched = ptr.*;
+            const load = sched.active_tasks.load(.monotonic);
+            if (load < best_load) {
+                best_load = load;
+                best = sched;
+            }
+        }
+        return best;
     }
 };
 

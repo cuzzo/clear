@@ -275,13 +275,14 @@ module PipeAnalysis
   end
 
   def analyze_each_op(node)
-    # EACH accepts arrays (metatype :array) OR pools (pool? on type_info).
-    lhs_type = node.left.type_info
+    # EACH accepts arrays (metatype :array), pools, and @list:sharded collections.
+    lhs_type  = node.left.type_info
     is_pool   = lhs_type&.pool?
+    is_list   = lhs_type&.list_collection?
     is_array  = node.left.metatype == :array
 
-    unless is_pool || is_array
-      error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @pool, or @pool:sharded(N)")
+    unless is_pool || is_list || is_array
+      error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @list:sharded(N), @pool, or @pool:sharded(N)")
       node.full_type = :Void
       return
     end
@@ -461,9 +462,16 @@ module PipeAnalysis
     node.storage   = :stack
   end
 
-  # Helper to validate array input for higher-order ops
+  # Helper to validate array/pool input for higher-order ops.
+  # Accepts:
+  #   - Array types (metatype :array)
+  #   - @pool and @pool:sharded(N) collection types
+  #   - @list and @list:sharded(N) collection types
   def require_array_input!(node, op_name)
-    return unless node.left.metatype != :array
+    lhs_type = node.left.type_info
+    return if node.left.metatype == :array
+    return if lhs_type&.pool?
+    return if lhs_type&.list_collection?
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")

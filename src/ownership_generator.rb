@@ -7,6 +7,11 @@ module OwnershipGenerator
       return "defer #{close_stmt};\n"
     end
 
+    # @list / @list:sharded and @pool backing arrays are heap-allocated; auto-deinit.
+    if type_info&.list_collection? || type_info&.pool?
+      return "defer #{name}.deinit(rt.heapAlloc());\n"
+    end
+
     return "" unless type_info&.requires_move? || type_info&.any_rc? || type_info&.any_sync?
 
     is_rc           = type_info&.any_rc?

@@ -1216,6 +1216,14 @@ class Parser
     branches = []
 
     until match?(:CHAR, '}') || match?(:EOF)
+      # Check for @pinned -> prefix: pins this branch to the least-loaded scheduler.
+      pinned = false
+      if match?(:VAR_ID, '@pinned') && peek.type == :ARROW
+        consume(:VAR_ID, '@pinned')
+        consume(:ARROW, '->')
+        pinned = true
+      end
+
       # A branch is either a block-statement (WITH, IF, etc.) starting with a keyword,
       # or a bare expression. Keyword branches don't need a trailing semicolon.
       stmt = if match?(:KEYWORD)
@@ -1223,7 +1231,7 @@ class Parser
       else
         parse_expression
       end
-      branches << [stmt].compact
+      branches << { body: [stmt].compact, pinned: pinned }
       break unless match!(:CHAR, ',')
     end
 
