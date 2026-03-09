@@ -256,6 +256,11 @@ module AST
   LimitOp      = Struct.new(:token, :count) { include Locatable }
   UnnestOp     = Struct.new(:token, :expression) { include Locatable }
   DistinctOp   = Struct.new(:token, :expression) { include Locatable }
+  # EachOp: side-effect iteration over a collection.
+  # Uses `_` as the implicit item binding. Body is a list of statements.
+  # Syntax: collection s> EACH { _.field = value; };
+  # On sharded pools, auto-dispatches N parallel fibers (one per shard).
+  EachOp       = Struct.new(:token, :body) { include Locatable }
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }

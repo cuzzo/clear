@@ -1,0 +1,39 @@
+-- Test: Sharded Collections — Phase 2 (@pool:sharded(N) and @list:sharded(N))
+-- Exercises sharded pool declarations, round-robin insert/get/remove/count,
+-- EACH iteration over both array/list and sharded pools.
+
+STRUCT Score { value: Number }
+
+FN cheatMain() RETURNS Void ->
+    -- @pool:sharded(4): 4 independent Pool(Score) shards behind a single interface
+    MUTABLE sp: Score[]@pool:sharded(4) = [];
+
+    -- insert / get / remove / count work identically to non-sharded pools
+    id_a: Id<Score> = sp.insert(Score{ value: 10.0 });
+    id_b: Id<Score> = sp.insert(Score{ value: 20.0 });
+    id_c: Id<Score> = sp.insert(Score{ value: 30.0 });
+
+    ASSERT sp.count() == 3, "sharded pool should have 3 items";
+
+    pa = sp.get(id_a);
+    ASSERT pa != NIL, "get should find id_a";
+
+    sp.remove(id_b);
+    ASSERT sp.count() == 2, "should have 2 after removing id_b";
+    ASSERT sp.get(id_b) == NIL, "id_b should be stale after remove";
+    ASSERT sp.get(id_c) != NIL, "id_c should still be valid";
+
+    -- EACH on sharded pool: parallel side-effect iteration across 4 fibers
+    sp s> EACH { _.value = 0.0; };
+
+    -- EACH on a regular @list (sequential iteration)
+    MUTABLE items: Score[]@list = [];
+    append(items, Score{ value: 1.0 });
+    append(items, Score{ value: 2.0 });
+    items s> EACH { _.value = 0.0; };
+
+    -- @list:sharded(2): 2 independent list shards
+    MUTABLE sl: Score[]@list:sharded(2) = [];
+
+    RETURN;
+END

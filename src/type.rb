@@ -7,6 +7,7 @@ class Type
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc)
   attr_accessor :sync        # nil (default), :locked, :write_locked
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
+  attr_accessor :shard_count # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N))
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
@@ -110,7 +111,7 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil)
+  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil, shard_count: nil)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -120,6 +121,7 @@ class Type
       @ownership          = other.ownership
       @sync               = other.sync
       @collection         = other.instance_variable_get(:@collection)
+      @shard_count        = other.instance_variable_get(:@shard_count)
       @location           = other.instance_variable_get(:@location)
       @is_error_union     = other.instance_variable_get(:@is_error_union)
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
@@ -155,6 +157,7 @@ class Type
       @zig_type_cache = nil
       @location = :heap if collection == :pool
     end
+    @shard_count = shard_count if shard_count
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -357,6 +360,11 @@ class Type
   # True when this is an explicit @list (heap list) collection.
   def list_collection?
     @collection == :list
+  end
+
+  # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
+  def sharded?
+    !@shard_count.nil?
   end
 
   def value_type
@@ -704,10 +712,16 @@ class Type
       return is_pointer ? "*[]const u8" : "[]const u8"
     end
 
-    # 3b. Handle Pool collection: User[]@pool → CheatLib.Pool(User)
+    # 3b. Handle Pool / ShardedPool collection
     if pool?
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
-      return "CheatLib.Pool(#{base_zig})"
+      return sharded? ? "CheatLib.ShardedPool(#{base_zig}, #{shard_count})" : "CheatLib.Pool(#{base_zig})"
+    end
+
+    # 3c. Handle @list / ShardedList collection
+    if list_collection?
+      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      return sharded? ? "CheatLib.ShardedList(#{base_zig}, #{shard_count})" : "std.ArrayListUnmanaged(#{base_zig})"
     end
 
     # 4. Handle Arrays recursively

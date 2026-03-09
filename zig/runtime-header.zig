@@ -933,6 +933,87 @@ pub const CheatLib = struct {
         };
     }
 
+    /// ShardedPool(T, N) — N independent Pool(T) shards behind a single insert/get/remove/count interface.
+    /// Handles encode the shard index in the upper 8 bits:
+    ///   [(shard_idx: u8) << 56 | (pool_handle: u56)]
+    /// This allows up to 256 shards and keeps the same u64 handle type as Pool(T).
+    pub fn ShardedPool(comptime T: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2); // sharding requires at least 2 shards
+        return struct {
+            const Self = @This();
+            const SHARD_SHIFT: u6 = 56;
+            const HANDLE_MASK: u64 = (1 << 56) - 1;
+
+            shards: [N]Pool(T) = [_]Pool(T){.{}} ** N,
+            round_robin: usize = 0,
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                for (&self.shards) |*s| s.deinit(allocator);
+            }
+
+            /// Insert into the next shard (round-robin). Returns a handle encoding shard index.
+            pub fn insert(self: *Self, allocator: std.mem.Allocator, value: T) !u64 {
+                const shard_idx = self.round_robin % N;
+                self.round_robin +%= 1;
+                const local_handle = try self.shards[shard_idx].insert(allocator, value);
+                return (@as(u64, shard_idx) << SHARD_SHIFT) | (local_handle & HANDLE_MASK);
+            }
+
+            /// Look up a handle. Returns null if stale, out of range, or wrong shard.
+            pub fn get(self: *Self, id: u64) ?*T {
+                const shard_idx = @as(usize, @intCast(id >> SHARD_SHIFT));
+                if (shard_idx >= N) return null;
+                const local_handle = id & HANDLE_MASK;
+                return self.shards[shard_idx].get(local_handle);
+            }
+
+            /// Remove by handle. No-op if stale or out of range.
+            pub fn remove(self: *Self, id: u64) void {
+                const shard_idx = @as(usize, @intCast(id >> SHARD_SHIFT));
+                if (shard_idx >= N) return;
+                const local_handle = id & HANDLE_MASK;
+                self.shards[shard_idx].remove(local_handle);
+            }
+
+            /// Returns the total number of live slots across all shards.
+            pub fn count(self: *const Self) usize {
+                var n: usize = 0;
+                for (&self.shards) |*s| n += s.count();
+                return n;
+            }
+        };
+    }
+
+    /// ShardedList(T, N) — N independent ArrayListUnmanaged(T) shards.
+    /// Provides the same append/len interface as a single list but distributed across N shards.
+    pub fn ShardedList(comptime T: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+
+            shards: [N]std.ArrayListUnmanaged(T) = [_]std.ArrayListUnmanaged(T){.{}} ** N,
+            round_robin: usize = 0,
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                for (&self.shards) |*s| s.deinit(allocator);
+            }
+
+            /// Append to the next shard (round-robin).
+            pub fn append(self: *Self, allocator: std.mem.Allocator, value: T) !void {
+                const shard_idx = self.round_robin % N;
+                self.round_robin +%= 1;
+                try self.shards[shard_idx].append(allocator, value);
+            }
+
+            /// Returns the total number of items across all shards.
+            pub fn len(self: *const Self) usize {
+                var n: usize = 0;
+                for (&self.shards) |*s| n += s.items.len;
+                return n;
+            }
+        };
+    }
+
     pub fn ffi(rt: *Runtime, comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
         const F = @TypeOf(f);
         const type_info = @typeInfo(F);

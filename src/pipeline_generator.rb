@@ -214,6 +214,115 @@ module PipelineGenerator
     end
   end
 
+  # Transpile `collection s> EACH _.expr` — side-effect iteration.
+  # Dispatches to the appropriate implementation based on the source type:
+  #   - Regular array/list → sequential for loop
+  #   - Plain pool         → sequential live-slot scan
+  #   - Sharded pool       → N parallel fibers (one per shard, DO-block pattern)
+  def transpile_each(smooth_node)
+    lhs      = smooth_node.left
+    each_op  = smooth_node.right
+    lhs_type = lhs.type_info
+
+    @placeholder_name = "__each_item"
+    body_code = each_op.body.map { |stmt|
+      code = visit(stmt)
+      code.strip.end_with?(";") ? code : "#{code};"
+    }.join("\n        ")
+    @placeholder_name = nil
+
+    if lhs_type&.pool?
+      if lhs_type.sharded?
+        transpile_each_sharded_pool(lhs, body_code, lhs_type)
+      else
+        transpile_each_pool(lhs, body_code)
+      end
+    else
+      transpile_each_array(lhs, body_code)
+    end
+  end
+
+  def transpile_each_array(list_node, body_code)
+    list_code = visit(list_node)
+    <<~ZIG.chomp
+      {
+          const __each_src = #{list_code};
+          const __each_items = if (@hasField(@TypeOf(__each_src), "items")) __each_src.items else __each_src;
+          for (__each_items) |*__each_item| {
+              #{body_code}
+          }
+      }
+    ZIG
+  end
+
+  def transpile_each_pool(pool_node, body_code)
+    pool_code = visit(pool_node)
+    <<~ZIG.chomp
+      {
+          const __each_src = &#{pool_code};
+          for (__each_src.slots.items) |*__each_slot| {
+              if (!__each_slot.alive) continue;
+              const __each_item = &__each_slot.value;
+              #{body_code}
+          }
+      }
+    ZIG
+  end
+
+  def transpile_each_sharded_pool(pool_node, body_code, pool_type)
+    n          = pool_type.shard_count
+    pool_code  = visit(pool_node)
+    elem_zig   = pool_type.element_type.zig_type
+    rt_name    = @do_rt_name || "rt"
+
+    @each_counter ||= 0
+    id = @each_counter
+    @each_counter += 1
+
+    wg_var = "__each#{id}_wg"
+
+    shard_parts = (0...n).map do |i|
+      ctx_type = "__EachShardCtx#{id}_#{i}"
+      ctx_var  = "__each#{id}_ctx#{i}"
+      # Body is re-emitted per shard inside the fiber; body_code already has _ resolved
+      # We capture the whole pool src and use shards[i] inside the fiber
+      shard_body = with_fiber_capture_map({}) do
+        "for (ctx.shard.slots.items) |*__each_slot| {\n            if (!__each_slot.alive) continue;\n            const __each_item = &__each_slot.value;\n            #{body_code}\n        }"
+      end
+
+      <<~ZIG.chomp
+        const #{ctx_type} = struct {
+            wg: *CheatHeader.WaitGroup,
+            shard: *CheatLib.Pool(#{elem_zig}),
+            fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                _ = &__rt;
+                const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                defer ctx.wg.done();
+                #{shard_body}
+            }
+        };
+        var #{ctx_var} = #{ctx_type}{ .wg = &#{wg_var}, .shard = &__each#{id}_src.shards[#{i}] };
+        try #{wg_var}.sched.submitSpawn(
+            @intFromPtr(&Runtime.entryWrapper),
+            @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+            &#{ctx_var},
+            .{}
+        );
+      ZIG
+    end
+
+    <<~ZIG.chomp
+      {
+          const __each#{id}_src = &#{pool_code};
+          var #{wg_var} = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          #{wg_var}.add(#{n});
+          #{shard_parts.join("\n    ")}
+          #{wg_var}.wait();
+      }
+    ZIG
+  end
+
   def visit_Placeholder(node)
     # Return the name of the loop variable
     @placeholder_name || (raise "Use of '_' outside of SELECT context")

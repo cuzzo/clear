@@ -942,10 +942,11 @@ private
     storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
     @frame_usage_count += 1 if storage == :frame
 
-    # 2a. Propagate collection annotation from the declared type (lost during finalize_storage!)
+    # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!)
     if (decl_t = node.type).is_a?(Type) && decl_t.collection
-      node.type_info.collection = decl_t.collection
-      node.type_info.location   = :heap if decl_t.collection == :pool
+      node.type_info.collection  = decl_t.collection
+      node.type_info.location    = :heap if decl_t.collection == :pool
+      node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
     end
 
     # 2b. Check if the declared type is a pool or resource — tag node and scope entry
@@ -1006,10 +1007,11 @@ private
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
       @frame_usage_count += 1 if storage == :frame
 
-      # Propagate collection annotation from the declared type (lost during finalize_storage!)
+      # Propagate collection + shard_count from declared type (lost during finalize_storage!)
       if (decl_t = node.type).is_a?(Type) && decl_t.collection
-        node.type_info.collection = decl_t.collection
-        node.type_info.location   = :heap if decl_t.collection == :pool
+        node.type_info.collection  = decl_t.collection
+        node.type_info.location    = :heap if decl_t.collection == :pool
+        node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
       end
 
       ft_obj        = node.type_info

@@ -117,6 +117,7 @@ class Parser
   primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :expression])
   primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :expression])
   primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :expression])
+  primary(:KEYWORD, 'EACH') { parse_each_op }
 
   # Expression Grouping
   primary(:CHAR, '(') do
@@ -1113,16 +1114,49 @@ class Parser
           error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
         end
         collection = :list
+        shard_count = parse_sharded_modifier_if_present!(cap_tok)
       when "@pool"
         unless inner.start_with?("[")
           error!(cap_tok, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
         end
         collection = :pool
+        shard_count = parse_sharded_modifier_if_present!(cap_tok)
       end
     end
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
-    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection)
+    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
+  end
+
+  # Parses `EACH { stmts... }` — side-effect block over a collection.
+  # `_` is the implicit item binding inside the body.
+  def parse_each_op
+    token = consume(:KEYWORD, 'EACH')
+    consume(:CHAR, '{')
+    body = parse_block_body(['}'])
+    consume(:CHAR, '}')
+    AST::EachOp.new(token, body)
+  end
+
+  # Parses an optional `:sharded(N)` suffix after @pool or @list.
+  # Returns the shard count (Integer >= 2) or nil if no :sharded modifier.
+  # Raises a ParserError if the syntax is malformed or N < 2.
+  def parse_sharded_modifier_if_present!(cap_tok)
+    return nil unless match?(:CHAR, ':')
+    colon_pos = @pos
+    consume(:CHAR, ':')
+    unless match?(:VAR_ID) && current.value == 'sharded'
+      error!(current, "Expected 'sharded(N)' after '#{cap_tok.value}:' — unknown modifier '#{current.value}'")
+    end
+    consume(:VAR_ID) # consume 'sharded'
+    consume(:CHAR, '(')
+    count_tok = consume(:NUMBER)
+    n = count_tok.value.to_i
+    if n < 2
+      error!(count_tok, "@pool:sharded / @list:sharded requires N >= 2, got #{n}")
+    end
+    consume(:CHAR, ')')
+    n
   end
 
   def parse_with_capability

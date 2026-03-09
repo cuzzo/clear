@@ -37,7 +37,8 @@ module PipeAnalysis
     node.is_a?(AST::ReduceOp) ||
     node.is_a?(AST::LimitOp) ||
     node.is_a?(AST::UnnestOp) ||
-    node.is_a?(AST::DistinctOp)
+    node.is_a?(AST::DistinctOp) ||
+    node.is_a?(AST::EachOp)
   end
 
   def analyze_higher_order_op(node)
@@ -52,6 +53,8 @@ module PipeAnalysis
       analyze_unnest_op(node)
     when AST::DistinctOp
       analyze_distinct_op(node)
+    when AST::EachOp
+      analyze_each_op(node)
     end
   end
 
@@ -245,6 +248,34 @@ module PipeAnalysis
 
     # 3. Set Result Type
     node.full_type = sig[:return][:type]
+  end
+
+  def analyze_each_op(node)
+    # EACH accepts arrays (metatype :array) OR pools (pool? on type_info).
+    lhs_type = node.left.type_info
+    is_pool   = lhs_type&.pool?
+    is_array  = node.left.metatype == :array
+
+    unless is_pool || is_array
+      error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @pool, or @pool:sharded(N)")
+      node.full_type = :Void
+      return
+    end
+
+    item_type = if is_pool
+      lhs_type.element_type.resolved
+    else
+      lhs_type.element_type.resolved
+    end
+
+    with_new_scope do
+      # Mutable: EACH body may mutate the item via field assignment (_.field = value)
+      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+      node.right.body.each { |stmt| visit(stmt) }
+    end
+
+    node.full_type = :Void
+    node.storage   = :frame
   end
 
   # Helper to validate array input for higher-order ops

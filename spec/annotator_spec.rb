@@ -7193,5 +7193,309 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===========================================================================
+  # Collection Types — Phase 2 (@pool:sharded(N), @list:sharded(N), EACH)
+  # ===========================================================================
+  describe "Collection Types — Phase 2" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    def find_var(tree, fn_name, var_name)
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == fn_name }
+      fn_node.body.find { |n| n.is_a?(AST::VarDecl) && n.name == var_name }
+    end
+
+    # -------------------------------------------------------------------------
+    # @pool:sharded(N) type annotation
+    # -------------------------------------------------------------------------
+    describe "@pool:sharded(N) (sharded generational pool)" do
+      it "accepts Score[]@pool:sharded(4) as a valid type annotation" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "resolves Score[]@pool:sharded(4) full_type to a sharded pool? Type" do
+        tree = run(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            RETURN;
+          END
+        CLEAR
+        bind = find_var(tree, "f", "sp")
+        expect(bind.type_info.pool?).to be true
+        expect(bind.type_info.sharded?).to be true
+        expect(bind.type_info.shard_count).to eq(4)
+      end
+
+      it "emits CheatLib.ShardedPool Zig type for @pool:sharded(4)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.ShardedPool(Score, 4){}")
+      end
+
+      it "emits defer sp.deinit for @pool:sharded cleanup (RAII)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("defer sp.deinit(rt.heapAlloc())")
+      end
+
+      it "raises for @pool:sharded(1) — shard count must be >= 2" do
+        expect {
+          run('FN f() RETURNS Void -> MUTABLE sp: Number[]@pool:sharded(1) = []; RETURN; END')
+        }.to raise_error(ParserError, /requires N >= 2/)
+      end
+
+      it "raises for @pool:sharded on a non-array type" do
+        expect {
+          run('FN f() RETURNS Void -> x: Number@pool:sharded(2) = 1; RETURN; END')
+        }.to raise_error(ParserError, /@pool requires an array type/)
+      end
+
+      it "allows insert/get/remove/count on a sharded pool" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              id = sp.insert(Score{ value: 1.0 });
+              result = sp.get(id);
+              sp.remove(id);
+              n = sp.count();
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "emits ShardedPool insert/get/remove/count Zig calls" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            id = sp.insert(Score{ value: 1.0 });
+            result = sp.get(id);
+            sp.remove(id);
+            n = sp.count();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("try sp.insert(rt.heapAlloc(),")
+        expect(out).to include("sp.get(id)")
+        expect(out).to include("sp.remove(id)")
+        expect(out).to include("sp.count()")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # @list:sharded(N) type annotation
+    # -------------------------------------------------------------------------
+    describe "@list:sharded(N) (sharded list)" do
+      it "accepts Score[]@list:sharded(2) as a valid type annotation" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sl: Score[]@list:sharded(2) = [];
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "resolves Score[]@list:sharded(2) to a sharded list_collection? Type" do
+        tree = run(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sl: Score[]@list:sharded(2) = [];
+            RETURN;
+          END
+        CLEAR
+        bind = find_var(tree, "f", "sl")
+        expect(bind.type_info.list_collection?).to be true
+        expect(bind.type_info.sharded?).to be true
+        expect(bind.type_info.shard_count).to eq(2)
+      end
+
+      it "emits CheatLib.ShardedList Zig type for @list:sharded(2)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sl: Score[]@list:sharded(2) = [];
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.ShardedList(Score, 2){}")
+      end
+
+      it "raises for @list:sharded(1) — shard count must be >= 2" do
+        expect {
+          run('FN f() RETURNS Void -> MUTABLE sl: Number[]@list:sharded(1) = []; RETURN; END')
+        }.to raise_error(ParserError, /requires N >= 2/)
+      end
+
+      it "raises for @list:sharded on a non-array type" do
+        expect {
+          run('FN f() RETURNS Void -> x: Number@list:sharded(2) = 1; RETURN; END')
+        }.to raise_error(ParserError, /@list requires an array type/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # EACH pipeline operator
+    # -------------------------------------------------------------------------
+    describe "EACH side-effect iteration" do
+      it "accepts EACH on a plain array" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              items: Score[] = [];
+              items s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts EACH on a @list collection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE items: Score[]@list = [];
+              items s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts EACH on a @pool collection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE pool: Score[]@pool = [];
+              pool s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts EACH on a @pool:sharded(N) collection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              sp s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises a clear error when EACH is applied to a non-collection" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 42.0;
+              x s> EACH { _ = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot EACH non-collection type/)
+      end
+
+      it "emits a sequential for loop for EACH on plain arrays" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            items: Score[] = [];
+            items s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("for (__each_items)")
+        expect(out).to include("|*__each_item|")
+      end
+
+      it "emits pool slot scan for EACH on @pool" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE pool: Score[]@pool = [];
+            pool s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("slots.items")
+        expect(out).to include("__each_slot.alive")
+      end
+
+      it "emits N parallel fiber structs for EACH on @pool:sharded(4)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            sp s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("WaitGroup")
+        expect(out).to include("submitSpawn")
+        expect(out).to include("__EachShardCtx0_0")
+        expect(out).to include("__EachShardCtx0_1")
+        expect(out).to include("__EachShardCtx0_2")
+        expect(out).to include("__EachShardCtx0_3")
+      end
+
+      it "uses __each_item in Zig output (Zig reserves _ as discard identifier)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            items: Score[] = [];
+            items s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("__each_item")
+        expect(out).not_to match(/\bconst _ =/)
+      end
+
+      it "EACH on array emits mutable pointer iteration (|*__each_item|)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            items: Score[] = [];
+            items s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("|*__each_item|")
+      end
+    end
+  end
 end
 

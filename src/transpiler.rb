@@ -300,13 +300,11 @@ private
       rhs_ti = rhs_ident&.type_info
 
       value_code = if node.full_type&.pool?
-        # Pool initialization: zero-initialize the struct.
-        elem_zig = node.full_type.element_type.zig_type
-        "CheatLib.Pool(#{elem_zig}){}"
+        # Pool / ShardedPool: zero-initialize via zig_type (handles both sharded and non-sharded)
+        "#{node.full_type.zig_type}{}"
       elsif node.full_type&.list_collection?
-        # @list: explicit heap list backed by std.ArrayListUnmanaged
-        elem_zig = node.full_type.element_type.zig_type
-        "std.ArrayListUnmanaged(#{elem_zig}){}"
+        # @list / ShardedList: zero-initialize via zig_type
+        "#{node.full_type.zig_type}{}"
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
@@ -1081,6 +1079,9 @@ private
 
     elsif node.right.is_a?(AST::DistinctOp)
       return transpile_distinct(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::EachOp)
+      return transpile_each(node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.
