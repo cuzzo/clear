@@ -303,11 +303,20 @@ module AST
   EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }
   # UnionDef: UNION Name { Variant1: Type, Variant2: Type, UnitVariant }
   # Declares a Zig tagged union (union(enum)). variants is a Hash of
-  # { "VariantName" => Type_object_or_nil } where nil means void (unit variant).
+  # { "VariantName" => value } where value is:
+  #   nil                                          — unit variant (void payload)
+  #   Type object                                  — single-type payload (existing)
+  #   { kind: :inline_struct, fields: { "f" => Type } } — inline struct payload (new)
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T"], or nil
   end
+
+  # UnionVariantLit: TypeName.VariantName{ field: val, ... }
+  # Constructs an inline-struct variant of a union type.
+  # union_name: String (e.g., "Shape"), variant_name: String (e.g., "Circle")
+  # fields: Hash<String, ASTNode>
+  UnionVariantLit  = Struct.new(:token, :union_name, :variant_name, :fields, :storage) { include Locatable }
 
   # StaticCall: TypeName::method(args) — type-level static method call.
   # type_name: AST::Identifier (the type), method_name: String, args: Array of ASTNode

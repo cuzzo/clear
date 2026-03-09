@@ -217,6 +217,26 @@ class Parser
     AST::CapabilityWrap.new(token, lhs, nil, :write_locked)
   end
 
+  # Inline union variant constructor: TypeName.VariantName{ field: val, ... }
+  # Only fires when lhs is a GetField whose target is a TYPE_ID (uppercase) identifier.
+  # Returns SUFFIX_DECLINE (without consuming '{') for any other lhs, so callers
+  # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
+  suffix(:CHAR, '{') do |lhs|
+    if lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
+        lhs.target.name[0] =~ /[A-Z]/
+      tok = current
+      _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
+        k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
+        consume(:CHAR, ':')
+        v = parse_expression
+        [k, v]
+      end
+      AST::UnionVariantLit.new(tok, lhs.target.name, lhs.field, field_pairs.to_h, :stack)
+    else
+      SUFFIX_DECLINE
+    end
+  end
+
   def parse_literal(type, storage)
     token = consume(type)
     node = AST::Literal.new(token, type, token.value, storage)
@@ -555,9 +575,22 @@ class Parser
     variants = {}
     until match?(:CHAR, '}')
       var_name = consume(:TYPE_ID).value
-      # Optional payload type after ':'
-      payload_type = match!(:CHAR, ':') ? parse_type_annotation : nil
-      variants[var_name] = payload_type
+      if match?(:CHAR, '{')
+        # Inline struct variant: Circle { radius: Number, color: String }
+        _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
+          fname = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
+          consume(:CHAR, ':')
+          ftype = parse_type_annotation
+          [fname, ftype]
+        end
+        variants[var_name] = { kind: :inline_struct, fields: field_pairs.to_h }
+      elsif match!(:CHAR, ':')
+        # Single-type payload: Data: Number
+        variants[var_name] = parse_type_annotation
+      else
+        # Unit variant: Point
+        variants[var_name] = nil
+      end
       match!(:CHAR, ',')
     end
     consume(:CHAR, '}')
@@ -750,13 +783,20 @@ class Parser
     parse_primary
   end
 
+  # Sentinel returned by a suffix rule to signal "this suffix does not apply
+  # to the current lhs — stop processing without consuming any tokens."
+  SUFFIX_DECLINE = Object.new.freeze
+
   def parse_suffixes(lhs)
     loop do
       rule = @@suffix_rules[[current.type, current.value]]
       break unless rule
-      # Run the rule, passing the current 'lhs' into it
-      # The result becomes the new 'lhs' for the next iteration
-      lhs = instance_exec(lhs, &rule)
+      # Run the rule, passing the current 'lhs' into it.
+      # If the rule returns SUFFIX_DECLINE, it did not consume anything and
+      # the suffix loop should stop (leaving the token for the caller).
+      result = instance_exec(lhs, &rule)
+      break if result.equal?(SUFFIX_DECLINE)
+      lhs = result
     end
     lhs
   end

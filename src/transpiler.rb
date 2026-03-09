@@ -205,14 +205,33 @@ private
       # ZIG:   const Result = union(enum) { Ok: f64, Err: []const u8, Empty: void };
       # CHEAT: UNION Option<T> { Some: T, None }
       # ZIG:   fn Option(comptime T: type) type { return union(enum) { Some: T, None: void }; }
+      # CHEAT: UNION Shape { Circle { radius: Number }, Point }
+      # ZIG:   const Shape_Circle = struct { radius: f64 };
+      #        const Shape = union(enum) { Circle: Shape_Circle, Point: void };
       @union_schemas ||= {}
       @union_schemas[node.name.to_sym] = node.variants
-      variants = node.variants.map do |var_name, type_obj|
-        zig_t = type_obj ? transpile_type(type_obj) : "void"
+
+      # Emit helper structs for inline struct variants before the union declaration.
+      helper_structs = node.variants.filter_map do |var_name, var_data|
+        next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+        fields = var_data[:fields].map do |fname, ftype|
+          "    #{fname}: #{transpile_type(ftype)},"
+        end.join("\n")
+        "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
+      end
+
+      variants = node.variants.map do |var_name, var_data|
+        zig_t = if var_data.nil?
+          "void"
+        elsif var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+          "#{node.name}_#{var_name}"
+        else
+          transpile_type(var_data)
+        end
         "    #{var_name}: #{zig_t},"
       end.join("\n")
 
-      if node.type_params&.any?
+      union_decl = if node.type_params&.any?
         params = node.type_params.map { |p| "comptime #{p}: type" }.join(", ")
         <<~ZIG.strip
           fn #{node.name}(#{params}) type {
@@ -224,6 +243,15 @@ private
       else
         "const #{node.name} = union(enum) {\n#{variants}\n};"
       end
+
+      helper_structs.empty? ? union_decl : "#{helper_structs.join("\n\n")}\n\n#{union_decl}"
+
+    when AST::UnionVariantLit
+      # CHEAT: Shape.Circle{ radius: 5.0 }
+      # ZIG:   Shape{ .Circle = Shape_Circle{ .radius = 5.0 } }
+      variant_struct_name = "#{node.union_name}_#{node.variant_name}"
+      field_inits = node.fields.map { |k, v| ".#{k} = #{visit(v)}" }.join(", ")
+      "#{node.union_name}{ .#{node.variant_name} = #{variant_struct_name}{ #{field_inits} } }"
 
     when AST::StructDef
       # Cache field schemas so VarDecl can generate field-level Rc cleanup
@@ -901,9 +929,14 @@ private
 
     when AST::GetField
       # Union unit-variant constructor: Result{ .Empty = {} }
+      # Inline struct variants never reach here — the annotator requires UnionVariantLit for those.
       if node.target.is_a?(AST::Identifier)
         schema = @union_schemas&.dig(node.target.name.to_sym)
-        return "#{node.target.name}{ .#{node.field} = {} }" if schema
+        if schema
+          var_data = schema[node.field]
+          # Only emit unit-variant construction; inline struct variants require UnionVariantLit.
+          return "#{node.target.name}{ .#{node.field} = {} }" unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+        end
       end
 
       target_code = visit(node.target)

@@ -28,6 +28,7 @@ class SemanticAnnotator
     @return_collection_stack = [] # Track actual returns found in current function/lambda
     @loop_depth = 0 # Track if we are inside a loop
     @smooth_depth = 0
+    @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @frame_usage_count = 0
     @current_fn_type_params = [] # Type params of the function currently being validated
     setup_builtins
@@ -370,10 +371,75 @@ private
     # Validate generic type parameters (duplicate / builtin-shadow)
     validate_type_param_list!(node, node.type_params, "union") if node.type_params&.any?
 
+    # Inline struct variants are not supported in generic unions.
+    if node.type_params&.any? && node.variants.any? { |_, v| v.is_a?(Hash) && v[:kind] == :inline_struct }
+      error!(node, :UNION_INLINE_IN_GENERIC)
+    end
+
+    # Register a synthetic struct schema for each inline struct variant so
+    # that MATCH AS bindings (e.g. `Shape.Circle AS c`) can field-access the payload.
+    node.variants.each do |var_name, var_data|
+      next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+      synthetic_name = :"#{node.name}_#{var_name}"
+      current_scope.declare_type(synthetic_name, var_data[:fields])
+    end
+
     schema = { kind: :union, variants: node.variants }
     schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
+  end
+
+  def visit_UnionVariantLit(node)
+    schema = lookup_type_schema(node.union_name.to_sym)
+    if schema.nil?
+      error!(node, "Unknown union type: '#{node.union_name}'")
+    end
+    unless schema.is_a?(Hash) && schema[:kind] == :union
+      error!(node, "Type Error: '#{node.union_name}' is not a union type.")
+    end
+    unless schema[:variants].key?(node.variant_name)
+      error!(node, :UNION_UNKNOWN_VARIANT, node.union_name, node.variant_name)
+    end
+
+    var_data = schema[:variants][node.variant_name]
+    unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+      if var_data.nil?
+        error!(node, "Union variant '#{node.variant_name}' is a unit variant — use '#{node.union_name}.#{node.variant_name}' (no fields).")
+      else
+        error!(node, "Union variant '#{node.variant_name}' takes a single typed payload — use '#{node.union_name}{ #{node.variant_name}: value }' instead.")
+      end
+    end
+
+    expected_fields = var_data[:fields]
+
+    # Check for unknown fields
+    node.fields.each_key do |fname|
+      unless expected_fields.key?(fname)
+        error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, node.union_name, node.variant_name, fname)
+      end
+    end
+
+    # Check for missing required fields
+    expected_fields.each_key do |fname|
+      unless node.fields.key?(fname)
+        error!(node, :UNION_INLINE_VARIANT_MISSING_FIELD, node.union_name, node.variant_name, fname)
+      end
+    end
+
+    # Type-check each field value
+    node.fields.each do |fname, val_node|
+      visit(val_node)
+      expected_type = expected_fields[fname]
+      actual = val_node.type_info
+      unless expected_type.accepts?(actual)
+        error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH,
+               node.union_name, node.variant_name, fname,
+               expected_type.resolved, actual&.resolved)
+      end
+    end
+
+    node.full_type = node.union_name.to_sym
   end
 
 
@@ -498,7 +564,11 @@ private
         elsif c[:kind] == :struct_pattern
           annotate_struct_pattern!(node, c[:value])
         else
+          # Suppress inline-struct "needs braces" error: variant names in MATCH cases are
+          # patterns (tag identifiers), not constructors — they don't need field values.
+          @match_pattern_context = true
           visit(c[:value])
+          @match_pattern_context = false
           expr_t2 = Type.new(node.expr.resolved_type || :Any)
           # Allow union base type (e.g. :Option) to match a generic instance (e.g. :"Option<Number>")
           base_match = expr_t2.generic_instance? && expr_t2.generic_base == c[:value].resolved_type
@@ -522,6 +592,12 @@ private
                 raw_payload = schema[:variants][variant_name]
                 if raw_payload.nil?
                   error!(node, "Cannot bind 'AS #{c[:binding]}': '#{variant_name}' is a unit variant with no payload.")
+                elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
+                  # Inline struct variant: bind to the synthetic struct type (e.g., Shape_Circle).
+                  # Field access (c.radius) is resolved via the synthetic struct schema registered in visit_UnionDef.
+                  synthetic_type = :"#{type_name}_#{variant_name}"
+                  current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
+                  current_scope.set_state(c[:binding], :live)
                 else
                   payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
                   current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
@@ -1271,6 +1347,10 @@ private
         unless schema[:variants].key?(node.field)
           error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
         end
+        var_data = schema[:variants][node.field]
+        if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
+          error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, type_name, node.field, type_name, node.field)
+        end
         node.target.full_type = type_name
         node.full_type = type_name
         return
@@ -1413,6 +1493,9 @@ private
       raw_expected = schema[:variants][variant_name]
       if raw_expected.nil?
         error!(node, "Union variant '#{variant_name}' is a unit variant — use '#{node.name}.#{variant_name}' (no payload).")
+      end
+      if raw_expected.is_a?(Hash) && raw_expected[:kind] == :inline_struct
+        error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, node.name, variant_name, node.name, variant_name)
       end
       # Apply type param substitution (e.g. T → Number for generic unions)
       expected_type = union_subst.any? ? apply_type_subst(raw_expected, union_subst) : raw_expected

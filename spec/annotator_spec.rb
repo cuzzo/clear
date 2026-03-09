@@ -5666,6 +5666,318 @@ RSpec.describe SemanticAnnotator do
         expect(out).not_to include("const Internal = union(enum) {")
       end
     end
+
+    # --------------------------------------------------
+    # Inline struct variants
+    # --------------------------------------------------
+    describe "inline struct variants" do
+      def transpile(src)
+        ZigTranspiler.new.transpile(src)
+      end
+
+      # Declaration
+      describe "declaration" do
+        it "accepts a UNION with an inline struct variant without error" do
+          expect {
+            run("UNION Shape { Circle { radius: Number }, Point }")
+          }.not_to raise_error
+        end
+
+        it "accepts multiple inline struct variants alongside unit and single-payload variants" do
+          expect {
+            run(<<~CLEAR)
+              UNION Mixed {
+                Inline { x: Number, y: Number },
+                Single: Number,
+                Unit
+              }
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "resolves the UnionDef node as Void" do
+          ast = run("UNION Shape { Circle { radius: Number }, Point }")
+          expect(ast.statements.first.resolved_type).to eq(:Void)
+        end
+
+        it "accepts PUB UNION with inline struct variants" do
+          expect {
+            run("PUB UNION Shape { Circle { radius: Number }, Point }")
+          }.not_to raise_error
+        end
+
+        it "raises an error when inline struct variant is used in a generic union" do
+          expect {
+            run("UNION Box<T> { Wrapped { value: T }, Empty }")
+          }.to raise_error(CompilerError, /Inline struct variants are not supported in generic unions/)
+        end
+      end
+
+      # Construction
+      describe "construction (UnionVariantLit)" do
+        it "resolves an inline variant constructor to the union type" do
+          ast = run(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+              c: Shape = Shape.Circle{ radius: 5.0 };
+            END
+          CLEAR
+          bind = ast.statements.last.body.first
+          expect(bind.value.resolved_type).to eq(:Shape)
+        end
+
+        it "resolves the declared variable to the union type" do
+          ast = run(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+              c: Shape = Shape.Circle{ radius: 5.0 };
+            END
+          CLEAR
+          bind = ast.statements.last.body.first
+          expect(bind.resolved_type).to eq(:Shape)
+        end
+
+        it "accepts multiple-field inline variant constructor" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Rectangle { width: Number, height: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                r: Shape = Shape.Rectangle{ width: 3.0, height: 4.0 };
+              END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "raises when an unknown field is passed" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle{ radius: 5.0, color: 1.0 };
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /Union variant 'Shape.Circle' has no field 'color'/)
+        end
+
+        it "raises when a required field is missing" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Rectangle { width: Number, height: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                r: Shape = Shape.Rectangle{ width: 3.0 };
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /Union variant 'Shape.Rectangle' is missing required field 'height'/)
+        end
+
+        it "raises on field type mismatch" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle{ radius: TRUE };
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /Union variant 'Shape.Circle' field 'radius' expects Number, got Bool/)
+        end
+
+        it "raises when a unit variant is used with inline struct syntax" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                p: Shape = Shape.Point{ radius: 5.0 };
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /unit variant/)
+        end
+
+        it "raises when a single-payload variant is used with inline struct syntax" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Data: Number, Point }
+              FN cheatMain() RETURNS Void ->
+                d: Shape = Shape.Data{ value: 5.0 };
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /single typed payload/)
+        end
+
+        it "raises when an inline struct variant is accessed without braces (GetField)" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle;
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /inline struct variant/)
+        end
+
+        it "raises when old StructLit syntax is used for an inline struct variant" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape{ Circle: 5.0 };
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /inline struct fields/)
+        end
+      end
+
+      # MATCH integration
+      describe "MATCH integration" do
+        it "MATCH IFF accepts inline struct union without error" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle{ radius: 5.0 };
+                MATCH IFF c START
+                  Shape.Circle -> 1;,
+                  Shape.Point  -> 2;
+                END
+              END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "MATCH IFF enforces exhaustiveness over inline struct variants" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle{ radius: 5.0 };
+                MATCH IFF c START
+                  Shape.Circle -> 1;
+                END
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /non-exhaustive/)
+        end
+
+        it "AS binding on inline struct variant resolves to the synthetic struct type" do
+          ast = run(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+              c: Shape = Shape.Circle{ radius: 5.0 };
+              MUTABLE got = 0.0;
+              MATCH c START
+                Shape.Circle AS ci -> got = ci.radius;,
+                DEFAULT            -> got = -1.0;
+              END
+            END
+          CLEAR
+          expect { ast }.not_to raise_error
+        end
+
+        it "field access on AS binding type-checks correctly" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle{ radius: 5.0 };
+                MUTABLE got = 0.0;
+                MATCH c START
+                  Shape.Circle AS ci -> got = ci.radius;,
+                  DEFAULT            -> got = -1.0;
+                END
+              END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "raises when accessing a non-existent field on the AS binding" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape { Circle { radius: Number }, Point }
+              FN cheatMain() RETURNS Void ->
+                c: Shape = Shape.Circle{ radius: 5.0 };
+                MUTABLE got = 0.0;
+                MATCH c START
+                  Shape.Circle AS ci -> got = ci.diameter;,
+                  DEFAULT            -> got = -1.0;
+                END
+              END
+            CLEAR
+          }.to raise_error(CompilerError, /Type Error/)
+        end
+      end
+
+      # Zig code generation
+      describe "Zig code generation" do
+        it "emits a helper struct before the union declaration" do
+          out = transpile(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+            END
+          CLEAR
+          expect(out).to include("const Shape_Circle = struct {")
+          expect(out).to include("    radius: f64,")
+        end
+
+        it "emits the union with the helper struct type for inline variants" do
+          out = transpile(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+            END
+          CLEAR
+          expect(out).to include("const Shape = union(enum) {")
+          expect(out).to include("    Circle: Shape_Circle,")
+          expect(out).to include("    Point: void,")
+        end
+
+        it "emits helper structs for multiple inline struct variants" do
+          out = transpile(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Rectangle { width: Number, height: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+            END
+          CLEAR
+          expect(out).to include("const Shape_Circle = struct {")
+          expect(out).to include("const Shape_Rectangle = struct {")
+          expect(out).to include("    Circle: Shape_Circle,")
+          expect(out).to include("    Rectangle: Shape_Rectangle,")
+        end
+
+        it "emits UnionVariantLit as Shape{ .Circle = Shape_Circle{ .radius = val } }" do
+          out = transpile(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+              c: Shape = Shape.Circle{ radius: 5.0 };
+            END
+          CLEAR
+          # NUMBER literals are emitted as integers (existing transpiler behaviour).
+          expect(out).to include("Shape{ .Circle = Shape_Circle{ .radius = 5 } }")
+        end
+
+        it "emits multi-field inline variant constructor correctly" do
+          out = transpile(<<~CLEAR)
+            UNION Shape { Rectangle { width: Number, height: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+              r: Shape = Shape.Rectangle{ width: 3.0, height: 4.0 };
+            END
+          CLEAR
+          expect(out).to include("Shape{ .Rectangle = Shape_Rectangle{ .width = 3, .height = 4 } }")
+        end
+
+        it "emits const binding = subject.Variant for AS capture" do
+          out = transpile(<<~CLEAR)
+            UNION Shape { Circle { radius: Number }, Point }
+            FN cheatMain() RETURNS Void ->
+              c: Shape = Shape.Circle{ radius: 5.0 };
+              MUTABLE got = 0.0;
+              MATCH c START
+                Shape.Circle AS ci -> got = ci.radius;,
+                DEFAULT            -> got = -1.0;
+              END
+            END
+          CLEAR
+          expect(out).to include("const ci = c.Circle;")
+          expect(out).to include("ci.radius")
+        end
+      end
+    end
   end
 
   # ==================================================

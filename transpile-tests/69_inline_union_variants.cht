@@ -1,0 +1,82 @@
+-- Inline struct variants in UNION declarations.
+-- Variants can now carry multi-field payloads declared inline,
+-- without requiring a separate STRUCT definition.
+
+UNION Shape {
+  Circle    { radius: Number },
+  Rectangle { width: Number, height: Number },
+  Point
+}
+
+UNION Event {
+  Click    { x: Number, y: Number },
+  KeyPress { code: Number },
+  Quit
+}
+
+FN classify(s: Shape) RETURNS Number ->
+  MUTABLE result = 0.0;
+  MATCH IFF s START
+    Shape.Circle    -> result = 1.0;,
+    Shape.Rectangle -> result = 2.0;,
+    Shape.Point     -> result = 0.0;
+  END
+  RETURN result;
+END
+
+-- Exhaustive match with payload capture — subject is a function parameter
+-- so Zig's compile-time analysis cannot statically prove the active tag.
+FN extract_radius(s: Shape) RETURNS Number ->
+  MUTABLE r = 0.0;
+  MATCH IFF s START
+    Shape.Circle    AS ci -> r = ci.radius;,
+    Shape.Rectangle AS ri -> r = ri.width;,
+    Shape.Point            -> r = 0.0;
+  END
+  RETURN r;
+END
+
+FN extract_event_x(ev: Event) RETURNS Number ->
+  MUTABLE x = 0.0;
+  MATCH IFF ev START
+    Event.Click    AS click -> x = click.x;,
+    Event.KeyPress AS kp    -> x = kp.code;,
+    Event.Quit              -> x = -1.0;
+  END
+  RETURN x;
+END
+
+FN cheatMain() RETURNS Void ->
+  -- Unit variant is unchanged
+  ASSERT classify(Shape.Point) == 0.0, "Unit variant Point";
+
+  -- Inline struct variant construction and dispatch
+  ASSERT classify(Shape.Circle{ radius: 5.0 }) == 1.0, "Inline struct Circle";
+  ASSERT classify(Shape.Rectangle{ width: 3.0, height: 4.0 }) == 2.0, "Inline struct Rectangle";
+
+  -- MATCH with DEFAULT and AS binding — access fields on the captured payload
+  MUTABLE got_radius = 0.0;
+  MUTABLE c: Shape = Shape.Circle{ radius: 5.0 };
+  MATCH c START
+    Shape.Circle AS ci -> got_radius = ci.radius;,
+    DEFAULT            -> got_radius = -1.0;
+  END
+  ASSERT got_radius == 5.0, "Circle AS ci: ci.radius = 5.0";
+
+  MUTABLE got_w = 0.0;
+  MUTABLE rect: Shape = Shape.Rectangle{ width: 3.0, height: 4.0 };
+  MATCH rect START
+    Shape.Rectangle AS ri -> got_w = ri.width;,
+    DEFAULT               -> got_w = -1.0;
+  END
+  ASSERT got_w == 3.0, "Rectangle AS ri: ri.width = 3.0";
+
+  -- MATCH IFF exhaustive with payload capture (via function parameter)
+  ASSERT extract_radius(Shape.Circle{ radius: 7.0 }) == 7.0, "MATCH IFF Circle AS ci";
+  ASSERT extract_radius(Shape.Rectangle{ width: 4.0, height: 9.0 }) == 4.0, "MATCH IFF Rectangle AS ri";
+  ASSERT extract_radius(Shape.Point) == 0.0, "MATCH IFF Point unit";
+
+  -- Event union with multiple inline struct variants
+  ASSERT extract_event_x(Event.Click{ x: 10.0, y: 20.0 }) == 10.0, "Event.Click click.x";
+  ASSERT extract_event_x(Event.KeyPress{ code: 65.0 }) == 65.0, "Event.KeyPress kp.code";
+END
