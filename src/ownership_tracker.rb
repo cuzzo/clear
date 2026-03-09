@@ -93,10 +93,13 @@ module OwnershipTracker
 
     call_node = node.value
 
+    # Pool method calls (insert/get/remove) are intrinsic — no scope entry to look up
+    return if call_node.is_a?(AST::MethodCall) && call_node.pool_method
+
     func_name = call_node.is_a?(AST::MethodCall) ? call_node.name : call_node.name
     scope = lookup_scope_for(func_name)
     if scope.nil?
-      error!(node, "Method not found")
+      return
     end
 
     func_type = scope.resolve_type(func_name)

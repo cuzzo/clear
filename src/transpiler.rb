@@ -299,7 +299,15 @@ private
       rhs_is_unwrapped = rhs_ident && rc_map.key?(rhs_ident.name)
       rhs_ti = rhs_ident&.type_info
 
-      value_code = if rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
+      value_code = if node.full_type&.pool?
+        # Pool initialization: zero-initialize the struct.
+        elem_zig = node.full_type.element_type.zig_type
+        "CheatLib.Pool(#{elem_zig}){}"
+      elsif node.full_type&.list_collection?
+        # @list: explicit heap list backed by std.ArrayListUnmanaged
+        elem_zig = node.full_type.element_type.zig_type
+        "std.ArrayListUnmanaged(#{elem_zig}){}"
+      elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
         visit(node.value)
@@ -808,6 +816,11 @@ private
       result
 
     when AST::FuncCall, AST::MethodCall
+      # Pool method dispatch: pool.insert/get/remove bypass UFCS
+      if node.is_a?(AST::MethodCall) && node.pool_method
+        return transpile_pool_method(node)
+      end
+
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
 
       # Standard call (pass rt)
@@ -1185,6 +1198,25 @@ private
     end
 
     pattern
+  end
+
+  # Emits Zig for pool.insert / pool.get / pool.remove method calls.
+  def transpile_pool_method(node)
+    obj_code = visit(node.object)
+    rt_name  = @do_rt_name || "rt"
+    case node.pool_method
+    when :insert
+      val_code = visit(node.args[0])
+      "try #{obj_code}.insert(#{rt_name}.heapAlloc(), #{val_code})"
+    when :get
+      id_code = visit(node.args[0])
+      "#{obj_code}.get(#{id_code})"
+    when :remove
+      id_code = visit(node.args[0])
+      "#{obj_code}.remove(#{id_code})"
+    when :count
+      "#{obj_code}.count()"
+    end
   end
 
   # Temporarily installs a new fiber capture map and rt alias, runs the block, then restores.

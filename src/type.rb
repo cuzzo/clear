@@ -4,8 +4,9 @@ BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :e
 class Type
   attr_reader :raw, :name, :generic_args, :capacity, :value_type_raw
   attr_accessor :mutability, :lifetime_constraint
-  attr_accessor :ownership  # :affine (default), :multiowned (Rc), :shared (Arc)
-  attr_accessor :sync       # nil (default), :locked, :write_locked
+  attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc)
+  attr_accessor :sync        # nil (default), :locked, :write_locked
+  attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
@@ -109,7 +110,7 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil, location: nil)
+  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -118,6 +119,7 @@ class Type
       @lifetime_constraint = nil
       @ownership          = other.ownership
       @sync               = other.sync
+      @collection         = other.instance_variable_get(:@collection)
       @location           = other.instance_variable_get(:@location)
       @is_error_union     = other.instance_variable_get(:@is_error_union)
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
@@ -147,6 +149,12 @@ class Type
     @location  = location  if location
     @ownership = ownership if ownership
     @sync      = sync      if sync
+    # Pool collection always lives on the heap (owns internal slot array).
+    if collection
+      @collection = collection
+      @zig_type_cache = nil
+      @location = :heap if collection == :pool
+    end
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -341,6 +349,16 @@ class Type
     @is_map
   end
 
+  # True when this is an explicit @pool (generational pool) collection.
+  def pool?
+    @collection == :pool
+  end
+
+  # True when this is an explicit @list (heap list) collection.
+  def list_collection?
+    @collection == :list
+  end
+
   def value_type
     return nil unless map?
     @value_type_obj ||= Type.new(@value_type_raw || :Any)
@@ -406,7 +424,8 @@ class Type
     resolver = lookup_arg || lookup_block
 
     # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc/Arc/Locked are also pointer-sized)
-    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared? || any_sync?
+    # Generic instances (e.g. Id<T>) are intrinsic scalar types — always 1 slot.
+    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared? || any_sync? || generic_instance?
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
@@ -526,8 +545,9 @@ class Type
     # Hash and Array raws are function signatures — no string parsing applies.
     # @resolved_cache is left nil and computed on-demand by the resolved() fallback.
     if @raw.is_a?(Hash) || @raw.is_a?(Array)
-      @ownership = :affine
-      @sync      = nil
+      @ownership  = :affine
+      @sync       = nil
+      @collection = nil
       @is_error_union      = false; @payload_type_raw = nil
       @is_optional         = false; @wrapped_type_raw  = nil
       @is_array            = false; @capacity = nil; @element_type_raw = nil
@@ -552,6 +572,7 @@ class Type
       @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
       @ownership      = :affine
       @sync           = nil
+      @collection     = nil
       @location       = :stack  # Promise handle lives on the stack; result_cell is heap
       @resolved_cache = @raw.to_sym
       return
@@ -580,9 +601,10 @@ class Type
       @wrapped_type_raw = nil
     end
 
-    # C. Capability fields default — callers pass ownership:/sync:/location: as keyword args.
-    @ownership = :affine
-    @sync      = nil
+    # C. Capability fields default — callers pass ownership:/sync:/location:/collection: as keyword args.
+    @ownership  = :affine
+    @sync       = nil
+    @collection = nil
 
     # D. Detect Array Structure
     # Regex Breakdown:
@@ -682,6 +704,12 @@ class Type
       return is_pointer ? "*[]const u8" : "[]const u8"
     end
 
+    # 3b. Handle Pool collection: User[]@pool → CheatLib.Pool(User)
+    if pool?
+      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.Pool(#{base_zig})"
+    end
+
     # 4. Handle Arrays recursively
     #    Dynamic arrays use ArrayListUnmanaged only for local variables to support growth.
     #    Struct fields and function parameters use slices.
@@ -704,7 +732,9 @@ class Type
 
     # 5b. Handle Generic Struct Instances
     #    Pair<Number> -> Pair(f64),  Map<String,Number> -> Map([]const u8, f64)
+    #    Id<User>     -> u64        (compiler-intrinsic handle, type param is for CLEAR safety only)
     if generic_instance?
+      return "u64" if @generic_base_raw == :Id
       args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
       zig = "#{@generic_base_raw}(#{args_zig})"
       return is_pointer && zig != "void" ? "*#{zig}" : zig

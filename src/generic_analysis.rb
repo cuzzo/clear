@@ -65,6 +65,10 @@ module GenericAnalysis
 
     if inner.generic_instance?
       base_name = inner.generic_base
+
+      # Id<T> is a compiler intrinsic — no schema needed
+      return if base_name == :Id
+
       schema = lookup_type_schema(base_name)
 
       if schema.nil?

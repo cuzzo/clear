@@ -854,6 +854,85 @@ pub const CheatLib = struct {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Pool(T): A generational pool for ABA-safe handle-based access.
+    //
+    // Handles are u64 values encoding [generation: upper 32 bits][index: lower 32 bits].
+    // Generation counters prevent use-after-remove (ABA safety).
+    //
+    // Usage (mirrors CLEAR `MUTABLE p: User[]@pool = []`):
+    //   var p = CheatLib.Pool(User){};
+    //   defer p.deinit(allocator);
+    //   const id: u64 = try p.insert(allocator, User{ .name = "Alice" });
+    //   const ptr: ?*User = p.get(id);    // null if stale
+    //   p.remove(id);                     // increments generation
+    pub fn Pool(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            const Slot = struct {
+                generation: u32 = 0,
+                alive: bool = false,
+                value: T = undefined,
+            };
+
+            slots: std.ArrayListUnmanaged(Slot) = .{},
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                self.slots.deinit(allocator);
+            }
+
+            /// Insert a value, returning a stable u64 handle.
+            /// The handle encodes: [(generation: u32) << 32 | (index: u32)].
+            /// Reuses dead slots when available; otherwise grows the array.
+            pub fn insert(self: *Self, allocator: std.mem.Allocator, value: T) !u64 {
+                // Linear scan for a dead slot to reuse
+                for (self.slots.items, 0..) |*slot, i| {
+                    if (!slot.alive) {
+                        const gen = slot.generation;
+                        slot.* = .{ .generation = gen, .alive = true, .value = value };
+                        return (@as(u64, gen) << 32) | @as(u64, @intCast(i));
+                    }
+                }
+                // No free slot: grow
+                const idx = @as(u32, @intCast(self.slots.items.len));
+                try self.slots.append(allocator, .{ .generation = 0, .alive = true, .value = value });
+                return @as(u64, idx); // generation=0, index=idx
+            }
+
+            /// Look up a handle. Returns null if stale or out of range.
+            pub fn get(self: *Self, id: u64) ?*T {
+                const idx = @as(u32, @truncate(id));
+                const gen = @as(u32, @truncate(id >> 32));
+                if (idx >= self.slots.items.len) return null;
+                const slot = &self.slots.items[idx];
+                if (!slot.alive or slot.generation != gen) return null;
+                return &slot.value;
+            }
+
+            /// Remove a slot. Increments the generation counter (ABA protection).
+            /// No-op if the handle is stale or out of range.
+            pub fn remove(self: *Self, id: u64) void {
+                const idx = @as(u32, @truncate(id));
+                const gen = @as(u32, @truncate(id >> 32));
+                if (idx >= self.slots.items.len) return;
+                const slot = &self.slots.items[idx];
+                if (!slot.alive or slot.generation != gen) return;
+                slot.alive = false;
+                slot.generation +%= 1; // wrapping increment for ABA safety
+            }
+
+            /// Returns the number of live (non-removed) slots.
+            pub fn count(self: *const Self) usize {
+                var n: usize = 0;
+                for (self.slots.items) |slot| {
+                    if (slot.alive) n += 1;
+                }
+                return n;
+            }
+        };
+    }
+
     pub fn ffi(rt: *Runtime, comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
         const F = @TypeOf(f);
         const type_info = @typeInfo(F);

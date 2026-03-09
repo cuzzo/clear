@@ -1,0 +1,37 @@
+-- Test: Collection Types — Phase 1 (@list and @pool)
+-- Exercises explicit @list annotations and @pool generational pool declarations
+-- with insert / get / remove and Id<T> handle semantics.
+
+STRUCT Point { x: Number, y: Number }
+
+FN cheatMain() RETURNS Void ->
+    -- @list: explicit heap list (same Zig output as a plain dynamic array)
+    MUTABLE pts: Point[]@list = [];
+    append(pts, Point{ x: 1.0, y: 2.0 });
+    append(pts, Point{ x: 3.0, y: 4.0 });
+    ASSERT pts.length() == 2, "@list should hold 2 points";
+
+    -- @pool: generational pool with handle-based access
+    MUTABLE pool: Point[]@pool = [];
+
+    -- insert returns an Id<Point> (u64 handle)
+    id_a: Id<Point> = pool.insert(Point{ x: 10.0, y: 20.0 });
+    id_b: Id<Point> = pool.insert(Point{ x: 30.0, y: 40.0 });
+
+    -- pool.count() tracks live slots
+    ASSERT pool.count() == 2, "pool should have 2 live items";
+
+    -- get returns ?*Point (optional pointer to the live slot)
+    p_a = pool.get(id_a);
+    ASSERT p_a != NIL, "get should find a";
+
+    -- remove invalidates the handle
+    pool.remove(id_a);
+    ASSERT pool.get(id_a) == NIL, "get after remove should return NIL";
+    ASSERT pool.count() == 1, "pool should have 1 live item after remove";
+
+    -- id_b still valid
+    ASSERT pool.get(id_b) != NIL, "id_b should still be valid";
+
+    RETURN;
+END

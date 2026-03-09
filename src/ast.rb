@@ -228,6 +228,7 @@ module AST
 
   MethodCall   = Struct.new(:token, :object, :name, :args) do
     include Locatable
+    attr_accessor :pool_method  # :insert, :get, :remove — set by annotator for Pool dispatch
     def wildcard?; false end
     def name; self[:name].to_s end
   end

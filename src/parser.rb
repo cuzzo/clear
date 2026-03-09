@@ -1093,24 +1093,36 @@ class Parser
       end
     end
 
-    # Check for capability suffix: Type @multiowned, Type @shared, Type @locked.
+    # Check for capability suffix: Type @multiowned, Type @shared, Type @locked, @list, @pool.
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
-    ownership = nil
-    sync      = nil
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked].include?(current.value)
+    ownership  = nil
+    sync       = nil
+    collection = nil
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @list @pool].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
-      case consume(:VAR_ID).value
+      cap_tok = consume(:VAR_ID)
+      case cap_tok.value
       when "@multiowned" then ownership = :multiowned
       when "@shared"     then ownership = :shared
-      when "@locked"       then sync      = :locked
-      when "@writeLocked"  then sync      = :write_locked
+      when "@locked"     then sync      = :locked
+      when "@writeLocked" then sync     = :write_locked
+      when "@list"
+        unless inner.start_with?("[")
+          error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
+        end
+        collection = :list
+      when "@pool"
+        unless inner.start_with?("[")
+          error!(cap_tok, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
+        end
+        collection = :pool
       end
     end
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
-    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil)
+    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection)
   end
 
   def parse_with_capability

@@ -773,8 +773,60 @@ private
     visit(node.object)
     node.args.each { |arg| visit(arg) }
 
+    # Pool method dispatch: intercept before UFCS so pool.insert/get/remove
+    # resolve to the pool's own methods rather than global functions.
+    obj_type = node.object.type_info
+    if obj_type&.pool?
+      return visit_PoolMethod(node, obj_type)
+    end
+
     ufcs_args = [node.object] + node.args
     resolve_call(node, ufcs_args)
+  end
+
+  # Type-checks a method call on a Pool<T> and tags the node for transpilation.
+  def visit_PoolMethod(node, pool_type)
+    elem = pool_type.element_type
+    case node.name
+    when "insert"
+      unless node.args.length == 1
+        error!(node, "Pool.insert requires exactly 1 argument, got #{node.args.length}")
+        return
+      end
+      arg_type = node.args[0].resolved_type
+      unless arg_type == :Any || is_safe_autocast?(arg_type, elem.resolved)
+        error!(node, "Pool.insert: argument type #{arg_type} does not match pool element type #{elem.resolved}")
+      end
+      node.pool_method = :insert
+      node.full_type   = Type.new(:"Id<#{elem.resolved}>")
+
+    when "get"
+      unless node.args.length == 1
+        error!(node, "Pool.get requires exactly 1 argument (an Id handle), got #{node.args.length}")
+        return
+      end
+      node.pool_method = :get
+      node.full_type   = Type.new(:"?#{elem.resolved}")
+
+    when "remove"
+      unless node.args.length == 1
+        error!(node, "Pool.remove requires exactly 1 argument (an Id handle), got #{node.args.length}")
+        return
+      end
+      node.pool_method = :remove
+      node.full_type   = :Void
+
+    when "count"
+      unless node.args.empty?
+        error!(node, "Pool.count takes no arguments, got #{node.args.length}")
+        return
+      end
+      node.pool_method = :count
+      node.full_type   = Type.new(:Int64)
+
+    else
+      error!(node, "Unknown method '#{node.name}' on Pool<#{elem.resolved}>. Available: insert, get, remove, count")
+    end
   end
 
   # Shared logic for resolving function/method calls.
@@ -890,10 +942,23 @@ private
     storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
     @frame_usage_count += 1 if storage == :frame
 
-    # 2b. Check if the declared type is a resource — tag node and scope entry
-    resource_schema   = lookup_type_schema(final_type)
-    is_resource       = resource_schema&.dig(:kind) == :resource
-    resource_close    = is_resource ? resource_schema[:close_zig] : nil
+    # 2a. Propagate collection annotation from the declared type (lost during finalize_storage!)
+    if (decl_t = node.type).is_a?(Type) && decl_t.collection
+      node.type_info.collection = decl_t.collection
+      node.type_info.location   = :heap if decl_t.collection == :pool
+    end
+
+    # 2b. Check if the declared type is a pool or resource — tag node and scope entry
+    ft_obj        = node.type_info
+    is_pool       = ft_obj&.pool?
+    if is_pool
+      resource_close = "{0}.deinit(rt.heapAlloc())"
+      is_resource    = false
+    else
+      resource_schema = lookup_type_schema(final_type)
+      is_resource     = resource_schema&.dig(:kind) == :resource
+      resource_close  = is_resource ? resource_schema[:close_zig] : nil
+    end
     node.resource_close_zig = resource_close
 
     # 3. Declare in Scope (include sync capability if present)
@@ -909,7 +974,7 @@ private
       Set.new,       # capabilities
       [],            # borrowed_paths
       sync: node_sync,
-      resource: is_resource,
+      resource: is_resource || is_pool,
       close_zig: resource_close
     )
 
@@ -941,9 +1006,22 @@ private
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
       @frame_usage_count += 1 if storage == :frame
 
-      resource_schema   = lookup_type_schema(final_type)
-      is_resource       = resource_schema&.dig(:kind) == :resource
-      resource_close    = is_resource ? resource_schema[:close_zig] : nil
+      # Propagate collection annotation from the declared type (lost during finalize_storage!)
+      if (decl_t = node.type).is_a?(Type) && decl_t.collection
+        node.type_info.collection = decl_t.collection
+        node.type_info.location   = :heap if decl_t.collection == :pool
+      end
+
+      ft_obj        = node.type_info
+      is_pool       = ft_obj&.pool?
+      if is_pool
+        resource_close = "{0}.deinit(rt.heapAlloc())"
+        is_resource    = false
+      else
+        resource_schema = lookup_type_schema(final_type)
+        is_resource     = resource_schema&.dig(:kind) == :resource
+        resource_close  = is_resource ? resource_schema[:close_zig] : nil
+      end
       node.resource_close_zig = resource_close
 
       node_sync = node.type_info&.sync
@@ -958,7 +1036,7 @@ private
         Set.new,
         [],
         sync: node_sync,
-        resource: is_resource,
+        resource: is_resource || is_pool,
         close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
