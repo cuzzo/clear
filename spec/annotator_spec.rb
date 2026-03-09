@@ -7842,5 +7842,375 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===========================================================================
+  # Collection Types — Phase 4 (SUM, AVERAGE, MIN, MAX numeric aggregation)
+  # ===========================================================================
+  describe "Collection Types — Phase 4 (SUM, AVERAGE, MIN, MAX)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # SUM — returns Number (0 for empty list)
+    # -------------------------------------------------------------------------
+    describe "SUM aggregation operator" do
+      it "infers Number for SUM on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> SUM _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "infers Number for SUM of a struct field projection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Item { value: Number }
+            FN f() RETURNS Void ->
+              items: Item[] = [];
+              result = items s> SUM _.value;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises when SUM is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> SUM _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot SUM non-list type/)
+      end
+
+      it "raises when SUM expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> SUM _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /SUM requires a numeric expression/)
+      end
+
+      it "raises when SUM expression is a String" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Tag { name: String }
+            FN f() RETURNS Void ->
+              tags: Tag[] = [];
+              tags s> SUM _.name;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /SUM requires a numeric expression/)
+      end
+
+      it "emits sum_result: f64 and += in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> SUM _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("sum_result: f64")
+        expect(out).to include("sum_result +=")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # AVERAGE — returns Number (0 for empty list)
+    # -------------------------------------------------------------------------
+    describe "AVERAGE aggregation operator" do
+      it "infers Number for AVERAGE on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> AVERAGE _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "raises when AVERAGE is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> AVERAGE _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot AVERAGE non-list type/)
+      end
+
+      it "raises when AVERAGE expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> AVERAGE _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /AVERAGE requires a numeric expression/)
+      end
+
+      it "emits avg_sum and floatFromInt division in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> AVERAGE _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("avg_sum")
+        expect(out).to include("avg_count")
+        expect(out).to include("floatFromInt")
+      end
+
+      it "emits a guard returning 0 for empty list in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [];
+            result = nums s> AVERAGE _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("avg_count == 0")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # MIN — returns Number (panics on empty list)
+    # -------------------------------------------------------------------------
+    describe "MIN aggregation operator" do
+      it "infers Number for MIN on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> MIN _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "raises when MIN is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> MIN _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot MIN non-list type/)
+      end
+
+      it "raises when MIN expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> MIN _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MIN requires a numeric expression/)
+      end
+
+      it "raises when MIN expression is a String" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Tag { name: String }
+            FN f() RETURNS Void ->
+              tags: Tag[] = [];
+              tags s> MIN _.name;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MIN requires a numeric expression/)
+      end
+
+      it "emits min_result: f64 initialized to floatMax and @panic on empty in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MIN _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("min_result: f64")
+        expect(out).to include("floatMax(f64)")
+        expect(out).to include("@panic(\"MIN applied to empty list\")")
+      end
+
+      it "emits a less-than comparison for updating min in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MIN _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("min_val < min_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # MAX — returns Number (panics on empty list)
+    # -------------------------------------------------------------------------
+    describe "MAX aggregation operator" do
+      it "infers Number for MAX on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> MAX _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "raises when MAX is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> MAX _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot MAX non-list type/)
+      end
+
+      it "raises when MAX expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> MAX _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MAX requires a numeric expression/)
+      end
+
+      it "emits max_result: f64 initialized to -floatMax and @panic on empty in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MAX _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("max_result: f64")
+        expect(out).to include("-std.math.floatMax(f64)")
+        expect(out).to include("@panic(\"MAX applied to empty list\")")
+      end
+
+      it "emits a greater-than comparison for updating max in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MAX _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("max_val > max_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Cross-operator and chaining
+    # -------------------------------------------------------------------------
+    describe "aggregation chaining and combined usage" do
+      it "allows SUM after WHERE" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0, 3.0, 4.0];
+              filtered: Number[] = nums s> WHERE _ > 2.0;
+              total = filtered s> SUM _;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows MIN after WHERE" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0, 3.0];
+              filtered: Number[] = nums s> WHERE _ > 1.0;
+              minimum = filtered s> MIN _;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows AVERAGE on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              scores: Score[] = [];
+              avg = scores s> AVERAGE _.value;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows MAX on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              scores: Score[] = [];
+              result = scores s> MAX _.value;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "SUM result can be used in further arithmetic" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0];
+              total = nums s> SUM _;
+              doubled = total * 2.0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+  end
 end
 

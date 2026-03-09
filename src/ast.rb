@@ -267,6 +267,12 @@ module AST
   AnyOp    = Struct.new(:token, :expression) { include Locatable } # Bool
   AllOp    = Struct.new(:token, :expression) { include Locatable } # Bool
   CountOp  = Struct.new(:token, :expression) { include Locatable } # Int64
+  # Phase 4 numeric aggregation operators — expression must be numeric.
+  # SUM/AVERAGE return 0 for empty list; MIN/MAX panic on empty list.
+  SumOp     = Struct.new(:token, :expression) { include Locatable } # Number
+  AverageOp = Struct.new(:token, :expression) { include Locatable } # Number
+  MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
+  MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }

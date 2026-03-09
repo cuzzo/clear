@@ -407,6 +407,79 @@ module PipelineGenerator
     end
   end
 
+  # =========================================================
+  # Phase 4: Numeric Aggregation Operators
+  # =========================================================
+
+  def transpile_sum(list_node, sum_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(sum_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        var sum_result: f64 = 0;
+        for (pipe_items) |it| {
+            sum_result += #{expr_code};
+        }
+        break :blk sum_result;
+      ZIG
+    end
+  end
+
+  def transpile_average(list_node, avg_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(avg_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        var avg_sum: f64 = 0;
+        const avg_count = pipe_items.len;
+        for (pipe_items) |it| {
+            avg_sum += #{expr_code};
+        }
+        break :blk if (avg_count == 0) @as(f64, 0) else avg_sum / @as(f64, @floatFromInt(avg_count));
+      ZIG
+    end
+  end
+
+  def transpile_min(list_node, min_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(min_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        if (pipe_items.len == 0) @panic("MIN applied to empty list");
+        var min_result: f64 = std.math.floatMax(f64);
+        for (pipe_items) |it| {
+            const min_val = #{expr_code};
+            if (min_val < min_result) min_result = min_val;
+        }
+        break :blk min_result;
+      ZIG
+    end
+  end
+
+  def transpile_max(list_node, max_node, smooth_node)
+    @placeholder_name = "it"
+    expr_code = visit(max_node.expression)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, smooth_node) do
+      <<~ZIG
+        if (pipe_items.len == 0) @panic("MAX applied to empty list");
+        var max_result: f64 = -std.math.floatMax(f64);
+        for (pipe_items) |it| {
+            const max_val = #{expr_code};
+            if (max_val > max_result) max_result = max_val;
+        }
+        break :blk max_result;
+      ZIG
+    end
+  end
+
   def visit_Placeholder(node)
     # Return the name of the loop variable
     @placeholder_name || (raise "Use of '_' outside of SELECT context")

@@ -118,10 +118,14 @@ class Parser
   primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :expression])
   primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :expression])
   primary(:KEYWORD, 'EACH')  { parse_each_op }
-  primary(:KEYWORD, 'FIND',  AST::FindOp,  ['FIND',  :expression])
-  primary(:KEYWORD, 'ANY',   AST::AnyOp,   ['ANY',   :expression])
-  primary(:KEYWORD, 'ALL',   AST::AllOp,   ['ALL',   :expression])
-  primary(:KEYWORD, 'COUNT', AST::CountOp, ['COUNT', :expression])
+  primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :expression])
+  primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :expression])
+  primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :expression])
+  primary(:KEYWORD, 'COUNT',   AST::CountOp,   ['COUNT',   :expression])
+  primary(:KEYWORD, 'SUM',     AST::SumOp,     ['SUM',     :expression])
+  primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :expression])
+  primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :expression])
+  primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :expression])
 
   # Expression Grouping
   primary(:CHAR, '(') do

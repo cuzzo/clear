@@ -42,7 +42,11 @@ module PipeAnalysis
     node.is_a?(AST::FindOp) ||
     node.is_a?(AST::AnyOp) ||
     node.is_a?(AST::AllOp) ||
-    node.is_a?(AST::CountOp)
+    node.is_a?(AST::CountOp) ||
+    node.is_a?(AST::SumOp) ||
+    node.is_a?(AST::AverageOp) ||
+    node.is_a?(AST::MinOp) ||
+    node.is_a?(AST::MaxOp)
   end
 
   def analyze_higher_order_op(node)
@@ -67,6 +71,14 @@ module PipeAnalysis
       analyze_all_op(node)
     when AST::CountOp
       analyze_count_op(node)
+    when AST::SumOp
+      analyze_sum_op(node)
+    when AST::AverageOp
+      analyze_average_op(node)
+    when AST::MinOp
+      analyze_min_op(node)
+    when AST::MaxOp
+      analyze_max_op(node)
     end
   end
 
@@ -364,6 +376,88 @@ module PipeAnalysis
     end
 
     node.full_type = :Int64
+    node.storage   = :stack
+  end
+
+  # =========================================================
+  # Phase 4: Numeric Aggregation Operators (SUM, AVERAGE, MIN, MAX)
+  # =========================================================
+
+  NUMERIC_TYPES = [:Number, :Int64].freeze
+
+  def analyze_sum_op(node)
+    # SUM: list s> SUM _.field  → Number (sum of numeric projection; 0 for empty list)
+    require_array_input!(node, "SUM")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    expr_type = node.right.expression.resolved_type
+    unless NUMERIC_TYPES.include?(expr_type)
+      error!(node.right, "SUM requires a numeric expression, got #{expr_type}")
+    end
+
+    node.full_type = :Number
+    node.storage   = :stack
+  end
+
+  def analyze_average_op(node)
+    # AVERAGE: list s> AVERAGE _.field  → Number (arithmetic mean; 0 for empty list)
+    require_array_input!(node, "AVERAGE")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    expr_type = node.right.expression.resolved_type
+    unless NUMERIC_TYPES.include?(expr_type)
+      error!(node.right, "AVERAGE requires a numeric expression, got #{expr_type}")
+    end
+
+    node.full_type = :Number
+    node.storage   = :stack
+  end
+
+  def analyze_min_op(node)
+    # MIN: list s> MIN _.field  → Number (minimum value; panics on empty list)
+    require_array_input!(node, "MIN")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    expr_type = node.right.expression.resolved_type
+    unless NUMERIC_TYPES.include?(expr_type)
+      error!(node.right, "MIN requires a numeric expression, got #{expr_type}")
+    end
+
+    node.full_type = :Number
+    node.storage   = :stack
+  end
+
+  def analyze_max_op(node)
+    # MAX: list s> MAX _.field  → Number (maximum value; panics on empty list)
+    require_array_input!(node, "MAX")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    expr_type = node.right.expression.resolved_type
+    unless NUMERIC_TYPES.include?(expr_type)
+      error!(node.right, "MAX requires a numeric expression, got #{expr_type}")
+    end
+
+    node.full_type = :Number
     node.storage   = :stack
   end
 

@@ -1094,6 +1094,18 @@ private
 
     elsif node.right.is_a?(AST::CountOp)
       return transpile_count(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::SumOp)
+      return transpile_sum(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::AverageOp)
+      return transpile_average(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::MinOp)
+      return transpile_min(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::MaxOp)
+      return transpile_max(node.left, node.right, node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.

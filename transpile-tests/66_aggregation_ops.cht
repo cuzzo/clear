@@ -1,0 +1,61 @@
+-- Test: Phase 4 Numeric Aggregation Operators
+-- Exercises SUM, AVERAGE, MIN, MAX pipeline operators.
+
+STRUCT Measurement { value: Number }
+
+FN cheatMain() RETURNS Void ->
+    nums: Number[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    -- SUM
+    total = nums s> SUM _;
+    ASSERT total == 15.0, "SUM should be 15";
+
+    -- SUM on empty list returns 0
+    empty: Number[] = [];
+    empty_sum = empty s> SUM _;
+    ASSERT empty_sum == 0.0, "SUM of empty list should be 0";
+
+    -- AVERAGE
+    avg = nums s> AVERAGE _;
+    ASSERT avg == 3.0, "AVERAGE should be 3";
+
+    -- AVERAGE on empty list returns 0
+    empty_avg = empty s> AVERAGE _;
+    ASSERT empty_avg == 0.0, "AVERAGE of empty list should be 0";
+
+    -- MIN
+    minimum = nums s> MIN _;
+    ASSERT minimum == 1.0, "MIN should be 1";
+
+    -- MAX
+    maximum = nums s> MAX _;
+    ASSERT maximum == 5.0, "MAX should be 5";
+
+    -- SUM of a struct field projection
+    measurements: Measurement[] = [
+        Measurement{ value: 10.0 },
+        Measurement{ value: 20.0 },
+        Measurement{ value: 30.0 }
+    ];
+    field_sum = measurements s> SUM _.value;
+    ASSERT field_sum == 60.0, "SUM of field should be 60";
+
+    -- AVERAGE of a struct field
+    field_avg = measurements s> AVERAGE _.value;
+    ASSERT field_avg == 20.0, "AVERAGE of field should be 20";
+
+    -- MIN of a struct field
+    field_min = measurements s> MIN _.value;
+    ASSERT field_min == 10.0, "MIN of field should be 10";
+
+    -- MAX of a struct field
+    field_max = measurements s> MAX _.value;
+    ASSERT field_max == 30.0, "MAX of field should be 30";
+
+    -- Chained: WHERE then SUM (use intermediate binding to avoid ambiguous parse)
+    big_nums: Number[] = nums s> WHERE _ > 3.0;
+    big_sum = big_nums s> SUM _;
+    ASSERT big_sum == 9.0, "SUM of [4,5] should be 9";
+
+    RETURN;
+END
