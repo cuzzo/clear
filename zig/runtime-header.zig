@@ -855,6 +855,38 @@ pub const CheatLib = struct {
         };
     }
 
+    // -----------------------------------------------------------------------
+    // BoundedStream(T, N): A fixed-size ordered stream of N concurrent BG fibers.
+    // Corresponds to ~T[N] in CLEAR source.
+    //
+    // Each slot is a Promise(T) spawned at stream creation. NEXT consumes them
+    // in FIFO order — the Nth NEXT call blocks on the Nth promise then frees it.
+    // Calling next() more than N times panics at runtime.
+    //
+    // Lifecycle:
+    //   Creation:   var s = CheatLib.BoundedStream(f64, 3){ .items = .{ p0, p1, p2 } };
+    //   Consume:    const val = s.next();   // O(1), head advances
+    //   Exhausted:  s.next()                // panics
+    pub fn BoundedStream(comptime T: type, comptime N: usize) type {
+        return struct {
+            const Self = @This();
+
+            items: [N]Promise(T),
+            head: usize = 0,
+
+            /// Block on the next unconsumed BG fiber and return its result.
+            /// Advances the internal head pointer so subsequent calls yield
+            /// successive items. Panics if the stream has already been fully
+            /// consumed (all N items retrieved).
+            pub fn next(self: *Self) T {
+                if (self.head >= N) @panic("BoundedStream exhausted: all items consumed");
+                const val = self.items[self.head].next();
+                self.head += 1;
+                return val;
+            }
+        };
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});

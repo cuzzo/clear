@@ -1670,6 +1670,20 @@ private
     # 1. Analyze all items
     node.items.each { |item| visit(item) }
 
+    # Bounded stream literal: [BG{...}, BG{...}] where all items are promises.
+    # Produces ~T[N] type — a fixed-size stream of N concurrent BG fibers.
+    # This must be checked before the general array logic, since ~T items would
+    # otherwise produce a bare ~T[] type (which is a compiler error).
+    if !node.items.empty? && node.items.all? { |i| Type.new(i.resolved_type).tense? }
+      inner_types = node.items.map { |i| Type.new(i.resolved_type).tense_type.to_sym }.uniq
+      if inner_types.size > 1
+        error!(node, "Bounded stream literal contains mixed promise types: #{inner_types.join(', ')}. All BG blocks must produce the same type.")
+      end
+      node.full_type = :"~#{inner_types.first}[#{node.items.size}]"
+      node.storage   = :stack
+      return
+    end
+
     if node.items.empty?
       if node.storage == :heap
         node.full_type = Type.new(:"Any[]", location: :heap)
@@ -2058,17 +2072,26 @@ private
     promise_type = Type.new(node.expr.full_type || :Void)
 
     unless promise_type.tense?
-      error!(node, "NEXT requires a Promise (~T) value, got #{node.expr.full_type}")
+      error!(node, "NEXT requires a Promise (~T) or bounded stream (~T[N]), got #{node.expr.full_type}")
     end
 
-    # Consuming the promise marks the variable as moved — it cannot be used again.
-    if node.expr.is_a?(AST::Identifier)
-      scope = lookup_scope_for(node.expr.name)
-      scope&.set_state(node.expr.name, :moved)
+    # ~T[] (bare dynamic tense array) is not a valid form — give a directed error.
+    if promise_type.tense_type.array? && promise_type.tense_type.dynamic?
+      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for infinite, or ~T[?] for an open/closeable stream (future phases).")
     end
 
-    # The result type is the inner T from ~T
-    node.full_type = promise_type.tense_type.to_sym
+    if promise_type.bounded_stream?
+      # NEXT on ~T[N]: returns T (the element type).
+      # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
+      node.full_type = promise_type.stream_element_type.to_sym
+    else
+      # NEXT on ~T: returns T, marks the promise as linearly consumed.
+      if node.expr.is_a?(AST::Identifier)
+        scope = lookup_scope_for(node.expr.name)
+        scope&.set_state(node.expr.name, :moved)
+      end
+      node.full_type = promise_type.tense_type.to_sym
+    end
   end
 
   def get_type_slot_size(type_input)

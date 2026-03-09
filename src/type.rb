@@ -422,6 +422,24 @@ class Type
     @tense_type_obj ||= Type.new(@tense_type_raw || :Void)
   end
 
+  # Bounded stream: ~T[N] — a fixed array of N promises consumed one-by-one via NEXT.
+  # Distinct from a single promise (~T): NEXT can be called N times, not exactly once.
+  def bounded_stream?
+    tense? && tense_type.fixed?
+  end
+
+  # The element type T in ~T[N].
+  def stream_element_type
+    return nil unless bounded_stream?
+    tense_type.element_type
+  end
+
+  # The capacity N in ~T[N].
+  def stream_capacity
+    return nil unless bounded_stream?
+    tense_type.capacity
+  end
+
   def element_type
     return nil unless array?
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Number"
@@ -456,7 +474,8 @@ class Type
 
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
-    return true if tense?                   # Promises are linear — must be consumed (NEXT/COLLECT/GIVE)
+    return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
+    return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle
     return true if heap?
@@ -667,8 +686,12 @@ class Type
   # Computes the Zig type string for this CHEAT type.
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
   def compute_zig_type(is_param: false, is_field: false)
-    # 0. Handle Tense (Promise): ~T -> CheatLib.Promise(T)
+    # 0. Handle Tense types: ~T[N] -> CheatLib.BoundedStream(T, N), ~T -> CheatLib.Promise(T)
     if tense?
+      if bounded_stream?
+        elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+        return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
+      end
       inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Promise(#{inner_zig})"
     end

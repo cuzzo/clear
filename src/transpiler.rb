@@ -317,6 +317,9 @@ private
     # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
+      # Bounded streams must be `var` even when declared immutable in CLEAR, because
+      # BoundedStream.next() takes *Self (mutates the internal head counter).
+      is_mutable ||= Type.new(node.full_type || :Void).bounded_stream?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       annotation = ZIG_PRIMITIVES.include?(zig_type) ? ": #{zig_type}" : ""
@@ -473,6 +476,36 @@ private
     when AST::ListLit
       # 1. Determine the Zig Type (T)
       ti = node.coerced_type_info || node.type_info
+
+      # Bounded stream: ~T[N] — emit a BoundedStream struct literal.
+      # Each element is a BG block expression (labeled Zig block → Promise(T)).
+      # We pre-declare each promise as a local const so the array initializer is clean.
+      if ti.bounded_stream?
+        @stream_lit_counter ||= 0
+        s_id = @stream_lit_counter
+        @stream_lit_counter += 1
+
+        elem_zig    = ti.stream_element_type.zig_type
+        n           = ti.stream_capacity
+        promise_zig = "CheatLib.Promise(#{elem_zig})"
+        stream_zig  = ti.zig_type
+
+        promise_decls = node.items.each_with_index.map do |item, i|
+          "const __stream#{s_id}_item#{i} = #{visit(item)};"
+        end.join("\n        ")
+
+        items_list = (0...n).map { |i| "__stream#{s_id}_item#{i}" }.join(", ")
+
+        return <<~ZIG.chomp
+          __stream#{s_id}: {
+              #{promise_decls}
+              break :__stream#{s_id} #{stream_zig}{
+                  .items = [#{n}]#{promise_zig}{ #{items_list} },
+              };
+          }
+        ZIG
+      end
+
       element_ti = ti.element_type
       zig_type = element_ti.zig_type
 

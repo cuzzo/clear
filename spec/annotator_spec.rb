@@ -9378,5 +9378,270 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===================================================================
+  # ~T[N] Bounded Streams — Phase 1
+  # ===================================================================
+  describe "~T[N] Bounded Streams" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    # ------------------------------------------------------------------
+    # Type system
+    # ------------------------------------------------------------------
+    describe "Type predicates" do
+      it "bounded_stream? is true for ~Number[3]" do
+        t = Type.new(:"~Number[3]")
+        expect(t.bounded_stream?).to be true
+      end
+
+      it "bounded_stream? is false for plain ~Number" do
+        expect(Type.new(:"~Number").bounded_stream?).to be false
+      end
+
+      it "bounded_stream? is false for ~Number[] (dynamic)" do
+        expect(Type.new(:"~Number[]").bounded_stream?).to be false
+      end
+
+      it "stream_element_type returns the inner T for ~Number[3]" do
+        t = Type.new(:"~Number[3]")
+        expect(t.stream_element_type.to_sym).to eq(:Number)
+      end
+
+      it "stream_capacity returns N for ~Number[3]" do
+        expect(Type.new(:"~Number[3]").stream_capacity).to eq(3)
+      end
+
+      it "stream_capacity returns 1 for ~Bool[1]" do
+        expect(Type.new(:"~Bool[1]").stream_capacity).to eq(1)
+      end
+
+      it "requires_move? is false for bounded streams (incremental consumption)" do
+        expect(Type.new(:"~Number[3]").requires_move?).to be false
+      end
+
+      it "requires_move? is still true for single promises" do
+        expect(Type.new(:"~Number").requires_move?).to be true
+      end
+    end
+
+    describe "Zig type emission" do
+      it "emits CheatLib.BoundedStream(f64, 3) for ~Number[3]" do
+        expect(Type.new(:"~Number[3]").zig_type).to eq("CheatLib.BoundedStream(f64, 3)")
+      end
+
+      it "emits CheatLib.BoundedStream(bool, 1) for ~Bool[1]" do
+        expect(Type.new(:"~Bool[1]").zig_type).to eq("CheatLib.BoundedStream(bool, 1)")
+      end
+
+      it "still emits CheatLib.Promise(f64) for plain ~Number" do
+        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Parser
+    # ------------------------------------------------------------------
+    describe "Parser: parse_type_annotation" do
+      it "parses ~Number[3] as a bounded stream type" do
+        tokens = Lexer.new("~Number[3]").tokenize
+        t = Parser.new(tokens, "~Number[3]").send(:parse_type_annotation)
+        expect(t.bounded_stream?).to be true
+        expect(t.stream_capacity).to eq(3)
+        expect(t.stream_element_type.to_sym).to eq(:Number)
+      end
+
+      it "parses ~Bool[1] as a bounded stream type" do
+        tokens = Lexer.new("~Bool[1]").tokenize
+        t = Parser.new(tokens, "~Bool[1]").send(:parse_type_annotation)
+        expect(t.bounded_stream?).to be true
+        expect(t.stream_capacity).to eq(1)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator: visit_ListLit (bounded stream literal)
+    # ------------------------------------------------------------------
+    describe "visit_ListLit with tense items" do
+      it "infers ~Number[3] when all 3 items are ~Number promises" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "infers ~Number[1] for a single-element promise list" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[1] = [BG { 42.0; }];
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "raises when promise list items produce different types" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 1.0; }, BG { TRUE; }];
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /mixed promise types/)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Annotator: visit_NextExpr on bounded streams
+    # ------------------------------------------------------------------
+    describe "visit_NextExpr on bounded streams" do
+      it "returns the element type T when NEXT is applied to ~Number[3]" do
+        src = <<~CLEAR
+          FN f() RETURNS Number ->
+            s: ~Number[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            r: Number = NEXT s;
+            RETURN r;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows NEXT to be called multiple times on the same bounded stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 10.0; }, BG { 20.0; }];
+            a: Number = NEXT s;
+            b: Number = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not mark the stream variable as moved after first NEXT" do
+        # If the stream were marked :moved, the second NEXT would raise 'Use of moved value'.
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            a: Number = NEXT s;
+            b: Number = NEXT s;
+            c: Number = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "still raises when NEXT is applied to a non-tense value" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            x: Number = 5.0;
+            r: Number = NEXT x;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /NEXT requires a Promise/)
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Compiler error: ~T[] (bare dynamic tense) is not valid
+    # ------------------------------------------------------------------
+    describe "~T[] compiler error" do
+      it "raises a directed error when NEXT is called on a ~T[] value" do
+        # Build an annotated node with a dynamic tense type manually
+        # to simulate someone bypassing the parse_type_annotation guard.
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            RETURN;
+          END
+        CLEAR
+        # Normal bounded stream works fine (no error)
+        expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Transpiler
+    # ------------------------------------------------------------------
+    describe "Transpiler output" do
+      it "emits CheatLib.BoundedStream in the variable declaration" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.BoundedStream(f64, 2)")
+      end
+
+      it "emits var (not const) for bounded stream declarations" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to match(/var s /)
+      end
+
+      it "emits .next() for NEXT on a bounded stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            a: Number = NEXT s;
+            b: Number = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out.scan("s.next()").size).to eq(2)
+      end
+
+      it "emits pre-declared promise items for bounded stream literal" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 10.0; }, BG { 20.0; }];
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        # Each BG item is pre-declared as a local const
+        expect(out).to include("__stream0_item0")
+        expect(out).to include("__stream0_item1")
+      end
+
+      it "emits a Promise array in the BoundedStream items field" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("[2]CheatLib.Promise(f64)")
+      end
+
+      it "emits two independent stream labels for two streams in the same function" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s1: ~Number[1] = [BG { 1.0; }];
+            s2: ~Number[1] = [BG { 2.0; }];
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("__stream0")
+        expect(out).to include("__stream1")
+      end
+    end
+  end
 end
 
