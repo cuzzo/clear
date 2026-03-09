@@ -5977,6 +5977,133 @@ RSpec.describe SemanticAnnotator do
           expect(out).to include("ci.radius")
         end
       end
+
+      describe "method requirements" do
+        it "accepts a UNION with FN stubs when matching top-level functions exist" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                Point,
+                FN area(s: Shape) RETURNS Number
+              }
+              FN area(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "parses multiple FN requirements without error" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                Point,
+                FN area(s: Shape) RETURNS Number,
+                FN describe(s: Shape) RETURNS String
+              }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN describe(s: Shape) RETURNS String -> RETURN ""; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "stores method requirements on the UnionDef node" do
+          ast = run(<<~CLEAR)
+            UNION Shape {
+              Circle { radius: Number },
+              FN area(s: Shape) RETURNS Number
+            }
+            FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          union_node = ast.statements.first
+          expect(union_node).to be_a(AST::UnionDef)
+          expect(union_node.methods).to be_an(Array)
+          expect(union_node.methods.length).to eq(1)
+          expect(union_node.methods.first[:name]).to eq("area")
+        end
+
+        it "raises UNION_METHOD_MISSING when the required function does not exist" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Shape) RETURNS Number
+              }
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /Union 'Shape' requires method 'area'/)
+        end
+
+        it "raises UNION_METHOD_WRONG_ARITY when arity does not match" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Shape) RETURNS Number
+              }
+              FN area(s: Shape, n: Number) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /Union 'Shape' method 'area' requires 1 parameter.*has 2/)
+        end
+
+        it "raises UNION_METHOD_PARAM_TYPE when a parameter type mismatches" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Number) RETURNS Number
+              }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /Union 'Shape' method 'area' parameter 1 expects 'Number'/)
+        end
+
+        it "raises UNION_METHOD_RETURN_TYPE when the return type mismatches" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Shape) RETURNS String
+              }
+              FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /Union 'Shape' method 'area' requires return type 'String'.*returns 'Number'/)
+        end
+
+        it "does not emit Zig code for FN stubs — no duplicate definitions" do
+          out = transpile(<<~CLEAR)
+            UNION Shape {
+              Circle { radius: Number },
+              Point,
+              FN area(s: Shape) RETURNS Number
+            }
+            FN area(s: Shape) RETURNS Number ->
+              RETURN 0.0;
+            END
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          # There should be exactly one Zig function definition named 'area'
+          expect(out.scan(/fn area\b/).length).to eq(1)
+        end
+
+        it "works with unit-only union and method requirements" do
+          expect {
+            run(<<~CLEAR)
+              UNION Color { Red, Green, Blue, FN label(c: Color) RETURNS String }
+              FN label(c: Color) RETURNS String -> RETURN ""; END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+      end
     end
   end
 

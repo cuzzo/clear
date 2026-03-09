@@ -1,0 +1,40 @@
+-- Method requirements in UNION declarations.
+-- FN signatures inside a UNION body are compile-time constraints:
+-- the compiler verifies that matching top-level functions exist.
+
+UNION Shape {
+  Circle    { radius: Number },
+  Rectangle { width: Number, height: Number },
+  Point,
+
+  FN area(s: Shape) RETURNS Number,
+  FN perimeter(s: Shape) RETURNS Number
+}
+
+-- Satisfy both method requirements with concrete implementations.
+FN area(s: Shape) RETURNS Number ->
+  MUTABLE result = 0.0;
+  MATCH IFF s START
+    Shape.Circle    AS ci -> result = 3.14159 * ci.radius * ci.radius;,
+    Shape.Rectangle AS ri -> result = ri.width * ri.height;,
+    Shape.Point            -> result = 0.0;
+  END
+  RETURN result;
+END
+
+FN perimeter(s: Shape) RETURNS Number ->
+  MUTABLE result = 0.0;
+  MATCH IFF s START
+    Shape.Circle    AS ci -> result = 2.0 * 3.14159 * ci.radius;,
+    Shape.Rectangle AS ri -> result = 2.0 * (ri.width + ri.height);,
+    Shape.Point            -> result = 0.0;
+  END
+  RETURN result;
+END
+
+FN cheatMain() RETURNS Void ->
+  ASSERT area(Shape.Point) == 0.0, "Point area = 0";
+  ASSERT perimeter(Shape.Point) == 0.0, "Point perimeter = 0";
+  ASSERT area(Shape.Rectangle{ width: 3.0, height: 4.0 }) == 12.0, "Rectangle area = w*h";
+  ASSERT perimeter(Shape.Rectangle{ width: 3.0, height: 4.0 }) == 14.0, "Rectangle perimeter";
+END

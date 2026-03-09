@@ -573,29 +573,48 @@ class Parser
 
     consume(:CHAR, '{')
     variants = {}
+    method_reqs = []
     until match?(:CHAR, '}')
-      var_name = consume(:TYPE_ID).value
-      if match?(:CHAR, '{')
-        # Inline struct variant: Circle { radius: Number, color: String }
-        _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
-          fname = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
+      if match?(:KEYWORD, 'FN')
+        # Method requirement stub: FN name(param: Type, ...) RETURNS Type
+        fn_tok = consume(:KEYWORD, 'FN')
+        fn_name = consume(:VAR_ID).value
+        _, raw_params = parse_comma_seq(:CHAR, '(', ')') do
+          p_name = consume(:VAR_ID).value
           consume(:CHAR, ':')
-          ftype = parse_type_annotation
-          [fname, ftype]
+          p_type = parse_type_annotation
+          { name: p_name, type: p_type }
         end
-        variants[var_name] = { kind: :inline_struct, fields: field_pairs.to_h }
-      elsif match!(:CHAR, ':')
-        # Single-type payload: Data: Number
-        variants[var_name] = parse_type_annotation
+        ret_type = nil
+        if match!(:KEYWORD, 'RETURNS')
+          ret_type = parse_type_annotation
+        end
+        method_reqs << { token: fn_tok, name: fn_name, params: raw_params, return_type: ret_type }
       else
-        # Unit variant: Point
-        variants[var_name] = nil
+        var_name = consume(:TYPE_ID).value
+        if match?(:CHAR, '{')
+          # Inline struct variant: Circle { radius: Number, color: String }
+          _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
+            fname = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
+            consume(:CHAR, ':')
+            ftype = parse_type_annotation
+            [fname, ftype]
+          end
+          variants[var_name] = { kind: :inline_struct, fields: field_pairs.to_h }
+        elsif match!(:CHAR, ':')
+          # Single-type payload: Data: Number
+          variants[var_name] = parse_type_annotation
+        else
+          # Unit variant: Point
+          variants[var_name] = nil
+        end
       end
       match!(:CHAR, ',')
     end
     consume(:CHAR, '}')
     node = AST::UnionDef.new(tok, name, variants, visibility)
     node.type_params = type_params unless type_params.empty?
+    node.methods = method_reqs unless method_reqs.empty?
     node
   end
 

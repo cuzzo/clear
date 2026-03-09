@@ -115,6 +115,13 @@ private
       visit_ExternFnDecl(stmt)    if stmt.is_a?(AST::ExternFnDecl)
     end
 
+    # PASS 2.5: Validate union method requirements.
+    # All function signatures are now registered; check that required methods exist.
+    node.statements.each do |stmt|
+      next unless stmt.is_a?(AST::UnionDef) && stmt.methods&.any?
+      validate_union_methods!(stmt)
+    end
+
     # PASS 3: Analyze Logic
     # Visit all statements in order.
     # - VarDecls will be registered here (linear scoping).
@@ -388,6 +395,54 @@ private
     schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
+  end
+
+  # Called after Pass 2 (all function signatures registered).
+  # Verifies that every method requirement declared inside the UNION body
+  # is satisfied by a concrete top-level function with a matching signature.
+  def validate_union_methods!(node)
+    node.methods.each do |req|
+      fn_name    = req[:name]
+      req_tok    = req[:token]
+      union_name = node.name
+
+      scope = lookup_scope_for(fn_name)
+      local = scope&.locals&.[](fn_name)
+      unless local
+        error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+      end
+
+      sig = local[:type]
+      unless sig.is_a?(Hash) && sig.key?(:params)
+        error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+      end
+
+      # Arity check
+      if req[:params].length != sig[:params].length
+        error!(req_tok, :UNION_METHOD_WRONG_ARITY,
+               union_name, fn_name, req[:params].length, fn_name, sig[:params].length)
+      end
+
+      # Parameter type checks
+      req[:params].each_with_index do |rp, i|
+        req_t  = to_type(rp[:type]).resolved.to_s
+        sig_t  = to_type(sig[:params][i][:type]).resolved.to_s
+        unless req_t == sig_t || req_t == 'Any' || sig_t == 'Any'
+          error!(req_tok, :UNION_METHOD_PARAM_TYPE,
+                 union_name, fn_name, i + 1, req_t, fn_name, sig_t)
+        end
+      end
+
+      # Return type check
+      if req[:return_type]
+        req_ret = to_type(req[:return_type]).resolved.to_s
+        sig_ret = to_type(sig[:return][:type]).resolved.to_s
+        unless req_ret == sig_ret || req_ret == 'Any' || sig_ret == 'Any'
+          error!(req_tok, :UNION_METHOD_RETURN_TYPE,
+                 union_name, fn_name, req_ret, fn_name, sig_ret)
+        end
+      end
+    end
   end
 
   def visit_UnionVariantLit(node)

@@ -307,9 +307,12 @@ module AST
   #   nil                                          — unit variant (void payload)
   #   Type object                                  — single-type payload (existing)
   #   { kind: :inline_struct, fields: { "f" => Type } } — inline struct payload (new)
+  # methods (optional): Array of { token:, name:, params: [{name:, type:},...], return_type: }
+  #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T"], or nil
+    attr_accessor :methods       # Array of method requirement hashes, or nil
   end
 
   # UnionVariantLit: TypeName.VariantName{ field: val, ... }
