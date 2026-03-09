@@ -6625,7 +6625,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # ------------------------------------------------------------------
-    # Resource move semantics
+    # Resource move semantics — linear ownership enforcement
     # ------------------------------------------------------------------
     describe "Resource move tracking" do
       it "allows moving a TCPServer to another variable" do
@@ -6635,6 +6635,84 @@ RSpec.describe SemanticAnnotator do
 
       it "allows moving a TCPClient to another variable" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # ------------------------------------------------------------------
+    # Use-after-move errors for resource types
+    # Resources are linear: once moved to another binding they cannot
+    # be used again — doing so would risk a double-close / use-after-free.
+    # ------------------------------------------------------------------
+    describe "Use-after-move errors for resource types" do
+      # File::open
+      it "raises on use-after-move of File::open resource" do
+        src = 'FN f() RETURNS Void -> a = File::open("x"); b = a; fileWrite(a, "bad"); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'a'/)
+      end
+
+      it "raises on double-move of File::open resource" do
+        src = 'FN f() RETURNS Void -> a = File::open("x"); b = a; c = a; RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'a'/)
+      end
+
+      # File::create
+      it "raises on use-after-move of File::create resource" do
+        src = 'FN f() RETURNS Void -> a = File::create("x"); b = a; fileWrite(a, "bad"); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'a'/)
+      end
+
+      # TCPServer
+      it "raises on use-after-move of TCPServer resource" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); s2 = s; c = accept(s); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 's'/)
+      end
+
+      it "raises on double-move of TCPServer resource" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); s2 = s; s3 = s; RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 's'/)
+      end
+
+      # TCPClient
+      it "raises on use-after-move of TCPClient resource" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; d = tcpRead(c); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'c'/)
+      end
+
+      it "raises on use-after-move when writing to moved TCPClient" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; tcpWrite(c, "bad"); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'c'/)
+      end
+
+      # TCPClient::connect
+      it "raises on use-after-move of TCPClient::connect resource" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); c2 = c; tcpWrite(c, "bad"); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'c'/)
+      end
+
+      # Normal use — should NOT raise
+      it "does not raise when using File before any move" do
+        src = 'FN f() RETURNS Void -> a = File::open("x"); fileWrite(a, "ok"); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not raise when using TCPServer before any move" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not raise when using TCPClient before any move" do
+        src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not raise when using TCPClient::connect before any move" do
+        src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); tcpWrite(c, "hi"); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not raise when using File::create before any move" do
+        src = 'FN f() RETURNS Void -> a = File::create("x"); fileWrite(a, "ok"); RETURN; END'
         expect { run(src) }.not_to raise_error
       end
     end
