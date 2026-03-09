@@ -301,6 +301,10 @@ private
 
       prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
       prologue = node.uses_frame ? prologue : "_ = &rt;"
+      # Suppress unused-parameter warnings for all non-rt params.
+      # Zig 0.15+ errors on any unused function parameter; _ = &x; is a safe no-op.
+      param_suppressions = node.params.map { |p| "_ = &#{p[:name]};" }.join("\n    ")
+      prologue = param_suppressions.empty? ? prologue : "#{prologue}\n    #{param_suppressions}"
       body = transpile_block(node.body)
 
       <<~ZIG

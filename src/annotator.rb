@@ -117,10 +117,14 @@ private
 
     # PASS 2.5: Validate union method requirements.
     # All function signatures are now registered; check that required methods exist.
+    # Methods with default bodies that have no concrete override are synthesized here.
+    @synthetic_fns = []
     node.statements.each do |stmt|
       next unless stmt.is_a?(AST::UnionDef) && stmt.methods&.any?
       validate_union_methods!(stmt)
     end
+    # Pre-register synthesized default functions so Pass 3 bodies can call them.
+    @synthetic_fns.each { |fn| pre_register_function(fn) }
 
     # PASS 3: Analyze Logic
     # Visit all statements in order.
@@ -133,6 +137,13 @@ private
               stmt.is_a?(AST::EnumDef)      || stmt.is_a?(AST::UnionDef)
 
       visit(stmt)
+    end
+
+    # Analyze synthesized default function bodies and append to program so
+    # the transpiler emits them as top-level Zig functions.
+    @synthetic_fns.each do |fn|
+      visit_FunctionDef(fn)
+      node.statements << fn
     end
 
     # Determine Program Result Type (Type of the last statement)
@@ -408,8 +419,22 @@ private
 
       scope = lookup_scope_for(fn_name)
       local = scope&.locals&.[](fn_name)
-      unless local
-        error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+
+      if local.nil?
+        if req[:body]
+          # No concrete override — synthesize a top-level function from the default body.
+          fn_params = req[:params].map { |rp|
+            { name: rp[:name], type: rp[:type], default: nil, mutable: false, takes: false }
+          }
+          fn_node = AST::FunctionDef.new(
+            req[:token], req[:name], fn_params, [], req[:return_type],
+            nil, req[:body], nil, nil, :package, nil, nil
+          )
+          @synthetic_fns << fn_node
+          next  # signature will be pre-registered in visit_Program after this loop
+        else
+          error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+        end
       end
 
       sig = local[:type]

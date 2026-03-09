@@ -589,7 +589,15 @@ class Parser
         if match!(:KEYWORD, 'RETURNS')
           ret_type = parse_type_annotation
         end
-        method_reqs << { token: fn_tok, name: fn_name, params: raw_params, return_type: ret_type }
+        # Optional default body: FN name(...) RETURNS T -> body END
+        default_body = nil
+        if match?(:ARROW, '->')
+          consume(:ARROW, '->')
+          default_body = parse_block_body(['END'])
+          consume(:KEYWORD, 'END')
+        end
+        method_reqs << { token: fn_tok, name: fn_name, params: raw_params,
+                         return_type: ret_type, body: default_body }
       else
         var_name = consume(:TYPE_ID).value
         if match?(:CHAR, '{')

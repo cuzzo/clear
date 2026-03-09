@@ -1,0 +1,43 @@
+-- Default method implementations in UNION declarations.
+-- A FN stub with a body provides a fallback used when no concrete top-level
+-- function overrides it. An override replaces the default entirely.
+
+UNION Shape {
+  Circle    { radius: Number },
+  Rectangle { width: Number, height: Number },
+  Point,
+
+  -- Default: 0 for any variant not covered by a concrete override.
+  FN area(s: Shape) RETURNS Number ->
+    RETURN 0.0;
+  END,
+
+  -- Default label works for all variants.
+  FN label(s: Shape) RETURNS Number ->
+    RETURN -1.0;
+  END
+}
+
+-- Concrete override replaces the default for 'area'.
+FN area(s: Shape) RETURNS Number ->
+  MUTABLE result = 0.0;
+  MATCH IFF s START
+    Shape.Circle    AS ci -> result = 3.14159 * ci.radius * ci.radius;,
+    Shape.Rectangle AS ri -> result = ri.width * ri.height;,
+    Shape.Point            -> result = 0.0;
+  END
+  RETURN result;
+END
+
+-- 'label' has no concrete override — the default body is used.
+
+FN cheatMain() RETURNS Void ->
+  -- Concrete 'area' override is in effect.
+  ASSERT area(Shape.Point) == 0.0,                            "Point area";
+  ASSERT area(Shape.Circle{ radius: 1.0 }) == 3.14159,        "Circle area";
+  ASSERT area(Shape.Rectangle{ width: 3.0, height: 4.0 }) == 12.0, "Rectangle area";
+
+  -- Default 'label' returns -1.0 for all shapes.
+  ASSERT label(Shape.Point) == -1.0,                          "Point label default";
+  ASSERT label(Shape.Circle{ radius: 5.0 }) == -1.0,          "Circle label default";
+END

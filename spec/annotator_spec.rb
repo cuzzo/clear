@@ -6104,6 +6104,115 @@ RSpec.describe SemanticAnnotator do
           }.not_to raise_error
         end
       end
+
+      describe "default method implementations" do
+        it "accepts a FN stub with a default body when no concrete override exists" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                Point,
+                FN area(s: Shape) RETURNS Number ->
+                  RETURN 0.0;
+                END
+              }
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "does not raise an error for a missing method when a default body is provided" do
+          # Previously UNION_METHOD_MISSING — now satisfied by the default body.
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Shape) RETURNS Number ->
+                  RETURN 0.0;
+                END
+              }
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.not_to raise_error
+        end
+
+        it "still raises UNION_METHOD_MISSING when stub has no body and function is missing" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Shape) RETURNS Number
+              }
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /requires method 'area'/)
+        end
+
+        it "synthesizes a top-level function from the default body" do
+          out = transpile(<<~CLEAR)
+            UNION Shape {
+              Circle { radius: Number },
+              Point,
+              FN area(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END
+            }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          expect(out).to include("fn area(")
+        end
+
+        it "does not emit a duplicate when a concrete override also exists" do
+          out = transpile(<<~CLEAR)
+            UNION Shape {
+              Circle { radius: Number },
+              FN area(s: Shape) RETURNS Number ->
+                RETURN -1.0;
+              END
+            }
+            FN area(s: Shape) RETURNS Number ->
+              RETURN 0.0;
+            END
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          # Concrete override wins; only one fn area definition should appear.
+          expect(out.scan(/fn area\b/).length).to eq(1)
+        end
+
+        it "concrete override validates against the declared default signature" do
+          expect {
+            run(<<~CLEAR)
+              UNION Shape {
+                Circle { radius: Number },
+                FN area(s: Shape) RETURNS String ->
+                  RETURN "";
+                END
+              }
+              FN area(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END
+              FN cheatMain() RETURNS Void -> END
+            CLEAR
+          }.to raise_error(CompilerError, /return type 'String'/)
+        end
+
+        it "multiple default methods are all synthesized when none are overridden" do
+          out = transpile(<<~CLEAR)
+            UNION Shape {
+              Point,
+              FN area(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END,
+              FN perimeter(s: Shape) RETURNS Number ->
+                RETURN 0.0;
+              END
+            }
+            FN cheatMain() RETURNS Void -> END
+          CLEAR
+          expect(out).to include("fn area(")
+          expect(out).to include("fn perimeter(")
+        end
+      end
     end
   end
 
