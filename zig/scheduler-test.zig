@@ -259,3 +259,74 @@ test "Scheduler: Multi-Threaded Hammer (Work Stealing & Sync)" {
     try testing.expectEqual(@as(usize, 0), wg.counter.load(.seq_cst));
 }
 
+
+// -------------------------------------------------------------------------
+// TEST: getLeastLoaded — picks scheduler with fewest active_tasks
+// -------------------------------------------------------------------------
+
+test "SchedulerRegistry.getLeastLoaded returns null for empty registry" {
+    var reg: scheduler.SchedulerRegistry = .{};
+    defer reg.deinit(std.testing.allocator);
+
+    const result = reg.getLeastLoaded();
+    try testing.expect(result == null);
+}
+
+test "SchedulerRegistry.getLeastLoaded returns the only registered scheduler" {
+    const allocator = std.testing.allocator;
+    var reg: scheduler.SchedulerRegistry = .{};
+    defer reg.deinit(allocator);
+
+    // Create a minimal scheduler struct — only active_tasks matters for getLeastLoaded.
+    var sched_a: Scheduler = undefined;
+    sched_a.active_tasks = std.atomic.Value(usize).init(5);
+
+    // Register under a fake thread ID.
+    try reg.register(allocator, @as(std.Thread.Id, @intCast(1001)), &sched_a);
+
+    const result = reg.getLeastLoaded();
+    try testing.expect(result != null);
+    try testing.expectEqual(&sched_a, result.?);
+}
+
+test "SchedulerRegistry.getLeastLoaded picks the less-loaded of two schedulers" {
+    const allocator = std.testing.allocator;
+    var reg: scheduler.SchedulerRegistry = .{};
+    defer reg.deinit(allocator);
+
+    var sched_busy: Scheduler = undefined;
+    sched_busy.active_tasks = std.atomic.Value(usize).init(10);
+
+    var sched_idle: Scheduler = undefined;
+    sched_idle.active_tasks = std.atomic.Value(usize).init(2);
+
+    try reg.register(allocator, @as(std.Thread.Id, @intCast(2001)), &sched_busy);
+    try reg.register(allocator, @as(std.Thread.Id, @intCast(2002)), &sched_idle);
+
+    const result = reg.getLeastLoaded();
+    try testing.expect(result != null);
+    // Must pick the idle scheduler (load = 2), not the busy one (load = 10).
+    try testing.expectEqual(&sched_idle, result.?);
+}
+
+test "SchedulerRegistry.getLeastLoaded handles zero-load schedulers (tie: returns one)" {
+    const allocator = std.testing.allocator;
+    var reg: scheduler.SchedulerRegistry = .{};
+    defer reg.deinit(allocator);
+
+    var sched_a: Scheduler = undefined;
+    sched_a.active_tasks = std.atomic.Value(usize).init(0);
+
+    var sched_b: Scheduler = undefined;
+    sched_b.active_tasks = std.atomic.Value(usize).init(0);
+
+    try reg.register(allocator, @as(std.Thread.Id, @intCast(3001)), &sched_a);
+    try reg.register(allocator, @as(std.Thread.Id, @intCast(3002)), &sched_b);
+
+    const result = reg.getLeastLoaded();
+    try testing.expect(result != null);
+    // Either is acceptable when tied; just verify it returns one of them.
+    const is_a = result.? == &sched_a;
+    const is_b = result.? == &sched_b;
+    try testing.expect(is_a or is_b);
+}

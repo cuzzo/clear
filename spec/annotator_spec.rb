@@ -3753,6 +3753,118 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "sharded list s> ALL predicate resolves to Bool" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          result = slist s> ALL _ > 0.0;
+        FLUX
+      }
+
+      it "resolves to Bool" do
+        expect(result).to eq(:Bool)
+      end
+    end
+
+    context "sharded list s> AVERAGE _ resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          result = slist s> AVERAGE _;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "sharded list s> MIN _ resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          result = slist s> MIN _;
+        FLUX
+      }
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "sharded list s> MAX _ resolves to Number" do
+      let(:code) {
+        <<~FLUX
+          MUTABLE slist: Number[]@list:sharded(2) = [];
+          result = slist s> MAX _;
+        FLUX
+      }
+
+      it "resolves to Number" do
+        expect(result).to eq(:Number)
+      end
+    end
+
+    context "sharded list s> WHERE predicate resolves to element array type" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE slist: Item[]@list:sharded(2) = [];
+          result = slist s> WHERE _.value > 0.0;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Item[]" do
+        expect(result).to eq(:"Item[]")
+      end
+    end
+
+    context "sharded list s> FIND predicate resolves to optional element type" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          MUTABLE slist: Item[]@list:sharded(2) = [];
+          result = slist s> FIND _.value > 0.0;
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to an optional type" do
+        # ?Item — the resolved raw includes Item
+        expect(result.to_s).to match(/Item/)
+      end
+    end
+
+    context "Zig output: @list:sharded WHERE/FIND flatten shards before iterating" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE slist: Item[]@list:sharded(2) = [];
+            result = slist s> WHERE _.value > 0.0;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "emits appendSlice to flatten shards" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("appendSlice")
+        expect(zig).to include("shards[__psi].items")
+      end
+    end
+
     context "Zig output: @list:sharded EACH emits parallel fibers" do
       let(:code) {
         <<~FLUX

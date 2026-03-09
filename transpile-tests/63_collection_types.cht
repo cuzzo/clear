@@ -9,7 +9,27 @@ FN cheatMain() RETURNS Void ->
     MUTABLE pts: Point[]@list = [];
     append(pts, Point{ x: 1.0, y: 2.0 });
     append(pts, Point{ x: 3.0, y: 4.0 });
-    ASSERT pts.length() == 2, "@list should hold 2 points";
+    append(pts, Point{ x: 5.0, y: 6.0 });
+    ASSERT pts.length() == 3, "@list should hold 3 points";
+
+    -- Pipeline operators on @list work the same as on plain arrays
+    x_sum = pts s> SUM _.x;
+    ASSERT x_sum == 9.0, "@list SUM should be 9";
+
+    x_count: Int64 = pts s> COUNT _.x > 2.0;
+    ASSERT x_count == 2, "@list COUNT should be 2";
+
+    any_big = pts s> ANY _.x > 4.0;
+    ASSERT any_big == TRUE, "@list ANY should find x > 4";
+
+    all_pos = pts s> ALL _.x > 0.0;
+    ASSERT all_pos == TRUE, "@list ALL positive";
+
+    found_pt = pts s> FIND _.x == 3.0;
+    ASSERT found_pt != NIL, "@list FIND should find x=3";
+
+    small_pts = pts s> WHERE _.x < 4.0;
+    ASSERT small_pts.length() == 2, "@list WHERE should return 2 items";
 
     -- @pool: generational pool with handle-based access
     MUTABLE pool: Point[]@pool = [];
