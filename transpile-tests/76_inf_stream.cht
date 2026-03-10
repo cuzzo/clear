@@ -1,0 +1,63 @@
+-- Infinite streams: ~T[INF] — lazy rendezvous generator; NEXT returns T (never nil).
+-- BG STREAM { WHILE TRUE DO YIELD x; END } creates a generator that rendezvous with
+-- each NEXT call. The generator blocks after each YIELD until NEXT is called.
+
+FN cheatMain() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: Infinite counter stream — consume first 3 values.
+    -- -------------------------------------------------------
+    counter: ~Number[INF] = BG STREAM {
+        MUTABLE i: Number = 0.0;
+        WHILE TRUE DO
+            YIELD i;
+            i = i + 1.0;
+        END
+    };
+
+    v1: Number = NEXT counter;
+    v2: Number = NEXT counter;
+    v3: Number = NEXT counter;
+
+    ASSERT v1 == 0.0, "inf stream: first value is 0";
+    ASSERT v2 == 1.0, "inf stream: second value is 1";
+    ASSERT v3 == 2.0, "inf stream: third value is 2";
+
+    -- -------------------------------------------------------
+    -- Test 2: Stream with captured variable.
+    -- -------------------------------------------------------
+    base: Number = 10.0;
+    multiplier: ~Number[INF] = BG STREAM {
+        MUTABLE j: Number = 1.0;
+        WHILE TRUE DO
+            YIELD base * j;
+            j = j + 1.0;
+        END
+    };
+
+    u1: Number = NEXT multiplier;
+    u2: Number = NEXT multiplier;
+
+    ASSERT u1 == 10.0, "inf stream with capture: first value";
+    ASSERT u2 == 20.0, "inf stream with capture: second value";
+
+    -- -------------------------------------------------------
+    -- Test 3: Bool infinite stream.
+    -- -------------------------------------------------------
+    toggler: ~Bool[INF] = BG STREAM {
+        MUTABLE flag: Bool = TRUE;
+        WHILE TRUE DO
+            YIELD flag;
+            flag = !flag;
+        END
+    };
+
+    b1: Bool = NEXT toggler;
+    b2: Bool = NEXT toggler;
+    b3: Bool = NEXT toggler;
+
+    ASSERT b1 == TRUE,  "bool inf stream: first value";
+    ASSERT b2 == FALSE, "bool inf stream: second value";
+    ASSERT b3 == TRUE,  "bool inf stream: third value (wraps)";
+
+    RETURN;
+END

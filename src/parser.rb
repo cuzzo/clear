@@ -1166,8 +1166,14 @@ class Parser
         consume(:CHAR, ']')
         inner = "[?]"
 
+      # Case 5: Infinite stream marker "T[INF]" (used inside tense type ~T[INF])
+      elsif match?(:TYPE_ID) && current.value == 'INF'
+        consume(:TYPE_ID)
+        consume(:CHAR, ']')
+        inner = "[INF]"
+
       else
-        error!(current, "Syntax Error: Expected ']', '*', '?', or size in array type.")
+        error!(current, "Syntax Error: Expected ']', '*', '?', 'INF', or size in array type.")
       end
 
       # Allow multiple dimensions (e.g., Number[][][])

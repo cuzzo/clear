@@ -312,6 +312,12 @@ class Type
     array? && capacity == :STREAM_OPEN
   end
 
+  # True when this is the [INF] marker (infinite stream element-type annotation).
+  # Only meaningful as the tense_type of an infinite stream: ~T[INF].
+  def inf_stream_marker?
+    array? && capacity == :INF
+  end
+
   def empty_list?
     # Handles the empty list literal "Any[]" or heap "%Any[]"
     # This is crucial for initializing typed arrays (e.g., `var x: Number[] = []`)
@@ -455,6 +461,19 @@ class Type
     tense_type.element_type
   end
 
+  # Infinite stream: ~T[INF] — a lazy rendezvous generator; NEXT returns T (never nil).
+  # Generator and consumer rendezvous on each value: push() blocks until next() reads it.
+  # Resource semantics: call deinit() to free the heap-allocated Inner.
+  def inf_stream?
+    tense? && tense_type.inf_stream_marker?
+  end
+
+  # The element type T in ~T[INF].
+  def inf_stream_element_type
+    return nil unless inf_stream?
+    tense_type.element_type
+  end
+
   # The element type T in ~T[N].
   def stream_element_type
     return nil unless bounded_stream?
@@ -504,6 +523,7 @@ class Type
     return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
     return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
+    return false if inf_stream?             # Infinite streams are resources with deinit cleanup, not linear
     return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle
@@ -735,6 +755,10 @@ class Type
       if open_stream?
         elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.Stream(#{elem_zig})"
+      end
+      if inf_stream?
+        elem_zig = inf_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+        return "CheatLib.InfStream(#{elem_zig})"
       end
       inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Promise(#{inner_zig})"

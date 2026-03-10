@@ -317,10 +317,10 @@ private
     # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
-      # Bounded streams, shared promises, and open streams must be `var` even when declared
+      # Bounded/open/infinite streams and shared promises must be `var` even when declared
       # immutable in CLEAR, because their next() methods take *Self (mutate internal state).
       ft = Type.new(node.full_type || :Void)
-      is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream?
+      is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       annotation = ZIG_PRIMITIVES.include?(zig_type) ? ": #{zig_type}" : ""
@@ -894,8 +894,8 @@ private
       @stream_gen_counter += 1
 
       tense_t    = Type.new(node.full_type || :"~Void[?]")
-      elem_t     = tense_t.open_stream_element_type
-      stream_zig = tense_t.zig_type  # "CheatLib.Stream(Number)"
+      is_inf     = tense_t.inf_stream?
+      stream_zig = tense_t.zig_type  # "CheatLib.Stream(T)" or "CheatLib.InfStream(T)"
 
       ctx_type     = "__SgCtx#{id}"
       alloc_var    = "__sg#{id}_alloc"
@@ -918,17 +918,18 @@ private
 
       capture_map = captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
 
+      # Set @current_stream_local so that YieldExpr nodes at ANY nesting depth
+      # (inside while loops, if statements, etc.) emit the correct push() call.
+      prev_stream_local = @current_stream_local
+      @current_stream_local = local_stream
       body_code = with_fiber_capture_map(capture_map) do
         node.body.map do |expr|
-          if expr.is_a?(AST::YieldExpr)
-            "try #{local_stream}.push(#{visit(expr.expr)});"
-          else
-            code = visit(expr)
-            code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-            code
-          end
+          code = visit(expr)
+          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+          code
         end.join("\n            ")
       end
+      @current_stream_local = prev_stream_local
 
       <<~ZIG.chomp
         #{blk_label}: {
@@ -942,7 +943,7 @@ private
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
                     var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
-                    defer #{local_stream}.close();
+                    #{is_inf ? "" : "defer #{local_stream}.close();"}
                     #{body_code}
                 }
             };
@@ -961,9 +962,9 @@ private
       ZIG
 
     when AST::YieldExpr
-      # Should not normally be reached — BgStreamBlock handles YieldExpr inline.
-      # This fallback silences "unhandled node" warnings in edge cases.
-      "/* yield #{visit(node.expr)} */"
+      # Emits push() on the current generator's local stream handle.
+      # @current_stream_local is set by the enclosing BgStreamBlock transpiler.
+      "try #{@current_stream_local}.push(#{visit(node.expr)})"
 
     when AST::NextExpr
       "#{visit(node.expr)}.next()"

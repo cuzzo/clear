@@ -1127,14 +1127,15 @@ private
       node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
     end
 
-    # 2b. Check if the declared type is a pool, open stream, or resource — tag node and scope entry
+    # 2b. Check if the declared type is a pool, open/infinite stream, or resource — tag node and scope entry
     ft_obj          = node.type_info
     is_pool         = ft_obj&.pool?
     is_open_stream  = ft_obj&.open_stream?
+    is_inf_stream   = ft_obj&.inf_stream?
     if is_pool
       resource_close = "{0}.deinit(rt.heapAlloc())"
       is_resource    = false
-    elsif is_open_stream
+    elsif is_open_stream || is_inf_stream
       resource_close = "{0}.deinit()"
       is_resource    = false
     else
@@ -1157,7 +1158,7 @@ private
       Set.new,       # capabilities
       [],            # borrowed_paths
       sync: node_sync,
-      resource: is_resource || is_pool || is_open_stream,
+      resource: is_resource || is_pool || is_open_stream || is_inf_stream,
       close_zig: resource_close
     )
 
@@ -1188,6 +1189,17 @@ private
         error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
       end
 
+      # For BgStreamBlock assigned to ~T[INF]: retype to ~T[INF] before coerce! so exact
+      # match works (BgStreamBlock infers ~T[?] by default; ~T[INF] is a separate runtime type).
+      if node.value.is_a?(AST::BgStreamBlock) && node.type.is_a?(Type) && node.type.inf_stream?
+        elem_sym = begin
+          node.value.full_type.tense_type.element_type.to_sym
+        rescue
+          :Void
+        end
+        node.value.full_type = :"~#{elem_sym}[INF]"
+      end
+
       final_type, error = node.value.coerce!(node.type)
       error!(node, error) if error
 
@@ -1210,10 +1222,11 @@ private
       ft_obj          = node.type_info
       is_pool         = ft_obj&.pool?
       is_open_stream  = ft_obj&.open_stream?
+      is_inf_stream   = ft_obj&.inf_stream?
       if is_pool
         resource_close = "{0}.deinit(rt.heapAlloc())"
         is_resource    = false
-      elsif is_open_stream
+      elsif is_open_stream || is_inf_stream
         resource_close = "{0}.deinit()"
         is_resource    = false
       else
@@ -1235,7 +1248,7 @@ private
         Set.new,
         [],
         sync: node_sync,
-        resource: is_resource || is_pool || is_open_stream,
+        resource: is_resource || is_pool || is_open_stream || is_inf_stream,
         close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
@@ -2147,6 +2160,10 @@ private
       # Does NOT mark as moved — stream is a resource cleaned up via deinit.
       elem_sym = promise_type.open_stream_element_type.to_sym
       node.full_type = :"?#{elem_sym}"
+    elsif promise_type.inf_stream?
+      # NEXT on ~T[INF]: returns T (never nil — stream is infinite, rendezvous-style).
+      # Does NOT mark as moved — stream is a resource cleaned up via deinit.
+      node.full_type = promise_type.inf_stream_element_type.to_sym
     else
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)

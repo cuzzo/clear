@@ -5,7 +5,7 @@ const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 
 pub const EbrContext = @import("ebr.zig").EbrContext;
-const Task = fc.Task;
+const Task = @import("queues.zig").Task;
 const Fiber = fc.Fiber;
 
 // Concurrency primitives re-exported for DO block fork-join support.
@@ -1030,6 +1030,116 @@ pub const CheatLib = struct {
             /// Free the buffer and Inner allocation. Call once when done consuming.
             pub fn deinit(self: *Self) void {
                 self.inner.items.deinit(self.alloc);
+                self.alloc.destroy(self.inner);
+            }
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // InfStream(T): A lazy rendezvous generator stream. Corresponds to ~T[INF] in CLEAR.
+    //
+    // Generator and consumer rendezvous on each value via a single-slot channel:
+    //   - Generator calls push(val): writes val, blocks until consumer reads it.
+    //   - Consumer calls next(): blocks until generator pushes, reads val, wakes generator.
+    //
+    // Both sides run as green fibers in the same scheduler. Blocking = fiber yield.
+    // The generator is expected to loop forever (BG STREAM { WHILE TRUE DO YIELD; END }).
+    //
+    // Lifecycle:
+    //   Spawn:   var s = try CheatLib.InfStream(f64).spawnNew(alloc, sched);
+    //   In gen:  var local = CheatLib.InfStream(f64){ .inner = ctx.stream_inner, .alloc = ctx.alloc };
+    //            while (true) { try local.push(val); }
+    //   Consume: const v = s.next();  // T — blocks until generator pushes
+    //   Cleanup: defer s.deinit();    // frees Inner
+    pub fn InfStream(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            pub const Inner = struct {
+                slot: T = undefined,
+                // 0 = empty (no value available), 1 = value ready (generator is waiting)
+                state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+                // Spinlock protecting consumer_task and producer_task
+                lock: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                consumer_task: ?*Task = null,
+                producer_task: ?*Task = null,
+                sched: *fp.Scheduler,
+            };
+
+            inner: *Inner,
+            alloc: std.mem.Allocator,
+
+            /// Allocate an Inner on the heap and return the InfStream handle.
+            pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
+                const inner = try alloc.create(Inner);
+                inner.* = .{ .sched = sched };
+                return Self{ .inner = inner, .alloc = alloc };
+            }
+
+            /// Generator fiber calls this to yield a value.
+            /// Writes val into the slot, wakes the consumer, then blocks until val is consumed.
+            pub fn push(self: *Self, val: T) void {
+                const inner = self.inner;
+
+                // Write value and mark slot as ready (state = 1)
+                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                inner.slot = val;
+                inner.state.store(1, .release);
+                if (inner.consumer_task) |consumer| {
+                    inner.consumer_task = null;
+                    inner.lock.store(0, .release);
+                    inner.sched.schedule(consumer);
+                } else {
+                    inner.lock.store(0, .release);
+                }
+
+                // Block until consumer reads the value (state returns to 0)
+                while (true) {
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    if (inner.state.load(.acquire) == 0) {
+                        inner.lock.store(0, .release);
+                        return; // Value was consumed — proceed to next YIELD
+                    }
+                    const task = inner.sched.getCurrent();
+                    task.status = .Blocked;
+                    inner.producer_task = task;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
+            }
+
+            /// Consumer calls this to receive the next yielded value.
+            /// Blocks until the generator calls push().
+            pub fn next(self: *Self) T {
+                const inner = self.inner;
+
+                while (true) {
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    if (inner.state.load(.acquire) == 1) {
+                        const val = inner.slot;
+                        inner.state.store(0, .release);
+                        if (inner.producer_task) |producer| {
+                            inner.producer_task = null;
+                            inner.lock.store(0, .release);
+                            inner.sched.schedule(producer);
+                        } else {
+                            inner.lock.store(0, .release);
+                        }
+                        return val;
+                    }
+                    const task = inner.sched.getCurrent();
+                    task.status = .Blocked;
+                    inner.consumer_task = task;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
+            }
+
+            /// No-op — infinite streams have no natural close point.
+            pub fn close(_: *Self) void {}
+
+            /// Free the Inner allocation. The generator fiber will remain blocked permanently.
+            pub fn deinit(self: *Self) void {
                 self.alloc.destroy(self.inner);
             }
         };

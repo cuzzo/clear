@@ -10190,5 +10190,252 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===================================================================
+  # ~T[INF] Infinite Streams — Phase 4
+  # ===================================================================
+  describe "~T[INF] Infinite Streams" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    # -------------------------------------------------------------------
+    # Type predicates
+    # -------------------------------------------------------------------
+    describe "Type predicates" do
+      it "inf_stream? is true for ~Number[INF]" do
+        t = Type.new(:"~Number[INF]")
+        expect(t.inf_stream?).to be true
+      end
+
+      it "inf_stream? is false for plain ~Number" do
+        expect(Type.new(:"~Number").inf_stream?).to be false
+      end
+
+      it "inf_stream? is false for ~Number[3] (bounded stream)" do
+        expect(Type.new(:"~Number[3]").inf_stream?).to be false
+      end
+
+      it "inf_stream? is false for ~Number[?] (open stream)" do
+        expect(Type.new(:"~Number[?]").inf_stream?).to be false
+      end
+
+      it "inf_stream_element_type returns Number for ~Number[INF]" do
+        t = Type.new(:"~Number[INF]")
+        expect(t.inf_stream_element_type.resolved).to eq :Number
+      end
+
+      it "inf_stream_element_type returns Bool for ~Bool[INF]" do
+        t = Type.new(:"~Bool[INF]")
+        expect(t.inf_stream_element_type.resolved).to eq :Bool
+      end
+
+      it "requires_move? is false for infinite streams (resource semantics)" do
+        expect(Type.new(:"~Number[INF]").requires_move?).to be false
+      end
+
+      it "inf_stream_marker? is true for Number[INF]" do
+        t = Type.new(:"Number[INF]")
+        expect(t.inf_stream_marker?).to be true
+      end
+
+      it "inf_stream_marker? is false for Number[3]" do
+        expect(Type.new(:"Number[3]").inf_stream_marker?).to be false
+      end
+
+      it "fixed? is false for Number[INF]" do
+        expect(Type.new(:"Number[INF]").fixed?).to be false
+      end
+
+      it "dynamic? is false for Number[INF]" do
+        expect(Type.new(:"Number[INF]").dynamic?).to be false
+      end
+    end
+
+    # -------------------------------------------------------------------
+    # Zig type emission
+    # -------------------------------------------------------------------
+    describe "zig_type" do
+      it "emits CheatLib.InfStream(f64) for ~Number[INF]" do
+        expect(Type.new(:"~Number[INF]").zig_type).to eq "CheatLib.InfStream(f64)"
+      end
+
+      it "emits CheatLib.InfStream(bool) for ~Bool[INF]" do
+        expect(Type.new(:"~Bool[INF]").zig_type).to eq "CheatLib.InfStream(bool)"
+      end
+    end
+
+    # -------------------------------------------------------------------
+    # Parser: [INF] in type annotations
+    # -------------------------------------------------------------------
+    describe "parser" do
+      it "parses ~Number[INF] as a type annotation" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # -------------------------------------------------------------------
+    # Annotator: BgStreamBlock with ~T[INF] declared type
+    # -------------------------------------------------------------------
+    describe "BgStreamBlock annotation with ~T[INF]" do
+      it "infers ~Number[INF] type when declared as ~Number[INF]" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        decl = fn_node.body.first
+        expect(decl.value.full_type.inf_stream?).to be true
+        expect(decl.value.full_type.inf_stream_element_type.resolved).to eq :Number
+      end
+
+      it "infers ~Bool[INF] when YIELD produces Bool" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Bool[INF] = BG STREAM { WHILE TRUE DO YIELD TRUE; END };
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        decl = fn_node.body.first
+        expect(decl.value.full_type.inf_stream?).to be true
+        expect(decl.value.full_type.inf_stream_element_type.resolved).to eq :Bool
+      end
+    end
+
+    # -------------------------------------------------------------------
+    # NextExpr on ~T[INF] returns T (not ?T)
+    # -------------------------------------------------------------------
+    describe "NextExpr on ~T[INF]" do
+      it "NEXT on ~Number[INF] returns Number (not ?Number)" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            v: Number = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        next_decl = fn_node.body[1]
+        expect(next_decl.value.full_type.optional?).to be false
+        expect(next_decl.value.full_type.resolved).to eq :Number
+      end
+
+      it "NEXT on ~Bool[INF] returns Bool (not ?Bool)" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Bool[INF] = BG STREAM { WHILE TRUE DO YIELD TRUE; END };
+            v: Bool = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        next_decl = fn_node.body[1]
+        expect(next_decl.value.full_type.optional?).to be false
+        expect(next_decl.value.full_type.resolved).to eq :Bool
+      end
+    end
+
+    # -------------------------------------------------------------------
+    # Resource cleanup: deinit is emitted
+    # -------------------------------------------------------------------
+    describe "resource cleanup" do
+      it "emits defer s.deinit() for ~Number[INF] declaration" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("defer s.deinit()")
+      end
+    end
+
+    # -------------------------------------------------------------------
+    # Transpiler output
+    # -------------------------------------------------------------------
+    describe "transpiler output" do
+      it "emits CheatLib.InfStream(f64) in the var declaration" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.InfStream(f64)")
+      end
+
+      it "emits var (not const) for the stream binding" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to match(/var s/)
+      end
+
+      it "emits spawnNew in the BG STREAM block" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("spawnNew")
+      end
+
+      it "emits push() calls for YIELD inside the generator" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include(".push(")
+      end
+
+      it "does NOT emit defer close() for infinite stream generators" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        # InfStream.close() is a no-op and should NOT be emitted for infinite generators
+        expect(out).not_to include(".close()")
+      end
+
+      it "emits .next() for NEXT on infinite stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            v: Number = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("s.next()")
+      end
+    end
+  end
 end
 
