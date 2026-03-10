@@ -1112,6 +1112,16 @@ private
     handle_assign_move(node)
     handle_assign_borrow(node)
 
+    # 1a. Reject ~T@multiOwned — promises are multi-fiber; only @shared is valid.
+    if node.type.is_a?(Type) && node.type.tense? && node.type.multiowned?
+      error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
+    end
+
+    # 1b. Reject bare ~T[] — must specify [N], [INF], or [?].
+    if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic?
+      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
+    end
+
     # 1. Resolve final type (handles coercion check internally)
     final_type, error = node.value.coerce!(node.type)
     error!(node, error) if error
@@ -1187,6 +1197,11 @@ private
       # Reject ~T@multiOwned — promises are multi-fiber by nature; only @shared is valid.
       if node.type.is_a?(Type) && node.type.tense? && node.type.multiowned?
         error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
+      end
+
+      # Reject bare ~T[] — must specify [N], [INF], or [?].
+      if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic?
+        error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
       end
 
       # For BgStreamBlock assigned to ~T[INF]: retype to ~T[INF] before coerce! so exact
@@ -2144,7 +2159,7 @@ private
 
     # ~T[] (bare dynamic tense array) is not a valid form — give a directed error.
     if promise_type.tense_type.array? && promise_type.tense_type.dynamic?
-      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for infinite, or ~T[?] for an open/closeable stream (future phases).")
+      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
     end
 
     if promise_type.bounded_stream?
