@@ -1,0 +1,12 @@
+-- Test: CONCURRENT SELECT with OR RAISE — when no errors, works as normal SELECT
+FN alwaysOk(x: Number) RETURNS !Number ->
+    RETURN x * 2.0;
+END
+
+FN cheatMain() RETURNS Void ->
+    nums: Number[] = [1.0, 2.0, 3.0];
+    results = nums s> CONCURRENT(pool_size: 2) SELECT alwaysOk(_) OR RAISE;
+    total = results s> SUM _;
+    ASSERT total == 12.0, "OR RAISE with no errors should work normally";
+    RETURN;
+END

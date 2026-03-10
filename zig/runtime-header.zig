@@ -10,6 +10,7 @@ const Fiber = fc.Fiber;
 
 // Concurrency primitives re-exported for DO block fork-join support.
 pub const WaitGroup = fp.WaitGroup;
+pub const Semaphore = fp.Semaphore;
 pub const TaskFn = @import("queues.zig").TaskFn;
 
 

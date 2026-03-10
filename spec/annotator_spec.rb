@@ -10845,5 +10845,333 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===========================================================================
+  # CONCURRENT modifier — parallel SELECT, WHERE, EACH
+  # ===========================================================================
+  describe "CONCURRENT modifier (parallel pipeline operator)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # Type resolution
+    # -------------------------------------------------------------------------
+    it "CONCURRENT SELECT resolves to element_type[]" do
+      tree = run(<<~CLEAR)
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT SELECT double(_);
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "results" }
+      expect(bind.resolved_type).to eq(:"Number[]")
+    end
+
+    it "CONCURRENT WHERE resolves to item_type[]" do
+      tree = run(<<~CLEAR)
+        STRUCT Item { value: Number }
+        FN f() RETURNS Void ->
+          items: Item[] = [];
+          evens = items s> CONCURRENT WHERE _.value > 0.0;
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "evens" }
+      expect(bind.resolved_type).to eq(:"Item[]")
+    end
+
+    it "CONCURRENT EACH resolves to Void" do
+      tree = run(<<~CLEAR)
+        STRUCT Score { value: Number }
+        FN f() RETURNS Void ->
+          items: Score[] = [];
+          items s> CONCURRENT EACH { _.value = 0.0; };
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      # The EACH pipeline is a BinaryOp with SMOOTH operator at top level
+      smooth = fn_node.body.find { |n| n.is_a?(AST::BinaryOp) && n.op == :SMOOTH }
+      expect(smooth.resolved_type).to eq(:Void)
+    end
+
+    it "CONCURRENT(pool_size: N) SELECT accepts numeric pool_size" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            items: Number[] = [1.0, 2.0];
+            results = items s> CONCURRENT(pool_size: 4) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    # -------------------------------------------------------------------------
+    # Error cases
+    # -------------------------------------------------------------------------
+    it "raises an error when CONCURRENT SELECT is applied to a non-array" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            x: Number = 42.0;
+            r = x s> CONCURRENT SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot SELECT from non-list type/)
+    end
+
+    it "raises an error when CONCURRENT WHERE predicate is non-Bool" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            items: Number[] = [1.0, 2.0];
+            r = items s> CONCURRENT WHERE _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WHERE clause must evaluate to Bool/)
+    end
+
+    # -------------------------------------------------------------------------
+    # Zig output
+    # -------------------------------------------------------------------------
+    it "CONCURRENT SELECT emits WaitGroup, Semaphore, and submitSpawn" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT(pool_size: 3) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("WaitGroup")
+      expect(out).to include("Semaphore")
+      expect(out).to include("submitSpawn")
+      expect(out).to include("__ConcSelCtx0")
+    end
+
+    it "CONCURRENT WHERE emits WaitGroup, Semaphore, and submitSpawn" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          evens = items s> CONCURRENT WHERE _ > 1.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("WaitGroup")
+      expect(out).to include("Semaphore")
+      expect(out).to include("submitSpawn")
+      expect(out).to include("__ConcWhrCtx0")
+    end
+
+    it "CONCURRENT EACH emits WaitGroup, Semaphore, and submitSpawn" do
+      out = transpile_fn(<<~CLEAR)
+        STRUCT Score { value: Number }
+        FN f() RETURNS Void ->
+          items: Score[] = [];
+          items s> CONCURRENT(pool_size: 2) EACH { _.value = 0.0; };
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("WaitGroup")
+      expect(out).to include("Semaphore")
+      expect(out).to include("submitSpawn")
+      expect(out).to include("__ConcEachCtx0")
+    end
+
+    it "CONCURRENT SELECT uses default pool_size 8 when omitted" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("Semaphore.init(@as(usize, @intCast(8))")
+    end
+
+    it "CONCURRENT SELECT fn OR PRUNE — expression type is unwrapped T (not !T)" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR PRUNE;
+          RETURN;
+        END
+      CLEAR
+      # Should not raise; resolved type is Number[] not !Number[]
+      expect { transpile_fn(src) }.not_to raise_error
+      out = transpile_fn(src)
+      expect(out).to include("__ConcSelCtx0")
+      # result type should be Number (not error union)
+      expect(out).to include("?f64")
+    end
+
+    it "CONCURRENT SELECT fn OR RAISE — expression type is unwrapped T" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR RAISE;
+          RETURN;
+        END
+      CLEAR
+      expect { transpile_fn(src) }.not_to raise_error
+      out = transpile_fn(src)
+      expect(out).to include("__ConcSelCtx0")
+      expect(out).to include("?f64")
+    end
+
+    it "CONCURRENT(pin: true) SELECT emits spawnBest instead of submitSpawn" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT(pool_size: 2, pin: true) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("spawnBest")
+      expect(out).not_to include("submitSpawn")
+    end
+
+    it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR PRUNE;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("catch return")
+    end
+
+    it "CONCURRENT SELECT fn OR RAISE emits cmpxchgStrong and @errorFromInt" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR RAISE;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("cmpxchgStrong")
+      expect(out).to include("@errorFromInt")
+    end
+
+    # -------------------------------------------------------------------------
+    # CONCURRENT option validation
+    # -------------------------------------------------------------------------
+    context "CONCURRENT option validation" do
+      it "rejects pool_size of 0" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT(pool_size: 0) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/pool_size must be greater than 0/)
+      end
+
+      it "rejects negative pool_size" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> CONCURRENT(pool_size: -1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/pool_size must be greater than 0/)
+      end
+
+      it "rejects unknown options" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/Unknown CONCURRENT option/)
+      end
+
+      it "rejects non-Bool pin value" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> CONCURRENT(pool_size: 4, pin: 1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/pin must be a Bool/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # CONCURRENT OR PRUNE / OR RAISE validation
+    # -------------------------------------------------------------------------
+    context "CONCURRENT OR PRUNE / OR RAISE validation" do
+      it "rejects OR PRUNE when expression is not error-returning" do
+        code = <<~CLEAR
+          FN double(x: Number) RETURNS Number ->
+            RETURN x * 2.0;
+          END
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT SELECT double(_) OR PRUNE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/OR PRUNE requires the expression to return an error union/)
+      end
+
+      it "rejects OR RAISE when expression is not error-returning" do
+        code = <<~CLEAR
+          FN double(x: Number) RETURNS Number ->
+            RETURN x * 2.0;
+          END
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT SELECT double(_) OR RAISE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/OR RAISE requires the expression to return an error union/)
+      end
+
+      it "accepts OR PRUNE when expression returns !T" do
+        code = <<~CLEAR
+          FN mayFail(x: Number) RETURNS !Number ->
+            RETURN x * 2.0;
+          END
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT SELECT mayFail(_) OR PRUNE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+  end
 end
 

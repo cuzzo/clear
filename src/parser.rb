@@ -127,6 +127,7 @@ class Parser
   primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :expression])
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :expression])
+  primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
 
   # Expression Grouping
   primary(:CHAR, '(') do
@@ -787,6 +788,10 @@ class Parser
     elsif match!(:KEYWORD, 'PASS')
       rhs = AST::OrPass.new(previous)
 
+    # Syntax: ... OR PRUNE (discard error, skip item — concurrent SELECT/WHERE)
+    elsif match!(:KEYWORD, 'PRUNE')
+      rhs = AST::OrPrune.new(previous)
+
     # Syntax: ... OR EXIT
     elsif match!(:KEYWORD, 'EXIT')
       exit_token = previous
@@ -1223,6 +1228,42 @@ class Parser
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
     Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
+  end
+
+  # Parses `CONCURRENT(pool_size: N)? SELECT|WHERE|EACH ...`
+  def parse_concurrent_op
+    token = consume(:KEYWORD, 'CONCURRENT')
+    options = {}
+    if match?(:CHAR, '(')
+      consume(:CHAR, '(')
+      loop do
+        key_tok = consume(:VAR_ID)
+        consume(:CHAR, ':')
+        val = parse_expression
+        options[key_tok.value] = val
+        break unless match?(:CHAR, ',')
+        consume(:CHAR, ',')
+      end
+      consume(:CHAR, ')')
+    end
+    inner_op = parse_concurrent_inner_op(token)
+    AST::ConcurrentOp.new(token, inner_op, options)
+  end
+
+  def parse_concurrent_inner_op(parent_token)
+    if match?(:KEYWORD, 'SELECT')
+      consume(:KEYWORD, 'SELECT')
+      expr = parse_expression
+      AST::SelectOp.new(previous, expr)
+    elsif match?(:KEYWORD, 'WHERE')
+      consume(:KEYWORD, 'WHERE')
+      expr = parse_expression
+      AST::WhereOp.new(previous, expr)
+    elsif match?(:KEYWORD, 'EACH')
+      parse_each_op
+    else
+      error!(current, "Expected SELECT, WHERE, or EACH after CONCURRENT, got #{current.value.inspect}")
+    end
   end
 
   # Parses `EACH { stmts... }` — side-effect block over a collection.

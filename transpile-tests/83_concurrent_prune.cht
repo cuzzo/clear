@@ -1,0 +1,17 @@
+-- Test: CONCURRENT SELECT with OR PRUNE — errors are swallowed, item skipped
+FN safeDouble(x: Number) RETURNS !Number ->
+    IF x == 3.0 THEN
+        RAISE "bad value";
+    END
+    RETURN x * 2.0;
+END
+
+FN cheatMain() RETURNS Void ->
+    nums: Number[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    -- item 3.0 will error and be pruned
+    results = nums s> CONCURRENT(pool_size: 3) SELECT safeDouble(_) OR PRUNE;
+    -- results should have [2.0, 4.0, 8.0, 10.0] (4 items, 3.0 pruned)
+    total = results s> SUM _;
+    ASSERT total == 24.0, "pruned result should sum to 24";
+    RETURN;
+END

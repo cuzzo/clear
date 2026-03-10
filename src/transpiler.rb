@@ -1206,11 +1206,13 @@ private
       msg = visit(node.message_expr)
       "return error.CheatError"
 
-    # Marker nodes for OR RAISE / OR PASS - handled in transpile_OrRescue
+    # Marker nodes for OR RAISE / OR PASS / OR PRUNE - handled in transpile_OrRescue
     when AST::OrRaise
       "error.OrRaise"  # Should not be visited directly
     when AST::OrPass
       "undefined"  # Should not be visited directly
+    when AST::OrPrune
+      "undefined"  # Should not be visited directly — handled in concurrent pipeline
 
     else
       raise "Unknown Node: #{node.class}"
@@ -1272,6 +1274,9 @@ private
 
     elsif node.right.is_a?(AST::MaxOp)
       return transpile_max(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::ConcurrentOp)
+      return transpile_concurrent(node)
     end
 
     # We construct a synthetic node that looks like the resulting function call.

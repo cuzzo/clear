@@ -274,11 +274,16 @@ module AST
   AverageOp = Struct.new(:token, :expression) { include Locatable } # Number
   MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
   MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
+  # ConcurrentOp: CONCURRENT modifier wrapping a pipeline op for parallel execution.
+  # op: SelectOp | WhereOp | EachOp
+  # options: Hash of String => ASTNode  (e.g. {"pool_size" => Literal(8)})
+  ConcurrentOp = Struct.new(:token, :op, :options) { include Locatable }
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
+  OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked

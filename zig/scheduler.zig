@@ -738,6 +738,75 @@ pub const WaitGroup = struct {
     }
 };
 
+pub const Semaphore = struct {
+    counter: std.atomic.Value(usize),
+    lock: std.atomic.Value(u32),
+    waiting_task: ?*Task,
+    sched: *Scheduler,
+
+    pub fn init(count: usize, sched: *Scheduler) Semaphore {
+        return .{
+            .counter = std.atomic.Value(usize).init(count),
+            .lock = std.atomic.Value(u32).init(0),
+            .waiting_task = null,
+            .sched = sched,
+        };
+    }
+
+    /// Acquire one slot. Blocks the calling fiber if no slots are available.
+    /// Only one fiber should call acquire() at a time (the spawner loop).
+    pub fn acquire(self: *Semaphore) void {
+        while (true) {
+            // Fast path: try CAS decrement
+            var c = self.counter.load(.seq_cst);
+            while (c > 0) {
+                if (self.counter.cmpxchgWeak(c, c - 1, .seq_cst, .seq_cst) == null) {
+                    return; // Acquired
+                }
+                c = self.counter.load(.seq_cst);
+            }
+
+            // Slow path: must block
+            const task = self.sched.getCurrent();
+            task.status = .Blocked;
+
+            while (self.lock.swap(1, .acquire) == 1) {
+                std.Thread.yield() catch {};
+            }
+            // Double-check inside lock
+            const recheck = self.counter.load(.seq_cst);
+            if (recheck > 0) {
+                self.lock.store(0, .release);
+                task.status = .Ready;
+                continue;
+            }
+            self.waiting_task = task;
+            self.lock.store(0, .release);
+
+            task.base.yield();
+            task.status = .Ready;
+            // Slot was granted by release() directly — return
+            return;
+        }
+    }
+
+    /// Release one slot. Wakes a blocked acquirer if present; otherwise increments counter.
+    pub fn release(self: *Semaphore) void {
+        while (self.lock.swap(1, .acquire) == 1) {
+            std.Thread.yield() catch {};
+        }
+        if (self.waiting_task) |task| {
+            // Grant slot directly to waiter (don't increment counter)
+            self.waiting_task = null;
+            self.lock.store(0, .release);
+            self.sched.schedule(task);
+        } else {
+            self.lock.store(0, .release);
+            _ = self.counter.fetchAdd(1, .seq_cst);
+        }
+    }
+};
+
 // Poller lets us make IO & other sys calls without blocking
 // Without this, green fibers are pretty much useless
 // This only works on Linux for now

@@ -1,0 +1,17 @@
+-- Test: CONCURRENT WHERE — parallel filter
+STRUCT Item { value: Number }
+
+FN isPositive(x: Number) RETURNS Bool ->
+    RETURN x > 0.0;
+END
+
+FN cheatMain() RETURNS Void ->
+    items: Item[] = [Item{value: -1.0}, Item{value: 2.0}, Item{value: -3.0}, Item{value: 4.0}, Item{value: 5.0}, Item{value: 6.0}];
+
+    -- CONCURRENT WHERE: filter to positive values (pool_size: 4)
+    positives = items s> CONCURRENT(pool_size: 4) WHERE isPositive(_.value);
+    total = positives s> SUM _.value;
+    ASSERT total == 17.0, "sum of positive values [2,4,5,6] should be 17";
+
+    RETURN;
+END

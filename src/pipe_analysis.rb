@@ -46,7 +46,8 @@ module PipeAnalysis
     node.is_a?(AST::SumOp) ||
     node.is_a?(AST::AverageOp) ||
     node.is_a?(AST::MinOp) ||
-    node.is_a?(AST::MaxOp)
+    node.is_a?(AST::MaxOp) ||
+    node.is_a?(AST::ConcurrentOp)
   end
 
   def analyze_higher_order_op(node)
@@ -79,6 +80,8 @@ module PipeAnalysis
       analyze_min_op(node)
     when AST::MaxOp
       analyze_max_op(node)
+    when AST::ConcurrentOp
+      analyze_concurrent_op(node)
     end
   end
 
@@ -460,6 +463,80 @@ module PipeAnalysis
 
     node.full_type = :Number
     node.storage   = :stack
+  end
+
+  VALID_CONCURRENT_OPTIONS = %w[pool_size pin].freeze
+
+  def analyze_concurrent_op(node)
+    conc    = node.right   # the ConcurrentOp node
+    options = conc.options
+
+    # Validate pool_size option if present
+    if (ps = options["pool_size"])
+      visit(ps)
+      unless [:Number, :Int64].include?(ps.resolved_type)
+        error!(ps, "CONCURRENT pool_size must be a number, got #{ps.resolved_type}")
+      end
+      # Validate pool_size > 0 for literal values (including negated literals like -1)
+      literal_val = if ps.is_a?(AST::Literal)
+        ps.value.to_f
+      elsif ps.is_a?(AST::UnaryOp) && ps.op == :SUB && ps.right.is_a?(AST::Literal)
+        -ps.right.value.to_f
+      end
+      if literal_val && literal_val <= 0
+        error!(ps, "CONCURRENT pool_size must be greater than 0, got #{literal_val.to_i}")
+      end
+    end
+
+    # Validate pin option is Bool if present
+    if (pin_val = options["pin"])
+      # true/false may appear as lowercase identifiers (VAR_ID) or BOOLEAN literals
+      is_bool = (pin_val.is_a?(AST::Literal) && pin_val.type == :BOOLEAN) ||
+                (pin_val.is_a?(AST::Identifier) && %w[true false].include?(pin_val.name))
+      unless is_bool
+        error!(pin_val, "CONCURRENT pin must be a Bool (true or false), got #{pin_val.class.name.split('::').last}")
+      end
+    end
+
+    # Validate that only known option keys are used
+    options.each_key do |key|
+      unless VALID_CONCURRENT_OPTIONS.include?(key)
+        error!(conc, "Unknown CONCURRENT option '#{key}'. Valid options: #{VALID_CONCURRENT_OPTIONS.join(', ')}")
+      end
+    end
+
+    # Type analysis for concurrent ops is identical to synchronous versions.
+    # Create a proxy BinaryOp(SMOOTH, left, inner_op) so we can reuse the existing analyze_* methods.
+    proxy = AST::BinaryOp.new(node.token, node.left, :SMOOTH, conc.op)
+
+    case conc.op
+    when AST::SelectOp, AST::WhereOp
+      analyze_select_family_op(proxy)
+    when AST::EachOp
+      analyze_each_op(proxy)
+    else
+      error!(conc, "CONCURRENT does not support #{conc.op.class.name.split('::').last}")
+    end
+
+    # Validate that OR PRUNE / OR RAISE is only used with error-returning expressions
+    inner_expr = case conc.op
+    when AST::SelectOp, AST::WhereOp then conc.op.expression
+    else nil
+    end
+
+    if inner_expr.is_a?(AST::BinaryOp) && inner_expr.op == :OR_RESCUE
+      modifier = inner_expr.right
+      if modifier.is_a?(AST::OrPrune) || modifier.is_a?(AST::OrRaise)
+        inner_fn_type = inner_expr.left.type_info
+        unless inner_fn_type&.error_union?
+          mod_name = modifier.is_a?(AST::OrPrune) ? "OR PRUNE" : "OR RAISE"
+          error!(modifier, "#{mod_name} requires the expression to return an error union (!T), but got #{inner_expr.left.resolved_type}")
+        end
+      end
+    end
+
+    node.full_type = proxy.full_type
+    node.storage   = proxy.storage
   end
 
   # Helper to validate array/pool input for higher-order ops.

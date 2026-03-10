@@ -589,6 +589,274 @@ module PipelineGenerator
     end
   end
 
+  # =========================================================
+  # CONCURRENT modifier: parallel SELECT, WHERE, EACH
+  # =========================================================
+
+  def transpile_concurrent(smooth_node)
+    lhs     = smooth_node.left
+    conc    = smooth_node.right   # ConcurrentOp
+    inner   = conc.op
+    options = conc.options
+
+    @conc_counter ||= 0
+    id = @conc_counter
+    @conc_counter += 1
+
+    pool_size_code = options["pool_size"] ? visit(options["pool_size"]) : "8"
+    rt_name = @do_rt_name || "rt"
+
+    case inner
+    when AST::SelectOp
+      transpile_concurrent_select(lhs, inner, id, pool_size_code, rt_name, options)
+    when AST::WhereOp
+      transpile_concurrent_where(lhs, inner, id, pool_size_code, rt_name, options)
+    when AST::EachOp
+      transpile_concurrent_each(lhs, inner, id, pool_size_code, rt_name, options)
+    end
+  end
+
+  # Returns the Zig spawn call: spawnBest (pin: true) or submitSpawn (default)
+  def concurrent_spawn_call(options, wg_var, ctx_type, ctx_var)
+    pinned = options["pin"]
+    if pinned
+      "try CheatHeader.spawnBest(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    .{},\n);"
+    else
+      "try #{wg_var}.sched.submitSpawn(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    .{},\n);"
+    end
+  end
+
+  # Inspect the expression for OR PRUNE / OR RAISE error policy
+  # Returns [:prune, inner_expr], [:raise, inner_expr], or [:default, expr]
+  def extract_concurrent_error_policy(expr)
+    if expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
+      if expr.right.is_a?(AST::OrPrune)
+        return [:prune, expr.left]
+      elsif expr.right.is_a?(AST::OrRaise)
+        return [:raise, expr.left]
+      end
+    end
+    [:default, expr]
+  end
+
+  def transpile_concurrent_select(list_node, select_op, id, pool_size_code, rt_name, options = {})
+    policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
+
+    result_type_sym = select_op.expression.full_type
+    result_zig = transpile_type(result_type_sym)
+    item_zig   = transpile_type(list_node.type_info.element_type.resolved)
+
+    list_code  = visit(list_node)
+    lhs_type   = list_node.type_info
+    items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
+
+    @placeholder_name = "ctx.item"
+    inner_code = with_fiber_capture_map({}) { visit(inner_expr) }
+    @placeholder_name = nil
+    bare_code = inner_code.sub(/^try /, '')
+
+    err_field   = policy == :raise ? "\n              err:    *std.atomic.Value(u16)," : ""
+    err_ctx_init = policy == :raise ? "\n                  .err    = &__ccs#{id}_err," : ""
+    err_decl    = policy == :raise ? "\n          var __ccs#{id}_err = std.atomic.Value(u16).init(0);" : ""
+    err_check   = policy == :raise ? "\n          const __ccs#{id}_err_code = __ccs#{id}_err.load(.seq_cst);\n          if (__ccs#{id}_err_code != 0) return @errorFromInt(__ccs#{id}_err_code);" : ""
+
+    fiber_result_code = case policy
+    when :prune
+      "const __cv = #{bare_code} catch return;\n                  ctx.result.* = __cv;"
+    when :raise
+      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      return;\n                  };\n                  ctx.result.* = __cv;"
+    else
+      "ctx.result.* = #{inner_code};"
+    end
+
+    spawn_call = concurrent_spawn_call(options, "__ccs#{id}_wg", "__ConcSelCtx#{id}", "__ccs#{id}_ctxs[__ccs#{id}_i]")
+
+    <<~ZIG.chomp
+      blk: {
+          const pipe_src_list = #{list_code};
+          _ = &pipe_src_list;
+          #{items_block}
+          const __ConcSelCtx#{id} = struct {
+              wg:     *CheatHeader.WaitGroup,
+              sem:    *CheatHeader.Semaphore,
+              item:   #{item_zig},
+              result: *?#{result_zig},#{err_field}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  defer ctx.sem.release();
+                  #{fiber_result_code}
+              }
+          };
+          const __ccs#{id}_len = pipe_items.len;
+          var __ccs#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{result_zig}, __ccs#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__ccs#{id}_results);
+          for (__ccs#{id}_results) |*__s| __s.* = null;
+          var __ccs#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcSelCtx#{id}, __ccs#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__ccs#{id}_ctxs);#{err_decl}
+          var __ccs#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          var __ccs#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
+          __ccs#{id}_wg.add(__ccs#{id}_len);
+          for (pipe_items, 0..) |__ccs#{id}_it, __ccs#{id}_i| {
+              __ccs#{id}_sem.acquire();
+              __ccs#{id}_ctxs[__ccs#{id}_i] = .{
+                  .wg     = &__ccs#{id}_wg,
+                  .sem    = &__ccs#{id}_sem,
+                  .item   = __ccs#{id}_it,
+                  .result = &__ccs#{id}_results[__ccs#{id}_i],#{err_ctx_init}
+              };
+              #{spawn_call}
+          }
+          __ccs#{id}_wg.wait();#{err_check}
+          var __ccs#{id}_final = std.ArrayListUnmanaged(#{result_zig}){};
+          for (__ccs#{id}_results) |__ccs#{id}_slot| {
+              if (__ccs#{id}_slot) |__v| try __ccs#{id}_final.append(#{rt_name}.heapAlloc(), __v);
+          }
+          break :blk __ccs#{id}_final;
+      }
+    ZIG
+  end
+
+  def transpile_concurrent_where(list_node, where_op, id, pool_size_code, rt_name, options = {})
+    policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
+
+    item_type_str = list_node.full_type.to_s.gsub(/[\[\]]/, '')
+    item_zig      = transpile_type(item_type_str)
+
+    list_code  = visit(list_node)
+    lhs_type   = list_node.type_info
+    items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
+
+    @placeholder_name = "ctx.item"
+    inner_code = with_fiber_capture_map({}) { visit(inner_expr) }
+    @placeholder_name = nil
+    bare_code = inner_code.sub(/^try /, '')
+
+    err_field    = policy == :raise ? "\n              err:    *std.atomic.Value(u16)," : ""
+    err_ctx_init = policy == :raise ? "\n                  .err    = &__ccw#{id}_err," : ""
+    err_decl     = policy == :raise ? "\n          var __ccw#{id}_err = std.atomic.Value(u16).init(0);" : ""
+    err_check    = policy == :raise ? "\n          const __ccw#{id}_err_code = __ccw#{id}_err.load(.seq_cst);\n          if (__ccw#{id}_err_code != 0) return @errorFromInt(__ccw#{id}_err_code);" : ""
+
+    pred_body = case policy
+    when :prune
+      "const __cv = #{bare_code} catch return;\n                  if (__cv) ctx.result.* = ctx.item;"
+    when :raise
+      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      return;\n                  };\n                  if (__cv) ctx.result.* = ctx.item;"
+    else
+      "if (#{inner_code}) ctx.result.* = ctx.item;"
+    end
+
+    spawn_call = concurrent_spawn_call(options, "__ccw#{id}_wg", "__ConcWhrCtx#{id}", "__ccw#{id}_ctxs[__ccw#{id}_i]")
+
+    <<~ZIG.chomp
+      blk: {
+          const pipe_src_list = #{list_code};
+          _ = &pipe_src_list;
+          #{items_block}
+          const __ConcWhrCtx#{id} = struct {
+              wg:     *CheatHeader.WaitGroup,
+              sem:    *CheatHeader.Semaphore,
+              item:   #{item_zig},
+              result: *?#{item_zig},#{err_field}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  defer ctx.sem.release();
+                  #{pred_body}
+              }
+          };
+          const __ccw#{id}_len = pipe_items.len;
+          var __ccw#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{item_zig}, __ccw#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__ccw#{id}_results);
+          for (__ccw#{id}_results) |*__s| __s.* = null;
+          var __ccw#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcWhrCtx#{id}, __ccw#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__ccw#{id}_ctxs);#{err_decl}
+          var __ccw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          var __ccw#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
+          __ccw#{id}_wg.add(__ccw#{id}_len);
+          for (pipe_items, 0..) |__ccw#{id}_it, __ccw#{id}_i| {
+              __ccw#{id}_sem.acquire();
+              __ccw#{id}_ctxs[__ccw#{id}_i] = .{
+                  .wg     = &__ccw#{id}_wg,
+                  .sem    = &__ccw#{id}_sem,
+                  .item   = __ccw#{id}_it,
+                  .result = &__ccw#{id}_results[__ccw#{id}_i],#{err_ctx_init}
+              };
+              #{spawn_call}
+          }
+          __ccw#{id}_wg.wait();#{err_check}
+          var __ccw#{id}_final = std.ArrayListUnmanaged(#{item_zig}){};
+          for (__ccw#{id}_results) |__ccw#{id}_slot| {
+              if (__ccw#{id}_slot) |__v| try __ccw#{id}_final.append(#{rt_name}.heapAlloc(), __v);
+          }
+          break :blk __ccw#{id}_final;
+      }
+    ZIG
+  end
+
+  def transpile_concurrent_each(list_node, each_op, id, pool_size_code, rt_name, options = {})
+    item_zig = transpile_type(list_node.type_info.element_type.resolved)
+
+    list_code  = visit(list_node)
+    lhs_type   = list_node.type_info
+    items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
+
+    @placeholder_name = "__each_item"
+    body_code = with_fiber_capture_map({}) do
+      each_op.body.map { |stmt|
+        code = visit(stmt)
+        code.strip.end_with?(";") ? code : "#{code};"
+      }.join("\n                ")
+    end
+    @placeholder_name = nil
+
+    spawn_call = concurrent_spawn_call(options, "__cce#{id}_wg", "__ConcEachCtx#{id}", "__cce#{id}_ctxs[__cce#{id}_i]")
+
+    <<~ZIG.chomp
+      {
+          const pipe_src_list = #{list_code};
+          _ = &pipe_src_list;
+          #{items_block}
+          const __cce#{id}_len = pipe_items.len;
+          if (__cce#{id}_len == 0) {} else {
+          const __ConcEachCtx#{id} = struct {
+              wg:       *CheatHeader.WaitGroup,
+              sem:      *CheatHeader.Semaphore,
+              item_ptr: *#{item_zig},
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  defer ctx.sem.release();
+                  const __each_item = ctx.item_ptr;
+                  #{body_code}
+              }
+          };
+          var __cce#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcEachCtx#{id}, __cce#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__cce#{id}_ctxs);
+          var __cce#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          var __cce#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
+          __cce#{id}_wg.add(__cce#{id}_len);
+          for (pipe_items, 0..) |*__cce#{id}_it, __cce#{id}_i| {
+              __cce#{id}_sem.acquire();
+              __cce#{id}_ctxs[__cce#{id}_i] = .{
+                  .wg       = &__cce#{id}_wg,
+                  .sem      = &__cce#{id}_sem,
+                  .item_ptr = __cce#{id}_it,
+              };
+              #{spawn_call}
+          }
+          __cce#{id}_wg.wait();
+          }
+      }
+    ZIG
+  end
+
   def visit_Placeholder(node)
     # Return the name of the loop variable
     @placeholder_name || (raise "Use of '_' outside of SELECT context")

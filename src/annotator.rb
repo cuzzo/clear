@@ -1960,6 +1960,17 @@ private
       return
     end
 
+    # Handle OR PRUNE: discard error, skip item (used in CONCURRENT SELECT/WHERE)
+    if node.right.is_a?(AST::OrPrune)
+      if t_left_type.error_union?
+        # Unwrap to payload type - error causes item to be skipped
+        node.full_type = t_left_type.payload_type.resolved
+      else
+        node.full_type = t_left_type.resolved
+      end
+      return
+    end
+
     # Handle error union types: !T OR default -> T
     if t_left_type.error_union?
       payload_type = t_left_type.payload_type
@@ -1994,6 +2005,12 @@ private
 
   def visit_OrPass(node)
     # This is a marker node for OR PASS - no type annotation needed
+    # The actual type handling is done in visit_OrRescue
+    node.full_type = :Void
+  end
+
+  def visit_OrPrune(node)
+    # This is a marker node for OR PRUNE - no type annotation needed
     # The actual type handling is done in visit_OrRescue
     node.full_type = :Void
   end
