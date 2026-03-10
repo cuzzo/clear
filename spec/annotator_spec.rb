@@ -1543,7 +1543,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
       it "resolves split to a List of Strings" do
-        expect(result).to eq(:"String")
+        expect(result).to eq(:"String[]")
       end
     end
 
@@ -1630,7 +1630,7 @@ RSpec.describe SemanticAnnotator do
     context "Basic Projection: list s> SELECT _.method()" do
       let(:code) {
         <<~FLUX
-          words: String = ["a", "bb", "ccc"];
+          words: String[] = ["a", "bb", "ccc"];
           -- Project List<String> -> List<Int64> using .length()
           lengths = words s> SELECT _.length();
         FLUX
