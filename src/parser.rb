@@ -1375,9 +1375,65 @@ class Parser
       return parse_bg_stream_block(bg_token)
     end
     consume(:CHAR, '{')
-    body = parse_block_body(['}'])
+    body = parse_bg_then_body
     consume(:CHAR, '}')
     AST::BgBlock.new(bg_token, body, nil)
+  end
+
+  # Custom body parser for BG blocks that recognises THEN chains.
+  def parse_bg_then_body
+    stmts = []
+    until match?(:CHAR, '}') || match?(:EOF)
+      stmt = parse_bg_body_stmt
+      stmts << stmt if stmt
+    end
+    stmts
+  end
+
+  # Parse one statement from a BG block body.
+  # If the expression is followed by AS or THEN, builds a ThenChain node.
+  def parse_bg_body_stmt
+    # Keywordless bind/assign: x = ..., x.field = ..., x[0] = ...
+    if current.type == :VAR_ID
+      result = try_parse_bind_or_assign
+      return result if result
+    end
+
+    # Keyword statements (IF, WHILE, RETURN, etc.) — cannot start THEN chains
+    rule = @@stmt_rules[[current.type, current.value]]
+    return instance_exec(&rule) if rule
+
+    expr = parse_expression
+
+    # THEN chain: expr [AS name] THEN expr [AS name] THEN ...
+    if match?(:KEYWORD, 'AS') || match?(:KEYWORD, 'THEN')
+      binding_name = nil
+      if match?(:KEYWORD, 'AS')
+        consume(:KEYWORD, 'AS')
+        binding_name = consume(:VAR_ID).value
+      end
+
+      unless match?(:KEYWORD, 'THEN')
+        error!(current, "Expected THEN after AS binding in BG block, got #{current.value.inspect}")
+      end
+
+      steps = [{ expr: expr, binding: binding_name }]
+      while match?(:KEYWORD, 'THEN')
+        consume(:KEYWORD, 'THEN')
+        next_expr = parse_expression
+        next_binding = nil
+        if match?(:KEYWORD, 'AS')
+          consume(:KEYWORD, 'AS')
+          next_binding = consume(:VAR_ID).value
+        end
+        steps << { expr: next_expr, binding: next_binding }
+      end
+      match!(:CHAR, ';')
+      return AST::ThenChain.new(steps.first[:expr].token, steps)
+    end
+
+    consume(:CHAR, ';')
+    expr
   end
 
   def parse_bg_stream_block(bg_token)

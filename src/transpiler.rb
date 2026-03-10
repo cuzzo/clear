@@ -833,20 +833,45 @@ private
 
       rt_name = @do_rt_name || "rt"
 
-      # Transpile body inside fiber — captured vars rewritten to ctx.name (by-value, not pointer)
-      body_stmts = node.body.dup
-      last_expr  = body_stmts.pop
+      # Flatten ThenChain nodes in the body into individual steps.
+      # Each flat step is { expr: ASTNode, binding: String|nil }.
+      # Non-ThenChain body nodes become steps with binding=nil.
+      flat_steps = []
+      node.body.each do |stmt|
+        if stmt.is_a?(AST::ThenChain)
+          stmt.steps.each { |s| flat_steps << s }
+        else
+          flat_steps << { expr: stmt, binding: nil }
+        end
+      end
+
+      last_step  = flat_steps.pop
+      pre_steps  = flat_steps
 
       stmt_code, result_line = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h) do
-        stmts = body_stmts.map { |e|
-          code = visit(e)
-          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-          code
+        stmts = pre_steps.map { |step|
+          code = visit(step[:expr])
+          if step[:binding]
+            # Binding: emit as a const declaration for use in subsequent steps
+            "const #{step[:binding]} = #{code};"
+          else
+            # No binding: emit as a statement.
+            # If the code is already a complete statement (ends with ; or }), emit as-is.
+            # Otherwise, discard non-void results with _ = to satisfy Zig.
+            if code.strip.end_with?(";") || code.strip.end_with?("}")
+              code
+            else
+              expr_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type : :Void
+              is_void_step = expr_type.nil? || expr_type == :Void ||
+                             (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+              is_void_step ? "#{code};" : "_ = #{code};"
+            end
+          end
         }.join("\n            ")
-        result = if last_expr.nil? || is_void
-          last_expr ? "#{visit(last_expr)};" : ""
+        result = if last_step.nil? || is_void
+          last_step ? "#{visit(last_step[:expr])};" : ""
         else
-          "ctx.inner.result = #{visit(last_expr)};"
+          "ctx.inner.result = #{visit(last_step[:expr])};"
         end
         [stmts, result]
       end
@@ -1214,6 +1239,9 @@ private
     when AST::OrPrune
       "undefined"  # Should not be visited directly — handled in concurrent pipeline
 
+    when AST::ThenChain
+      raise "Internal: ThenChain node reached visit() — should be flattened by BgBlock transpiler"
+
     else
       raise "Unknown Node: #{node.class}"
     end
@@ -1505,6 +1533,10 @@ private
       if (e.is_a?(AST::BindExpr) || e.is_a?(AST::VarDecl)) && e.name.is_a?(String)
         locally_bound = locally_bound | Set[e.name]
       end
+      # ThenChain: all step bindings are locally declared inside the fiber.
+      if e.is_a?(AST::ThenChain)
+        e.steps.each { |step| locally_bound = locally_bound | Set[step[:binding]] if step[:binding] }
+      end
     end
     result
   end
@@ -1513,6 +1545,16 @@ private
     return unless node.is_a?(AST::Locatable)
     if node.is_a?(AST::Identifier)
       result[node.name] ||= node.type_info unless locally_bound.include?(node.name)
+      return
+    end
+    # ThenChain: process steps in order, accumulating bindings into locally_bound
+    # so later steps that reference earlier bindings are NOT captured from outer scope.
+    if node.is_a?(AST::ThenChain)
+      lb = locally_bound
+      node.steps.each do |step|
+        walk_do_identifiers(step[:expr], result, lb)
+        lb = lb | Set[step[:binding]] if step[:binding]
+      end
       return
     end
     # WithBlock: visit var_nodes as outer refs but exclude aliases from capture.

@@ -341,6 +341,12 @@ module AST
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   BgBlock           = Struct.new(:token, :body, :deferred_drops) { include Locatable }
 
+  # ThenChain: sequential chaining of steps inside a BG block fiber.
+  # steps: Array of { expr: ASTNode, binding: String | nil }
+  # Each step may bind its result to a name for use in subsequent steps.
+  # The last step's type determines the ThenChain's full_type.
+  ThenChain         = Struct.new(:token, :steps) { include Locatable }
+
   # BgStreamBlock: background generator — spawns a fiber that YIELDs values into a Stream.
   # body: Array of statements; YIELD expressions push values. Returns ~T[?] (open stream).
   BgStreamBlock     = Struct.new(:token, :body, :deferred_drops) { include Locatable }

@@ -2230,6 +2230,32 @@ private
     node.full_type = :"~#{last_type}"
   end
 
+  def visit_ThenChain(node)
+    # Sequential chaining: each step runs in order inside the same fiber.
+    # Steps with AS bindings declare a local variable accessible to later steps.
+    # The last step's type determines the ThenChain's type.
+    last_type = :Void
+    node.steps.each do |step|
+      visit(step[:expr])
+      step_type = step[:expr].respond_to?(:full_type) ? (step[:expr].full_type || :Void) : :Void
+
+      if step[:binding]
+        current_scope.declare(
+          step[:binding],
+          nil,
+          step_type,
+          false,  # immutable
+          false,  # not rebindable
+          nil,
+          :stack
+        )
+      end
+
+      last_type = step_type
+    end
+    node.full_type = last_type
+  end
+
   def visit_NextExpr(node)
     visit(node.expr)
     promise_type = Type.new(node.expr.full_type || :Void)

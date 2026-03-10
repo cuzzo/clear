@@ -11173,5 +11173,128 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===========================================================================
+  # BG THEN chains
+  # ===========================================================================
+  describe "BG THEN chains" do
+    it "two-step THEN chain resolves to the last step's type" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { 5.0 AS n THEN double(n) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+
+    it "three-step THEN chain resolves to the last step's type" do
+      code = <<~CLEAR
+        FN add_one(x: Number) RETURNS Number ->
+          RETURN x + 1.0;
+        END
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+
+    it "THEN without AS binding resolves to last step's type" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { double(1.0) THEN double(2.0) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+
+    it "AS binding is accessible to subsequent THEN steps" do
+      code = <<~CLEAR
+        FN add(a: Number, b: Number) RETURNS Number ->
+          RETURN a + b;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { 3.0 AS x THEN add(x, x) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "raises a parse error when AS appears without THEN" do
+      code = <<~CLEAR
+        FN foo() RETURNS Number ->
+          RETURN 1.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { foo() AS f; };
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/Expected THEN after AS binding/)
+    end
+
+    it "ThenChain node is produced in BG block body" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { double(1.0) AS r THEN double(r) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+                  .body.first.value
+      expect(bg_node.body.first).to be_a(AST::ThenChain)
+    end
+
+    it "THEN chain mixed with a setup statement resolves correctly" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG {
+            n = double(1.0);
+            n AS x THEN double(x)
+          };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+  end
 end
 

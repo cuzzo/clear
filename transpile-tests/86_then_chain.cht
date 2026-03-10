@@ -1,0 +1,57 @@
+-- BG THEN chains: sequential chaining of steps inside a single background fiber.
+-- `expr AS name THEN next_expr` runs steps in order; result is last step's value.
+
+FN double(x: Number) RETURNS Number ->
+    RETURN x * 2.0;
+END
+
+FN add_one(x: Number) RETURNS Number ->
+    RETURN x + 1.0;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: Simple two-step THEN chain with AS binding.
+    -- add_one(5) = 6, double(6) = 12
+    -- -------------------------------------------------------
+    h1 = BG { add_one(5.0) AS r THEN double(r) };
+    v1: Number = NEXT h1;
+    ASSERT v1 == 12.0, "two-step THEN chain: add_one(5) AS r THEN double(r)";
+
+    -- -------------------------------------------------------
+    -- Test 2: Three-step chain with AS bindings.
+    -- add_one(2) = 3, double(3) = 6, add_one(6) = 7
+    -- -------------------------------------------------------
+    h2 = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
+    v2: Number = NEXT h2;
+    ASSERT v2 == 7.0, "three-step THEN chain";
+
+    -- -------------------------------------------------------
+    -- Test 3: THEN without AS binding (first step result discarded).
+    -- First step runs for side effects; last step is the promise value.
+    -- -------------------------------------------------------
+    h3 = BG { add_one(99.0) THEN double(10.0) };
+    v3: Number = NEXT h3;
+    ASSERT v3 == 20.0, "THEN without binding: first step discarded, last step is result";
+
+    -- -------------------------------------------------------
+    -- Test 4: Regular body statement followed by THEN chain.
+    -- n = add_one(1) = 2.0, double(2) = 4.0
+    -- -------------------------------------------------------
+    h4 = BG {
+        n = add_one(1.0);
+        n AS x THEN double(x)
+    };
+    v4: Number = NEXT h4;
+    ASSERT v4 == 4.0, "setup stmt then THEN chain";
+
+    -- -------------------------------------------------------
+    -- Test 5: THEN chain captures outer variable.
+    -- -------------------------------------------------------
+    base: Number = 3.0;
+    h5 = BG { add_one(base) AS r THEN double(r) };
+    v5: Number = NEXT h5;
+    ASSERT v5 == 8.0, "THEN chain captures outer var: add_one(3)=4, double(4)=8";
+
+    RETURN;
+END
