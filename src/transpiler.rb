@@ -317,10 +317,10 @@ private
     # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
-      # Bounded streams and shared promises must be `var` even when declared immutable
-      # in CLEAR, because their next() methods take *Self (mutate internal state).
+      # Bounded streams, shared promises, and open streams must be `var` even when declared
+      # immutable in CLEAR, because their next() methods take *Self (mutate internal state).
       ft = Type.new(node.full_type || :Void)
-      is_mutable ||= ft.bounded_stream? || ft.shared_promise?
+      is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       annotation = ZIG_PRIMITIVES.include?(zig_type) ? ": #{zig_type}" : ""
@@ -887,6 +887,83 @@ private
             break :#{blk_label} #{promise_var};
         }
       ZIG
+
+    when AST::BgStreamBlock
+      @stream_gen_counter ||= 0
+      id = @stream_gen_counter
+      @stream_gen_counter += 1
+
+      tense_t    = Type.new(node.full_type || :"~Void[?]")
+      elem_t     = tense_t.open_stream_element_type
+      stream_zig = tense_t.zig_type  # "CheatLib.Stream(Number)"
+
+      ctx_type     = "__SgCtx#{id}"
+      alloc_var    = "__sg#{id}_alloc"
+      stream_var   = "__sg#{id}_stream"
+      ctx_var      = "__sg#{id}_ctx"
+      blk_label    = "__sg#{id}"
+      local_stream = "__sg#{id}_local"
+
+      captured = collect_do_identifiers(node.body)
+
+      capture_fields = captured.map do |name, type_obj|
+        zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
+        "#{name}: #{zig_t},"
+      end.join("\n        ")
+
+      capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
+        captured.map { |name, _| ".#{name} = #{name}" }).join(", ")
+
+      rt_name = @do_rt_name || "rt"
+
+      capture_map = captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
+
+      body_code = with_fiber_capture_map(capture_map) do
+        node.body.map do |expr|
+          if expr.is_a?(AST::YieldExpr)
+            "try #{local_stream}.push(#{visit(expr.expr)});"
+          else
+            code = visit(expr)
+            code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+            code
+          end
+        end.join("\n            ")
+      end
+
+      <<~ZIG.chomp
+        #{blk_label}: {
+            const #{ctx_type} = struct {
+                stream_inner: *#{stream_zig}.Inner,
+                alloc: std.mem.Allocator,
+                #{capture_fields}
+                fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                    const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                    _ = &__rt;
+                    const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                    defer ctx.alloc.destroy(ctx);
+                    var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
+                    defer #{local_stream}.close();
+                    #{body_code}
+                }
+            };
+            const #{alloc_var} = #{rt_name}.getSched().allocator;
+            var #{stream_var} = try #{stream_zig}.spawnNew(#{alloc_var}, #{rt_name}.getSched());
+            const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
+            #{ctx_var}.* = .{ #{capture_inits} };
+            try #{rt_name}.getSched().submitSpawn(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                #{ctx_var},
+                .{},
+            );
+            break :#{blk_label} #{stream_var};
+        }
+      ZIG
+
+    when AST::YieldExpr
+      # Should not normally be reached — BgStreamBlock handles YieldExpr inline.
+      # This fallback silences "unhandled node" warnings in edge cases.
+      "/* yield #{visit(node.expr)} */"
 
     when AST::NextExpr
       "#{visit(node.expr)}.next()"

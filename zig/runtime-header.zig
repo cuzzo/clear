@@ -964,6 +964,77 @@ pub const CheatLib = struct {
         };
     }
 
+    // -----------------------------------------------------------------------
+    // Stream(T): An open/closeable generator stream. Corresponds to ~T[?] in CLEAR.
+    //
+    // A BG STREAM { YIELD x; } block spawns a generator fiber that calls push() for
+    // each YIELD and close() when the body completes. The consumer calls next() to
+    // retrieve values one by one; next() returns null when the stream is exhausted.
+    //
+    // First next() call blocks via WaitGroup until the generator fiber has finished
+    // (buffered all values). Subsequent next() calls return immediately from the buffer.
+    //
+    // Lifecycle:
+    //   Spawn:   var s = try CheatLib.Stream(f64).spawnNew(alloc, sched);
+    //   In gen:  var local = CheatLib.Stream(f64){ .inner = ctx.stream_inner, .alloc = ctx.alloc };
+    //            defer local.close();
+    //            try local.push(1.0); try local.push(2.0);
+    //   Consume: const v1 = s.next(); // ?f64 — blocks until generator done, then pops
+    //            const v2 = s.next(); // ?f64 — pops next item
+    //            const v3 = s.next(); // null — exhausted
+    //   Cleanup: defer s.deinit();    // frees Inner + buffer
+    pub fn Stream(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            pub const Inner = struct {
+                items: std.ArrayListUnmanaged(T) = .{},
+                wg: WaitGroup = undefined,
+            };
+
+            inner: *Inner,
+            alloc: std.mem.Allocator,
+            head: usize = 0,
+
+            /// Allocate an Inner on the heap, initialize the WaitGroup, and return the Stream handle.
+            pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
+                _ = sched;
+                const inner = try alloc.create(Inner);
+                inner.* = .{ .items = .{}, .wg = WaitGroup{} };
+                inner.wg.add(1);
+                return Self{ .inner = inner, .alloc = alloc, .head = 0 };
+            }
+
+            /// Called by the generator fiber to buffer a yielded value.
+            pub fn push(self: *Self, val: T) !void {
+                try self.inner.items.append(self.alloc, val);
+            }
+
+            /// Called by the generator fiber (via defer) when its body finishes.
+            /// Signals the consumer that all values have been buffered.
+            pub fn close(self: *Self) void {
+                self.inner.wg.done();
+            }
+
+            /// Consume the next buffered value.
+            /// Blocks on the first call until the generator fiber has finished.
+            /// Returns null when all yielded values have been consumed.
+            pub fn next(self: *Self) ?T {
+                self.inner.wg.wait();
+                if (self.head >= self.inner.items.items.len) return null;
+                const val = self.inner.items.items[self.head];
+                self.head += 1;
+                return val;
+            }
+
+            /// Free the buffer and Inner allocation. Call once when done consuming.
+            pub fn deinit(self: *Self) void {
+                self.inner.items.deinit(self.alloc);
+                self.alloc.destroy(self.inner);
+            }
+        };
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});

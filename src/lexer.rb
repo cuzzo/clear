@@ -21,6 +21,7 @@ class Lexer
       MATCH START DEFAULT WHEN IFF
       PUB PRIVATE
       EXTERN FROM
+      STREAM YIELD
     ].to_set
 
   def initialize(source)

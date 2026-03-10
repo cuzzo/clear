@@ -302,8 +302,14 @@ class Type
   end
 
   def fixed?
-    # It is fixed if it is an array AND has a specific capacity
-    array? && !capacity.nil?
+    # It is fixed if it is an array AND has a specific integer capacity (not [?] or [INF])
+    array? && capacity.is_a?(Integer)
+  end
+
+  # True when this is the [?] marker (open stream element-type annotation).
+  # Only meaningful as the tense_type of an open stream: ~T[?].
+  def open_stream_marker?
+    array? && capacity == :STREAM_OPEN
   end
 
   def empty_list?
@@ -437,6 +443,18 @@ class Type
     tense? && shared?
   end
 
+  # Open stream: ~T[?] — a generator-backed stream; NEXT returns ?T (nil when exhausted).
+  # Resource semantics: call deinit() to free the heap-allocated buffer.
+  def open_stream?
+    tense? && tense_type.open_stream_marker?
+  end
+
+  # The element type T in ~T[?].
+  def open_stream_element_type
+    return nil unless open_stream?
+    tense_type.element_type
+  end
+
   # The element type T in ~T[N].
   def stream_element_type
     return nil unless bounded_stream?
@@ -485,6 +503,7 @@ class Type
   def requires_move?
     return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
+    return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
     return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle
@@ -652,13 +671,17 @@ class Type
     #           If this is missing, it matches "[]", meaning Dynamic.
     #   \]      Literal closing bracket
     #   $       End of string
-    if match = str.match(/^(.+)\[(\d+)?\]$/)
+    if match = str.match(/^(.+)\[(\d+|INF|\?)?\]$/)
       @is_array = true
       @element_type_raw = match[1].to_sym # Store "Number"
 
-      # If Capture Group 2 exists, it's the capacity.
-      # If nil, it's dynamic.
-      @capacity = match[2]&.to_i
+      # Capacity: nil = dynamic, :STREAM_OPEN = open stream [?], :INF = infinite [INF], Integer = fixed [N]
+      @capacity = case match[2]
+                  when nil    then nil
+                  when "?"    then :STREAM_OPEN
+                  when "INF"  then :INF
+                  else             match[2].to_i
+                  end
     else
       @is_array = false
       @capacity = nil
@@ -708,6 +731,10 @@ class Type
       if shared_promise?
         inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.SharedPromise(#{inner_zig})"
+      end
+      if open_stream?
+        elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+        return "CheatLib.Stream(#{elem_zig})"
       end
       inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Promise(#{inner_zig})"

@@ -1,0 +1,63 @@
+-- Open streams: ~T[?] — a generator-backed stream; NEXT returns ?T (null when exhausted).
+-- BG STREAM { YIELD x; } spawns a generator fiber that buffers values.
+-- NEXT blocks until the generator completes, then pops one value per call.
+
+FN generate_squares(n: Number) RETURNS Number ->
+    RETURN n * n;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: Simple number stream with three YIELD statements.
+    -- -------------------------------------------------------
+    s: ~Number[?] = BG STREAM {
+        YIELD 1.0;
+        YIELD 4.0;
+        YIELD 9.0;
+    };
+
+    v1: ?Number = NEXT s;
+    v2: ?Number = NEXT s;
+    v3: ?Number = NEXT s;
+    v4: ?Number = NEXT s;
+
+    ASSERT v1 == 1.0, "open stream: first NEXT returns first yield";
+    ASSERT v2 == 4.0, "open stream: second NEXT returns second yield";
+    ASSERT v3 == 9.0, "open stream: third NEXT returns third yield";
+    ASSERT v4 == NIL, "open stream: NEXT after exhaustion returns null";
+
+    -- -------------------------------------------------------
+    -- Test 2: Stream with a captured variable.
+    -- -------------------------------------------------------
+    base: Number = 10.0;
+    s2: ~Number[?] = BG STREAM {
+        YIELD base;
+        YIELD base * 2.0;
+    };
+
+    u1: ?Number = NEXT s2;
+    u2: ?Number = NEXT s2;
+    u3: ?Number = NEXT s2;
+
+    ASSERT u1 == 10.0, "stream with capture: first NEXT";
+    ASSERT u2 == 20.0, "stream with capture: second NEXT";
+    ASSERT u3 == NIL,  "stream with capture: exhausted";
+
+    -- -------------------------------------------------------
+    -- Test 3: Bool stream.
+    -- -------------------------------------------------------
+    flags: ~Bool[?] = BG STREAM {
+        YIELD TRUE;
+        YIELD FALSE;
+    };
+
+    b1: ?Bool = NEXT flags;
+    b2: ?Bool = NEXT flags;
+    b3: ?Bool = NEXT flags;
+
+    ASSERT b1 == TRUE,  "bool stream: first NEXT";
+    ASSERT b2 == FALSE, "bool stream: second NEXT";
+    ASSERT b3 == NIL,   "bool stream: exhausted";
+
+    RETURN;
+END

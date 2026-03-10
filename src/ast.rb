@@ -335,6 +335,14 @@ module AST
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   BgBlock           = Struct.new(:token, :body, :deferred_drops) { include Locatable }
 
+  # BgStreamBlock: background generator — spawns a fiber that YIELDs values into a Stream.
+  # body: Array of statements; YIELD expressions push values. Returns ~T[?] (open stream).
+  BgStreamBlock     = Struct.new(:token, :body, :deferred_drops) { include Locatable }
+
+  # YieldExpr: push a value into the enclosing BG STREAM's buffer.
+  # Only valid inside a BgStreamBlock body. expr: the value to yield.
+  YieldExpr         = Struct.new(:token, :expr) { include Locatable }
+
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
   NextExpr          = Struct.new(:token, :expr) { include Locatable }

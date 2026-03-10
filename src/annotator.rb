@@ -1127,11 +1127,15 @@ private
       node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
     end
 
-    # 2b. Check if the declared type is a pool or resource — tag node and scope entry
-    ft_obj        = node.type_info
-    is_pool       = ft_obj&.pool?
+    # 2b. Check if the declared type is a pool, open stream, or resource — tag node and scope entry
+    ft_obj          = node.type_info
+    is_pool         = ft_obj&.pool?
+    is_open_stream  = ft_obj&.open_stream?
     if is_pool
       resource_close = "{0}.deinit(rt.heapAlloc())"
+      is_resource    = false
+    elsif is_open_stream
+      resource_close = "{0}.deinit()"
       is_resource    = false
     else
       resource_schema = lookup_type_schema(final_type)
@@ -1153,7 +1157,7 @@ private
       Set.new,       # capabilities
       [],            # borrowed_paths
       sync: node_sync,
-      resource: is_resource || is_pool,
+      resource: is_resource || is_pool || is_open_stream,
       close_zig: resource_close
     )
 
@@ -1203,10 +1207,14 @@ private
         node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
       end
 
-      ft_obj        = node.type_info
-      is_pool       = ft_obj&.pool?
+      ft_obj          = node.type_info
+      is_pool         = ft_obj&.pool?
+      is_open_stream  = ft_obj&.open_stream?
       if is_pool
         resource_close = "{0}.deinit(rt.heapAlloc())"
+        is_resource    = false
+      elsif is_open_stream
+        resource_close = "{0}.deinit()"
         is_resource    = false
       else
         resource_schema = lookup_type_schema(final_type)
@@ -1227,7 +1235,7 @@ private
         Set.new,
         [],
         sync: node_sync,
-        resource: is_resource || is_pool,
+        resource: is_resource || is_pool || is_open_stream,
         close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
@@ -2066,6 +2074,41 @@ private
     node.full_type = :Void
   end
 
+  def visit_BgStreamBlock(node)
+    # Body runs in a separate generator fiber. YIELD expressions push values into the stream.
+    # The stream element type T is inferred from YIELD expression types.
+    prev_stream_ctx  = @current_stream_context
+    prev_yield_types = @stream_yield_types
+    @current_stream_context = node
+    @stream_yield_types = []
+
+    node.body.each { |expr| visit(expr) }
+
+    yield_types = @stream_yield_types
+    @current_stream_context = prev_stream_ctx
+    @stream_yield_types     = prev_yield_types
+
+    if yield_types.empty?
+      error!(node, "BG STREAM block has no YIELD statements. Use BG { } for a plain promise.")
+    end
+
+    elem_syms = yield_types.map(&:resolved).uniq
+    if elem_syms.size > 1
+      error!(node, "BG STREAM block yields inconsistent types: #{elem_syms.join(', ')}. All YIELD expressions must produce the same type.")
+    end
+
+    node.full_type = :"~#{elem_syms.first}[?]"
+  end
+
+  def visit_YieldExpr(node)
+    unless @current_stream_context
+      error!(node, "YIELD can only be used inside a BG STREAM { } block.")
+    end
+    visit(node.expr)
+    node.full_type = node.expr.full_type || :Void
+    @stream_yield_types << Type.new(node.full_type)
+  end
+
   def visit_BgBlock(node)
     # Body runs in a separate fiber. The last expression's type determines T in ~T.
     # Affine variables captured from the enclosing scope are MOVED (not borrowed),
@@ -2099,6 +2142,11 @@ private
       # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
       # Does NOT mark as moved; multiple consumers may hold their own handles.
       node.full_type = promise_type.tense_type.to_sym
+    elsif promise_type.open_stream?
+      # NEXT on ~T[?]: returns ?T — null signals stream exhaustion.
+      # Does NOT mark as moved — stream is a resource cleaned up via deinit.
+      elem_sym = promise_type.open_stream_element_type.to_sym
+      node.full_type = :"?#{elem_sym}"
     else
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)

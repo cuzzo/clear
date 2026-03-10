@@ -83,6 +83,7 @@ class Parser
   stmt(:KEYWORD, 'WITH') { parse_with_capability }
   stmt(:KEYWORD, 'DO')   { parse_do_block }
   stmt(:KEYWORD, 'BG')   { parse_bg_block }
+  stmt(:KEYWORD, 'YIELD') { parse_yield_expr }
   stmt(:KEYWORD, 'MATCH') { parse_match_statement }
   stmt(:KEYWORD, 'PASS') do
     tok = consume(:KEYWORD, 'PASS')
@@ -1159,8 +1160,14 @@ class Parser
         consume(:CHAR, ']')
         inner = "[#{size}]"
 
+      # Case 4: Open stream marker "T[?]" (used inside tense type ~T[?])
+      elsif match?(:CHAR, '?')
+        consume(:CHAR, '?')
+        consume(:CHAR, ']')
+        inner = "[?]"
+
       else
-        error!(current, "Syntax Error: Expected ']', '*', or size in array type.")
+        error!(current, "Syntax Error: Expected ']', '*', '?', or size in array type.")
       end
 
       # Allow multiple dimensions (e.g., Number[][][])
@@ -1317,10 +1324,28 @@ class Parser
 
   def parse_bg_block
     bg_token = consume(:KEYWORD, 'BG')
+    if match?(:KEYWORD, 'STREAM')
+      return parse_bg_stream_block(bg_token)
+    end
     consume(:CHAR, '{')
     body = parse_block_body(['}'])
     consume(:CHAR, '}')
     AST::BgBlock.new(bg_token, body, nil)
+  end
+
+  def parse_bg_stream_block(bg_token)
+    consume(:KEYWORD, 'STREAM')
+    consume(:CHAR, '{')
+    body = parse_block_body(['}'])
+    consume(:CHAR, '}')
+    AST::BgStreamBlock.new(bg_token, body, nil)
+  end
+
+  def parse_yield_expr
+    tok = consume(:KEYWORD, 'YIELD')
+    expr = parse_expression
+    consume(:CHAR, ';')
+    AST::YieldExpr.new(tok, expr)
   end
 
   def parse_next_expr
