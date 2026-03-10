@@ -129,6 +129,7 @@ class Type
       @wrapped_type_raw   = other.instance_variable_get(:@wrapped_type_raw)
       @is_array              = other.instance_variable_get(:@is_array)
       @element_type_raw      = other.instance_variable_get(:@element_type_raw)
+      @is_map                = other.instance_variable_get(:@is_map)
       @value_type_raw        = other.instance_variable_get(:@value_type_raw)
       @capacity              = other.capacity
       @resolved_cache        = other.instance_variable_get(:@resolved_cache)
@@ -252,6 +253,12 @@ class Type
       end
 
       return true if self.dynamic? && other_type.dynamic?
+    end
+
+    # 6. HashMap coercion: HashMap<Any> (empty literal) accepts as any HashMap<T>
+    if self.map? && other_type.map?
+      return true if other_type.value_type.any?
+      return self.value_type.accepts?(other_type.value_type)
     end
 
     false

@@ -175,6 +175,48 @@ pub const CheatLib = struct {
         return V;
     }
 
+    // Delete a key from the map. No-ops if the key doesn't exist.
+    pub fn mapDelete(comptime V: type, allocator: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8) void {
+        if (map.fetchRemove(key)) |entry| {
+            // Free the duplicated key that mapPut allocated.
+            allocator.free(entry.key);
+        }
+    }
+
+    // Returns true if the map contains the given key.
+    pub fn mapContains(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) bool {
+        return map.contains(key);
+    }
+
+    // Returns the number of entries in the map.
+    pub fn mapCount(comptime V: type, map: std.StringHashMapUnmanaged(V)) i64 {
+        return @intCast(map.count());
+    }
+
+    // Returns all keys as a slice allocated on the given allocator.
+    pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![][]const u8 {
+        const n = map.count();
+        const result = try allocator.alloc([]const u8, n);
+        var it = map.keyIterator();
+        var i: usize = 0;
+        while (it.next()) |k| : (i += 1) {
+            result[i] = k.*;
+        }
+        return result;
+    }
+
+    // Returns all values as a slice allocated on the given allocator.
+    pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![]V {
+        const n = map.count();
+        const result = try allocator.alloc(V, n);
+        var it = map.valueIterator();
+        var i: usize = 0;
+        while (it.next()) |v| : (i += 1) {
+            result[i] = v.*;
+        }
+        return result;
+    }
+
     // FILE
 
     // Open a file as a linear resource. Caller is responsible for calling .close().

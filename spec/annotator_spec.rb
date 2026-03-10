@@ -10590,5 +10590,260 @@ RSpec.describe SemanticAnnotator do
       end
     end
   end
+
+  # ===========================================================================
+  # HashMap Methods (delete, contains, count, keys, values)
+  # ===========================================================================
+  describe "HashMap Methods" do
+    def transpile_map(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    describe "HashMap#count" do
+      it "resolves count() return type as Int64" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            n = m.count();
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr)) && n.name == "n" }
+        expect(bind.full_type.resolved).to eq(:Int64)
+      end
+
+      it "emits CheatLib.mapCount in Zig" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            n = m.count();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.mapCount(i64, m)")
+      end
+
+      it "raises when count receives arguments" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.count(42);
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /HashMap.count takes no arguments/)
+      end
+    end
+
+    describe "HashMap#contains" do
+      it "resolves contains() return type as Bool" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            found = m.contains("x");
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "found" }
+        expect(bind.full_type.resolved).to eq(:Bool)
+      end
+
+      it "emits CheatLib.mapContains in Zig" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            found = m.contains("x");
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include('CheatLib.mapContains(i64, m, "x")')
+      end
+
+      it "raises when contains receives no arguments" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.contains();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /HashMap.contains requires exactly 1 argument/)
+      end
+
+      it "raises when contains key is not a String" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.contains(42);
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /HashMap.contains: key must be a String/)
+      end
+    end
+
+    describe "HashMap#delete" do
+      it "resolves delete() return type as Void" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            m.delete("x");
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        call = fn_node.body.find { |n| n.is_a?(AST::MethodCall) && n.name == "delete" }
+        expect(call.full_type.to_sym).to eq(:Void)
+      end
+
+      it "emits CheatLib.mapDelete in Zig" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            m.delete("x");
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include('CheatLib.mapDelete(i64, rt.heapAlloc(), &m, "x")')
+      end
+
+      it "raises when delete receives no arguments" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.delete();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /HashMap.delete requires exactly 1 argument/)
+      end
+    end
+
+    describe "HashMap#keys" do
+      it "resolves keys() return type as String[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            ks = m.keys();
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "ks" }
+        expect(bind.full_type.resolved).to eq(:"String[]")
+      end
+
+      it "emits CheatLib.mapKeys in Zig" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            ks = m.keys();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m)")
+      end
+
+      it "raises when keys receives arguments" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.keys("x");
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /HashMap.keys takes no arguments/)
+      end
+    end
+
+    describe "HashMap#values" do
+      it "resolves values() return type as V[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            vs = m.values();
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "vs" }
+        expect(bind.full_type.resolved).to eq(:"Int64[]")
+      end
+
+      it "emits CheatLib.mapValues in Zig" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            vs = m.values();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.mapValues(i64, rt.frameAlloc(), m)")
+      end
+
+      it "raises when values receives arguments" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.values(1);
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /HashMap.values takes no arguments/)
+      end
+    end
+
+    describe "HashMap literal with initial values" do
+      it "emits a Zig block with mapPut calls for populated literals" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m = {"a": 1_i64, "b": 2_i64};
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.mapPut")
+        expect(out).to include('"a"')
+        expect(out).to include('"b"')
+      end
+
+      it "emits bare makeHashMap for empty literals" do
+        out = transpile_map(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.makeHashMap(i64)")
+        expect(out).not_to include("mapPut")
+      end
+    end
+
+    describe "HashMap#unknown_method error" do
+      it "raises a helpful error for unknown map methods" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m.frobnicate();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Unknown method 'frobnicate' on HashMap/)
+      end
+    end
+  end
 end
 

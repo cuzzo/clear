@@ -229,6 +229,7 @@ module AST
   MethodCall   = Struct.new(:token, :object, :name, :args) do
     include Locatable
     attr_accessor :pool_method  # :insert, :get, :remove — set by annotator for Pool dispatch
+    attr_accessor :map_method   # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
     def wildcard?; false end
     def name; self[:name].to_s end
   end

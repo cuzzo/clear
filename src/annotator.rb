@@ -962,6 +962,11 @@ private
       return visit_PoolMethod(node, obj_type)
     end
 
+    # HashMap method dispatch: intercept before UFCS for map-specific methods.
+    if obj_type&.map?
+      return visit_MapMethod(node, obj_type)
+    end
+
     ufcs_args = [node.object] + node.args
     resolve_call(node, ufcs_args)
   end
@@ -1008,6 +1013,61 @@ private
 
     else
       error!(node, "Unknown method '#{node.name}' on Pool<#{elem.resolved}>. Available: insert, get, remove, count")
+    end
+  end
+
+  # Type-checks a method call on a HashMap<V> and tags the node for transpilation.
+  def visit_MapMethod(node, map_type)
+    val_type = map_type.value_type
+    case node.name
+    when "delete"
+      unless node.args.length == 1
+        error!(node, "HashMap.delete requires exactly 1 argument (a String key), got #{node.args.length}")
+        return
+      end
+      unless Type.new(node.args[0].resolved_type).string?
+        error!(node, "HashMap.delete: key must be a String, got #{node.args[0].resolved_type}")
+      end
+      node.map_method = :delete
+      node.full_type  = :Void
+
+    when "contains"
+      unless node.args.length == 1
+        error!(node, "HashMap.contains requires exactly 1 argument (a String key), got #{node.args.length}")
+        return
+      end
+      unless Type.new(node.args[0].resolved_type).string?
+        error!(node, "HashMap.contains: key must be a String, got #{node.args[0].resolved_type}")
+      end
+      node.map_method = :contains
+      node.full_type  = :Bool
+
+    when "count"
+      unless node.args.empty?
+        error!(node, "HashMap.count takes no arguments, got #{node.args.length}")
+        return
+      end
+      node.map_method = :count
+      node.full_type  = Type.new(:Int64)
+
+    when "keys"
+      unless node.args.empty?
+        error!(node, "HashMap.keys takes no arguments, got #{node.args.length}")
+        return
+      end
+      node.map_method = :keys
+      node.full_type  = :"String[]"
+
+    when "values"
+      unless node.args.empty?
+        error!(node, "HashMap.values takes no arguments, got #{node.args.length}")
+        return
+      end
+      node.map_method = :values
+      node.full_type  = :"#{val_type.resolved}[]"
+
+    else
+      error!(node, "Unknown method '#{node.name}' on HashMap<#{val_type.resolved}>. Available: delete, contains, count, keys, values")
     end
   end
 

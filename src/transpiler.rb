@@ -541,21 +541,7 @@ private
 
     # TODO: Try on frame.
     when AST::HashLit
-      # 1. Extract Value Type (V)
-      #    "HashMap<Int64>" -> "i64"
-      type_str = node.full_type.to_s
-      inner_type = type_str.match(/HashMap<(.+)>/)[1]
-      zig_type = transpile_type(inner_type)
-
-      # 2. Generate Creation
-      #    var map = try CheatLib.makeHashMap(i64);
-      creation = "try CheatLib.makeHashMap(#{zig_type})"
-
-      # 3. Generate Initializers (Block Expression)
-      #    Zig doesn't have a simple Map Literal syntax, so we stick to creation-only
-      #    for the expression, or use a block if we want to populate immediately.
-      #    For v0.1, let's just return the empty map creation and let users use 'set'.
-      creation
+      transpile_hash_lit(node)
 
     when AST::GetIndex
       # 1. Resolve Target and Index
@@ -987,6 +973,11 @@ private
       # Pool method dispatch: pool.insert/get/remove bypass UFCS
       if node.is_a?(AST::MethodCall) && node.pool_method
         return transpile_pool_method(node)
+      end
+
+      # HashMap method dispatch: map.delete/contains/count/keys/values bypass UFCS
+      if node.is_a?(AST::MethodCall) && node.map_method
+        return transpile_map_method(node)
       end
 
       return transpile_Intrinsic(node) if !node.zig_pattern.nil?
@@ -1427,6 +1418,58 @@ private
       "#{obj_code}.remove(#{id_code})"
     when :count
       "#{obj_code}.count()"
+    end
+  end
+
+  # Emits Zig for a HashMap literal, including any initial key-value pairs.
+  # Empty literals emit a bare makeHashMap call; populated literals use a Zig
+  # labeled block so all puts happen before the value is yielded.
+  def transpile_hash_lit(node)
+    # Prefer coerced_type (the declared type) over the inferred HashMap<Any> from empty literals.
+    effective_type = (node.coerced_type && node.full_type.to_s.include?("Any")) ? node.coerced_type.to_s : node.full_type.to_s
+    type_str   = effective_type
+    inner_type = type_str.match(/HashMap<(.+)>/)[1]
+    zig_type   = transpile_type(inner_type)
+    rt_name    = @do_rt_name || "rt"
+
+    return "try CheatLib.makeHashMap(#{zig_type})" if node.pairs.empty?
+
+    @hashlit_counter ||= 0
+    id    = @hashlit_counter
+    @hashlit_counter += 1
+    label = "__hl#{id}"
+    var   = "__hl#{id}_map"
+
+    puts_stmts = node.pairs.map do |k, v|
+      key_str = visit(k)
+      val_str = visit(v)
+      "try CheatLib.mapPut(#{zig_type}, #{rt_name}.heapAlloc(), &#{var}, #{key_str}, #{val_str});"
+    end.join("\n            ")
+
+    "#{label}: {\n            var #{var} = try CheatLib.makeHashMap(#{zig_type});\n            #{puts_stmts}\n            break :#{label} #{var};\n        }"
+  end
+
+  # Emits Zig for map.delete / map.contains / map.count / map.keys / map.values.
+  def transpile_map_method(node)
+    obj_code = visit(node.object)
+    rt_name  = @do_rt_name || "rt"
+    map_type = node.object.full_type.to_s
+    inner_type = map_type.match(/HashMap<(.+)>/)[1]
+    zig_type = transpile_type(inner_type)
+
+    case node.map_method
+    when :delete
+      key_code = visit(node.args[0])
+      "CheatLib.mapDelete(#{zig_type}, #{rt_name}.heapAlloc(), &#{obj_code}, #{key_code})"
+    when :contains
+      key_code = visit(node.args[0])
+      "CheatLib.mapContains(#{zig_type}, #{obj_code}, #{key_code})"
+    when :count
+      "CheatLib.mapCount(#{zig_type}, #{obj_code})"
+    when :keys
+      "try CheatLib.mapKeys(#{zig_type}, #{rt_name}.frameAlloc(), #{obj_code})"
+    when :values
+      "try CheatLib.mapValues(#{zig_type}, #{rt_name}.frameAlloc(), #{obj_code})"
     end
   end
 
