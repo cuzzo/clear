@@ -629,7 +629,14 @@ private
           cond = case c[:kind]
                  when :when           then visit(c[:value])
                  when :struct_pattern then transpile_struct_pattern(subject, c[:value])
-                 else                      "#{subject} == #{visit(c[:value])}"
+                 else
+                   val = visit(c[:value])
+                   expr_type = Type.new(node.expr.resolved_type || :Any)
+                   if expr_type.string?
+                     "CheatLib.strEql(#{subject}, #{val})"
+                   else
+                     "#{subject} == #{val}"
+                   end
                  end
         end
         "if (#{cond}) {\n    #{body}\n    }"

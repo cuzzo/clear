@@ -672,12 +672,16 @@ private
           visit(c[:value])
           @match_pattern_context = false
           expr_t2 = Type.new(node.expr.resolved_type || :Any)
+          case_t2 = Type.new(c[:value].resolved_type || :Any)
           # Allow union base type (e.g. :Option) to match a generic instance (e.g. :"Option<Number>")
           base_match = expr_t2.generic_instance? && expr_t2.generic_base == c[:value].resolved_type
+          # Allow Byte[N] string literals (e.g. "hello") to match a String-typed subject
+          string_match = expr_t2.string? && case_t2.string?
           unless c[:value].resolved_type == node.expr.resolved_type ||
                  node.expr.resolved_type == :Any ||
                  c[:value].resolved_type == :Any ||
-                 base_match
+                 base_match ||
+                 string_match
             error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
           end
 
