@@ -23,6 +23,7 @@ class TestGenerator < ZigTranspiler
 
     # 3. Detect if test uses DO/BG blocks, TCP resources, or sharded EACH (all need a running fiber scheduler).
     needs_scheduler = cheat_code.include?("DO {") || cheat_code.include?("BG {") ||
+                      cheat_code.include?("BG STREAM {") ||
                       cheat_code.include?("TCPServer") || cheat_code.include?("TCPClient") ||
                       cheat_code.include?("@pinned") ||
                       transpiled_body.include?("WaitGroup")

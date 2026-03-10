@@ -536,7 +536,7 @@ module PipeAnalysis
     end
 
     node.full_type = proxy.full_type
-    node.storage   = proxy.storage
+    node.storage   = (node.full_type == :Void) ? :stack : :heap
   end
 
   # Helper to validate array/pool input for higher-order ops.

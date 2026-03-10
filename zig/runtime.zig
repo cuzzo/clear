@@ -285,6 +285,8 @@ pub const Runtime = struct {
             // For now, we just print and die safely.
             if (err == error.Timeout) {
                  std.debug.print("\n[Scheduler] Task Timed Out! Killing it.\n", .{});
+            } else if (err == error.StreamClosed) {
+                 // InfStream generator received a close signal — clean exit, not a crash.
             } else {
                  std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
             }

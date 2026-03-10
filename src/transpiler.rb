@@ -347,11 +347,12 @@ private
         visit(node.value)
       end
 
-      decl = "#{keyword} #{node.name}#{annotation} = #{value_code};"
-      suppression = "_ = &#{node.name};"
+      safe_name = zig_safe_name(node.name)
+      decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
+      suppression = "_ = &#{safe_name};"
 
       # 2. Cleanup & Move Suppression
-      affine_logic = emit_cleanup(node.name, node.type_info, node.storage, resource_close: node.resource_close_zig)
+      affine_logic = emit_cleanup(safe_name, node.type_info, node.storage, resource_close: node.resource_close_zig)
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
 
@@ -371,7 +372,7 @@ private
         # Transpile as simple assignment
         value_str = visit(node.value)
         move_logic = emit_move_suppression(node.value)
-        "#{node.name} = #{value_str}; #{move_logic}"
+        "#{zig_safe_name(node.name)} = #{value_str}; #{move_logic}"
       end
 
     when AST::Assignment
@@ -938,8 +939,12 @@ private
 
       # Set @current_stream_local so that YieldExpr nodes at ANY nesting depth
       # (inside while loops, if statements, etc.) emit the correct push() call.
+      # @current_stream_is_inf distinguishes InfStream (push returns void) from
+      # Stream (push returns !void) so YIELD knows whether to emit `try`.
       prev_stream_local = @current_stream_local
+      prev_stream_is_inf = @current_stream_is_inf
       @current_stream_local = local_stream
+      @current_stream_is_inf = is_inf
       body_code = with_fiber_capture_map(capture_map) do
         node.body.map do |expr|
           code = visit(expr)
@@ -948,6 +953,7 @@ private
         end.join("\n            ")
       end
       @current_stream_local = prev_stream_local
+      @current_stream_is_inf = prev_stream_is_inf
 
       <<~ZIG.chomp
         #{blk_label}: {
@@ -960,13 +966,14 @@ private
                     _ = &__rt;
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
+                    #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
                     var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
                     #{is_inf ? "" : "defer #{local_stream}.close();"}
                     #{body_code}
                 }
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
-            var #{stream_var} = try #{stream_zig}.spawnNew(#{alloc_var}, #{rt_name}.getSched());
+            const #{stream_var} = try #{stream_zig}.spawnNew(#{alloc_var}, #{rt_name}.getSched());
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
             try #{rt_name}.getSched().submitSpawn(
@@ -981,7 +988,8 @@ private
 
     when AST::YieldExpr
       # Emits push() on the current generator's local stream handle.
-      # @current_stream_local is set by the enclosing BgStreamBlock transpiler.
+      # Both Stream.push and InfStream.push return !void → always use try.
+      # (InfStream.push returns error.StreamClosed when the consumer calls deinit.)
       "try #{@current_stream_local}.push(#{visit(node.expr)})"
 
     when AST::NextExpr
@@ -1156,14 +1164,18 @@ private
       capture_map = @do_capture_map || {}
       return capture_map[node.name] if capture_map.key?(node.name)
 
-      node.name
+      zig_safe_name(node.name)
 
     when AST::Literal
       case node.type
       when :STRING
         "\"#{node.value}\""  # Add quotes!
-      when :NUMBER, :INT64
-        node.value.to_i.to_s # Force Integer for Zig i64 compatibility
+      when :NUMBER
+        # If it's a whole number, emit as integer string to allow Zig coersion to both f64 and i64.
+        # Otherwise emit as float string.
+        (node.value == node.value.to_i) ? node.value.to_i.to_s : node.value.to_s
+      when :INT64
+        node.value.to_s
       when :BOOLEAN
         node.value.to_s      # "true"/"false" is fine
       when :NIL
@@ -1539,6 +1551,13 @@ private
       end
     end
     result
+  end
+
+  # Escape CLEAR variable names that would shadow Zig primitive types
+  # (uN, iN, fN patterns like u8, i32, f64) using Zig's @"name" quoting syntax.
+  ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
+  def zig_safe_name(name)
+    name =~ ZIG_PRIMITIVE_RE ? "@\"#{name}\"" : name
   end
 
   def walk_do_identifiers(node, result, locally_bound = Set.new)

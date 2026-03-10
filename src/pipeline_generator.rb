@@ -697,7 +697,7 @@ module PipelineGenerator
           var __ccs#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcSelCtx#{id}, __ccs#{id}_len);
           defer #{rt_name}.heapAlloc().free(__ccs#{id}_ctxs);#{err_decl}
           var __ccs#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          var __ccs#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
+          var __ccs#{id}_sem = CheatHeader.Semaphore.init(@intFromFloat(@as(f64, #{pool_size_code})), #{rt_name}.getSched());
           __ccs#{id}_wg.add(__ccs#{id}_len);
           for (pipe_items, 0..) |__ccs#{id}_it, __ccs#{id}_i| {
               __ccs#{id}_sem.acquire();
@@ -776,7 +776,7 @@ module PipelineGenerator
           var __ccw#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcWhrCtx#{id}, __ccw#{id}_len);
           defer #{rt_name}.heapAlloc().free(__ccw#{id}_ctxs);#{err_decl}
           var __ccw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          var __ccw#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
+          var __ccw#{id}_sem = CheatHeader.Semaphore.init(@intFromFloat(@as(f64, #{pool_size_code})), #{rt_name}.getSched());
           __ccw#{id}_wg.add(__ccw#{id}_len);
           for (pipe_items, 0..) |__ccw#{id}_it, __ccw#{id}_i| {
               __ccw#{id}_sem.acquire();
@@ -840,7 +840,7 @@ module PipelineGenerator
           var __cce#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcEachCtx#{id}, __cce#{id}_len);
           defer #{rt_name}.heapAlloc().free(__cce#{id}_ctxs);
           var __cce#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          var __cce#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
+          var __cce#{id}_sem = CheatHeader.Semaphore.init(@intFromFloat(@as(f64, #{pool_size_code})), #{rt_name}.getSched());
           __cce#{id}_wg.add(__cce#{id}_len);
           for (pipe_items, 0..) |*__cce#{id}_it, __cce#{id}_i| {
               __cce#{id}_sem.acquire();

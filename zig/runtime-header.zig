@@ -1041,9 +1041,8 @@ pub const CheatLib = struct {
 
             /// Allocate an Inner on the heap, initialize the WaitGroup, and return the Stream handle.
             pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
-                _ = sched;
                 const inner = try alloc.create(Inner);
-                inner.* = .{ .items = .{}, .wg = WaitGroup{} };
+                inner.* = .{ .items = .{}, .wg = WaitGroup.init(sched) };
                 inner.wg.add(1);
                 return Self{ .inner = inner, .alloc = alloc, .head = 0 };
             }
@@ -1107,6 +1106,8 @@ pub const CheatLib = struct {
                 consumer_task: ?*Task = null,
                 producer_task: ?*Task = null,
                 sched: *fp.Scheduler,
+                // Set by deinit() to signal the generator fiber to stop.
+                closed: bool = false,
             };
 
             inner: *Inner,
@@ -1121,11 +1122,13 @@ pub const CheatLib = struct {
 
             /// Generator fiber calls this to yield a value.
             /// Writes val into the slot, wakes the consumer, then blocks until val is consumed.
-            pub fn push(self: *Self, val: T) void {
+            /// Returns error.StreamClosed if deinit() was called while the generator was blocked.
+            pub fn push(self: *Self, val: T) error{StreamClosed}!void {
                 const inner = self.inner;
 
                 // Write value and mark slot as ready (state = 1)
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                if (inner.closed) { inner.lock.store(0, .release); return error.StreamClosed; }
                 inner.slot = val;
                 inner.state.store(1, .release);
                 if (inner.consumer_task) |consumer| {
@@ -1139,6 +1142,7 @@ pub const CheatLib = struct {
                 // Block until consumer reads the value (state returns to 0)
                 while (true) {
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    if (inner.closed) { inner.lock.store(0, .release); return error.StreamClosed; }
                     if (inner.state.load(.acquire) == 0) {
                         inner.lock.store(0, .release);
                         return; // Value was consumed — proceed to next YIELD
@@ -1181,9 +1185,23 @@ pub const CheatLib = struct {
             /// No-op — infinite streams have no natural close point.
             pub fn close(_: *Self) void {}
 
-            /// Free the Inner allocation. The generator fiber will remain blocked permanently.
+            /// Signal the generator fiber to stop.
+            /// Sets the closed flag and wakes the generator if it is blocked in push().
+            /// The generator will see closed=true, return error.StreamClosed, and free Inner
+            /// itself before exiting — so this function must NOT free Inner to avoid UAF.
             pub fn deinit(self: *Self) void {
-                self.alloc.destroy(self.inner);
+                const inner = self.inner;
+                // Acquire lock, mark closed, and wake any blocked producer.
+                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                inner.closed = true;
+                if (inner.producer_task) |producer| {
+                    inner.producer_task = null;
+                    inner.lock.store(0, .release);
+                    inner.sched.schedule(producer);
+                } else {
+                    inner.lock.store(0, .release);
+                }
+                // Inner will be freed by the generator fiber when it exits via error.StreamClosed.
             }
         };
     }
