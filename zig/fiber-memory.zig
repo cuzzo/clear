@@ -6,7 +6,7 @@ const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 const StackSize = fc.StackSize;
 const Fiber = fc.Fiber;
 
-const STACK_SIZE: usize = 16 * 1024; // 16KB -> 12KB Stack, 4KB Frame
+const STACK_SIZE: usize = 64 * 1024; // 64KB -> 60KB Stack, 4KB Frame
 const StackArray = [STACK_SIZE]u8;
 
 // Calculate a Slab Size that is larger than the Stack Size.
