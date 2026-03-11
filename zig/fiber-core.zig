@@ -141,7 +141,14 @@ pub export fn __zig_free_segment(current_sp_ptr: usize) callconv(.c) void {
 // 2MB is not the per-fiber stack memory usage. It's the limit.
 // 4KB is the minimum (p95) size.
 pub const StackSize = enum {
-    Standard, // 2MB (Fall back to mmap/mprotect)
+    /// Micro: 4 KB total (4 KB stack; arena allocated lazily on first use up to 4 KB)
+    Micro,
+    /// Standard: 16 KB total (12 KB stack + 4 KB arena) — default for all spawns
+    Standard,
+    /// Large: 64 KB total (60 KB stack + 4 KB arena)
+    Large,
+    /// Xl: 256 KB total (252 KB stack + 4 KB arena)
+    Xl,
 };
 
 pub const Stack = struct {
@@ -164,7 +171,7 @@ pub const Fiber = struct {
     stack_limit: usize,
     stack_guard_head: ?*safety.GuardNode = null,
 
-    pub fn init(memory: []u8, entry_fn: usize) Fiber {
+    pub fn init(memory: []u8, entry_fn: usize, size: StackSize) Fiber {
         //std.debug.print("\n=== Fiber.init ===\n", .{});
         //std.debug.print("Memory: 0x{x} - 0x{x} ({} bytes)\n", .{
         //    @intFromPtr(memory.ptr),
@@ -209,7 +216,7 @@ pub const Fiber = struct {
             .ctx = Context{ .sp = initial_sp },
             .stack_limit = limit,
             .parent_ctx = undefined,
-            .size_class = .Standard,
+            .size_class = size,
             .stack_guard_head = null,
         };
     }

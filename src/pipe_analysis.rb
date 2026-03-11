@@ -465,7 +465,8 @@ module PipeAnalysis
     node.storage   = :stack
   end
 
-  VALID_CONCURRENT_OPTIONS = %w[pool_size pin].freeze
+  VALID_CONCURRENT_OPTIONS = %w[pool_size pin size].freeze
+  VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
   def analyze_concurrent_op(node)
     conc    = node.right   # the ConcurrentOp node
@@ -495,6 +496,15 @@ module PipeAnalysis
                 (pin_val.is_a?(AST::Identifier) && %w[true false].include?(pin_val.name))
       unless is_bool
         error!(pin_val, "CONCURRENT pin must be a Bool (true or false), got #{pin_val.class.name.split('::').last}")
+      end
+    end
+
+    # Validate size option if present: must be one of MICRO STANDARD LARGE XL
+    if (sz = options["size"])
+      valid = sz.is_a?(AST::Identifier) && VALID_CONCURRENT_SIZES.include?(sz.name)
+      unless valid
+        got = sz.is_a?(AST::Identifier) ? sz.name : sz.class.name.split("::").last
+        error!(sz, "CONCURRENT size must be one of #{VALID_CONCURRENT_SIZES.join(', ')}, got #{got}")
       end
     end
 

@@ -254,6 +254,8 @@ pub fn SlabAllocator(comptime T: type) type {
                 262144 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(262144), 262144),
                 524288 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(524288), 524288),
                 1048576 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(1048576), 1048576),
+                2097152 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(2097152), 2097152),
+                4194304 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(4194304), 4194304),
                 else => error.InvalidSlabSize,
             };
         }
@@ -299,6 +301,14 @@ pub fn SlabAllocator(comptime T: type) type {
                 1048576 => {
                     const p: [*]align(1048576) u8 = @alignCast(raw_ptr);
                     self.allocator.free(p[0..1048576]);
+                },
+                2097152 => {
+                    const p: [*]align(2097152) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..2097152]);
+                },
+                4194304 => {
+                    const p: [*]align(4194304) u8 = @alignCast(raw_ptr);
+                    self.allocator.free(p[0..4194304]);
                 },
                 else => unreachable,
             }

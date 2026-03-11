@@ -65,7 +65,7 @@ class TestGenerator < ZigTranspiler
                   @intFromPtr(&Runtime.entryWrapper),
                   @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
                   null,
-                  .{},
+                  .{ .stack_size = .Large },
               );
               sched.run();
           }

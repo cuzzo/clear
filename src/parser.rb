@@ -199,24 +199,36 @@ class Parser
   end
 
   # Capability Wraps: expr @multiowned -> Rc(T), expr @shared -> Arc(T), expr @locked -> *Locked(T)
+  # Supports `:` join: expr @shared:locked, expr @locked:multiowned (order-independent).
+  CAP_SIGIL_ATTRS = {
+    '@multiowned' => { ownership: :multiowned },
+    '@shared'     => { ownership: :shared     },
+    '@locked'     => { sync: :locked          },
+    '@writeLocked' => { sync: :write_locked   },
+  }.freeze
+
   suffix(:VAR_ID, '@multiowned') do |lhs|
     token = consume(:VAR_ID)
-    AST::CapabilityWrap.new(token, lhs, :multiowned, nil)
+    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync)
   end
 
   suffix(:VAR_ID, '@shared') do |lhs|
     token = consume(:VAR_ID)
-    AST::CapabilityWrap.new(token, lhs, :shared, nil)
+    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync)
   end
 
   suffix(:VAR_ID, '@locked') do |lhs|
     token = consume(:VAR_ID)
-    AST::CapabilityWrap.new(token, lhs, nil, :locked)
+    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync)
   end
 
   suffix(:VAR_ID, '@writeLocked') do |lhs|
     token = consume(:VAR_ID)
-    AST::CapabilityWrap.new(token, lhs, nil, :write_locked)
+    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync)
   end
 
   # Inline union variant constructor: TypeName.VariantName{ field: val, ... }
@@ -1224,6 +1236,35 @@ class Parser
         collection = :pool
         shard_count = parse_sharded_modifier_if_present!(cap_tok)
       end
+
+      # `:` join: allow combining ownership + sync in a single annotation (order-independent).
+      # Only for @multiowned/@shared/@locked/@writeLocked — not @list/@pool.
+      # Accepts both 'locked' and '@locked' after ':' (same convention as branch prefixes).
+      if (ownership || sync) && !collection && match?(:CHAR, ':')
+        consume(:CHAR, ':')
+        unless current.type == :VAR_ID
+          error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+        end
+        normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
+        unless %w[@multiowned @shared @locked @writeLocked].include?(normalized)
+          error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+        end
+        second_tok = consume(:VAR_ID)
+        case normalized
+        when "@multiowned"
+          error!(second_tok, "Duplicate ownership capability in '#{cap_tok.value}:#{second_tok.value}'") if ownership
+          ownership = :multiowned
+        when "@shared"
+          error!(second_tok, "Duplicate ownership capability in '#{cap_tok.value}:#{second_tok.value}'") if ownership
+          ownership = :shared
+        when "@locked"
+          error!(second_tok, "Duplicate sync capability in '#{cap_tok.value}:#{second_tok.value}'") if sync
+          sync = :locked
+        when "@writeLocked"
+          error!(second_tok, "Duplicate sync capability in '#{cap_tok.value}:#{second_tok.value}'") if sync
+          sync = :write_locked
+        end
+      end
     end
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
@@ -1340,19 +1381,96 @@ class Parser
     AST::WithBlock.new(with_token, capabilities, body)
   end
 
+  # Parses an optional `:@cap` continuation after an expression-level capability sigil.
+  # `tok` is the already-consumed first sigil token; `first_attrs` is its CAP_SIGIL_ATTRS entry.
+  # Returns [ownership, sync] — either field may be nil.
+  # Handles order-independent joins: @shared:locked and @locked:shared both work.
+  def parse_cap_join(tok, first_attrs)
+    ownership = first_attrs[:ownership]
+    sync      = first_attrs[:sync]
+
+    if match?(:CHAR, ':')
+      consume(:CHAR, ':')
+      unless current.type == :VAR_ID
+        error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+      end
+      # Normalize: accept both 'locked' and '@locked' after ':' (same convention as branch prefixes)
+      normalized   = current.value.start_with?('@') ? current.value : "@#{current.value}"
+      second_attrs = CAP_SIGIL_ATTRS[normalized]
+      unless second_attrs
+        error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+      end
+      second_tok = consume(:VAR_ID)
+      if second_attrs[:ownership]
+        error!(second_tok, "Duplicate ownership capability in '#{tok.value}:#{second_tok.value}'") if ownership
+        ownership = second_attrs[:ownership]
+      else
+        error!(second_tok, "Duplicate sync capability in '#{tok.value}:#{second_tok.value}'") if sync
+        sync = second_attrs[:sync]
+      end
+    end
+
+    [ownership, sync]
+  end
+
+  # Branch-prefix sigils for DO blocks.
+  # Each maps to the attribute(s) it sets on the branch hash.
+  # After `:` the next word is also looked up here (with `@` prepended if absent).
+  DO_BRANCH_SIGILS = {
+    '@micro'    => { stack_size: :micro    },
+    '@standard' => { stack_size: :standard },
+    '@large'    => { stack_size: :large    },
+    '@xl'       => { stack_size: :xl       },
+    '@pinned'   => { pinned: true          },
+  }.freeze
+
+  # Stack-size-only sigils valid at the start of a BG body.
+  BG_SIZE_SIGILS = {
+    '@micro'    => :micro,
+    '@standard' => :standard,
+    '@large'    => :large,
+    '@xl'       => :xl,
+  }.freeze
+
+  # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
+  # Returns { pinned: Bool, stack_size: Symbol|nil }.
+  # Only enters the prefix parser when the first token is a known DO branch sigil.
+  # After `:`, the next identifier is normalised (@ prepended if absent).
+  def parse_branch_prefix
+    pinned     = false
+    stack_size = nil
+
+    return { pinned: pinned, stack_size: stack_size } unless
+      current.type == :VAR_ID && DO_BRANCH_SIGILS.key?(current.value)
+
+    loop do
+      tok      = consume(:VAR_ID)
+      cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
+      attrs    = DO_BRANCH_SIGILS[cap_name]
+      error!(tok, "Unknown branch prefix #{tok.value.inspect}. " \
+                  "Expected @micro, @standard, @large, @xl, or @pinned") unless attrs
+
+      if attrs[:stack_size]
+        error!(tok, "Duplicate stack size in branch prefix") if stack_size
+        stack_size = attrs[:stack_size]
+      end
+      pinned = true if attrs[:pinned]
+
+      break unless match?(:CHAR, ':')
+      consume(:CHAR, ':')
+    end
+
+    consume(:ARROW, '->')
+    { pinned: pinned, stack_size: stack_size }
+  end
+
   def parse_do_block
     do_token = consume(:KEYWORD, 'DO')
     consume(:CHAR, '{')
     branches = []
 
     until match?(:CHAR, '}') || match?(:EOF)
-      # Check for @pinned -> prefix: pins this branch to the least-loaded scheduler.
-      pinned = false
-      if match?(:VAR_ID, '@pinned') && peek.type == :ARROW
-        consume(:VAR_ID, '@pinned')
-        consume(:ARROW, '->')
-        pinned = true
-      end
+      prefix = parse_branch_prefix
 
       # A branch is either a block-statement (WITH, IF, etc.) starting with a keyword,
       # or a bare expression. Keyword branches don't need a trailing semicolon.
@@ -1361,12 +1479,23 @@ class Parser
       else
         parse_expression
       end
-      branches << { body: [stmt].compact, pinned: pinned }
+      branches << { body: [stmt].compact, pinned: prefix[:pinned], stack_size: prefix[:stack_size] }
       break unless match!(:CHAR, ',')
     end
 
     consume(:CHAR, '}')
     AST::DoBlock.new(do_token, branches)
+  end
+
+  # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
+  # Returns the stack_size symbol (:micro/:standard/:large/:xl) or nil.
+  def parse_bg_size_prefix
+    return nil unless current.type == :VAR_ID &&
+                      BG_SIZE_SIGILS.key?(current.value) &&
+                      peek.type == :ARROW
+    tok = consume(:VAR_ID)
+    consume(:ARROW, '->')
+    BG_SIZE_SIGILS[tok.value]
   end
 
   def parse_bg_block
@@ -1375,9 +1504,10 @@ class Parser
       return parse_bg_stream_block(bg_token)
     end
     consume(:CHAR, '{')
+    stack_size = parse_bg_size_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    AST::BgBlock.new(bg_token, body, nil)
+    AST::BgBlock.new(bg_token, body, nil, stack_size)
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.

@@ -2110,11 +2110,13 @@ private
         scope = lookup_scope_for(var_node.name)
         storage = scope&.locals&.dig(var_node.name, :storage)
         syn     = scope&.locals&.dig(var_node.name, :sync)
+        # Sync takes priority over ownership when both are present:
+        # @shared:locked → infer EXCLUSIVE (lock the mutex, not just unwrap the Arc).
         cap[:capability] = case
-                           when storage == :multiowned    then :multiowned
-                           when storage == :shared        then :shared
                            when syn == :locked            then :EXCLUSIVE
                            when syn == :write_locked      then :write_locked_read
+                           when storage == :multiowned    then :multiowned
+                           when storage == :shared        then :shared
                            else
                              error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
                              :unknown
@@ -2176,7 +2178,9 @@ private
   def visit_DoBlock(node)
     # Each branch runs in a separate fiber (fork-join).
     # Visit branches independently — no ownership transfer between parallel branches.
-    # branches: Array of { body: Array<ASTNode>, pinned: Boolean }
+    # branches: Array of { body: Array<ASTNode>, pinned: Boolean,
+    #                       stack_size: :standard | :micro | :large | :xl | nil }
+    # stack_size nil → STANDARD (16 KB) is used by the transpiler as the default.
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
     end
@@ -2222,6 +2226,7 @@ private
     # Body runs in a separate fiber. The last expression's type determines T in ~T.
     # Affine variables captured from the enclosing scope are MOVED (not borrowed),
     # because the caller may return before the fiber finishes.
+    # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
     last_type = :Void
     node.body.each do |expr|
       visit(expr)

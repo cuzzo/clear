@@ -332,14 +332,16 @@ module AST
   StaticCall        = Struct.new(:token, :type_name, :method_name, :args) { include Locatable }
 
   # DoBlock: fork-join parallel execution.
-  # branches: Array of { body: Array<ASTNode>, pinned: Boolean }
-  # pinned=true → dispatch to least-loaded scheduler (spawnBest) instead of current (submitSpawn)
+  # branches: Array of { body: Array<ASTNode>, pinned: Boolean, stack_size: :standard | :micro | :large | :xl | nil }
+  # pinned=true      → dispatch to least-loaded scheduler (spawnBest) instead of current (submitSpawn)
+  # stack_size nil   → defaults to :standard (16 KB total: 12 KB stack + 4 KB arena)
   DoBlock           = Struct.new(:token, :branches) { include Locatable }
 
   # BgBlock: background execution — spawns a fiber and returns a linear Promise (~T).
   # body: Array of expression nodes. The last expression's type determines T.
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
-  BgBlock           = Struct.new(:token, :body, :deferred_drops) { include Locatable }
+  # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
+  BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size) { include Locatable }
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
   # steps: Array of { expr: ASTNode, binding: String | nil }
@@ -349,7 +351,8 @@ module AST
 
   # BgStreamBlock: background generator — spawns a fiber that YIELDs values into a Stream.
   # body: Array of statements; YIELD expressions push values. Returns ~T[?] (open stream).
-  BgStreamBlock     = Struct.new(:token, :body, :deferred_drops) { include Locatable }
+  # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
+  BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) { include Locatable }
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
   # Only valid inside a BgStreamBlock body. expr: the value to yield.

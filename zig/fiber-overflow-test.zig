@@ -42,7 +42,7 @@ test "Fiber: Segmented Stack (Real Memory)" {
     main_ctx = Context{ .sp = 0 }; // Will be filled by switchTo
 
     // 3. Init Fiber with a wrapper function
-    var fiber = fc.Fiber.init(stack_mem, @intFromPtr(&recurseDeeply));
+    var fiber = fc.Fiber.init(stack_mem, @intFromPtr(&recurseDeeply), .Large);
 
     // 4. Run
     test_recursion_depth = 100;

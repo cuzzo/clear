@@ -3282,6 +3282,318 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ---------------------------------------------------------------------------
+  # Phase 6: Capability `:` join syntax
+  # ---------------------------------------------------------------------------
+
+  describe "capability `:` join at expression level" do
+    def cap_join_decl(source)
+      run(source).statements.find { |s| s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr) }
+    end
+
+    context "@shared:locked join (ownership then sync)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          c = Counter{ value: 0 } @shared:locked;
+        FLUX
+      }
+
+      it "parses and annotates without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "marks the variable as shared (Arc)" do
+        expect(cap_join_decl(code).type_info.shared?).to be true
+      end
+
+      it "marks the variable as locked (mutex)" do
+        expect(cap_join_decl(code).type_info.locked?).to be true
+      end
+    end
+
+    context "@locked:shared join (sync then ownership, order-independent)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          c = Counter{ value: 0 } @locked:shared;
+        FLUX
+      }
+
+      it "parses and annotates without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "marks the variable as shared (Arc)" do
+        expect(cap_join_decl(code).type_info.shared?).to be true
+      end
+
+      it "marks the variable as locked (mutex)" do
+        expect(cap_join_decl(code).type_info.locked?).to be true
+      end
+    end
+
+    context "@multiowned:writeLocked join" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          c = Counter{ value: 0 } @multiowned:writeLocked;
+        FLUX
+      }
+
+      it "parses and annotates without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "marks the variable as multiowned (Rc)" do
+        expect(cap_join_decl(code).type_info.multiowned?).to be true
+      end
+
+      it "marks the variable as write_locked (RwLock)" do
+        expect(cap_join_decl(code).type_info.write_locked?).to be true
+      end
+    end
+
+    context "duplicate ownership join error (@shared:multiowned)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          c = Counter{ value: 0 } @shared:multiowned;
+        FLUX
+      }
+
+      it "raises a parser error about duplicate ownership" do
+        expect { ast }.to raise_error(/Duplicate ownership capability/i)
+      end
+    end
+
+    context "duplicate sync join error (@locked:writeLocked)" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          c = Counter{ value: 0 } @locked:writeLocked;
+        FLUX
+      }
+
+      it "raises a parser error about duplicate sync capability" do
+        expect { ast }.to raise_error(/Duplicate sync capability/i)
+      end
+    end
+  end
+
+  describe "capability `:` join in type annotations" do
+    context "Counter @shared:locked type" do
+      subject(:t) {
+        tokens = Lexer.new("Counter @shared:locked").tokenize
+        Parser.new(tokens, "Counter @shared:locked").send(:parse_type_annotation)
+      }
+
+      it "sets ownership to :shared" do
+        expect(t.ownership).to eq(:shared)
+      end
+
+      it "sets sync to :locked" do
+        expect(t.sync).to eq(:locked)
+      end
+    end
+
+    context "Counter @locked:multiowned type (reverse order)" do
+      subject(:t) {
+        tokens = Lexer.new("Counter @locked:multiowned").tokenize
+        Parser.new(tokens, "Counter @locked:multiowned").send(:parse_type_annotation)
+      }
+
+      it "sets ownership to :multiowned" do
+        expect(t.ownership).to eq(:multiowned)
+      end
+
+      it "sets sync to :locked" do
+        expect(t.sync).to eq(:locked)
+      end
+    end
+
+    context "Counter @writeLocked:shared type" do
+      subject(:t) {
+        tokens = Lexer.new("Counter @writeLocked:shared").tokenize
+        Parser.new(tokens, "Counter @writeLocked:shared").send(:parse_type_annotation)
+      }
+
+      it "sets ownership to :shared" do
+        expect(t.ownership).to eq(:shared)
+      end
+
+      it "sets sync to :write_locked" do
+        expect(t.sync).to eq(:write_locked)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Phase 6: Transpiler output for all dual-capability combinations
+  # ---------------------------------------------------------------------------
+
+  describe "capability `:` join — transpiler output (all 4 two-layer combos)" do
+    let(:preamble) { "STRUCT Counter { value: Number }\n" }
+
+    context "@shared:locked → Arc(Locked(T))" do
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @shared:locked;") }
+
+      it "emits lockedCreate for the inner sync layer" do
+        expect(zig).to include("lockedCreate")
+      end
+
+      it "emits arcCreate for the outer ownership layer" do
+        expect(zig).to include("arcCreate")
+      end
+
+      it "wraps arcCreate argument with CheatLib.Locked type" do
+        expect(zig).to include("CheatLib.Locked(Counter)")
+      end
+    end
+
+    context "@locked:shared → Arc(Locked(T)) (order-independent)" do
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @locked:shared;") }
+
+      it "emits lockedCreate and arcCreate" do
+        expect(zig).to include("lockedCreate")
+        expect(zig).to include("arcCreate")
+      end
+    end
+
+    context "@shared:writeLocked → Arc(RwLocked(T))" do
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @shared:writeLocked;") }
+
+      it "emits rwLockedCreate for the inner sync layer" do
+        expect(zig).to include("rwLockedCreate")
+      end
+
+      it "emits arcCreate for the outer ownership layer" do
+        expect(zig).to include("arcCreate")
+      end
+
+      it "wraps arcCreate argument with CheatLib.RwLocked type" do
+        expect(zig).to include("CheatLib.RwLocked(Counter)")
+      end
+    end
+
+    context "@multiowned:locked → Rc(Locked(T))" do
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @multiowned:locked;") }
+
+      it "emits lockedCreate for the inner sync layer" do
+        expect(zig).to include("lockedCreate")
+      end
+
+      it "emits rcCreate for the outer ownership layer" do
+        expect(zig).to include("rcCreate")
+      end
+
+      it "wraps rcCreate argument with CheatLib.Locked type" do
+        expect(zig).to include("CheatLib.Locked(Counter)")
+      end
+    end
+
+    context "@multiowned:writeLocked → Rc(RwLocked(T))" do
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @multiowned:writeLocked;") }
+
+      it "emits rwLockedCreate for the inner sync layer" do
+        expect(zig).to include("rwLockedCreate")
+      end
+
+      it "emits rcCreate for the outer ownership layer" do
+        expect(zig).to include("rcCreate")
+      end
+
+      it "wraps rcCreate argument with CheatLib.RwLocked type" do
+        expect(zig).to include("CheatLib.RwLocked(Counter)")
+      end
+    end
+  end
+
+  describe "capability `:` join — WITH block dereferences through ownership wrapper" do
+    let(:preamble) {
+      <<~FLUX
+        STRUCT Counter { value: Number }
+        FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+      FLUX
+    }
+
+    context "WITH EXCLUSIVE on @shared:locked dereferences through Arc (.data.*)" do
+      let(:zig) {
+        ZigTranspiler.new.transpile(preamble + <<~FLUX)
+          c = Counter{ value: 0 } @shared:locked;
+          WITH EXCLUSIVE c AS inner { getVal(inner); }
+        FLUX
+      }
+
+      it "emits .data.*.acquire() to dereference through Arc before locking" do
+        expect(zig).to include(".data.*.acquire()")
+      end
+
+      it "does not emit bare .acquire() without Arc dereference" do
+        expect(zig).not_to match(/\bc\.acquire\(\)/)
+      end
+    end
+
+    context "WITH EXCLUSIVE on @shared:writeLocked dereferences through Arc (.data.*)" do
+      let(:zig) {
+        ZigTranspiler.new.transpile(preamble + <<~FLUX)
+          c = Counter{ value: 0 } @shared:writeLocked;
+          WITH EXCLUSIVE c AS inner { getVal(inner); }
+        FLUX
+      }
+
+      it "emits .data.*.write() to dereference through Arc before write-locking" do
+        expect(zig).to include(".data.*.write()")
+      end
+    end
+
+    context "WITH on @locked (no ownership) does NOT add .data.* dereference" do
+      let(:zig) {
+        ZigTranspiler.new.transpile(preamble + <<~FLUX)
+          c = Counter{ value: 0 } @locked;
+          WITH c AS inner { getVal(inner); }
+        FLUX
+      }
+
+      it "emits plain .acquire() without .data.* dereference" do
+        expect(zig).to include(".acquire()")
+        expect(zig).not_to include(".data.*.acquire()")
+      end
+    end
+  end
+
+  describe "capability `:` join — infer prefers sync over ownership" do
+    context "WITH c (implicit) on @shared:locked infers EXCLUSIVE" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          c = Counter{ value: 0 } @shared:locked;
+          WITH c AS inner { getVal(inner); }
+        FLUX
+      }
+
+      it "infers EXCLUSIVE (sync) rather than :shared (ownership) and succeeds" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    context "WITH c (implicit) on @multiowned:writeLocked infers write_locked_read" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Number }
+          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          c = Counter{ value: 0 } @multiowned:writeLocked;
+          WITH c AS inner { getVal(inner); }
+        FLUX
+      }
+
+      it "infers write_locked_read (sync) rather than :multiowned (ownership) and succeeds" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # DO block (fork-join parallelism)
   # ---------------------------------------------------------------------------
 
@@ -3481,6 +3793,331 @@ RSpec.describe SemanticAnnotator do
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("submitSpawn")
         expect(zig).to include("CheatHeader.spawnBest")
+      end
+    end
+  end
+
+  describe "DO block — stack size prefix syntax" do
+    subject(:ast) { run(code) }
+    let(:preamble) { "FN work() RETURNS Void -> RETURN; END\n" }
+
+    context "bare @micro -> branch" do
+      let(:code) { preamble + "DO { @micro -> work() }" }
+
+      it "parses without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "sets stack_size :micro on the branch" do
+        branch = ast.statements.last.branches.first
+        expect(branch[:stack_size]).to eq(:micro)
+        expect(branch[:pinned]).to eq(false)
+      end
+    end
+
+    context "bare @large -> branch" do
+      let(:code) { preamble + "DO { @large -> work() }" }
+
+      it "sets stack_size :large on the branch" do
+        expect(ast.statements.last.branches.first[:stack_size]).to eq(:large)
+      end
+    end
+
+    context "bare @xl -> branch" do
+      let(:code) { preamble + "DO { @xl -> work() }" }
+
+      it "sets stack_size :xl on the branch" do
+        expect(ast.statements.last.branches.first[:stack_size]).to eq(:xl)
+      end
+    end
+
+    context "bare @standard -> branch" do
+      let(:code) { preamble + "DO { @standard -> work() }" }
+
+      it "sets stack_size :standard on the branch" do
+        expect(ast.statements.last.branches.first[:stack_size]).to eq(:standard)
+      end
+    end
+
+    context "no prefix — branch defaults to nil stack_size" do
+      let(:code) { preamble + "DO { work() }" }
+
+      it "leaves stack_size nil" do
+        expect(ast.statements.last.branches.first[:stack_size]).to be_nil
+      end
+    end
+
+    context "@micro:pinned join (size first)" do
+      let(:code) { preamble + "DO { @micro:pinned -> work() }" }
+
+      it "sets both stack_size :micro and pinned true" do
+        branch = ast.statements.last.branches.first
+        expect(branch[:stack_size]).to eq(:micro)
+        expect(branch[:pinned]).to eq(true)
+      end
+    end
+
+    context "@pinned:large join (pin first)" do
+      let(:code) { preamble + "DO { @pinned:large -> work() }" }
+
+      it "sets both pinned true and stack_size :large (order-independent)" do
+        branch = ast.statements.last.branches.first
+        expect(branch[:stack_size]).to eq(:large)
+        expect(branch[:pinned]).to eq(true)
+      end
+    end
+
+    context "mixed branches with different sizes" do
+      let(:code) {
+        preamble +
+        "FN heavy() RETURNS Void -> RETURN; END\n" \
+        "DO { @micro -> work(), @large -> heavy(), work() }"
+      }
+
+      it "assigns the right sizes to each branch" do
+        branches = ast.statements.last.branches
+        expect(branches[0][:stack_size]).to eq(:micro)
+        expect(branches[1][:stack_size]).to eq(:large)
+        expect(branches[2][:stack_size]).to be_nil
+      end
+    end
+
+    context "Zig output: DO @micro branch emits .Micro task config" do
+      let(:code) { preamble + "DO { @micro -> work() }" }
+
+      it "emits .stack_size = .Micro in submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: DO @large branch emits .Large task config" do
+      let(:code) { preamble + "DO { @large -> work() }" }
+
+      it "emits .stack_size = .Large in submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Large")
+      end
+    end
+
+    context "Zig output: DO no-prefix branch emits .Standard task config" do
+      let(:code) { preamble + "DO { work() }" }
+
+      it "emits .stack_size = .Standard (the default)" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Standard")
+      end
+    end
+
+    context "Zig output: @xl:pinned emits .Xl in spawnBest" do
+      let(:code) { preamble + "DO { @xl:pinned -> work() }" }
+
+      it "emits spawnBest with .stack_size = .Xl" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatHeader.spawnBest")
+        expect(zig).to include(".stack_size = .Xl")
+      end
+    end
+  end
+
+  describe "BG block — stack size prefix syntax" do
+    subject(:ast) { run(code) }
+    let(:work_fn) { "FN work() RETURNS Void -> RETURN; END\n" }
+
+    context "BG { @micro -> expr; }" do
+      let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { @micro -> work(); }; NEXT p; RETURN; END" }
+
+      it "parses without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "sets stack_size :micro on the BgBlock" do
+        fn   = ast.statements.last
+        bg   = fn.body.first.value
+        expect(bg).to be_a(AST::BgBlock)
+        expect(bg.stack_size).to eq(:micro)
+      end
+    end
+
+    context "BG { @large -> expr; }" do
+      let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { @large -> work(); }; NEXT p; RETURN; END" }
+
+      it "sets stack_size :large on the BgBlock" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to eq(:large)
+      end
+    end
+
+    context "BG { expr; } with no prefix" do
+      let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { work(); }; NEXT p; RETURN; END" }
+
+      it "leaves stack_size nil" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to be_nil
+      end
+    end
+
+    context "BG with @xl prefix" do
+      let(:code) {
+        "FN add(x: Number, y: Number) RETURNS Number -> RETURN x + y; END\n" \
+        "FN f() RETURNS Void -> p: ~Number = BG { @xl -> add(1.0, 2.0); }; r: Number = NEXT p; RETURN; END"
+      }
+
+      it "parses and type-checks correctly" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "sets stack_size :xl on the BgBlock" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to eq(:xl)
+      end
+    end
+
+    context "Zig output: BG @micro emits .Micro task config" do
+      let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { @micro -> work(); }; NEXT p; RETURN; END" }
+
+      it "emits .stack_size = .Micro in submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: BG no prefix emits .Standard task config" do
+      let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { work(); }; NEXT p; RETURN; END" }
+
+      it "emits .stack_size = .Standard" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Standard")
+      end
+    end
+  end
+
+  describe "CONCURRENT — size option parsing" do
+    subject(:ast) { run(code) }
+    let(:preamble) {
+      "FN double(x: Number) RETURNS Number -> RETURN x * 2.0; END\n"
+    }
+
+    context "CONCURRENT(size: LARGE) SELECT" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT(size: LARGE) SELECT double(_); RETURN; END"
+      }
+
+      it "parses without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "captures size option as an Identifier node" do
+        fn   = ast.statements.last
+        # r = items s> CONCURRENT(...) SELECT ...
+        # fn.body[0] = items decl, fn.body[1] = r bind (BinaryOp SMOOTH on RHS)
+        pipe = fn.body[1].value        # BinaryOp(:SMOOTH, items, ConcurrentOp)
+        conc = pipe.right              # ConcurrentOp
+        expect(conc).to be_a(AST::ConcurrentOp)
+        size_node = conc.options["size"]
+        expect(size_node).to be_a(AST::Identifier)
+        expect(size_node.name).to eq("LARGE")
+      end
+    end
+
+    context "CONCURRENT(pool_size: 4, size: MICRO) WHERE" do
+      let(:code) {
+        preamble +
+        "FN big(x: Number) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT(pool_size: 4, size: MICRO) WHERE big(_); RETURN; END"
+      }
+
+      it "parses both pool_size and size options" do
+        fn   = ast.statements.last
+        pipe = fn.body[1].value        # BinaryOp(:SMOOTH, items, ConcurrentOp)
+        conc = pipe.right
+        expect(conc).to be_a(AST::ConcurrentOp)
+        expect(conc.options["pool_size"]).to be_a(AST::Literal)
+        size_node = conc.options["size"]
+        expect(size_node).to be_a(AST::Identifier)
+        expect(size_node.name).to eq("MICRO")
+      end
+    end
+
+    context "CONCURRENT(size: STANDARD) EACH" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS Void -> items: Number[] = [1.0]; " \
+        "items s> CONCURRENT(size: STANDARD) EACH { double(_); }; RETURN; END"
+      }
+
+      it "accepts STANDARD as a valid size" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "CONCURRENT(size: XL) SELECT" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS Void -> items: Number[] = [1.0]; " \
+        "r = items s> CONCURRENT(size: XL) SELECT double(_); RETURN; END"
+      }
+
+      it "accepts XL as a valid size" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "CONCURRENT(size: HUGE) — invalid size" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS Void -> items: Number[] = [1.0]; " \
+        "r = items s> CONCURRENT(size: HUGE) SELECT double(_); RETURN; END"
+      }
+
+      it "raises a Compiler Error" do
+        expect { ast }.to raise_error(/CONCURRENT size must be one of/i)
+      end
+    end
+
+    context "Zig output: CONCURRENT(size: MICRO) emits .Micro task config" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT(size: MICRO) SELECT double(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Micro in each spawned fiber" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: CONCURRENT with no size emits .Standard" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT SELECT double(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Standard (the default)" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Standard")
+      end
+    end
+
+    context "Zig output: CONCURRENT(size: LARGE) WHERE emits .Large" do
+      let(:code) {
+        preamble +
+        "FN big(x: Number) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT(size: LARGE) WHERE big(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Large" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Large")
       end
     end
   end

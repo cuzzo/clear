@@ -657,14 +657,16 @@ private
       end.join("\n")
 
       # --- Mutex bindings: acquire(), bind alias as *T ---
+      # When the variable also has an ownership wrapper (Arc/Rc), the Zig variable is
+      # Arc(Locked(T)) or Rc(Locked(T)); dereference through .data.* to reach Locked(T).
       mutex_bindings = mutex_caps.map do |cap|
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
-        # Inside a DO branch, the outer variable is accessed via ctx pointer.
-        zig_var = @do_capture_map&.dig(var_name) || var_name
+        zig_var    = @do_capture_map&.dig(var_name) || var_name
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
         <<~ZIG.chomp
-          var #{guard_var} = #{zig_var}.acquire();
+          var #{guard_var} = #{lock_expr}.acquire();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -676,9 +678,10 @@ private
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
-        zig_var = @do_capture_map&.dig(var_name) || var_name
+        zig_var    = @do_capture_map&.dig(var_name) || var_name
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
         <<~ZIG.chomp
-          var #{guard_var} = #{zig_var}.write();
+          var #{guard_var} = #{lock_expr}.write();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -690,9 +693,10 @@ private
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
-        zig_var = @do_capture_map&.dig(var_name) || var_name
+        zig_var    = @do_capture_map&.dig(var_name) || var_name
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
         <<~ZIG.chomp
-          var #{guard_var} = #{zig_var}.read();
+          var #{guard_var} = #{lock_expr}.read();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -758,13 +762,14 @@ private
 
         # @pinned branches use spawnBest (least-loaded scheduler from global registry).
         # Regular branches use the current scheduler's submitSpawn.
+        task_cfg = task_config_zig(branch[:stack_size])
         spawn_call = if pinned
           <<~ZIG.chomp
             try CheatHeader.spawnBest(
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 &#{ctx_var},
-                .{}
+                #{task_cfg}
             );
           ZIG
         else
@@ -773,7 +778,7 @@ private
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 &#{ctx_var},
-                .{}
+                #{task_cfg}
             );
           ZIG
         end
@@ -901,7 +906,7 @@ private
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 #{ctx_var},
-                .{},
+                #{task_config_zig(node.stack_size)},
             );
             break :#{blk_label} #{promise_var};
         }
@@ -980,7 +985,7 @@ private
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 #{ctx_var},
-                .{},
+                #{task_config_zig(node.stack_size)},
             );
             break :#{blk_label} #{stream_var};
         }
@@ -1109,22 +1114,33 @@ private
       base_type  = node.value.resolved_type.to_s
       zig_base   = transpile_type(base_type)
 
-      if node.sync == :locked && node.ownership == :shared
-        # Arc(Locked(T)): lockedCreate then arcCreate
+      # Build from the inside out: sync layer first, then ownership layer.
+      # This handles all 9 legal (ownership × sync) combinations generically.
+      sync_fn   = case node.sync
+                  when :locked      then "lockedCreate"
+                  when :write_locked then "rwLockedCreate"
+                  end
+      sync_type = case node.sync
+                  when :locked      then "CheatLib.Locked(#{zig_base})"
+                  when :write_locked then "CheatLib.RwLocked(#{zig_base})"
+                  end
+      own_fn    = case node.ownership
+                  when :shared     then "arcCreate"
+                  when :multiowned then "rcCreate"
+                  end
+
+      if sync_fn && own_fn
+        # Two-layer: sync wraps T, ownership wraps the sync type.
         <<~ZIG.chomp
-          blk_sl: {
-              const __sl_inner = try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code});
-              break :blk_sl try CheatLib.arcCreate(CheatLib.Locked(#{zig_base}), rt.heapAlloc(), __sl_inner);
+          blk_cap: {
+              const __cap_inner = try CheatLib.#{sync_fn}(#{zig_base}, rt.heapAlloc(), #{inner_code});
+              break :blk_cap try CheatLib.#{own_fn}(#{sync_type}, rt.heapAlloc(), __cap_inner);
           }
         ZIG
-      elsif node.sync == :locked
-        "try CheatLib.lockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
-      elsif node.sync == :write_locked
-        "try CheatLib.rwLockedCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
-      elsif node.ownership == :shared
-        "try CheatLib.arcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
-      elsif node.ownership == :multiowned
-        "try CheatLib.rcCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      elsif sync_fn
+        "try CheatLib.#{sync_fn}(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      elsif own_fn
+        "try CheatLib.#{own_fn}(#{zig_base}, rt.heapAlloc(), #{inner_code})"
       else
         inner_code
       end
@@ -1516,6 +1532,21 @@ private
     when :values
       "try CheatLib.mapValues(#{zig_type}, #{rt_name}.frameAlloc(), #{obj_code})"
     end
+  end
+
+  # Maps a CLEAR stack_size symbol (or nil) to a Zig TaskConfig struct literal.
+  # nil / :standard → Standard (16 KB); :micro → Micro (4 KB); :large → Large (64 KB); :xl → Xl (256 KB)
+  STACK_SIZE_ZIG_VARIANT = {
+    nil       => "Standard",
+    :micro    => "Micro",
+    :standard => "Standard",
+    :large    => "Large",
+    :xl       => "Xl",
+  }.freeze
+
+  def task_config_zig(stack_size)
+    variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")
+    ".{ .stack_size = .#{variant} }"
   end
 
   # Temporarily installs a new fiber capture map and rt alias, runs the block, then restores.

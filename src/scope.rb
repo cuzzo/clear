@@ -106,6 +106,10 @@ class Scope
       end
     end
 
+    # Always propagate sync — it may coexist with an ownership wrapper (e.g. @shared:locked
+    # has storage=:shared AND sync=:locked; the case above only sets ownership).
+    base_type.sync = entry[:sync] if entry[:sync] && !base_type.sync
+
     base_type
   end
 

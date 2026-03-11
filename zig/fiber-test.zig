@@ -87,7 +87,7 @@ test "Context Switching" {
 
     // 1. Create Fiber pointing to our function
     // We cast the function pointer to usize to write it to the stack
-    my_fiber = Fiber.init(memory, @intFromPtr(&fiberEntry));
+    my_fiber = Fiber.init(memory, @intFromPtr(&fiberEntry), .Standard);
 
     std.debug.print("\n[Main] Switching to Fiber...", .{});
 

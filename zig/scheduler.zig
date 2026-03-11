@@ -22,8 +22,8 @@ const Fiber = fc.Fiber;
 const Stack = fc.Stack;
 const StackSize = fc.StackSize;
 
-const VirtualArena = fm.VirtualArena;
 const StackPool = fm.StackPool;
+const STANDARD_STACK_SIZE = fm.STANDARD_STACK_SIZE;
 
 const linux = std.os.linux;
 const posix = std.posix;
@@ -204,7 +204,7 @@ pub const Scheduler = struct {
             q.deinit(self.allocator);
         }
 
-        var node = self.inbox.popAll();
+        var node = AtomicInbox.reverse(self.inbox.popAll());
         while (node) |n| {
             const next = n.next;
             if (n.type == .Resume) {
@@ -226,7 +226,7 @@ pub const Scheduler = struct {
         // Ownership: We must return all cached stacks to the pool
         while (self.stack_cache.items.len > 0) {
             const stack = self.stack_cache.pop().?;
-            self.stack_pool.stack_slab.free(stack);
+            self.stack_pool.free(stack);
         }
 
         // Ownership Split: RunQueue manages the backing array (the pointers),
@@ -256,25 +256,26 @@ pub const Scheduler = struct {
     // ------------------------------------------------------------
     // Memory Management
     // ------------------------------------------------------------
-    // HOT PATH: Allocating a stack
-    fn allocStack(self: *Scheduler) ![]u8 {
-        // 1. Check Local Cache (5ns)
-        if (self.stack_cache.items.len > 0) {
-            const stack = self.stack_cache.pop().?;
-            return stack;
+    // HOT PATH: Allocating a stack.
+    // The L1 cache (stack_cache) holds only Standard-sized stacks.
+    // Non-standard sizes bypass the cache and go directly to the pool slab.
+    fn allocStack(self: *Scheduler, size: StackSize) ![]u8 {
+        if (size == .Standard and self.stack_cache.items.len > 0) {
+            return self.stack_cache.pop().?;
         }
-        // 2. Fallback to Global Arena (Atomic Increment)
-        return self.stack_pool.stack_slab.alloc();
+        return self.stack_pool.alloc(size);
     }
 
-    // HOT PATH: Freeing a stack
+    // HOT PATH: Freeing a stack.
+    // Standard-sized stacks are kept in the L1 cache for fast reuse.
+    // All other sizes are returned directly to the pool slab.
     fn freeStack(self: *Scheduler, stack: []u8) void {
-        if (self.stack_cache.items.len < STACK_CACHE_LIMIT) {
+        if (stack.len == STANDARD_STACK_SIZE and self.stack_cache.items.len < STACK_CACHE_LIMIT) {
             self.stack_cache.append(self.allocator, stack) catch {
-                self.stack_pool.stack_slab.free(stack);
+                self.stack_pool.free(stack);
             };
         } else {
-            self.stack_pool.stack_slab.free(stack);
+            self.stack_pool.free(stack);
         }
     }
 
@@ -286,10 +287,7 @@ pub const Scheduler = struct {
 
         while (self.stack_cache.items.len > WARM_CACHE_SIZE) {
             const stack = self.stack_cache.pop().?;
-            // Push to the Slab's Thread-Local Magazine
-            // (Note: Using stack_slab directly as seen in your freeStack code,
-            //  or access via self.stack_pool.stack_slab)
-            self.stack_pool.stack_slab.free(stack);
+            self.stack_pool.free(stack);
         }
 
         // 2. Flush L2 Cache (Magazine) -> L3 Depot (Global Slabs)
@@ -356,8 +354,7 @@ pub const Scheduler = struct {
             }
 
             // run all to-be-scheduled tasks
-            var req_node = self.inbox.popAll();
-            // OPTIONALLLY: reverse if we want to preserve FIFO
+            var req_node = AtomicInbox.reverse(self.inbox.popAll());
 
             while (req_node) |node| {
                 const next_node = node.next;
@@ -367,7 +364,7 @@ pub const Scheduler = struct {
                     const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
 
                     // 1. GET STACK FROM POOL (Fast!)
-                    const stack_mem = self.allocStack() catch |err| {
+                    const stack_mem = self.allocStack(req.config.stack_size) catch |err| {
                         std.debug.print("Stack Alloc Failed: {}\n", .{err});
                         self.allocator.destroy(req);
                         req_node = next_node;
@@ -380,7 +377,7 @@ pub const Scheduler = struct {
                         req_node = next_node; // Must advance, or infinite loop
                         continue;
                     };
-                    fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr);
+                    fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr, req.config.stack_size);
 
                     // 2. Alloc Task shell (local allocator)
                     const task = self.allocator.create(Task) catch {
@@ -756,6 +753,7 @@ pub const Semaphore = struct {
     /// Acquire one slot. Blocks the calling fiber if no slots are available.
     /// Only one fiber should call acquire() at a time (the spawner loop).
     pub fn acquire(self: *Semaphore) void {
+        // std.debug.print("ACQUIRE: counter={d}\n", .{self.counter.load(.seq_cst)});
         while (true) {
             // Fast path: try CAS decrement
             var c = self.counter.load(.seq_cst);

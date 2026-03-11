@@ -616,13 +616,17 @@ module PipelineGenerator
     end
   end
 
-  # Returns the Zig spawn call: spawnBest (pin: true) or submitSpawn (default)
+  # Returns the Zig spawn call: spawnBest (pin: true) or submitSpawn (default).
+  # Respects the `size` option to set TaskConfig.stack_size on each spawned fiber.
   def concurrent_spawn_call(options, wg_var, ctx_type, ctx_var)
-    pinned = options["pin"]
+    pinned    = options["pin"]
+    size_node = options["size"]
+    size_sym  = size_node ? size_node.name.downcase.to_sym : nil
+    task_cfg  = task_config_zig(size_sym)
     if pinned
-      "try CheatHeader.spawnBest(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    .{},\n);"
+      "try CheatHeader.spawnBest(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    #{task_cfg},\n);"
     else
-      "try #{wg_var}.sched.submitSpawn(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    .{},\n);"
+      "try #{wg_var}.sched.submitSpawn(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    #{task_cfg},\n);"
     end
   end
 
