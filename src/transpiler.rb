@@ -1074,6 +1074,11 @@ private
       if node.respond_to?(:extern_call) && node.extern_call
         # Native FFI call: no rt injection, no try (native Zig/C return convention)
         "#{mod_prefix}#{node.name}(#{args_zig.join(', ')})"
+      elsif node.respond_to?(:fn_var_call) && node.fn_var_call
+        # Calling a fn-type variable: inject rt but no module prefix
+        rt_name = @do_rt_name || "rt"
+        args = [rt_name] + args_zig
+        "try #{node.name}(#{args.join(', ')})"
       else
         rt_name = @do_rt_name || "rt"
         # For generic function calls, inject inferred comptime type args after rt

@@ -227,6 +227,7 @@ module AST
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
+    attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     def wildcard?; false end
     def name; self[:name].to_s end
   end

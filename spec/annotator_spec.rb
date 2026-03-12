@@ -12125,5 +12125,99 @@ RSpec.describe SemanticAnnotator do
     end
 
   end
+
+  # ===========================================================================
+  # FIRST-CLASS FUNCTION TYPES — Phase 3
+  # ===========================================================================
+  describe "Function Types — Phase 3 (calling fn-type variables)" do
+
+    def transpile(source)
+      ZigTranspiler.new.transpile(source)
+    end
+
+    # -------------------------------------------------------------------------
+    # Annotator: calling fn-type variables resolves the return type
+    # -------------------------------------------------------------------------
+    describe "Annotator: calling fn-type variables" do
+      context "cb: FN(Int64) -> Bool; result = cb(5)" do
+        let(:code) {
+          <<~CLEAR
+            cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
+            result: Bool = cb(5);
+          CLEAR
+        }
+        it "annotates without error" do
+          expect { run(code) }.not_to raise_error
+        end
+
+        it "resolves the call's type to Bool" do
+          tree = run(code)
+          call_stmt = tree.statements[1]
+          # call_stmt is a BindExpr; the value is the FuncCall
+          expect(call_stmt.value.resolved_type).to eq(:Bool)
+        end
+      end
+
+      context "add: FN(Int64, Int64) -> Int64; sum = add(3, 4)" do
+        let(:code) {
+          <<~CLEAR
+            add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
+            sum: Int64 = add(3, 4);
+          CLEAR
+        }
+        it "annotates without error" do
+          expect { run(code) }.not_to raise_error
+        end
+      end
+
+      context "calling fn-type variable with wrong argument type" do
+        let(:code) {
+          <<~CLEAR
+            cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
+            result: Bool = cb("oops");
+          CLEAR
+        }
+        it "raises a type mismatch error" do
+          expect { run(code) }.to raise_error(CompilerError)
+        end
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Transpiler: fn-type call emits try name(rt, args...)
+    # -------------------------------------------------------------------------
+    describe "Transpiler: calling fn-type variables" do
+      context "cb(5) where cb: FN(Int64) -> Bool" do
+        let(:source) {
+          <<~CLEAR
+            FN cheatMain() RETURNS Void ->
+              cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
+              result: Bool = cb(5);
+            END
+          CLEAR
+        }
+        it "emits try cb(rt, ...)" do
+          zig = transpile(source)
+          expect(zig).to match(/try cb\(rt,/)
+        end
+      end
+
+      context "add(3, 4) where add: FN(Int64, Int64) -> Int64" do
+        let(:source) {
+          <<~CLEAR
+            FN cheatMain() RETURNS Void ->
+              add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
+              sum: Int64 = add(3, 4);
+            END
+          CLEAR
+        }
+        it "emits try add(rt, ...)" do
+          zig = transpile(source)
+          expect(zig).to match(/try add\(rt,/)
+        end
+      end
+    end
+
+  end
 end
 

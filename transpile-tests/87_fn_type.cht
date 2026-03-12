@@ -1,8 +1,8 @@
--- Phase 1: First-class function types.
+-- First-class function types (Phase 1 + Phase 3).
 --
 -- FN(T, ...) -> R is a function-pointer type. Variables may be declared with
--- this annotation and assigned a lambda literal.  Calling through fn-type
--- variables is Phase 3; this test only exercises declaration + storage.
+-- this annotation and assigned a lambda literal.  Phase 3: calling through
+-- fn-type variables.
 
 FN isPositive(n: Int64) RETURNS Bool ->
   RETURN n > 0;
@@ -14,6 +14,11 @@ FN cheatMain() RETURNS Void ->
 
   -- A multi-param fn type.
   add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
+
+  -- Phase 3: call through fn-type variables.
+  ASSERT cb(5) == TRUE;
+  ASSERT cb(-1) == FALSE;
+  ASSERT add(3, 4) == 7;
 
   -- Smoke test: verify unrelated logic still works.
   ASSERT isPositive(5) == TRUE;

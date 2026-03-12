@@ -1117,6 +1117,17 @@ private
         node.full_type = func_type[:return][:type]
       end
 
+    elsif func_type.is_a?(Type) && func_type.fn_type?
+      # Calling a fn-type variable: cb(5) where cb: FN(Int64) -> Bool
+      node.fn_var_call = true if node.respond_to?(:fn_var_call=)
+      synthetic_sig = {
+        params: func_type.raw[:params],
+        return: { type: func_type.raw[:return][:type] }
+      }
+      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+      verify_function_signature!(call_node, synthetic_sig)
+      node.full_type = func_type.raw[:return][:type]
+
     elsif func_type.is_a?(Symbol)
       node.full_type = func_type
 
