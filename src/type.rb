@@ -261,6 +261,21 @@ class Type
       return self.value_type.accepts?(other_type.value_type)
     end
 
+    # 7. Function type compatibility
+    if self.fn_type?
+      # Accept another fn_type (Phase 2 will add full signature matching)
+      return true if other_type.fn_type?
+      # Accept a lambda signature when its return type is compatible.
+      # Phase 2 will add full parameter-signature matching.
+      if other_type.raw.is_a?(Hash) && other_type.raw[:lambda]
+        lambda_ret_raw = other_type.raw.dig(:return, :type)
+        fn_ret_raw     = @raw.dig(:return, :type)
+        lambda_ret = lambda_ret_raw.is_a?(Type) ? lambda_ret_raw : Type.new(lambda_ret_raw || :Any)
+        fn_ret     = fn_ret_raw.is_a?(Type)     ? fn_ret_raw     : Type.new(fn_ret_raw || :Any)
+        return fn_ret.accepts?(lambda_ret)
+      end
+    end
+
     false
   end
 
@@ -289,6 +304,10 @@ class Type
 
   def void?
     resolved == :Void
+  end
+
+  def fn_type?
+    @raw.is_a?(Hash) && @raw[:fn_type] == true
   end
 
   def array?
@@ -411,7 +430,7 @@ class Type
 
   # TODO: keep metatype from ast, use that
   def struct?
-    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union? && !tense?
+    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union? && !tense? && !fn_type?
   end
 
   def optional?
@@ -527,6 +546,7 @@ class Type
 
   # TODO: In future, need to be able to call slot-size for small structs.
   def requires_move?
+    return false if fn_type?                # Function pointers are pointer-sized; no move semantics
     return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
     return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
@@ -781,6 +801,19 @@ class Type
     if optional?
       inner_zig = wrapped_type.zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
+    end
+
+    # 2c. Function type: FN(T, ...) -> R  =>  *const fn(*Runtime, T, ...) anyerror!R
+    if fn_type?
+      param_types_zig = @raw[:params].map do |p|
+        t = p[:type]
+        t.is_a?(Type) ? t.zig_type(is_param: true) : Type.new(t).zig_type(is_param: true)
+      end
+      ret = @raw[:return][:type]
+      ret_zig = ret.is_a?(Type) ? ret.zig_type : Type.new(ret).zig_type
+      all_params = ["*Runtime"] + param_types_zig
+      ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
+      return "*const fn(#{all_params.join(', ')}) #{ret_str}"
     end
 
     # 2b. Derive Zig type from ownership × sync dimensions

@@ -314,6 +314,39 @@ private
         }
       ZIG
 
+    when AST::LambdaLit
+      # Transpile a lambda literal as an anonymous Zig struct with a named `call` function.
+      # This yields a comptime function reference that Zig coerces to *const fn(...).
+      # Captures are not yet supported (Phase 2+).
+      sig = node.full_type  # Type wrapping { params: [...], return: { type: ... }, lambda: true }
+      @lambda_counter ||= 0
+      @lambda_counter += 1
+      fn_name = "_lambda_#{@lambda_counter}"
+
+      params_zig = (sig[:params] || []).map do |p|
+        p_name = p[:name]
+        p_type = p[:type]
+        type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
+        "#{p_name}: #{type_str}"
+      end
+
+      ret = sig[:return]&.fetch(:type, nil) || :Void
+      ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
+      ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
+
+      # Use _rt to avoid shadowing an enclosing function's `rt` parameter (Zig 0.13+ forbids it).
+      all_params = ["_rt: *Runtime"] + params_zig
+
+      body_expr = visit(node.body)
+      # Lambdas have a single-expression body; wrap in return.
+      body_str = "return #{body_expr};"
+
+      rt_sup = "_ = &_rt;"
+      param_sups = (sig[:params] || []).map { |p| "_ = &#{p[:name]};" }.join(" ")
+      sups = [rt_sup, param_sups].reject(&:empty?).join(" ")
+
+      "&(struct { fn #{fn_name}(#{all_params.join(', ')}) #{ret_str} { #{sups} #{body_str} } }).#{fn_name}"
+
     # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
@@ -323,7 +356,8 @@ private
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
-      annotation = ZIG_PRIMITIVES.include?(zig_type) ? ": #{zig_type}" : ""
+      # Always emit explicit type annotation for fn_type (Zig can't always infer *const fn(...)).
+      annotation = (ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type?) ? ": #{zig_type}" : ""
 
       # 1. Resolve MOVE vs RETAIN logic
       @current_rhs_is_move = node.value.is_a?(AST::MoveNode)

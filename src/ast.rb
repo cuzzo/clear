@@ -100,8 +100,13 @@ module AST
       end
 
       # Build a Type that carries the resolved base type plus storage-derived capabilities.
-      base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
-      t = Type.new(base_sym)
+      # For fn_type, preserve the full type object — do not reduce to the return-type symbol.
+      t = if final_type.is_a?(Type) && final_type.fn_type?
+        final_type
+      else
+        base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
+        Type.new(base_sym)
+      end
       case storage
       when :multiowned
         t.ownership = :multiowned   # also sets t.location = :multiowned via setter

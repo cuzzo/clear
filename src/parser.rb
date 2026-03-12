@@ -1119,7 +1119,38 @@ class Parser
     AST::ReduceOp.new(reduce_token, initial_value, body)
   end
 
+  # Parses a function type annotation: FN(Type, ...) -> ReturnType
+  # Parameter names are optional (documentation only): FN(n: Int64) -> Bool is the same as FN(Int64) -> Bool.
+  # Returns a Type whose raw is { params: [...], return: { type: Type }, fn_type: true }.
+  def parse_fn_type_annotation
+    consume(:KEYWORD, 'FN')
+    consume(:CHAR, '(')
+    param_types = []
+    until match?(:CHAR, ')')
+      # Allow optional name annotation: `name: Type` or just `Type`
+      if match?(:VAR_ID) && peek.type == :CHAR && peek.value == ':'
+        consume(:VAR_ID)   # name is for documentation only
+        consume(:CHAR, ':')
+      end
+      param_types << parse_type_annotation(allow_capabilities: false)
+      break unless match!(:CHAR, ',')
+    end
+    consume(:CHAR, ')')
+    consume(:ARROW, '->')
+    return_type = parse_type_annotation(allow_capabilities: false)
+    Type.new({
+      params: param_types.each_with_index.map { |t, i|
+        { name: "arg#{i}", type: t, required: true, mutable: false, takes: false }
+      },
+      return: { type: return_type },
+      fn_type: true
+    })
+  end
+
   def parse_type_annotation(allow_capabilities: true)
+    # Function type: FN(Type, ...) -> ReturnType
+    return parse_fn_type_annotation if match?(:KEYWORD, 'FN')
+
     # Check for tense (Promise) prefix: ~Type
     tense_prefix = ""
     if match!(:CHAR, '~')

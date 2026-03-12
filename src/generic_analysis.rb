@@ -52,6 +52,9 @@ module GenericAnalysis
   # does not raise "unknown type argument T".
   def validate_type_annotation!(node, type_obj)
     return unless type_obj.is_a?(Type)
+    # FN types are structurally typed; their nested param/return types are validated
+    # when they are parsed. No named-type schema lookup is needed here.
+    return if type_obj.fn_type?
 
     # Unwrap error-union and optional wrappers to get the inner type
     inner = if type_obj.error_union?
