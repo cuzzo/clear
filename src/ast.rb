@@ -194,6 +194,7 @@ module AST
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
     include Locatable
+    attr_accessor :fn_ref   # true when the identifier refers to a named function used as a value
     def wildcard?; false end
     def name; self[:name].to_s end
   end

@@ -1,24 +1,30 @@
--- First-class function types (Phase 1 + Phase 3).
+-- First-class function types (Phase 1 + Phase 3 + Phase 4).
 --
 -- FN(T, ...) -> R is a function-pointer type. Variables may be declared with
--- this annotation and assigned a lambda literal.  Phase 3: calling through
--- fn-type variables.
+-- this annotation and assigned a lambda literal (Phase 1), called through
+-- fn-type variables (Phase 3), or passed a named function as a value (Phase 4).
 
 FN isPositive(n: Int64) RETURNS Bool ->
   RETURN n > 0;
 END
 
-FN cheatMain() RETURNS Void ->
-  -- Declare a fn-type variable and assign a typed lambda.
-  cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
+FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+  RETURN cb(n);
+END
 
-  -- A multi-param fn type.
+FN cheatMain() RETURNS Void ->
+  -- Phase 1: declare fn-type variables with lambda literals.
+  cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
   add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
 
   -- Phase 3: call through fn-type variables.
   ASSERT cb(5) == TRUE;
   ASSERT cb(-1) == FALSE;
   ASSERT add(3, 4) == 7;
+
+  -- Phase 4: pass a named function as a value.
+  ASSERT apply(isPositive, 10) == TRUE;
+  ASSERT apply(isPositive, -5) == FALSE;
 
   -- Smoke test: verify unrelated logic still works.
   ASSERT isPositive(5) == TRUE;

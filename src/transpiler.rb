@@ -1211,6 +1211,9 @@ private
         return @placeholder_name
       end
 
+      # Named function used as a value: emit a function pointer
+      return "&#{zig_safe_name(node.name)}" if node.respond_to?(:fn_ref) && node.fn_ref
+
       # Inside a WITH block, use the unwrapped inner alias instead of the Rc handle
       rc_map = @rc_unwrap_map || {}
       return rc_map[node.name] if rc_map.key?(node.name)

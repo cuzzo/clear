@@ -1368,7 +1368,13 @@ private
     else
       scope = current_scope
       if !scope.locals.key?(node.name)
-        error!(node, "Undefined variable '#{node.name}'")
+        # Check if it's a named function being used as a value (Phase 4 fn-as-value)
+        fn_scope = lookup_scope_for(node.name)
+        if fn_scope && fn_scope.resolve_type(node.name).is_a?(Hash)
+          scope = fn_scope
+        else
+          error!(node, "Undefined variable '#{node.name}'")
+        end
       end
     end
 
@@ -1377,7 +1383,15 @@ private
     scope.check_validity!(node.name)
 
     # 2. Resolve Type
-    node.full_type = scope.resolve_full_type(node.name)
+    raw_type = scope.resolve_full_type(node.name)
+    if raw_type.raw.is_a?(Hash) && raw_type.raw[:params] && !raw_type.fn_type?
+      # Named function used as a value — build a proper fn_type Type
+      sig = raw_type.raw
+      node.full_type = Type.new({ params: sig[:params], return: sig[:return], fn_type: true })
+      node.fn_ref = true
+    else
+      node.full_type = raw_type
+    end
 
     # 3. Liveness
     state = scope.get_state(node.name)

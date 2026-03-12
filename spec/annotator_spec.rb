@@ -12219,5 +12219,111 @@ RSpec.describe SemanticAnnotator do
     end
 
   end
+
+  # ===========================================================================
+  # FIRST-CLASS FUNCTION TYPES — Phase 4
+  # ===========================================================================
+  describe "Function Types — Phase 4 (named functions as values)" do
+
+    def transpile(source)
+      ZigTranspiler.new.transpile(source)
+    end
+
+    let(:fn_preamble) {
+      <<~CLEAR
+        FN isPositive(n: Int64) RETURNS Bool ->
+          RETURN n > 0;
+        END
+        FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+          RETURN cb(n);
+        END
+      CLEAR
+    }
+
+    # -------------------------------------------------------------------------
+    # Annotator: named function used as a value
+    # -------------------------------------------------------------------------
+    describe "Annotator: named function as value" do
+      context "apply(isPositive, 5)" do
+        let(:code) {
+          <<~CLEAR
+            FN isPositive(n: Int64) RETURNS Bool ->
+              RETURN n > 0;
+            END
+            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+              RETURN cb(n);
+            END
+            result: Bool = apply(isPositive, 5);
+          CLEAR
+        }
+
+        it "annotates without error" do
+          expect { run(code) }.not_to raise_error
+        end
+
+        it "marks the Identifier as fn_ref" do
+          tree = run(code)
+          call_stmt = tree.statements.last
+          fn_ref_arg = call_stmt.value.args.find { |a| a.is_a?(AST::Identifier) && a.name == "isPositive" }
+          expect(fn_ref_arg).not_to be_nil
+          expect(fn_ref_arg.fn_ref).to be true
+        end
+
+        it "resolves the fn_ref identifier's type as fn_type?" do
+          tree = run(code)
+          call_stmt = tree.statements.last
+          fn_ref_arg = call_stmt.value.args.find { |a| a.is_a?(AST::Identifier) && a.name == "isPositive" }
+          expect(fn_ref_arg.full_type.fn_type?).to be true
+        end
+      end
+
+      context "named function with wrong return type passed where fn_type expected" do
+        let(:code) {
+          <<~CLEAR
+            FN returnsString(n: Int64) RETURNS String ->
+              RETURN "hello";
+            END
+            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+              RETURN cb(n);
+            END
+            result: Bool = apply(returnsString, 5);
+          CLEAR
+        }
+        it "raises a type mismatch error" do
+          expect { run(code) }.to raise_error(CompilerError)
+        end
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Transpiler: named function as value emits &name
+    # -------------------------------------------------------------------------
+    describe "Transpiler: named function as value" do
+      let(:source) {
+        <<~CLEAR
+          FN isPositive(n: Int64) RETURNS Bool ->
+            RETURN n > 0;
+          END
+          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+            RETURN cb(n);
+          END
+          FN cheatMain() RETURNS Void ->
+            result: Bool = apply(isPositive, 5);
+          END
+        CLEAR
+      }
+
+      it "emits &isPositive as the argument" do
+        zig = transpile(source)
+        expect(zig).to include("&isPositive")
+      end
+
+      it "emits try apply(rt, &isPositive, ...)" do
+        zig = transpile(source)
+        expect(zig).to match(/try apply\(rt, &isPositive,/)
+      end
+    end
+
+  end
 end
 
