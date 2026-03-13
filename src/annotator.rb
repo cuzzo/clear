@@ -31,6 +31,10 @@ class SemanticAnnotator
     @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @frame_usage_count = 0
     @current_fn_type_params = [] # Type params of the function currently being validated
+    # Reentrancy analysis
+    @call_graph  = {}  # name => Set of directly-called function names (excluding self-calls)
+    @fn_has_fnptr = {} # name => true if function calls a fn-type variable or lambda
+    @fn_nodes    = {}  # name => FunctionDef node (for error reporting in the post-pass)
     setup_builtins
   end
 
@@ -145,6 +149,11 @@ private
       visit_FunctionDef(fn)
       node.statements << fn
     end
+
+    # PASS 4: Indirect reentrancy cycle detection.
+    # Now that all function bodies have been analyzed and @call_graph is complete,
+    # detect mutually-recursive function groups and require @reentrant or @nonReentrant.
+    check_indirect_reentrancy!
 
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
@@ -351,6 +360,32 @@ private
 
     # 4. Routine Analysis
     final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
+
+    # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
+    called_names, has_fnptr = scan_for_calls(node.body)
+    directly_recursive = called_names.include?(node.name)
+    # Record in call graph for the later indirect-cycle post-pass.
+    @call_graph[node.name]   = called_names - [node.name]
+    @fn_has_fnptr[node.name] = has_fnptr
+    @fn_nodes[node.name]     = node
+
+    if directly_recursive
+      case node.reentrant
+      when :non_reentrant
+        error!(node, "Reentrancy Error: '#{node.name}' directly calls itself. " \
+                     "Use @reentrant (not @nonReentrant) for directly recursive functions.")
+      when nil
+        error!(node, "Reentrancy Error: '#{node.name}' calls itself recursively. " \
+                     "Add @reentrant to the function signature to allow this.")
+      end
+      # :reentrant → OK
+    end
+
+    if has_fnptr && node.reentrant.nil?
+      error!(node, "Reentrancy Error: '#{node.name}' calls a function pointer or lambda whose " \
+                   "behavior cannot be statically determined. " \
+                   "Add @reentrant or @nonReentrant to the function signature.")
+    end
 
     # 5. Finalize Signature
     if (is_implicit_return || declared_return == :Any)
@@ -2392,6 +2427,80 @@ private
   #   1. Generic type used correctly: Pair<Number>    — validate arg count + arg types
   # Generic helpers (validate_type_annotation!, infer_generic_type_args!, etc.)
   # live in src/generic_analysis.rb (included via GenericAnalysis module).
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Reentrancy helpers
+  # ──────────────────────────────────────────────────────────────────────────
+
+  # Recursively walk an annotated AST subtree and collect:
+  #   - names of every directly-called named function (FuncCall where !fn_var_call)
+  #   - whether any fn-type variable or lambda is invoked (fn_var_call)
+  #
+  # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
+  # all functions are top-level — but guarded for safety).
+  def scan_for_calls(node)
+    calls    = Set.new
+    has_fnptr = [false]
+
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+        # terminals — nothing to recurse into
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested function definitions (own scope).
+      when AST::FuncCall
+        if n.fn_var_call
+          has_fnptr[0] = true
+        else
+          calls.add(n.name)
+        end
+        traverse.call(n.args)
+      else
+        # Generic Struct traversal: covers all other AST node types.
+        if n.respond_to?(:each_pair)
+          n.each_pair { |_, v| traverse.call(v) }
+        end
+      end
+    end
+
+    traverse.call(node)
+    [calls, has_fnptr[0]]
+  end
+
+  # Post-pass: detect indirect mutual recursion in the call graph and require
+  # @reentrant or @nonReentrant on every unannotated function involved in a cycle.
+  #
+  # Uses a simple DFS reachability check: for each function F, walk F's callees
+  # transitively and report an error if F is reachable from itself.
+  def check_indirect_reentrancy!
+    @call_graph.each_key do |fn_name|
+      node = @fn_nodes[fn_name]
+      next if node.nil?
+      next if node.reentrant  # already annotated — no complaint needed
+
+      # DFS from fn_name's callees; detect if we can reach fn_name.
+      visited = Set.new
+      queue   = (@call_graph[fn_name] || Set.new).to_a
+
+      until queue.empty?
+        callee = queue.shift
+        next if visited.include?(callee)
+        visited.add(callee)
+
+        if callee == fn_name
+          error!(node, "Reentrancy Error: '#{fn_name}' is part of a mutually recursive call cycle. " \
+                       "Add @reentrant or @nonReentrant to the function signature.")
+          break
+        end
+
+        (@call_graph[callee] || Set.new).each { |c| queue << c }
+      end
+    end
+  end
 
 end
 

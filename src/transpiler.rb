@@ -37,17 +37,21 @@ class ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
+    @needs_safety_import = false
+    body = visit(ast)
+    safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
+
     <<~ZIG
       const std = @import("std");
       const CheatHeader = @import("runtime-header.zig");
       const CheatLib = CheatHeader.CheatLib;
       const Runtime = CheatHeader.Runtime;
       const EbrContext = CheatHeader.EbrContext;
-
+      #{safety_line}
       // -------------------------------------------------------------------------
       // 2. User Types & Functions (Transpiled)
       // -------------------------------------------------------------------------
-      #{visit(ast)}
+      #{body}
 
       // -------------------------------------------------------------------------
       // 3. Main Entry (Test Harness)
@@ -100,7 +104,9 @@ class ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
+    @needs_safety_import = false
     body = transpile_module(ast)
+    safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
 
     # If the module defines cheatMain, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
@@ -130,7 +136,7 @@ class ZigTranspiler
       const CheatLib = CheatHeader.CheatLib;
       const Runtime = CheatHeader.Runtime;
       const EbrContext = CheatHeader.EbrContext;
-
+      #{safety_line}
       #{body}
       #{test_block}
     ZIG
@@ -301,6 +307,12 @@ private
 
       prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
       prologue = node.uses_frame ? prologue : "_ = &rt;"
+      # @nonReentrant: insert a StackGuard that errors at runtime on unexpected recursion.
+      if node.reentrant == :non_reentrant
+        @needs_safety_import = true
+        guard = "var _guard = try safety.StackGuard.enter(@src());\n    _guard.push();\n    defer _guard.pop();"
+        prologue = "#{guard}\n    #{prologue}"
+      end
       # Suppress unused-parameter warnings for all non-rt params.
       # Zig 0.15+ errors on any unused function parameter; _ = &x; is a safe no-op.
       param_suppressions = node.params.map { |p| "_ = &#{p[:name]};" }.join("\n    ")

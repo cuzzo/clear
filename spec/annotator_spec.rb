@@ -12234,7 +12234,7 @@ RSpec.describe SemanticAnnotator do
       context "cb(5) where cb: FN(Int64) -> Bool" do
         let(:source) {
           <<~CLEAR
-            FN cheatMain() RETURNS Void ->
+            FN cheatMain() RETURNS Void @nonReentrant ->
               cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
               result: Bool = cb(5);
             END
@@ -12249,7 +12249,7 @@ RSpec.describe SemanticAnnotator do
       context "add(3, 4) where add: FN(Int64, Int64) -> Int64" do
         let(:source) {
           <<~CLEAR
-            FN cheatMain() RETURNS Void ->
+            FN cheatMain() RETURNS Void @nonReentrant ->
               add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
               sum: Int64 = add(3, 4);
             END
@@ -12294,7 +12294,7 @@ RSpec.describe SemanticAnnotator do
             FN isPositive(n: Int64) RETURNS Bool ->
               RETURN n > 0;
             END
-            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool @nonReentrant ->
               RETURN cb(n);
             END
             result: Bool = apply(isPositive, 5);
@@ -12348,7 +12348,7 @@ RSpec.describe SemanticAnnotator do
           FN isPositive(n: Int64) RETURNS Bool ->
             RETURN n > 0;
           END
-          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool @nonReentrant ->
             RETURN cb(n);
           END
           FN cheatMain() RETURNS Void ->
@@ -12365,6 +12365,238 @@ RSpec.describe SemanticAnnotator do
       it "emits try apply(rt, &isPositive, ...)" do
         zig = transpile(source)
         expect(zig).to match(/try apply\(rt, &isPositive,/)
+      end
+    end
+
+  end
+
+  # ===========================================================================
+  # REENTRANCY CAPABILITY — @reentrant / @nonReentrant
+  # ===========================================================================
+  describe "Reentrancy capability (@reentrant / @nonReentrant)" do
+
+    def transpile(source)
+      ZigTranspiler.new.transpile(source)
+    end
+
+    # -------------------------------------------------------------------------
+    # @reentrant: direct recursion allowed
+    # -------------------------------------------------------------------------
+    describe "direct recursion" do
+      it "raises an error when a directly-recursive function is not annotated" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*@reentrant/)
+      end
+
+      it "accepts a directly-recursive function marked @reentrant" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "raises an error when a directly-recursive function is marked @nonReentrant" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 @nonReentrant ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(CompilerError, /Use @reentrant.*not @nonReentrant/)
+      end
+
+      it "transpiles @reentrant function without a StackGuard prologue" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+          FN cheatMain() RETURNS Void ->
+            ASSERT fib(5) == 5;
+          END
+        CLEAR
+        zig = transpile(code)
+        expect(zig).not_to include("StackGuard")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # @nonReentrant: fn-pointer / lambda calls
+    # -------------------------------------------------------------------------
+    describe "fn-pointer / lambda calls" do
+      it "raises an error when a function calling a fn-type variable is not annotated" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
+            RETURN cb(x);
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*apply/)
+      end
+
+      it "accepts a fn-pointer-calling function marked @nonReentrant" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "accepts a fn-pointer-calling function marked @reentrant" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @reentrant ->
+            RETURN cb(x);
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "transpiles @nonReentrant with a StackGuard prologue" do
+        code = <<~CLEAR
+          FN double(x: Int64) RETURNS Int64 ->
+            RETURN x * 2;
+          END
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          FN cheatMain() RETURNS Void ->
+            result: Int64 = apply(double, 3);
+          END
+        CLEAR
+        zig = transpile(code)
+        expect(zig).to include("StackGuard.enter")
+        expect(zig).to include("_guard.push()")
+        expect(zig).to include("_guard.pop()")
+      end
+
+      it "transpiles @nonReentrant with safety import" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        zig = transpile(code)
+        expect(zig).to include('const safety = @import("safety.zig")')
+      end
+
+      it "does not emit safety import when no @nonReentrant functions exist" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+          END
+        CLEAR
+        zig = transpile(code)
+        expect(zig).not_to include("safety")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Indirect (mutual) recursion
+    # -------------------------------------------------------------------------
+    describe "mutual recursion (indirect cycles)" do
+      it "raises an error for unannotated mutually recursive functions" do
+        code = <<~CLEAR
+          FN isEven(n: Int64) RETURNS Bool ->
+            IF n == 0 THEN RETURN TRUE; END
+            RETURN isOdd(n - 1);
+          END
+          FN isOdd(n: Int64) RETURNS Bool ->
+            IF n == 0 THEN RETURN FALSE; END
+            RETURN isEven(n - 1);
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*mutually recursive/)
+      end
+
+      it "accepts mutually recursive functions when both are marked @reentrant" do
+        code = <<~CLEAR
+          FN isEven(n: Int64) RETURNS Bool @reentrant ->
+            IF n == 0 THEN RETURN TRUE; END
+            RETURN isOdd(n - 1);
+          END
+          FN isOdd(n: Int64) RETURNS Bool @reentrant ->
+            IF n == 0 THEN RETURN FALSE; END
+            RETURN isEven(n - 1);
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "accepts mutually recursive functions when both are marked @nonReentrant" do
+        code = <<~CLEAR
+          FN isEven(n: Int64) RETURNS Bool @nonReentrant ->
+            IF n == 0 THEN RETURN TRUE; END
+            RETURN isOdd(n - 1);
+          END
+          FN isOdd(n: Int64) RETURNS Bool @nonReentrant ->
+            IF n == 0 THEN RETURN FALSE; END
+            RETURN isEven(n - 1);
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "does not flag functions that share a callee but aren't in a cycle" do
+        # foo and bar both call helper — no cycle
+        code = <<~CLEAR
+          FN helper(x: Int64) RETURNS Int64 ->
+            RETURN x + 1;
+          END
+          FN foo(x: Int64) RETURNS Int64 ->
+            RETURN helper(x);
+          END
+          FN bar(x: Int64) RETURNS Int64 ->
+            RETURN helper(x);
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Parser: @reentrant / @nonReentrant attribute parsing
+    # -------------------------------------------------------------------------
+    describe "parser" do
+      it "parses @reentrant on FunctionDef without RETURNS" do
+        code = <<~CLEAR
+          FN ping() @reentrant ->
+            ping();
+          END
+        CLEAR
+        tree = run(code)
+        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "ping" }
+        expect(fn.reentrant).to eq(:reentrant)
+      end
+
+      it "parses @nonReentrant on FunctionDef with RETURNS" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+        CLEAR
+        tree = run(code)
+        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
+        expect(fn.reentrant).to eq(:non_reentrant)
+      end
+
+      it "leaves reentrant as nil for plain functions" do
+        code = <<~CLEAR
+          FN add(a: Int64, b: Int64) RETURNS Int64 ->
+            RETURN a + b;
+          END
+        CLEAR
+        tree = run(code)
+        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "add" }
+        expect(fn.reentrant).to be_nil
       end
     end
 

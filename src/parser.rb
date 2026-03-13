@@ -683,6 +683,14 @@ class Parser
       return_type = parse_type_annotation()
     end
 
+    # 4. Parse optional @reentrant / @nonReentrant function-level capability.
+    # These are separate from type capabilities and must appear after the return type.
+    reentrant = nil
+    if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
+      cap_tok = consume(:VAR_ID)
+      reentrant = cap_tok.value == '@reentrant' ? :reentrant : :non_reentrant
+    end
+
     consume(:ARROW, '->')
     body = parse_block_body(['END', 'CATCH'])
 
@@ -697,6 +705,7 @@ class Parser
     consume(:KEYWORD, 'END')
     node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var, visibility)
     node.type_params = type_params unless type_params.empty?
+    node.reentrant = reentrant
     node
   end
 

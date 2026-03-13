@@ -1,0 +1,29 @@
+-- 88_reentrant.cht — reentrancy capability tests
+--
+-- @reentrant    — function is designed to call itself recursively.
+-- @nonReentrant — function might be re-entered (e.g. calls a callback);
+--                 a runtime StackGuard errors if it IS re-entered.
+
+-- Direct recursion: must be @reentrant
+FN fib(n: Int64) RETURNS Int64 @reentrant ->
+  IF n <= 1 THEN
+    RETURN n;
+  END
+  RETURN fib(n - 1) + fib(n - 2);
+END
+
+-- Fn-pointer call: must be @reentrant or @nonReentrant.
+-- Using @nonReentrant here because apply itself is not designed to recur.
+FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+  RETURN cb(x);
+END
+
+FN double(x: Int64) RETURNS Int64 ->
+  RETURN x * 2;
+END
+
+FN cheatMain() RETURNS Void ->
+  ASSERT fib(10) == 55;
+  result: Int64 = apply(double, 7);
+  ASSERT result == 14;
+END
