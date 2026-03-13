@@ -173,6 +173,13 @@ class Type
   # Allow code to compare this object directly to symbols/strings
   # e.g. if node.type == :Number
   def ==(other)
+    # fn_types must never compare equal to a plain symbol (resolved returns the return type,
+    # not a unique identity). Two fn_types are equal only when their raw hashes match.
+    if fn_type?
+      other_t = other.is_a?(Type) ? other : nil
+      return false unless other_t&.fn_type?
+      return @raw == other_t.raw
+    end
     resolved == other.to_sym || @raw == other
   end
 
@@ -209,6 +216,34 @@ class Type
   # Coercion helpers
   # ----------------------------------------------
   def accepts?(other_type)
+    # 0. Function type structural matching (must precede == shortcut because `resolved`
+    #    returns only the return type for fn_types, making two different fn_type signatures
+    #    appear equal if their return types match).
+    if self.fn_type?
+      return true if other_type.is_a?(Type) && other_type.any?
+      other_raw = other_type.is_a?(Type) ? other_type.raw : nil
+      is_fn_or_lambda = other_type.is_a?(Type) &&
+                        (other_type.fn_type? || (other_raw.is_a?(Hash) && other_raw[:lambda]))
+      return false unless is_fn_or_lambda
+
+      self_params  = @raw[:params] || []
+      other_params = (other_raw || {})[:params] || []
+      return false unless self_params.length == other_params.length
+
+      self_ret  = @raw.dig(:return, :type)
+      other_ret = (other_raw || {}).dig(:return, :type)
+      self_ret_t  = self_ret.is_a?(Type)  ? self_ret  : Type.new(self_ret  || :Any)
+      other_ret_t = other_ret.is_a?(Type) ? other_ret : Type.new(other_ret || :Any)
+      return false unless self_ret_t.accepts?(other_ret_t)
+
+      self_params.zip(other_params).each do |sp, op|
+        sp_t = sp[:type].is_a?(Type) ? sp[:type] : Type.new(sp[:type] || :Any)
+        op_t = op[:type].is_a?(Type) ? op[:type] : Type.new(op[:type] || :Any)
+        return false unless sp_t.accepts?(op_t)
+      end
+      return true
+    end
+
     # 1. Exact Match / Any
     return true if self == other_type || self.any? || other_type.any?
 
@@ -259,21 +294,6 @@ class Type
     if self.map? && other_type.map?
       return true if other_type.value_type.any?
       return self.value_type.accepts?(other_type.value_type)
-    end
-
-    # 7. Function type compatibility
-    if self.fn_type?
-      # Accept another fn_type (Phase 2 will add full signature matching)
-      return true if other_type.fn_type?
-      # Accept a lambda signature when its return type is compatible.
-      # Phase 2 will add full parameter-signature matching.
-      if other_type.raw.is_a?(Hash) && other_type.raw[:lambda]
-        lambda_ret_raw = other_type.raw.dig(:return, :type)
-        fn_ret_raw     = @raw.dig(:return, :type)
-        lambda_ret = lambda_ret_raw.is_a?(Type) ? lambda_ret_raw : Type.new(lambda_ret_raw || :Any)
-        fn_ret     = fn_ret_raw.is_a?(Type)     ? fn_ret_raw     : Type.new(fn_ret_raw || :Any)
-        return fn_ret.accepts?(lambda_ret)
-      end
     end
 
     false

@@ -12075,6 +12075,43 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
+    # Phase 2: Full signature matching in Type#accepts?
+    # -------------------------------------------------------------------------
+    describe "Type#accepts? full signature matching (Phase 2)" do
+      def fn_type(params, ret)
+        Type.new({
+          params: params.map.with_index { |t, i| { name: "arg#{i}", type: Type.new(t), required: true, mutable: false, takes: false } },
+          return: { type: Type.new(ret) },
+          fn_type: true
+        })
+      end
+
+      it "accepts identical signatures" do
+        expect(fn_type([:Int64], :Bool).accepts?(fn_type([:Int64], :Bool))).to be true
+      end
+
+      it "rejects when param type differs" do
+        expect(fn_type([:Int64], :Bool).accepts?(fn_type([:String], :Bool))).to be false
+      end
+
+      it "rejects when return type differs" do
+        expect(fn_type([:Int64], :Bool).accepts?(fn_type([:Int64], :Int64))).to be false
+      end
+
+      it "rejects when param count differs" do
+        expect(fn_type([:Int64], :Bool).accepts?(fn_type([:Int64, :Int64], :Bool))).to be false
+      end
+
+      it "rejects non-fn_type (plain symbol)" do
+        expect(fn_type([:Int64], :Bool).accepts?(Type.new(:Bool))).to be false
+      end
+
+      it "accepts when other_type is :Any" do
+        expect(fn_type([:Int64], :Bool).accepts?(Type.new(:Any))).to be true
+      end
+    end
+
+    # -------------------------------------------------------------------------
     # Annotator: type mismatch errors
     # -------------------------------------------------------------------------
     describe "Annotator: fn_type type checking" do
@@ -12082,6 +12119,13 @@ RSpec.describe SemanticAnnotator do
         let(:code) { "cb: FN(Int64) -> Bool = %(n: Int64) -> \"hello\";" }
         it "raises a type mismatch error" do
           expect { run(code) }.to raise_error(/Type Mismatch/i)
+        end
+      end
+
+      context "lambda param count does not match FN param count" do
+        let(:code) { "cb: FN(Int64) -> Bool = %(a: Int64, b: Int64) -> a > b;" }
+        it "raises a type mismatch error" do
+          expect { run(code) }.to raise_error(CompilerError)
         end
       end
     end

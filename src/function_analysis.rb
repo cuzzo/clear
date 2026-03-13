@@ -135,11 +135,20 @@ module FunctionAnalysis
 
       match = false
 
+      # Case 0: fn_type structural check.
+      # resolved_type only returns the return-type symbol for fn_types, so we
+      # must compare the full Type objects to validate signature compatibility.
+      expected_type_obj = expected.is_a?(Type) ? expected : Type.new(expected || :Any)
+      if expected_type_obj.fn_type? && arg_node.respond_to?(:full_type)
+        actual_type_obj = arg_node.full_type
+        match = true if actual_type_obj.is_a?(Type) && expected_type_obj.accepts?(actual_type_obj)
+      end
+
       # Case 1: Exact Match or Any
-      if expected == :Any || actual == :Any || expected == actual
+      if !match && (expected == :Any || actual == :Any || expected == actual)
         match = true
 
-      elsif is_safe_autocast?(actual, expected)
+      elsif !match && is_safe_autocast?(actual, expected)
         arg_node.coerced_type = expected
         match = true
       end
