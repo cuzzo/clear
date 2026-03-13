@@ -1147,12 +1147,20 @@ class Parser
     consume(:CHAR, ')')
     consume(:ARROW, '->')
     return_type = parse_type_annotation(allow_capabilities: false)
+    # Parse optional @reentrant capability on fn-type annotations.
+    # FN(Int64) -> Bool @reentrant means the parameter accepts @reentrant functions.
+    allows_reentrant = false
+    if match?(:VAR_ID) && current.value == '@reentrant'
+      consume(:VAR_ID)
+      allows_reentrant = true
+    end
     Type.new({
       params: param_types.each_with_index.map { |t, i|
         { name: "arg#{i}", type: t, required: true, mutable: false, takes: false }
       },
       return: { type: return_type },
-      fn_type: true
+      fn_type: true,
+      reentrant: allows_reentrant
     })
   end
 

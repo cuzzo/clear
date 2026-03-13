@@ -241,6 +241,13 @@ class Type
         op_t = op[:type].is_a?(Type) ? op[:type] : Type.new(op[:type] || :Any)
         return false unless sp_t.accepts?(op_t)
       end
+
+      # Reentrant constraint: a @reentrant function cannot be passed to a parameter
+      # that doesn't explicitly allow it (i.e., the param type lacks @reentrant).
+      self_allows_reentrant = @raw[:reentrant] == true
+      other_is_reentrant    = other_raw.is_a?(Hash) && other_raw[:reentrant] == true
+      return false if other_is_reentrant && !self_allows_reentrant
+
       return true
     end
 

@@ -141,7 +141,16 @@ module FunctionAnalysis
       expected_type_obj = expected.is_a?(Type) ? expected : Type.new(expected || :Any)
       if expected_type_obj.fn_type? && arg_node.respond_to?(:full_type)
         actual_type_obj = arg_node.full_type
-        match = true if actual_type_obj.is_a?(Type) && expected_type_obj.accepts?(actual_type_obj)
+        if actual_type_obj.is_a?(Type) && expected_type_obj.accepts?(actual_type_obj)
+          match = true
+        elsif actual_type_obj.is_a?(Type) && actual_type_obj.fn_type? &&
+              actual_type_obj.raw[:reentrant] && !expected_type_obj.raw[:reentrant]
+          arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
+          error!(arg_node,
+            "Reentrancy Error: '#{arg_name}' is @reentrant but parameter '#{param[:name]}' " \
+            "does not accept @reentrant functions. " \
+            "Declare the parameter type as 'FN(...) -> Type @reentrant' to allow this.")
+        end
       end
 
       # Case 1: Exact Match or Any

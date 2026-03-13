@@ -245,7 +245,8 @@ private
         type: (node.return_type || :Any),
         lifetime: get_lifetime_path(node)
       },
-      visibility: node.visibility
+      visibility: node.visibility,
+      reentrant: node.reentrant == :reentrant
     }
 
     current_scope.declare(
@@ -354,7 +355,8 @@ private
       }},
       return: { type: declared_return, lifetime: lifetime_path },
       visibility: node.visibility,
-      type_params: fn_type_params.any? ? fn_type_params : nil
+      type_params: fn_type_params.any? ? fn_type_params : nil,
+      reentrant: node.reentrant == :reentrant
     }
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
@@ -1420,9 +1422,10 @@ private
     # 2. Resolve Type
     raw_type = scope.resolve_full_type(node.name)
     if raw_type.raw.is_a?(Hash) && raw_type.raw[:params] && !raw_type.fn_type?
-      # Named function used as a value — build a proper fn_type Type
+      # Named function used as a value — build a proper fn_type Type.
+      # Propagate :reentrant so the type-checker can enforce param constraints.
       sig = raw_type.raw
-      node.full_type = Type.new({ params: sig[:params], return: sig[:return], fn_type: true })
+      node.full_type = Type.new({ params: sig[:params], return: sig[:return], fn_type: true, reentrant: sig[:reentrant] == true })
       node.fn_ref = true
     else
       node.full_type = raw_type

@@ -12601,5 +12601,143 @@ RSpec.describe SemanticAnnotator do
     end
 
   end
+
+  # ===========================================================================
+  # FN-TYPE PARAMETER @reentrant CONSTRAINT
+  # ===========================================================================
+  describe "fn-type parameter @reentrant constraint" do
+
+    # -------------------------------------------------------------------------
+    # Blocking @reentrant functions at non-reentrant parameters
+    # -------------------------------------------------------------------------
+    describe "passing @reentrant functions to non-@reentrant parameters" do
+      it "raises a reentrancy error when passing a @reentrant function to a plain fn-type param" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          result: Int64 = apply(fib, 5);
+        CLEAR
+        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*@reentrant/)
+      end
+
+      it "does not raise when passing a non-reentrant function to a plain fn-type param" do
+        code = <<~CLEAR
+          FN double(x: Int64) RETURNS Int64 ->
+            RETURN x * 2;
+          END
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          result: Int64 = apply(double, 5);
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Allowing @reentrant functions at @reentrant-annotated parameters
+    # -------------------------------------------------------------------------
+    describe "passing @reentrant functions to @reentrant-annotated fn-type params" do
+      it "accepts a @reentrant function when the param declares @reentrant" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          result: Int64 = apply(fib, 5);
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "also accepts a non-reentrant function at a @reentrant-annotated param (covariant)" do
+        code = <<~CLEAR
+          FN double(x: Int64) RETURNS Int64 ->
+            RETURN x * 2;
+          END
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          result: Int64 = apply(double, 5);
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Parser: @reentrant on fn-type annotation
+    # -------------------------------------------------------------------------
+    describe "parser" do
+      it "parses @reentrant on a fn-type param annotation" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+        CLEAR
+        tree = run(code)
+        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
+        cb_param = fn.params.find { |p| p[:name] == "cb" }
+        expect(cb_param[:type].raw[:reentrant]).to be true
+      end
+
+      it "leaves reentrant false on a plain fn-type param annotation" do
+        code = <<~CLEAR
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+        CLEAR
+        tree = run(code)
+        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
+        cb_param = fn.params.find { |p| p[:name] == "cb" }
+        expect(cb_param[:type].raw[:reentrant]).to be_falsy
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Type: @reentrant propagated on fn_ref
+    # -------------------------------------------------------------------------
+    describe "fn_ref type propagation" do
+      it "marks the fn_ref type as reentrant when the named function is @reentrant" do
+        code = <<~CLEAR
+          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+            IF n <= 1 THEN RETURN n; END
+            RETURN fib(n - 1) + fib(n - 2);
+          END
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          result: Int64 = apply(fib, 5);
+        CLEAR
+        tree = run(code)
+        call = tree.statements.last.value
+        fib_arg = call.args.find { |a| a.is_a?(AST::Identifier) && a.name == "fib" }
+        expect(fib_arg.full_type.raw[:reentrant]).to be true
+      end
+
+      it "does not mark the fn_ref type as reentrant for a non-@reentrant function" do
+        code = <<~CLEAR
+          FN double(x: Int64) RETURNS Int64 ->
+            RETURN x * 2;
+          END
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+            RETURN cb(x);
+          END
+          result: Int64 = apply(double, 5);
+        CLEAR
+        tree = run(code)
+        call = tree.statements.last.value
+        double_arg = call.args.find { |a| a.is_a?(AST::Identifier) && a.name == "double" }
+        expect(double_arg.full_type.raw[:reentrant]).to be_falsy
+      end
+    end
+
+  end
 end
 
