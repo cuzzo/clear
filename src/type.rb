@@ -381,6 +381,10 @@ class Type
     @location == :heap
   end
 
+  def frame?
+    @location == :frame
+  end
+
   def multiowned?
     @ownership == :multiowned
   end
@@ -590,6 +594,7 @@ class Type
     return true if primitive?
     return false if multiowned? || shared? || any_sync?  # Rc/Arc/Locked must not be silently copied
     return false if heap?                   # Heap-allocated types are not copyable
+    return false if frame? && struct?       # Frame-allocated struct pointers are not copyable
     return false if array?   # Arrays are not copyable
     return false if map?     # Maps are not copyable
 
@@ -683,7 +688,7 @@ class Type
       @is_array            = false; @capacity = nil; @element_type_raw = nil
       @is_map              = false; @value_type_raw = nil
       @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
-      @location            = :frame
+      @location            = :stack
       return
     end
 
@@ -783,8 +788,10 @@ class Type
       @generic_args_raw    = nil
     end
 
-    # F. Default location based on type structure (keyword arg location: overrides this in initialize).
-    @location = primitive? ? :stack : :frame
+    # F. Default location: stack for all types.  Explicit frame/heap is set later by finalize_storage!
+    #    (Previously defaulted to :frame for non-primitives, but :frame is now a meaningful directive,
+    #    so we use :stack as the neutral default and let finalize_storage! upgrade when needed.)
+    @location = :stack
 
     # Resolved name is the raw string as-is (! and ? are type-level modifiers, not stripped).
     @resolved_cache = @raw.to_sym
@@ -863,7 +870,9 @@ class Type
       end
     end
 
-    is_pointer = heap?
+    # :frame means "allocated in the frame arena". Strings/arrays are value-typed (slice), only
+    # frame-allocated structs are stored as *T pointers so large data stays off the fiber stack.
+    is_pointer = heap? || (frame? && struct?)
 
     # 3. Handle Special primitive mapping
     if resolved == :String

@@ -112,6 +112,8 @@ module AST
         t.ownership = :multiowned   # also sets t.location = :multiowned via setter
       when :shared
         t.ownership = :shared       # also sets t.location = :shared via setter
+      when :frame
+        t.location = :frame         # marks variable as frame-arena pointer (*T in Zig)
       when :heap
         if value_sync == :locked
           t.sync = :locked          # sync= setter sets location = :heap

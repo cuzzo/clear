@@ -96,6 +96,8 @@ class Scope
       base_type.ownership = :multiowned
     when :shared
       base_type.ownership = :shared
+    when :frame
+      base_type.location = :frame   # large local var: arena pointer (*T in Zig)
     when :heap
       if entry[:sync] == :locked
         base_type.sync = :locked

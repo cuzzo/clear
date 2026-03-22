@@ -1218,6 +1218,12 @@ private
   end
 
   def visit_VarDecl(node)
+    # Pre-set :stack on list literals when the declared type is a fixed array (e.g. Number[3]).
+    # This must happen before visit(node.value) so visit_ListLit sees the correct storage
+    # and emits a fixed-size type (Number[3]) rather than a dynamic heap-array type.
+    if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
+      node.value.storage = :stack
+    end
     visit(node.value)
 
     verify_unrestricted!(node)
@@ -1293,6 +1299,10 @@ private
   # If x is in scope and mutable → assignment (like old SET x = val).
   # If x is in scope and immutable → error.
   def visit_BindExpr(node)
+    # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
+    if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
+      node.value.storage = :stack
+    end
     visit(node.value)
 
     scope = current_scope

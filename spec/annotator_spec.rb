@@ -12739,5 +12739,183 @@ RSpec.describe SemanticAnnotator do
     end
 
   end
+
+  # ---------------------------------------------------------------------------
+  # Frame Allocation & SROA Optimization
+  # ---------------------------------------------------------------------------
+  describe "frame allocation — large structs (> 128 slots)" do
+    # Chunk5 = 5 Number fields = 5 slots.
+    # BigS   = 26 × Chunk5   = 130 slots → should be classified :frame.
+    let(:large_struct_preamble) do
+      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
+      <<~CLEAR
+        STRUCT Chunk5 { #{chunk_fields} }
+        STRUCT BigS   { #{big_fields}   }
+      CLEAR
+    end
+
+    let(:large_struct_fn) do
+      chunk_init = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
+      big_fields = (1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")
+      <<~CLEAR
+        FN make_big() RETURNS Void ->
+          s: BigS = BigS{ #{big_fields} };
+          _ = s.c1.a;
+        END
+      CLEAR
+    end
+
+    let(:code)  { large_struct_preamble + large_struct_fn }
+    let(:zig)   { ZigTranspiler.new.transpile(code) }
+
+    it "classifies large struct (130 slots) as :frame storage" do
+      ast = run(code)
+      fn  = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "make_big" }
+      # keywordless `s: BigS = ...` is a BindExpr in decl mode
+      decl = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == "s" }
+      expect(decl.storage).to eq(:frame)
+    end
+
+    it "sets frame? on the full_type of the declaration" do
+      ast = run(code)
+      fn  = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "make_big" }
+      decl = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == "s" }
+      expect(decl.type_info.frame?).to be true
+    end
+
+    it "emits *BigS as the Zig type for the frame-allocated variable" do
+      expect(zig).to match(/const s = blk:/)
+      expect(zig).to include("rt.frameAlloc().create(BigS)")
+    end
+
+    it "emits ptr.* initialiser inside the allocation block" do
+      expect(zig).to include("ptr.* = BigS{")
+    end
+
+    it "does NOT use heapAlloc for the BigS struct" do
+      expect(zig).not_to include("heapAlloc().create(BigS)")
+    end
+
+    it "does NOT emit a _moved flag or defer destroy for frame variables" do
+      expect(zig).not_to include("s_moved")
+      expect(zig).not_to include("CheatLib.free(rt, s)")
+    end
+
+    it "keeps small structs on the stack (≤ 128 slots) — no frameAlloc.create" do
+      small_code = <<~CLEAR
+        STRUCT Tiny { x: Number, y: Number }
+        FN use_tiny() RETURNS Void ->
+          t: Tiny = Tiny{ x: 1.0, y: 2.0 };
+          _ = t.x;
+        END
+      CLEAR
+      small_zig = ZigTranspiler.new.transpile(small_code)
+      expect(small_zig).not_to include("frameAlloc().create(Tiny)")
+      expect(small_zig).to     include("Tiny{ .x = 1, .y = 2 }")
+    end
+  end
+
+  describe "frame allocation — passing frame variables to functions" do
+    let(:code) do
+      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
+      chunk_init   = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
+      big_init     = "BigS{ #{(1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")} }"
+      <<~CLEAR
+        STRUCT Chunk5 { #{chunk_fields} }
+        STRUCT BigS   { #{big_fields}   }
+        FN consume(s: BigS) RETURNS Number ->
+          RETURN s.c1.a;
+        END
+        FN caller() RETURNS Number ->
+          s: BigS = #{big_init};
+          RETURN consume(s);
+        END
+      CLEAR
+    end
+
+    let(:zig) { ZigTranspiler.new.transpile(code) }
+
+    it "auto-derefs the frame pointer when passing to a function expecting a value type" do
+      # The call site should emit consume(rt, s.*) not consume(rt, s)
+      expect(zig).to include("consume(rt, s.*)")
+    end
+  end
+
+  describe "frame allocation — returning frame variables" do
+    let(:code) do
+      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
+      chunk_init   = "Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 }"
+      big_init     = "BigS{ #{(1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")} }"
+      <<~CLEAR
+        STRUCT Chunk5 { #{chunk_fields} }
+        STRUCT BigS   { #{big_fields}   }
+        FN make() RETURNS BigS ->
+          s: BigS = #{big_init};
+          RETURN s;
+        END
+      CLEAR
+    end
+
+    let(:zig) { ZigTranspiler.new.transpile(code) }
+
+    it "auto-derefs the frame pointer when returning a value type" do
+      expect(zig).to include("return s.*;")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # SROA — stack-allocated fixed array literals
+  # ---------------------------------------------------------------------------
+  describe "SROA — fixed array literals with explicit T[N] annotation" do
+    let(:code) do
+      <<~CLEAR
+        FN use_fixed_array() RETURNS Void ->
+          vals: Number[3] = [1.0, 2.0, 3.0];
+          _ = vals;
+        END
+      CLEAR
+    end
+
+    let(:zig) { ZigTranspiler.new.transpile(code) }
+
+    it "emits a raw Zig array literal [N]T{...} instead of makeList" do
+      expect(zig).to include("[3]f64{ 1, 2, 3 }")
+    end
+
+    it "does NOT emit makeList for a stack-fixed array" do
+      expect(zig).not_to include("CheatLib.makeList")
+    end
+
+    it "does NOT emit frameAlloc for a stack-fixed array" do
+      expect(zig).not_to include("frameAlloc")
+    end
+
+    it "works for a two-element Number array" do
+      two_code = <<~CLEAR
+        FN use_two_array() RETURNS Void ->
+          ns: Number[2] = [10.0, 20.0];
+          _ = ns;
+        END
+      CLEAR
+      two_zig = ZigTranspiler.new.transpile(two_code)
+      expect(two_zig).to include("[2]f64{")
+      expect(two_zig).not_to include("makeList")
+    end
+
+    it "still emits makeList for dynamic arrays without fixed annotation" do
+      dyn_code = <<~CLEAR
+        FN use_dyn() RETURNS Void ->
+          vals: Number[] = [1.0, 2.0, 3.0];
+          _ = vals;
+        END
+      CLEAR
+      dyn_zig = ZigTranspiler.new.transpile(dyn_code)
+      expect(dyn_zig).to include("CheatLib.makeList")
+    end
+  end
+
 end
 

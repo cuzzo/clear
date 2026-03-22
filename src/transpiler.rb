@@ -146,7 +146,12 @@ private
 
   def visit(node)
     code = visit_node(node)
-    if node.respond_to?(:coerced_type) && node.coerced_type && node.coerced_type != node.full_type
+    # SROA path: stack-allocated fixed-array literals are emitted as raw [N]T{...} which
+    # already carries the correct Zig type — applying a coerce wrapper on top would produce
+    # invalid @as([]T, [N]T{...}).  Skip the cast for this case.
+    sroa_array = node.is_a?(AST::ListLit) && node.storage == :stack &&
+                 (node.coerced_type_info || node.type_info)&.fixed?
+    if !sroa_array && node.respond_to?(:coerced_type) && node.coerced_type && node.coerced_type != node.full_type
       code = transpile_cast(code, node.full_type, node.coerced_type)
     end
     code
@@ -307,6 +312,7 @@ private
 
       prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
       prologue = node.uses_frame ? prologue : "_ = &rt;"
+
       # @nonReentrant: insert a StackGuard that errors at runtime on unexpected recursion.
       if node.reentrant == :non_reentrant
         @needs_safety_import = true
@@ -505,6 +511,18 @@ private
              break :blk ptr;
           }
         ZIG
+      elsif node.storage == :frame
+        # Large struct (> 128 slots): allocate in the frame arena so it doesn't bloat the
+        # fiber stack.  The frame mark is saved/restored by the enclosing function, so no
+        # explicit destroy is needed — O(1) bulk reclaim on function exit.
+        <<~ZIG
+          blk: {
+             #{move_logic}
+             const ptr = try rt.frameAlloc().create(#{struct_name});
+             ptr.* = #{struct_init};
+             break :blk ptr;
+          }
+        ZIG
       else
         if move_logic.empty?
           struct_init
@@ -556,6 +574,14 @@ private
 
       element_ti = ti.element_type
       zig_type = element_ti.zig_type
+
+      # 2a. SROA: stack-allocated fixed array → emit a raw Zig array literal so LLVM can
+      #     apply Scalar Replacement of Aggregates and keep elements in registers.
+      #     This path fires when the declared type is T[N] and the array is small (≤128 slots).
+      if node.storage == :stack && ti.fixed?
+        items_code = node.items.map { |item| visit(item) }.join(", ")
+        return "[#{ti.capacity}]#{zig_type}{ #{items_code} }"
+      end
 
       # 2. Determine Allocator
       allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
@@ -1074,6 +1100,10 @@ private
         # Locked-unwrap aliases are Zig `*T` pointers; deref to pass as value to functions.
         if a.is_a?(AST::Identifier) && locked_map.key?(a.name)
           "#{arg_code}.*"
+        # Frame-allocated struct variables are `*T` pointers; deref when passing by value.
+        # (Strings/arrays in frame memory are already slice-typed — no deref needed.)
+        elsif a.is_a?(AST::Identifier) && a.type_info&.frame? && a.type_info&.struct?
+          "#{arg_code}.*"
         # If argument is an array (ArrayList), convert to slice via .items for function params
         elsif a.type_info&.array?
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
@@ -1122,8 +1152,15 @@ private
 
       # 2. Standard Return with Move Suppression for unique heap
       suppress = emit_move_suppression(node.value)
-      val_code = node.value.nil? ? "" : visit(node.value)
-      
+      val_code = if node.value.nil?
+        ""
+      elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
+        # Frame-allocated struct variables are `*T`; deref when returning by value.
+        "#{visit(node.value)}.*"
+      else
+        visit(node.value)
+      end
+
       if suppress.empty?
         "return #{val_code};"
       else
