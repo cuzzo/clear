@@ -19,7 +19,9 @@ class TestGenerator < ZigTranspiler
     annotator.annotate!(ast)
 
     # 2. Get Raw Zig Body
+    @needs_safety_import = false
     transpiled_body = visit(ast)
+    @_needs_safety = @needs_safety_import
 
     # 3. Detect if test uses DO/BG blocks, TCP resources, or sharded EACH (all need a running fiber scheduler).
     needs_scheduler = cheat_code.include?("DO {") || cheat_code.include?("BG {") ||
@@ -90,8 +92,10 @@ class TestGenerator < ZigTranspiler
       ZIG
     end
 
+    safety_import = @_needs_safety ? "const safety = @import(\"safety.zig\");" : ""
     <<~ZIG
       test "#{filename}" {
+          #{safety_import}
           // ---------------------------------------------------------
           // Namespace Isolation
           // ---------------------------------------------------------

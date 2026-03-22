@@ -68,7 +68,11 @@ class Type
   private
 
   def self.resolve_numeric_op(t_left, t_right)
-    if t_left == :Int64 && t_right == :Int64
+    # Integer wins: when either operand is Int64 the result is Int64.
+    # NUMBER whole-number literals emit as Zig comptime_int which is i64-compatible,
+    # so no explicit cast is needed.  Mixing a genuine f64 *variable* with Int64 in
+    # SUB/MUL/DIV/MOD is a type error the user must resolve with an explicit conversion.
+    if t_left == :Int64 || t_right == :Int64
       BinaryOpResult.new(type: :Int64)
     else
       BinaryOpResult.new(type: :Number)
