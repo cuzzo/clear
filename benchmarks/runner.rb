@@ -18,13 +18,18 @@ def run_bench(dir)
   end
 
   # 2. Compile CLEAR
-  # If bench.cht contains "@use_zig", skip transpilation and use bench.zig directly.
-  # This is used when the benchmark requires the fiber scheduler (e.g. socket I/O).
-  use_zig = File.exist?("#{dir}/bench.zig") &&
+  # bench.zt: pure Zig benchmark (runtime-level, no CLEAR transpilation needed).
+  # bench.cht with "@use_zig": scheduler-dependent Zig (e.g. socket I/O).
+  use_zt  = File.exist?("#{dir}/bench.zt")
+  use_zig = !use_zt &&
+            File.exist?("#{dir}/bench.zig") &&
             File.exist?("#{dir}/bench.cht") &&
             File.read("#{dir}/bench.cht").include?("@use_zig")
 
-  if use_zig
+  if use_zt
+    puts "Compiling CLEAR (runtime Zig, .zt)..."
+    FileUtils.cp("#{dir}/bench.zt", "zig/bench.zig")
+  elsif use_zig
     puts "Compiling CLEAR (native Zig, scheduler required)..."
     FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
   else

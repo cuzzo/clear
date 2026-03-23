@@ -1,0 +1,47 @@
+-- HashMap Benchmark — CLEAR @map (GPA-backed)
+--
+-- @use_zig
+--
+-- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3):
+--
+--   C   (FNV-1a, open-addr, no key dup) : Insert ~163 ms | Lookup ~160 ms | Total ~323 ms
+--   CLEAR (@map, GPA, key dup per put)  : Insert ~734 ms | Lookup ~262 ms | Total ~996 ms
+--
+--   Insert overhead : ~4.5×  ← GPA key duplication dominates
+--   Lookup overhead : ~1.6×  ← WyHash vs FNV-1a + slightly larger bucket metadata
+--   Total overhead  : ~3.1×
+--
+-- ROOT CAUSES (insert is 4.5× slower):
+--   1. Key duplication: mapPut calls allocator.dupe(u8, key) — 1M small GPA
+--      allocations just for key strings (~400 ns each × 1M = ~400 ms overhead).
+--   2. GPA bookkeeping: each alloc() updates per-allocation metadata outside L1
+--      cache, destroying spatial locality on every insertion.
+--   3. Bucket-array growth: std.StringHashMapUnmanaged rehashes ~20 times during
+--      1M inserts (load factor 80%), each triggering a GPA realloc.
+--
+-- ROOT CAUSES (lookup is 1.6× slower):
+--   1. WyHash (Zig default) vs FNV-1a: WyHash is DoS-resistant and higher
+--      quality, but ~2× slower than FNV-1a for short (< 16 byte) keys.
+--   2. No key duplication on lookup — this path is already GPA-free, so the
+--      gap is narrower.
+--
+-- OPTIMIZATION ROADMAP:
+--
+--   Step 1 — Arena-backed bucket array.
+--     Pass rt.frameAlloc() (not rt.heapAlloc()) to map.put() for bucket growth.
+--     Keys still go to heap (they outlive the frame), but the bucket metadata
+--     becomes bump-allocated.  Expected insert gain: ~1.5×–2×.
+--
+--   Step 2 — Arena key interning.
+--     When the @map lifetime is scoped to a single function/request, keys can
+--     also be bump-allocated into an ArenaAllocator wrapping the frame arena.
+--     Eliminates GPA from the hot path entirely.
+--     Expected additional insert gain: ~3×–4× (total ~4–5× from baseline).
+--
+--   Step 3 — Integer-keyed @map.
+--     Introduce AutoHashMapUnmanaged(u64, f64) for @map:int or numeric keys.
+--     No string hashing at all; integer comparison ~5× faster than strcmp.
+--     Expected gain vs string map: ~3×–5×.
+--
+-- GOAL: CLEAR @map (arena-backed + arena key interning) should reach within
+-- 10%–20% of the C open-addressing baseline on insert-heavy workloads.
