@@ -332,8 +332,10 @@ test "socketRead + socketWriteVoid: heap-string echo roundtrip" {
             defer CheatLib.socketClose(client_fd);
 
             // Use the Phase 3 CLEAR-facing helpers instead of raw read/write.
+            // CheatLib.free() routes pool-backed slices to ReadPool.release()
+            // and GPA-backed slices to heapAlloc().free() — caller need not know.
             const data = try CheatLib.socketRead(rt_ptr.heapAlloc(), client_fd);
-            defer rt_ptr.heapAlloc().free(data);
+            defer CheatLib.free(rt_ptr, data);
 
             try CheatLib.socketWriteVoid(client_fd, data);
 
@@ -576,4 +578,210 @@ test "socketConnect — ECONNREFUSED on closed port" {
     sched.run();
 
     try std.testing.expect(cr.got_error.load(.seq_cst));
+}
+
+// ---------------------------------------------------------------------------
+// ReadPool unit tests (no sockets needed — test the slab directly)
+// ---------------------------------------------------------------------------
+
+// Test: acquire fills slots in order; release restores them.
+test "ReadPool: acquire and release round-trip" {
+    var pool = fp.ReadPool{};
+    const full_mask: u8 = ~@as(u8, 0);
+
+    // All 8 slots free at start.
+    try std.testing.expectEqual(full_mask, pool.free_mask);
+
+    // Acquire all 8 slots.
+    var ptrs: [fp.ReadPool.SLOTS][*]u8 = undefined;
+    for (0..fp.ReadPool.SLOTS) |i| {
+        const slot = pool.acquire() orelse return error.TestUnexpectedNull;
+        ptrs[i] = slot.ptr;
+    }
+    try std.testing.expectEqual(@as(u8, 0), pool.free_mask); // all in-use
+
+    // 9th acquire must return null (pool exhausted).
+    try std.testing.expectEqual(@as(?[]u8, null), pool.acquire());
+
+    // Release all slots one by one; mask rebuilds.
+    for (0..fp.ReadPool.SLOTS) |i| {
+        try std.testing.expect(pool.release(ptrs[i]));
+    }
+    try std.testing.expectEqual(full_mask, pool.free_mask); // all free again
+}
+
+// Test: sequential acquire → release → acquire reuses the same slot (LIFO on ctz).
+test "ReadPool: released slot is immediately reused" {
+    var pool = fp.ReadPool{};
+
+    const first = pool.acquire().?.ptr;
+    try std.testing.expect(pool.release(first));   // return slot
+
+    const second = pool.acquire().?.ptr;
+    try std.testing.expectEqual(first, second);    // same slot pointer
+}
+
+// Test: release() returns false for a pointer outside the slab (GPA allocation).
+test "ReadPool: release rejects out-of-slab pointer" {
+    var pool = fp.ReadPool{};
+    var outside: u8 = 0xFF;
+    try std.testing.expect(!pool.release(@ptrCast(&outside)));
+}
+
+// ---------------------------------------------------------------------------
+// ReadPool integration tests (require scheduler + fiber context)
+// ---------------------------------------------------------------------------
+
+// Test: socketRead uses a pool slot on the fast path; CheatLib.free returns it.
+test "socketRead: uses pool slot, CheatLib.free recycles it" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var rt = try Runtime.init(allocator, 512 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer {
+        sched.deinit();
+        fp.global_registry.deinit(allocator);
+    }
+    fp.active_scheduler = &sched;
+
+    const server_fd = try CheatLib.socketListen(0);
+    defer CheatLib.socketClose(server_fd);
+    var bound: std.posix.sockaddr.in = undefined;
+    var bound_len: std.posix.socklen_t = @sizeOf(@TypeOf(bound));
+    try std.posix.getsockname(server_fd, @ptrCast(&bound), &bound_len);
+    const port = std.mem.bigToNative(u16, bound.port);
+
+    const Shared = struct {
+        server_fd: i32,
+        port: u16,
+        ready: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        // Slots free before the read; should be one fewer during the read,
+        // then restored after CheatLib.free().
+        mask_before: u8 = 0,
+        mask_during: u8 = 0,
+        mask_after: u8 = 0,
+    };
+    var shared = Shared{ .server_fd = server_fd, .port = port };
+
+    const ServerFiber = struct {
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const rt_ptr: *Runtime = @ptrCast(@alignCast(raw_rt));
+            const s: *Shared = @ptrCast(@alignCast(raw_args.?));
+
+            s.ready.store(true, .seq_cst);
+            const client_fd = try CheatLib.socketAccept(s.server_fd);
+            defer CheatLib.socketClose(client_fd);
+
+            s.mask_before = fp.active_scheduler.read_pool.free_mask;
+
+            const data = try CheatLib.socketRead(rt_ptr.heapAlloc(), client_fd);
+
+            s.mask_during = fp.active_scheduler.read_pool.free_mask;
+
+            // Verify the pointer lives inside the pool slab (fast path was taken).
+            const pool = &fp.active_scheduler.read_pool;
+            const base = @intFromPtr(&pool.slab[0][0]);
+            const p = @intFromPtr(data.ptr);
+            std.debug.assert(p >= base and p < base + fp.ReadPool.SLOTS * fp.ReadPool.SLOT_SIZE);
+
+            try CheatLib.socketWriteVoid(client_fd, data);
+
+            CheatLib.free(rt_ptr, data);
+            s.mask_after = fp.active_scheduler.read_pool.free_mask;
+
+            s.done.store(true, .seq_cst);
+        }
+    };
+
+    const ClientCtx = struct { port: u16 };
+    var client_ctx = ClientCtx{ .port = port };
+    const clientFn = struct {
+        fn run(ctx: *ClientCtx) void {
+            const fd = std.posix.socket(std.posix.AF.INET, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, 0) catch return;
+            defer std.posix.close(fd);
+            const addr = std.posix.sockaddr.in{
+                .family = std.posix.AF.INET,
+                .port = std.mem.nativeToBig(u16, ctx.port),
+                .addr = std.mem.nativeToBig(u32, 0x7F000001),
+                .zero = [_]u8{0} ** 8,
+            };
+            std.posix.connect(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch return;
+            _ = std.posix.write(fd, "pool test") catch return;
+            var buf: [64]u8 = undefined;
+            _ = std.posix.read(fd, &buf) catch return;
+        }
+    }.run;
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&ServerFiber.run)),
+        &shared, .{},
+    );
+    const thread = try std.Thread.spawn(.{}, clientFn, .{&client_ctx});
+    sched.run();
+    thread.join();
+
+    try std.testing.expect(shared.done.load(.seq_cst));
+    // One slot was consumed during the read.
+    try std.testing.expectEqual(shared.mask_before, shared.mask_after);           // recycled
+    try std.testing.expect(shared.mask_during != shared.mask_before);             // was in-use
+    try std.testing.expect(@popCount(shared.mask_during) + 1 == @popCount(shared.mask_before)); // exactly 1 slot used
+}
+
+// Test: restoreFrameMark releases pool slots acquired within the scope,
+// without disturbing slots held by outer scopes or already freed explicitly.
+test "ReadPool: restoreFrameMark releases in-scope slots" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var rt = try Runtime.init(allocator, 512 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer {
+        sched.deinit();
+        fp.global_registry.deinit(allocator);
+    }
+    fp.active_scheduler = &sched;
+
+    const full_mask: u8 = ~@as(u8, 0);
+    const pool = &sched.read_pool;
+
+    // Simulate an "outer" slot held before saveFrameMark.
+    const outer_slot = pool.acquire().?;
+    const mask_after_outer = pool.free_mask; // one slot consumed
+
+    // Save mark (captures current state: outer slot in-use, rest free).
+    const mark = rt.saveFrameMark();
+
+    // Acquire 3 more slots inside this scope.
+    const a = pool.acquire().?;
+    var b = pool.acquire().?;
+    const c = pool.acquire().?;
+    _ = a; _ = c;
+    try std.testing.expectEqual(@popCount(mask_after_outer) - 3, @popCount(pool.free_mask)); // 3 more consumed
+
+    // Explicitly free one of the inner slots before restoreFrameMark.
+    try std.testing.expect(pool.release(b.ptr));
+    b = undefined;
+
+    // Restore — should release the 2 remaining in-scope slots (a, c)
+    // but NOT touch the outer slot or double-release b.
+    rt.restoreFrameMark(mark);
+
+    try std.testing.expectEqual(mask_after_outer, pool.free_mask); // back to outer state
+
+    // Release outer slot manually.
+    try std.testing.expect(pool.release(outer_slot.ptr));
+    try std.testing.expectEqual(full_mask, pool.free_mask);
 }

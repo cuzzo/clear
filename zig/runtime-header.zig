@@ -7,6 +7,7 @@ const fp = @import("scheduler.zig");
 pub const EbrContext = @import("ebr.zig").EbrContext;
 const Task = @import("queues.zig").Task;
 const Fiber = fc.Fiber;
+const ReadPool = fp.ReadPool;
 
 // Concurrency primitives re-exported for DO block fork-join support.
 pub const WaitGroup = fp.WaitGroup;
@@ -459,11 +460,30 @@ pub const CheatLib = struct {
         std.posix.close(fd);
     }
 
-    // Read up to 4096 bytes from a connected client socket into a heap-allocated String.
+    // Read up to 4096 bytes from a connected client socket.
     // Yields the fiber (via epoll) until data is available.
+    //
+    // Fast path — ReadPool slot (zero GPA allocation):
+    //   Reads directly into a pre-allocated slot on the per-scheduler ReadPool
+    //   slab.  The slot is released when the owning frame mark is restored
+    //   (function return / scope exit) or explicitly via CheatLib.free().
+    //   Capacity: 8 simultaneous live reads per scheduler thread.
+    //
+    // Slow path — GPA dupe (pool exhausted, >8 simultaneous live reads):
+    //   Falls back to allocator.dupe(), same behaviour as the old implementation.
+    //   The returned pointer will NOT be in the pool slab range; CheatLib.free()
+    //   detects this via address-range check and routes to allocator.free().
+    //
     // Usage: data = tcpRead(client)
     pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
-        var buf: [4096]u8 = undefined;
+        // Pool fast path: carve a slot from the per-scheduler slab.
+        const sched = fp.active_scheduler;
+        if (sched.read_pool.acquire()) |slot| {
+            const n = try CheatLib.read(fd, slot);
+            return slot[0..n];
+        }
+        // Slow path: pool exhausted — fall back to caller-supplied allocator.
+        var buf: [ReadPool.SLOT_SIZE]u8 = undefined;
         const n = try CheatLib.read(fd, &buf);
         return allocator.dupe(u8, buf[0..n]);
     }
@@ -618,8 +638,15 @@ pub const CheatLib = struct {
             .pointer => |ptr_info| {
                 switch (ptr_info.size) {
                     // Case 2a: Slices ([]const u8)
+                    // Check whether the slice is backed by a ReadPool slot.
+                    // If so, release the slot (O(1) bitmask flip) rather than
+                    // calling the GPA.  Pool-backed slices are returned by
+                    // socketRead fast path; GPA-backed slices come from the
+                    // slow path or other heap allocations.
                     .slice => {
-                        rt.heapAlloc().free(item);
+                        if (!fp.active_scheduler.read_pool.release(item.ptr)) {
+                            rt.heapAlloc().free(item);
+                        }
                     },
                     // Case 2b: Single Items (*User)
                     .one => {
