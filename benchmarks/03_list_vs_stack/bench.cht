@@ -1,0 +1,44 @@
+-- List vs. Stack Benchmark
+--
+-- WHY CLEAR IS SLOWER:
+--
+--   CLEAR has no fixed-size stack array type. The idiomatic way to accumulate
+--   N values is the @list collection (backed by Zig's ArrayListUnmanaged).
+--   Every append call goes through:
+--
+--     try vals.append(rt.heapAlloc(), value);
+--
+--   Where rt.heapAlloc() is the runtime's General Purpose Allocator (GPA),
+--   a bookkeeping-heavy allocator suited for safety and debugging.
+--   As each list grows past capacity, it reallocs through the GPA.
+--
+--   1000 outer iterations × 1000 appends each:
+--     - 1000 list creations (GPA malloc for initial capacity)
+--     - ~10 000 reallocs total (capacity doublings: 1→2→4→...→1024)
+--     - 1 000 000 `try` error-union checks (one per append)
+--     - 1000 deferred deinits (GPA free) at each outer scope exit
+--
+-- C:     stack array double arr[1000] — 0 allocations, 0 error checks.
+-- Rust:  Vec::with_capacity(1000) — 1 alloc per outer, 0 reallocs, no try.
+-- CLEAR: GPA + try on every append.
+--
+-- Fix: a fixed-size array literal (e.g. Number[1000]) or a capacity hint
+--   for @list would eliminate the reallocs. Neither exists yet.
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE total: Number = 0.0;
+    MUTABLE outer = 0_i64;
+    WHILE outer < 1000 DO
+        MUTABLE vals: Number[]@list = [];
+        MUTABLE inner = 0_i64;
+        WHILE inner < 1000 DO
+            append(vals, inner + 0.0);
+            inner = inner + 1_i64;
+        END
+        s = vals s> SUM _;
+        total = total + s;
+        outer = outer + 1_i64;
+    END
+    ASSERT total > 0.0, "total must be positive";
+    RETURN;
+END
