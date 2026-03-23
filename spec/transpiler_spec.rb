@@ -51,6 +51,61 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
+  # @list return promotion (list escape safety)
+  # ===========================================================================
+  describe "@list return promotion" do
+    # BigS is 130 slots (>128 threshold) → local BigS declaration → uses_frame=true.
+    # The frame mark rewinds on function exit, which would invalidate the list's arena buffer.
+    # CLEAR must emit promoteList before the return and the caller uses heapAlloc for deinit.
+    let(:frame_list_src) { <<~CLEAR }
+      STRUCT Chunk5 { a: Number, b: Number, c: Number, d: Number, e: Number }
+      STRUCT BigS {
+        c1: Chunk5, c2: Chunk5, c3: Chunk5, c4: Chunk5, c5: Chunk5,
+        c6: Chunk5, c7: Chunk5, c8: Chunk5, c9: Chunk5, c10: Chunk5,
+        c11: Chunk5, c12: Chunk5, c13: Chunk5, c14: Chunk5, c15: Chunk5,
+        c16: Chunk5, c17: Chunk5, c18: Chunk5, c19: Chunk5, c20: Chunk5,
+        c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
+        c26: Chunk5
+      }
+      FN buildList() RETURNS Number[]@list ->
+        zero: Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
+        big: BigS = BigS{
+          c1: zero, c2: zero, c3: zero, c4: zero, c5: zero,
+          c6: zero, c7: zero, c8: zero, c9: zero, c10: zero,
+          c11: zero, c12: zero, c13: zero, c14: zero, c15: zero,
+          c16: zero, c17: zero, c18: zero, c19: zero, c20: zero,
+          c21: zero, c22: zero, c23: zero, c24: zero, c25: zero,
+          c26: zero
+        };
+        MUTABLE vals: Number[]@list = [];
+        append(vals, big.c1.a);
+        RETURN vals;
+      END
+      FN cheatMain() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+
+    it "emits CheatLib.promoteList before returning a @list from a frame-using function" do
+      zig = transpile(frame_list_src)
+      expect(zig).to include("CheatLib.promoteList(f64, rt, &vals)")
+    end
+
+    it "emits promoteList before the return statement" do
+      zig = transpile(frame_list_src)
+      promote_pos = zig.index("CheatLib.promoteList")
+      return_pos  = zig.index("return vals")
+      expect(promote_pos).to be < return_pos
+    end
+
+    it "callee still uses frameAlloc for its own deinit (no-op is fine)" do
+      zig = transpile(frame_list_src)
+      # The callee's own defer uses frameAlloc (no-op smartFree)
+      expect(zig).to include("vals.deinit(rt.frameAlloc())")
+    end
+  end
+
+  # ===========================================================================
   # WhileLoop per-iteration frame marks
   # ===========================================================================
   describe "WhileLoop per-iteration frame marks" do

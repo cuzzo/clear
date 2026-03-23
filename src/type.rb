@@ -8,6 +8,7 @@ class Type
   attr_accessor :sync        # nil (default), :locked, :write_locked
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N))
+  attr_accessor :heap_list   # true when the list was promoted to heap (returned from frame-using fn)
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
@@ -586,6 +587,7 @@ class Type
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
     return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
     return false if inf_stream?             # Infinite streams are resources with deinit cleanup, not linear
+    return false if list_collection? || pool?  # @list/@pool are arena/heap-managed via defer deinit — not linearly affine
     return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle

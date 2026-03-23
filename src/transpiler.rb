@@ -401,8 +401,10 @@ private
       is_mutable = node.respond_to?(:mutable) && node.mutable
       # Bounded/open/infinite streams and shared promises must be `var` even when declared
       # immutable in CLEAR, because their next() methods take *Self (mutate internal state).
+      # @list and @pool also need `var` because deinit(*Self, alloc) requires a mutable receiver.
       ft = Type.new(node.full_type || :Void)
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
+      is_mutable ||= ft.list_collection? || ft.pool?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       # Always emit explicit type annotation for fn_type (Zig can't always infer *const fn(...)).
@@ -422,8 +424,15 @@ private
         # Pool / ShardedPool: zero-initialize via zig_type (handles both sharded and non-sharded)
         "#{node.full_type.zig_type}{}"
       elsif node.full_type&.list_collection?
-        # @list / ShardedList: zero-initialize via zig_type
-        "#{node.full_type.zig_type}{}"
+        # @list / ShardedList: if the RHS is a function call that returned a promoted list,
+        # use the call result directly.  Otherwise zero-initialize (empty-list-literal path).
+        rhs = @current_rhs_is_move ? node.value.value : node.value
+        if (rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)) &&
+           rhs.respond_to?(:list_from_call) && rhs.list_from_call
+          visit(node.value)
+        else
+          "#{node.full_type.zig_type}{}"
+        end
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
@@ -1190,7 +1199,16 @@ private
         end
       end
 
-      # 2. Standard Return with Move Suppression for unique heap
+      # 2. List escape promotion — copy arena-backed buffer to heap before frame mark rewinds.
+      # Only emitted when annotator detected: (a) list identifier returned, (b) uses_frame=true.
+      promote = if node.list_return && node.value.is_a?(AST::Identifier)
+        elem_zig = node.value.type_info&.element_type&.zig_type || "u8"
+        var_name = zig_safe_name(node.value.name)
+        rt_name  = @do_rt_name || "rt"
+        "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
+      end
+
+      # 3. Standard Return with Move Suppression for unique heap
       suppress = emit_move_suppression(node.value)
       val_code = if node.value.nil?
         ""
@@ -1201,11 +1219,8 @@ private
         visit(node.value)
       end
 
-      if suppress.empty?
-        "return #{val_code};"
-      else
-        "#{suppress}\nreturn #{val_code};"
-      end
+      parts = [suppress, promote, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
+      parts.join("\n")
 
     when AST::GetField
       # Union unit-variant constructor: Result{ .Empty = {} }
