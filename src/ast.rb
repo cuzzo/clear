@@ -225,7 +225,10 @@ module AST
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) { include Locatable }
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) { include Locatable }
-  WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) { include Locatable }
+  WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
+    include Locatable
+    attr_accessor :mark_per_iter
+  end
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }
   FuncCall     = Struct.new(:token, :name, :args) do

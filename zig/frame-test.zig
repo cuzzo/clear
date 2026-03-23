@@ -477,3 +477,47 @@ test "CheatArena: The 'Goldilocks' Test (Packing Small Objects)" {
     try std.testing.expect(efficiency > 0.90);
 }
 
+
+test "Runtime.saveLoopMark/restoreLoopMark: arena rewinds per iteration" {
+    // Simulate what the transpiler emits for a WhileLoop with mark_per_iter = true.
+    // Verifies that the arena returns to the same position after each rewind,
+    // so list backing buffers don't accumulate across loop iterations.
+    const allocator = std.testing.allocator;
+    const Runtime = @import("runtime.zig").Runtime;
+    const EbrContext = @import("ebr.zig").EbrContext;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 512 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const N: usize = 1000;
+
+    // Record arena state before the loop — should stay constant across iterations.
+    const pre_loop_mark = rt.saveLoopMark();
+
+    var i: usize = 0;
+    while (i < N) : (i += 1) {
+        // Simulate per-iteration frame mark (what the transpiler emits).
+        const iter_mark = rt.saveLoopMark();
+        defer rt.restoreLoopMark(iter_mark);
+
+        // Simulate a @list growing inside the loop body.
+        var list = std.ArrayListUnmanaged(f64){};
+        defer list.deinit(rt.frameAlloc()); // no-op on arena allocator
+
+        var j: usize = 0;
+        while (j < 100) : (j += 1) {
+            try list.append(rt.frameAlloc(), @as(f64, @floatFromInt(j)));
+        }
+        // Use the list so the compiler doesn't eliminate it.
+        try std.testing.expect(list.items.len == 100);
+    } // iter_mark restored here each iteration
+
+    // After all iterations the arena should be back to pre-loop state.
+    const post_loop_mark = rt.saveLoopMark();
+    try std.testing.expectEqual(pre_loop_mark.block_index, post_loop_mark.block_index);
+    try std.testing.expectEqual(pre_loop_mark.cursor, post_loop_mark.cursor);
+}

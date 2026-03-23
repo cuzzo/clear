@@ -1259,6 +1259,44 @@ RSpec.describe SemanticAnnotator do
       #end
     end
 
+    context "WhileLoop mark_per_iter" do
+      it "marks loop as safe for per-iter frame marks when list is loop-local" do
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+              MUTABLE vals: Number[]@list = [];
+              append(vals, 1.0);
+              i = i + 1_i64;
+            END
+            RETURN;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+        expect(loop_node.mark_per_iter).to be true
+      end
+
+      it "does NOT mark loop as safe when outer-scope list is appended" do
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE all: Number[]@list = [];
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+              append(all, 1.0);
+              i = i + 1_i64;
+            END
+            RETURN;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+        expect(loop_node.mark_per_iter).to be false
+      end
+    end
+
     context "Break and Continue" do
       context "Inside Loop" do
         let(:code) {

@@ -827,13 +827,17 @@ private
       error!(node, "Condition must be a Boolean, got #{node.condition.resolved_type}")
     end
 
-    # 2. Analyze Body in a New Scope AND increment loop depth
+    # 2. Capture outer-scope variable names before visiting the body.
+    # Used to determine if per-iteration frame marks are safe.
+    outer_vars = @scope_stack.flat_map { |s| s.locals.keys }.to_set
+
+    # 3. Analyze Body in a New Scope AND increment loop depth
     @loop_depth += 1
-    
+
     # We use analyze_control_flow_branches to handle state merging and drops.
     # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
     pre_loop_state = current_scope.clone_states
-    
+
     analyze_control_flow_branches([
       proc {
         if node.do_branch.is_a?(Array)
@@ -842,7 +846,7 @@ private
           visit(node.do_branch)
         end
         finalize_scope(node)
-        
+
         # Post-analysis check for loop-specific errors (use of moved value in next iteration)
         current_scope.var_states.each do |name, new_state|
           old_state = pre_loop_state[name]
@@ -855,7 +859,36 @@ private
     ], merge_to_parent: false)
 
     @loop_depth -= 1
+
+    # 4. Determine if per-iteration frame marks are safe:
+    # Safe only when no append() in the body targets an outer-scope variable.
+    node.mark_per_iter = !loop_appends_outer_list?(node.do_branch, outer_vars)
+
     node.full_type = :Void
+  end
+
+  # Returns true if any append() call in stmts (or nested loops/ifs) targets a variable
+  # that was declared in an outer scope (before this loop body was entered).
+  def loop_appends_outer_list?(stmts, outer_vars)
+    return false if stmts.nil?
+    stmts = [stmts] unless stmts.is_a?(Array)
+    stmts.any? do |stmt|
+      case stmt
+      when AST::FuncCall
+        if stmt.name == "append" && stmt.args&.first.is_a?(AST::Identifier)
+          outer_vars.include?(stmt.args.first.name)
+        else
+          false
+        end
+      when AST::WhileLoop
+        loop_appends_outer_list?(stmt.do_branch, outer_vars)
+      when AST::IfStatement
+        loop_appends_outer_list?(stmt.then_branch, outer_vars) ||
+          loop_appends_outer_list?(stmt.else_branch, outer_vars)
+      else
+        false
+      end
+    end
   end
 
   def visit_BreakNode(node)

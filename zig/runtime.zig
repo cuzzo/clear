@@ -153,6 +153,18 @@ pub const Runtime = struct {
         pool.free_mask |= acquired_in_scope;
     }
 
+    // Lightweight arena-only mark for per-loop-iteration rewind.
+    // Does NOT touch the ReadPool (no scheduler required — safe in cheatMain).
+    // Used by the transpiler for WhileLoop bodies that contain loop-local
+    // frame-allocated data (e.g. @list declared inside the loop body).
+    pub fn saveLoopMark(self: *Runtime) CheatArena.Mark {
+        return self.overflow_arena.getMark();
+    }
+
+    pub fn restoreLoopMark(self: *Runtime, mark: CheatArena.Mark) void {
+        self.overflow_arena.rewind(mark);
+    }
+
     pub fn frameAlloc(self: *Runtime) std.mem.Allocator {
         return self.frame_allocator;
     }

@@ -329,6 +329,10 @@ private
       vis = node.visibility == :pub ? "pub " : ""
       signature = "#{vis}fn #{node.name}(#{all_params.join(', ')}) #{return_type_str}"
 
+      @current_fn_uses_frame = node.uses_frame
+      # Track whether rt is available in the current function (needed for per-loop frame marks).
+      @current_fn_has_rt = fn_needs_rt
+
       prologue = if fn_needs_rt
         node.uses_frame ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
       else
@@ -740,7 +744,13 @@ private
     when AST::WhileLoop
       cond = visit(node.condition)
       body = transpile_block(node.do_branch)
-      "while (#{cond}) {\n #{body} \n}"
+      if node.mark_per_iter && @current_fn_has_rt
+        mark_id = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
+        mark_var = "__loop_mark_#{mark_id}"
+        "while (#{cond}) {\nconst #{mark_var} = rt.saveLoopMark(); defer rt.restoreLoopMark(#{mark_var});\n #{body} \n}"
+      else
+        "while (#{cond}) {\n #{body} \n}"
+      end
 
     when AST::WithBlock
       rc_caps          = node.capabilities.select { |c| [:multiowned, :shared].include?(c[:capability]) }

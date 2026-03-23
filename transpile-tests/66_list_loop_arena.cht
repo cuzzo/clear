@@ -1,0 +1,21 @@
+-- List in loop: tests that per-iteration frame marks allow arena reuse.
+-- Without frame marks, 1000 iterations x ~16KB each would accumulate 16MB.
+-- With frame marks, the arena stays constant across iterations.
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE total: Number = 0.0;
+    MUTABLE outer = 0_i64;
+    WHILE outer < 100 DO
+        MUTABLE vals: Number[]@list = [];
+        MUTABLE inner = 0_i64;
+        WHILE inner < 1000 DO
+            append(vals, inner + 0.0);
+            inner = inner + 1_i64;
+        END
+        s = vals s> SUM _;
+        total = total + s;
+        outer = outer + 1_i64;
+    END
+    ASSERT total > 0.0, "total must be positive";
+    RETURN;
+END
