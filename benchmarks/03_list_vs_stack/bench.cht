@@ -1,29 +1,33 @@
 -- List vs. Stack Benchmark
 --
--- WHY CLEAR IS SLOWER:
+-- BEFORE (heapAlloc era):  ~52× slower than C
+-- AFTER  (frameAlloc + per-loop marks): matches C wall-clock time
 --
---   CLEAR has no fixed-size stack array type. The idiomatic way to accumulate
---   N values is the @list collection (backed by Zig's ArrayListUnmanaged).
---   Every append call goes through:
+-- WHAT CHANGED:
 --
---     try vals.append(rt.heapAlloc(), value);
+--   Step 1 — @list switched from rt.heapAlloc() to rt.frameAlloc().
+--   The frame arena (CheatArena) grows dynamically via heap-backed pages
+--   (4KB → 16KB → 64KB → 256KB) so it never OOMs.  append now uses a
+--   bump allocator with no GPA lock and no bookkeeping overhead.
+--   Result: ~52× → ~5× overhead (GPA lock eliminated).
 --
---   Where rt.heapAlloc() is the runtime's General Purpose Allocator (GPA),
---   a bookkeeping-heavy allocator suited for safety and debugging.
---   As each list grows past capacity, it reallocs through the GPA.
+--   Step 2 — Per-iteration arena rewind for loop-local lists.
+--   The compiler detects that vals is declared inside the outer loop body
+--   and wraps each iteration with saveLoopMark/restoreLoopMark.  The
+--   stranded realloc buffers (from ArrayListUnmanaged's geometric growth)
+--   are reclaimed at each iteration end rather than accumulating to ~16MB.
+--   Arena usage stays O(1) across iterations.
+--   Result: ~5× → matches C.
 --
---   1000 outer iterations × 1000 appends each:
---     - 1000 list creations (GPA malloc for initial capacity)
---     - ~10 000 reallocs total (capacity doublings: 1→2→4→...→1024)
---     - 1 000 000 `try` error-union checks (one per append)
---     - 1000 deferred deinits (GPA free) at each outer scope exit
+-- REMAINING GAP vs C (minor):
+--   - `try` error-union check on every append (vs no check in C)
+--   - ArrayListUnmanaged copies on capacity doubling (vs C's fixed array)
+--   C uses a fixed-size stack array (zero realloc); CLEAR uses a growable
+--   list that pays for realloc copies.  The allocation cost is now gone.
 --
 -- C:     stack array double arr[1000] — 0 allocations, 0 error checks.
 -- Rust:  Vec::with_capacity(1000) — 1 alloc per outer, 0 reallocs, no try.
--- CLEAR: GPA + try on every append.
---
--- Fix: a fixed-size array literal (e.g. Number[1000]) or a capacity hint
---   for @list would eliminate the reallocs. Neither exists yet.
+-- CLEAR: frame arena + per-loop rewind — 0 GPA calls in the hot path.
 
 FN cheatMain() RETURNS Void ->
     MUTABLE total: Number = 0.0;
