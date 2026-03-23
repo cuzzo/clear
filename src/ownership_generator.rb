@@ -9,8 +9,10 @@ module OwnershipGenerator
 
     # @list backing buffer lives in the frame arena — deinit is a no-op but safe.
     # Sharded lists are shared across fibers and must stay heap-backed.
+    # Promoted lists (returned from frame-using functions) were copied to heap and
+    # must be freed with heapAlloc() to avoid leaking the GPA allocation.
     if type_info&.list_collection?
-      alloc = type_info.sharded? ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      alloc = (type_info.sharded? || type_info.heap_list) ? "rt.heapAlloc()" : "rt.frameAlloc()"
       return "defer #{name}.deinit(#{alloc});\n"
     end
     # @pool backing arrays are heap-allocated; auto-deinit.

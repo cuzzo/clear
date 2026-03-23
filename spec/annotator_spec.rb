@@ -1297,6 +1297,59 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "ReturnNode list_return flag" do
+      it "sets list_return=true when returning a @list from a frame-using function" do
+        # BigS is 130 slots (>128 threshold) → local declaration → uses_frame = true.
+        # Returning a @list from that function is dangerous: the frame mark rewinds on
+        # exit, invalidating the arena buffer.
+        src = <<~CLEAR
+          STRUCT Chunk5 { a: Number, b: Number, c: Number, d: Number, e: Number }
+          STRUCT BigS {
+            c1: Chunk5, c2: Chunk5, c3: Chunk5, c4: Chunk5, c5: Chunk5,
+            c6: Chunk5, c7: Chunk5, c8: Chunk5, c9: Chunk5, c10: Chunk5,
+            c11: Chunk5, c12: Chunk5, c13: Chunk5, c14: Chunk5, c15: Chunk5,
+            c16: Chunk5, c17: Chunk5, c18: Chunk5, c19: Chunk5, c20: Chunk5,
+            c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
+            c26: Chunk5
+          }
+          FN buildList() RETURNS Number[]@list ->
+            zero: Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
+            big: BigS = BigS{
+              c1: zero, c2: zero, c3: zero, c4: zero, c5: zero,
+              c6: zero, c7: zero, c8: zero, c9: zero, c10: zero,
+              c11: zero, c12: zero, c13: zero, c14: zero, c15: zero,
+              c16: zero, c17: zero, c18: zero, c19: zero, c20: zero,
+              c21: zero, c22: zero, c23: zero, c24: zero, c25: zero,
+              c26: zero
+            };
+            MUTABLE vals: Number[]@list = [];
+            append(vals, big.c1.a);
+            RETURN vals;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
+        ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
+        expect(fn.uses_frame).to be true
+        expect(ret.list_return).to be true
+      end
+
+      it "does NOT set list_return when the function has no frame usage" do
+        src = <<~CLEAR
+          FN buildList() RETURNS Number[]@list ->
+            MUTABLE vals: Number[]@list = [];
+            append(vals, 1.0);
+            RETURN vals;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
+        ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
+        expect(fn.uses_frame).to be false
+        expect(ret.list_return).to be_falsey
+      end
+    end
+
     context "Break and Continue" do
       context "Inside Loop" do
         let(:code) {

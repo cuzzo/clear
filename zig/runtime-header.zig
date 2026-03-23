@@ -76,6 +76,21 @@ pub const CheatLib = struct {
         return list;
     }
 
+    // Promote a @list's arena-backed buffer to heap before returning from a frame-using
+    // function.  The frame arena rewinds on function exit; without promotion the caller
+    // would hold a dangling pointer.  After promotion the caller must deinit with
+    // rt.heapAlloc() — the annotator sets heap_list=true on the receiving variable so
+    // emit_cleanup emits the correct allocator.
+    //
+    // Empty lists are a no-op (items.len == 0 means no backing allocation).
+    pub fn promoteList(comptime T: type, rt: *Runtime, list: *std.ArrayListUnmanaged(T)) !void {
+        if (list.items.len == 0) return;
+        const heap_buf = try rt.heapAlloc().alloc(T, list.items.len);
+        @memcpy(heap_buf, list.items);
+        list.items = heap_buf;
+        list.capacity = heap_buf.len;
+    }
+
     // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
     // Also handles casting the index to usize automatically.
     pub fn getAt(container: anytype, index: anytype) @TypeOf(if (@hasField(@TypeOf(container), "items")) container.items[0] else container[0]) {

@@ -955,6 +955,18 @@ private
     was_promoted = handle_return_escape(node.value, expected)
     @frame_usage_count -= 1 if was_promoted
 
+    # 3. List Escape Detection
+    # If this function uses the frame arena (uses_frame=true) AND we're returning
+    # a @list identifier, the frame mark will rewind after return, invalidating
+    # the list's arena-backed buffer.  Tag the node so the transpiler emits
+    # CheatLib.promoteList() before the return to copy the buffer to heap.
+    if @frame_usage_count > 0 &&
+       node.value.is_a?(AST::Identifier) &&
+       node.value.type_info&.list_collection? &&
+       !node.value.type_info.sharded?
+      node.list_return = true
+    end
+
     # Promote non-identifier literals to heap when the expected return type requires it.
     # handle_return_escape only handles identifier variables; literals need this explicit check.
     unless was_promoted || node.value.is_a?(AST::Identifier)
@@ -1215,6 +1227,14 @@ private
     else
       error!(node, "Cannot call '#{func_name}' - not a function")
     end
+
+    # Tag calls that return a @list from a frame-using function.
+    # The caller's variable will need heapAlloc() for deinit instead of frameAlloc().
+    if node.respond_to?(:list_from_call=) &&
+       node.type_info&.list_collection? && !node.type_info.sharded? &&
+       @fn_nodes[func_name]&.uses_frame
+      node.list_from_call = true
+    end
   end
 
   # Handles intrinsic function calls by finding the matching overload and
@@ -1317,11 +1337,24 @@ private
     storage = downgrade_frame_to_stack(node, storage)
     @frame_usage_count += 1 if storage == :frame
 
-    # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!)
-    if (decl_t = node.type).is_a?(Type) && decl_t.collection
-      node.type_info.collection  = decl_t.collection
-      node.type_info.location    = :heap if decl_t.collection == :pool
-      node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
+    # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!).
+    #     When there is no explicit type annotation (inferred), fall back to the value's type_info
+    #     so that e.g. `result = buildList()` still gets the @list collection flag.
+    coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
+      decl_t
+    elsif node.value.type_info&.collection
+      node.value.type_info
+    end
+    if coll_src
+      node.type_info.collection  = coll_src.collection
+      node.type_info.location    = :heap if coll_src.collection == :pool
+      node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
+    end
+
+    # 2a'. Propagate heap_list flag: list received from a frame-using function must
+    #      deinit with heapAlloc() because the callee promoted the buffer to heap.
+    if node.value.respond_to?(:list_from_call) && node.value.list_from_call
+      node.type_info.heap_list = true
     end
 
     # 2b. Check if the declared type is a pool, open/infinite stream, or resource — tag node and scope entry
@@ -1419,11 +1452,24 @@ private
       storage = downgrade_frame_to_stack(node, storage)
       @frame_usage_count += 1 if storage == :frame
 
-      # Propagate collection + shard_count from declared type (lost during finalize_storage!)
-      if (decl_t = node.type).is_a?(Type) && decl_t.collection
-        node.type_info.collection  = decl_t.collection
-        node.type_info.location    = :heap if decl_t.collection == :pool
-        node.type_info.shard_count = decl_t.shard_count if decl_t.shard_count
+      # Propagate collection + shard_count from declared type (lost during finalize_storage!).
+      # When there is no explicit type annotation (inferred), fall back to the value's type_info
+      # so that e.g. `result = buildList()` still gets the @list collection flag.
+      coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
+        decl_t
+      elsif node.value.type_info&.collection
+        node.value.type_info
+      end
+      if coll_src
+        node.type_info.collection  = coll_src.collection
+        node.type_info.location    = :heap if coll_src.collection == :pool
+        node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
+      end
+
+      # Propagate heap_list flag: list received from a frame-using function must
+      # deinit with heapAlloc() because the callee promoted the buffer to heap.
+      if node.value.respond_to?(:list_from_call) && node.value.list_from_call
+        node.type_info.heap_list = true
       end
 
       ft_obj          = node.type_info

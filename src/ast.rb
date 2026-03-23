@@ -237,14 +237,16 @@ module AST
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
+    attr_accessor :list_from_call    # true when callee has uses_frame=true and returns a @list
     def wildcard?; false end
     def name; self[:name].to_s end
   end
 
   MethodCall   = Struct.new(:token, :object, :name, :args) do
     include Locatable
-    attr_accessor :pool_method  # :insert, :get, :remove — set by annotator for Pool dispatch
-    attr_accessor :map_method   # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
+    attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
+    attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
+    attr_accessor :list_from_call # true when callee has uses_frame=true and returns a @list
     def wildcard?; false end
     def name; self[:name].to_s end
   end
@@ -255,7 +257,10 @@ module AST
   end
   GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
-  ReturnNode   = Struct.new(:token, :value) { include Locatable }
+  ReturnNode   = Struct.new(:token, :value) do
+    include Locatable
+    attr_accessor :list_return  # true when returning a @list from a function with uses_frame=true
+  end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   Raise        = Struct.new(:token, :message_expr) { include Locatable }
   ThrowNode    = Struct.new(:token, :value) { include Locatable }
