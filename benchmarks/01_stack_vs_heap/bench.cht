@@ -1,0 +1,16 @@
+-- Recursive Fibonacci to test stack frames and call overhead
+-- Goal: 1M calls with zero heap allocation
+
+FN fib(n: Int64) RETURNS Int64 @reentrant ->
+    IF n <= 1 THEN
+        RETURN n;
+    END
+    RETURN fib(n - 1) + fib(n - 2);
+END
+
+FN cheatMain() RETURNS Void ->
+    -- Fib(35) results in ~18M calls
+    r = fib(35);
+    ASSERT r == 9227465, "Fib(35) calculation error";
+    RETURN;
+END
