@@ -7223,7 +7223,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("Map([]const u8, f64)")
       end
 
-      it "emits !Pair(f64) as the Zig return type for RETURNS Pair<Number>" do
+      it "emits Pair(f64) as the Zig return type for RETURNS Pair<Number>" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
           FN make() RETURNS Pair<Number> ->
@@ -7232,7 +7232,7 @@ RSpec.describe SemanticAnnotator do
           FN cheatMain() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("!Pair(f64)")
+        expect(out).to include("Pair(f64)")
       end
 
       it "emits Pair(bool) for Pair<Bool>" do
@@ -7468,31 +7468,33 @@ RSpec.describe SemanticAnnotator do
       it "emits 'comptime T: type' in function signature for FN identity<T>" do
         src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("fn identity(comptime T: type, rt: *Runtime, x: T)")
+        expect(out).to include("fn identity(comptime T: type, x: T)")
       end
 
       it "emits two comptime params for a two-type-param function" do
         src = "FN first<A, B>(a: A, b: B) RETURNS A -> RETURN a; END\nFN cheatMain() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("fn first(comptime A: type, comptime B: type, rt: *Runtime")
+        expect(out).to include("fn first(comptime A: type, comptime B: type, a: A")
       end
 
-      it "emits inferred type arg at call site: identity(f64, rt, 42)" do
+      it "emits inferred type arg at call site without rt when callee is pure" do
         src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> n = identity(42.0); END"
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("identity(f64, rt,")
+        expect(out).to include("identity(f64,")
+        expect(out).not_to include("identity(f64, rt,")
       end
 
       it "emits bool type arg at call site for identity(TRUE)" do
         src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> b = identity(TRUE); END"
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("identity(bool, rt,")
+        expect(out).to include("identity(bool,")
+        expect(out).not_to include("identity(bool, rt,")
       end
 
       it "emits Pair(T) as return type when RETURNS Pair<T>" do
         src = "STRUCT Pair<T> { first: T, second: T }\nFN makePair<T>(v: T) RETURNS Pair<T> -> RETURN Pair<T>{ first: v, second: v }; END\nFN cheatMain() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("!Pair(T)")
+        expect(out).to include("Pair(T)")
       end
     end
 
@@ -12838,8 +12840,8 @@ RSpec.describe SemanticAnnotator do
     let(:zig) { ZigTranspiler.new.transpile(code) }
 
     it "auto-derefs the frame pointer when passing to a function expecting a value type" do
-      # The call site should emit consume(rt, s.*) not consume(rt, s)
-      expect(zig).to include("consume(rt, s.*)")
+      # The call site should emit consume(s.*) not consume(s) — rt omitted since consume is pure
+      expect(zig).to include("consume(s.*)")
     end
   end
 

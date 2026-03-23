@@ -25,7 +25,7 @@ def run_bench(dir)
   # Ensure runtime headers are linked correctly for Zig compilation
   puts "Compiling CLEAR (Zig output)..."
   Dir.chdir("zig") do
-    `zig build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseSafe -lc`
+    `zig build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
   end
   
   if File.exist?("zig/bench_clear")

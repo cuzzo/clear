@@ -38,6 +38,15 @@ class ZigTranspiler
     annotator.annotate!(ast)
 
     @needs_safety_import = false
+    # Pre-populate needs_rt/can_fail lookup tables from annotated FunctionDef nodes
+    # so call sites can look up callee flags before the callee's definition is visited.
+    @fn_needs_rt = {}
+    @fn_can_fail = {}
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
+      @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
+    end
     body = visit(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
 
@@ -303,26 +312,44 @@ private
       # For generic functions, prepend comptime type params before rt
       comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
 
-      # We inject 'rt' into every function signature
-      all_params = comptime_params + ["rt: *Runtime"] + params_zig
+      fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
+      fn_can_fail = node.can_fail.nil? ? true : node.can_fail
+
+      all_params = if fn_needs_rt
+        comptime_params + ["rt: *Runtime"] + params_zig
+      else
+        comptime_params + params_zig
+      end
       # Don't add ! if the type is already an error union
-      return_type_str = final_type.start_with?("!") ? final_type : "!#{final_type}"
+      return_type_str = if fn_can_fail
+        final_type.start_with?("!") ? final_type : "!#{final_type}"
+      else
+        final_type
+      end
       vis = node.visibility == :pub ? "pub " : ""
       signature = "#{vis}fn #{node.name}(#{all_params.join(', ')}) #{return_type_str}"
 
-      prologue = "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
-      prologue = node.uses_frame ? prologue : "_ = &rt;"
+      prologue = if fn_needs_rt
+        node.uses_frame ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
+      else
+        nil
+      end
 
       # @nonReentrant: insert a StackGuard that errors at runtime on unexpected recursion.
       if node.reentrant == :non_reentrant
         @needs_safety_import = true
         guard = "var _guard = try safety.StackGuard.enter(@src());\n    _guard.push();\n    defer _guard.pop();"
-        prologue = "#{guard}\n    #{prologue}"
+        prologue = prologue ? "#{guard}\n    #{prologue}" : guard
       end
-      # Suppress unused-parameter warnings for all non-rt params.
+      # Suppress unused-parameter warnings only for params not referenced in the body.
       # Zig 0.15+ errors on any unused function parameter; _ = &x; is a safe no-op.
-      param_suppressions = node.params.map { |p| "_ = &#{p[:name]};" }.join("\n    ")
-      prologue = param_suppressions.empty? ? prologue : "#{prologue}\n    #{param_suppressions}"
+      used_names = collect_identifier_names(node.body)
+      param_suppressions = node.params
+        .reject { |p| used_names.include?(p[:name]) }
+        .map    { |p| "_ = &#{p[:name]};" }
+        .join("\n    ")
+      prologue_parts = [prologue, param_suppressions.empty? ? nil : param_suppressions].compact
+      prologue = prologue_parts.join("\n    ")
       body = transpile_block(node.body)
 
       <<~ZIG
@@ -1117,7 +1144,7 @@ private
         # Native FFI call: no rt injection, no try (native Zig/C return convention)
         "#{mod_prefix}#{node.name}(#{args_zig.join(', ')})"
       elsif node.respond_to?(:fn_var_call) && node.fn_var_call
-        # Calling a fn-type variable: inject rt but no module prefix
+        # Calling a fn-type variable: always inject rt, always try (unknown callee)
         rt_name = @do_rt_name || "rt"
         args = [rt_name] + args_zig
         "try #{node.name}(#{args.join(', ')})"
@@ -1129,9 +1156,12 @@ private
         else
           []
         end
-        args = type_arg_strs + [rt_name] + args_zig
+        # Only inject rt / emit try if the callee actually needs them.
+        needs_rt = callee_needs_rt?(node.name)
+        can_fail  = callee_can_fail?(node.name)
+        args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
         call = "#{mod_prefix}#{node.name}(#{args.join(', ')})"
-        "try #{call}"
+        can_fail ? "try #{call}" : call
       end
 
     when AST::ReturnNode
@@ -1784,6 +1814,45 @@ private
 
     # 3. Output
     "std.debug.print(\"#{formats}\\n\", .{#{values}});"
+  end
+
+  # Returns true if the named callee requires an rt: *Runtime argument.
+  # Defaults to true (conservative) for unknown/stdlib callees.
+  def callee_needs_rt?(name)
+    return true if name.nil? || name.empty?
+    val = @fn_needs_rt&.fetch(name, nil)
+    val.nil? ? true : val
+  end
+
+  # Returns true if the named callee returns an error union (!T) and needs try.
+  # Defaults to true (conservative) for unknown/stdlib callees.
+  def callee_can_fail?(name)
+    return true if name.nil? || name.empty?
+    val = @fn_can_fail&.fetch(name, nil)
+    val.nil? ? true : val
+  end
+
+  # Collect all Identifier names referenced in an AST subtree.
+  # Used to determine which parameters actually need _ = &name; suppression.
+  def collect_identifier_names(nodes)
+    names = Set.new
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested definitions.
+      when AST::Identifier
+        names.add(n.name)
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(nodes)
+    names
   end
 end
 

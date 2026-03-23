@@ -35,6 +35,8 @@ class SemanticAnnotator
     @call_graph  = {}  # name => Set of directly-called function names (excluding self-calls)
     @fn_has_fnptr = {} # name => true if function calls a fn-type variable or lambda
     @fn_nodes    = {}  # name => FunctionDef node (for error reporting in the post-pass)
+    # Performance analysis
+    @fn_raises_directly = {}  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
     setup_builtins
   end
 
@@ -154,6 +156,10 @@ private
     # Now that all function bodies have been analyzed and @call_graph is complete,
     # detect mutually-recursive function groups and require @reentrant or @nonReentrant.
     check_indirect_reentrancy!
+
+    # PASS 5: Compute needs_rt and can_fail for every function via call-graph fixed-point.
+    compute_needs_rt!
+    compute_can_fail!
 
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
@@ -398,6 +404,11 @@ private
     signature[:return_strategy] = get_return_strategy(signature[:return][:type])
     node.full_type = signature
     node.uses_frame = (@frame_usage_count > 0)
+    # Seed for compute_can_fail! post-pass: direct failure sources.
+    @fn_raises_directly[node.name] = node.uses_frame ||
+      (@fn_has_fnptr[node.name] == true) ||
+      (node.reentrant == :non_reentrant) ||
+      scan_for_raises(node.body)
     @function_context_stack.pop
   end
 
@@ -2513,6 +2524,84 @@ private
         (@call_graph[callee] || Set.new).each { |c| queue << c }
       end
     end
+  end
+
+  # Post-pass: compute needs_rt for every function.
+  # A function needs rt if it uses the frame arena, calls a fn pointer, or any
+  # transitive callee needs rt. cheatMain always needs rt (entry point).
+  def compute_needs_rt!
+    needs_rt = {}
+    @fn_nodes.each do |name, fn_node|
+      needs_rt[name] = fn_node.uses_frame || (@fn_has_fnptr[name] == true) || name == "cheatMain"
+    end
+
+    changed = true
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        next if needs_rt[fn_name]
+        if callees.any? { |c| needs_rt[c] }
+          needs_rt[fn_name] = true
+          changed = true
+        end
+      end
+    end
+
+    @fn_nodes.each do |name, fn_node|
+      fn_node.needs_rt = (needs_rt[name] == true)
+    end
+  end
+
+  # Post-pass: compute can_fail for every function.
+  # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
+  # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
+  # cheatMain always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
+  # are excluded from propagation — they don't use CLEAR's error union convention.
+  def compute_can_fail!
+    can_fail = {}
+    @fn_nodes.each do |name, _|
+      can_fail[name] = @fn_raises_directly[name] == true || name == "cheatMain"
+    end
+
+    changed = true
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        next if can_fail[fn_name]
+        if callees.any? { |c| @fn_nodes.key?(c) && can_fail[c] }
+          can_fail[fn_name] = true
+          changed = true
+        end
+      end
+    end
+
+    @fn_nodes.each do |name, fn_node|
+      fn_node.can_fail = (can_fail[name] == true)
+    end
+  end
+
+  # Scan a function body for direct failure sources: AST::Raise or AST::OrRaise nodes.
+  # Does not descend into nested FunctionDef nodes (their failures are tracked separately).
+  def scan_for_raises(body)
+    found = [false]
+    traverse = lambda do |n|
+      return if found[0]
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested function definitions.
+      when AST::Raise, AST::OrRaise
+        found[0] = true
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(body)
+    found[0]
   end
 
 end
