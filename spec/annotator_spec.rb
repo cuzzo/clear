@@ -12818,6 +12818,70 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "loop-local SROA — large struct literals inside a loop body" do
+    # BigS (130 slots) declared inside a WHILE loop should be :stack, not :frame.
+    # The OS stack reclaims it each iteration; no frame-arena growth.
+    let(:preamble) do
+      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
+      <<~CLEAR
+        STRUCT Chunk5 { #{chunk_fields} }
+        STRUCT BigS   { #{big_fields}   }
+        FN first_a(s: BigS) RETURNS Number @reentrant ->
+          RETURN s.c1.a;
+        END
+      CLEAR
+    end
+
+    let(:loop_code) do
+      chunk_init = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
+      big_fields = (1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")
+      preamble + <<~CLEAR
+        FN bench() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          MUTABLE acc: Number = 0.0;
+          WHILE i < 100 DO
+            s = BigS{ #{big_fields} };
+            acc = acc + first_a(s);
+            i = i + 1_i64;
+          END
+          ASSERT acc > 0.0, "ok";
+        END
+      CLEAR
+    end
+
+    it "classifies loop-local large struct as :stack (not :frame)" do
+      ast = run(loop_code)
+      fn  = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "bench" }
+      while_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+      decl = while_node.do_branch.find { |s| s.is_a?(AST::BindExpr) && s.name == "s" }
+      expect(decl.storage).to eq(:stack)
+    end
+
+    it "does not emit frameAlloc for a loop-local large struct" do
+      zig = ZigTranspiler.new.transpile(loop_code)
+      expect(zig).not_to include("frameAlloc().create(BigS)")
+    end
+
+    it "emits the struct literal directly (no blk: wrapper)" do
+      zig = ZigTranspiler.new.transpile(loop_code)
+      expect(zig).to include("const s = BigS{")
+    end
+
+    it "still uses frameAlloc for the same large struct declared OUTSIDE a loop" do
+      chunk_init = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
+      big_fields = (1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")
+      outside_code = preamble + <<~CLEAR
+        FN outside() RETURNS Void ->
+          s = BigS{ #{big_fields} };
+          _ = first_a(s);
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(outside_code)
+      expect(zig).to include("frameAlloc().create(BigS)")
+    end
+  end
+
   describe "frame allocation — passing frame variables to functions" do
     let(:code) do
       chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"

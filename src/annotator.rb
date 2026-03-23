@@ -1228,6 +1228,27 @@ private
     node.zig_pattern = matched_def[:zig]
   end
 
+  # Loop-local SROA: when a large struct literal (storage == :frame) is declared
+  # inside a loop body, downgrade it to :stack allocation.
+  #
+  # Rationale: the frame arena's save/restore mark is per-function, not per-iteration.
+  # A :frame allocation inside a loop bumps the arena every iteration and never
+  # reclaims it until function exit — burning O(N) memory for N iterations.
+  # A Zig `var BigVec` on the OS stack is reclaimed automatically each iteration;
+  # LLVM then SROAs the fields to registers and dead-code-eliminates unused ones.
+  #
+  # Safety: CLEAR uses value semantics for structs (pass/return by copy).  A large
+  # struct on the stack cannot have its address escape the loop body through normal
+  # CLEAR operations, so :stack is always safe here.
+  def downgrade_frame_to_stack(node, storage)
+    return storage unless storage == :frame && @loop_depth > 0
+    return storage unless node.value.is_a?(AST::StructLit)
+
+    node.type_info.location = :stack
+    node.value.storage      = :stack
+    :stack
+  end
+
   def visit_VarDecl(node)
     # Pre-set :stack on list literals when the declared type is a fixed array (e.g. Number[3]).
     # This must happen before visit(node.value) so visit_ListLit sees the correct storage
@@ -1257,6 +1278,10 @@ private
 
     # 2. Finalize Storage
     storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
+    # Loop-local SROA: a large struct literal created inside a loop body doesn't need the
+    # frame arena. The OS stack reclaims it each iteration; LLVM can then SROA the fields
+    # to registers and dead-code-eliminate any that are never read.
+    storage = downgrade_frame_to_stack(node, storage)
     @frame_usage_count += 1 if storage == :frame
 
     # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!)
@@ -1358,6 +1383,7 @@ private
       end
 
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
+      storage = downgrade_frame_to_stack(node, storage)
       @frame_usage_count += 1 if storage == :frame
 
       # Propagate collection + shard_count from declared type (lost during finalize_storage!)
