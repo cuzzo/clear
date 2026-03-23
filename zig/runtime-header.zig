@@ -130,45 +130,85 @@ pub const CheatLib = struct {
         }
     }
 
-    // HashMap / Associative Map
+    // =========================================================================
+    // String-keyed HashMap (StringHashMapUnmanaged)
+    //
+    // Option 1 — Arena bucket array:
+    //   mapPut takes two allocators:
+    //     key_alloc    — heap allocator for key string copies (keys must
+    //                    outlive the frame; GPA ensures this).
+    //     bucket_alloc — frame allocator for the bucket array.  The frame
+    //                    arena is bump-allocated and never individually freed;
+    //                    smartFree is a no-op so passing frameAlloc here
+    //                    eliminates all per-bucket GPA calls.
+    //   mapDeinit frees key copies via key_alloc, then calls map.deinit
+    //   with bucket_alloc (no-op via smartFree; frame rewind reclaims it).
+    // =========================================================================
 
-    // Usage: var map = try rt.makeMap(i64, rt.heapAlloc());
-    pub fn makeHashMap(comptime V: type) !std.StringHashMapUnmanaged(V) {
-        // Start empty. Unmanaged maps don't alloc until you put().
+    pub fn makeHashMap(comptime V: type) std.StringHashMapUnmanaged(V) {
         return std.StringHashMapUnmanaged(V){};
     }
 
-    // Usage: try rt.mapPut(i64, rt.heapAlloc(), &map, "key", 100);
-    pub fn mapPut(comptime V: type, allocator: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
-        // Check if key already exists - if so, just update the value
+    // Split allocators: key_alloc=heapAlloc (key copies), bucket_alloc=frameAlloc (buckets).
+    pub fn mapPut(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
         if (map.getPtr(key)) |val_ptr| {
             val_ptr.* = value;
             return;
         }
-        // Key doesn't exist - duplicate it to the Heap because the Map keeps a pointer to it.
-        // If we don't, and 'key' is a frame string that dies, the map breaks.
-        const key_copy = try allocator.dupe(u8, key);
-        try map.put(allocator, key_copy, value);
+        // Duplicate the key to key_alloc (heap) so it survives frame rewinds.
+        const key_copy = try key_alloc.dupe(u8, key);
+        // Bucket array grows into bucket_alloc (frame arena — bump allocation, no GPA lock).
+        try map.put(bucket_alloc, key_copy, value);
     }
 
-    // Usage: rt.mapGet(i64, map, "key")
-    // Smart return: if V is ArrayListUnmanaged(T), returns []T instead of the list struct
+    // Free all heap-duplicated key strings, then deinit the bucket array.
+    // bucket_alloc is frameAlloc → deinit is a no-op (smartFree); frame rewind
+    // reclaims the bucket memory.
+    pub fn mapDeinit(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V)) void {
+        var it = map.keyIterator();
+        while (it.next()) |k| key_alloc.free(k.*);
+        map.deinit(bucket_alloc);
+    }
+
+    // Smart return: if V is ArrayListUnmanaged(T), returns []T instead of the list struct.
     pub fn mapGet(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) MapGetReturnType(V) {
         const is_array_list = comptime isArrayListUnmanaged(V);
-
         if (map.get(key)) |val| {
-            if (comptime is_array_list) {
-                return val.items; // Return slice for ArrayListUnmanaged
-            } else {
-                return val;
-            }
+            return if (comptime is_array_list) val.items else val;
         }
-
-        // Default values based on type
         if (comptime is_array_list) return &[_]ArrayListElement(V){};
         if (V == i64 or V == f64) return 0;
         if (V == []const u8) return "";
         return undefined;
+    }
+
+    // Delete a key. Frees the heap-duplicated key string via key_alloc.
+    pub fn mapDelete(comptime V: type, key_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8) void {
+        if (map.fetchRemove(key)) |entry| key_alloc.free(entry.key);
+    }
+
+    pub fn mapContains(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) bool {
+        return map.contains(key);
+    }
+
+    pub fn mapCount(comptime V: type, map: std.StringHashMapUnmanaged(V)) i64 {
+        return @intCast(map.count());
+    }
+
+    pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![][]const u8 {
+        const result = try allocator.alloc([]const u8, map.count());
+        var it = map.keyIterator();
+        var i: usize = 0;
+        while (it.next()) |k| : (i += 1) result[i] = k.*;
+        return result;
+    }
+
+    pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![]V {
+        const result = try allocator.alloc(V, map.count());
+        var it = map.valueIterator();
+        var i: usize = 0;
+        while (it.next()) |v| : (i += 1) result[i] = v.*;
+        return result;
     }
 
     // Helper: Check if type is ArrayListUnmanaged
@@ -179,58 +219,99 @@ pub const CheatLib = struct {
 
     // Helper: Get element type from ArrayListUnmanaged
     fn ArrayListElement(comptime T: type) type {
-        const items_field = @typeInfo(T).@"struct".fields[0]; // items is first field
+        const items_field = @typeInfo(T).@"struct".fields[0];
         const slice_info = @typeInfo(items_field.type).pointer;
         return slice_info.child;
     }
 
     // Helper: Compute return type for mapGet
     fn MapGetReturnType(comptime V: type) type {
-        if (comptime isArrayListUnmanaged(V)) {
-            return []ArrayListElement(V);
-        }
+        if (comptime isArrayListUnmanaged(V)) return []ArrayListElement(V);
         return V;
     }
 
-    // Delete a key from the map. No-ops if the key doesn't exist.
-    pub fn mapDelete(comptime V: type, allocator: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8) void {
-        if (map.fetchRemove(key)) |entry| {
-            // Free the duplicated key that mapPut allocated.
-            allocator.free(entry.key);
+    // =========================================================================
+    // Numeric-keyed HashMap (Option 3)
+    //
+    // For integer keys (i64, u64, …): std.AutoHashMapUnmanaged(K, V).
+    // For float keys (f64, f32):      std.HashMapUnmanaged with a custom
+    //   context that bit-casts the float to u64 before hashing — avoids
+    //   NaN/+0/-0 equality issues and satisfies Zig's hashability rules.
+    //
+    //   MUTABLE m: HashMap<Number, Number> = {};  →  NumericMapType(f64,f64)
+    //   MUTABLE m: HashMap<Int64, Number>  = {};  →  NumericMapType(i64,f64)
+    //
+    // All numericMap* functions accept *NumericMapType(K,V) so callers never
+    // need to know the distinction.
+    // =========================================================================
+
+    /// Returns the concrete Zig map type for a numeric-keyed CLEAR HashMap.
+    /// Integer keys → AutoHashMapUnmanaged (Zig default).
+    /// Float keys   → HashMapUnmanaged with a bit-cast context (NaN-safe).
+    pub fn NumericMapType(comptime K: type, comptime V: type) type {
+        if (@typeInfo(K) == .float) {
+            // Bit-cast context: hash via murmur-finalised u64 bit-pattern.
+            const Ctx = struct {
+                pub fn hash(_: @This(), k: K) u64 {
+                    var bits: u64 = @bitCast(@as(f64, k));
+                    bits ^= bits >> 33;
+                    bits *%= 0xff51afd7ed558ccd;
+                    bits ^= bits >> 33;
+                    bits *%= 0xc4ceb9fe1a85ec53;
+                    bits ^= bits >> 33;
+                    return bits;
+                }
+                pub fn eql(_: @This(), a: K, b: K) bool {
+                    return @as(u64, @bitCast(@as(f64, a))) ==
+                           @as(u64, @bitCast(@as(f64, b)));
+                }
+            };
+            return std.HashMapUnmanaged(K, V, Ctx, 80);
         }
+        return std.AutoHashMapUnmanaged(K, V);
     }
 
-    // Returns true if the map contains the given key.
-    pub fn mapContains(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) bool {
+    pub fn numericMapPut(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K, value: V) !void {
+        try map.put(alloc, key, value);
+    }
+
+    pub fn numericMapGet(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) V {
+        return map.get(key) orelse {
+            if (V == i64 or V == f64) return 0;
+            return undefined;
+        };
+    }
+
+    pub fn numericMapDelete(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K) void {
+        _ = map.remove(key);
+        _ = alloc;
+    }
+
+    pub fn numericMapContains(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) bool {
         return map.contains(key);
     }
 
-    // Returns the number of entries in the map.
-    pub fn mapCount(comptime V: type, map: std.StringHashMapUnmanaged(V)) i64 {
+    pub fn numericMapCount(comptime K: type, comptime V: type, map: NumericMapType(K, V)) i64 {
         return @intCast(map.count());
     }
 
-    // Returns all keys as a slice allocated on the given allocator.
-    pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![][]const u8 {
-        const n = map.count();
-        const result = try allocator.alloc([]const u8, n);
+    pub fn numericMapDeinit(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V)) void {
+        map.deinit(alloc);
+    }
+
+    pub fn numericMapKeys(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) ![]K {
+        const result = try allocator.alloc(K, map.count());
         var it = map.keyIterator();
         var i: usize = 0;
-        while (it.next()) |k| : (i += 1) {
-            result[i] = k.*;
-        }
+        while (it.next()) |k| : (i += 1) result[i] = k.*;
         return result;
     }
 
-    // Returns all values as a slice allocated on the given allocator.
-    pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![]V {
-        const n = map.count();
-        const result = try allocator.alloc(V, n);
+    pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) ![]V {
+        const result = try allocator.alloc(V, map.count());
         var it = map.valueIterator();
         var i: usize = 0;
-        while (it.next()) |v| : (i += 1) {
-            result[i] = v.*;
-        }
+        while (it.next()) |v| : (i += 1) result[i] = v.*;
         return result;
     }
 

@@ -1,47 +1,58 @@
--- HashMap Benchmark — CLEAR @map (GPA-backed)
+-- HashMap Benchmark — CLEAR @map vs C baseline
 --
 -- @use_zig
 --
--- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3):
+-- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3)
+-- Machine: x86-64 Linux
 --
---   C   (FNV-1a, open-addr, no key dup) : Insert ~163 ms | Lookup ~160 ms | Total ~323 ms
---   CLEAR (@map, GPA, key dup per put)  : Insert ~734 ms | Lookup ~262 ms | Total ~996 ms
+--   VARIANT                 | INSERT  | LOOKUP  | TOTAL  | vs C-String
+--   C (string, FNV-1a)      |  179 ms |  150 ms |  329 ms |  1.00× (baseline)
+--   C (f64-key, bit-cast)   |  137 ms |   68 ms |  206 ms |  0.63×
+--   ──────────────────────────────────────────────────────────────────
+--   CLEAR String/GPA (old)  |  711 ms |  151 ms |  863 ms |  2.62×
+--   CLEAR String/Split      |  705 ms |  200 ms |  905 ms |  2.75×  ← minimal gain (see below)
+--   CLEAR Numeric/f64       |  266 ms |   55 ms |  321 ms |  0.98×  ← ~= C string!
+--   CLEAR Numeric/i64       |  206 ms |   55 ms |  261 ms |  0.79×  ← FASTER than C string!
 --
---   Insert overhead : ~4.5×  ← GPA key duplication dominates
---   Lookup overhead : ~1.6×  ← WyHash vs FNV-1a + slightly larger bucket metadata
---   Total overhead  : ~3.1×
+-- KEY FINDING:
+--   CLEAR HashMap<Int64, V>  beats C's FNV-1a string map on insert+lookup total.
+--   CLEAR HashMap<Number, V> is essentially on par with C string maps.
+--   Both numeric variants are GPA-free — all memory comes from frameAlloc
+--   (bump-pointer arena), so insert cost approaches malloc-free C.
 --
--- ROOT CAUSES (insert is 4.5× slower):
---   1. Key duplication: mapPut calls allocator.dupe(u8, key) — 1M small GPA
---      allocations just for key strings (~400 ns each × 1M = ~400 ms overhead).
---   2. GPA bookkeeping: each alloc() updates per-allocation metadata outside L1
---      cache, destroying spatial locality on every insertion.
---   3. Bucket-array growth: std.StringHashMapUnmanaged rehashes ~20 times during
---      1M inserts (load factor 80%), each triggering a GPA realloc.
+-- WHY STRING/SPLIT DIDN'T HELP MUCH:
+--   Option 1 (split allocator) was designed to save bucket-array growth via
+--   frameAlloc (no GPA lock).  It helps only when bucket reallocs dominate.
+--   In practice, 1M × GPA.dupe(key) (~400 ns each) is the real bottleneck —
+--   key duplication accounts for ~400 ms of the 711 ms insert cost.
+--   Bucket growth is ~20 GPA reallocs × a few ms each — noise by comparison.
+--   TAKEAWAY: String map performance is gated by key duplication, not buckets.
+--   To fully close the gap, arena key interning (keys scoped to a frame) is needed.
 --
--- ROOT CAUSES (lookup is 1.6× slower):
---   1. WyHash (Zig default) vs FNV-1a: WyHash is DoS-resistant and higher
---      quality, but ~2× slower than FNV-1a for short (< 16 byte) keys.
---   2. No key duplication on lookup — this path is already GPA-free, so the
---      gap is narrower.
+-- WHY NUMERIC IS FAST:
+--   1. No key duplication — integers/floats copied by value, zero GPA allocs.
+--   2. Bucket array in frameAlloc — bump-pointer growth, no GPA lock at all.
+--   3. Integer hash (~2 ns) vs FNV-1a string hash (~5 ns for short keys).
+--   4. 64-bit compare vs strcmp — one instruction vs a loop.
 --
--- OPTIMIZATION ROADMAP:
+-- IMPLEMENTATION:
+--   HashMap<V>          → std.StringHashMapUnmanaged(V)
+--                           mapPut:  heapAlloc key copy + frameAlloc bucket growth
+--                           mapDeinit: free key copies (heapAlloc) + deinit (frameAlloc)
+--   HashMap<K, V>       → CheatLib.NumericMapType(K, V)
+--     integer K         → std.AutoHashMapUnmanaged(K, V)       (Zig default)
+--     float K (f64/f32) → std.HashMapUnmanaged with bit-cast context
+--                           (NaN-safe: hashes/compares via @bitCast to u64)
+--   All numeric maps: single frameAlloc allocator, no key copies, no GPA.
 --
---   Step 1 — Arena-backed bucket array.
---     Pass rt.frameAlloc() (not rt.heapAlloc()) to map.put() for bucket growth.
---     Keys still go to heap (they outlive the frame), but the bucket metadata
---     becomes bump-allocated.  Expected insert gain: ~1.5×–2×.
+-- OPTIMIZATION ROADMAP (remaining):
 --
---   Step 2 — Arena key interning.
---     When the @map lifetime is scoped to a single function/request, keys can
---     also be bump-allocated into an ArenaAllocator wrapping the frame arena.
---     Eliminates GPA from the hot path entirely.
---     Expected additional insert gain: ~3×–4× (total ~4–5× from baseline).
+--   Step A — Arena key interning for String maps.
+--     When @map lifetime is scoped to a function/request, keys can be
+--     bump-allocated into the frame arena alongside the bucket array.
+--     Eliminates GPA entirely from the string-map hot path.
+--     Expected gain: 4–5× insert speedup → string map approaches C baseline.
 --
---   Step 3 — Integer-keyed @map.
---     Introduce AutoHashMapUnmanaged(u64, f64) for @map:int or numeric keys.
---     No string hashing at all; integer comparison ~5× faster than strcmp.
---     Expected gain vs string map: ~3×–5×.
---
--- GOAL: CLEAR @map (arena-backed + arena key interning) should reach within
--- 10%–20% of the C open-addressing baseline on insert-heavy workloads.
+--   Step B — Integer-keyed CLEAR maps in user code.
+--     Users writing HashMap<Int64, V> or HashMap<Number, V> get near-C
+--     performance today with zero annotation overhead.

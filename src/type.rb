@@ -428,6 +428,16 @@ class Type
     @is_map
   end
 
+  # True when this is a numeric-keyed map (HashMap<Number,V> or HashMap<Int64,V>).
+  # Backed by AutoHashMapUnmanaged — no key duplication, pure arena-allocated.
+  def numeric_map?
+    @is_map && @key_type_raw && @key_type_raw != :String
+  end
+
+  def key_type
+    Type.new(@key_type_raw || :String)
+  end
+
   # True when this is an explicit @pool (generational pool) collection.
   def pool?
     @collection == :pool
@@ -588,6 +598,7 @@ class Type
     return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
     return false if inf_stream?             # Infinite streams are resources with deinit cleanup, not linear
     return false if list_collection? || pool?  # @list/@pool are arena/heap-managed via defer deinit — not linearly affine
+    return false if map?                       # @map is cleaned up via mapDeinit/numericMapDeinit — not linearly affine
     return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
     return false if any_sync?               # Sync vars manage their own lifecycle
@@ -773,12 +784,23 @@ class Type
       @element_type_raw = nil
     end
 
-    # E. Detect HashMap Structure: HashMap<ValueType>
+    # E. Detect HashMap Structure: HashMap<ValueType> or HashMap<KeyType, ValueType>
+    # Two-arg form: HashMap<Number, V> or HashMap<Int64, V> → numeric-keyed AutoHashMap.
+    # One-arg form: HashMap<V> → String-keyed StringHashMap (original behaviour).
     if match = str.match(/^HashMap<(.+)>$/)
       @is_map = true
-      @value_type_raw = match[1].to_sym
+      inner = match[1]
+      if inner.include?(",")
+        parts = inner.split(",", 2).map(&:strip)
+        @key_type_raw   = parts[0].to_sym
+        @value_type_raw = parts[1].to_sym
+      else
+        @key_type_raw   = :String
+        @value_type_raw = inner.to_sym
+      end
     else
       @is_map = false
+      @key_type_raw   = nil
       @value_type_raw = nil
     end
 
@@ -911,10 +933,16 @@ class Type
     end
 
     # 5. Handle HashMaps
-    #    HashMap<Int64> -> std.StringHashMapUnmanaged(i64)
+    #    HashMap<V>         → std.StringHashMapUnmanaged(V)        (String keys)
+    #    HashMap<K, V>      → CheatLib.NumericMapType(K, V)        (numeric keys)
+    #      Integer keys → AutoHashMapUnmanaged; float keys → bit-cast context.
     if map?
-      inner_zig = value_type.zig_type
-      return "std.StringHashMapUnmanaged(#{inner_zig})"
+      val_zig = value_type.zig_type
+      if numeric_map?
+        key_zig = key_type.zig_type
+        return "CheatLib.NumericMapType(#{key_zig}, #{val_zig})"
+      end
+      return "std.StringHashMapUnmanaged(#{val_zig})"
     end
 
     # 5b. Handle Generic Struct Instances

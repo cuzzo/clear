@@ -404,7 +404,7 @@ private
       # @list and @pool also need `var` because deinit(*Self, alloc) requires a mutable receiver.
       ft = Type.new(node.full_type || :Void)
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
-      is_mutable ||= ft.list_collection? || ft.pool?
+      is_mutable ||= ft.list_collection? || ft.pool? || ft.map?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       # Always emit explicit type annotation for fn_type (Zig can't always infer *const fn(...)).
@@ -484,18 +484,20 @@ private
           # Check if target is a Map
           target_node = node.name.target
           if target_node.metatype == :hashmap
-             # Generate mapPut
+             map_ft   = Type.new(target_node.full_type)
+             map_ref  = visit(target_node)
+             key_ref  = visit(node.name.index)
+             val_ref  = visit(node.value)
+             rt_name  = @do_rt_name || "rt"
 
-             # TODO: Helper
-             inner_type = target_node.full_type.to_s.match(/HashMap<(.+)>/)[1]
-             zig_type = transpile_type(inner_type)
-
-             map_ref = visit(target_node)
-             key_ref = visit(node.name.index)
-             val_ref = visit(node.value)
-
-             # Pass &map_ref because Put modifies the map struct
-             return "try CheatLib.mapPut(#{zig_type}, rt.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+             if map_ft.numeric_map?
+               key_zig = map_ft.key_type.zig_type
+               val_zig = map_ft.value_type.zig_type
+               return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+             else
+               val_zig = map_ft.value_type.zig_type
+               return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.heapAlloc(), #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+             end
           end
           arr_ref = visit(target_node)
           idx_ref = visit(node.name.index)
@@ -662,19 +664,24 @@ private
       index = visit(node.index)
 
       if node.target.metatype == :hashmap
-        inner_type = node.target.full_type.to_s.match(/HashMap<(.+)>/)[1]
+        map_ft = Type.new(node.target.full_type)
 
-        # For INDEX results (HashMap<T[]>), the runtime stores ArrayListUnmanaged(T)
-        # We need to pass the actual stored type, not the conceptual slice type
-        if inner_type.end_with?("[]")
-          element_type = inner_type.gsub(/[\[\]]/, '')
-          zig_element = transpile_type(element_type)
-          zig_type = "std.ArrayListUnmanaged(#{zig_element})"
+        if map_ft.numeric_map?
+          key_zig = map_ft.key_type.zig_type
+          val_zig = map_ft.value_type.zig_type
+          "CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target}, #{index})"
         else
-          zig_type = transpile_type(inner_type)
+          inner_type = node.target.full_type.to_s.match(/HashMap<(.+)>/)[1]
+          # For INDEX results (HashMap<T[]>), the runtime stores ArrayListUnmanaged(T)
+          if inner_type.end_with?("[]")
+            element_type = inner_type.gsub(/[\[\]]/, '')
+            zig_element = transpile_type(element_type)
+            zig_type = "std.ArrayListUnmanaged(#{zig_element})"
+          else
+            zig_type = map_ft.value_type.zig_type
+          end
+          "CheatLib.mapGet(#{zig_type}, #{target}, #{index})"
         end
-
-        "CheatLib.mapGet(#{zig_type}, #{target}, #{index})"
       else
         "CheatLib.getAt(#{target}, #{index})"
       end
@@ -1639,12 +1646,11 @@ private
   def transpile_hash_lit(node)
     # Prefer coerced_type (the declared type) over the inferred HashMap<Any> from empty literals.
     effective_type = (node.coerced_type && node.full_type.to_s.include?("Any")) ? node.coerced_type.to_s : node.full_type.to_s
-    type_str   = effective_type
-    inner_type = type_str.match(/HashMap<(.+)>/)[1]
-    zig_type   = transpile_type(inner_type)
-    rt_name    = @do_rt_name || "rt"
+    map_ft   = Type.new(effective_type)
+    rt_name  = @do_rt_name || "rt"
+    zig_init = "#{map_ft.zig_type}{}"
 
-    return "try CheatLib.makeHashMap(#{zig_type})" if node.pairs.empty?
+    return zig_init if node.pairs.empty?
 
     @hashlit_counter ||= 0
     id    = @hashlit_counter
@@ -1652,36 +1658,65 @@ private
     label = "__hl#{id}"
     var   = "__hl#{id}_map"
 
-    puts_stmts = node.pairs.map do |k, v|
-      key_str = visit(k)
-      val_str = visit(v)
-      "try CheatLib.mapPut(#{zig_type}, #{rt_name}.heapAlloc(), &#{var}, #{key_str}, #{val_str});"
-    end.join("\n            ")
+    if map_ft.numeric_map?
+      key_zig = map_ft.key_type.zig_type
+      val_zig = map_ft.value_type.zig_type
+      puts_stmts = node.pairs.map do |k, v|
+        key_str = visit(k)
+        val_str = visit(v)
+        "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{var}, #{key_str}, #{val_str});"
+      end.join("\n            ")
+    else
+      val_zig = map_ft.value_type.zig_type
+      puts_stmts = node.pairs.map do |k, v|
+        key_str = visit(k)
+        val_str = visit(v)
+        "try CheatLib.mapPut(#{val_zig}, #{rt_name}.heapAlloc(), #{rt_name}.frameAlloc(), &#{var}, #{key_str}, #{val_str});"
+      end.join("\n            ")
+    end
 
-    "#{label}: {\n            var #{var} = try CheatLib.makeHashMap(#{zig_type});\n            #{puts_stmts}\n            break :#{label} #{var};\n        }"
+    "#{label}: {\n            var #{var} = #{zig_init};\n            #{puts_stmts}\n            break :#{label} #{var};\n        }"
   end
 
   # Emits Zig for map.delete / map.contains / map.count / map.keys / map.values.
   def transpile_map_method(node)
     obj_code = visit(node.object)
     rt_name  = @do_rt_name || "rt"
-    map_type = node.object.full_type.to_s
-    inner_type = map_type.match(/HashMap<(.+)>/)[1]
-    zig_type = transpile_type(inner_type)
+    map_ft   = Type.new(node.object.full_type)
 
-    case node.map_method
-    when :delete
-      key_code = visit(node.args[0])
-      "CheatLib.mapDelete(#{zig_type}, #{rt_name}.heapAlloc(), &#{obj_code}, #{key_code})"
-    when :contains
-      key_code = visit(node.args[0])
-      "CheatLib.mapContains(#{zig_type}, #{obj_code}, #{key_code})"
-    when :count
-      "CheatLib.mapCount(#{zig_type}, #{obj_code})"
-    when :keys
-      "try CheatLib.mapKeys(#{zig_type}, #{rt_name}.frameAlloc(), #{obj_code})"
-    when :values
-      "try CheatLib.mapValues(#{zig_type}, #{rt_name}.frameAlloc(), #{obj_code})"
+    if map_ft.numeric_map?
+      key_zig = map_ft.key_type.zig_type
+      val_zig = map_ft.value_type.zig_type
+      case node.map_method
+      when :delete
+        key_code = visit(node.args[0])
+        "CheatLib.numericMapDelete(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{obj_code}, #{key_code})"
+      when :contains
+        key_code = visit(node.args[0])
+        "CheatLib.numericMapContains(#{key_zig}, #{val_zig}, #{obj_code}, #{key_code})"
+      when :count
+        "CheatLib.numericMapCount(#{key_zig}, #{val_zig}, #{obj_code})"
+      when :keys
+        "try CheatLib.numericMapKeys(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
+      when :values
+        "try CheatLib.numericMapValues(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
+      end
+    else
+      val_zig = map_ft.value_type.zig_type
+      case node.map_method
+      when :delete
+        key_code = visit(node.args[0])
+        "CheatLib.mapDelete(#{val_zig}, #{rt_name}.heapAlloc(), &#{obj_code}, #{key_code})"
+      when :contains
+        key_code = visit(node.args[0])
+        "CheatLib.mapContains(#{val_zig}, #{obj_code}, #{key_code})"
+      when :count
+        "CheatLib.mapCount(#{val_zig}, #{obj_code})"
+      when :keys
+        "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
+      when :values
+        "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
+      end
     end
   end
 

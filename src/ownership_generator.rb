@@ -20,6 +20,18 @@ module OwnershipGenerator
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
 
+    # String map: key copies live in heapAlloc, bucket array in frameAlloc (bump — no-op free).
+    if type_info&.map? && !type_info&.numeric_map?
+      val_zig = type_info.value_type.zig_type
+      return "defer CheatLib.mapDeinit(#{val_zig}, rt.heapAlloc(), rt.frameAlloc(), &#{name});\n"
+    end
+    # Numeric map: no key copies; bucket array in frameAlloc.
+    if type_info&.numeric_map?
+      key_zig = type_info.key_type.zig_type
+      val_zig = type_info.value_type.zig_type
+      return "defer CheatLib.numericMapDeinit(#{key_zig}, #{val_zig}, rt.frameAlloc(), &#{name});\n"
+    end
+
     return "" unless type_info&.requires_move? || type_info&.any_rc? || type_info&.any_sync?
 
     is_rc           = type_info&.any_rc?

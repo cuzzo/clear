@@ -11544,19 +11544,19 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapPut")
+        expect(out).to include("CheatLib.mapPut(i64, rt.heapAlloc(), rt.frameAlloc()")
         expect(out).to include('"a"')
         expect(out).to include('"b"')
       end
 
-      it "emits bare makeHashMap for empty literals" do
+      it "emits zero-init for empty string-keyed map literals" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS Void ->
             MUTABLE m: HashMap<Int64> = {};
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.makeHashMap(i64)")
+        expect(out).to include("std.StringHashMapUnmanaged(i64){}")
         expect(out).not_to include("mapPut")
       end
     end

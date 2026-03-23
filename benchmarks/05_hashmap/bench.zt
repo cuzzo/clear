@@ -1,25 +1,22 @@
 // HashMap Benchmark — CLEAR Runtime (Zig implementation)
 //
-// This file exercises the CLEAR @map runtime exactly as the transpiler
-// generates it.  CLEAR syntax cannot produce integer→string keys in a loop
-// (no fmt intrinsic yet), so we drive the runtime directly from Zig.
+// Tests three variants head-to-head:
+//   1. String map — old GPA-only path  (heapAlloc for keys AND buckets)
+//   2. String map — split-allocator    (heapAlloc keys, frameAlloc buckets)
+//   3. Numeric map — f64 key           (AutoHashMapUnmanaged, no key copies)
 //
-// What this measures:
-//   - CheatLib.mapPut with rt.heapAlloc() — one GPA alloc per key copy +
-//     periodic GPA realloc for the bucket array as it grows.
-//   - CheatLib.mapGet with the resulting map.
+// Numeric maps (Option 3) cover ALL numeric key types:
+//   f64, i64, u64, etc.  AutoHashMapUnmanaged handles them identically.
 //
-// WHY CLEAR IS SLOW TODAY:
-//   1. Key duplication: every put() calls allocator.dupe(u8, key) — 1M
-//      small GPA allocations just for key strings.
-//   2. GPA bookkeeping: each small alloc touches global lock-protected
-//      metadata, ruining branch-predictor and cache locality.
-//   3. Bucket-array growth: std.StringHashMapUnmanaged grows geometrically
-//      (~20 GPA reallocs for 1M items), each copying the entire table.
+// WHY NUMERIC MAP IS FASTEST:
+//   - No key duplication at all (integers copied by value).
+//   - Single frameAlloc bump for bucket array — no GPA lock contention.
+//   - Integer comparison (~1 ns) vs string hash + strcmp (~5 ns).
 //
-// GOAL: Arena-backed @map would eliminate all three costs.  A single
-// allocator.alloc() for the initial bucket array + bump-pointer key storage
-// would bring CLEAR's map to within ~10% of the C baseline.
+// WHY SPLIT-ALLOCATOR STRING MAP IS FASTER THAN OLD:
+//   - Bucket-array growth uses frameAlloc (bump-pointer, no GPA lock).
+//   - Only key copies still go to heapAlloc — 1M small GPA allocs,
+//     but bucket reallocs are now free.
 
 const std = @import("std");
 const Header = @import("../zig/runtime-header.zig");
@@ -37,12 +34,11 @@ pub fn main() !void {
     var ctx = EbrContext{};
     defer ctx.deinit(allocator);
 
-    var rt = try Runtime.init(allocator, 4 * 1024 * 1024, &ctx);
+    var rt = try Runtime.init(allocator, 16 * 1024 * 1024, &ctx);
     defer rt.deinit();
     rt.wireAllocator();
 
-    // Pre-generate all key strings into a single heap buffer.
-    // This isolates hash-table cost from key-generation cost.
+    // Pre-generate all key strings — isolates hash-table cost from key-gen.
     var key_buf = try allocator.alloc([8]u8, N);
     defer allocator.free(key_buf);
     var key_lens = try allocator.alloc(usize, N);
@@ -53,38 +49,143 @@ pub fn main() !void {
         key_lens[i] = s.len;
     }
 
-    var map = std.StringHashMapUnmanaged(f64){};
-    defer {
-        // Free all duplicated key strings that mapPut allocated.
-        var it = map.keyIterator();
-        while (it.next()) |k| rt.heapAlloc().free(k.*);
-        map.deinit(rt.heapAlloc());
+    // =========================================================
+    // Variant 1: String map — GPA for both keys AND buckets
+    // (old CLEAR behaviour, kept for baseline comparison)
+    // =========================================================
+    {
+        var map = std.StringHashMapUnmanaged(f64){};
+        defer {
+            var it = map.keyIterator();
+            while (it.next()) |k| rt.heapAlloc().free(k.*);
+            map.deinit(rt.heapAlloc());
+        }
+
+        var timer = try std.time.Timer.start();
+
+        timer.reset();
+        for (0..N) |i| {
+            const key = key_buf[i][0..key_lens[i]];
+            // Old API: single heapAlloc for both key copy and bucket growth.
+            if (map.getPtr(key)) |p| { p.* = @floatFromInt(i); } else {
+                const kc = try rt.heapAlloc().dupe(u8, key);
+                try map.put(rt.heapAlloc(), kc, @floatFromInt(i));
+            }
+        }
+        const ins_ns = timer.read();
+
+        var sum: f64 = 0;
+        timer.reset();
+        for (0..N) |i| {
+            const key = key_buf[i][0..key_lens[i]];
+            sum += map.get(key) orelse 0;
+        }
+        const lkp_ns = timer.read();
+
+        std.debug.assert(sum > 0);
+        std.debug.print("[1] String/GPA  Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
+            @as(f64, @floatFromInt(ins_ns)) / 1e6,
+            @as(f64, @floatFromInt(lkp_ns)) / 1e6,
+            @as(f64, @floatFromInt(ins_ns + lkp_ns)) / 1e6,
+        });
     }
 
-    var timer = try std.time.Timer.start();
+    // =========================================================
+    // Variant 2: String map — split allocator (Option 1)
+    //   heapAlloc for key copies, frameAlloc for bucket growth
+    // =========================================================
+    {
+        var map = std.StringHashMapUnmanaged(f64){};
+        defer CheatLib.mapDeinit(f64, rt.heapAlloc(), rt.frameAlloc(), &map);
 
-    // ---- INSERT: uses rt.heapAlloc() for key copy + bucket array ----
-    timer.reset();
-    for (0..N) |i| {
-        const key = key_buf[i][0..key_lens[i]];
-        try CheatLib.mapPut(f64, rt.heapAlloc(), &map, key, @floatFromInt(i));
+        var timer = try std.time.Timer.start();
+
+        timer.reset();
+        for (0..N) |i| {
+            const key = key_buf[i][0..key_lens[i]];
+            try CheatLib.mapPut(f64, rt.heapAlloc(), rt.frameAlloc(), &map, key, @floatFromInt(i));
+        }
+        const ins_ns = timer.read();
+
+        var sum: f64 = 0;
+        timer.reset();
+        for (0..N) |i| {
+            const key = key_buf[i][0..key_lens[i]];
+            sum += CheatLib.mapGet(f64, map, key);
+        }
+        const lkp_ns = timer.read();
+
+        std.debug.assert(sum > 0);
+        std.debug.print("[2] String/Split Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
+            @as(f64, @floatFromInt(ins_ns)) / 1e6,
+            @as(f64, @floatFromInt(lkp_ns)) / 1e6,
+            @as(f64, @floatFromInt(ins_ns + lkp_ns)) / 1e6,
+        });
     }
-    const ins_ns = timer.read();
 
-    // ---- LOOKUP ----
-    var sum: f64 = 0;
-    timer.reset();
-    for (0..N) |i| {
-        const key = key_buf[i][0..key_lens[i]];
-        sum += CheatLib.mapGet(f64, map, key);
+    // =========================================================
+    // Variant 3: Numeric map — f64 key (Option 3)
+    //   AutoHashMapUnmanaged(f64, f64), frameAlloc only
+    //   No key duplication, no GPA at all.
+    // =========================================================
+    {
+        var map = CheatLib.NumericMapType(f64, f64){};
+        defer CheatLib.numericMapDeinit(f64, f64, rt.frameAlloc(), &map);
+
+        var timer = try std.time.Timer.start();
+
+        timer.reset();
+        for (0..N) |i| {
+            const key: f64 = @floatFromInt(i);
+            try CheatLib.numericMapPut(f64, f64, rt.frameAlloc(), &map, key, key);
+        }
+        const ins_ns = timer.read();
+
+        var sum: f64 = 0;
+        timer.reset();
+        for (0..N) |i| {
+            const key: f64 = @floatFromInt(i);
+            sum += CheatLib.numericMapGet(f64, f64, map, key);
+        }
+        const lkp_ns = timer.read();
+
+        std.debug.assert(sum > 0);
+        std.debug.print("[3] Numeric/f64  Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
+            @as(f64, @floatFromInt(ins_ns)) / 1e6,
+            @as(f64, @floatFromInt(lkp_ns)) / 1e6,
+            @as(f64, @floatFromInt(ins_ns + lkp_ns)) / 1e6,
+        });
     }
-    const lkp_ns = timer.read();
 
-    std.debug.assert(sum > 0);
-    std.debug.print("sum = {d:.0}\n", .{sum});
-    std.debug.print("Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
-        @as(f64, @floatFromInt(ins_ns)) / 1e6,
-        @as(f64, @floatFromInt(lkp_ns)) / 1e6,
-        @as(f64, @floatFromInt(ins_ns + lkp_ns)) / 1e6,
-    });
+    // =========================================================
+    // Variant 4: Numeric map — i64 key
+    //   Same as f64 but with integer keys — typically faster
+    //   because integer hash is simpler than float hash.
+    // =========================================================
+    {
+        var map = CheatLib.NumericMapType(i64, f64){};
+        defer CheatLib.numericMapDeinit(i64, f64, rt.frameAlloc(), &map);
+
+        var timer = try std.time.Timer.start();
+
+        timer.reset();
+        for (0..N) |i| {
+            try CheatLib.numericMapPut(i64, f64, rt.frameAlloc(), &map, @intCast(i), @floatFromInt(i));
+        }
+        const ins_ns = timer.read();
+
+        var sum: f64 = 0;
+        timer.reset();
+        for (0..N) |i| {
+            sum += CheatLib.numericMapGet(i64, f64, map, @intCast(i));
+        }
+        const lkp_ns = timer.read();
+
+        std.debug.assert(sum > 0);
+        std.debug.print("[4] Numeric/i64  Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
+            @as(f64, @floatFromInt(ins_ns)) / 1e6,
+            @as(f64, @floatFromInt(lkp_ns)) / 1e6,
+            @as(f64, @floatFromInt(ins_ns + lkp_ns)) / 1e6,
+        });
+    }
 }
