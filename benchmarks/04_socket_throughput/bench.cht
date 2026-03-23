@@ -1,0 +1,33 @@
+-- Socket Throughput Benchmark
+--
+-- This benchmark cannot be expressed as a plain cheatMain because tcpRead
+-- requires the CLEAR fiber scheduler (epoll-backed yield on EAGAIN).
+-- The equivalent Zig source is bench.zig — it exercises the identical code
+-- path that the transpiler generates for tcpRead inside a fiber task.
+--
+-- runner.rb uses bench.zig when it is present alongside bench.cht.
+--
+-- WHAT WE ARE MEASURING:
+--
+--   C (baseline):  read() into char buf[4096] on the stack
+--                  — 0 allocations, 0 pool ops
+--
+--   CLEAR (pool):  CheatLib.socketRead → ReadPool.acquire()
+--                  — 0 GPA malloc calls, 1 bitmask ctz per read
+--                  Slot released via restoreFrameMark (1 bitmask OR)
+--
+-- OLD CLEAR path (before ReadPool):
+--   tcpRead → allocator.dupe(u8, buf[0..n])
+--   = 1 GPA malloc per read × 100,000 reads
+--   GPA involves: lock, free-list traversal, header writes, stats update
+--
+-- NEW CLEAR path (ReadPool):
+--   tcpRead → pool.acquire() → @ctz(free_mask) — single bitmask instruction
+--   100,000 reads = 0 GPA malloc calls in the hot path
+--
+-- Expected: CLEAR (pool) is on par with C or faster.
+--   C uses fork() — separate processes with kernel IPC + wait() overhead.
+--   CLEAR uses fibers in a single process — epoll event loop, no fork cost.
+--   The allocation path (ReadPool vs GPA) is no longer the bottleneck.
+--
+-- @use_zig

@@ -17,13 +17,23 @@ def run_bench(dir)
     `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
   end
 
-  # 2. Transpile and Compile CLEAR
-  puts "Transpiling CLEAR..."
-  # Run from root to ensure relative requires in src/ work
-  `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
-  
-  # Ensure runtime headers are linked correctly for Zig compilation
-  puts "Compiling CLEAR (Zig output)..."
+  # 2. Compile CLEAR
+  # If bench.cht contains "@use_zig", skip transpilation and use bench.zig directly.
+  # This is used when the benchmark requires the fiber scheduler (e.g. socket I/O).
+  use_zig = File.exist?("#{dir}/bench.zig") &&
+            File.exist?("#{dir}/bench.cht") &&
+            File.read("#{dir}/bench.cht").include?("@use_zig")
+
+  if use_zig
+    puts "Compiling CLEAR (native Zig, scheduler required)..."
+    FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
+  else
+    puts "Transpiling CLEAR..."
+    # Run from root to ensure relative requires in src/ work
+    `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
+    puts "Compiling CLEAR (Zig output)..."
+  end
+
   Dir.chdir("zig") do
     `zig build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
   end
