@@ -1557,19 +1557,24 @@ private
     #    {alloc} -> determine allocator automatically
     #    For method calls, use the object's storage (not the result's storage)
     if pattern.include?("{alloc}")
-      # @list / @list:sharded backing buffers must live on the heap so that
-      # fiber-frame data isn't corrupted by stack growth inside a 16 KB fiber.
-      # append(slist, x) is a FuncCall where args[0] is the list.
+      # Sharded lists are shared across fibers — must stay heap-backed.
+      # Regular @list uses the frame arena (CheatArena grows dynamically via heap pages).
+      # @pool is always heap (explicit location: :heap set in annotator).
       first_arg_type = node.respond_to?(:args) ? node.args&.first&.type_info : nil
       force_heap = if node.is_a?(AST::MethodCall)
-        node.object.respond_to?(:type_info) && node.object.type_info&.list_collection?
+        node.object.respond_to?(:type_info) &&
+          (node.object.type_info&.pool? || node.object.type_info&.sharded?)
       else
-        first_arg_type&.list_collection?
+        first_arg_type&.pool? || first_arg_type&.sharded?
       end
       target_storage = if force_heap
         :heap
       elsif node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
         node.object.storage
+      elsif !node.is_a?(AST::MethodCall) && first_arg_type&.list_collection?
+        # For list operations (append, etc.), use the list arg's storage,
+        # not the call result's storage (which is always :stack for Void returns).
+        node.args&.first&.respond_to?(:storage) ? (node.args.first.storage || :stack) : :stack
       else
         node.storage
       end

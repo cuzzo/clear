@@ -7,8 +7,14 @@ module OwnershipGenerator
       return "defer #{close_stmt};\n"
     end
 
-    # @list / @list:sharded and @pool backing arrays are heap-allocated; auto-deinit.
-    if type_info&.list_collection? || type_info&.pool?
+    # @list backing buffer lives in the frame arena — deinit is a no-op but safe.
+    # Sharded lists are shared across fibers and must stay heap-backed.
+    if type_info&.list_collection?
+      alloc = type_info.sharded? ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      return "defer #{name}.deinit(#{alloc});\n"
+    end
+    # @pool backing arrays are heap-allocated; auto-deinit.
+    if type_info&.pool?
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
 
