@@ -106,6 +106,60 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
+  # String HashMap frame-key promotion (mapPromote)
+  # ===========================================================================
+  describe "String HashMap escape promotion" do
+    let(:map_return_src) { <<~CLEAR }
+      FN buildMap() RETURNS HashMap<Int64> ->
+        MUTABLE m: HashMap<Int64> = {};
+        m["x"] = 1_i64;
+        m["y"] = 2_i64;
+        RETURN m;
+      END
+      FN cheatMain() RETURNS Void ->
+        result = buildMap();
+        RETURN;
+      END
+    CLEAR
+
+    it "emits CheatLib.mapPromote before returning a String HashMap" do
+      zig = transpile(map_return_src)
+      expect(zig).to include("CheatLib.mapPromote(i64, rt.heapAlloc(), &m)")
+    end
+
+    it "emits mapPromote before the return statement" do
+      zig = transpile(map_return_src)
+      promote_pos = zig.index("CheatLib.mapPromote")
+      return_pos  = zig.index("return m")
+      expect(promote_pos).to be < return_pos
+    end
+
+    it "uses frameAlloc for mapPut key copies (fast path)" do
+      zig = transpile(map_return_src)
+      expect(zig).to include("mapPut(i64, rt.frameAlloc(), rt.frameAlloc()")
+    end
+
+    it "caller uses mapDeinit with heapAlloc for promoted map" do
+      zig = transpile(map_return_src)
+      expect(zig).to include("CheatLib.mapDeinit(i64, rt.heapAlloc(), rt.heapAlloc(), &result)")
+    end
+
+    it "non-escaping map uses frameAlloc deinit (no-op)" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE m: HashMap<Int64> = {};
+          m["k"] = 42_i64;
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("m.deinit(rt.frameAlloc())")
+      expect(zig).not_to include("mapPromote")
+      expect(zig).not_to include("mapDeinit")
+    end
+  end
+
+  # ===========================================================================
   # WhileLoop per-iteration frame marks
   # ===========================================================================
   describe "WhileLoop per-iteration frame marks" do

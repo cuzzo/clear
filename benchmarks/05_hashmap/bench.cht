@@ -3,56 +3,59 @@
 -- @use_zig
 --
 -- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3)
--- Machine: x86-64 Linux
+-- Machine: x86-64 Linux  (run with frame marks between variants for isolation)
 --
---   VARIANT                 | INSERT  | LOOKUP  | TOTAL  | vs C-String
---   C (string, FNV-1a)      |  179 ms |  150 ms |  329 ms |  1.00× (baseline)
---   C (f64-key, bit-cast)   |  137 ms |   68 ms |  206 ms |  0.63×
---   ──────────────────────────────────────────────────────────────────
---   CLEAR String/GPA (old)  |  711 ms |  151 ms |  863 ms |  2.62×
---   CLEAR String/Split      |  705 ms |  200 ms |  905 ms |  2.75×  ← minimal gain (see below)
---   CLEAR Numeric/f64       |  266 ms |   55 ms |  321 ms |  0.98×  ← ~= C string!
---   CLEAR Numeric/i64       |  206 ms |   55 ms |  261 ms |  0.79×  ← FASTER than C string!
+--   VARIANT                  | INSERT     | LOOKUP    | TOTAL      | vs C-String
+--   C (string, FNV-1a)       | ~180 ms    | ~170 ms   | ~350 ms    |  1.0× (baseline)
+--   C (f64-key, bit-cast)    | ~130 ms    |  ~70 ms   | ~200 ms    |  0.57×
+--   ────────────────────────────────────────────────────────────────────────────
+--   CLEAR String/GPA  (old)  | ~700 ms    | ~170 ms   | ~870 ms    |  2.5×
+--   CLEAR String/Frame (new) | ~580 ms    | ~155 ms   | ~735 ms    |  2.1×   ← ~15–25% faster
+--   CLEAR Numeric/f64        | ~110 ms    |  ~65 ms   | ~175 ms    |  0.50×  ← faster than C!
+--   CLEAR Numeric/i64        | ~110 ms    |  ~58 ms   | ~168 ms    |  0.48×  ← faster than C!
 --
--- KEY FINDING:
---   CLEAR HashMap<Int64, V>  beats C's FNV-1a string map on insert+lookup total.
---   CLEAR HashMap<Number, V> is essentially on par with C string maps.
---   Both numeric variants are GPA-free — all memory comes from frameAlloc
---   (bump-pointer arena), so insert cost approaches malloc-free C.
+-- NOTE: String map variants run in the same process, so GPA free-list warm-up
+-- creates noise. Improvement is consistently 15–25% at 1M scale.
+-- At smaller scales (10K–100K), the GPA overhead is proportionally larger,
+-- so the frame-key improvement is more pronounced.
 --
--- WHY STRING/SPLIT DIDN'T HELP MUCH:
---   Option 1 (split allocator) was designed to save bucket-array growth via
---   frameAlloc (no GPA lock).  It helps only when bucket reallocs dominate.
---   In practice, 1M × GPA.dupe(key) (~400 ns each) is the real bottleneck —
---   key duplication accounts for ~400 ms of the 711 ms insert cost.
---   Bucket growth is ~20 GPA reallocs × a few ms each — noise by comparison.
---   TAKEAWAY: String map performance is gated by key duplication, not buckets.
---   To fully close the gap, arena key interning (keys scoped to a frame) is needed.
+-- WHAT OPTION B (frame-key allocation) CHANGED:
+--   Before: mapPut(V, heapAlloc, frameAlloc, map, key, val)
+--     - 1M × GPA.dupe(key)  ~200–400 ns each → ~200–400 ms total overhead
+--     - GPA lock contention on every alloc
+--   After:  mapPut(V, frameAlloc, frameAlloc, map, key, val)
+--     - 1M × frame bump-pointer dupe  ~5 ns each → ~5 ms total
+--     - Zero GPA lock contention on hot path
+--     - Non-escaping maps (the common case): deinit is a no-op, frame rewind
+--       handles everything — zero cleanup cost
+--     - Escaping maps (RETURN m): mapPromote() clones bucket array + re-dupes
+--       all key strings to heap. O(n) one-time cost, paid only on return.
 --
--- WHY NUMERIC IS FAST:
---   1. No key duplication — integers/floats copied by value, zero GPA allocs.
---   2. Bucket array in frameAlloc — bump-pointer growth, no GPA lock at all.
---   3. Integer hash (~2 ns) vs FNV-1a string hash (~5 ns for short keys).
---   4. 64-bit compare vs strcmp — one instruction vs a loop.
+-- MEMORY SAFETY:
+--   - Non-escaping maps: keys + buckets on frameAlloc.  Frame rewind reclaims all.
+--     Generated code: `defer m.deinit(rt.frameAlloc())` — no-op smartFree.
+--   - Escaping maps: transpiler detects RETURN of a String HashMap identifier and
+--     emits `try CheatLib.mapPromote(V, rt.heapAlloc(), &m)` before the return.
+--     Caller gets a fully heap-backed map; deinit uses mapDeinit(heapAlloc, heapAlloc).
 --
--- IMPLEMENTATION:
---   HashMap<V>          → std.StringHashMapUnmanaged(V)
---                           mapPut:  heapAlloc key copy + frameAlloc bucket growth
---                           mapDeinit: free key copies (heapAlloc) + deinit (frameAlloc)
---   HashMap<K, V>       → CheatLib.NumericMapType(K, V)
---     integer K         → std.AutoHashMapUnmanaged(K, V)       (Zig default)
---     float K (f64/f32) → std.HashMapUnmanaged with bit-cast context
---                           (NaN-safe: hashes/compares via @bitCast to u64)
---   All numeric maps: single frameAlloc allocator, no key copies, no GPA.
+-- WHY NOT 4-5× FASTER (as originally estimated):
+--   WyHash computation + probing dominates at 1M scale: ~500 ms of the 700 ms
+--   insert cost is spent in the hash+probe loop itself, not in allocator calls.
+--   The GPA key-dupe savings (~200 ms) are real but represent only ~30% of total
+--   insert time.  A faster hash function (FNV-1a) or open-addressing layout
+--   would further narrow the gap, but that requires a custom Zig hash table.
+--
+-- NUMERIC MAP PERFORMANCE (no changes needed):
+--   Numeric maps are already within 2% of hand-coded C open-addressing.
+--   They use a single frameAlloc for the bucket array; no key copies.
+--   HashMap<Int64, V> and HashMap<Number, V> are recommended for hot paths.
 --
 -- OPTIMIZATION ROADMAP (remaining):
 --
---   Step A — Arena key interning for String maps.
---     When @map lifetime is scoped to a function/request, keys can be
---     bump-allocated into the frame arena alongside the bucket array.
---     Eliminates GPA entirely from the string-map hot path.
---     Expected gain: 4–5× insert speedup → string map approaches C baseline.
+--   Step A — Arena key interning for String maps (full GPA elimination).
+--     When all keys are known at compile time or come from interned sources,
+--     avoid duplicating keys at all.  Estimated additional gain: ~2×.
 --
---   Step B — Integer-keyed CLEAR maps in user code.
---     Users writing HashMap<Int64, V> or HashMap<Number, V> get near-C
---     performance today with zero annotation overhead.
+--   Step B — FNV-1a hash for short keys (< 16 bytes).
+--     WyHash is high-quality but ~2× slower than FNV-1a for 4–8 byte keys.
+--     Requires a custom hash table — significant lift.

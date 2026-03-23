@@ -496,7 +496,9 @@ private
                return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              else
                val_zig = map_ft.value_type.zig_type
-               return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.heapAlloc(), #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+               # Key copies go to frameAlloc (bump, ~2 ns) instead of heapAlloc (~400 ns).
+               # mapPromote() re-copies keys to heap on RETURN if the map escapes.
+               return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              end
           end
           arr_ref = visit(target_node)
@@ -1215,6 +1217,15 @@ private
         "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
       end
 
+      # 2a. Map escape promotion — clone frame-backed bucket array + key strings to heap.
+      # Emitted for any RETURN of a String HashMap identifier; numeric maps need no promotion.
+      promote_map = if node.map_return && node.value.is_a?(AST::Identifier)
+        val_zig  = node.value.type_info&.value_type&.zig_type || "f64"
+        var_name = zig_safe_name(node.value.name)
+        rt_name  = @do_rt_name || "rt"
+        "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name});"
+      end
+
       # 3. Standard Return with Move Suppression for unique heap
       suppress = emit_move_suppression(node.value)
       val_code = if node.value.nil?
@@ -1226,7 +1237,7 @@ private
         visit(node.value)
       end
 
-      parts = [suppress, promote, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
+      parts = [suppress, promote, promote_map, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
 
     when AST::GetField
@@ -1671,7 +1682,7 @@ private
       puts_stmts = node.pairs.map do |k, v|
         key_str = visit(k)
         val_str = visit(v)
-        "try CheatLib.mapPut(#{val_zig}, #{rt_name}.heapAlloc(), #{rt_name}.frameAlloc(), &#{var}, #{key_str}, #{val_str});"
+        "try CheatLib.mapPut(#{val_zig}, #{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), &#{var}, #{key_str}, #{val_str});"
       end.join("\n            ")
     end
 

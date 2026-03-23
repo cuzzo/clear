@@ -34,7 +34,9 @@ pub fn main() !void {
     var ctx = EbrContext{};
     defer ctx.deinit(allocator);
 
-    var rt = try Runtime.init(allocator, 16 * 1024 * 1024, &ctx);
+    // 128 MB frame arena — large enough for 4 × 1M-entry map variants.
+    // (1M string keys ~5 bytes avg + 1.25M bucket slots × 24 bytes ≈ 35 MB/variant)
+    var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &ctx);
     defer rt.deinit();
     rt.wireAllocator();
 
@@ -48,6 +50,10 @@ pub fn main() !void {
         const s = try std.fmt.bufPrint(&key_buf[i], "{d}", .{i});
         key_lens[i] = s.len;
     }
+
+    // Capture a fresh-arena mark; restore before each variant so they each
+    // start with the full 128 MB frame available and don't pollute each other.
+    const fresh_mark = rt.saveLoopMark();
 
     // =========================================================
     // Variant 1: String map — GPA for both keys AND buckets
@@ -90,20 +96,24 @@ pub fn main() !void {
         });
     }
 
+    rt.restoreLoopMark(fresh_mark);
     // =========================================================
-    // Variant 2: String map — split allocator (Option 1)
-    //   heapAlloc for key copies, frameAlloc for bucket growth
+    // Variant 2: String map — frame-key allocation (Option B)
+    //   frameAlloc for BOTH key copies AND bucket growth.
+    //   Keys are ~2 ns each instead of ~400 ns (no GPA lock).
+    //   Non-escaping maps pay zero GPA cost; escaping maps call
+    //   mapPromote() to re-copy keys to heap before return.
     // =========================================================
     {
         var map = std.StringHashMapUnmanaged(f64){};
-        defer CheatLib.mapDeinit(f64, rt.heapAlloc(), rt.frameAlloc(), &map);
+        defer map.deinit(rt.frameAlloc()); // no-op; frame rewinds everything
 
         var timer = try std.time.Timer.start();
 
         timer.reset();
         for (0..N) |i| {
             const key = key_buf[i][0..key_lens[i]];
-            try CheatLib.mapPut(f64, rt.heapAlloc(), rt.frameAlloc(), &map, key, @floatFromInt(i));
+            try CheatLib.mapPut(f64, rt.frameAlloc(), rt.frameAlloc(), &map, key, @floatFromInt(i));
         }
         const ins_ns = timer.read();
 
@@ -116,13 +126,14 @@ pub fn main() !void {
         const lkp_ns = timer.read();
 
         std.debug.assert(sum > 0);
-        std.debug.print("[2] String/Split Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
+        std.debug.print("[2] String/Frame Insert: {d:.1} ms | Lookup: {d:.1} ms | Total: {d:.1} ms\n", .{
             @as(f64, @floatFromInt(ins_ns)) / 1e6,
             @as(f64, @floatFromInt(lkp_ns)) / 1e6,
             @as(f64, @floatFromInt(ins_ns + lkp_ns)) / 1e6,
         });
     }
 
+    rt.restoreLoopMark(fresh_mark);
     // =========================================================
     // Variant 3: Numeric map — f64 key (Option 3)
     //   AutoHashMapUnmanaged(f64, f64), frameAlloc only
@@ -157,6 +168,7 @@ pub fn main() !void {
         });
     }
 
+    rt.restoreLoopMark(fresh_mark);
     // =========================================================
     // Variant 4: Numeric map — i64 key
     //   Same as f64 but with integer keys — typically faster

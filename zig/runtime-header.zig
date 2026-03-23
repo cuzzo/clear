@@ -137,33 +137,43 @@ pub const CheatLib = struct {
     //   mapPut takes two allocators:
     //     key_alloc    — heap allocator for key string copies (keys must
     //                    outlive the frame; GPA ensures this).
-    //     bucket_alloc — frame allocator for the bucket array.  The frame
-    //                    arena is bump-allocated and never individually freed;
-    //                    smartFree is a no-op so passing frameAlloc here
-    //                    eliminates all per-bucket GPA calls.
-    //   mapDeinit frees key copies via key_alloc, then calls map.deinit
-    //   with bucket_alloc (no-op via smartFree; frame rewind reclaims it).
+    //   Both key copies and bucket array use frameAlloc (bump, ~2 ns/alloc).
+    //   mapPromote() is called before RETURN to clone both to heapAlloc for
+    //   maps that escape their function.  Non-escaping maps pay zero GPA cost.
+    //   mapDeinit() is only called for promoted (heap-backed) maps.
     // =========================================================================
 
     pub fn makeHashMap(comptime V: type) std.StringHashMapUnmanaged(V) {
         return std.StringHashMapUnmanaged(V){};
     }
 
-    // Split allocators: key_alloc=heapAlloc (key copies), bucket_alloc=frameAlloc (buckets).
+    // Both key copies and bucket array go to frameAlloc (bump, ~2 ns per alloc).
+    // Keys are re-copied to heapAlloc by mapPromote() when the map escapes its frame.
     pub fn mapPut(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
         if (map.getPtr(key)) |val_ptr| {
             val_ptr.* = value;
             return;
         }
-        // Duplicate the key to key_alloc (heap) so it survives frame rewinds.
         const key_copy = try key_alloc.dupe(u8, key);
-        // Bucket array grows into bucket_alloc (frame arena — bump allocation, no GPA lock).
         try map.put(bucket_alloc, key_copy, value);
     }
 
+    /// Promotes a frame-allocated string map to heap before it escapes a function.
+    /// Clones the bucket array to heap (via map.clone) and re-dupes each key string
+    /// to heap so both survive the caller's frame rewind.  Called by the transpiler
+    /// immediately before `return m` for any String HashMap identifier.
+    pub fn mapPromote(comptime V: type, heap: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V)) !void {
+        // Clone bucket array to heap; key pointers still reference frame arena at this point.
+        var promoted = try map.clone(heap);
+        // Re-copy each key string to heap, fixing the frame-arena pointers in-place.
+        var it = promoted.keyIterator();
+        while (it.next()) |k| k.* = try heap.dupe(u8, k.*);
+        // Replace original (frame-backed) map with the fully heap-backed clone.
+        map.* = promoted;
+    }
+
     // Free all heap-duplicated key strings, then deinit the bucket array.
-    // bucket_alloc is frameAlloc → deinit is a no-op (smartFree); frame rewind
-    // reclaims the bucket memory.
+    // Used only for promoted maps (heap_map=true); frame-scoped maps use m.deinit(frameAlloc).
     pub fn mapDeinit(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V)) void {
         var it = map.keyIterator();
         while (it.next()) |k| key_alloc.free(k.*);

@@ -9,6 +9,7 @@ class Type
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N))
   attr_accessor :heap_list   # true when the list was promoted to heap (returned from frame-using fn)
+  attr_accessor :heap_map    # true when the string map was promoted to heap (returned from any fn)
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity

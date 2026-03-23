@@ -11544,7 +11544,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapPut(i64, rt.heapAlloc(), rt.frameAlloc()")
+        expect(out).to include("CheatLib.mapPut(i64, rt.frameAlloc(), rt.frameAlloc()")
         expect(out).to include('"a"')
         expect(out).to include('"b"')
       end

@@ -967,6 +967,17 @@ private
       node.list_return = true
     end
 
+    # 3a. Map Escape Detection
+    # String HashMap keys are frame-allocated (frameAlloc) for speed.  When a map
+    # is returned, the caller's frame may rewind and invalidate the keys.  Tag the
+    # return so the transpiler emits CheatLib.mapPromote() — clones bucket array to
+    # heap and re-dupes each key string — before the return statement.
+    if node.value.is_a?(AST::Identifier) &&
+       node.value.type_info&.map? &&
+       !node.value.type_info&.numeric_map?
+      node.map_return = true
+    end
+
     # Promote non-identifier literals to heap when the expected return type requires it.
     # handle_return_escape only handles identifier variables; literals need this explicit check.
     unless was_promoted || node.value.is_a?(AST::Identifier)
@@ -1235,6 +1246,15 @@ private
        @fn_nodes[func_name]&.uses_frame
       node.list_from_call = true
     end
+
+    # Tag calls that return a String HashMap.
+    # String map keys are frame-allocated and get promoted to heap in the callee
+    # before return (mapPromote).  The caller's deinit must use heapAlloc for both
+    # key strings and the bucket array.
+    if node.respond_to?(:map_from_call=) &&
+       node.type_info&.map? && !node.type_info&.numeric_map?
+      node.map_from_call = true
+    end
   end
 
   # Handles intrinsic function calls by finding the matching overload and
@@ -1357,6 +1377,12 @@ private
       node.type_info.heap_list = true
     end
 
+    # 2a''. Propagate heap_map flag: string map received from any function has been
+    #        promoted to heap by mapPromote() in the callee; deinit must use heapAlloc.
+    if node.value.respond_to?(:map_from_call) && node.value.map_from_call
+      node.type_info.heap_map = true
+    end
+
     # 2b. Check if the declared type is a pool, open/infinite stream, or resource — tag node and scope entry
     ft_obj          = node.type_info
     is_pool         = ft_obj&.pool?
@@ -1470,6 +1496,12 @@ private
       # deinit with heapAlloc() because the callee promoted the buffer to heap.
       if node.value.respond_to?(:list_from_call) && node.value.list_from_call
         node.type_info.heap_list = true
+      end
+
+      # Propagate heap_map flag: string map received from any function has been
+      # promoted to heap by mapPromote() in the callee; deinit must use heapAlloc.
+      if node.value.respond_to?(:map_from_call) && node.value.map_from_call
+        node.type_info.heap_map = true
       end
 
       ft_obj          = node.type_info

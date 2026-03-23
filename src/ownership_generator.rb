@@ -20,10 +20,17 @@ module OwnershipGenerator
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
 
-    # String map: key copies live in heapAlloc, bucket array in frameAlloc (bump — no-op free).
+    # String map:
+    #   Promoted (heap_map): keys + bucket array are on heapAlloc — full mapDeinit.
+    #   Frame-scoped (default): keys + bucket array are on frameAlloc — deinit is a
+    #   no-op (smartFree is a no-op; frame rewind reclaims all memory automatically).
     if type_info&.map? && !type_info&.numeric_map?
       val_zig = type_info.value_type.zig_type
-      return "defer CheatLib.mapDeinit(#{val_zig}, rt.heapAlloc(), rt.frameAlloc(), &#{name});\n"
+      if type_info.heap_map
+        return "defer CheatLib.mapDeinit(#{val_zig}, rt.heapAlloc(), rt.heapAlloc(), &#{name});\n"
+      else
+        return "defer #{name}.deinit(rt.frameAlloc());\n"
+      end
     end
     # Numeric map: no key copies; bucket array in frameAlloc.
     if type_info&.numeric_map?
