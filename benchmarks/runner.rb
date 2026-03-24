@@ -3,6 +3,11 @@
 require 'fileutils'
 require 'benchmark'
 
+def measure_min(command, runs = 5)
+  times = runs.times.map { Benchmark.measure { `#{command}` }.real }
+  times.min
+end
+
 def run_bench(dir)
   puts "=== BENCHMARK: #{dir} ==="
   
@@ -54,15 +59,6 @@ def run_bench(dir)
   # 3. Execution & Timing
   results = {}
   
-  def measure_min(command, runs = 5)
-    times = []
-    runs.times do
-      t = Benchmark.measure { `#{command}` }.real
-      times << t
-    end
-    times.min
-  end
-
   puts "Running C baseline (best of 5)..."
   results[:c] = measure_min("./#{dir}/bench_c")
   
@@ -85,7 +81,12 @@ def run_bench(dir)
 end
 
 if ARGV.empty?
-  puts "Usage: ruby runner.rb <benchmark_dir>"
+  # Run all benchmark directories
+  dirs = Dir.glob("benchmarks/0*").sort
+  dirs.each { |d| run_bench(d); puts }
+elsif ARGV[0] == "--all"
+  dirs = Dir.glob("benchmarks/0*").sort
+  dirs.each { |d| run_bench(d); puts }
 else
   run_bench(ARGV[0])
 end

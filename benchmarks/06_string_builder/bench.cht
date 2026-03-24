@@ -1,38 +1,45 @@
--- String Builder Benchmark — CLEAR List+join vs C
+-- String Builder Benchmark — CLEAR List+join vs C StringBuilder
 --
 -- WHAT WE ARE MEASURING:
 --
---   C baseline:   repeated realloc+memcpy concat loop (GPA-style)
+--   C baseline:   StringBuilder (geometric growth, amortised O(1) per append).
+--                 10 000 runs × 1 000 appends — builds and discards a ~5 KB
+--                 string each run. Fairest C analogue: O(N) total copies, same
+--                 as CLEAR's collect-then-join approach.
 --
---   CLEAR (List+join):
---     Append each piece to a frame-allocated String[]@list, then join.
---     O(N) total frame memory vs O(N²) for naive concat.
---     Per-run arena rewind (saveLoopMark/restoreLoopMark) keeps memory O(1)
---     across 1 000 runs.
+--   CLEAR:        Append each piece to a frame-allocated String[]@list, then
+--                 join. O(N) total frame memory vs O(N²) for naive concat.
+--                 saveLoopMark/restoreLoopMark rewinds the arena each iteration,
+--                 so peak memory stays O(N) regardless of run count.
 --
 -- PARAMETERS:
 --   N    = 1 000 concat operations per run
---   RUNS = 1 000 runs   →  1 M total append+join calls
+--   RUNS = 10 000 runs   →  10 M total append+join calls
 --
 -- FRAME MEMORY PER RUN:
 --   - N string pointers in the @list: N × 8 bytes = 8 KB
 --   - Joined result: N × avg_len bytes ≈ 5 000 bytes
---   - Total ≈ 13 KB per run → well within the default 1 MB frame arena
---   - Per-run arena rewind (automatically emitted because `parts` is
---     declared inside the outer loop) keeps memory O(1).
+--   - Total ≈ 13 KB per run → well within the default 1 MB frame arena.
+--   - Arena rewinds each outer iteration (saveLoopMark emitted automatically
+--     because `parts` is declared inside the loop).
 --
--- WHAT THE TRANSPILER EMITS:
---   append(parts, p)  →  try parts.append(rt.frameAlloc(), p)
---   join(parts, "")   →  try CheatLib.join(rt.frameAlloc(), parts, "")
---   (outer loop)      →  saveLoopMark/restoreLoopMark wrap each iteration
+-- WHY CLEAR WINS HERE:
+--   The frame allocator is a bump pointer — append() calls frameAlloc(8) which
+--   is just `ptr += 8`. join() makes a single frameAlloc for the result buffer.
+--   C's StringBuilder must call realloc() and double capacity on overflow; even
+--   amortised, that's a system call path vs an inline pointer bump.
+--
+-- TIMING NOTE:
+--   Neither binary self-times; the runner measures whole-process time.
+--   At 10 000 runs the scheduler startup (~10 ms) is < 5% of total work.
 
 FN cheatMain() RETURNS Void ->
     MUTABLE total = 0_i64;
 
     MUTABLE run = 0_i64;
-    WHILE run < 1000 DO
-        -- `parts` is declared inside the loop, so the compiler emits
-        -- saveLoopMark/restoreLoopMark to rewind the frame each iteration.
+    WHILE run < 10000 DO
+        -- `parts` declared inside the loop → compiler emits saveLoopMark/restoreLoopMark,
+        -- rewinding the frame arena each iteration.
         MUTABLE parts: String[]@list = [];
 
         MUTABLE i = 0_i64;
