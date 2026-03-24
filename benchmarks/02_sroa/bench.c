@@ -1,11 +1,30 @@
 /*
- * SROA Benchmark — C Baseline (Perfect)
+ * SROA Benchmark — C Baseline
  *
- * BigVec is stack-allocated each iteration; C reclaims it automatically.
- * With -O3 + inlining + SROA: only x1, x2, x3 are live. x4..x130
- * initializations are dead-code-eliminated. The loop is pure arithmetic.
+ * WHAT THIS MEASURES:
+ *   BigVec has 130 f64 fields (1040 bytes). sum3() reads only x1, x2, x3.
+ *   127 of the 130 field initialisations are dead.
  *
- * Runs 100 000 iterations trivially. CLEAR crashes after ~1000.
+ *   With -O3 + inlining + SROA (Scalar Replacement of Aggregates):
+ *     - LLVM decomposes BigVec into 130 scalar SSA values
+ *     - DCE eliminates the 127 unused ones
+ *     - The loop body reduces to ~3 scalar fadd instructions per iteration
+ *
+ * PREVENTING CONSTANT FOLDING:
+ *   `limit` is volatile so the compiler cannot evaluate the loop at compile
+ *   time.  Loop inputs are fed from `acc` (previous result), creating a true
+ *   recurrence that forces serial evaluation — matching the same dependency
+ *   chain CLEAR must execute.
+ *   acc triples quickly and becomes inf after ~50 iterations; IEEE 754 inf
+ *   arithmetic is well-defined so the loop body continues to execute.
+ *
+ * N = 10 000 000 iterations.
+ *
+ * CLEAR DOES NOT IMPLEMENT SROA.
+ *   The transpiler emits the full 130-field struct initialisation every
+ *   iteration, plus a saveLoopMark/restoreLoopMark pair.
+ *   Expected overhead: significant — dominated by 20 M runtime calls plus
+ *   127 dead f64 writes per iteration.
  */
 
 #include <stdio.h>
@@ -35,26 +54,28 @@ static double sum3(BigVec v) {
 }
 
 int main(void) {
+    /* volatile prevents the compiler from evaluating the loop at compile time */
+    volatile int64_t limit = 10000000;
+
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    double acc = 0.0;
-    for (int64_t i = 0; i < 100000; i++) {
+    double acc = 1.0;
+    for (int64_t i = 0; i < limit; i++) {
         BigVec bv;
         memset(&bv, 0, sizeof(bv));
         bv.x1 = acc;
         bv.x2 = acc + 1.0;
         bv.x3 = acc + 2.0;
-        acc += sum3(bv);
+        acc = sum3(bv);   /* acc = 3*acc + 3; triples, becomes inf ~50 iters */
     }
 
-    assert(acc > 0.0);
+    assert(acc > 0.0); /* inf > 0 is true */
 
     clock_gettime(CLOCK_MONOTONIC, &end);
     double elapsed = (end.tv_sec - start.tv_sec) +
                      (end.tv_nsec - start.tv_nsec) / 1e9;
 
-    printf("acc = %.6f\n", acc);
-    printf("Time: %.4f seconds\n", elapsed);
+    printf("acc = %g\nTime: %.4f seconds\n", acc, elapsed);
     return 0;
 }

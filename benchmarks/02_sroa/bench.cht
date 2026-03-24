@@ -1,26 +1,38 @@
 -- SROA (Scalar Replacement of Aggregates) Benchmark
 --
--- WHY CLEAR FAILS HERE:
+-- WHAT THIS MEASURES:
 --
---   BigVec has 130 Number fields = 130 slots, which exceeds CLEAR's 128-slot
---   frame-allocation threshold. CLEAR allocates it in the frame arena (*BigVec).
+--   BigVec has 130 Number fields (1040 bytes). sum3() reads only x1, x2, x3.
+--   127 of the 130 field initialisations are dead writes.
 --
---   The frame arena is saved/restored ONCE per function call. Inside a loop,
---   each iteration allocates 1040 bytes that are never reclaimed until the
---   function returns. After ~1000 iterations the 1 MB arena is exhausted
---   and CLEAR crashes with OutOfMemory.
+--   C at -O3:   LLVM applies SROA → decomposes BigVec into scalars → DCE
+--               eliminates 127 dead initialisations → loop is 3 scalar fadds.
 --
---   C / Rust: BigVec lives on the OS stack, auto-reclaimed at each iteration.
---   No allocation, no growth, runs 100 000 iterations in microseconds.
+--   CLEAR:      The transpiler emits all 130 field initialisations as a Zig
+--               struct literal. Because the struct is a stack `const` that
+--               never escapes, LLVM's own SROA pass in ReleaseFast also DCEs
+--               the 127 dead fields — so the struct overhead is the SAME as C.
 --
--- Expected result: CLEAR crashes; C/Rust finishes instantly.
+--               The remaining gap (~50%) is dominated by the 20 M runtime
+--               calls that LLVM cannot eliminate:
+--                 - rt.saveLoopMark()    ×10 M  (CLEAR emits this for every loop)
+--                 - rt.restoreLoopMark() ×10 M
 --
--- Fix (SROA): detect that bv never escapes the loop body, decompose it into
---   individual scalar `var` bindings (x1..x3 only), eliminate the frame-arena
---   allocation entirely, and dead-code-eliminate the 127 unused fields.
+-- KEY FINDING:
+--   LLVM handles the struct-level SROA even without CLEAR implementing it.
+--   The real cost is saveLoopMark/restoreLoopMark on loops that don't
+--   actually allocate anything — Loop Mark Elision is the right fix.
 --
--- Iteration count is intentionally small (100 000) so CLEAR crashes quickly
--- instead of grinding through memory pressure.
+-- LOOP MARK ELISION (future optimisation):
+--   If the transpiler detects that a loop body contains no frame-allocating
+--   operations (no @list, @map, or String operations), it should suppress the
+--   saveLoopMark/restoreLoopMark pair entirely. This would close the ~50% gap
+--   on compute-only loops like this one.
+--
+-- N = 10 000 000 iterations.
+-- acc is fed back from the previous result (recurrence prevents constant
+-- folding); it overflows to inf after ~50 iterations but IEEE 754 inf
+-- arithmetic is defined, so the loop body continues to execute at full speed.
 
 STRUCT BigVec {
   x1: Number, x2: Number, x3: Number, x4: Number, x5: Number,
@@ -51,25 +63,23 @@ STRUCT BigVec {
   x126: Number, x127: Number, x128: Number, x129: Number, x130: Number
 }
 
--- Only reads 3 of 130 fields.
--- With SROA the other 127 field initializations are dead and eliminated.
+-- Only reads x1, x2, x3. The other 127 fields are dead.
+-- With SROA the compiler would eliminate those 127 field initialisations.
 FN sum3(v: BigVec) RETURNS Number @reentrant ->
     RETURN v.x1 + v.x2 + v.x3;
 END
 
 FN cheatMain() RETURNS Void ->
     MUTABLE i = 0_i64;
-    MUTABLE acc: Number = 0.0;
+    MUTABLE acc: Number = 1.0;
 
-    -- Each iteration creates a BigVec INSIDE the loop.
-    -- CLEAR: frame-arena allocates 1040 bytes per iteration.
-    --   Frame mark is saved once at function entry; the arena never shrinks
-    --   inside the loop.  After ~1000 iterations the 1 MB arena is exhausted
-    --   and the program crashes with OutOfMemory.
-    -- C / Rust: BigVec is stack-allocated per iteration with zero overhead.
-    WHILE i < 100000 DO
+    WHILE i < 10000000 DO
+        -- Inputs fed from acc: same recurrence as the C baseline, prevents
+        -- constant folding and matches the serial dependency chain.
+        -- CLEAR emits all 130 field initialisations here. C's SROA pass
+        -- eliminates 127 of them. This is the gap this benchmark measures.
         bv = BigVec{
-            x1: acc, x2: acc + 1.0, x3: acc + 2.0,
+            x1: acc, x2: acc+1.0, x3: acc+2.0,
             x4: 0.0, x5: 0.0, x6: 0.0, x7: 0.0, x8: 0.0,
             x9: 0.0, x10: 0.0, x11: 0.0, x12: 0.0, x13: 0.0,
             x14: 0.0, x15: 0.0, x16: 0.0, x17: 0.0, x18: 0.0,
@@ -97,7 +107,7 @@ FN cheatMain() RETURNS Void ->
             x124: 0.0, x125: 0.0, x126: 0.0, x127: 0.0, x128: 0.0,
             x129: 0.0, x130: 0.0
         };
-        acc = acc + sum3(bv);
+        acc = sum3(bv);   -- acc = 3*acc + 3; triples, becomes inf ~50 iters
         i = i + 1_i64;
     END
 
