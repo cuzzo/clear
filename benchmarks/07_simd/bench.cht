@@ -1,0 +1,74 @@
+-- SIMD Benchmark — Vec4 Dot Product (10 million iterations)
+--
+-- WHY CLEAR FAILS HERE:
+--
+--   CLEAR has no SIMD vector types and no way to express data-parallel
+--   operations. The transpiler generates plain Zig structs with individual
+--   field accesses. The dot4 function emits:
+--
+--     return ((((a.x * b.x) + (a.y * b.y)) + (a.z * b.z)) + (a.w * b.w));
+--
+--   That is 4 scalar fmul + 3 scalar fadd = 7 serial FP operations per call.
+--
+--   C uses explicit AVX2 intrinsics:
+--     - _mm256_set_pd:  load all 4 doubles into one 256-bit register
+--     - _mm256_mul_pd:  multiply all 4 pairs in a SINGLE hardware instruction
+--     - _mm_hadd_pd:    horizontal reduction
+--
+--   AVX2 processes 4 doubles in parallel, so the multiply phase is ~4x fewer
+--   instructions. FMA (_mm256_fmadd_pd on wider loops) fuses multiply+add.
+--
+-- NOTE: Zig ReleaseFast uses LLVM -O3 which may auto-vectorize the reduction
+--   loop in cheatMain. Results depend on whether LLVM can prove the
+--   cross-iteration independence. The C baseline uses explicit intrinsics to
+--   guarantee SIMD usage regardless of auto-vectorization decisions.
+--
+-- MEASURED RESULTS (x86-64 Linux, AVX2+FMA, ReleaseFast / -O3 -mavx2 -mfma):
+--
+--   VARIANT                | TIME      | vs C
+--   C (explicit AVX2)      | ~44 ms    | 1.0× (baseline)
+--   CLEAR (scalar Zig)     | ~62 ms    | ~1.4×
+--
+-- Binary inspection confirms:
+--   C:     vmulpd ymm  (256-bit, 4 doubles per instruction)
+--   CLEAR: vmulsd xmm  (scalar,  1 double per instruction)
+--
+-- WHY THE GAP IS ONLY ~1.4× NOT ~4×:
+--   Two overheads mask the full SIMD benefit in CLEAR:
+--   1. rt.saveLoopMark() / rt.restoreLoopMark() called on EVERY loop
+--      iteration (10M function calls) — inhibits loop vectorization.
+--   2. `_ = &a` in generated Zig forces Vec4 struct to stack memory
+--      (prevents register allocation) — inhibits auto-vectorization.
+--   The horizontal reduction in the C AVX2 path (hadd) also adds
+--   latency, slightly reducing the 4× theoretical maximum.
+--
+-- CONCLUSION: CLEAR does not support SIMD. Even when LLVM cannot
+--   auto-vectorize due to runtime call barriers, the scalar code is
+--   only ~1.4× slower than explicit AVX2 on this workload — but the
+--   potential ceiling is 4× (or 8× with float32) for pure compute loops.
+
+STRUCT Vec4 {
+    x: Number,
+    y: Number,
+    z: Number,
+    w: Number
+}
+
+-- Scalar dot product: 4 fmul + 3 fadd.
+-- No SIMD equivalent exists in CLEAR today.
+FN dot4(a: Vec4, b: Vec4) RETURNS Number @reentrant ->
+    RETURN a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+END
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE sum: Number = 0.0;
+    MUTABLE i = 0_i64;
+    WHILE i < 10000000 DO
+        a = Vec4{ x: i+0.0, y: i+1.0, z: i+2.0, w: i+3.0 };
+        b = Vec4{ x: 1.0, y: 2.0, z: 3.0, w: 4.0 };
+        sum = sum + dot4(a, b);
+        i = i + 1_i64;
+    END
+    ASSERT sum > 0.0, "sum must be positive";
+    RETURN;
+END
