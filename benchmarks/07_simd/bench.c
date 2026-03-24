@@ -54,7 +54,7 @@ int main(void) {
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    const int64_t N = 10000000;
+    const int64_t N = 100000000;
     double sum = 0.0;
     for (int64_t i = 0; i < N; i++) {
         Vec4 a = { (double)i, (double)(i + 1), (double)(i + 2), (double)(i + 3) };

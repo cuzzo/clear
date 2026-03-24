@@ -54,16 +54,25 @@ def run_bench(dir)
   # 3. Execution & Timing
   results = {}
   
-  puts "Running C baseline..."
-  results[:c] = Benchmark.measure { `./#{dir}/bench_c` }.real
+  def measure_min(command, runs = 5)
+    times = []
+    runs.times do
+      t = Benchmark.measure { `#{command}` }.real
+      times << t
+    end
+    times.min
+  end
+
+  puts "Running C baseline (best of 5)..."
+  results[:c] = measure_min("./#{dir}/bench_c")
   
   if has_rust
-    puts "Running Rust baseline..."
-    results[:rust] = Benchmark.measure { `./#{dir}/bench_rust` }.real
+    puts "Running Rust baseline (best of 5)..."
+    results[:rust] = measure_min("./#{dir}/bench_rust")
   end
   
-  puts "Running CLEAR..."
-  results[:clear] = Benchmark.measure { `./#{dir}/bench_clear` }.real
+  puts "Running CLEAR (best of 5)..."
+  results[:clear] = measure_min("./#{dir}/bench_clear")
   
   # 4. Reporting
   puts "\nRESULTS for #{dir}:"
