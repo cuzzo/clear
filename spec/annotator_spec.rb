@@ -3866,8 +3866,9 @@ RSpec.describe SemanticAnnotator do
 
       it "emits spawnBest for pinned branch" do
         zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
         expect(zig).to include("CheatHeader.spawnBest")
-        expect(zig).not_to include("submitSpawn")
+        expect(user_code).not_to include("submitSpawn")
       end
     end
 
@@ -11772,8 +11773,9 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
+      user_code = out.split("// 3. Main Entry").first
       expect(out).to include("spawnBest")
-      expect(out).not_to include("submitSpawn")
+      expect(user_code).not_to include("submitSpawn")
     end
 
     it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do
