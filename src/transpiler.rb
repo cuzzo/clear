@@ -339,7 +339,7 @@ private
         final_type
       end
       vis = node.visibility == :pub ? "pub " : ""
-      signature = "#{vis}fn #{node.name}(#{all_params.join(', ')}) #{return_type_str}"
+      signature = "#{vis}fn #{zig_safe_name(node.name)}(#{all_params.join(', ')}) #{return_type_str}"
 
       @current_fn_uses_frame = node.uses_frame
       # Track whether rt is available in the current function (needed for per-loop frame marks).
@@ -1230,7 +1230,7 @@ private
         needs_rt = callee_needs_rt?(node.name)
         can_fail  = callee_can_fail?(node.name)
         args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
-        call = "#{mod_prefix}#{node.name}(#{args.join(', ')})"
+        call = "#{mod_prefix}#{zig_safe_name(node.name)}(#{args.join(', ')})"
         can_fail ? "try #{call}" : call
       end
 
@@ -1835,9 +1835,12 @@ private
 
   # Escape CLEAR variable names that would shadow Zig primitive types
   # (uN, iN, fN patterns like u8, i32, f64) using Zig's @"name" quoting syntax.
+  # Also strips the trailing `!` from MUTABLE-parameter function names — `!` is a
+  # CLEAR naming convention and is not valid in Zig identifiers.
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
   def zig_safe_name(name)
-    name =~ ZIG_PRIMITIVE_RE ? "@\"#{name}\"" : name
+    cleaned = name.end_with?('!') ? name[0..-2] : name
+    cleaned =~ ZIG_PRIMITIVE_RE ? "@\"#{cleaned}\"" : cleaned
   end
 
   def walk_do_identifiers(node, result, locally_bound = Set.new)

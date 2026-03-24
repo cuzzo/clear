@@ -1,0 +1,147 @@
+-- Sort Benchmark — Quicksort + Mergesort
+-- N = 1,000,000 f64 values
+--
+-- Data: deterministic permutation via Knuth's multiplicative hash
+--   val[i] = (i * 2654435761) MOD N  cast to f64
+--   Produces a permutation of [0, N-1].
+--
+-- Both algorithms are in-place (or near-in-place for mergesort with external buffer).
+-- Function parameters use plain Number[] (slice) — CLEAR auto-converts @list to slice
+-- at the call site via CheatLib's @hasField comptime check.
+--
+-- Key optimizations active from recent commits:
+--   1. Loop Mark Elision: qsort!/msort! bodies have no loop-local frame allocations,
+--      so no saveLoopMark/restoreLoopMark is emitted inside the inner while loops.
+--   2. var_mutated SROA: loop index vars (i, j, k, sp, etc.) are read AND reassigned,
+--      so no `_ = &name;` is emitted — LLVM can keep them in registers.
+
+-- Iterative Lomuto quicksort over a plain slice.
+-- The `!` suffix marks a function with MUTABLE parameters (CLEAR convention).
+FN qsort!(MUTABLE arr: Number[], n: Int64) RETURNS Void ->
+  -- Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
+  -- Using @list so both stacks live in the frame arena; trivially freed on exit.
+  MUTABLE lo_stk: Int64[]@list = [];
+  MUTABLE hi_stk: Int64[]@list = [];
+  MUTABLE fill_i = 0_i64;
+  WHILE fill_i < 48 DO
+    append(lo_stk, 0_i64);
+    append(hi_stk, 0_i64);
+    fill_i = fill_i + 1_i64;
+  END
+  lo_stk[0] = 0_i64;
+  hi_stk[0] = n - 1_i64;
+  MUTABLE sp = 1_i64;
+  MUTABLE tmp = 0.0;
+
+  WHILE sp > 0 DO
+    sp = sp - 1_i64;
+    lo = lo_stk[sp];
+    hi = hi_stk[sp];
+
+    IF lo < hi THEN
+      pivot = arr[hi];
+      MUTABLE i = lo - 1_i64;
+      MUTABLE j = lo;
+      WHILE j < hi DO
+        IF arr[j] <= pivot THEN
+          i = i + 1_i64;
+          tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+        END
+        j = j + 1_i64;
+      END
+      i = i + 1_i64;
+      tmp = arr[i]; arr[i] = arr[hi]; arr[hi] = tmp;
+      pi = i;
+
+      left_size  = pi - lo;
+      right_size = hi - pi;
+      IF left_size > right_size THEN
+        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1_i64; sp = sp + 1_i64;
+        lo_stk[sp] = pi + 1_i64; hi_stk[sp] = hi;       sp = sp + 1_i64;
+      ELSE
+        lo_stk[sp] = pi + 1_i64; hi_stk[sp] = hi;       sp = sp + 1_i64;
+        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1_i64; sp = sp + 1_i64;
+      END
+    END
+  END
+  RETURN;
+END
+
+-- Bottom-up iterative mergesort.
+-- arr and tmp are both plain slices (Number[]); no allocation inside this function.
+FN msort!(MUTABLE arr: Number[], MUTABLE tmp: Number[], n: Int64) RETURNS Void ->
+  MUTABLE width = 1_i64;
+  WHILE width < n DO
+    MUTABLE lo = 0_i64;
+    WHILE lo < n DO
+      MUTABLE mid = lo + width;
+      IF mid > n THEN mid = n; END
+      MUTABLE hi = lo + width + width;
+      IF hi > n THEN hi = n; END
+
+      IF mid < hi THEN
+        MUTABLE i = lo;
+        MUTABLE j = mid;
+        MUTABLE k = lo;
+        WHILE k < hi DO
+          IF j >= hi || (i < mid && arr[i] <= arr[j]) THEN
+            tmp[k] = arr[i];
+            i = i + 1_i64;
+          ELSE
+            tmp[k] = arr[j];
+            j = j + 1_i64;
+          END
+          k = k + 1_i64;
+        END
+        MUTABLE ci = lo;
+        WHILE ci < hi DO
+          arr[ci] = tmp[ci];
+          ci = ci + 1_i64;
+        END
+      END
+
+      lo = lo + width + width;
+    END
+    width = width + width;
+  END
+  RETURN;
+END
+
+FN cheatMain() RETURNS Void ->
+  n = 1000000_i64;
+
+  -- Build data: permutation of [0, N-1] via Knuth multiplicative hash
+  MUTABLE arr: Number[]@list = [];
+  MUTABLE seed_i = 0_i64;
+  WHILE seed_i < n DO
+    v = seed_i * 2654435761_i64 MOD n + 0.0;
+    append(arr, v);
+    seed_i = seed_i + 1_i64;
+  END
+
+  -- Quicksort
+  qsort!(arr, n);
+  ASSERT arr[0_i64] <= arr[1_i64], "qsort: not sorted at start";
+  ASSERT arr[n - 2_i64] <= arr[n - 1_i64], "qsort: not sorted at end";
+
+  -- Refill for mergesort
+  seed_i = 0_i64;
+  WHILE seed_i < n DO
+    v = seed_i * 2654435761_i64 MOD n + 0.0;
+    arr[seed_i] = v;
+    seed_i = seed_i + 1_i64;
+  END
+
+  -- Mergesort (needs a temp buffer of the same size)
+  MUTABLE tmp_arr: Number[]@list = [];
+  MUTABLE ti = 0_i64;
+  WHILE ti < n DO
+    append(tmp_arr, 0.0);
+    ti = ti + 1_i64;
+  END
+  msort!(arr, tmp_arr, n);
+  ASSERT arr[0_i64] <= arr[1_i64], "msort: not sorted at start";
+  ASSERT arr[n - 2_i64] <= arr[n - 1_i64], "msort: not sorted at end";
+
+  RETURN;
+END

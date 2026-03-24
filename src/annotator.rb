@@ -31,6 +31,7 @@ class SemanticAnnotator
     @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @frame_usage_count = 0
     @heap_usage_count  = 0
+    @alloc_call_count  = 0
     @current_fn_type_params = [] # Type params of the function currently being validated
     # Reentrancy analysis
     @call_graph  = {}  # name => Set of directly-called function names (excluding self-calls)
@@ -337,6 +338,7 @@ private
   def visit_FunctionDef(node)
     @frame_usage_count = 0
     @heap_usage_count  = 0
+    @alloc_call_count  = 0
 
     # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
@@ -411,10 +413,11 @@ private
     node.full_type = signature
     node.uses_frame = (@frame_usage_count > 0)
     node.uses_heap  = (@heap_usage_count  > 0)
+    node.uses_alloc = (@alloc_call_count  > 0)
     # Seed for compute_can_fail! post-pass: direct failure sources.
     ret_type_obj = signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil
     heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
-    @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || heap_ret ||
+    @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || node.uses_alloc || heap_ret ||
       (@fn_has_fnptr[node.name] == true) ||
       (node.reentrant == :non_reentrant) ||
       scan_for_raises(node.body)
@@ -1109,6 +1112,7 @@ private
 
     node.zig_pattern = method_def[:zig]
     node.full_type   = method_def[:return]
+    @alloc_call_count += 1 if node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
   end
 
   def visit_FuncCall(node)
@@ -1383,6 +1387,7 @@ private
 
     # 4. Store Zig pattern for transpiler
     node.zig_pattern = matched_def[:zig]
+    @alloc_call_count += 1 if node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
   end
 
   # Loop-local SROA: when a large struct literal (storage == :frame) is declared
@@ -2846,7 +2851,7 @@ private
     @fn_nodes.each do |name, fn_node|
       ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || heap_return || (@fn_has_fnptr[name] == true) || name == "cheatMain"
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || name == "cheatMain"
     end
 
     changed = true

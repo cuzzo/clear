@@ -251,7 +251,8 @@ module OwnershipTracker
       current_scope.locals.each do |name, info|
         next unless current_scope.owned_names.include?(name)
         next if name.start_with?('_')           # underscore prefix = intentionally unused
-        next if info[:read]                      # variable was read at least once
+        next if info[:read]                      # variable was read at least once (same scope)
+        next if info[:reg]&.respond_to?(:var_used) && info[:reg].var_used  # read in nested scope
         next if info[:resource]                  # resource — implicit use via defer close
         t = info[:type]
         ti = t.is_a?(Type) ? t : Type.new(t.to_s)
