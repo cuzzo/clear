@@ -459,17 +459,23 @@ private
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
 
-      # Suppression logic differs for mutable (var) vs immutable (const):
+      # Suppression logic:
       #
-      # `var` declarations: Zig requires mutation OR address-taken to suppress "never mutated".
-      #   Always emit `_ = &name;` unless affine_logic (defer) already references it.
-      #   Taking the address of a `var` is free — mutable values live on the stack anyway.
+      # `var` declarations (actually mutated):
+      #   - If var_used: Zig won't warn (it's read AND mutated) → no suppression needed.
+      #   - If !var_used: emit `_ = &name;` to suppress "unused variable".
+      #   Taking &struct forces the struct to memory and kills SROA; skip when safe.
       #
-      # `const` declarations: no mutation warning possible. Only suppress "unused variable".
-      #   Emit `_ = name;` (no &) when unused — avoids address-taken, keeps LLVM free to
-      #   register-allocate and auto-vectorize.
+      # `const` declarations (immutable OR mutable-but-never-reassigned):
+      #   No "never mutated" warning possible. Only suppress "unused variable".
+      #   Emit `_ = name;` (no &) when unused — keeps LLVM free to SROA and vectorize.
       suppression = if is_mutable
-        affine_logic.empty? ? "_ = &#{safe_name};" : ""
+        actually_mutated = node.respond_to?(:var_mutated) && node.var_mutated == true
+        if actually_mutated && node.respond_to?(:var_used) && node.var_used
+          ""  # used AND mutated — Zig won't warn about either; no _ = &name; needed
+        else
+          affine_logic.empty? ? "_ = &#{safe_name};" : ""
+        end
       else
         (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
       end

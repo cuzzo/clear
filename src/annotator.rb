@@ -1639,6 +1639,7 @@ private
       handle_assign_move(node)
       handle_assign_borrow(node)
 
+      mark_var_mutated(node.name)
       current_scope.set_state(node.name, :live)
     end
   end
@@ -1690,6 +1691,16 @@ private
     owner&.mark_read(node.name)
   end
 
+  # Mark a variable's declaration node as mutated (reassigned after declaration).
+  # This allows the transpiler to skip `_ = &name;` for mutable variables that
+  # are genuinely reassigned — LLVM can then SROA struct fields to registers.
+  def mark_var_mutated(name)
+    scope = lookup_scope_for(name)
+    return unless scope
+    decl_node = scope.locals.dig(name, :reg)
+    decl_node.var_mutated = true if decl_node&.respond_to?(:var_mutated=)
+  end
+
   # ==========================================
   # Assignment
   # ==========================================
@@ -1739,6 +1750,7 @@ private
 
     validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
     node.full_type = scope.resolve_type(var_name)
+    mark_var_mutated(var_name)
   end
 
   def visit_assignment_index(index_node, assignment_node)
@@ -1753,6 +1765,7 @@ private
         # matches your test expectation
         error!(assignment_node, "Cannot modify index of immutable list '#{var_name}'")
       end
+      mark_var_mutated(var_name)
     end
 
     # 3. Type Check
@@ -1772,6 +1785,7 @@ private
       if current_scope.is_immutable?(var_name)
         error!(assignment_node, "Cannot modify field of immutable struct '#{var_name}'")
       end
+      mark_var_mutated(var_name)
     end
 
     # 3. Type Check

@@ -181,7 +181,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "does NOT emit loop marks when outer-scope list is appended in loop" do
+    it "does NOT emit loop marks when loop body has no frame allocations" do
       src = <<~CLEAR
         FN cheatMain() RETURNS Void ->
           MUTABLE all: Number[]@list = [];
@@ -195,6 +195,88 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("saveLoopMark")
+    end
+  end
+
+  # ===========================================================================
+  # var_mutated — SROA suppression optimization
+  # ===========================================================================
+  describe "var_mutated SROA suppression" do
+    it "omits _ = &name for a mutable scalar that is read AND reassigned" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE sum: Number = 0.0;
+          MUTABLE i = 0_i64;
+          WHILE i < 10 DO
+            sum = sum + 1.0;
+            i = i + 1_i64;
+          END
+          ASSERT sum > 0.0, "positive";
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Both sum and i are read AND reassigned — no address-taken suppression
+      expect(zig).not_to include("_ = &sum")
+      expect(zig).not_to include("_ = &i")
+    end
+
+    it "omits _ = &name for a mutable struct that is reassigned" do
+      src = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        FN cheatMain() RETURNS Void ->
+          MUTABLE v: Vec2 = Vec2{ x: 0.0, y: 0.0 };
+          MUTABLE i = 0_i64;
+          WHILE i < 3 DO
+            v = Vec2{ x: i+1.0, y: i+2.0 };
+            i = i + 1_i64;
+          END
+          ASSERT v.x > 0.0, "positive";
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # v is reassigned — no _ = &v (which would block SROA)
+      expect(zig).not_to include("_ = &v")
+    end
+
+    it "omits _ = &name for a mutable struct with field mutation" do
+      src = <<~CLEAR
+        STRUCT Point { x: Number, y: Number }
+        FN cheatMain() RETURNS Void ->
+          MUTABLE p: Point = Point{ x: 1.0, y: 2.0 };
+          p.x = 99.0;
+          ASSERT p.x > 0.0, "positive";
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # p.x mutation marks p as mutated — no _ = &p
+      expect(zig).not_to include("_ = &p")
+    end
+
+    it "keeps _ = &name for a mutable var that is used but never reassigned" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE x = 5_i64;
+          ASSERT x == 5_i64, "should be 5";
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # x is read but never reassigned — keep _ = &x to suppress Zig "never mutated" warning
+      expect(zig).to include("_ = &x")
+    end
+
+    it "keeps _ = &name for a completely unused mutable var" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE x = 5_i64;
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("_ = &x")
     end
   end
 end
