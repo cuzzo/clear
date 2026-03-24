@@ -11,4 +11,6 @@ zig/*.bc
 zig/*.o
 transpile-tests/ffi-integration/.zig-cache
 transpile-tests/module-integration/.zig-cache
+benchmarks/**/bench_c
+benchmarks/**/bench_clear
 
