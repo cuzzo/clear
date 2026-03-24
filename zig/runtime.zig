@@ -126,11 +126,6 @@ pub const Runtime = struct {
     pub const FrameMark = struct {
         stack_index: usize,
         overflow_mark: CheatArena.Mark,
-        // Snapshot of the read-pool free_mask at the moment this mark was saved.
-        // restoreFrameMark uses it to release only the pool slots acquired within
-        // this scope, without touching slots held by the caller or already freed
-        // explicitly via CheatLib.free().
-        pool_mask_at_save: u8,
     };
 
     // Stack Helper: Get current Mark (Offset)
@@ -138,25 +133,17 @@ pub const Runtime = struct {
         return FrameMark{
             .stack_index = 0,  // TODO: Deprecate
             .overflow_mark = self.overflow_arena.getMark(),
-            .pool_mask_at_save = fp.active_scheduler.read_pool.free_mask,
         };
     }
 
     // Stack Helper: Reset to Mark (O(1) Free)
-    // Also releases any ReadPool slots acquired since this mark was saved.
-    // Formula: bits that were free at save-time but in-use now were acquired
-    // in this scope.  Setting them free again is the correct restore action.
     pub fn restoreFrameMark(self: *Runtime, mark: FrameMark) void {
         self.overflow_arena.rewind(mark.overflow_mark);
-        const pool = &fp.active_scheduler.read_pool;
-        const acquired_in_scope = mark.pool_mask_at_save & ~pool.free_mask;
-        pool.free_mask |= acquired_in_scope;
     }
 
-    // Lightweight arena-only mark for per-loop-iteration rewind.
-    // Does NOT touch the ReadPool (no scheduler required — safe in cheatMain).
+    // Lightweight arena mark for per-loop-iteration rewind.
     // Used by the transpiler for WhileLoop bodies that contain loop-local
-    // frame-allocated data (e.g. @list declared inside the loop body).
+    // frame-allocated data (e.g. @list or tcpRead results inside a loop body).
     pub fn saveLoopMark(self: *Runtime) CheatArena.Mark {
         return self.overflow_arena.getMark();
     }

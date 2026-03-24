@@ -108,49 +108,6 @@ pub const SmartEventFd = struct {
 
 const STACK_CACHE_LIMIT: usize = 16;
 
-// ---------------------------------------------------------------------------
-// ReadPool — per-scheduler slab of fixed-size socket read buffers.
-//
-// Why here (Scheduler) and not per-fiber (Runtime):
-//   One pool per OS thread.  Fibers run cooperatively on the same thread, so
-//   only one fiber touches the pool at a time — no lock needed.
-//   Memory: 8 slots × 4096 bytes = 32 KB, always resident.
-//   At 10 000 concurrent connections (threads × fibers): 32 KB × thread-count,
-//   not 32 KB × connection-count.
-//
-// Lifecycle: slots are acquired by socketRead and released either
-//   (a) explicitly via CheatLib.free()  — range-check in free() routes here, or
-//   (b) implicitly via restoreFrameMark — releases everything acquired in scope.
-// ---------------------------------------------------------------------------
-pub const ReadPool = struct {
-    pub const SLOTS: usize = 8;
-    pub const SLOT_SIZE: usize = 4096;
-
-    slab: [SLOTS][SLOT_SIZE]u8 = undefined,
-    // Bitmask: bit i = 1 means slot i is free.  All bits set at init.
-    free_mask: u8 = ~@as(u8, 0),
-
-    /// Grab the first free slot.  Returns a mutable slice of the full slot.
-    /// Returns null when all 8 slots are occupied (caller must fall back to GPA).
-    pub fn acquire(self: *ReadPool) ?[]u8 {
-        if (self.free_mask == 0) return null;
-        const idx: u3 = @intCast(@ctz(self.free_mask));
-        self.free_mask &= ~(@as(u8, 1) << idx);
-        return &self.slab[idx];
-    }
-
-    /// Release a slot identified by pointer.
-    /// Returns true if ptr fell inside the slab (slot marked free).
-    /// Returns false if ptr is a GPA allocation — caller handles the free.
-    pub fn release(self: *ReadPool, ptr: [*]const u8) bool {
-        const base = @intFromPtr(&self.slab[0][0]);
-        const p    = @intFromPtr(ptr);
-        if (p < base or p >= base + SLOTS * SLOT_SIZE) return false;
-        const idx: u3 = @intCast((p - base) / SLOT_SIZE);
-        self.free_mask |= @as(u8, 1) << idx;
-        return true;
-    }
-};
 
 pub const Scheduler = struct {
     // 1. The Manager State
@@ -170,7 +127,6 @@ pub const Scheduler = struct {
     allocator: std.mem.Allocator,
     global_ebr: *EbrContext,
     poller: Poller,
-    read_pool: ReadPool = .{},
 
     // 4. Main Thread Context (To return to OS)
     main_ctx: Context,

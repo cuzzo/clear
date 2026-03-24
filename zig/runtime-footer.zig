@@ -10,11 +10,13 @@ pub fn main() !void {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    // 3. Init Runtime (128 MB frame arena)
-    // init(allocator, frame_size, global_ctx, global_alloc, backing_alloc)
+    // 3. Init Runtime (4 MB frame arena — carved off the heap for the main fiber).
+    // Per-fiber runtimes use a 4 KB slice of their own stack (see entryWrapper).
+    // 4 MB here is generous; the hot path (e.g. tcpRead loop) only ever holds
+    // one buffer at a time thanks to per-iteration restoreLoopMark.
     var rt = try Runtime.init(
         allocator,
-        128 * 1024 * 1024,
+        4 * 1024 * 1024,
         &global_ctx,
     );
     defer rt.deinit();

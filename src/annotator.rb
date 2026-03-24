@@ -2466,15 +2466,69 @@ private
 
   def visit_BgBlock(node)
     # Body runs in a separate fiber. The last expression's type determines T in ~T.
-    # Affine variables captured from the enclosing scope are MOVED (not borrowed),
-    # because the caller may return before the fiber finishes.
     # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
+    outer_scope = current_scope
+    locally_bound = Set.new
+
     last_type = :Void
     node.body.each do |expr|
       visit(expr)
       last_type = expr.respond_to?(:full_type) ? (expr.full_type || :Void) : :Void
+      # Track names declared inside the body so we don't treat them as outer captures.
+      if (expr.is_a?(AST::BindExpr) || expr.is_a?(AST::VarDecl)) && expr.name.is_a?(String)
+        locally_bound << expr.name
+      end
     end
     node.full_type = :"~#{last_type}"
+
+    # Enforce linear ownership for BG captures.
+    # Resource and affine (requires_move?) variables from the outer scope that are
+    # referenced inside the BG body are MOVED into the fiber's lifetime.  The outer
+    # scope cannot use them again after the BG block is spawned.  (The outer scope's
+    # Zig `defer` for resources still fires after NEXT, which is correct — by that
+    # point the fiber has finished and released the value.)
+    walk_bg_capture_moves(node.body, outer_scope, locally_bound)
+  end
+
+  # Walk the BG block's body AST and mark any outer-scope resource or affine
+  # variables as :moved.  Stops at nested BgBlock boundaries (those captures
+  # belong to a different fiber's scope).
+  def walk_bg_capture_moves(stmts, scope, locally_bound)
+    stmts.each { |expr| _bg_walk(expr, scope, locally_bound) }
+  end
+
+  def _bg_walk(node, scope, locally_bound)
+    return unless node.is_a?(AST::Locatable)
+    # Don't cross nested BG block boundaries.
+    return if node.is_a?(AST::BgBlock)
+
+    if node.is_a?(AST::Identifier)
+      name = node.name
+      return if locally_bound.include?(name)
+      info = scope.locals[name]
+      return unless info && scope.owned_names.include?(name)
+      return if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
+      if (info[:resource] || Type.new(info[:type]).requires_move?) &&
+         scope.get_state(name) == :live
+        scope.set_state(name, :moved)
+      end
+      return
+    end
+
+    # Track names declared within the body to avoid treating them as outer captures.
+    lb = locally_bound
+    if node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)
+      lb = lb | Set[node.name.to_s] if node.name.is_a?(String)
+    end
+
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array)
+        val.each { |v| _bg_walk(v, scope, lb) }
+      elsif val.is_a?(AST::Locatable)
+        _bg_walk(val, scope, lb)
+      end
+    end
   end
 
   def visit_ThenChain(node)
