@@ -441,7 +441,10 @@ private
 
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
-      suppression = "_ = &#{safe_name};"
+      # Emit suppression only when the variable is not referenced in user code.
+      # `_ = name` (no &) avoids taking the address, letting LLVM keep the value
+      # in registers and enabling auto-vectorization on small structs.
+      suppression = node.var_used ? "" : "_ = #{safe_name};"
 
       # 2. Cleanup & Move Suppression
       affine_logic = emit_cleanup(safe_name, node.type_info, node.storage, resource_close: node.resource_close_zig)
@@ -455,10 +458,11 @@ private
       if node.mode == :decl
         # Transpile as immutable declaration — delegate to VarDecl logic via a proxy
         proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
-        proxy.full_type         = node.full_type
-        proxy.storage           = node.storage
-        proxy.slot_size         = node.slot_size
+        proxy.full_type          = node.full_type
+        proxy.storage            = node.storage
+        proxy.slot_size          = node.slot_size
         proxy.resource_close_zig = node.resource_close_zig
+        proxy.var_used           = node.var_used
         visit(proxy)
       else
         # Transpile as simple assignment

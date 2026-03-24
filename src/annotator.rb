@@ -1611,6 +1611,11 @@ private
       # TODO: Better error
       error!(node, "Use of moved value '#{node.name}'")
     end
+
+    # 4. Mark variable as read so the transpiler can skip `_ = &x` suppression.
+    # The variable may live in an outer scope; use lookup_scope_for to find it.
+    owner = lookup_scope_for(node.name)
+    owner&.mark_read(node.name)
   end
 
   # ==========================================

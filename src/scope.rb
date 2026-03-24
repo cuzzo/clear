@@ -209,6 +209,16 @@ class Scope
     @var_states[name] || :uninit
   end
 
+  # Mark a variable as read (used as an r-value in user code).
+  # The caller (visit_Identifier via lookup_scope_for) is expected to pass the
+  # scope that owns the declaration, so no parent traversal is needed here.
+  def mark_read(name)
+    entry = @locals[name]
+    return unless entry
+    entry[:read] = true
+    entry[:reg]&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
+  end
+
   # Helper for branching
   def clone_states
     @var_states.dup

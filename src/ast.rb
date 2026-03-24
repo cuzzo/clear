@@ -15,6 +15,7 @@ module AST
     attr_accessor :was_moved
     attr_accessor :slot_size
     attr_accessor :resource_close_zig   # set by annotator on resource declarations
+    attr_accessor :var_used             # true when the variable is read in user code
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).

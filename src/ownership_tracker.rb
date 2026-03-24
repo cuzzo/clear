@@ -244,6 +244,26 @@ module OwnershipTracker
     else
       node.deferred_drops = drops
     end
+
+    # Warn about variables declared in this scope that were never read.
+    # Only fires at function-level finalize (branch: nil) to avoid duplicate warnings.
+    if branch.nil?
+      current_scope.locals.each do |name, info|
+        next unless current_scope.owned_names.include?(name)
+        next if name.start_with?('_')           # underscore prefix = intentionally unused
+        next if info[:read]                      # variable was read at least once
+        next if info[:resource]                  # resource — implicit use via defer close
+        t = info[:type]
+        ti = t.is_a?(Type) ? t : Type.new(t.to_s)
+        next if ti.list_collection? || ti.pool?  # collections — implicit use via defer deinit
+        next if ti.multiowned? || ti.shared?     # Rc/Arc — implicit use via defer release
+        reg = info[:reg]
+        next unless reg                          # compiler-internal binding, not user code
+
+        loc = reg.respond_to?(:line) ? " (line #{reg.line})" : ""
+        $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{name}'#{loc}"
+      end
+    end
   end
 
   def collect_scope_drops(node: nil)
