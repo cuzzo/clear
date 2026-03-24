@@ -129,7 +129,7 @@ class ZigTranspiler
             const allocator = gpa.allocator();
             var global_ctx = EbrContext{};
             defer global_ctx.deinit(allocator);
-            var rt = try Runtime.init(allocator, 1024 * 1024, &global_ctx);
+            var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
             defer rt.deinit();
             rt.wireAllocator();
             try cheatMain(&rt);
@@ -765,7 +765,8 @@ private
       if node.mark_per_iter && @current_fn_has_rt
         mark_id = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
-        "while (#{cond}) {\nconst #{mark_var} = rt.saveLoopMark(); defer rt.restoreLoopMark(#{mark_var});\n #{body} \n}"
+        rt_ref = @do_rt_name || "rt"
+        "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n #{body} \n}"
       else
         "while (#{cond}) {\n #{body} \n}"
       end
@@ -1002,7 +1003,13 @@ private
           end
         }.join("\n            ")
         result = if last_step.nil? || is_void
-          last_step ? "#{visit(last_step[:expr])};" : ""
+          if last_step
+            last_code = visit(last_step[:expr])
+            # Block statements (while/if/etc.) already end with }; don't add ; after them.
+            last_code.strip.end_with?("}") ? last_code : "#{last_code};"
+          else
+            ""
+          end
         else
           "ctx.inner.result = #{visit(last_step[:expr])};"
         end

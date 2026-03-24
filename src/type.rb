@@ -136,6 +136,7 @@ class Type
       @is_array              = other.instance_variable_get(:@is_array)
       @element_type_raw      = other.instance_variable_get(:@element_type_raw)
       @is_map                = other.instance_variable_get(:@is_map)
+      @key_type_raw          = other.instance_variable_get(:@key_type_raw)
       @value_type_raw        = other.instance_variable_get(:@value_type_raw)
       @capacity              = other.capacity
       @resolved_cache        = other.instance_variable_get(:@resolved_cache)
@@ -904,7 +905,9 @@ class Type
     is_pointer = heap? || (frame? && struct?)
 
     # 3. Handle Special primitive mapping
-    if resolved == :String
+    # String and Byte[N] (fixed-size string literals) both map to []const u8.
+    # Byte[N] is the inferred type for string literals; their contents are always const.
+    if resolved == :String || string?
       return is_pointer ? "*[]const u8" : "[]const u8"
     end
 

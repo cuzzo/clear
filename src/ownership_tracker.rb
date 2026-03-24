@@ -210,9 +210,11 @@ module OwnershipTracker
   def finalize_scope(node, branch: nil)
     drops = []
 
-    # Look at all variables in the current scope
+    # Look at variables DECLARED in this scope (not inherited from parent scopes).
+    # Variables from outer scopes are the outer scope's responsibility to finalize.
     current_scope.locals.each do |name, info|
 
+      next unless current_scope.owned_names.include?(name)
       next unless current_scope.get_state(name) == :live
       next if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
 

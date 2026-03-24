@@ -1126,22 +1126,36 @@ private
     case node.name
     when "delete"
       unless node.args.length == 1
-        error!(node, "HashMap.delete requires exactly 1 argument (a String key), got #{node.args.length}")
+        error!(node, "HashMap.delete requires exactly 1 argument (a key), got #{node.args.length}")
         return
       end
-      unless Type.new(node.args[0].resolved_type).string?
-        error!(node, "HashMap.delete: key must be a String, got #{node.args[0].resolved_type}")
+      arg_type = Type.new(node.args[0].resolved_type)
+      if map_type.numeric_map?
+        unless arg_type.numeric?
+          error!(node, "HashMap.delete: key must be a numeric type, got #{node.args[0].resolved_type}")
+        end
+      else
+        unless arg_type.string?
+          error!(node, "HashMap.delete: key must be a String, got #{node.args[0].resolved_type}")
+        end
       end
       node.map_method = :delete
       node.full_type  = :Void
 
     when "contains"
       unless node.args.length == 1
-        error!(node, "HashMap.contains requires exactly 1 argument (a String key), got #{node.args.length}")
+        error!(node, "HashMap.contains requires exactly 1 argument (a key), got #{node.args.length}")
         return
       end
-      unless Type.new(node.args[0].resolved_type).string?
-        error!(node, "HashMap.contains: key must be a String, got #{node.args[0].resolved_type}")
+      arg_type = Type.new(node.args[0].resolved_type)
+      if map_type.numeric_map?
+        unless arg_type.numeric?
+          error!(node, "HashMap.contains: key must be a numeric type, got #{node.args[0].resolved_type}")
+        end
+      else
+        unless arg_type.string?
+          error!(node, "HashMap.contains: key must be a String, got #{node.args[0].resolved_type}")
+        end
       end
       node.map_method = :contains
       node.full_type  = :Bool
@@ -1748,10 +1762,17 @@ private
       node.full_type = target_type_info.value_type
 
       # Validate Key Type
-      # Allow String (stack), %String (heap), or Byte[] (raw)
+      # Numeric maps (HashMap<Int64,V> or HashMap<Number,V>) accept numeric keys.
+      # String maps require a String key.
       index_type_info = node.index.type_info
-      unless index_type_info&.string?
-         error!(node, "Map keys must be Strings, got #{node.index.resolved_type}")
+      if target_type_info.numeric_map?
+        unless index_type_info&.numeric?
+          error!(node, "Numeric map keys must be a number type, got #{node.index.resolved_type}")
+        end
+      else
+        unless index_type_info&.string?
+          error!(node, "Map keys must be Strings, got #{node.index.resolved_type}")
+        end
       end
 
     # Case 2: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"

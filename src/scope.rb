@@ -1,7 +1,7 @@
 require "set"
 
 class Scope
-  attr_accessor :locals, :var_states, :dependencies, :var_states, :moved_paths
+  attr_accessor :locals, :var_states, :dependencies, :var_states, :moved_paths, :owned_names
   attr_reader   :types
 
   def initialize
@@ -10,9 +10,11 @@ class Scope
     @types = {}
     @var_states = {}
     @moved_paths = []  # Track moved sub-paths like [:foo, :child]
+    @owned_names = Set.new  # Variables declared in THIS scope (not inherited from parent)
   end
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
+    @owned_names.add(name)
     @locals[name] = {
       reg: reg,
       type: type,
@@ -48,6 +50,9 @@ class Scope
     @var_states = original.var_states.dup
     @dependencies = original.dependencies.dup
     @moved_paths = original.moved_paths.map(&:dup)
+    # Child scopes inherit variables but don't own them — start with empty owned_names.
+    # Only variables declared in this scope (via `declare`) are in @owned_names.
+    @owned_names = Set.new
 
     # 3. Types are usually static definitions, so a shallow copy is fine
     @types = original.instance_variable_get(:@types).dup

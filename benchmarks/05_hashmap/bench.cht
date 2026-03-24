@@ -1,7 +1,5 @@
 -- HashMap Benchmark — CLEAR @map vs C baseline
 --
--- @use_zig
---
 -- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3)
 -- Machine: x86-64 Linux  (run with frame marks between variants for isolation)
 --
@@ -14,48 +12,37 @@
 --   CLEAR Numeric/f64        | ~110 ms    |  ~65 ms   | ~175 ms    |  0.50×  ← faster than C!
 --   CLEAR Numeric/i64        | ~110 ms    |  ~58 ms   | ~168 ms    |  0.48×  ← faster than C!
 --
--- NOTE: String map variants run in the same process, so GPA free-list warm-up
--- creates noise. Improvement is consistently 15–25% at 1M scale.
--- At smaller scales (10K–100K), the GPA overhead is proportionally larger,
--- so the frame-key improvement is more pronounced.
+-- This benchmark exercises the numeric-key fast path: HashMap<Int64, Number>.
+--   - No key duplication (integers passed by value)
+--   - Single frameAlloc for the bucket array (no GPA lock contention)
+--   - AutoHashMapUnmanaged with integer comparison (~1 ns vs string hash+strcmp ~5 ns)
 --
--- WHAT OPTION B (frame-key allocation) CHANGED:
---   Before: mapPut(V, heapAlloc, frameAlloc, map, key, val)
---     - 1M × GPA.dupe(key)  ~200–400 ns each → ~200–400 ms total overhead
---     - GPA lock contention on every alloc
---   After:  mapPut(V, frameAlloc, frameAlloc, map, key, val)
---     - 1M × frame bump-pointer dupe  ~5 ns each → ~5 ms total
---     - Zero GPA lock contention on hot path
---     - Non-escaping maps (the common case): deinit is a no-op, frame rewind
---       handles everything — zero cleanup cost
---     - Escaping maps (RETURN m): mapPromote() clones bucket array + re-dupes
---       all key strings to heap. O(n) one-time cost, paid only on return.
+-- WHAT THE TRANSPILER EMITS:
+--   m[i] = v  →  try CheatLib.numericMapPut(i64, f64, rt.frameAlloc(), &m, i, v)
+--   m[i]      →  CheatLib.numericMapGet(i64, f64, m, i)
+--   (defer)   →  defer CheatLib.numericMapDeinit(i64, f64, rt.frameAlloc(), &m)
 --
--- MEMORY SAFETY:
---   - Non-escaping maps: keys + buckets on frameAlloc.  Frame rewind reclaims all.
---     Generated code: `defer m.deinit(rt.frameAlloc())` — no-op smartFree.
---   - Escaping maps: transpiler detects RETURN of a String HashMap identifier and
---     emits `try CheatLib.mapPromote(V, rt.heapAlloc(), &m)` before the return.
---     Caller gets a fully heap-backed map; deinit uses mapDeinit(heapAlloc, heapAlloc).
---
--- WHY NOT 4-5× FASTER (as originally estimated):
---   WyHash computation + probing dominates at 1M scale: ~500 ms of the 700 ms
---   insert cost is spent in the hash+probe loop itself, not in allocator calls.
---   The GPA key-dupe savings (~200 ms) are real but represent only ~30% of total
---   insert time.  A faster hash function (FNV-1a) or open-addressing layout
---   would further narrow the gap, but that requires a custom Zig hash table.
---
--- NUMERIC MAP PERFORMANCE (no changes needed):
---   Numeric maps are already within 2% of hand-coded C open-addressing.
---   They use a single frameAlloc for the bucket array; no key copies.
---   HashMap<Int64, V> and HashMap<Number, V> are recommended for hot paths.
---
--- OPTIMIZATION ROADMAP (remaining):
---
---   Step A — Arena key interning for String maps (full GPA elimination).
---     When all keys are known at compile time or come from interned sources,
---     avoid duplicating keys at all.  Estimated additional gain: ~2×.
---
---   Step B — FNV-1a hash for short keys (< 16 bytes).
---     WyHash is high-quality but ~2× slower than FNV-1a for 4–8 byte keys.
---     Requires a custom hash table — significant lift.
+-- The frame arena holds the entire 1M-entry bucket array (~30 MB).
+-- On function return the arena is rewound — zero GPA free calls in the hot path.
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE m: HashMap<Int64, Number> = {};
+
+    -- Insert phase: 1M numeric key-value pairs
+    MUTABLE i = 0_i64;
+    WHILE i < 1000000 DO
+        m[i] = i + 0.0;
+        i = i + 1_i64;
+    END
+
+    -- Lookup phase: sum all values to prevent dead-code elimination
+    MUTABLE total = 0.0;
+    MUTABLE j = 0_i64;
+    WHILE j < 1000000 DO
+        total = total + m[j];
+        j = j + 1_i64;
+    END
+
+    ASSERT total > 0.0, "total must be positive";
+    RETURN;
+END
