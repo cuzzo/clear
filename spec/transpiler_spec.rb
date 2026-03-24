@@ -98,10 +98,11 @@ RSpec.describe ZigTranspiler do
       expect(promote_pos).to be < return_pos
     end
 
-    it "callee still uses frameAlloc for its own deinit (no-op is fine)" do
+    it "callee omits the defer deinit for the returned list (escaped_return suppresses cleanup)" do
       zig = transpile(frame_list_src)
-      # The callee's own defer uses frameAlloc (no-op smartFree)
-      expect(zig).to include("vals.deinit(rt.frameAlloc())")
+      # The returned list must NOT have a defer deinit — ownership transfers to the
+      # caller and a defer would corrupt the value through Zig NRVO aliasing.
+      expect(zig).not_to include("vals.deinit(rt.frameAlloc())")
     end
   end
 

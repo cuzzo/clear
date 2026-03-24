@@ -11445,7 +11445,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include('CheatLib.mapDelete(i64, rt.heapAlloc(), &m, "x")')
+        expect(out).to include('CheatLib.mapDelete(i64, rt.frameAlloc(), &m, "x")')
       end
 
       it "raises when delete receives no arguments" do
@@ -12527,13 +12527,15 @@ RSpec.describe SemanticAnnotator do
     # @nonReentrant: fn-pointer / lambda calls
     # -------------------------------------------------------------------------
     describe "fn-pointer / lambda calls" do
-      it "raises an error when a function calling a fn-type variable is not annotated" do
+      it "does not require annotation when calling a fn-type parameter" do
+        # Calling through a fn-type parameter is safe — the caller explicitly controls
+        # what function is passed; any self-recursion is visible at the call site.
         code = <<~CLEAR
           FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
             RETURN cb(x);
           END
         CLEAR
-        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*apply/)
+        expect { run(code) }.not_to raise_error
       end
 
       it "accepts a fn-pointer-calling function marked @nonReentrant" do

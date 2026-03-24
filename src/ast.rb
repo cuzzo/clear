@@ -190,6 +190,7 @@ module AST
     attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
+    attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }

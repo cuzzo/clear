@@ -30,6 +30,7 @@ class SemanticAnnotator
     @smooth_depth = 0
     @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @frame_usage_count = 0
+    @heap_usage_count  = 0
     @current_fn_type_params = [] # Type params of the function currently being validated
     # Reentrancy analysis
     @call_graph  = {}  # name => Set of directly-called function names (excluding self-calls)
@@ -160,6 +161,11 @@ private
     # PASS 5: Compute needs_rt and can_fail for every function via call-graph fixed-point.
     compute_needs_rt!
     compute_can_fail!
+
+    # PASS 5b: Functions referenced as fn-type values must match the fn-pointer calling
+    # convention (*Runtime, params) !return. Mark them needs_rt=true so their signatures
+    # are compatible with the fn-type Zig type emitted by type.rb#zig_type.
+    mark_fn_value_references!(node)
 
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
@@ -330,6 +336,7 @@ private
 
   def visit_FunctionDef(node)
     @frame_usage_count = 0
+    @heap_usage_count  = 0
 
     # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
@@ -389,11 +396,10 @@ private
       # :reentrant → OK
     end
 
-    if has_fnptr && node.reentrant.nil?
-      error!(node, "Reentrancy Error: '#{node.name}' calls a function pointer or lambda whose " \
-                   "behavior cannot be statically determined. " \
-                   "Add @reentrant or @nonReentrant to the function signature.")
-    end
+    # Note: calling through a fn-type variable (parameter or local lambda) does NOT
+    # require @reentrant — the caller controls what is passed and self-recursion is
+    # the caller's explicit choice.  Only the call-graph cycle post-pass (below) fires
+    # errors for implicit mutual/direct recursion.
 
     # 5. Finalize Signature
     if (is_implicit_return || declared_return == :Any)
@@ -404,8 +410,11 @@ private
     signature[:return_strategy] = get_return_strategy(signature[:return][:type])
     node.full_type = signature
     node.uses_frame = (@frame_usage_count > 0)
+    node.uses_heap  = (@heap_usage_count  > 0)
     # Seed for compute_can_fail! post-pass: direct failure sources.
-    @fn_raises_directly[node.name] = node.uses_frame ||
+    ret_type_obj = signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil
+    heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
+    @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || heap_ret ||
       (@fn_has_fnptr[node.name] == true) ||
       (node.reentrant == :non_reentrant) ||
       scan_for_raises(node.body)
@@ -1004,7 +1013,10 @@ private
 
     # 2. Ownership Tracking
     was_promoted = handle_return_escape(node.value, expected)
-    @frame_usage_count -= 1 if was_promoted
+    if was_promoted
+      @frame_usage_count -= 1
+      @heap_usage_count  += 1
+    end
 
     # 3. List Escape Detection
     # If this function uses the frame arena (uses_frame=true) AND we're returning
@@ -1016,6 +1028,11 @@ private
        node.value.type_info&.list_collection? &&
        !node.value.type_info.sharded?
       node.list_return = true
+      # Suppress the defer cleanup on the *declaration* node so `emit_cleanup` skips
+      # the `defer vals.deinit(...)` — ownership is transferred to the caller and the
+      # NRVO alias would corrupt the returned value if deinit ran after `return`.
+      decl_reg = lookup_scope_for(node.value.name)&.locals&.dig(node.value.name, :reg)
+      decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
     end
 
     # 3a. Map Escape Detection
@@ -1289,6 +1306,8 @@ private
     elsif func_type.is_a?(Type) && func_type.fn_type?
       # Calling a fn-type variable: cb(5) where cb: FN(Int64) -> Bool
       node.fn_var_call = true if node.respond_to?(:fn_var_call=)
+      # Mark the variable as read so the transpiler skips `_ = cb;` suppression.
+      lookup_scope_for(func_name)&.mark_read(func_name)
       synthetic_sig = {
         params: func_type.raw[:params],
         return: { type: func_type.raw[:return][:type] }
@@ -1421,6 +1440,7 @@ private
     # to registers and dead-code-eliminate any that are never read.
     storage = downgrade_frame_to_stack(node, storage)
     @frame_usage_count += 1 if storage == :frame
+    @heap_usage_count  += 1 if storage == :heap
 
     # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!).
     #     When there is no explicit type annotation (inferred), fall back to the value's type_info
@@ -1542,6 +1562,7 @@ private
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
       storage = downgrade_frame_to_stack(node, storage)
       @frame_usage_count += 1 if storage == :frame
+      @heap_usage_count  += 1 if storage == :heap
 
       # Propagate collection + shard_count from declared type (lost during finalize_storage!).
       # When there is no explicit type annotation (inferred), fall back to the value's type_info
@@ -1971,6 +1992,7 @@ private
 
     node.full_type = :"HashMap<#{first_val_type}>"
     node.storage = :heap
+    @heap_usage_count += 1
   end
 
   def visit_StructLit(node)
@@ -2325,6 +2347,9 @@ private
     ti = Type.new(base_type)
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
+
+    # CapabilityWrap always allocates on the heap (rcCreate/arcCreate/lockedCreate/rwLockedCreate).
+    @heap_usage_count += 1 if node.ownership || node.sync
 
     # Store the Type directly — full_type= accepts Type objects
     node.full_type = ti
@@ -2805,7 +2830,9 @@ private
   def compute_needs_rt!
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
-      needs_rt[name] = fn_node.uses_frame || (@fn_has_fnptr[name] == true) || name == "cheatMain"
+      ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
+      heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || heap_return || (@fn_has_fnptr[name] == true) || name == "cheatMain"
     end
 
     changed = true
@@ -2875,6 +2902,43 @@ private
     end
     traverse.call(body)
     found[0]
+  end
+
+  # PASS 5b: scan all AST nodes for Identifiers used as fn-type arguments.
+  # Any named function referenced as a value must adopt the rt-bearing calling
+  # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
+  def mark_fn_value_references!(program_node)
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FuncCall, AST::MethodCall
+        n.args&.each do |arg|
+          arg_ft = arg.respond_to?(:full_type) ? arg.full_type : nil
+          if arg.is_a?(AST::Identifier) && arg_ft.is_a?(Type) && arg_ft.fn_type?
+            fn = @fn_nodes[arg.name]
+            if fn
+              fn.needs_rt = true
+              fn.can_fail  = true
+            end
+          end
+          traverse.call(arg)
+        end
+        traverse.call(n.respond_to?(:object) ? n.object : nil)
+      when AST::VarDecl, AST::BindExpr
+        traverse.call(n.value)
+      when AST::ReturnNode
+        traverse.call(n.value)
+      when AST::FunctionDef
+        traverse.call(n.body)
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(program_node.statements)
   end
 
 end

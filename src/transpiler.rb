@@ -207,6 +207,18 @@ private
           @struct_schemas.merge!(mod.struct_schemas)
         end
 
+        # Propagate needs_rt/can_fail from imported functions so call sites
+        # correctly omit or inject rt and try.
+        if mod.ast
+          @fn_needs_rt ||= {}
+          @fn_can_fail  ||= {}
+          mod.ast.statements.each do |stmt|
+            next unless stmt.is_a?(AST::FunctionDef)
+            @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
+            @fn_can_fail[stmt.name]  = stmt.can_fail.nil?  ? true : stmt.can_fail
+          end
+        end
+
         body = mod.transpiled_body.strip
         # Indent each line of the module body for readability inside the struct.
         indented = body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
@@ -441,15 +453,26 @@ private
 
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
-      # Emit suppression only when the variable is not referenced in user code.
-      # `_ = name` (no &) avoids taking the address, letting LLVM keep the value
-      # in registers and enabling auto-vectorization on small structs.
-      suppression = node.var_used ? "" : "_ = #{safe_name};"
 
-      # 2. Cleanup & Move Suppression
+      # 2. Cleanup & Move Suppression (must be computed before suppression decision)
       affine_logic = emit_cleanup(safe_name, node.type_info, node.storage, resource_close: node.resource_close_zig)
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
+
+      # Suppression logic differs for mutable (var) vs immutable (const):
+      #
+      # `var` declarations: Zig requires mutation OR address-taken to suppress "never mutated".
+      #   Always emit `_ = &name;` unless affine_logic (defer) already references it.
+      #   Taking the address of a `var` is free — mutable values live on the stack anyway.
+      #
+      # `const` declarations: no mutation warning possible. Only suppress "unused variable".
+      #   Emit `_ = name;` (no &) when unused — avoids address-taken, keeps LLVM free to
+      #   register-allocate and auto-vectorize.
+      suppression = if is_mutable
+        affine_logic.empty? ? "_ = &#{safe_name};" : ""
+      else
+        (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
+      end
 
       "#{decl} #{suppression}\n#{affine_logic}\n#{move_source_logic}"
 
@@ -1740,7 +1763,7 @@ private
       case node.map_method
       when :delete
         key_code = visit(node.args[0])
-        "CheatLib.mapDelete(#{val_zig}, #{rt_name}.heapAlloc(), &#{obj_code}, #{key_code})"
+        "CheatLib.mapDelete(#{val_zig}, #{rt_name}.frameAlloc(), &#{obj_code}, #{key_code})"
       when :contains
         key_code = visit(node.args[0])
         "CheatLib.mapContains(#{val_zig}, #{obj_code}, #{key_code})"

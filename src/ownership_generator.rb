@@ -12,6 +12,7 @@ module OwnershipGenerator
     # Promoted lists (returned from frame-using functions) were copied to heap and
     # must be freed with heapAlloc() to avoid leaking the GPA allocation.
     if type_info&.list_collection?
+      return "" if type_info.escaped_return  # ownership transferred to caller via return
       alloc = (type_info.sharded? || type_info.heap_list) ? "rt.heapAlloc()" : "rt.frameAlloc()"
       return "defer #{name}.deinit(#{alloc});\n"
     end
