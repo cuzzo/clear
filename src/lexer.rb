@@ -22,6 +22,7 @@ class Lexer
       PUB PRIVATE
       EXTERN FROM
       STREAM YIELD
+      TIGHT
     ].to_set
 
   def initialize(source)

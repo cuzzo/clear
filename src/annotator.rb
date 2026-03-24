@@ -872,13 +872,67 @@ private
 
     @loop_depth -= 1
 
-    # 4. Loop Mark Elision: emit saveLoopMark/restoreLoopMark only when the loop
+    # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
+    # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.
+    # Does NOT recurse into bodies of called CLEAR functions — those are separate
+    # compilation units and their internal behaviour is their own concern.
+    if node.tight
+      validate_tight_body!(node.do_branch, node)
+    end
+
+    # 5. Loop Mark Elision: emit saveLoopMark/restoreLoopMark only when the loop
     # body actually allocates from the frame arena AND those allocations don't
     # target an outer-scope variable (which mark-rewind would corrupt).
-    node.mark_per_iter = loop_allocates_frame?(node.do_branch) &&
+    # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
+    node.mark_per_iter = !node.tight &&
+                         loop_allocates_frame?(node.do_branch) &&
                          !loop_appends_outer_list?(node.do_branch, outer_vars)
 
     node.full_type = :Void
+  end
+
+  # Deep validation for TIGHT loops.
+  # Walks the full AST subtree (nested ifs, whiles, match blocks) looking for
+  # any call to a @reentrant or EXTERN FN function. Stops at FunctionDef
+  # boundaries — nested lambdas/closures are separate compilation units.
+  def validate_tight_body!(stmts, loop_node)
+    return if stmts.nil?
+    stmts = [stmts] unless stmts.is_a?(Array)
+    stmts.each { |s| validate_tight_node!(s, loop_node) }
+  end
+
+  def validate_tight_node!(node, loop_node)
+    return if node.nil?
+    case node
+    when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      # primitive — nothing to check
+    when Array
+      node.each { |n| validate_tight_node!(n, loop_node) }
+    when AST::FunctionDef
+      # Don't descend into nested function definitions.
+    when AST::FuncCall
+      if node.respond_to?(:extern_call) && node.extern_call
+        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
+      end
+      fn = @fn_nodes[node.name]
+      if fn&.reentrant == :reentrant
+        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
+      end
+      node.args&.each { |a| validate_tight_node!(a, loop_node) }
+    when AST::MethodCall
+      if node.respond_to?(:extern_call) && node.extern_call
+        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
+      end
+      fn = @fn_nodes[node.name]
+      if fn&.reentrant == :reentrant
+        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
+      end
+      validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node)
+      node.args&.each { |a| validate_tight_node!(a, loop_node) }
+    else
+      # Generic: walk all struct fields of the AST node
+      node.each_pair { |_, v| validate_tight_node!(v, loop_node) } if node.respond_to?(:each_pair)
+    end
   end
 
   # Returns true if any append() call in stmts (or nested loops/ifs) targets a variable

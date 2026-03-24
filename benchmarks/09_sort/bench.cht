@@ -9,9 +9,9 @@
 -- Function parameters use plain Number[] (slice) — CLEAR auto-converts @list to slice
 -- at the call site via CheatLib's @hasField comptime check.
 --
--- Key optimizations active from recent commits:
---   1. Loop Mark Elision: qsort!/msort! bodies have no loop-local frame allocations,
---      so no saveLoopMark/restoreLoopMark is emitted inside the inner while loops.
+-- Key optimizations active:
+--   1. TIGHT inner loops: eliminates rt.checkYield() and saveLoopMark/restoreLoopMark
+--      overhead from pure compare/swap loops — the dominant cost before this change.
 --   2. var_mutated SROA: loop index vars (i, j, k, sp, etc.) are read AND reassigned,
 --      so no `_ = &name;` is emitted — LLVM can keep them in registers.
 
@@ -23,6 +23,7 @@ FN qsort!(MUTABLE arr: Number[], n: Int64) RETURNS Void ->
   MUTABLE lo_stk: Int64[]@list = [];
   MUTABLE hi_stk: Int64[]@list = [];
   MUTABLE fill_i = 0_i64;
+  -- Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
   WHILE fill_i < 48 DO
     append(lo_stk, 0_i64);
     append(hi_stk, 0_i64);
@@ -33,7 +34,8 @@ FN qsort!(MUTABLE arr: Number[], n: Int64) RETURNS Void ->
   MUTABLE sp = 1_i64;
   MUTABLE tmp = 0.0;
 
-  WHILE sp > 0 DO
+  -- TIGHT: pure compare-and-swap, no per-iteration allocation.
+  TIGHT WHILE sp > 0 DO
     sp = sp - 1_i64;
     lo = lo_stk[sp];
     hi = hi_stk[sp];
@@ -42,7 +44,7 @@ FN qsort!(MUTABLE arr: Number[], n: Int64) RETURNS Void ->
       pivot = arr[hi];
       MUTABLE i = lo - 1_i64;
       MUTABLE j = lo;
-      WHILE j < hi DO
+      TIGHT WHILE j < hi DO
         IF arr[j] <= pivot THEN
           i = i + 1_i64;
           tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
@@ -71,9 +73,10 @@ END
 -- arr and tmp are both plain slices (Number[]); no allocation inside this function.
 FN msort!(MUTABLE arr: Number[], MUTABLE tmp: Number[], n: Int64) RETURNS Void ->
   MUTABLE width = 1_i64;
-  WHILE width < n DO
+  -- TIGHT: all loops here are pure compare/copy, no allocation.
+  TIGHT WHILE width < n DO
     MUTABLE lo = 0_i64;
-    WHILE lo < n DO
+    TIGHT WHILE lo < n DO
       MUTABLE mid = lo + width;
       IF mid > n THEN mid = n; END
       MUTABLE hi = lo + width + width;
@@ -83,7 +86,7 @@ FN msort!(MUTABLE arr: Number[], MUTABLE tmp: Number[], n: Int64) RETURNS Void -
         MUTABLE i = lo;
         MUTABLE j = mid;
         MUTABLE k = lo;
-        WHILE k < hi DO
+        TIGHT WHILE k < hi DO
           IF j >= hi || (i < mid && arr[i] <= arr[j]) THEN
             tmp[k] = arr[i];
             i = i + 1_i64;
@@ -94,7 +97,7 @@ FN msort!(MUTABLE arr: Number[], MUTABLE tmp: Number[], n: Int64) RETURNS Void -
           k = k + 1_i64;
         END
         MUTABLE ci = lo;
-        WHILE ci < hi DO
+        TIGHT WHILE ci < hi DO
           arr[ci] = tmp[ci];
           ci = ci + 1_i64;
         END
@@ -125,8 +128,9 @@ FN cheatMain() RETURNS Void ->
   ASSERT arr[n - 2_i64] <= arr[n - 1_i64], "qsort: not sorted at end";
 
   -- Refill for mergesort
+  -- TIGHT: pure write loop, no allocation.
   seed_i = 0_i64;
-  WHILE seed_i < n DO
+  TIGHT WHILE seed_i < n DO
     v = seed_i * 2654435761_i64 MOD n + 0.0;
     arr[seed_i] = v;
     seed_i = seed_i + 1_i64;

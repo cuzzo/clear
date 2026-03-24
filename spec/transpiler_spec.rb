@@ -199,6 +199,168 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
+  # Cooperative yield injection
+  # ===========================================================================
+  describe "cooperative yield injection" do
+    it "emits checkYield at the back-edge of a normal while loop with rt" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 1000 DO
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("checkYield()")
+    end
+
+    it "emits checkYield alongside saveLoopMark for frame-allocating loops" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 10 DO
+            MUTABLE vals: Number[]@list = [];
+            append(vals, 1.0);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to include("checkYield()")
+    end
+
+    it "does NOT emit checkYield in functions without rt (no-scheduler context)" do
+      # A pure function that calls no alloc helpers and has no frame vars
+      # will not have rt, so no yield injection possible.
+      src = <<~CLEAR
+        FN addTwo(a: Number, b: Number) RETURNS Number ->
+          RETURN a + b;
+        END
+        FN cheatMain() RETURNS Void ->
+          x = addTwo(1.0, 2.0);
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # addTwo has no rt — no checkYield inside it
+      fn_body = zig[/fn addTwo\b.*?\n\}/m]
+      expect(fn_body).not_to include("checkYield") if fn_body
+    end
+  end
+
+  # ===========================================================================
+  # TIGHT loops
+  # ===========================================================================
+  describe "TIGHT loops" do
+    it "does NOT emit checkYield for a TIGHT loop" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          TIGHT WHILE i < 1000 DO
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to include("checkYield")
+    end
+
+    it "does NOT emit saveLoopMark for a TIGHT loop even with frame allocs" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          TIGHT WHILE i < 10 DO
+            MUTABLE vals: Number[]@list = [];
+            append(vals, 1.0);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to include("saveLoopMark")
+      expect(zig).not_to include("checkYield")
+    end
+
+    it "raises a compile error when TIGHT loop calls an EXTERN FN directly" do
+      src = <<~CLEAR
+        EXTERN FN native_sqrt(x: Number) RETURNS Number FROM "math";
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          TIGHT WHILE i < 100 DO
+            x = native_sqrt(i + 0.0);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call EXTERN FN/)
+    end
+
+    it "raises a compile error when TIGHT loop calls an @reentrant function directly" do
+      src = <<~CLEAR
+        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          IF n <= 1 THEN RETURN n; END
+          RETURN fib(n - 1) + fib(n - 2);
+        END
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          TIGHT WHILE i < 100 DO
+            x = fib(i);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+    end
+
+    it "raises a compile error when @reentrant call is nested inside an IF inside TIGHT" do
+      src = <<~CLEAR
+        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          IF n <= 1 THEN RETURN n; END
+          RETURN fib(n - 1) + fib(n - 2);
+        END
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          TIGHT WHILE i < 100 DO
+            IF i > 50_i64 THEN
+              x = fib(i);
+            END
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+    end
+
+    it "allows normal (non-reentrant, non-extern) CLEAR calls inside TIGHT" do
+      src = <<~CLEAR
+        FN square(x: Number) RETURNS Number ->
+          RETURN x * x;
+        END
+        FN cheatMain() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          TIGHT WHILE i < 100 DO
+            x = square(i + 0.0);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.not_to raise_error
+      zig = transpile(src)
+      expect(zig).not_to include("checkYield")
+    end
+  end
+
+  # ===========================================================================
   # var_mutated — SROA suppression optimization
   # ===========================================================================
   describe "var_mutated SROA suppression" do

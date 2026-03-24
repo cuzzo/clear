@@ -73,6 +73,7 @@ class Parser
   stmt(:KEYWORD, 'ENUM')   { parse_enum_def }
   stmt(:KEYWORD, 'UNION')  { parse_union_def }
   stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
+  stmt(:KEYWORD, 'TIGHT') { parse_tight_stmt }
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
   stmt(:KEYWORD, 'RAISE', AST::Raise, ['RAISE', :raise_msg, ';'])
@@ -403,6 +404,22 @@ class Parser
       # Field or index assignment — always a reassignment, never a declaration
       AST::Assignment.new(target_token, target, value)
     end
+  end
+
+  def parse_tight_stmt
+    tight_token = consume(:KEYWORD, 'TIGHT')
+    unless match?(:KEYWORD, 'WHILE')
+      raise "Expected WHILE after TIGHT (got #{current.value.inspect})"
+    end
+    # Reuse the standard WHILE pattern; then annotate as tight
+    consume(:KEYWORD, 'WHILE')
+    cond  = parse_expression
+    consume(:KEYWORD, 'DO')
+    body  = parse_block_body(['END'])
+    consume(:KEYWORD, 'END')
+    node = AST::WhileLoop.new(tight_token, cond, body, nil)
+    node.tight = true
+    node
   end
 
   def parse_return

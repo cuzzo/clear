@@ -16,12 +16,21 @@ comptime {
     _ = fc;
 }
 
+// Cooperative yield budget: power-of-two so the check reduces to a single AND.
+// Every YIELD_BUDGET loop iterations, checkYield() hands control to the scheduler
+// if another fiber is ready. Reset to 0 after each yield, giving each fiber a
+// fresh 4096-iteration slice on resume.
+const YIELD_BUDGET: u32 = 4096;
+const YIELD_MASK:   u32 = YIELD_BUDGET - 1; // 0x0FFF
+
 pub const Runtime = struct {
     // Control
     ebr: ThreadLocalEbr,  // This probably needs to be global...
     owns_frame_memory: bool,
     // For green fibers, how long until this DIES? (0 = No timeout - deal with it)
     deadline: i64 = 0,
+    // Cooperative scheduling: counts loop back-edges; yields when lower 12 bits hit 0.
+    yield_counter: u32 = 0,
 
     // OVERFLOW (The Safety Valve)
     // We use an Arena so we can track all the overflow allocations
@@ -187,6 +196,19 @@ pub const Runtime = struct {
     // Used by the DO block fork-join primitive.
     pub fn getSched(_: *Runtime) *fp.Scheduler {
         return fp.active_scheduler;
+    }
+
+    // Cooperative yield check — injected at the back-edge of every non-TIGHT while loop.
+    // Uses a power-of-two counter so the hot path is: wrapping-add + AND + compare-zero.
+    // Yields to the scheduler only when another fiber is ready; single-fiber programs pay
+    // only the counter arithmetic (no syscall, no context switch).
+    // The counter resets to 0 on each yield, giving the fiber a fresh 4096-iteration
+    // budget on every resume.
+    pub inline fn checkYield(self: *Runtime) void {
+        self.yield_counter = (self.yield_counter +% 1) & YIELD_MASK;
+        if (self.yield_counter == 0) {
+            fp.active_scheduler.coopYield();
+        }
     }
 
     // Helper to spawn tasks easily from the Runtime

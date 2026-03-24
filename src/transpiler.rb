@@ -315,8 +315,17 @@ private
       # ZIG:   pub fn test(rt: *Runtime) !User {
       final_type = transpile_type(node.return_type || :Void)
 
+      # For MUTABLE scalar params, Zig function params are const — we can't reassign them.
+      # We mangle the Zig param name to `_m_<name>` and emit `var <name> = _m_<name>;`
+      # in the prologue, so the body references the mutable shadow.
+      # Slice/pointer params ([]T, *T) are fine as-is: element mutation doesn't reassign
+      # the param itself.
+      mutable_scalar_params = node.params.select do |p|
+        p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
+      end.map { |p| p[:name] }.to_set
+
       params_zig = node.params.map do |param|
-        p_name = param[:name]
+        p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
         p_type = transpile_type(param[:type], is_param: true)
         "#{p_name}: #{p_type}"
       end
@@ -359,12 +368,22 @@ private
       end
       # Suppress unused-parameter warnings only for params not referenced in the body.
       # Zig 0.15+ errors on any unused function parameter; _ = &x; is a safe no-op.
+      # For mutable scalar params the Zig param name is `_m_<name>`, handle them separately.
       used_names = collect_identifier_names(node.body)
       param_suppressions = node.params
         .reject { |p| used_names.include?(p[:name]) }
-        .map    { |p| "_ = &#{p[:name]};" }
+        .map    { |p| mutable_scalar_params.include?(p[:name]) ? "_ = &_m_#{p[:name]};" : "_ = &#{p[:name]};" }
         .join("\n    ")
-      prologue_parts = [prologue, param_suppressions.empty? ? nil : param_suppressions].compact
+
+      # Emit `var <name> = _m_<name>;` for used mutable scalar params (enables reassignment).
+      mutable_param_shadows = mutable_scalar_params
+        .select { |name| used_names.include?(name) }
+        .map    { |name| "var #{name} = _m_#{name};" }
+        .join("\n    ")
+
+      prologue_parts = [prologue,
+                        param_suppressions.empty? ? nil : param_suppressions,
+                        mutable_param_shadows.empty? ? nil : mutable_param_shadows].compact
       prologue = prologue_parts.join("\n    ")
       body = transpile_block(node.body)
 
@@ -795,14 +814,23 @@ private
       result
 
     when AST::WhileLoop
-      cond = visit(node.condition)
-      body = transpile_block(node.do_branch)
-      if node.mark_per_iter && @current_fn_has_rt
-        mark_id = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
+      cond   = visit(node.condition)
+      body   = transpile_block(node.do_branch)
+      rt_ref = @do_rt_name || "rt"
+
+      if node.tight
+        # TIGHT: no yield injection, no arena loop marks — pure computation path.
+        "while (#{cond}) {\n #{body} \n}"
+      elsif node.mark_per_iter && @current_fn_has_rt
+        # Loop-local frame allocs: unwind arena each iteration AND yield at back-edge.
+        mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
-        rt_ref = @do_rt_name || "rt"
-        "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n #{body} \n}"
+        "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n #{body} \n#{rt_ref}.checkYield();\n}"
+      elsif @current_fn_has_rt
+        # Normal loop: inject cooperative yield at back-edge.
+        "while (#{cond}) {\n #{body} \n#{rt_ref}.checkYield();\n}"
       else
+        # No rt in scope (e.g. static initializer or extern context): no yield possible.
         "while (#{cond}) {\n #{body} \n}"
       end
 

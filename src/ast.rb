@@ -232,6 +232,7 @@ module AST
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     include Locatable
     attr_accessor :mark_per_iter
+    attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
   end
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }

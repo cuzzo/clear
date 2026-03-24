@@ -65,7 +65,8 @@ STRUCT BigVec {
 
 -- Only reads x1, x2, x3. The other 127 fields are dead.
 -- With SROA the compiler would eliminate those 127 field initialisations.
-FN sum3(v: BigVec) RETURNS Number @reentrant ->
+-- Note: not @reentrant — TIGHT loops cannot call @reentrant functions.
+FN sum3(v: BigVec) RETURNS Number ->
     RETURN v.x1 + v.x2 + v.x3;
 END
 
@@ -73,7 +74,10 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i = 0_i64;
     MUTABLE acc: Number = 1.0;
 
-    WHILE i < 10000000 DO
+    -- TIGHT: pure compute loop — no arena cleanup needed, no yield overhead.
+    -- Eliminates saveLoopMark/restoreLoopMark (the dominant cost in the previous
+    -- version) and checkYield. See benchmark comments above.
+    TIGHT WHILE i < 10000000 DO
         -- Inputs fed from acc: same recurrence as the C baseline, prevents
         -- constant folding and matches the serial dependency chain.
         -- CLEAR emits all 130 field initialisations here. C's SROA pass

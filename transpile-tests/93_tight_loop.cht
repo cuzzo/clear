@@ -1,0 +1,67 @@
+-- 93_tight_loop.cht — TIGHT loop: no yield injection, no arena loop marks
+--
+-- TIGHT WHILE disables:
+--   - rt.checkYield() at the back-edge (no cooperative yield budget consumed)
+--   - saveLoopMark / restoreLoopMark (arena grows freely each iteration)
+--
+-- Use TIGHT for pure computation loops (SIMD, sorting, numeric kernels)
+-- where head-of-line blocking is not a concern and per-iteration overhead
+-- must be minimised.
+
+-- Iterative power: tight inner loop, no alloc, no yield
+FN ipow!(base: Number, MUTABLE exp: Int64) RETURNS Number ->
+  MUTABLE result = 1.0;
+  TIGHT WHILE exp > 0 DO
+    result = result * base;
+    exp = exp - 1;
+  END
+  RETURN result;
+END
+
+-- Sum of squares: tight loop over a slice (n elements)
+FN sumSq(arr: Number[], n: Int64) RETURNS Number ->
+  MUTABLE total = 0.0;
+  MUTABLE i = 0_i64;
+  TIGHT WHILE i < n DO
+    x = arr[i];
+    total = total + x * x;
+    i = i + 1;
+  END
+  RETURN total;
+END
+
+-- Regular loop: verifies checkYield IS present (compiled from same file)
+FN countUp(n: Int64) RETURNS Int64 ->
+  MUTABLE i = 0_i64;
+  WHILE i < n DO
+    i = i + 1;
+  END
+  RETURN i;
+END
+
+FN cheatMain() RETURNS Void ->
+  -- TIGHT power: 2^10 = 1024
+  MUTABLE exp10 = 10_i64;
+  ASSERT ipow!(2.0, exp10) == 1024.0;
+
+  -- TIGHT sum-of-squares over a small array
+  MUTABLE data: Number[]@list = [];
+  append(data, 1.0);
+  append(data, 2.0);
+  append(data, 3.0);
+  append(data, 4.0);
+  -- 1 + 4 + 9 + 16 = 30
+  ASSERT sumSq(data, 4) == 30.0;
+
+  -- Regular loop still works (yield injection present but functionally transparent)
+  ASSERT countUp(100) == 100;
+
+  -- TIGHT loop with accumulation (no loop marks means arena grows — OK here)
+  MUTABLE acc = 0_i64;
+  MUTABLE k = 1_i64;
+  TIGHT WHILE k <= 10 DO
+    acc = acc + k;
+    k = k + 1;
+  END
+  ASSERT acc == 55;
+END
