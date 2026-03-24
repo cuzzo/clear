@@ -688,6 +688,8 @@ private
           end
           "CheatLib.mapGet(#{zig_type}, #{target}, #{index})"
         end
+      elsif node.target.type_info&.pool?
+        "#{target}.get(#{index})"
       else
         "CheatLib.getAt(#{target}, #{index})"
       end

@@ -1831,7 +1831,12 @@ private
         end
       end
 
-    # Case 2: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
+    # Case 2: Pool Index Access: pool[id] -> ?T  (sugar for pool.get(id))
+    elsif target_type_info.pool?
+      elem = target_type_info.element_type
+      node.full_type = Type.new(:"?#{elem.resolved}")
+
+    # Case 3: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
     elsif target_type_info.array? || node.target.metatype == :struct
       node.full_type = target_type_info.element_type
 
