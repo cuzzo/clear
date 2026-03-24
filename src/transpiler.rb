@@ -1412,6 +1412,16 @@ private
         return "std.math.pow(i64, #{left}, #{right})"
       end
 
+      if node.op == :MOD
+        # Zig's `%` only works on unsigned integers; signed i64 requires @mod.
+        # Number (f64) can still use `%` directly.
+        left_type = node.left.full_type
+        resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
+        if resolved == :Int64
+          return "@mod(#{left}, #{right})"
+        end
+      end
+
       # Standard Operators
       op_str = ZIG_OPS[node.op]
 

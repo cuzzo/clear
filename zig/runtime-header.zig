@@ -1360,7 +1360,11 @@ pub const CheatLib = struct {
                 value: T = undefined,
             };
 
-            slots: std.ArrayListUnmanaged(Slot) = .{},
+            slots:      std.ArrayListUnmanaged(Slot) = .{},
+            /// Number of dead (removed) slots available for reuse.
+            /// When zero we can skip the linear scan entirely and just append,
+            /// giving O(1) amortised insert for workloads with no removes.
+            free_count: u32 = 0,
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
                 self.slots.deinit(allocator);
@@ -1368,17 +1372,21 @@ pub const CheatLib = struct {
 
             /// Insert a value, returning a stable u64 handle.
             /// The handle encodes: [(generation: u32) << 32 | (index: u32)].
-            /// Reuses dead slots when available; otherwise grows the array.
+            /// Reuses dead slots when available (O(N) scan); otherwise O(1) append.
+            /// For insert-only workloads free_count stays 0, so the scan is skipped.
             pub fn insert(self: *Self, allocator: std.mem.Allocator, value: T) !u64 {
-                // Linear scan for a dead slot to reuse
-                for (self.slots.items, 0..) |*slot, i| {
-                    if (!slot.alive) {
-                        const gen = slot.generation;
-                        slot.* = .{ .generation = gen, .alive = true, .value = value };
-                        return (@as(u64, gen) << 32) | @as(u64, @intCast(i));
+                // Only scan for a dead slot if we know at least one exists.
+                if (self.free_count > 0) {
+                    for (self.slots.items, 0..) |*slot, i| {
+                        if (!slot.alive) {
+                            self.free_count -= 1;
+                            const gen = slot.generation;
+                            slot.* = .{ .generation = gen, .alive = true, .value = value };
+                            return (@as(u64, gen) << 32) | @as(u64, @intCast(i));
+                        }
                     }
                 }
-                // No free slot: grow
+                // No free slot (or free_count was 0): grow
                 const idx = @as(u32, @intCast(self.slots.items.len));
                 try self.slots.append(allocator, .{ .generation = 0, .alive = true, .value = value });
                 return @as(u64, idx); // generation=0, index=idx
@@ -1404,6 +1412,7 @@ pub const CheatLib = struct {
                 if (!slot.alive or slot.generation != gen) return;
                 slot.alive = false;
                 slot.generation +%= 1; // wrapping increment for ABA safety
+                self.free_count += 1;
             }
 
             /// Returns the number of live (non-removed) slots.
