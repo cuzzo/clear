@@ -860,9 +860,11 @@ private
 
     @loop_depth -= 1
 
-    # 4. Determine if per-iteration frame marks are safe:
-    # Safe only when no append() in the body targets an outer-scope variable.
-    node.mark_per_iter = !loop_appends_outer_list?(node.do_branch, outer_vars)
+    # 4. Loop Mark Elision: emit saveLoopMark/restoreLoopMark only when the loop
+    # body actually allocates from the frame arena AND those allocations don't
+    # target an outer-scope variable (which mark-rewind would corrupt).
+    node.mark_per_iter = loop_allocates_frame?(node.do_branch) &&
+                         !loop_appends_outer_list?(node.do_branch, outer_vars)
 
     node.full_type = :Void
   end
@@ -888,6 +890,55 @@ private
       else
         false
       end
+    end
+  end
+
+  # Returns true if any statement in stmts (or nested nodes) allocates from the
+  # frame arena — either a direct :frame VarDecl/BindExpr, a stdlib call with
+  # {alloc} in its zig_pattern, or a call to a function that uses_frame.
+  def loop_allocates_frame?(stmts)
+    return false if stmts.nil?
+    stmts = [stmts] unless stmts.is_a?(Array)
+    stmts.any? { |s| node_allocates_frame?(s) }
+  end
+
+  def node_allocates_frame?(node)
+    return false if node.nil?
+    case node
+    when AST::VarDecl, AST::BindExpr
+      return true if node.storage == :frame
+      node_allocates_frame?(node.value)
+    when AST::FuncCall
+      pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
+      return true if pat.is_a?(String) && pat.include?("{alloc}")
+      return false if node.respond_to?(:extern_call) && node.extern_call
+      fn = @fn_nodes&.[](node.name)
+      return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
+      node.args&.any? { |a| node_allocates_frame?(a) } || false
+    when AST::MethodCall
+      return false if node.respond_to?(:pool_method) && node.pool_method
+      pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
+      return true if pat.is_a?(String) && pat.include?("{alloc}")
+      fn = @fn_nodes&.[](node.name)
+      return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
+      ([node.object] + (node.args || [])).any? { |a| node_allocates_frame?(a) }
+    when AST::BinaryOp
+      node_allocates_frame?(node.left) || node_allocates_frame?(node.right)
+    when AST::UnaryOp
+      node_allocates_frame?(node.right)
+    when AST::IfStatement
+      loop_allocates_frame?(node.then_branch) || loop_allocates_frame?(node.else_branch)
+    when AST::WhileLoop
+      loop_allocates_frame?(node.do_branch)
+    when AST::MatchStatement
+      node.cases.any? { |c| loop_allocates_frame?(c[:body]) } ||
+        loop_allocates_frame?(node.default_case)
+    when AST::ReturnNode
+      node_allocates_frame?(node.value)
+    when AST::Assignment
+      node_allocates_frame?(node.value)
+    else
+      false
     end
   end
 
