@@ -154,3 +154,43 @@ Is the data shared across fibers?
 Stable heap address needed (graphs)?
 └── @indirect (combinable with any of the above)
 ```
+
+## Why Capabilities Can't "Leak" Through Structs
+
+A natural concern: what if a `@local` struct contains a field that points to `@shared` data? Could capturing the `@local` outer struct in a `@parallel` block silently expose the inner `@shared` pointer to cross-scheduler access?
+
+**This can't happen.** Capabilities exist on *bindings*, not on *struct field definitions*. Struct fields are always plain Types:
+
+```clear
+STRUCT Node {
+    value: Int64,
+    left: Node,          -- plain Type, no capability
+    right: Node,         -- plain Type, no capability
+}
+```
+
+You cannot write:
+
+```clear
+STRUCT Node {
+    value: Int64,
+    left: Node @shared,      -- NOT valid CLEAR syntax
+    cache: Counter @local,   -- NOT valid CLEAR syntax
+}
+```
+
+Capabilities are applied at the **declaration site**, when a value is bound to a variable:
+
+```clear
+root = Node{ value: 1, left: NIL, right: NIL } @local;
+```
+
+This means a struct's field types are always capability-free. When the compiler checks whether a BG block captures `@local` or `@shared` state, it only needs to check the **top-level binding** — there's no capability nesting to recurse into.
+
+The separation is enforced at two levels:
+
+1. **Parser**: The type annotation grammar (`field: Type`) does not accept capability suffixes on struct field definitions. `STRUCT Foo { x: Counter @locked }` is a parse error.
+
+2. **Functions**: Functions take plain Types (`FN process(c: Counter)`), not capabilities. A function can't receive or return a capability-wrapped value — it always works with the unwrapped inner type.
+
+This is a deliberate design constraint. Capabilities describe how a *binding* is accessed, not what a *type* contains. The cost and safety of a capability is always visible at the single line where the binding is declared — never hidden inside a type definition.
