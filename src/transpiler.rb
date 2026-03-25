@@ -326,8 +326,16 @@ private
 
       params_zig = node.params.map do |param|
         p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
-        p_type = transpile_type(param[:type], is_param: true)
-        "#{p_name}: #{p_type}"
+        p_type_sym = param[:type].is_a?(Type) ? param[:type].resolved : param[:type]
+        # Only real structs (not enums/unions/primitives) use anytype for transparent
+        # stack/heap monomorphization.  Zig monomorphizes for T and *T automatically.
+        is_user_struct = @struct_schemas&.key?(p_type_sym)
+        if is_user_struct
+          "#{p_name}: anytype"
+        else
+          p_type = transpile_type(param[:type], is_param: true)
+          "#{p_name}: #{p_type}"
+        end
       end
 
       # For generic functions, prepend comptime type params before rt
@@ -1231,23 +1239,12 @@ private
 
       # Standard call (pass rt)
       # Note: We don't add 'try' here - let the caller decide via OR RAISE or context
-      locked_map = @locked_unwrap_map || {}
       args_zig = node.args.map do |a|
         arg_code = visit(a)
-        # Locked-unwrap aliases are Zig `*T` pointers; deref to pass as value to functions.
-        if a.is_a?(AST::Identifier) && locked_map.key?(a.name)
-          "#{arg_code}.*"
-        # @local / @indirect variables are `*T` heap pointers; deref to pass by value.
-        # Functions take plain Types — the caller is responsible for unwrapping.
-        elsif a.is_a?(AST::Identifier) && a.type_info&.struct? &&
-              (a.type_info&.local? || (a.type_info&.heap? && !a.type_info&.locked? && !a.type_info&.write_locked?))
-          "#{arg_code}.*"
-        # Frame-allocated struct variables are `*T` pointers; deref when passing by value.
-        # (Strings/arrays in frame memory are already slice-typed — no deref needed.)
-        elsif a.is_a?(AST::Identifier) && a.type_info&.frame? && a.type_info&.struct?
-          "#{arg_code}.*"
-        # If argument is an array (ArrayList), convert to slice via .items for function params
-        elsif a.type_info&.array?
+        # Struct args: no .* deref needed — functions use `anytype` params which Zig
+        # monomorphizes for both T and *T with transparent field access.
+        # Array/List args: convert to slice via .items for function params.
+        if a.type_info&.array?
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
         else
           arg_code

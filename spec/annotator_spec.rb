@@ -13507,9 +13507,10 @@ RSpec.describe SemanticAnnotator do
 
     let(:zig) { ZigTranspiler.new.transpile(code) }
 
-    it "auto-derefs the frame pointer when passing to a function expecting a value type" do
-      # The call site should emit consume(s.*) not consume(s) — rt omitted since consume is pure
-      expect(zig).to include("consume(s.*)")
+    it "passes frame pointer directly — anytype monomorphization handles T and *T" do
+      # With anytype params, no explicit .* deref needed — Zig auto-derefs at comptime.
+      # The call site emits consume(s) and the function's anytype param handles both.
+      expect(zig).to include("consume(s)")
     end
   end
 
