@@ -39,11 +39,15 @@ class SemanticAnnotator
     @fn_nodes    = {}  # name => FunctionDef node (for error reporting in the post-pass)
     # Performance analysis
     @fn_raises_directly = {}  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
+    # Capability audit — tracks declarations and usage to detect over-engineering.
+    @capability_audit = {}     # "fn:var" => { sync:, ownership:, line:, mutated:, captured_bg:, captured_parallel:, pub: }
+    @current_function_name = nil
     setup_builtins
   end
 
   def annotate!(node)
     visit(node)
+    finalize_capability_audit!
   end
 
 private
@@ -339,6 +343,7 @@ private
     @frame_usage_count = 0
     @heap_usage_count  = 0
     @alloc_call_count  = 0
+    @current_function_name = node.name
 
     # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
@@ -422,6 +427,7 @@ private
       (node.reentrant == :non_reentrant) ||
       scan_for_raises(node.body)
     @function_context_stack.pop
+    @current_function_name = nil
   end
 
   def visit_StructDef(node)
@@ -1564,6 +1570,9 @@ private
 
     # 4. Set live
     current_scope.set_state(node.name, :live)
+
+    # Capability audit: record after declare so scope locals have sync/storage.
+    record_capability_binding(node.name, node, final_type, storage)
   end
 
   # Keywordless `x = val` or `x: Type = val`.
@@ -1682,6 +1691,9 @@ private
         close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
+
+      # Capability audit: record after declare so scope locals have sync/storage.
+      record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
       error!(node, "Variable '#{node.name}' is immutable")
@@ -2545,6 +2557,11 @@ private
 
       validate_capability(node, cap[:capability], var_node)
 
+      # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
+      if cap[:capability] == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
+        audit_mark_mutated(var_node.name)
+      end
+
       # Handle Wildcard Borrow: WITH RESTRICT node.* { ... }
       if var_node.is_a?(AST::GetField) && var_node.wildcard?
         # Retrieve the struct's schema for the target
@@ -2618,6 +2635,9 @@ private
         branch[:pinned] = true
         note!(node, "DO branch auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
       end
+
+      # Capability audit: mark captured variables in DO branches.
+      audit_mark_bg_captures(branch[:body], branch[:parallel])
     end
     node.full_type = :Void
   end
@@ -2693,6 +2713,9 @@ private
       node.pinned = true
       note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
     end
+
+    # Capability audit: mark captured capability variables.
+    audit_mark_bg_captures(node.body, node.parallel)
 
     # Enforce linear ownership for BG captures.
     walk_bg_capture_moves(node.body, outer_scope, locally_bound)
@@ -3194,6 +3217,119 @@ private
       end
     end
     false
+  end
+
+  # ---------------------------------------------------------------------------
+  # Capability Audit — "Architecture Consultant"
+  #
+  # Tracks capability declarations and their actual usage.  At the end of
+  # annotation, emits notes when a capability is over-specified:
+  #   - Ghost Lock: @locked/@writeLocked but never mutated via WITH EXCLUSIVE
+  #   - Isolated Share: @shared but never captured in a @parallel block
+  #   - Unnecessary Local: @local but never captured in any BG/DO block
+  # ---------------------------------------------------------------------------
+
+  def record_capability_binding(var_name, node, final_type, storage)
+    return unless var_name.is_a?(String) && @current_function_name
+
+    # Capabilities live on the scope locals (set during declare), or on the
+    # value expression's full_type (CapabilityWrap).  Check the scope first
+    # since it's the most reliable source after declare().
+    info = current_scope.locals[var_name]
+    sync = info&.dig(:sync)
+    own  = storage if storage == :multiowned || storage == :shared
+    return unless sync || own
+
+    # Skip PUB functions — libraries can't know how consumers will use exports.
+    fn_node = @fn_nodes[@current_function_name]
+    return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
+
+    key = "#{@current_function_name}:#{var_name}"
+    line = node.respond_to?(:token) && node.token ? node.token.line : nil
+    @capability_audit[key] = {
+      fn: @current_function_name, var: var_name, line: line,
+      sync: sync, ownership: own, storage: storage,
+      mutated: false, captured_bg: false, captured_parallel: false
+    }
+  end
+
+  def audit_mark_mutated(var_name)
+    return unless @current_function_name
+    key = "#{@current_function_name}:#{var_name}"
+    @capability_audit[key][:mutated] = true if @capability_audit[key]
+  end
+
+  def audit_mark_bg_captures(body_exprs, is_parallel)
+    return unless @current_function_name
+    # Walk the body looking for identifiers that match tracked capability variables.
+    _audit_walk_captures(body_exprs, Set.new, is_parallel)
+  end
+
+  def _audit_walk_captures(nodes, locally_bound, is_parallel)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        key = "#{@current_function_name}:#{name}"
+        if @capability_audit[key]
+          @capability_audit[key][:captured_bg] = true
+          @capability_audit[key][:captured_parallel] = true if is_parallel
+        end
+        next
+      end
+      # Also check WITH block var_nodes.
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          vn = cap[:var_node]
+          next unless vn.is_a?(AST::Identifier)
+          next if locally_bound.include?(vn.name)
+          key = "#{@current_function_name}:#{vn.name}"
+          if @capability_audit[key]
+            @capability_audit[key][:captured_bg] = true
+            @capability_audit[key][:captured_parallel] = true if is_parallel
+          end
+        end
+      end
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          _audit_walk_captures(val, locally_bound, is_parallel)
+        elsif val.is_a?(AST::Locatable)
+          _audit_walk_captures([val], locally_bound, is_parallel)
+        end
+      end
+    end
+  end
+
+  def finalize_capability_audit!
+    @capability_audit.each do |_key, info|
+      loc = info[:line] ? " (line #{info[:line]})" : ""
+      sync = info[:sync]
+      own  = info[:ownership]
+
+      # Warning A: Ghost Lock — @locked/@writeLocked but never mutated.
+      if (sync == :locked || sync == :write_locked) && !info[:mutated]
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
+                     "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
+      end
+
+      # Warning B: Isolated Share — @shared but never captured in @parallel.
+      if own == :shared && !info[:captured_parallel]
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @shared (Arc) but never leaves the local scheduler. " \
+                     "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
+      end
+
+      # Warning C: Unnecessary Local — @local but never captured in any BG/DO.
+      if sync == :local && !info[:captured_bg]
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @local but never shared across fibers. " \
+                     "You are paying for a heap allocation with no sharing benefit. Consider removing @local.#{loc}"
+      end
+    end
   end
 
 end
