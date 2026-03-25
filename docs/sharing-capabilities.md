@@ -49,7 +49,15 @@ WITH node AS val { print(val.left); }
 
 **What it does**: Wraps the value in `Rc(T)` — a non-atomic reference-counted pointer. Each `WITH` unwrap increments the refcount; scope exit decrements it. The value is freed when the last reference is released.
 
+**What it does**: Wraps the value in `Rc(T)` — a non-atomic reference-counted pointer. Each `WITH` unwrap increments the refcount; scope exit decrements it. The value is freed when the last reference is released.
+
 **Why it exists**: For **graph structures** and **shared ownership** patterns where multiple variables need to keep the same value alive. Unlike `@local` (which has one owner and shared pointers), `@multiowned` has multiple owners with automatic lifetime management.
+
+**Read-only access**: `WITH node AS val` provides **read-only** access to the inner value. `@multiowned` does not support mutation — it's shared ownership, not shared mutation. This is analogous to Rust's `Rc<T>` (not `Rc<RefCell<T>>`).
+
+**For shared mutation**, use:
+- `@local` — zero-cost, single-scheduler, direct field writes
+- `@locked` — mutex-protected, cross-scheduler safe
 
 **Why it's NOT thread-safe**: `Rc` uses a plain integer for its refcount — no atomic CAS, no memory barriers. If two threads increment/decrement simultaneously, the count corrupts (use-after-free or double-free).
 
@@ -60,7 +68,7 @@ BG { @parallel -> WITH node AS val { ... } }
 -- Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.
 ```
 
-**When to use it**: Graphs, trees, and shared ownership patterns where all fibers run on the same scheduler. If you need cross-scheduler sharing, use `@shared` instead.
+**When to use it**: Graphs, trees, and shared ownership patterns where all fibers run on the same scheduler and data is read-only. If you need mutation, use `@local`. If you need cross-scheduler sharing, use `@shared`.
 
 ## @shared — Atomic Reference Counting (Arc)
 
@@ -98,19 +106,22 @@ BG { @parallel -> WITH EXCLUSIVE config AS c { c.port = 9090; } }  -- write lock
 
 ```
 Do multiple fibers need to access this data?
-├── No → plain value (default, stack-allocated)
+├── No  → default (no capability, single owner)
 └── Yes
-    ├── Do multiple fibers need to OWN it (keep it alive)?
-    │   ├── No → @local (shared pointer, single owner)
-    │   └── Yes
-    │       ├── Same scheduler? → @multiowned (Rc, fast)
-    │       └── Cross-scheduler? → @shared (Arc, thread-safe)
-    └── Does it need mutable access?
-        ├── @local: direct field write (c.value = 1)
-        ├── @multiowned: WITH block (read-only unwrap)
-        ├── @locked: WITH EXCLUSIVE (Mutex guard)
-        └── @writeLocked: WITH / WITH EXCLUSIVE (RwLock)
+    ├── Does it need mutable access?
+    │   ├── Same scheduler → @local (zero cost, direct field writes)
+    │   └── Cross-scheduler → @locked or @writeLocked (mutex/rwlock)
+    └── Do multiple fibers need to OWN it (keep it alive)?
+        ├── Read-only, same scheduler → @multiowned (Rc)
+        ├── Read-only, cross-scheduler → @shared (Arc)
+        └── Mutable + shared ownership → @local (same scheduler)
+            or @shared:locked (cross-scheduler)
+
+Stable heap address needed (graph edges, self-referential)?
+└── @indirect (combinable with any of the above)
 ```
+
+**Note on primitives**: Capabilities cannot be applied to primitive types (`Int64`, `Number`, `Bool`, `Byte`, `Float64`). Wrap in a `STRUCT` first — this makes the intent explicit and gives you named fields.
 
 ## Auto-Pinning
 

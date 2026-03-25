@@ -2425,6 +2425,16 @@ private
 
     base_type = node.value.resolved_type  # e.g. :Node
     ti = Type.new(base_type)
+
+    # Primitive types (Int64, Number, Bool, Byte, Float64) cannot have capabilities.
+    # Wrapping a primitive in @local/@locked/@shared creates a heap pointer to a
+    # value you can't meaningfully dereference.  Wrap in a STRUCT instead.
+    if ti.primitive? && (node.ownership || node.sync || node.layout)
+      cap_name = node.sync || node.ownership || node.layout
+      error!(node, "Capability @#{cap_name} cannot be applied to primitive type #{base_type}. " \
+                   "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
+    end
+
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
     # @indirect forces heap location (same as @local, but different intent).

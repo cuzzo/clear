@@ -4071,6 +4071,23 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.to raise_error(CompilerError, /@local.*@parallel/)
       end
     end
+
+    context "primitive types cannot have capabilities" do
+      it "raises error when @local is used on a number literal" do
+        code = "FN f() RETURNS Void -> x = 10 @local; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @local cannot be applied to primitive type/)
+      end
+
+      it "raises error when @locked is used on a number literal" do
+        code = "FN f() RETURNS Void -> x = 10 @locked; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @locked cannot be applied to primitive type/)
+      end
+
+      it "raises error when @indirect is used on a number literal" do
+        code = "FN f() RETURNS Void -> x = 42 @indirect; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @indirect cannot be applied to primitive type/)
+      end
+    end
   end
 
   describe "BG/DO capture safety — thread-safety enforcement" do
