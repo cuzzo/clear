@@ -172,6 +172,7 @@ pub fn build(b: *std.Build) void {
         "safety-benchmark-test.zig",
         "slab-alloc-benchmark-test.zig",
         "queues-benchmark-test.zig",
+        "scheduler-benchmark-test.zig",
     };
 
     for (benchmark_files) |filename| {

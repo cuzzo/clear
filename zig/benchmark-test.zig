@@ -71,13 +71,7 @@ test "Integration Benchmark" {
     global_shutdown.store(true, .seq_cst);
 
     // Wake up all threads so they check the shutdown flag
-    // (In a real app, you'd have a condition variable or eventfd broadcast)
-    fp.global_registry.mutex.lock();
-    var it = fp.global_registry.map.valueIterator();
-    while (it.next()) |sched_ptr| {
-        sched_ptr.*.event_fd.notify();
-    }
-    fp.global_registry.mutex.unlock();
+    fp.global_registry.notifyAll();
 
     for (threads) |t| t.join();
     global_ebr.deinit(allocator);
