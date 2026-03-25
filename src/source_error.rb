@@ -118,6 +118,13 @@ module ErrorHelper
 
     raise err_class.new(token, message, @source_code)
   end
+
+  # Non-fatal compiler note (printed to stderr, does not halt compilation).
+  def note!(node_or_token, message)
+    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    loc = token ? " (line #{token.line})" : ""
+    $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
+  end
 end
 
 class SourceError < StandardError

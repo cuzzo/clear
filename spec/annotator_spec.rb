@@ -3887,6 +3887,125 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "Auto-pinning — shared/locked captures" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    context "BG block capturing @locked variable" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @locked;
+              p: ~Void = BG { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "auto-pins to local scheduler (emits submitSpawn, not spawnBest)" do
+        zig = ZigTranspiler.new.transpile(code)
+        # The BG block should be auto-pinned: emits submitSpawn, not spawnBest
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("submitSpawn")
+        expect(user_code).not_to include("spawnBest")
+      end
+    end
+
+    context "BG block capturing @writeLocked variable" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @writeLocked;
+              p: ~Void = BG { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "auto-pins to local scheduler" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("submitSpawn")
+        expect(user_code).not_to include("spawnBest")
+      end
+    end
+
+    context "BG block with @parallel override on @locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @locked;
+              p: ~Void = BG { @parallel -> WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "respects @parallel — emits spawnBest, not submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("spawnBest")
+        expect(user_code).not_to include("submitSpawn")
+      end
+    end
+
+    context "BG block without shared/locked captures" do
+      let(:code) {
+        <<~FLUX
+          FN f() RETURNS Void ->
+              p: ~Number = BG { 42.0; };
+              r: Number = NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "uses spawnBest by default (no auto-pin)" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("spawnBest")
+      end
+    end
+
+    context "DO block with @locked capture in unpinned branch" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @locked;
+              DO { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "auto-pins the branch (emits submitSpawn)" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("submitSpawn")
+      end
+    end
+
+    context "DO block with @parallel override on @locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @locked;
+              DO { @parallel -> WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "respects @parallel — emits spawnBest" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("spawnBest")
+      end
+    end
+  end
+
   describe "DO block — stack size prefix syntax" do
     subject(:ast) { run(code) }
     let(:preamble) { "FN work() RETURNS Void -> RETURN; END\n" }

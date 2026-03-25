@@ -2585,11 +2585,17 @@ private
   def visit_DoBlock(node)
     # Each branch runs in a separate fiber (fork-join).
     # Visit branches independently — no ownership transfer between parallel branches.
-    # branches: Array of { body: Array<ASTNode>, pinned: Boolean,
-    #                       stack_size: :standard | :micro | :large | :xl | nil }
-    # stack_size nil → STANDARD (16 KB) is used by the transpiler as the default.
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
+
+      # Auto-pin: if the branch captures a @shared, @locked, or @writeLocked variable
+      # and the user hasn't explicitly said @parallel, pin to the local scheduler to
+      # avoid cache-line bouncing.  @parallel overrides auto-pinning.
+      next if branch[:pinned] || branch[:parallel]
+      if branch_captures_shared_state?(branch[:body])
+        branch[:pinned] = true
+        note!(node, "DO branch auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
+      end
     end
     node.full_type = :Void
   end
@@ -2646,12 +2652,15 @@ private
     end
     node.full_type = :"~#{last_type}"
 
+    # Auto-pin: if the BG body captures a @shared, @locked, or @writeLocked variable
+    # and the user hasn't explicitly said @parallel, pin to the local scheduler to
+    # avoid cache-line bouncing.  @parallel overrides auto-pinning.
+    if !node.pinned && !node.parallel && branch_captures_shared_state?(node.body)
+      node.pinned = true
+      note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
+    end
+
     # Enforce linear ownership for BG captures.
-    # Resource and affine (requires_move?) variables from the outer scope that are
-    # referenced inside the BG body are MOVED into the fiber's lifetime.  The outer
-    # scope cannot use them again after the BG block is spawned.  (The outer scope's
-    # Zig `defer` for resources still fires after NEXT, which is correct — by that
-    # point the fiber has finished and released the value.)
     walk_bg_capture_moves(node.body, outer_scope, locally_bound)
   end
 
@@ -3018,6 +3027,66 @@ private
       end
     end
     traverse.call(program_node.statements)
+  end
+
+  # Returns true if the given body AST nodes reference any outer-scope variable
+  # whose type has sync (:locked / :write_locked) or ownership (:shared).
+  # Used for auto-pinning BG/DO blocks that capture shared mutable state.
+  def branch_captures_shared_state?(body_exprs)
+    locally_bound = Set.new
+    _captures_shared?(body_exprs, locally_bound)
+  end
+
+  def _captures_shared?(nodes, locally_bound)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+
+      # Track locally declared names to avoid false positives.
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+
+      # Check identifiers against the outer scope.
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        info = current_scope.locals[name]
+        next unless info
+        # Check for shared/locked/write_locked capabilities.
+        return true if info[:sync] == :locked || info[:sync] == :write_locked
+        return true if info[:storage] == :shared
+        next
+      end
+
+      # WITH blocks store captured variable names in capabilities hashes,
+      # not as regular AST children.  Check var_node identifiers directly.
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          var_node = cap[:var_node]
+          next unless var_node.is_a?(AST::Identifier)
+          name = var_node.name
+          next if locally_bound.include?(name)
+          info = current_scope.locals[name]
+          next unless info
+          return true if info[:sync] == :locked || info[:sync] == :write_locked
+          return true if info[:storage] == :shared
+        end
+      end
+
+      # Don't cross nested BG/DO block boundaries.
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+
+      # Recurse into child AST nodes.
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          return true if _captures_shared?(val, locally_bound)
+        elsif val.is_a?(AST::Locatable)
+          return true if _captures_shared?([val], locally_bound)
+        end
+      end
+    end
+    false
   end
 
 end
