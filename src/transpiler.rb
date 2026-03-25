@@ -951,12 +951,12 @@ private
           }.join("\n        ")
         end
 
-        # @pinned branches use spawnBest (least-loaded scheduler from global registry).
-        # Regular branches use the current scheduler's submitSpawn.
+        # Default: spawnBest distributes across all schedulers (work-stealing).
+        # @pinned: pin to the current thread's scheduler via submitSpawn.
         task_cfg = task_config_zig(branch[:stack_size])
         spawn_call = if pinned
           <<~ZIG.chomp
-            try CheatHeader.spawnBest(
+            try #{wg_var}.sched.submitSpawn(
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 &#{ctx_var},
@@ -965,7 +965,7 @@ private
           ZIG
         else
           <<~ZIG.chomp
-            try #{wg_var}.sched.submitSpawn(
+            try CheatHeader.spawnBest(
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 &#{ctx_var},
@@ -1099,12 +1099,7 @@ private
             const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
-            try #{rt_name}.getSched().submitSpawn(
-                @intFromPtr(&Runtime.entryWrapper),
-                @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-                #{ctx_var},
-                #{task_config_zig(node.stack_size)},
-            );
+            #{bg_spawn_call(node, rt_name, ctx_type, ctx_var)}
             break :#{blk_label} #{promise_var};
         }
       ZIG
@@ -1821,6 +1816,30 @@ private
     :large    => "Large",
     :xl       => "Xl",
   }.freeze
+
+  # BG spawn call: spawnBest by default, submitSpawn when @pinned.
+  def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
+    task_cfg = task_config_zig(node.stack_size)
+    if node.pinned
+      <<~ZIG.chomp
+        try #{rt_name}.getSched().submitSpawn(
+                    @intFromPtr(&Runtime.entryWrapper),
+                    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                    #{ctx_var},
+                    #{task_cfg},
+                );
+      ZIG
+    else
+      <<~ZIG.chomp
+        try CheatHeader.spawnBest(
+                    @intFromPtr(&Runtime.entryWrapper),
+                    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                    #{ctx_var},
+                    #{task_cfg},
+                );
+      ZIG
+    end
+  end
 
   def task_config_zig(stack_size)
     variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")

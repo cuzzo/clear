@@ -742,9 +742,15 @@ pub const CheatLib = struct {
     }
 
     /// Submits a task to the least-loaded scheduler from the global registry.
-    /// Used by @pinned DO branches to pin execution to the best available thread.
-    /// Errors if no scheduler is registered (i.e. running outside a scheduler context).
+    /// Distribute a fiber to the least-loaded scheduler (default for BG/DO blocks).
+    /// Fast path: when only one scheduler exists (single-threaded), skips the
+    /// registry lookup entirely — just a wait-free inbox push on the local scheduler.
     pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+        // Fast path: single scheduler — no lock, no registry scan.
+        if (fp.global_registry.len.load(.acquire) <= 1) {
+            try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+            return;
+        }
         const sched = fp.global_registry.getLeastLoaded() orelse return error.NoSchedulerAvailable;
         try sched.submitSpawn(trampoline_addr, user_fn, args, config);
     }
@@ -1599,10 +1605,14 @@ pub const CheatLib = struct {
     }
 };
 
-/// Module-level spawnBest: submits a task to the least-loaded scheduler
-/// from the global registry. Used by @pinned DO branches.
-/// Errors if no scheduler is registered (outside a scheduler context).
+/// Module-level spawnBest: distribute a fiber to the least-loaded scheduler.
+/// Default dispatch for BG/DO blocks; @pinned blocks bypass this.
+/// Fast path for single-scheduler (no lock, no registry scan).
 pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+    if (fp.global_registry.len.load(.acquire) <= 1) {
+        try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+        return;
+    }
     const sched = fp.global_registry.getLeastLoaded() orelse return error.NoSchedulerAvailable;
     try sched.submitSpawn(trampoline_addr, user_fn, args, config);
 }

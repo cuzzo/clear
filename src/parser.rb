@@ -1489,12 +1489,13 @@ class Parser
     '@pinned'   => { pinned: true          },
   }.freeze
 
-  # Stack-size-only sigils valid at the start of a BG body.
-  BG_SIZE_SIGILS = {
-    '@micro'    => :micro,
-    '@standard' => :standard,
-    '@large'    => :large,
-    '@xl'       => :xl,
+  # Sigils valid at the start of a BG body (stack size + pinned).
+  BG_SIGILS = {
+    '@micro'    => { stack_size: :micro    },
+    '@standard' => { stack_size: :standard },
+    '@large'    => { stack_size: :large    },
+    '@xl'       => { stack_size: :xl       },
+    '@pinned'   => { pinned: true          },
   }.freeze
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
@@ -1554,13 +1555,32 @@ class Parser
 
   # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
   # Returns the stack_size symbol (:micro/:standard/:large/:xl) or nil.
-  def parse_bg_size_prefix
-    return nil unless current.type == :VAR_ID &&
-                      BG_SIZE_SIGILS.key?(current.value) &&
-                      peek.type == :ARROW
-    tok = consume(:VAR_ID)
+  def parse_bg_prefix
+    pinned     = false
+    stack_size = nil
+
+    return { pinned: pinned, stack_size: stack_size } unless
+      current.type == :VAR_ID && BG_SIGILS.key?(current.value)
+
+    loop do
+      tok      = consume(:VAR_ID)
+      cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
+      attrs    = BG_SIGILS[cap_name]
+      error!(tok, "Unknown BG prefix #{tok.value.inspect}") unless attrs
+
+      if attrs[:stack_size]
+        error!(tok, "Duplicate stack size in BG prefix") if stack_size
+        stack_size = attrs[:stack_size]
+      end
+      pinned = true if attrs[:pinned]
+
+      # More sigils chained with ':'?
+      break unless match?(:CHAR, ':')
+      consume(:CHAR, ':')
+    end
+
     consume(:ARROW, '->')
-    BG_SIZE_SIGILS[tok.value]
+    { pinned: pinned, stack_size: stack_size }
   end
 
   def parse_bg_block
@@ -1569,10 +1589,10 @@ class Parser
       return parse_bg_stream_block(bg_token)
     end
     consume(:CHAR, '{')
-    stack_size = parse_bg_size_prefix
+    prefix = parse_bg_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    AST::BgBlock.new(bg_token, body, nil, stack_size)
+    AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned])
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.

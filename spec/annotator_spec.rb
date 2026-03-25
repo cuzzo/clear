@@ -3856,7 +3856,7 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Zig output: @pinned branch emits spawnBest" do
+    context "Zig output: @pinned branch emits submitSpawn (pin to local)" do
       let(:code) {
         <<~FLUX
           FN work() RETURNS Void -> RETURN; END
@@ -3864,15 +3864,13 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "emits spawnBest for pinned branch" do
+      it "emits submitSpawn for pinned branch" do
         zig = ZigTranspiler.new.transpile(code)
-        user_code = zig.split("// 3. Main Entry").first
-        expect(zig).to include("CheatHeader.spawnBest")
-        expect(user_code).not_to include("submitSpawn")
+        expect(zig).to include("submitSpawn")
       end
     end
 
-    context "Zig output: unpinned branch emits submitSpawn, pinned emits spawnBest" do
+    context "Zig output: unpinned branch emits spawnBest, pinned emits submitSpawn" do
       let(:code) {
         <<~FLUX
           FN a() RETURNS Void -> RETURN; END
@@ -3881,7 +3879,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "emits both submitSpawn (regular) and spawnBest (pinned)" do
+      it "emits both spawnBest (regular) and submitSpawn (pinned)" do
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("submitSpawn")
         expect(zig).to include("CheatHeader.spawnBest")
@@ -4001,12 +3999,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Zig output: @xl:pinned emits .Xl in spawnBest" do
+    context "Zig output: @xl:pinned emits .Xl in submitSpawn (pinned to local)" do
       let(:code) { preamble + "DO { @xl:pinned -> work() }" }
 
-      it "emits spawnBest with .stack_size = .Xl" do
+      it "emits submitSpawn with .stack_size = .Xl" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("CheatHeader.spawnBest")
+        expect(zig).to include("submitSpawn")
         expect(zig).to include(".stack_size = .Xl")
       end
     end
@@ -8174,11 +8172,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     describe "Transpiler" do
-      it "BgBlock emits a labeled block with Promise spawn and submitSpawn" do
+      it "BgBlock emits a labeled block with Promise spawn and spawnBest (default)" do
         src = "FN f() RETURNS Void -> p: ~Number = BG { 42.0; }; r: Number = NEXT p; RETURN; END"
         out = transpile_fn(src)
         expect(out).to include("CheatLib.Promise(f64).spawn(")
-        expect(out).to include("submitSpawn(")
+        expect(out).to include("spawnBest(")
         expect(out).to include("break :")
         expect(out).to include("ctx.inner.result = 42")
       end

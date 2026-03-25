@@ -657,6 +657,8 @@ pub const SchedulerRegistry = struct {
     mutex: std.Thread.Mutex = .{},
     // Map Thread ID -> *Scheduler
     map: std.AutoHashMapUnmanaged(std.Thread.Id, *Scheduler) = .{},
+    // Atomic count for fast single-scheduler check (no lock needed).
+    len: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     // Helper for Load Balancing
     pub const Pair = struct { a: ?*Scheduler, b: ?*Scheduler };
@@ -683,12 +685,25 @@ pub const SchedulerRegistry = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         try self.map.put(allocator, id, sched);
+        _ = self.len.fetchAdd(1, .release);
     }
 
     pub fn unregister(self: *SchedulerRegistry, id: std.Thread.Id) void {
         self.mutex.lock();
         defer self.mutex.unlock();
         _ = self.map.remove(id);
+        _ = self.len.fetchSub(1, .release);
+    }
+
+    /// Wake all registered schedulers by notifying their eventfds.
+    /// Used on shutdown to break workers out of epoll_wait.
+    pub fn notifyAll(self: *SchedulerRegistry) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var it = self.map.valueIterator();
+        while (it.next()) |ptr| {
+            ptr.*.event_fd.notify();
+        }
     }
 
     /// Free the registry's internal hash map storage.
