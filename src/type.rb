@@ -413,6 +413,10 @@ class Type
     @sync == :write_locked
   end
 
+  def local?
+    @sync == :local
+  end
+
   # True for any sync capability
   def any_sync?
     !@sync.nil?

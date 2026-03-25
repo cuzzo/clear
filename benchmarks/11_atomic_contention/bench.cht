@@ -1,23 +1,21 @@
 -- Atomic Contention Benchmark — CLEAR
 --
--- 1024 fibers each increment a shared @locked counter 10 000 times.
+-- 1024 fibers each increment a shared counter 10 000 times.
 -- Total expected: 10 240 000.
 --
--- CLEAR's default single-scheduler mode keeps all fibers on one core.
--- The mutex is never contended (cooperative scheduling, one fiber at a
--- time), and the counter's cache line stays in L1 Modified state — zero
--- bus traffic.  This is the "cache-line bouncing tax" that Go/Tokio pay
--- but CLEAR avoids by design.
+-- @local: zero-cost shared mutable reference (*Counter, no Mutex).
+-- All BG blocks are auto-pinned to the local scheduler because the
+-- compiler sees @local capture.  Cooperative single-threaded execution
+-- means the counter's cache line stays in L1 Modified state — zero
+-- bus traffic, zero lock overhead.
 --
--- @locked uses a Mutex guard (acquire/release per access).  In single-
--- thread mode the mutex is always uncontended (~20ns per op).
--- Go uses atomic.AddInt64 which is faster per-op (~5ns uncontended) but
--- bounces the cache line across cores under M:N scheduling.
+-- Compare to Go's atomic.AddInt64 which bounces the cache line across
+-- cores under M:N scheduling (~15ns/op on 2 cores, worse on more).
 
 STRUCT Counter { value: Int64 }
 
 FN cheatMain() RETURNS Void ->
-    c = Counter{ value: 0 } @locked;
+    MUTABLE c = Counter{ value: 0 } @local;
 
     MUTABLE futures: ~Void[]@list = [];
     MUTABLE i: Int64 = 0;
@@ -25,9 +23,7 @@ FN cheatMain() RETURNS Void ->
         append(futures, BG {
             MUTABLE j: Int64 = 0;
             WHILE j < 10000 DO
-                WITH EXCLUSIVE c AS inner {
-                    inner.value = inner.value + 1;
-                }
+                c.value = c.value + 1;
                 j = j + 1;
             END
         });
@@ -40,9 +36,7 @@ FN cheatMain() RETURNS Void ->
         k = k + 1;
     END
 
-    WITH EXCLUSIVE c AS inner {
-        print("Counter:", inner.value);
-    }
+    print("Counter:", c.value);
 
     RETURN;
 END

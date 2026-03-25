@@ -436,6 +436,9 @@ private
       ft = Type.new(node.full_type || :Void)
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
       is_mutable ||= ft.list_collection? || ft.pool? || ft.map?
+      # @local pointers are always `const` — mutation goes through the pointer, not the binding.
+      # Same as @locked: the pointer itself never changes, only the pointee.
+      is_mutable = false if ft.local?
       keyword = is_mutable ? "var" : "const"
       zig_type = transpile_type(node.full_type)
       # Always emit explicit type annotation for fn_type (Zig can't always infer *const fn(...)).
@@ -1065,11 +1068,13 @@ private
             end
           end
         }.join("\n            ")
-        result = if last_step.nil? || is_void
+        # Field/index assignments are statements (void in Zig) — never set inner.result.
+        last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
+        result = if last_step.nil? || is_void || last_is_assign
           if last_step
             last_code = visit(last_step[:expr])
-            # Block statements (while/if/etc.) already end with }; don't add ; after them.
-            last_code.strip.end_with?("}") ? last_code : "#{last_code};"
+            # Block statements already end with } or ;; don't double-terminate.
+            (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
           else
             ""
           end
@@ -1355,7 +1360,10 @@ private
                   when :multiowned then "rcCreate"
                   end
 
-      if sync_fn && own_fn
+      if node.sync == :local
+        # @local: bare heap pointer, no Mutex/RwLock wrapper.
+        "try CheatLib.localCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
+      elsif sync_fn && own_fn
         # Two-layer: sync wraps T, ownership wraps the sync type.
         <<~ZIG.chomp
           blk_cap: {

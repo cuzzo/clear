@@ -206,6 +206,7 @@ class Parser
     '@shared'     => { ownership: :shared     },
     '@locked'     => { sync: :locked          },
     '@writeLocked' => { sync: :write_locked   },
+    '@local'      => { sync: :local           },
   }.freeze
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
@@ -227,6 +228,12 @@ class Parser
   end
 
   suffix(:VAR_ID, '@writeLocked') do |lhs|
+    token = consume(:VAR_ID)
+    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync)
+  end
+
+  suffix(:VAR_ID, '@local') do |lhs|
     token = consume(:VAR_ID)
     ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync)
@@ -1278,7 +1285,7 @@ class Parser
     ownership  = nil
     sync       = nil
     collection = nil
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @list @pool].include?(current.value)
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @list @pool].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
@@ -1286,8 +1293,9 @@ class Parser
       case cap_tok.value
       when "@multiowned" then ownership = :multiowned
       when "@shared"     then ownership = :shared
-      when "@locked"     then sync      = :locked
+      when "@locked"      then sync      = :locked
       when "@writeLocked" then sync     = :write_locked
+      when "@local"       then sync     = :local
       when "@list"
         unless inner.start_with?("[")
           error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")

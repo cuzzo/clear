@@ -960,6 +960,14 @@ pub const CheatLib = struct {
 
     /// Heap-allocate a new Locked(T) wrapping a value of type T.
     /// Caller owns the returned pointer; free with lockedDestroy.
+    /// Allocate a bare T on the heap and return a mutable pointer.
+    /// Used by @local capability — no Mutex/RwLock wrapper, just *T.
+    pub fn localCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*T {
+        const ptr = try alloc.create(T);
+        ptr.* = data;
+        return ptr;
+    }
+
     pub fn lockedCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*Locked(T) {
         const ptr = try alloc.create(Locked(T));
         ptr.* = Locked(T).init(data);

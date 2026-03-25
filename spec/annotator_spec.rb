@@ -749,7 +749,7 @@ RSpec.describe SemanticAnnotator do
 
         it "succeeds" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:Number)
+          expect(result).to eq(:Void) # Assignments are statements (void)
         end
       end
 
@@ -4002,6 +4002,73 @@ RSpec.describe SemanticAnnotator do
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
         expect(user_code).to include("spawnBest")
+      end
+    end
+  end
+
+  describe "@local capability" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    context "type predicates" do
+      it "local? returns true for @local type" do
+        t = Type.new(:Counter, sync: :local)
+        expect(t.local?).to be true
+        expect(t.locked?).to be false
+        expect(t.any_sync?).to be true
+      end
+
+      it "zig_type returns *Counter for @local" do
+        t = Type.new(:Counter, sync: :local)
+        expect(t.zig_type).to eq("*Counter")
+      end
+
+      it "requires_move? returns false for @local" do
+        t = Type.new(:Counter, sync: :local)
+        expect(t.requires_move?).to be false
+      end
+    end
+
+    context "transpiler" do
+      it "emits localCreate for @local" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.localCreate(Counter")
+      end
+
+      it "emits const (not var) for @local binding" do
+        code = counter_struct + "FN f() RETURNS Void -> MUTABLE c = Counter{ value: 0 } @local; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("const c =")
+        expect(zig).not_to include("var c =")
+      end
+
+      it "BG capturing @local emits submitSpawn (auto-pinned)" do
+        code = counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              MUTABLE c = Counter{ value: 0 } @local;
+              p: ~Void = BG { c.value = 1; };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("submitSpawn")
+        expect(user_code).not_to include("spawnBest")
+      end
+    end
+
+    context "@parallel + @local = compile error" do
+      it "raises error when @parallel BG captures @local" do
+        code = counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              MUTABLE c = Counter{ value: 0 } @local;
+              p: ~Void = BG { @parallel -> c.value = 1; };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+        expect { run(code) }.to raise_error(CompilerError, /@local.*@parallel/)
       end
     end
   end

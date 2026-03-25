@@ -1850,7 +1850,8 @@ private
     # 3. Type Check
     validate_assignment_type(assignment_node, field_node.resolved_type, assignment_node.value.resolved_type)
 
-    assignment_node.full_type = field_node.full_type
+    # Assignments are statements (void), not expressions that produce a value.
+    assignment_node.full_type = :Void
   end
 
   def validate_assignment_type(node, target_type, value_type)
@@ -2588,9 +2589,13 @@ private
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
 
-      # Auto-pin: if the branch captures a @shared, @locked, or @writeLocked variable
-      # and the user hasn't explicitly said @parallel, pin to the local scheduler to
-      # avoid cache-line bouncing.  @parallel overrides auto-pinning.
+      # Hard error: @local variables CANNOT be used in @parallel blocks.
+      if branch[:parallel] && branch_captures_local_state?(branch[:body])
+        error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
+      end
+
+      # Auto-pin: if the branch captures a @shared, @locked, @writeLocked, or @local
+      # variable and the user hasn't explicitly said @parallel, pin to the local scheduler.
       next if branch[:pinned] || branch[:parallel]
       if branch_captures_shared_state?(branch[:body])
         branch[:pinned] = true
@@ -2652,9 +2657,14 @@ private
     end
     node.full_type = :"~#{last_type}"
 
-    # Auto-pin: if the BG body captures a @shared, @locked, or @writeLocked variable
-    # and the user hasn't explicitly said @parallel, pin to the local scheduler to
-    # avoid cache-line bouncing.  @parallel overrides auto-pinning.
+    # Hard error: @local variables CANNOT be used in @parallel blocks.
+    if node.parallel && branch_captures_local_state?(node.body)
+      error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
+    end
+
+    # Auto-pin: if the BG body captures a @shared, @locked, @writeLocked, or @local
+    # variable and the user hasn't explicitly said @parallel, pin to the local scheduler
+    # to avoid cache-line bouncing.  @parallel overrides auto-pinning (except for @local).
     if !node.pinned && !node.parallel && branch_captures_shared_state?(node.body)
       node.pinned = true
       note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
@@ -3029,6 +3039,48 @@ private
     traverse.call(program_node.statements)
   end
 
+  # Returns true if any captured variable has sync: :local (requires single-scheduler).
+  def branch_captures_local_state?(body_exprs)
+    _captures_with_sync?(body_exprs, Set.new, :local)
+  end
+
+  def _captures_with_sync?(nodes, locally_bound, target_sync)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        info = current_scope.locals[name]
+        next unless info
+        return true if info[:sync] == target_sync
+        next
+      end
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          var_node = cap[:var_node]
+          next unless var_node.is_a?(AST::Identifier)
+          name = var_node.name
+          next if locally_bound.include?(name)
+          info = current_scope.locals[name]
+          return true if info && info[:sync] == target_sync
+        end
+      end
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          return true if _captures_with_sync?(val, locally_bound, target_sync)
+        elsif val.is_a?(AST::Locatable)
+          return true if _captures_with_sync?([val], locally_bound, target_sync)
+        end
+      end
+    end
+    false
+  end
+
   # Returns true if the given body AST nodes reference any outer-scope variable
   # whose type has sync (:locked / :write_locked) or ownership (:shared).
   # Used for auto-pinning BG/DO blocks that capture shared mutable state.
@@ -3053,7 +3105,7 @@ private
         info = current_scope.locals[name]
         next unless info
         # Check for shared/locked/write_locked capabilities.
-        return true if info[:sync] == :locked || info[:sync] == :write_locked
+        return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
         return true if info[:storage] == :shared
         next
       end
@@ -3068,7 +3120,7 @@ private
           next if locally_bound.include?(name)
           info = current_scope.locals[name]
           next unless info
-          return true if info[:sync] == :locked || info[:sync] == :write_locked
+          return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
           return true if info[:storage] == :shared
         end
       end
