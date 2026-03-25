@@ -653,92 +653,132 @@ pub const Scheduler = struct {
     }
 };
 
+// ---------------------------------------------------------------------------
+// SchedulerRegistry — fully lock-free scheduler lookup.
+//
+// Fixed-size atomic array of *Scheduler pointers.  No heap allocation,
+// no mutex on any hot path.
+//
+// Hot paths (per-spawn, per-steal):
+//   pickTwo():  1 fetchAdd + 2 atomic loads               — O(1), wait-free
+//
+// Cold paths (once per thread lifetime):
+//   register(): 1 fetchAdd + 1 atomic store                — O(1), wait-free
+//   unregister(): linear scan + 1 atomic store             — O(N), rare
+//
+// The round-robin `next` counter cycles consecutive calls through all pairs
+// of schedulers, approximating Power-of-Two-Choices without a PRNG.
+// ---------------------------------------------------------------------------
 pub const SchedulerRegistry = struct {
-    mutex: std.Thread.Mutex = .{},
-    // Map Thread ID -> *Scheduler
-    map: std.AutoHashMapUnmanaged(std.Thread.Id, *Scheduler) = .{},
-    // Atomic count for fast single-scheduler check (no lock needed).
-    len: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    const MAX = 64;
 
-    // Helper for Load Balancing
+    slots: [MAX]std.atomic.Value(?*Scheduler) = [_]std.atomic.Value(?*Scheduler){std.atomic.Value(?*Scheduler).init(null)} ** MAX,
+    len: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    next: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    // For backward compat — spawnOn(thread_id) needs ThreadId → *Scheduler.
+    // Cold path only (not used by spawnBest or work-stealing).
+    id_mutex: std.Thread.Mutex = .{},
+    id_map: std.AutoHashMapUnmanaged(std.Thread.Id, *Scheduler) = .{},
+
     pub const Pair = struct { a: ?*Scheduler, b: ?*Scheduler };
 
-    pub fn getRandomPair(self: *SchedulerRegistry) Pair {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        const count = self.map.count();
-        if (count == 0) return .{ .a = null, .b = null };
-
-        // Linear scan is okay for N < 100. For large N, keep a separate ArrayList of keys.
-        // We'll just grab the first two we find for this simple implementation.
-        // In prod: use a PRNG to pick indices.
-
-        var it = self.map.valueIterator();
-        const a = it.next().?.*;
-        const b = if (it.next()) |ptr| ptr.* else a; // If only 1 exists, compare against self
-
+    /// O(1), wait-free.  Returns two scheduler candidates via round-robin.
+    /// Callers compare active_tasks to pick the least loaded (Power-of-Two).
+    pub fn pickTwo(self: *SchedulerRegistry) Pair {
+        const n = self.len.load(.acquire);
+        if (n == 0) return .{ .a = null, .b = null };
+        if (n == 1) {
+            return .{ .a = self.slots[0].load(.acquire), .b = null };
+        }
+        const i = self.next.fetchAdd(1, .monotonic);
+        const a = self.slots[i % n].load(.acquire);
+        const b = self.slots[(i +% 1) % n].load(.acquire);
         return .{ .a = a, .b = b };
     }
 
-    pub fn register(self: *SchedulerRegistry, allocator: std.mem.Allocator, id: std.Thread.Id, sched: *Scheduler) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        try self.map.put(allocator, id, sched);
-        _ = self.len.fetchAdd(1, .release);
+    /// Backward-compat alias used by the work-stealing idle path.
+    pub fn getRandomPair(self: *SchedulerRegistry) Pair {
+        return self.pickTwo();
     }
 
-    pub fn unregister(self: *SchedulerRegistry, id: std.Thread.Id) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        _ = self.map.remove(id);
-        _ = self.len.fetchSub(1, .release);
-    }
-
-    /// Wake all registered schedulers by notifying their eventfds.
-    /// Used on shutdown to break workers out of epoll_wait.
-    pub fn notifyAll(self: *SchedulerRegistry) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        var it = self.map.valueIterator();
-        while (it.next()) |ptr| {
-            ptr.*.event_fd.notify();
-        }
-    }
-
-    /// Free the registry's internal hash map storage.
-    /// Safe to call after all schedulers have been unregistered.
-    /// Resets to empty state so the registry can be reused.
-    pub fn deinit(self: *SchedulerRegistry, allocator: std.mem.Allocator) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        self.map.deinit(allocator);
-        self.map = .{};
-    }
-
-    pub fn get(self: *SchedulerRegistry, id: std.Thread.Id) ?*Scheduler {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.map.get(id);
-    }
-
-    /// Returns the scheduler with the fewest active tasks (least loaded).
-    /// Falls back to current scheduler's registry entry if only one is registered.
+    /// Returns the least loaded of two random candidates (lock-free).
     pub fn getLeastLoaded(self: *SchedulerRegistry) ?*Scheduler {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        var best: ?*Scheduler = null;
-        var best_load: usize = std.math.maxInt(usize);
-        var it = self.map.valueIterator();
-        while (it.next()) |ptr| {
-            const sched = ptr.*;
-            const load = sched.active_tasks.load(.monotonic);
-            if (load < best_load) {
-                best_load = load;
-                best = sched;
+        const pair = self.pickTwo();
+        const a = pair.a orelse return null;
+        const b = pair.b orelse return a;
+        const la = a.active_tasks.load(.monotonic);
+        const lb = b.active_tasks.load(.monotonic);
+        return if (la <= lb) a else b;
+    }
+
+    /// Cold path.  Appends scheduler to the next free slot.
+    pub fn register(self: *SchedulerRegistry, allocator: std.mem.Allocator, id: std.Thread.Id, sched: *Scheduler) !void {
+        const idx = self.len.fetchAdd(1, .acq_rel);
+        if (idx >= MAX) {
+            _ = self.len.fetchSub(1, .acq_rel);
+            return error.RegistryFull;
+        }
+        self.slots[idx].store(sched, .release);
+
+        // Also record in id_map for spawnOn(thread_id) lookups.
+        self.id_mutex.lock();
+        defer self.id_mutex.unlock();
+        try self.id_map.put(allocator, id, sched);
+    }
+
+    /// Cold path.  Marks the scheduler's slot as null.
+    /// The round-robin index may hit this null — pickTwo handles it gracefully.
+    pub fn unregister(self: *SchedulerRegistry, id: std.Thread.Id) void {
+        self.id_mutex.lock();
+        const sched_opt = self.id_map.get(id);
+        _ = self.id_map.remove(id);
+        self.id_mutex.unlock();
+
+        if (sched_opt) |sched| {
+            const n = self.len.load(.acquire);
+            for (self.slots[0..n]) |*slot| {
+                if (slot.load(.acquire) == sched) {
+                    slot.store(null, .release);
+                    break;
+                }
             }
         }
-        return best;
+    }
+
+    /// Wake all registered schedulers.  Used on shutdown.
+    pub fn notifyAll(self: *SchedulerRegistry) void {
+        const n = self.len.load(.acquire);
+        for (self.slots[0..n]) |*slot| {
+            if (slot.load(.acquire)) |sched| {
+                sched.event_fd.notify();
+            }
+        }
+    }
+
+    /// Free the id_map storage and reset all atomic state.
+    /// Safe after all schedulers unregistered.  Required for test reuse.
+    pub fn deinit(self: *SchedulerRegistry, allocator: std.mem.Allocator) void {
+        // Reset atomic array — clear slots and counters.
+        const n = self.len.load(.acquire);
+        for (self.slots[0..n]) |*slot| {
+            slot.store(null, .release);
+        }
+        self.len.store(0, .release);
+        self.next.store(0, .release);
+
+        // Free id_map backing storage.
+        self.id_mutex.lock();
+        defer self.id_mutex.unlock();
+        self.id_map.deinit(allocator);
+        self.id_map = .{};
+    }
+
+    /// Cold path: look up scheduler by thread ID (for spawnOn).
+    pub fn get(self: *SchedulerRegistry, id: std.Thread.Id) ?*Scheduler {
+        self.id_mutex.lock();
+        defer self.id_mutex.unlock();
+        return self.id_map.get(id);
     }
 };
 

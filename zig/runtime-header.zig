@@ -741,18 +741,29 @@ pub const CheatLib = struct {
         }
     }
 
-    /// Submits a task to the least-loaded scheduler from the global registry.
     /// Distribute a fiber to the least-loaded scheduler (default for BG/DO blocks).
-    /// Fast path: when only one scheduler exists (single-threaded), skips the
-    /// registry lookup entirely — just a wait-free inbox push on the local scheduler.
+    /// Fully lock-free: pickTwo is 1 fetchAdd + 2 atomic loads (O(1), wait-free).
+    /// Fallback: if registry is empty (test contexts), uses active_scheduler.
     pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-        // Fast path: single scheduler — no lock, no registry scan.
-        if (fp.global_registry.len.load(.acquire) <= 1) {
-            try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+        const pair = fp.global_registry.pickTwo();
+        const a = pair.a orelse {
+            // Registry empty (unit-test context) — fall back to threadlocal scheduler.
+            if (fp.scheduler_running) {
+                try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+                return;
+            }
+            return error.NoSchedulerAvailable;
+        };
+        const b = pair.b orelse {
+            // Single scheduler — direct submit, zero overhead.
+            try a.submitSpawn(trampoline_addr, user_fn, args, config);
             return;
-        }
-        const sched = fp.global_registry.getLeastLoaded() orelse return error.NoSchedulerAvailable;
-        try sched.submitSpawn(trampoline_addr, user_fn, args, config);
+        };
+        // Power-of-Two Choices: compare load, pick lighter.
+        const la = a.active_tasks.load(.monotonic);
+        const lb = b.active_tasks.load(.monotonic);
+        const target = if (la <= lb) a else b;
+        try target.submitSpawn(trampoline_addr, user_fn, args, config);
     }
 
     // TODO: When does this get cleaned up?
@@ -1607,14 +1618,24 @@ pub const CheatLib = struct {
 
 /// Module-level spawnBest: distribute a fiber to the least-loaded scheduler.
 /// Default dispatch for BG/DO blocks; @pinned blocks bypass this.
-/// Fast path for single-scheduler (no lock, no registry scan).
+/// Fully lock-free via pickTwo (1 fetchAdd + 2 atomic loads).
 pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-    if (fp.global_registry.len.load(.acquire) <= 1) {
-        try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+    const pair = fp.global_registry.pickTwo();
+    const a = pair.a orelse {
+        if (fp.scheduler_running) {
+            try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+            return;
+        }
+        return error.NoSchedulerAvailable;
+    };
+    const b = pair.b orelse {
+        try a.submitSpawn(trampoline_addr, user_fn, args, config);
         return;
-    }
-    const sched = fp.global_registry.getLeastLoaded() orelse return error.NoSchedulerAvailable;
-    try sched.submitSpawn(trampoline_addr, user_fn, args, config);
+    };
+    const la = a.active_tasks.load(.monotonic);
+    const lb = b.active_tasks.load(.monotonic);
+    const target = if (la <= lb) a else b;
+    try target.submitSpawn(trampoline_addr, user_fn, args, config);
 }
 
 

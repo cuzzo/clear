@@ -237,27 +237,23 @@ pub const Runtime = struct {
         );
     }
 
-    // "Power of Two Choices": Pick 2 random threads - best of 2 is surprisingly good - send to the least busy one.
+    // Power-of-Two Choices via lock-free pickTwo.
     // TODO: need to pass config here.
     pub fn spawnBest(user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
-        // 1. Pick 2 Random Candidates
-        const candidates = fp.global_registry.getRandomPair();
-        if (candidates.a == null) return error.NoThreads;
-
-        const s1 = candidates.a.?;
-        const s2 = candidates.b orelse s1;
-
-        // 2. Compare Load
-        const l1 = s1.load.load(.monotonic);
-        const l2 = s2.load.load(.monotonic);
-
-        // 3. Pick the Winner
-        const target = if (l1 <= l2) s1 else s2;
-
-        // 4. Allocate the REQUEST node locally (eventually from a global slab if strict ownership)
-        // Ideally, we use a global lock-free slab allocator for these nodes
-        // so we don't leak memory if the runtime shuts down.
-        // For now, we'll malloc it.
+        const pair = fp.global_registry.pickTwo();
+        const a = pair.a orelse return error.NoThreads;
+        const b = pair.b orelse {
+            try a.submitSpawn(
+                @intFromPtr(&entryWrapper),
+                @as(qs.TaskFn, @ptrCast(user_fn)),
+                args_ptr,
+                .{}
+            );
+            return;
+        };
+        const la = a.active_tasks.load(.monotonic);
+        const lb = b.active_tasks.load(.monotonic);
+        const target = if (la <= lb) a else b;
         try target.submitSpawn(
             @intFromPtr(&entryWrapper),
             @as(qs.TaskFn, @ptrCast(user_fn)),

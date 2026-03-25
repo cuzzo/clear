@@ -56,11 +56,15 @@ class TestGenerator < ZigTranspiler
           defer stack_pool.deinit();
           var sched = try fp.Scheduler.init(t_alloc, &global_ctx, &stack_pool);
           defer {
+              // Reset threadlocals BEFORE deinit so subsequent tests don't
+              // see a dangling active_scheduler pointer.
+              fp.scheduler_running = false;
               sched.deinit();
-              // Free the global registry's hash map backing store.
+              // Free the global registry's id_map backing store.
               fp.global_registry.deinit(t_alloc);
           }
           fp.active_scheduler = &sched;
+          fp.scheduler_running = true;
 
           // ---------------------------------------------------------
           // Execution (inside a fiber so WaitGroup.wait() can yield)
