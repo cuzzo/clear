@@ -712,8 +712,25 @@ pub const SchedulerRegistry = struct {
         return if (la <= lb) a else b;
     }
 
-    /// Cold path.  Appends scheduler to the next free slot.
+    /// Cold path.  First tries to reuse a null hole left by unregister;
+    /// falls back to appending at len.  This prevents len from growing
+    /// unboundedly when threads are repeatedly spawned and killed.
     pub fn register(self: *SchedulerRegistry, allocator: std.mem.Allocator, id: std.Thread.Id, sched: *Scheduler) !void {
+        // 1. Scan existing slots for a null hole (left by unregister).
+        const n = self.len.load(.acquire);
+        for (self.slots[0..n]) |*slot| {
+            // CAS null → sched.  If another thread races us for the same
+            // hole, exactly one wins; the loser continues scanning.
+            if (slot.cmpxchgStrong(null, sched, .acq_rel, .monotonic) == null) {
+                // Won the slot — record in id_map and return.
+                self.id_mutex.lock();
+                defer self.id_mutex.unlock();
+                try self.id_map.put(allocator, id, sched);
+                return;
+            }
+        }
+
+        // 2. No holes — append at the end.
         const idx = self.len.fetchAdd(1, .acq_rel);
         if (idx >= MAX) {
             _ = self.len.fetchSub(1, .acq_rel);
@@ -721,14 +738,14 @@ pub const SchedulerRegistry = struct {
         }
         self.slots[idx].store(sched, .release);
 
-        // Also record in id_map for spawnOn(thread_id) lookups.
         self.id_mutex.lock();
         defer self.id_mutex.unlock();
         try self.id_map.put(allocator, id, sched);
     }
 
-    /// Cold path.  Marks the scheduler's slot as null.
+    /// Cold path.  Marks the scheduler's slot as null (hole).
     /// The round-robin index may hit this null — pickTwo handles it gracefully.
+    /// The hole will be reclaimed by the next register() call.
     pub fn unregister(self: *SchedulerRegistry, id: std.Thread.Id) void {
         self.id_mutex.lock();
         const sched_opt = self.id_map.get(id);
