@@ -958,9 +958,17 @@ class Type
     # 5. Handle HashMaps
     #    HashMap<V>         → std.StringHashMapUnmanaged(V)        (String keys)
     #    HashMap<K, V>      → CheatLib.NumericMapType(K, V)        (numeric keys)
-    #      Integer keys → AutoHashMapUnmanaged; float keys → bit-cast context.
+    #    HashMap<V>:sharded(N) → CheatLib.ShardedStringMap(V, N)
+    #    HashMap<K,V>:sharded(N) → CheatLib.ShardedNumericMap(K, V, N)
     if map?
       val_zig = value_type.zig_type
+      if sharded?
+        if numeric_map?
+          key_zig = key_type.zig_type
+          return "CheatLib.ShardedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
+        end
+        return "CheatLib.ShardedStringMap(#{val_zig}, #{shard_count})"
+      end
       if numeric_map?
         key_zig = key_type.zig_type
         return "CheatLib.NumericMapType(#{key_zig}, #{val_zig})"

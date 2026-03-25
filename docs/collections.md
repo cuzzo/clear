@@ -120,13 +120,52 @@ Is the size fixed at compile time?
         └── No → T[]@list (simpler, more cache-friendly for iteration)
 ```
 
-## Sharding
+## Hash Maps — `HashMap<V>` and `HashMap<K, V>`
 
-Both lists and pools support sharding for parallel pipeline operations:
+Key-value maps. String-keyed by default, numeric-keyed with explicit `HashMap<K, V>`.
+
+```clear
+MUTABLE scores: HashMap<Int64> = {};     -- String → Int64
+scores["alice"] = 100_i64;
+scores["bob"] = 200_i64;
+val = scores["alice"];                    -- 100
+scores.delete("bob");
+scores.contains("alice");                 -- TRUE
+scores.count();                           -- 1
+```
+
+**When to use**: Lookup by key. The general-purpose associative container.
+
+## Sharding — Lock-Free Parallel Collections
+
+Lists, pools, and hash maps all support sharding for parallel access:
 
 ```clear
 MUTABLE data: Number[]@list:sharded(4) = [];
 MUTABLE entities: Enemy[]@pool:sharded(4) = [];
+MUTABLE counts: HashMap<Int64>:sharded(4) = {};
 ```
 
-Sharding splits the collection into N independent partitions. Pipeline operations (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
+Sharding splits the collection into N independent partitions. Each shard is a complete, independent data structure — no shared state, no locks, no atomic operations between shards.
+
+**How it works:**
+- **Lists**: Round-robin distribution on `append`. `length()` sums across shards.
+- **Pools**: Round-robin distribution on `insert`. Handle encodes shard index in upper bits.
+- **Hash maps**: Key-based routing via `hash(key) % N`. Same key always maps to same shard.
+
+**Pipeline operations** (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
+
+### Why Not a ThreadSafeHashMap?
+
+A `ThreadSafeHashMap` (like Java's `ConcurrentHashMap`) uses internal lock striping — N segments, each with its own lock. Every operation pays lock/unlock overhead (~20ns).
+
+CLEAR's `HashMap:sharded(N)` achieves the same result with **zero synchronization overhead**:
+
+| Approach | Per-operation cost | Contention under load |
+|---|---|---|
+| `ConcurrentHashMap` (lock striping) | ~20ns (lock/unlock per op) | Degrades with more threads per stripe |
+| `HashMap:sharded(N)` (CLEAR) | ~0ns (no lock, direct hash table access) | Zero (each shard owned by one scheduler) |
+
+The key insight: CLEAR's scheduler pins fibers to shards. No two fibers ever access the same shard simultaneously, so no synchronization is needed. The sharding IS the thread safety.
+
+**When you genuinely need a thread-safe map** (rare): if multiple schedulers must read/write the same keys concurrently and sharding by key doesn't work (e.g., a global config map updated by any thread), use `HashMap<V> @shared:locked` — Arc + Mutex wrapping. But this is almost always a design smell; rethink whether the data can be partitioned first.

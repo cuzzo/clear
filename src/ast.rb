@@ -107,7 +107,10 @@ module AST
         final_type
       else
         base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
-        Type.new(base_sym)
+        new_t = Type.new(base_sym)
+        # Carry shard_count through finalize — it's not encoded in the base symbol.
+        new_t.shard_count = final_type.shard_count if final_type.is_a?(Type) && final_type.shard_count
+        new_t
       end
       case storage
       when :multiowned

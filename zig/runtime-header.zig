@@ -1590,6 +1590,115 @@ pub const CheatLib = struct {
         };
     }
 
+    // -----------------------------------------------------------------------
+    // ShardedStringMap(V, N) — N independent StringHashMapUnmanaged(V) shards.
+    // Keys are routed to shards via FNV-1a hash of the key string.
+    // Each shard is independently owned by one scheduler — no locks needed.
+    // -----------------------------------------------------------------------
+    pub fn ShardedStringMap(comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = std.StringHashMapUnmanaged(V);
+
+            shards: [N]Map = [_]Map{.{}} ** N,
+
+            fn shardIndex(key: []const u8) usize {
+                return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
+            }
+
+            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const s = shardIndex(key);
+                const owned_key = try key_alloc.dupe(u8, key);
+                try self.shards[s].put(bucket_alloc, owned_key, value);
+            }
+
+            pub fn get(self: *const Self, key: []const u8) ?V {
+                const s = shardIndex(key);
+                return self.shards[s].get(key);
+            }
+
+            pub fn contains(self: *const Self, key: []const u8) bool {
+                const s = shardIndex(key);
+                return self.shards[s].contains(key);
+            }
+
+            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                const s = shardIndex(key);
+                if (self.shards[s].fetchRemove(key)) |kv| {
+                    key_alloc.free(kv.key);
+                }
+            }
+
+            pub fn count(self: *const Self) i64 {
+                var n: i64 = 0;
+                for (&self.shards) |*s| n += @intCast(s.count());
+                return n;
+            }
+
+            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                for (&self.shards) |*s| {
+                    var it = s.iterator();
+                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
+                    s.deinit(bucket_alloc);
+                }
+            }
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // ShardedNumericMap(K, V, N) — N independent NumericMapType(K,V) shards.
+    // Keys are routed to shards via simple modular hash.
+    // -----------------------------------------------------------------------
+    pub fn ShardedNumericMap(comptime K: type, comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = NumericMapType(K, V);
+
+            shards: [N]Map = [_]Map{.{}} ** N,
+
+            fn shardIndex(key: K) usize {
+                const bits: u64 = if (@typeInfo(K) == .float)
+                    @bitCast(@as(f64, key))
+                else
+                    @as(u64, @intCast(key));
+                return @as(usize, @truncate(bits)) % N;
+            }
+
+            pub fn put(self: *Self, alloc: std.mem.Allocator, key: K, value: V) !void {
+                const s = shardIndex(key);
+                try self.shards[s].put(alloc, key, value);
+            }
+
+            pub fn get(self: *const Self, key: K) ?V {
+                const s = shardIndex(key);
+                return self.shards[s].get(key);
+            }
+
+            pub fn contains(self: *const Self, key: K) bool {
+                const s = shardIndex(key);
+                return self.shards[s].contains(key);
+            }
+
+            pub fn remove(self: *Self, alloc: std.mem.Allocator, key: K) void {
+                const s = shardIndex(key);
+                _ = alloc;
+                _ = self.shards[s].fetchRemove(key);
+            }
+
+            pub fn count(self: *const Self) i64 {
+                var n: i64 = 0;
+                for (&self.shards) |*s| n += @intCast(s.count());
+                return n;
+            }
+
+            pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
+                for (&self.shards) |*s| s.deinit(alloc);
+            }
+        };
+    }
+
     pub fn ffi(rt: *Runtime, comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
         const F = @TypeOf(f);
         const type_info = @typeInfo(F);

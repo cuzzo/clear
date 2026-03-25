@@ -1353,6 +1353,16 @@ class Parser
     end
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
+
+    # HashMap:sharded(N) — detect :sharded modifier on HashMap types.
+    if base.start_with?("HashMap") && !shard_count && match?(:CHAR, ':')
+      # Peek to see if it's "sharded" (not a capability join).
+      if peek.type == :VAR_ID && peek.value == "sharded"
+        dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
+        shard_count = parse_sharded_modifier_if_present!(dummy_tok)
+      end
+    end
+
     Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
   end
 

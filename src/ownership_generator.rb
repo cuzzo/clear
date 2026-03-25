@@ -21,6 +21,15 @@ module OwnershipGenerator
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
 
+    # Sharded maps: each shard is independently deinited.
+    if type_info&.map? && type_info&.sharded?
+      if type_info.numeric_map?
+        return "defer #{name}.deinit(rt.frameAlloc());\n"
+      else
+        return "defer #{name}.deinit(rt.frameAlloc(), rt.frameAlloc());\n"
+      end
+    end
+
     # String map:
     #   Promoted (heap_map): keys + bucket array are on heapAlloc — full mapDeinit.
     #   Frame-scoped (default): keys + bucket array are on frameAlloc — deinit is a

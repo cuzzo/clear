@@ -30,7 +30,9 @@ module ZigTypeMapper
   # Delegates to Type#zig_type for type-to-Zig conversion.
   # This keeps the transpiler interface stable while the logic lives in Type.
   def transpile_type(type, is_param: false, is_field: false)
-    Type.new(type).zig_type(is_param: is_param, is_field: is_field)
+    # If already a Type, use it directly — avoids losing shard_count through round-trip.
+    t = type.is_a?(Type) ? type : Type.new(type)
+    t.zig_type(is_param: is_param, is_field: is_field)
   end
 
   # TODO: from_type/to_type may need to be simplified

@@ -9851,6 +9851,57 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("|*__each_item|")
       end
     end
+
+    describe "HashMap:sharded(N) (sharded hash map)" do
+      it "accepts HashMap<Int64>:sharded(2) as a valid type annotation" do
+        expect {
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END")
+        }.not_to raise_error
+      end
+
+      it "generates ShardedStringMap Zig type" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.ShardedStringMap(i64, 2)")
+      end
+
+      it "emits .put() for index assignment on sharded map" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              m["key"] = 42_i64;
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.put(')
+      end
+
+      it "emits .get() for index access on sharded map" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              m["key"] = 42_i64;
+              v: Int64 = m["key"];
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.get(')
+      end
+
+      it "emits .count() for count method on sharded map" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              n: Int64 = m.count();
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.count()')
+      end
+    end
   end
 
   # ===========================================================================

@@ -467,6 +467,9 @@ private
         else
           "#{node.full_type.zig_type}{}"
         end
+      elsif node.type.is_a?(Type) && node.type.map? && node.type.sharded?
+        # Sharded map: zero-initialize using the declared type's zig_type (includes shard_count).
+        "#{node.type.zig_type}{}"
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
@@ -545,14 +548,19 @@ private
              val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
 
-             if map_ft.numeric_map?
+             if map_ft.sharded?
+               # Sharded maps have direct .put() methods on the struct.
+               if map_ft.numeric_map?
+                 return "try #{map_ref}.put(#{rt_name}.frameAlloc(), #{key_ref}, #{val_ref});"
+               else
+                 return "try #{map_ref}.put(#{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), #{key_ref}, #{val_ref});"
+               end
+             elsif map_ft.numeric_map?
                key_zig = map_ft.key_type.zig_type
                val_zig = map_ft.value_type.zig_type
                return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              else
                val_zig = map_ft.value_type.zig_type
-               # Key copies go to frameAlloc (bump, ~2 ns) instead of heapAlloc (~400 ns).
-               # mapPromote() re-copies keys to heap on RETURN if the map escapes.
                return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              end
           end
@@ -723,13 +731,17 @@ private
       if node.target.metatype == :hashmap
         map_ft = Type.new(node.target.full_type)
 
-        if map_ft.numeric_map?
+        if map_ft.sharded?
+          # Sharded maps have direct .get() that returns ?V.
+          # Unwrap with orelse 0/default for CLEAR's "zero for missing" semantics.
+          val_zig = map_ft.value_type.zig_type
+          "#{target}.get(#{index}) orelse @as(#{val_zig}, 0)"
+        elsif map_ft.numeric_map?
           key_zig = map_ft.key_type.zig_type
           val_zig = map_ft.value_type.zig_type
           "CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target}, #{index})"
         else
           inner_type = node.target.full_type.to_s.match(/HashMap<(.+)>/)[1]
-          # For INDEX results (HashMap<T[]>), the runtime stores ArrayListUnmanaged(T)
           if inner_type.end_with?("[]")
             element_type = inner_type.gsub(/[\[\]]/, '')
             zig_element = transpile_type(element_type)
@@ -1740,8 +1752,12 @@ private
   # labeled block so all puts happen before the value is yielded.
   def transpile_hash_lit(node)
     # Prefer coerced_type (the declared type) over the inferred HashMap<Any> from empty literals.
-    effective_type = (node.coerced_type && node.full_type.to_s.include?("Any")) ? node.coerced_type.to_s : node.full_type.to_s
-    map_ft   = Type.new(effective_type)
+    # Use Type objects directly to preserve shard_count (not lost through to_s round-trip).
+    map_ft = if node.coerced_type && node.full_type.to_s.include?("Any")
+      node.coerced_type.is_a?(Type) ? node.coerced_type : Type.new(node.coerced_type)
+    else
+      node.full_type.is_a?(Type) ? node.full_type : Type.new(node.full_type)
+    end
     rt_name  = @do_rt_name || "rt"
     zig_init = "#{map_ft.zig_type}{}"
 
@@ -1779,7 +1795,23 @@ private
     rt_name  = @do_rt_name || "rt"
     map_ft   = Type.new(node.object.full_type)
 
-    if map_ft.numeric_map?
+    # Sharded maps have direct methods on the struct.
+    if map_ft.sharded?
+      case node.map_method
+      when :delete
+        key_code = visit(node.args[0])
+        if map_ft.numeric_map?
+          "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
+        else
+          "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
+        end
+      when :contains
+        key_code = visit(node.args[0])
+        "#{obj_code}.contains(#{key_code})"
+      when :count
+        "#{obj_code}.count()"
+      end
+    elsif map_ft.numeric_map?
       key_zig = map_ft.key_type.zig_type
       val_zig = map_ft.value_type.zig_type
       case node.map_method
