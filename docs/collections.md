@@ -168,66 +168,30 @@ CLEAR's `HashMap:sharded(N)` achieves the same result with **zero synchronizatio
 
 The key insight: CLEAR's scheduler pins fibers to shards. No two fibers ever access the same shard simultaneously, so no synchronization is needed. The sharding IS the thread safety.
 
-### Handling Key Skew ("Hot Shard" Problem)
+### Key Skew and Why It's Not Your Problem
 
-Static sharding has a weakness: if `hash("alice") % 4 == 0` and "alice" represents 90% of your traffic, Shard 0 is overwhelmed while Shards 1-3 sit idle. Three patterns handle this:
+A common concern with sharding: what if one key is much hotter than others? If `hash("alice") % 4 == 0` and "alice" is 90% of your traffic, doesn't Shard 0 get overwhelmed?
 
-**1. Local Accumulator (Map-Reduce)**
+**In CLEAR's default mode (single scheduler), this doesn't matter.** All shards run on one thread sequentially. A "hot shard" just means more time is spent on that shard's data — the same as a non-sharded map. There's no idle-core waste because there's only one core.
 
-Each fiber maintains its own `@local` map, then merges into the sharded map once:
+**In multi-scheduler mode (`CLEAR_THREADS=N`), the fix is one line:**
 
-```clear
--- Each fiber: accumulate locally (zero contention)
-MUTABLE local_counts = Counter{ value: 0 } @local;
-BG {
-    -- ...process 10000 items, update local_counts...
-}
-
--- After all fibers: merge into the shared map (one write per fiber, not per item)
+```diff
+- MUTABLE counts: HashMap<Int64>:sharded(4) = {};
++ MUTABLE counts: HashMap<Int64>:sharded(64) = {};
 ```
 
-This eliminates 99.9% of contention. You hit the shared map once per fiber instead of once per operation. This is how Spark and Flink handle massive skew.
+With 64 shards, the probability that two hot keys collide in the same shard drops from 25% to 1.5%. CLEAR's work-stealing scheduler balances fiber load across cores — if one shard's fibers are busy, idle cores steal other fibers to stay productive.
 
-**2. Actor / Service Pattern**
+No rearchitecture. No actor patterns. No map-reduce rewrites. Change one number.
 
-Treat a hot data structure as a service, not shared data. One fiber owns the map; others send requests via a stream:
+### When You Need Shared Mutable Maps
 
-```clear
--- Owner fiber: processes requests in a tight loop, zero locks
-BG {
-    WHILE TRUE DO
-        request = NEXT requests;
-        -- update the map based on request
-    END
-}
-
--- Worker fibers: send requests, don't touch the map directly
-BG { append(requests, UpdateRequest{ key: "alice", delta: 1 }); }
-```
-
-The owner fiber processes requests as fast as possible with zero synchronization. If the queue grows, the system provides natural backpressure. This is easier to debug and scale than lock striping.
-
-**3. Over-Sharding**
-
-On a 4-core machine, use `sharded(64)` instead of `sharded(4)`:
-
-```clear
-MUTABLE counts: HashMap<Int64>:sharded(64) = {};
-```
-
-With 64 shards, the probability that two hot keys land in the same shard drops from 25% (4 shards) to 1.5% (64 shards). CLEAR's work-stealing scheduler balances the fiber load across cores — if Shard 7 is busy, other fibers handling idle shards migrate to available cores.
-
-### When You Genuinely Need a Thread-Safe Map
-
-One specific workload requires traditional locking: **low-latency, read-heavy, random-access shared state** where you can't wait for a merge or message.
-
-Example: a global session registry where thousands of fibers check if a SessionID is valid *right now*.
+For rare cases where multiple schedulers must read/write the same keys concurrently (e.g., a global session registry), use `@shared:writeLocked`:
 
 ```clear
 MUTABLE sessions: HashMap<Session> @shared:writeLocked = {};
 -- Arc<RwLock<HashMap>>: readers are parallel, writers are serialized
 ```
 
-Use `@shared:writeLocked` (Arc + RwLock). Readers run in parallel across schedulers. Writers serialize but are rare (session creation/expiration). For write-heavy variants, the actor pattern above is usually better — RwLock can starve readers under heavy write contention.
-
-**Rule of thumb:** if you're reaching for `@shared:locked` on a map, first ask whether the data can be partitioned by key (`sharded`), accumulated locally (map-reduce), or owned by a single fiber (actor). In 99% of high-volume data processing, one of these patterns is both faster and simpler.
+This is CLEAR's escape hatch — it works like Java's `ConcurrentHashMap` but with explicit intent. The capability annotation makes the cost visible at the declaration site, and the compiler's capability audit will tell you if you're paying for it unnecessarily.
