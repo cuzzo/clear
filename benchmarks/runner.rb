@@ -99,19 +99,19 @@ def run_bench(dir)
   # 6. Reporting
   puts "\nRESULTS for #{dir}:"
 
-  baseline_key = [:c, :go, :rust].find { |k| results[k] }
+  label_map      = { c: "C (Perfect)", go: "Go (goroutines)", rust: "Rust (threads)",
+                     clear: "CLEAR (fibers)" }
   baseline_label = { c: "C", go: "Go", rust: "Rust" }
 
   results.each do |lang, t|
-    label = { c: "C (Perfect)", go: "Go (goroutines)", rust: "Rust (threads)",
-              clear: "CLEAR (fibers)" }[lang]
-    puts "#{'%-22s' % label} #{'%.4f' % t} s"
+    puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s"
   end
 
-  if results[:clear] && baseline_key
-    overhead = (results[:clear] / results[baseline_key]) * 100 - 100
+  [:c, :go, :rust].each do |k|
+    next unless results[:clear] && results[k]
+    overhead = (results[:clear] / results[k]) * 100 - 100
     sign = overhead >= 0 ? "+" : ""
-    puts "CLEAR vs #{baseline_label[baseline_key]}:         #{sign}#{'%.2f' % overhead}%"
+    puts "CLEAR vs #{baseline_label[k]}:         #{sign}#{'%.2f' % overhead}%"
   end
 end
 

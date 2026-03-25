@@ -355,7 +355,16 @@ pub const CheatLib = struct {
     }
 
     // Read File (Allocates on HEAP)
+    // Yields to the scheduler before blocking so other fibers can make progress
+    // concurrently.  On a cooperative M:1 scheduler this ensures all in-flight
+    // fibers are interleaved rather than running strictly one-at-a-time.
     pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+        // Cooperative yield: hand control back to the scheduler so sibling fibers
+        // can advance (open/stat/read their own files) before we block on ours.
+        // Guard is required — readFile can be called from unit-test contexts that
+        // have no scheduler, where active_scheduler is undefined.
+        if (fp.scheduler_running) fp.active_scheduler.coopYield();
+
         // 1. Open File
         // Note: We use the absolute path or CWD.
         var dir = std.fs.cwd();

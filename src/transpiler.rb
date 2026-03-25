@@ -1939,8 +1939,9 @@ private
   def get_zig_format(flux_type)
     t = flux_type.to_s
 
-    # 2. Handle Strings explicitly
-    return "{s}" if t.include?("String")
+    # 2. Handle Strings explicitly — covers :String, Byte[N] (stack string literals),
+    #    and Byte[] (dynamic byte slices), all of which are []const u8 in Zig.
+    return "{s}" if t.include?("String") || t.match?(/^Byte\[/)
 
     # 3. Handle Primitives
     case t

@@ -885,4 +885,6 @@ pub const Poller = struct {
 // We need a global pointer to the active scheduler so the wrapper can find context.
 // In a real threaded app, this would be thread-local storage.
 pub threadlocal var active_scheduler: *Scheduler = undefined;
+// True when a Scheduler has been initialised on this thread (safe to call coopYield).
+pub threadlocal var scheduler_running: bool = false;
 

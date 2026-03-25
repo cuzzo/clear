@@ -33,6 +33,7 @@ pub fn main() !void {
         fp.global_registry.deinit(allocator);
     }
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     // 5. Run cheatMain inside a fiber so BG {} / NEXT can yield.
     //    We pass &rt (the 128 MB-frame runtime) via args so cheatMain has its
