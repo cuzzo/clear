@@ -1,0 +1,48 @@
+-- Atomic Contention Benchmark — CLEAR
+--
+-- 1024 fibers each increment a shared @locked counter 10 000 times.
+-- Total expected: 10 240 000.
+--
+-- CLEAR's default single-scheduler mode keeps all fibers on one core.
+-- The mutex is never contended (cooperative scheduling, one fiber at a
+-- time), and the counter's cache line stays in L1 Modified state — zero
+-- bus traffic.  This is the "cache-line bouncing tax" that Go/Tokio pay
+-- but CLEAR avoids by design.
+--
+-- @locked uses a Mutex guard (acquire/release per access).  In single-
+-- thread mode the mutex is always uncontended (~20ns per op).
+-- Go uses atomic.AddInt64 which is faster per-op (~5ns uncontended) but
+-- bounces the cache line across cores under M:N scheduling.
+
+STRUCT Counter { value: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    c = Counter{ value: 0 } @locked;
+
+    MUTABLE futures: ~Void[]@list = [];
+    MUTABLE i: Int64 = 0;
+    WHILE i < 1024 DO
+        append(futures, BG {
+            MUTABLE j: Int64 = 0;
+            WHILE j < 10000 DO
+                WITH EXCLUSIVE c AS inner {
+                    inner.value = inner.value + 1;
+                }
+                j = j + 1;
+            END
+        });
+        i = i + 1;
+    END
+
+    MUTABLE k: Int64 = 0;
+    WHILE k < 1024 DO
+        NEXT futures[k];
+        k = k + 1;
+    END
+
+    WITH EXCLUSIVE c AS inner {
+        print("Counter:", inner.value);
+    }
+
+    RETURN;
+END
