@@ -1483,9 +1483,9 @@ private
       error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
     end
 
-    # 1b. Reject bare ~T[] — must specify [N], [INF], or [?].
-    if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic?
-      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
+    # 1b. Reject bare ~T[] — must specify [N], [INF], [?], or @list (promise list).
+    if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
+      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
     end
 
     # 1. Resolve final type (handles coercion check internally)
@@ -1593,9 +1593,9 @@ private
         error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
       end
 
-      # Reject bare ~T[] — must specify [N], [INF], or [?].
-      if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic?
-        error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
+      # Reject bare ~T[] — must specify [N], [INF], [?], or @list (promise list).
+      if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
+        error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
       end
 
       # For BgStreamBlock assigned to ~T[INF]: retype to ~T[INF] before coerce! so exact
@@ -1929,6 +1929,12 @@ private
     elsif target_type_info.pool?
       elem = target_type_info.element_type
       node.full_type = Type.new(:"?#{elem.resolved}")
+
+    # Case 2b: Promise List Index Access: ~T[]@list[i] -> ~T (a single promise)
+    # CheatLib.getAt handles ArrayListUnmanaged; annotator returns the promise type.
+    elsif target_type_info.promise_list?
+      elem_t = target_type_info.tense_type.element_type
+      node.full_type = Type.new(:"~#{elem_t.resolved}")
 
     # Case 3: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
     elsif target_type_info.array? || node.target.metatype == :struct

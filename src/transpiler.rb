@@ -1701,7 +1701,8 @@ private
       else
         node.storage
       end
-      alloc = target_storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      rt_ref = @do_rt_name || "rt"
+      alloc = target_storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
       pattern = pattern.gsub("{alloc}", alloc)
     end
 

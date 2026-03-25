@@ -286,12 +286,16 @@ class Type
 
     # 5a. Tense (Promise) Coercion: ~T only accepts ~T with a compatible inner type
     if self.tense?
+      # Promise list (~T[]@list) accepts an empty list literal [] or another ~T[] type.
+      return true if self.promise_list? && (other_type.empty_list? || (other_type.tense? && other_type.tense_type.dynamic?))
       return false unless other_type.tense?
       return tense_type.accepts?(other_type.tense_type)
     end
 
     # 5. Array Coercion (The complex part from your Annotator)
     if self.array?
+      # Any[] accepts promise list types (~T[]) for append/list intrinsic matching.
+      return true if self.element_type.any? && other_type.tense? && other_type.tense_type.dynamic?
       return false if !other_type.array?
       return true if other_type.empty_list?
       return false unless self.element_type.accepts?(other_type.element_type)
@@ -449,6 +453,12 @@ class Type
   # True when this is an explicit @list (heap list) collection.
   def list_collection?
     @collection == :list
+  end
+
+  # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.
+  # Declared as `MUTABLE futures: ~T[]@list = []`; populated via append(futures, BG { ... }).
+  def promise_list?
+    tense? && list_collection?
   end
 
   # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
@@ -836,6 +846,10 @@ class Type
     #    ~T@shared  -> CheatLib.SharedPromise(T)
     #    ~T         -> CheatLib.Promise(T)
     if tense?
+      if promise_list?
+        elem_zig = tense_type.element_type.zig_type(is_param: is_param, is_field: is_field)
+        return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
+      end
       if bounded_stream?
         elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
