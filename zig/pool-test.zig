@@ -149,6 +149,40 @@ test "Pool.get returns a mutable pointer — value can be updated in place" {
 // RAII pattern: mirrors compiler-emitted code for `MUTABLE p: User[]@pool = []`
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Type confusion: a stale handle from a removed item cannot read data from
+// the new item that reuses the same slot.  This is the "User → Projectile"
+// scenario: delete a User, allocate a Projectile in the same slot, try to
+// read the old User handle — generational check returns null.
+// ---------------------------------------------------------------------------
+
+test "Generational safety prevents type confusion after slot reuse" {
+    const User = struct { name: u64 };
+    var pool = CheatLib.Pool(User){};
+    defer pool.deinit(std.testing.allocator);
+
+    // Insert a "User" and save the handle.
+    const user_id = try pool.insert(std.testing.allocator, User{ .name = 0xDEAD });
+    try std.testing.expect(pool.get(user_id) != null);
+    try std.testing.expectEqual(@as(u64, 0xDEAD), pool.get(user_id).?.name);
+
+    // Delete the User — slot becomes free, generation increments.
+    pool.remove(user_id);
+
+    // Insert a "new item" (in a real app, a different type reusing the same pool slot).
+    const new_id = try pool.insert(std.testing.allocator, User{ .name = 0xBEEF });
+
+    // The old User handle is stale — generation mismatch returns null.
+    try std.testing.expect(pool.get(user_id) == null);
+
+    // The new handle works and reads the correct data.
+    try std.testing.expect(pool.get(new_id) != null);
+    try std.testing.expectEqual(@as(u64, 0xBEEF), pool.get(new_id).?.name);
+
+    // Verify the handles differ (different generation despite same slot index).
+    try std.testing.expect(user_id != new_id);
+}
+
 test "RAII pattern: Pool zero-init + deinit (mirrors compiler output)" {
     // This mirrors exactly what `MUTABLE p: User[]@pool = []` produces in Zig:
     //   var p = CheatLib.Pool(Point){};
