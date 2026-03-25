@@ -1354,16 +1354,19 @@ class Parser
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
-    # HashMap:sharded(N) — detect :sharded modifier on HashMap types.
+    # HashMap:sharded(N) or HashMap:striped(N) — detect modifier on HashMap types.
+    stripe_count = nil
     if base.start_with?("HashMap") && !shard_count && match?(:CHAR, ':')
-      # Peek to see if it's "sharded" (not a capability join).
       if peek.type == :VAR_ID && peek.value == "sharded"
         dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
         shard_count = parse_sharded_modifier_if_present!(dummy_tok)
+      elsif peek.type == :VAR_ID && peek.value == "striped"
+        dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
+        stripe_count = parse_striped_modifier!(dummy_tok)
       end
     end
 
-    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
+    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count, stripe_count: stripe_count)
   end
 
   # Parses `CONCURRENT(pool_size: N)? SELECT|WHERE|EACH ...`
@@ -1428,6 +1431,19 @@ class Parser
     n = count_tok.value.to_i
     if n < 2
       error!(count_tok, "@pool:sharded / @list:sharded requires N >= 2, got #{n}")
+    end
+    consume(:CHAR, ')')
+    n
+  end
+
+  def parse_striped_modifier!(cap_tok)
+    consume(:CHAR, ':')
+    consume(:VAR_ID) # consume 'striped'
+    consume(:CHAR, '(')
+    count_tok = consume(:NUMBER)
+    n = count_tok.value.to_i
+    if n < 2
+      error!(count_tok, "HashMap:striped requires N >= 2, got #{n}")
     end
     consume(:CHAR, ')')
     n

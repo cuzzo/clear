@@ -7,7 +7,8 @@ class Type
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc)
   attr_accessor :sync        # nil (default), :locked, :write_locked
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
-  attr_accessor :shard_count # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N))
+  attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N))
+  attr_accessor :stripe_count # nil (no striping) or Integer >= 2 (HashMap:striped(N))
   attr_accessor :heap_list     # true when the list was promoted to heap (returned from frame-using fn)
   attr_accessor :heap_map      # true when the string map was promoted to heap (returned from any fn)
   attr_accessor :escaped_return # true when the list/map is returned — ownership transferred, no cleanup
@@ -118,7 +119,7 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil, shard_count: nil)
+  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -129,6 +130,7 @@ class Type
       @sync               = other.sync
       @collection         = other.instance_variable_get(:@collection)
       @shard_count        = other.instance_variable_get(:@shard_count)
+      @stripe_count       = other.instance_variable_get(:@stripe_count)
       @location           = other.instance_variable_get(:@location)
       @is_error_union     = other.instance_variable_get(:@is_error_union)
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
@@ -167,6 +169,7 @@ class Type
       @location = :heap if collection == :pool
     end
     @shard_count = shard_count if shard_count
+    @stripe_count = stripe_count if stripe_count
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -468,6 +471,10 @@ class Type
   # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
   def sharded?
     !@shard_count.nil?
+  end
+
+  def striped?
+    !@stripe_count.nil?
   end
 
   def value_type
@@ -960,8 +967,17 @@ class Type
     #    HashMap<K, V>      → CheatLib.NumericMapType(K, V)        (numeric keys)
     #    HashMap<V>:sharded(N) → CheatLib.ShardedStringMap(V, N)
     #    HashMap<K,V>:sharded(N) → CheatLib.ShardedNumericMap(K, V, N)
+    #    HashMap<V>:striped(N) → CheatLib.StripedStringMap(V, N)
+    #    HashMap<K,V>:striped(N) → CheatLib.StripedNumericMap(K, V, N)
     if map?
       val_zig = value_type.zig_type
+      if striped?
+        if numeric_map?
+          key_zig = key_type.zig_type
+          return "CheatLib.StripedNumericMap(#{key_zig}, #{val_zig}, #{stripe_count})"
+        end
+        return "CheatLib.StripedStringMap(#{val_zig}, #{stripe_count})"
+      end
       if sharded?
         if numeric_map?
           key_zig = key_type.zig_type

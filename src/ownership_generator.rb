@@ -21,8 +21,8 @@ module OwnershipGenerator
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
 
-    # Sharded maps: each shard is independently deinited.
-    if type_info&.map? && type_info&.sharded?
+    # Sharded/striped maps: each shard/stripe is independently deinited.
+    if type_info&.map? && (type_info&.sharded? || type_info&.striped?)
       if type_info.numeric_map?
         return "defer #{name}.deinit(rt.frameAlloc());\n"
       else

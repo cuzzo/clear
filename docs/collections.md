@@ -155,16 +155,30 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 
 **Pipeline operations** (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
 
-### Why Not a ThreadSafeHashMap?
+### Sharded vs Striped — Choosing the Right Parallel Map
 
-A `ThreadSafeHashMap` (like Java's `ConcurrentHashMap`) uses internal lock striping — N segments, each with its own lock. Every operation pays lock/unlock overhead (~20ns).
+CLEAR offers two parallel map strategies. Same syntax, one word difference:
 
-CLEAR's `HashMap:sharded(N)` achieves the same result with **zero synchronization overhead**:
+```clear
+MUTABLE balanced: HashMap<Int64>:sharded(8) = {};  -- zero locks, max speed
+MUTABLE skewed:   HashMap<Int64>:striped(8) = {};   -- per-stripe locks, skew-safe
+```
 
-| Approach | Per-operation cost | Contention under load |
+| | `:sharded(N)` | `:striped(N)` |
 |---|---|---|
-| `ConcurrentHashMap` (lock striping) | ~20ns (lock/unlock per op) | Degrades with more threads per stripe |
-| `HashMap:sharded(N)` (CLEAR) | ~0ns (no lock, direct hash table access) | Zero (each shard owned by one scheduler) |
+| **Mechanism** | N independent maps, scheduler-pinned | N independent maps, per-stripe Mutex |
+| **Per-op cost** | ~0ns (no lock) | ~20ns (lock/unlock) |
+| **Skew-safe?** | No — hot key = hot shard = one core | Yes — any thread can access any stripe |
+| **Use when** | Keys are balanced (batch, data science) | Keys are unpredictable (web servers, real-time) |
+
+**The one-line fix for skew:**
+
+```diff
+- MUTABLE counts: HashMap<Int64>:sharded(8) = {};
++ MUTABLE counts: HashMap<Int64>:striped(8) = {};
+```
+
+No rearchitecture. No actor patterns. No map-reduce rewrites. Change one word.
 
 The key insight: CLEAR's scheduler pins fibers to shards. No two fibers ever access the same shard simultaneously, so no synchronization is needed. The sharding IS the thread safety.
 

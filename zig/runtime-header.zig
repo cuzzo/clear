@@ -1699,6 +1699,150 @@ pub const CheatLib = struct {
         };
     }
 
+    // -----------------------------------------------------------------------
+    // StripedStringMap(V, N) — N lock-striped StringHashMap segments.
+    // Any thread can access any stripe; a per-stripe Mutex serializes
+    // concurrent writes to the SAME stripe.  Different stripes are fully
+    // parallel.  This is skew-safe: if key "alice" is 99% of traffic,
+    // other threads can still write to other stripes without blocking.
+    // -----------------------------------------------------------------------
+    pub fn StripedStringMap(comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = std.StringHashMapUnmanaged(V);
+
+            const Stripe = struct {
+                map: Map = .{},
+                lock: std.Thread.Mutex = .{},
+            };
+
+            stripes: [N]Stripe = [_]Stripe{.{}} ** N,
+
+            fn stripeIndex(key: []const u8) usize {
+                return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
+            }
+
+            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                const owned_key = try key_alloc.dupe(u8, key);
+                try self.stripes[s].map.put(bucket_alloc, owned_key, value);
+            }
+
+            pub fn get(self: *Self, key: []const u8) ?V {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                return self.stripes[s].map.get(key);
+            }
+
+            pub fn contains(self: *Self, key: []const u8) bool {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                return self.stripes[s].map.contains(key);
+            }
+
+            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                if (self.stripes[s].map.fetchRemove(key)) |kv| {
+                    key_alloc.free(kv.key);
+                }
+            }
+
+            pub fn count(self: *Self) i64 {
+                var n: i64 = 0;
+                for (&self.stripes) |*stripe| {
+                    stripe.lock.lock();
+                    defer stripe.lock.unlock();
+                    n += @intCast(stripe.map.count());
+                }
+                return n;
+            }
+
+            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                for (&self.stripes) |*stripe| {
+                    var it = stripe.map.iterator();
+                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
+                    stripe.map.deinit(bucket_alloc);
+                }
+            }
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // StripedNumericMap(K, V, N) — N lock-striped numeric map segments.
+    // -----------------------------------------------------------------------
+    pub fn StripedNumericMap(comptime K: type, comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = NumericMapType(K, V);
+
+            const Stripe = struct {
+                map: Map = .{},
+                lock: std.Thread.Mutex = .{},
+            };
+
+            stripes: [N]Stripe = [_]Stripe{.{}} ** N,
+
+            fn stripeIndex(key: K) usize {
+                const bits: u64 = if (@typeInfo(K) == .float)
+                    @bitCast(@as(f64, key))
+                else
+                    @as(u64, @intCast(key));
+                return @as(usize, @truncate(bits)) % N;
+            }
+
+            pub fn put(self: *Self, alloc: std.mem.Allocator, key: K, value: V) !void {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                try self.stripes[s].map.put(alloc, key, value);
+            }
+
+            pub fn get(self: *Self, key: K) ?V {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                return self.stripes[s].map.get(key);
+            }
+
+            pub fn contains(self: *Self, key: K) bool {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                return self.stripes[s].map.contains(key);
+            }
+
+            pub fn remove(self: *Self, alloc: std.mem.Allocator, key: K) void {
+                const s = stripeIndex(key);
+                self.stripes[s].lock.lock();
+                defer self.stripes[s].lock.unlock();
+                _ = alloc;
+                _ = self.stripes[s].map.fetchRemove(key);
+            }
+
+            pub fn count(self: *Self) i64 {
+                var n: i64 = 0;
+                for (&self.stripes) |*stripe| {
+                    stripe.lock.lock();
+                    defer stripe.lock.unlock();
+                    n += @intCast(stripe.map.count());
+                }
+                return n;
+            }
+
+            pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
+                for (&self.stripes) |*s| s.map.deinit(alloc);
+            }
+        };
+    }
+
     pub fn ffi(rt: *Runtime, comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
         const F = @TypeOf(f);
         const type_info = @typeInfo(F);

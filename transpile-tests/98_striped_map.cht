@@ -1,0 +1,40 @@
+-- Test: HashMap:striped(N) — lock-striped hash maps for skew-safe parallel access.
+-- Each stripe has its own Mutex.  Any thread can access any stripe.
+-- Trades ~20ns/op lock overhead for resilience to hot-key skew.
+
+FN cheatMain() RETURNS Void ->
+    -- String-keyed striped map with 4 stripes.
+    MUTABLE scores: HashMap<Int64>:striped(4) = {};
+
+    -- Put values (any thread can write to any stripe).
+    scores["alice"] = 100_i64;
+    scores["bob"] = 200_i64;
+    scores["charlie"] = 300_i64;
+
+    -- Get values back.
+    a: Int64 = scores["alice"];
+    ASSERT a == 100, "alice should be 100";
+
+    b: Int64 = scores["bob"];
+    ASSERT b == 200, "bob should be 200";
+
+    -- Contains check.
+    ASSERT scores.contains("alice") == TRUE, "should contain alice";
+    ASSERT scores.contains("nobody") == FALSE, "should not contain nobody";
+
+    -- Count across all stripes.
+    n: Int64 = scores.count();
+    ASSERT n == 3, "count should be 3";
+
+    -- Delete.
+    scores.delete("bob");
+    ASSERT scores.count() == 2, "count should be 2 after delete";
+    ASSERT scores.contains("bob") == FALSE, "bob should be removed";
+
+    -- Overwrite.
+    scores["alice"] = 999_i64;
+    a2: Int64 = scores["alice"];
+    ASSERT a2 == 999, "alice should be overwritten to 999";
+
+    RETURN;
+END

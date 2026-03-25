@@ -9902,6 +9902,45 @@ RSpec.describe SemanticAnnotator do
         expect(zig).to include('.count()')
       end
     end
+
+    describe "HashMap:striped(N) (lock-striped hash map)" do
+      it "accepts HashMap<Int64>:striped(4) as a valid type annotation" do
+        expect {
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:striped(4) = {}; RETURN; END")
+        }.not_to raise_error
+      end
+
+      it "generates StripedStringMap Zig type" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:striped(4) = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
+      end
+
+      it "emits .put() for index assignment" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:striped(4) = {};
+              m["key"] = 42_i64;
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.put(')
+      end
+
+      it "emits .get() for index access" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:striped(4) = {};
+              m["key"] = 42_i64;
+              v: Int64 = m["key"];
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.get(')
+      end
+    end
   end
 
   # ===========================================================================

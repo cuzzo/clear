@@ -475,8 +475,8 @@ private
         else
           "#{node.full_type.zig_type}{}"
         end
-      elsif node.type.is_a?(Type) && node.type.map? && node.type.sharded?
-        # Sharded map: zero-initialize using the declared type's zig_type (includes shard_count).
+      elsif node.type.is_a?(Type) && node.type.map? && (node.type.sharded? || node.type.striped?)
+        # Sharded/striped map: zero-initialize using the declared type's zig_type.
         "#{node.type.zig_type}{}"
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
@@ -556,8 +556,8 @@ private
              val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
 
-             if map_ft.sharded?
-               # Sharded maps have direct .put() methods on the struct.
+             if map_ft.sharded? || map_ft.striped?
+               # Sharded/striped maps have direct .put() methods on the struct.
                if map_ft.numeric_map?
                  return "try #{map_ref}.put(#{rt_name}.frameAlloc(), #{key_ref}, #{val_ref});"
                else
@@ -739,9 +739,8 @@ private
       if node.target.metatype == :hashmap
         map_ft = Type.new(node.target.full_type)
 
-        if map_ft.sharded?
-          # Sharded maps have direct .get() that returns ?V.
-          # Unwrap with orelse 0/default for CLEAR's "zero for missing" semantics.
+        if map_ft.sharded? || map_ft.striped?
+          # Sharded/striped maps have direct .get() that returns ?V.
           val_zig = map_ft.value_type.zig_type
           "#{target}.get(#{index}) orelse @as(#{val_zig}, 0)"
         elsif map_ft.numeric_map?
@@ -1798,7 +1797,7 @@ private
     map_ft   = Type.new(node.object.full_type)
 
     # Sharded maps have direct methods on the struct.
-    if map_ft.sharded?
+    if map_ft.sharded? || map_ft.striped?
       case node.map_method
       when :delete
         key_code = visit(node.args[0])
