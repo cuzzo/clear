@@ -201,42 +201,53 @@ class Parser
 
   # Capability Wraps: expr @multiowned -> Rc(T), expr @shared -> Arc(T), expr @locked -> *Locked(T)
   # Supports `:` join: expr @shared:locked, expr @locked:multiowned (order-independent).
+  # Three orthogonal dimensions:
+  #   ownership: :multiowned | :shared         (who keeps it alive)
+  #   sync:      :locked | :write_locked | :local  (how it's synchronized)
+  #   layout:    :indirect                      (where it lives — heap pointer)
   CAP_SIGIL_ATTRS = {
-    '@multiowned' => { ownership: :multiowned },
-    '@shared'     => { ownership: :shared     },
-    '@locked'     => { sync: :locked          },
-    '@writeLocked' => { sync: :write_locked   },
-    '@local'      => { sync: :local           },
+    '@multiowned'  => { dim: :ownership, val: :multiowned  },
+    '@shared'      => { dim: :ownership, val: :shared      },
+    '@locked'      => { dim: :sync,      val: :locked      },
+    '@writeLocked' => { dim: :sync,      val: :write_locked },
+    '@local'       => { dim: :sync,      val: :local       },
+    '@indirect'    => { dim: :layout,    val: :indirect    },
   }.freeze
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@shared') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@locked') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@writeLocked') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@local') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+  end
+
+  suffix(:VAR_ID, '@indirect') do |lhs|
+    token = consume(:VAR_ID)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   # Inline union variant constructor: TypeName.VariantName{ field: val, ... }
@@ -1285,7 +1296,7 @@ class Parser
     ownership  = nil
     sync       = nil
     collection = nil
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @list @pool].include?(current.value)
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @list @pool].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
@@ -1296,6 +1307,7 @@ class Parser
       when "@locked"      then sync      = :locked
       when "@writeLocked" then sync     = :write_locked
       when "@local"       then sync     = :local
+      when "@indirect"    then nil  # @indirect sets layout, not sync — handled by Type
       when "@list"
         unless inner.start_with?("[")
           error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
@@ -1458,32 +1470,36 @@ class Parser
   # `tok` is the already-consumed first sigil token; `first_attrs` is its CAP_SIGIL_ATTRS entry.
   # Returns [ownership, sync] — either field may be nil.
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
+  # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
+  # Returns [ownership, sync, layout].
   def parse_cap_join(tok, first_attrs)
-    ownership = first_attrs[:ownership]
-    sync      = first_attrs[:sync]
+    dims = { ownership: nil, sync: nil, layout: nil }
+    apply_cap_dim!(tok, first_attrs, dims)
 
-    if match?(:CHAR, ':')
+    while match?(:CHAR, ':')
       consume(:CHAR, ':')
       unless current.type == :VAR_ID
-        error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+        error!(current, "Expected a capability sigil after ':'")
       end
-      # Normalize: accept both 'locked' and '@locked' after ':' (same convention as branch prefixes)
-      normalized   = current.value.start_with?('@') ? current.value : "@#{current.value}"
-      second_attrs = CAP_SIGIL_ATTRS[normalized]
-      unless second_attrs
-        error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+      normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
+      attrs = CAP_SIGIL_ATTRS[normalized]
+      unless attrs
+        error!(current, "Unknown capability sigil '#{current.value}'. " \
+                        "Expected @multiowned, @shared, @locked, @writeLocked, @local, or @indirect")
       end
-      second_tok = consume(:VAR_ID)
-      if second_attrs[:ownership]
-        error!(second_tok, "Duplicate ownership capability in '#{tok.value}:#{second_tok.value}'") if ownership
-        ownership = second_attrs[:ownership]
-      else
-        error!(second_tok, "Duplicate sync capability in '#{tok.value}:#{second_tok.value}'") if sync
-        sync = second_attrs[:sync]
-      end
+      next_tok = consume(:VAR_ID)
+      apply_cap_dim!(next_tok, attrs, dims)
     end
 
-    [ownership, sync]
+    [dims[:ownership], dims[:sync], dims[:layout]]
+  end
+
+  def apply_cap_dim!(tok, attrs, dims)
+    dim = attrs[:dim]
+    if dims[dim]
+      error!(tok, "Duplicate #{dim} capability: already have @#{dims[dim]}, cannot add @#{attrs[:val]}")
+    end
+    dims[dim] = attrs[:val]
   end
 
   # Branch-prefix sigils for DO blocks.

@@ -1360,8 +1360,8 @@ private
                   when :multiowned then "rcCreate"
                   end
 
-      if node.sync == :local
-        # @local: bare heap pointer, no Mutex/RwLock wrapper.
+      if node.sync == :local || (node.layout == :indirect && !node.sync && !node.ownership)
+        # @local or bare @indirect: heap pointer, no Mutex/RwLock wrapper.
         "try CheatLib.localCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
       elsif sync_fn && own_fn
         # Two-layer: sync wraps T, ownership wraps the sync type.

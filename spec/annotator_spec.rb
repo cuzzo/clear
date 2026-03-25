@@ -4229,6 +4229,44 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "Capability combinations — ordering and conflicts" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    context "valid cross-dimension combinations" do
+      it "@local:indirect parses and compiles" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local:indirect; RETURN; END"
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "@indirect:local (reversed order) parses and compiles" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @indirect:local; RETURN; END"
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "@shared:locked (ownership + sync) parses and compiles" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @shared:locked; RETURN; END"
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    context "invalid same-dimension duplicates" do
+      it "@locked:writeLocked (duplicate sync) raises parser error" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @locked:writeLocked; RETURN; END"
+        expect { run(code) }.to raise_error(ParserError, /Duplicate sync/)
+      end
+
+      it "@shared:multiowned (duplicate ownership) raises parser error" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @shared:multiowned; RETURN; END"
+        expect { run(code) }.to raise_error(ParserError, /Duplicate ownership/)
+      end
+
+      it "@local:locked (duplicate sync) raises parser error" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local:locked; RETURN; END"
+        expect { run(code) }.to raise_error(ParserError, /Duplicate sync/)
+      end
+    end
+  end
+
   describe "DO block — stack size prefix syntax" do
     subject(:ast) { run(code) }
     let(:preamble) { "FN work() RETURNS Void -> RETURN; END\n" }

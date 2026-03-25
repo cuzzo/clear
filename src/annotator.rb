@@ -2427,9 +2427,11 @@ private
     ti = Type.new(base_type)
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
+    # @indirect forces heap location (same as @local, but different intent).
+    ti.location  = :heap           if node.layout == :indirect
 
-    # CapabilityWrap always allocates on the heap (rcCreate/arcCreate/lockedCreate/rwLockedCreate).
-    @heap_usage_count += 1 if node.ownership || node.sync
+    # CapabilityWrap always allocates on the heap.
+    @heap_usage_count += 1 if node.ownership || node.sync || node.layout
 
     # Store the Type directly — full_type= accepts Type objects
     node.full_type = ti

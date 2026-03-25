@@ -314,8 +314,9 @@ module AST
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
-  # sync:      nil | :locked | :write_locked
-  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync) { include Locatable }
+  # sync:      nil | :locked | :write_locked | :local
+  # layout:    nil | :indirect
+  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   # PassStmt: no-op statement (like Python's `pass`).
   PassStmt          = Struct.new(:token) { include Locatable }
