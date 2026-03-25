@@ -27,6 +27,7 @@ const STANDARD_STACK_SIZE = fm.STANDARD_STACK_SIZE;
 
 const linux = std.os.linux;
 const posix = std.posix;
+const IoUring = linux.IoUring;
 
 const FiberNode = struct {
     // The SlabAllocator will overwrite the first 8 bytes for its 'next' pointer.
@@ -128,6 +129,12 @@ pub const Scheduler = struct {
     global_ebr: *EbrContext,
     poller: Poller,
 
+    // 4a. io_uring — used for async file I/O (readFile).
+    // Network I/O stays on epoll.  The ring fd is registered with epoll so the
+    // scheduler's existing event loop drains CQEs alongside socket events.
+    ring: IoUring,
+    uring_cqes: [128]linux.io_uring_cqe = undefined,
+
     // 4. Main Thread Context (To return to OS)
     main_ctx: Context,
     current_task: ?*Task,
@@ -169,6 +176,9 @@ pub const Scheduler = struct {
         const p = Poller.init() catch unreachable;
         const efd = try SmartEventFd.init();
 
+        // io_uring ring for async file I/O (256 SQE slots).
+        const ring = try IoUring.init(256, 0);
+
         var sched = Scheduler{
             .stack_pool = stack_pool,
             .fiber_pool = .{},
@@ -181,6 +191,7 @@ pub const Scheduler = struct {
             .allocator = allocator,
             .global_ebr = global_ebr,
             .poller = p,
+            .ring = ring,
             .main_ctx = undefined,
             .current_task = null,
             .active_tasks = std.atomic.Value(usize).init(0),
@@ -188,6 +199,11 @@ pub const Scheduler = struct {
         };
 
         try sched.poller.register(sched.event_fd.fd, 0);
+
+        // Register the io_uring fd with epoll so CQE readiness wakes the
+        // scheduler from epoll_wait.  Use a sentinel user_data value (1) to
+        // distinguish from the eventfd sentinel (0) and task pointers (>4096).
+        try sched.poller.register(ring.fd, 1);
 
         return sched;
     }
@@ -251,6 +267,7 @@ pub const Scheduler = struct {
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
+        self.ring.deinit();
         self.poller.deinit();
     }
 
@@ -491,6 +508,12 @@ pub const Scheduler = struct {
                 }
             }
 
+            // Drain any io_uring completions before sleeping.  This catches CQEs
+            // that arrived while we were busy running fibers, without waiting for
+            // epoll to fire on the ring fd.
+            self.drainCqes();
+            if (self.ready_queue.len() > 0) continue;
+
             // IF IDLE: Poll for IO
             // Determine timeout based on next timer
             // If we have a sleeper in 50ms, poll(50). If empty, poll(-1) [Wait Forever].
@@ -529,6 +552,10 @@ pub const Scheduler = struct {
                     // CHECK: Is this the Wake Up Signal?
                     if (data_ptr == 0) {
                         self.event_fd.consume();
+                    }
+                    // CHECK: Is this the io_uring ring fd? (sentinel = 1)
+                    else if (data_ptr == 1) {
+                        self.drainCqes();
                     }
                     else {
                         // It's a standard IO Task Wakeup
@@ -591,6 +618,38 @@ pub const Scheduler = struct {
     // Remove fd from epoll (called by socketClose before closing the fd).
     pub fn unregisterFd(self: *Scheduler, fd: i32) void {
         self.poller.unregister(fd);
+    }
+
+    // -----------------------------------------------------------------
+    // io_uring helpers — async file I/O
+    // -----------------------------------------------------------------
+
+    /// Per-operation handle placed on the fiber's (blocked) stack frame.
+    /// Its address goes into the SQE user_data field.  The scheduler
+    /// writes the CQE result before waking the fiber, so the fiber
+    /// reads `waiter.result` immediately after resume.
+    pub const IoWaiter = struct {
+        task: *Task,
+        result: i32 = undefined,
+    };
+
+    /// Submit an IORING_OP_READ for `fd` into `buffer` and park `waiter.task`.
+    pub fn submitRead(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
+        _ = try self.ring.read(@intFromPtr(waiter), fd, .{ .buffer = buffer }, 0);
+        _ = try self.ring.submit();
+        waiter.task.status = .Blocked;
+    }
+
+    /// Drain all ready CQEs from the io_uring, writing the result into each
+    /// IoWaiter and pushing the corresponding task back onto the ready queue.
+    fn drainCqes(self: *Scheduler) void {
+        const n = self.ring.copy_cqes(&self.uring_cqes, 0) catch return;
+        for (self.uring_cqes[0..n]) |cqe| {
+            const waiter: *IoWaiter = @ptrFromInt(cqe.user_data);
+            waiter.result = cqe.res;
+            waiter.task.status = .Ready;
+            self.ready_queue.push(self.allocator, waiter.task) catch unreachable;
+        }
     }
 };
 

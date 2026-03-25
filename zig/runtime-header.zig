@@ -355,29 +355,43 @@ pub const CheatLib = struct {
     }
 
     // Read File (Allocates on HEAP)
-    // Yields to the scheduler before blocking so other fibers can make progress
-    // concurrently.  On a cooperative M:1 scheduler this ensures all in-flight
-    // fibers are interleaved rather than running strictly one-at-a-time.
+    //
+    // When a scheduler is active (BG fibers), the actual read(2) syscall is
+    // submitted via io_uring (IORING_OP_READ).  The fiber parks itself as
+    // .Blocked and yields; the kernel completes the read asynchronously and
+    // the scheduler's CQE drain wakes the fiber.  Other fibers run in the
+    // meantime, giving genuine concurrency on a single OS thread.
+    //
+    // Fallback: Outside a scheduler context (unit tests), a plain blocking
+    // readAll is used — no io_uring, no yield.
     pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-        // Cooperative yield: hand control back to the scheduler so sibling fibers
-        // can advance (open/stat/read their own files) before we block on ours.
-        // Guard is required — readFile can be called from unit-test contexts that
-        // have no scheduler, where active_scheduler is undefined.
-        if (fp.scheduler_running) fp.active_scheduler.coopYield();
-
-        // 1. Open File
-        // Note: We use the absolute path or CWD.
+        // 1. Open + stat are fast (no data transfer, just metadata).
         var dir = std.fs.cwd();
         var file = try dir.openFile(path, .{});
         defer file.close();
 
-        // 2. Stat size to allocate exact buffer
         const stat = try file.stat();
-
-        // 3. Alloc buffer in Heap Arena (Survivor)
         const buffer = try allocator.alloc(u8, stat.size);
 
-        // 4. Read
+        // 2. Async path: submit read via io_uring, yield, resume when done.
+        if (fp.scheduler_running) {
+            const sched = fp.active_scheduler;
+            const task = sched.getCurrent();
+
+            // IoWaiter lives on the fiber's stack — safe because the fiber is
+            // .Blocked until the CQE arrives and the scheduler writes .result.
+            var waiter = fp.Scheduler.IoWaiter{ .task = task };
+            try sched.submitRead(&waiter, file.handle, buffer);
+            task.base.yield(); // park until CQE
+
+            if (waiter.result < 0) {
+                allocator.free(buffer);
+                return error.IoUringReadFailed;
+            }
+            return buffer[0..@intCast(waiter.result)];
+        }
+
+        // 3. Blocking fallback for test / non-scheduler contexts.
         _ = try file.readAll(buffer);
         return buffer;
     }
