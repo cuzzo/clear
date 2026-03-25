@@ -4073,6 +4073,162 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "BG/DO capture safety — thread-safety enforcement" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+    let(:noop_fn) { "FN noop() RETURNS Void -> RETURN; END\n" }
+
+    # --- @multiowned (Rc) safety ---
+
+    context "BG capturing @multiowned without @parallel" do
+      let(:code) {
+        counter_struct + noop_fn + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @multiowned;
+              p: ~Void = BG { noop(); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "compiles without error" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    context "BG @parallel + @multiowned (direct identifier reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useRc(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @multiowned;
+              p: ~Void = BG { @parallel -> useRc(c); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "raises compile error (Rc is not thread-safe)" do
+        expect { run(code) }.to raise_error(CompilerError, /multiowned.*Rc.*non-atomic/)
+      end
+    end
+
+    context "DO @parallel + @multiowned (direct identifier reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useRc(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @multiowned;
+              DO { @parallel -> useRc(c) }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "raises compile error (Rc is not thread-safe)" do
+        expect { run(code) }.to raise_error(CompilerError, /multiowned.*Rc.*non-atomic/)
+      end
+    end
+
+    # --- @local safety ---
+
+    context "BG @parallel + @local" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              MUTABLE c = Counter{ value: 0 } @local;
+              p: ~Void = BG { @parallel -> c.value = 1; };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "raises compile error (@local has no sync)" do
+        expect { run(code) }.to raise_error(CompilerError, /@local.*@parallel/)
+      end
+    end
+
+    # --- @shared (Arc) — thread-safe, @parallel is allowed ---
+
+    context "BG @parallel + @shared (no WITH needed — just reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useArc(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @shared;
+              p: ~Void = BG { @parallel -> useArc(c); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "allows @parallel (Arc is thread-safe)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # --- @locked — thread-safe, @parallel is allowed ---
+
+    context "BG @parallel + @locked (no WITH needed — just reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useLocked(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 } @locked;
+              p: ~Void = BG { @parallel -> useLocked(c); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "allows @parallel (Mutex is thread-safe)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # --- Plain affine type — moved into BG, not shared ---
+
+    context "BG capturing affine struct" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS Void ->
+              c = Counter{ value: 0 };
+              p: ~Void = BG { print(c.value); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "moves the struct (outer scope loses access)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # --- Primitives — always safe (value copy) ---
+
+    context "BG capturing primitive Int64" do
+      let(:code) {
+        <<~FLUX
+          FN f() RETURNS Void ->
+              x: Int64 = 42;
+              p: ~Int64 = BG { x; };
+              r: Int64 = NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "copies the value (no move, no pinning needed)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+  end
+
   describe "DO block — stack size prefix syntax" do
     subject(:ast) { run(code) }
     let(:preamble) { "FN work() RETURNS Void -> RETURN; END\n" }
