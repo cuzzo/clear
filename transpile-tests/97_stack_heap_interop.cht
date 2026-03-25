@@ -1,0 +1,42 @@
+-- Test: Stack vs Heap interoperability.
+-- Functions take plain Types — the caller handles unwrapping.
+-- A single function must accept stack, @indirect, and @local structs.
+
+STRUCT Point { x: Number, y: Number }
+
+FN sum(p: Point) RETURNS Number ->
+    RETURN p.x + p.y;
+END
+
+FN scale(p: Point, factor: Number) RETURNS Point ->
+    RETURN Point{ x: p.x * factor, y: p.y * factor };
+END
+
+FN cheatMain() RETURNS Void ->
+    -- 1. Stack-allocated (default) — value on the OS stack, no pointer.
+    a = Point{ x: 1.0, y: 2.0 };
+    r1 = sum(a);
+    ASSERT r1 == 3.0, "stack Point sum should be 3";
+
+    -- 2. @indirect — heap-allocated *Point, stable address for graphs.
+    b = Point{ x: 10.0, y: 20.0 } @indirect;
+    r2 = sum(b);
+    ASSERT r2 == 30.0, "@indirect Point sum should be 30";
+
+    -- 3. @local — heap pointer shared across fibers (no lock).
+    MUTABLE c = Point{ x: 100.0, y: 200.0 } @local;
+    r3 = sum(c);
+    ASSERT r3 == 300.0, "@local Point sum should be 300";
+
+    -- 4. Function returning a struct works with all input types.
+    s1 = scale(a, 2.0);
+    ASSERT s1.x == 2.0, "scaled stack x";
+
+    s2 = scale(b, 3.0);
+    ASSERT s2.x == 30.0, "scaled indirect x";
+
+    s3 = scale(c, 0.5);
+    ASSERT s3.x == 50.0, "scaled local x";
+
+    RETURN;
+END

@@ -1237,6 +1237,11 @@ private
         # Locked-unwrap aliases are Zig `*T` pointers; deref to pass as value to functions.
         if a.is_a?(AST::Identifier) && locked_map.key?(a.name)
           "#{arg_code}.*"
+        # @local / @indirect variables are `*T` heap pointers; deref to pass by value.
+        # Functions take plain Types — the caller is responsible for unwrapping.
+        elsif a.is_a?(AST::Identifier) && a.type_info&.struct? &&
+              (a.type_info&.local? || (a.type_info&.heap? && !a.type_info&.locked? && !a.type_info&.write_locked?))
+          "#{arg_code}.*"
         # Frame-allocated struct variables are `*T` pointers; deref when passing by value.
         # (Strings/arrays in frame memory are already slice-typed — no deref needed.)
         elsif a.is_a?(AST::Identifier) && a.type_info&.frame? && a.type_info&.struct?
