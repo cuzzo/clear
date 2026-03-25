@@ -160,6 +160,22 @@ STD_LIB = {
     zig: "try CheatLib.fileWrite({0}, {1})"
   },
 
+  # List all files in a directory. Returns a list of filenames (not full paths).
+  # Usage: files = listDir("/some/dir")
+  "listDir" => {
+    args: [STRING_TYPE],
+    return: :"String[]",
+    zig: "try CheatLib.listDir({alloc}, {0})"
+  },
+
+  # Count non-overlapping occurrences of needle in haystack.
+  # Usage: n = countOccurrences(content, "the")
+  "countOccurrences" => {
+    args: [STRING_TYPE, STRING_TYPE],
+    return: :Int64,
+    zig: "CheatLib.countOccurrences({0}, {1})"
+  },
+
   # -------------------------------------------------------------------------
   # TCP Socket — Phase 3
   # -------------------------------------------------------------------------

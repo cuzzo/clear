@@ -1,0 +1,61 @@
+-- Concurrent File Search Benchmark — CLEAR Reference Design
+-- @use_zig
+--
+-- WHAT THIS MEASURES:
+--
+--   Opens all files in a directory, counts occurrences of a needle string
+--   in each file concurrently using fibers, then sorts files by count.
+--
+--   CLEAR (bench.zig): One fiber per file via Promise(i64) + CLEAR scheduler.
+--                      Cooperative multitasking: fibers run one at a time but
+--                      yield at checkYield() boundaries (~4096 iterations).
+--                      All 128 fibers are in-flight simultaneously; each
+--                      completes its file read without blocking others.
+--
+--   Go (bench.go):     One goroutine per file. Go runtime uses GOMAXPROCS
+--                      (default = num_cpu) for true parallelism.
+--
+--   Rust (bench.rs):   One OS thread per file via std::thread::spawn.
+--                      True OS-level parallelism; higher per-task overhead.
+--
+-- KEY COMPARISON:
+--   - Spawn overhead:  CLEAR fibers (~2KB stack) < Go goroutines (~8KB) < OS threads (8MB)
+--   - Concurrency:     CLEAR = cooperative M:1  |  Go = M:N  |  Rust = 1:1
+--   - Memory safety:   All three guarantee safety (CLEAR via arenas/ownership)
+--
+-- NOTE: bench.cht is the conceptual CLEAR design. bench.zig is the actual
+-- compiled version (hand-written Zig using CLEAR's scheduler/runtime API)
+-- because CLEAR does not yet support loop-based dynamic BG spawning.
+-- The .zig file uses the same CLEAR runtime infrastructure (scheduler, arenas,
+-- Promise(T), WaitGroup) that transpiled CLEAR code uses.
+--
+-- FUTURE CLEAR DESIGN (when loop-based spawning is supported):
+--
+--   FN countFile(path: String, needle: String) RETURNS Int64 ->
+--       content = readFile(path);
+--       RETURN countOccurrences(content, needle);
+--   END
+--
+--   FN cheatMain() RETURNS Void ->
+--       needle = "the";
+--       files = listDir("benchmarks/10_concurrent_search/data");
+--
+--       -- Spawn one fiber per file (future loop-based BG syntax):
+--       -- results: ~Int64[] = files.map(|f| BG { countFile(f, needle) });
+--       -- CLEAR would automatically collect and sort results.
+--
+--       -- Current workaround: use BoundedStream for fixed N, or bench.zig
+--
+--       RETURN;
+--   END
+--
+-- DATASET:
+--   N = 128 files × ~10 KB each = ~1.28 MB total
+--   Needle: "the" (common, ~200-300 occurrences per file)
+--   Generated deterministically from a hash seed (reproducible).
+--
+-- COMPILE (handled by benchmarks/runner.rb):
+--   CLEAR:  zig build-exe zig/bench.zig zig/switch.S zig/onRoot.S \
+--               --name bench_clear -O ReleaseFast -lc
+--   Go:     cd benchmarks/10_concurrent_search && go build -o bench_go .
+--   Rust:   rustc -C opt-level=3 bench.rs -o bench_rust

@@ -13,4 +13,7 @@ transpile-tests/ffi-integration/.zig-cache
 transpile-tests/module-integration/.zig-cache
 benchmarks/**/bench_c
 benchmarks/**/bench_clear
+benchmarks/**/bench_go
+benchmarks/**/bench_rust
+benchmarks/10_concurrent_search/data/
 

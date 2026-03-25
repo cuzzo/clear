@@ -373,6 +373,45 @@ pub const CheatLib = struct {
         return buffer;
     }
 
+    // List all files in a directory. Returns an ArrayListUnmanaged of heap-allocated
+    // filename slices (not full paths). Caller owns the list and each string.
+    // Usage: files = listDir(allocator, "/some/dir")
+    pub fn listDir(allocator: std.mem.Allocator, path: []const u8) !std.ArrayListUnmanaged([]const u8) {
+        var list = std.ArrayListUnmanaged([]const u8){};
+        errdefer {
+            for (list.items) |s| allocator.free(s);
+            list.deinit(allocator);
+        }
+        var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+        defer dir.close();
+        var it = dir.iterate();
+        while (try it.next()) |entry| {
+            if (entry.kind == .file) {
+                const name = try allocator.dupe(u8, entry.name);
+                try list.append(allocator, name);
+            }
+        }
+        return list;
+    }
+
+    // Count non-overlapping occurrences of needle in haystack.
+    // Returns 0 if needle is empty or not found.
+    // Usage: n = countOccurrences("hello world", "o")  → 2
+    pub fn countOccurrences(haystack: []const u8, needle: []const u8) i64 {
+        if (needle.len == 0) return 0;
+        var count: i64 = 0;
+        var pos: usize = 0;
+        while (pos + needle.len <= haystack.len) {
+            if (std.mem.startsWith(u8, haystack[pos..], needle)) {
+                count += 1;
+                pos += needle.len;
+            } else {
+                pos += 1;
+            }
+        }
+        return count;
+    }
+
     // Write File
     pub fn writeFile(path: []const u8, content: []const u8) !void {
         var dir = std.fs.cwd();

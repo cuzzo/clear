@@ -10,21 +10,34 @@ end
 
 def run_bench(dir)
   puts "=== BENCHMARK: #{dir} ==="
-  
-  # 1. Compile C Baseline
-  puts "Compiling C baseline..."
-  `gcc -O3 #{dir}/bench.c -o #{dir}/bench_c`
 
-  # 1.1 Compile Rust Baseline (Optional)
-  has_rust = system("command -v rustc > /dev/null 2>&1")
+  has_c    = File.exist?("#{dir}/bench.c")
+  has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
+  has_go   = File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
+
+  # 1. Compile C Baseline
+  if has_c
+    puts "Compiling C baseline..."
+    `gcc -O3 #{dir}/bench.c -o #{dir}/bench_c`
+  end
+
+  # 2. Compile Rust Baseline
   if has_rust
     puts "Compiling Rust baseline..."
     `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
   end
 
-  # 2. Compile CLEAR
+  # 3. Compile Go Baseline
+  if has_go
+    puts "Compiling Go baseline..."
+    Dir.chdir(dir) do
+      `go build -o bench_go .`
+    end
+  end
+
+  # 4. Compile CLEAR
   # bench.zt: pure Zig benchmark (runtime-level, no CLEAR transpilation needed).
-  # bench.cht with "@use_zig": scheduler-dependent Zig (e.g. socket I/O).
+  # bench.cht with "@use_zig": scheduler-dependent Zig (e.g. socket I/O, fiber benchmarks).
   use_zt  = File.exist?("#{dir}/bench.zt")
   use_zig = !use_zt &&
             File.exist?("#{dir}/bench.zig") &&
@@ -37,47 +50,69 @@ def run_bench(dir)
   elsif use_zig
     puts "Compiling CLEAR (native Zig, scheduler required)..."
     FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
-  else
+  elsif File.exist?("#{dir}/bench.cht")
     puts "Transpiling CLEAR..."
     # Run from root to ensure relative requires in src/ work
     `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
     puts "Compiling CLEAR (Zig output)..."
+  else
+    puts "No CLEAR source found, skipping CLEAR."
   end
 
-  Dir.chdir("zig") do
-    `zig build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
+  has_clear = false
+  if File.exist?("zig/bench.zig")
+    Dir.chdir("zig") do
+      `zig build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
+    end
+    if File.exist?("zig/bench_clear")
+      FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
+      has_clear = true
+    else
+      puts "WARNING: bench_clear was not generated."
+    end
+    FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
   end
-  
-  if File.exist?("zig/bench_clear")
-    FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
-  else
-    puts "ERROR: bench_clear was not generated."
-    exit 1
-  end
-  FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
-  
-  # 3. Execution & Timing
+
+  # 5. Execution & Timing
   results = {}
-  
-  puts "Running C baseline (best of 5)..."
-  results[:c] = measure_min("./#{dir}/bench_c")
-  
-  if has_rust
+
+  if has_c && File.exist?("#{dir}/bench_c")
+    puts "Running C baseline (best of 5)..."
+    results[:c] = measure_min("./#{dir}/bench_c")
+  end
+
+  if has_rust && File.exist?("#{dir}/bench_rust")
     puts "Running Rust baseline (best of 5)..."
     results[:rust] = measure_min("./#{dir}/bench_rust")
   end
-  
-  puts "Running CLEAR (best of 5)..."
-  results[:clear] = measure_min("./#{dir}/bench_clear")
-  
-  # 4. Reporting
+
+  if has_go && File.exist?("#{dir}/bench_go")
+    puts "Running Go baseline (best of 5)..."
+    results[:go] = measure_min("./#{dir}/bench_go")
+  end
+
+  if has_clear
+    puts "Running CLEAR (best of 5)..."
+    results[:clear] = measure_min("./#{dir}/bench_clear")
+  end
+
+  # 6. Reporting
   puts "\nRESULTS for #{dir}:"
-  puts "C (Perfect):    #{'%.4f' % results[:c]} s"
-  puts "Rust (Perf):    #{'%.4f' % (results[:rust] || 0)} s" if has_rust
-  puts "CLEAR (Transp): #{'%.4f' % results[:clear]} s"
-  
-  overhead = (results[:clear] / results[:c]) * 100 - 100
-  puts "CLEAR Overhead: #{'%.2f' % overhead}%"
+
+  baseline_key = [:c, :go, :rust].find { |k| results[k] }
+  baseline_label = { c: "C", go: "Go", rust: "Rust" }
+
+  results.each do |lang, t|
+    label = { c: "C (Perfect)", go: "Go (goroutines)", rust: "Rust (threads)",
+              clear: "CLEAR (fibers)" }[lang]
+    puts "#{'%-22s' % label} #{'%.4f' % t} s"
+  end
+
+  if results[:clear] && baseline_key
+    overhead = (results[:clear] / results[baseline_key]) * 100 - 100
+    sign = overhead >= 0 ? "+" : ""
+    puts "CLEAR vs #{baseline_label[baseline_key]}:         #{sign}#{'%.2f' % overhead}%"
+  end
 end
 
 if ARGV.empty?
@@ -85,7 +120,7 @@ if ARGV.empty?
   dirs = Dir.glob("benchmarks/0*").sort
   dirs.each { |d| run_bench(d); puts }
 elsif ARGV[0] == "--all"
-  dirs = Dir.glob("benchmarks/0*").sort
+  dirs = Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort
   dirs.each { |d| run_bench(d); puts }
 else
   run_bench(ARGV[0])
