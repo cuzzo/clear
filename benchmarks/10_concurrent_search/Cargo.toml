@@ -1,0 +1,16 @@
+[package]
+name = "bench_concurrent_search"
+version = "0.1.0"
+edition = "2021"
+
+# Keep the output binary named bench_rust so runner.rb finds it
+# in target/release/ without any special-casing.
+[[bin]]
+name = "bench_rust"
+path = "bench.rs"
+
+[dependencies]
+# Async runtime — multi-threaded, uses a thread pool sized to num_cpu.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+# SIMD substring search (memmem) — matches Go's bytes.Count throughput.
+memchr = "2"

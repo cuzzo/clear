@@ -23,8 +23,15 @@ def run_bench(dir)
 
   # 2. Compile Rust Baseline
   if has_rust
-    puts "Compiling Rust baseline..."
-    `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
+    if File.exist?("#{dir}/Cargo.toml")
+      puts "Compiling Rust baseline (cargo)..."
+      Dir.chdir(dir) { `cargo build --release -q 2>&1` }
+      src = "#{dir}/target/release/bench_rust"
+      FileUtils.cp(src, "#{dir}/bench_rust") if File.exist?(src)
+    else
+      puts "Compiling Rust baseline..."
+      `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
+    end
   end
 
   # 3. Compile Go Baseline
@@ -99,8 +106,9 @@ def run_bench(dir)
   # 6. Reporting
   puts "\nRESULTS for #{dir}:"
 
-  label_map      = { c: "C (Perfect)", go: "Go (goroutines)", rust: "Rust (threads)",
-                     clear: "CLEAR (fibers)" }
+  rust_label = File.exist?("#{dir}/Cargo.toml") ? "Rust (tokio)" : "Rust (threads)"
+  label_map  = { c: "C (Perfect)", go: "Go (goroutines)", rust: rust_label,
+                 clear: "CLEAR (fibers)" }
   baseline_label = { c: "C", go: "Go", rust: "Rust" }
 
   results.each do |lang, t|
