@@ -441,4 +441,1431 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # Collection Types — Phase 2 (@pool:sharded(N), @list:sharded(N), EACH)
+  # ===========================================================================
+  describe "Collection Types — Phase 2" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    def find_var(tree, fn_name, var_name)
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == fn_name }
+      fn_node.body.find { |n| n.is_a?(AST::VarDecl) && n.name == var_name }
+    end
+
+    # -------------------------------------------------------------------------
+    # @pool:sharded(N) type annotation
+    # -------------------------------------------------------------------------
+    describe "@pool:sharded(N) (sharded generational pool)" do
+      it "accepts Score[]@pool:sharded(4) as a valid type annotation" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "resolves Score[]@pool:sharded(4) full_type to a sharded pool? Type" do
+        tree = run(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            RETURN;
+          END
+        CLEAR
+        bind = find_var(tree, "f", "sp")
+        expect(bind.type_info.pool?).to be true
+        expect(bind.type_info.sharded?).to be true
+        expect(bind.type_info.shard_count).to eq(4)
+      end
+
+      it "emits CheatLib.ShardedPool Zig type for @pool:sharded(4)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.ShardedPool(Score, 4){}")
+      end
+
+      it "emits defer with move-guarded sp.deinit for @pool:sharded cleanup (RAII)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("defer if (!sp_moved) sp.deinit(rt.heapAlloc())")
+      end
+
+      it "raises for @pool:sharded(1) — shard count must be >= 2" do
+        expect {
+          run('FN f() RETURNS Void -> MUTABLE sp: Number[]@pool:sharded(1) = []; RETURN; END')
+        }.to raise_error(ParserError, /requires N >= 2/)
+      end
+
+      it "raises for @pool:sharded on a non-array type" do
+        expect {
+          run('FN f() RETURNS Void -> x: Number@pool:sharded(2) = 1; RETURN; END')
+        }.to raise_error(ParserError, /@pool requires an array type/)
+      end
+
+      it "allows insert/get/remove/count on a sharded pool" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              id = sp.insert(Score{ value: 1.0 });
+              result = sp.get(id);
+              sp.remove(id);
+              n = sp.count();
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "emits ShardedPool insert/get/remove/count Zig calls" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            id = sp.insert(Score{ value: 1.0 });
+            result = sp.get(id);
+            sp.remove(id);
+            n = sp.count();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("try sp.insert(rt.heapAlloc(),")
+        expect(out).to include("sp.get(id)")
+        expect(out).to include("sp.remove(id)")
+        expect(out).to include("sp.count()")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # @list:sharded(N) type annotation
+    # -------------------------------------------------------------------------
+    describe "@list:sharded(N) (sharded list)" do
+      it "accepts Score[]@list:sharded(2) as a valid type annotation" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sl: Score[]@list:sharded(2) = [];
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "resolves Score[]@list:sharded(2) to a sharded list_collection? Type" do
+        tree = run(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sl: Score[]@list:sharded(2) = [];
+            RETURN;
+          END
+        CLEAR
+        bind = find_var(tree, "f", "sl")
+        expect(bind.type_info.list_collection?).to be true
+        expect(bind.type_info.sharded?).to be true
+        expect(bind.type_info.shard_count).to eq(2)
+      end
+
+      it "emits CheatLib.ShardedList Zig type for @list:sharded(2)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sl: Score[]@list:sharded(2) = [];
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.ShardedList(Score, 2){}")
+      end
+
+      it "raises for @list:sharded(1) — shard count must be >= 2" do
+        expect {
+          run('FN f() RETURNS Void -> MUTABLE sl: Number[]@list:sharded(1) = []; RETURN; END')
+        }.to raise_error(ParserError, /requires N >= 2/)
+      end
+
+      it "raises for @list:sharded on a non-array type" do
+        expect {
+          run('FN f() RETURNS Void -> x: Number@list:sharded(2) = 1; RETURN; END')
+        }.to raise_error(ParserError, /@list requires an array type/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # EACH pipeline operator
+    # -------------------------------------------------------------------------
+    describe "EACH side-effect iteration" do
+      it "accepts EACH on a plain array" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              items: Score[] = [];
+              items s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts EACH on a @list collection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE items: Score[]@list = [];
+              items s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts EACH on a @pool collection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE pool: Score[]@pool = [];
+              pool s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "accepts EACH on a @pool:sharded(N) collection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              sp s> EACH { _.value = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises a clear error when EACH is applied to a non-collection" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 42.0;
+              x s> EACH { _ = 0.0; };
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot EACH non-collection type/)
+      end
+
+      it "emits a sequential for loop for EACH on plain arrays" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            items: Score[] = [];
+            items s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("for (__each_items)")
+        expect(out).to include("|*__each_item|")
+      end
+
+      it "emits pool slot scan for EACH on @pool" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE pool: Score[]@pool = [];
+            pool s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("slots.items")
+        expect(out).to include("__each_slot.alive")
+      end
+
+      it "emits N parallel fiber structs for EACH on @pool:sharded(4)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            sp s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("WaitGroup")
+        expect(out).to include("submitSpawn")
+        expect(out).to include("__EachShardCtx0_0")
+        expect(out).to include("__EachShardCtx0_1")
+        expect(out).to include("__EachShardCtx0_2")
+        expect(out).to include("__EachShardCtx0_3")
+      end
+
+      it "uses __each_item in Zig output (Zig reserves _ as discard identifier)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            items: Score[] = [];
+            items s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("__each_item")
+        expect(out).not_to match(/\bconst _ =/)
+      end
+
+      it "EACH on array emits mutable pointer iteration (|*__each_item|)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Score { value: Number }
+          FN f() RETURNS Void ->
+            items: Score[] = [];
+            items s> EACH { _.value = 0.0; };
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("|*__each_item|")
+      end
+    end
+
+    describe "HashMap:sharded(N) (sharded hash map)" do
+      it "accepts HashMap<Int64>:sharded(2) as a valid type annotation" do
+        expect {
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END")
+        }.not_to raise_error
+      end
+
+      it "generates ShardedStringMap Zig type" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.ShardedStringMap(i64, 2)")
+      end
+
+      it "emits .put() for index assignment on sharded map" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              m["key"] = 42_i64;
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.put(')
+      end
+
+      it "emits .get() for index access on sharded map" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              m["key"] = 42_i64;
+              v: Int64 = m["key"];
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.get(')
+      end
+
+      it "emits .count() for count method on sharded map" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              n: Int64 = m.count();
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.count()')
+      end
+    end
+
+    describe "HashMap:sharded(N) @locked (lock-striped hash map via composition)" do
+      it "accepts HashMap<Int64>:sharded(4) @locked as a valid type annotation" do
+        expect {
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) @locked = {}; RETURN; END")
+        }.not_to raise_error
+      end
+
+      it "generates StripedStringMap Zig type from :sharded @locked" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) @locked = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
+      end
+
+      it "emits .put() for index assignment" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(4) @locked = {};
+              m["key"] = 42_i64;
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.put(')
+      end
+
+      it "emits .get() for index access" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>:sharded(4) @locked = {};
+              m["key"] = 42_i64;
+              v: Int64 = m["key"];
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.get(')
+      end
+
+      it "plain :sharded(4) without @locked generates ShardedStringMap (not striped)" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
+        expect(zig).not_to include("Striped")
+      end
+
+      it "supports @writeLocked for read-heavy workloads" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) @writeLocked = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
+      end
+    end
+  end
+
+  # ===========================================================================
+  # @pool:soa (Structure of Arrays pool)
+  # ===========================================================================
+  describe "@pool:soa (SOA generational pool)" do
+    it "accepts Entity[]@pool:soa as a valid type annotation" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "generates SoaPool Zig type" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("CheatLib.SoaPool(Entity)")
+      expect(zig).not_to include("CheatLib.Pool(Entity)")
+    end
+
+    it "plain @pool still generates Pool (not SoaPool)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("CheatLib.Pool(Entity)")
+      expect(zig).not_to include("SoaPool")
+    end
+
+    it "emits defer deinit for @pool:soa" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("pool.deinit(")
+    end
+  end
+
+  # ===========================================================================
+  # Collection Constructor Sugar (List<T>[], Pool<T>[], List[], etc.)
+  # ===========================================================================
+  describe "Collection constructor sugar" do
+    it "List[] with lazy inference narrows type on append" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Void ->
+          MUTABLE items = List[];
+          append(items, 42_i64);
+          RETURN;
+        END
+      CLEAR
+      # Should narrow from Any to i64-compatible
+      expect(zig).to include("items.append(")
+    end
+
+    it "List[] used in pipeline before append raises helpful error" do
+      code = <<~CLEAR
+        STRUCT Score { value: Float64 }
+        FN f() RETURNS Void ->
+          MUTABLE items = List[];
+          total = items s> SUM _.value;
+          RETURN;
+        END
+      CLEAR
+      # TODO: improve this error to suggest "append an item first or use explicit type: Score[]@list"
+      expect { run(code) }.to raise_error(/Cannot determine struct type.*'Any'/i)
+    end
+
+    it "old syntax T[]@list still works" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Void -> MUTABLE items: Int64[]@list = []; RETURN; END
+      CLEAR
+      expect(zig).to include("ArrayListUnmanaged(i64)")
+    end
+  end
+
+  # ===========================================================================
+  # @list:soa (SOA dynamic list)
+  # ===========================================================================
+  describe "@list:soa (SOA dynamic list)" do
+    it "accepts Entity[]@list:soa as a valid type annotation" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "generates SoaList Zig type" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("CheatLib.SoaList(Entity)")
+    end
+
+    it "uses field-slice iteration for SUM (no alive check)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Number ->
+          MUTABLE items: Entity[]@list:soa = [];
+          total = items s> SUM _.health;
+          RETURN total;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("data.items(.health)")
+      # SOA list path should NOT have alive check (that's pool-only)
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).not_to include("alive")
+    end
+
+    it "plain @list still generates ArrayListUnmanaged (not SoaList)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number }
+        FN f() RETURNS Void -> MUTABLE items: Entity[]@list = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("ArrayListUnmanaged(Entity)")
+      expect(zig).not_to include("SoaList")
+    end
+  end
+
+  # ===========================================================================
+  # SOA + FFI guard
+  # ===========================================================================
+  describe "SOA FFI guard" do
+    it "rejects @pool:soa passed to EXTERN FN" do
+      code = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
+        FN f() RETURNS Void ->
+          MUTABLE pool: Vec2[]@pool:soa = [];
+          process_vecs(pool);
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/@soa.*EXTERN|incompatible.*C ABI/i)
+    end
+
+    it "rejects @list:soa passed to EXTERN FN" do
+      code = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
+        FN f() RETURNS Void ->
+          MUTABLE items: Vec2[]@list:soa = [];
+          process_vecs(items);
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/@soa.*EXTERN|incompatible.*C ABI/i)
+    end
+
+    it "allows regular struct passed to EXTERN FN (non-SOA)" do
+      code = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        EXTERN FN process_vec(data: Vec2) RETURNS Void FROM "native";
+        FN f() RETURNS Void ->
+          v = Vec2{ x: 1.0, y: 2.0 };
+          process_vec(v);
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+  end
+
+  # ===========================================================================
+  # Capability validation (capabilities.rb)
+  # ===========================================================================
+  describe "Capability validation" do
+    it "rejects @locked:writeLocked (conflicting sync — caught by parser)" do
+      code = "FN f() RETURNS Void -> MUTABLE x = 1.0 @locked:writeLocked; RETURN; END"
+      expect { run(code) }.to raise_error(/Duplicate sync|Conflicting sync/i)
+    end
+
+    it "rejects @shared:multiowned (conflicting ownership — caught by parser)" do
+      code = "STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 1 } @shared:multiowned; RETURN; END"
+      expect { run(code) }.to raise_error(/Duplicate ownership|Conflicting ownership/i)
+    end
+
+    it "allows valid combinations (@shared:locked)" do
+      code = "STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 1 } @shared:locked; RETURN; END"
+      expect { run(code) }.not_to raise_error
+    end
+  end
+
+  # ===========================================================================
+  # SOA Opportunity Detection
+  # ===========================================================================
+  describe "SOA opportunity warnings" do
+    def capture_notes(code)
+      notes = []
+      allow($stderr).to receive(:puts) do |msg|
+        notes << msg if msg.include?("[Note]")
+      end
+      ZigTranspiler.new.transpile(code)
+      notes
+    end
+
+    it "warns when pipeline accesses < 50% of fields on a large struct (SUM)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          total = entities s> SUM _.x;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).not_to be_nil
+      expect(soa_note).to include("1 of 8")
+    end
+
+    it "warns for EACH accessing few fields" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          entities s> EACH { _.x = _.x + _.vx; };
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).not_to be_nil
+      expect(soa_note).to include("2 of 8")
+    end
+
+    it "does NOT warn for small structs (< 4 fields)" do
+      code = <<~CLEAR
+        STRUCT Point { x: Number, y: Number, z: Number }
+        FN f() RETURNS Void ->
+          MUTABLE pts: Point[] = [];
+          total = pts s> SUM _.x;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "does NOT warn when >= 50% of fields are accessed" do
+      code = <<~CLEAR
+        STRUCT Stats { a: Number, b: Number, c: Number, d: Number }
+        FN f() RETURNS Void ->
+          MUTABLE data: Stats[] = [];
+          data s> EACH { _.a = _.a + _.b; };
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "does NOT warn when most fields are accessed" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; _.health = _.health - 1.0; };
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "does NOT warn for non-struct element types" do
+      code = <<~CLEAR
+        FN f() RETURNS Void ->
+          MUTABLE nums: Number[] = [];
+          total = nums s> SUM _;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "warns for WHERE accessing few fields" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          alive = entities s> WHERE _.health > 0;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).not_to be_nil
+      expect(soa_note).to include("1 of 8")
+    end
+  end
+
+  # ===========================================================================
+  # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
+  # ===========================================================================
+  describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # FIND — returns ?ElemType
+    # -------------------------------------------------------------------------
+    describe "FIND predicate operator" do
+      it "infers ?Number for a FIND on Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> FIND _ > 2.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.full_type.to_s).to eq("?Number")
+      end
+
+      it "infers ?Item for a FIND on a struct array" do
+        tree = run(<<~CLEAR)
+          STRUCT Item { x: Number }
+          FN f() RETURNS Void ->
+            items: Item[] = [];
+            result = items s> FIND _.x > 0.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.full_type.to_s).to eq("?Item")
+      end
+
+      it "raises a clear error when FIND is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> FIND _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot FIND non-list type/)
+      end
+
+      it "raises when FIND predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> FIND _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /FIND clause must evaluate to Bool/)
+      end
+
+      it "emits find_found flag and find_result variable in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> FIND _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("find_found")
+        expect(out).to include("find_result")
+        expect(out).to include("null")
+      end
+
+      it "emits the optional type cast in the break expression" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> FIND _ > 0.5;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("@as(?")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # ANY — returns Bool
+    # -------------------------------------------------------------------------
+    describe "ANY predicate operator" do
+      it "infers Bool for ANY on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> ANY _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Bool)
+      end
+
+      it "raises when ANY is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> ANY _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot ANY non-list type/)
+      end
+
+      it "raises when ANY predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> ANY _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /ANY clause must evaluate to Bool/)
+      end
+
+      it "emits any_result variable and short-circuit break in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> ANY _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("any_result = true")
+        expect(out).to include("break;")
+      end
+
+      it "emits a for loop over pipe_items" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> ANY _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("for (pipe_items)")
+        expect(out).to include("any_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # ALL — returns Bool
+    # -------------------------------------------------------------------------
+    describe "ALL predicate operator" do
+      it "infers Bool for ALL on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> ALL _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Bool)
+      end
+
+      it "raises when ALL is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> ALL _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot ALL non-list type/)
+      end
+
+      it "raises when ALL predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> ALL _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /ALL clause must evaluate to Bool/)
+      end
+
+      it "emits all_result initialized to true and negated short-circuit in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> ALL _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("all_result = true")
+        expect(out).to include("all_result = false")
+        expect(out).to include("!(")
+      end
+
+      it "vacuous truth: all_result starts as true (correct for empty list)" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [];
+            result = nums s> ALL _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("var all_result = true")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # COUNT — returns Int64
+    # -------------------------------------------------------------------------
+    describe "COUNT predicate operator" do
+      it "infers Int64 for COUNT on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> COUNT _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Int64)
+      end
+
+      it "raises when COUNT is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> COUNT _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot COUNT non-list type/)
+      end
+
+      it "raises when COUNT predicate does not evaluate to Bool" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> COUNT _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /COUNT clause must evaluate to Bool/)
+      end
+
+      it "emits an i64 counter and increment in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> COUNT _ > 1.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("count_result: i64")
+        expect(out).to include("count_result += 1")
+      end
+
+      it "wraps the predicate in an if condition in the loop" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> COUNT _ > 0.0;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("for (pipe_items)")
+        expect(out).to include("count_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Cross-operator and chaining
+    # -------------------------------------------------------------------------
+    describe "operator chaining and combined usage" do
+      it "allows COUNT after WHERE (chained pipeline)" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0, 3.0, 4.0];
+              filtered: Number[] = nums s> WHERE _ > 2.0;
+              n: Int64 = filtered s> COUNT _ > 3.0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows ANY on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT User { active: Bool }
+            FN f() RETURNS Void ->
+              users: User[] = [];
+              result = users s> ANY _.active == TRUE;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows ALL on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT User { score: Number }
+            FN f() RETURNS Void ->
+              users: User[] = [];
+              result = users s> ALL _.score > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "FIND on a struct array infers the optional struct type" do
+        tree = run(<<~CLEAR)
+          STRUCT User { score: Number }
+          FN f() RETURNS Void ->
+            users: User[] = [];
+            found = users s> FIND _.score > 50.0;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "found" }
+        expect(bind.full_type.to_s).to eq("?User")
+      end
+    end
+  end
+
+  # ===========================================================================
+  # Collection Types — Phase 4 (SUM, AVERAGE, MIN, MAX numeric aggregation)
+  # ===========================================================================
+  describe "Collection Types — Phase 4 (SUM, AVERAGE, MIN, MAX)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # SUM — returns Number (0 for empty list)
+    # -------------------------------------------------------------------------
+    describe "SUM aggregation operator" do
+      it "infers Number for SUM on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> SUM _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "infers Number for SUM of a struct field projection" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Item { value: Number }
+            FN f() RETURNS Void ->
+              items: Item[] = [];
+              result = items s> SUM _.value;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "raises when SUM is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> SUM _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot SUM non-list type/)
+      end
+
+      it "raises when SUM expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> SUM _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /SUM requires a numeric expression/)
+      end
+
+      it "raises when SUM expression is a String" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Tag { name: String }
+            FN f() RETURNS Void ->
+              tags: Tag[] = [];
+              tags s> SUM _.name;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /SUM requires a numeric expression/)
+      end
+
+      it "emits sum_result: f64 and += in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> SUM _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("sum_result: f64")
+        expect(out).to include("sum_result +=")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # AVERAGE — returns Number (0 for empty list)
+    # -------------------------------------------------------------------------
+    describe "AVERAGE aggregation operator" do
+      it "infers Number for AVERAGE on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> AVERAGE _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "raises when AVERAGE is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> AVERAGE _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot AVERAGE non-list type/)
+      end
+
+      it "raises when AVERAGE expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> AVERAGE _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /AVERAGE requires a numeric expression/)
+      end
+
+      it "emits avg_sum and floatFromInt division in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> AVERAGE _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("avg_sum")
+        expect(out).to include("avg_count")
+        expect(out).to include("floatFromInt")
+      end
+
+      it "emits a guard returning 0 for empty list in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [];
+            result = nums s> AVERAGE _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("avg_count == 0")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # MIN — returns Number (panics on empty list)
+    # -------------------------------------------------------------------------
+    describe "MIN aggregation operator" do
+      it "infers Number for MIN on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> MIN _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "raises when MIN is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> MIN _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot MIN non-list type/)
+      end
+
+      it "raises when MIN expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> MIN _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MIN requires a numeric expression/)
+      end
+
+      it "raises when MIN expression is a String" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Tag { name: String }
+            FN f() RETURNS Void ->
+              tags: Tag[] = [];
+              tags s> MIN _.name;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MIN requires a numeric expression/)
+      end
+
+      it "emits min_result: f64 initialized to floatMax and @panic on empty in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MIN _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("min_result: f64")
+        expect(out).to include("floatMax(f64)")
+        expect(out).to include("@panic(\"MIN applied to empty list\")")
+      end
+
+      it "emits a less-than comparison for updating min in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MIN _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("min_val < min_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # MAX — returns Number (panics on empty list)
+    # -------------------------------------------------------------------------
+    describe "MAX aggregation operator" do
+      it "infers Number for MAX on a Number[]" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0, 3.0];
+            result = nums s> MAX _;
+            RETURN;
+          END
+        CLEAR
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
+        expect(bind.resolved_type).to eq(:Number)
+      end
+
+      it "raises when MAX is applied to a non-array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              x: Number = 1.0;
+              x s> MAX _;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Cannot MAX non-list type/)
+      end
+
+      it "raises when MAX expression is not numeric" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0];
+              nums s> MAX _ > 0.0;
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /MAX requires a numeric expression/)
+      end
+
+      it "emits max_result: f64 initialized to -floatMax and @panic on empty in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MAX _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("max_result: f64")
+        expect(out).to include("-std.math.floatMax(f64)")
+        expect(out).to include("@panic(\"MAX applied to empty list\")")
+      end
+
+      it "emits a greater-than comparison for updating max in Zig" do
+        out = transpile_fn(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> MAX _;
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("max_val > max_result")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Cross-operator and chaining
+    # -------------------------------------------------------------------------
+    describe "aggregation chaining and combined usage" do
+      it "allows SUM after WHERE" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0, 3.0, 4.0];
+              filtered: Number[] = nums s> WHERE _ > 2.0;
+              total = filtered s> SUM _;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows MIN after WHERE" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0, 3.0];
+              filtered: Number[] = nums s> WHERE _ > 1.0;
+              minimum = filtered s> MIN _;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows AVERAGE on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              scores: Score[] = [];
+              avg = scores s> AVERAGE _.value;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows MAX on a struct field" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Score { value: Number }
+            FN f() RETURNS Void ->
+              scores: Score[] = [];
+              result = scores s> MAX _.value;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "SUM result can be used in further arithmetic" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Number[] = [1.0, 2.0];
+              total = nums s> SUM _;
+              doubled = total * 2.0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+  end
+
 end
