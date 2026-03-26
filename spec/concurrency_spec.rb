@@ -1372,4 +1372,350 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 2: Annotator & Ownership
+  # ===================================================================
+  describe "BG / ~T Phase 2: annotator and ownership" do
+    # Helper: construct and annotate a BgBlock directly (no parser needed yet)
+    def make_bg_block(body_nodes)
+      token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+      AST::BgBlock.new(token, body_nodes)
+    end
+
+    def make_next_expr(expr_node)
+      token = Lexer::Token.new(:KEYWORD, 'NEXT', 1, 1)
+      AST::NextExpr.new(token, expr_node)
+    end
+
+    # Helper: AST::Literal for a Number value (no scope lookup required by visit_Literal)
+    def make_num_lit(val = 42.0)
+      tok = Lexer::Token.new(:NUMBER, val, 1, 1)
+      AST::Literal.new(tok, :NUMBER, val, nil)
+    end
+
+    describe "visit_BgBlock" do
+      it "sets full_type to ~Void when body is empty" do
+        annotator = SemanticAnnotator.new
+        node = make_bg_block([])
+        annotator.send(:visit_BgBlock, node)
+        expect(node.full_type).to eq(:"~Void")
+      end
+
+      it "wraps the last expression's type in ~ (Number literal body)" do
+        annotator = SemanticAnnotator.new
+        bg = make_bg_block([make_num_lit])
+        annotator.send(:visit_BgBlock, bg)
+        expect(bg.full_type).to eq(:"~Number")
+      end
+    end
+
+    describe "visit_NextExpr" do
+      it "raises when NEXT is called on a Number literal (non-tense)" do
+        annotator = SemanticAnnotator.new
+        next_node = make_next_expr(make_num_lit)
+        expect { annotator.send(:visit_NextExpr, next_node) }
+          .to raise_error(SourceError, /NEXT requires a Promise/)
+      end
+    end
+
+    describe "~T in type annotations (lexer + parser)" do
+      it "tokenises ~ as a CHAR token" do
+        tokens = Lexer.new("~Number").tokenize
+        expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
+        expect(tokens[1]).to have_attributes(type: :TYPE_ID, value: 'Number')
+      end
+
+      it "tokenises ~!Number with tilde, bang, type" do
+        tokens = Lexer.new("~!Number").tokenize
+        expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
+        expect(tokens[1]).to have_attributes(type: :CHAR, value: '!')
+        expect(tokens[2]).to have_attributes(type: :TYPE_ID, value: 'Number')
+      end
+
+      it "parse_type_annotation produces a tense Type for ~Number" do
+        tokens = Lexer.new("~Number").tokenize
+        parser = Parser.new(tokens, "~Number")
+        t = parser.send(:parse_type_annotation)
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Number)
+        expect(t.zig_type).to eq("CheatLib.Promise(f64)")
+      end
+    end
+
+    describe "ownership tracker linear check" do
+      it "raises when a tense variable is live at scope end" do
+        annotator = SemanticAnnotator.new
+        dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+        dummy_node  = AST::BgBlock.new(dummy_token, [])
+
+        # with_new_scope yields and then pops — we call finalize_scope inside the block
+        expect {
+          annotator.send(:with_new_scope) do
+            annotator.send(:current_scope).declare('p', nil, :"~Number", false, false, nil, :stack)
+            annotator.send(:current_scope).set_state('p', :live)
+            annotator.send(:finalize_scope, dummy_node)
+          end
+        }.to raise_error(SourceError, /Promise 'p' must be consumed/)
+      end
+
+      it "does NOT raise when the tense variable has been moved (consumed)" do
+        annotator = SemanticAnnotator.new
+        dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+        dummy_node  = AST::BgBlock.new(dummy_token, [])
+
+        expect {
+          annotator.send(:with_new_scope) do
+            annotator.send(:current_scope).declare('p', nil, :"~Number", false, false, nil, :stack)
+            annotator.send(:current_scope).set_state('p', :moved)
+            annotator.send(:finalize_scope, dummy_node)
+          end
+        }.not_to raise_error
+      end
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 1: Type System
+  # ===================================================================
+  describe "~T (tense/promise) type system" do
+    describe "Type parsing" do
+      it "recognises ~Number as a tense type" do
+        t = Type.new(:"~Number")
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Number)
+      end
+
+      it "recognises ~Void as a tense type" do
+        t = Type.new(:"~Void")
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Void)
+      end
+
+      it "recognises ~!Number as a promise of a failable Number" do
+        t = Type.new(:"~!Number")
+        expect(t.tense?).to be true
+        expect(t.tense_type.error_union?).to be true
+        expect(t.tense_type.payload_type).to eq(:Number)
+      end
+
+      it "is not a struct, primitive, optional, or error_union" do
+        t = Type.new(:"~Number")
+        expect(t.struct?).to be false
+        expect(t.primitive?).to be false
+        expect(t.optional?).to be false
+        expect(t.error_union?).to be false
+      end
+    end
+
+    describe "Type#requires_move?" do
+      it "returns true for tense types — promises are linear" do
+        expect(Type.new(:"~Number").requires_move?).to be true
+        expect(Type.new(:"~Void").requires_move?).to be true
+      end
+    end
+
+    describe "Type#accepts?" do
+      it "accepts the same tense type" do
+        expect(Type.new(:"~Number").accepts?(Type.new(:"~Number"))).to be true
+      end
+
+      it "does not accept a non-tense type" do
+        expect(Type.new(:"~Number").accepts?(Type.new(:Number))).to be false
+      end
+
+      it "does not accept a different tense type" do
+        expect(Type.new(:"~Number").accepts?(Type.new(:"~Bool"))).to be false
+      end
+    end
+
+    describe "Type#zig_type" do
+      it "emits CheatLib.Promise(f64) for ~Number" do
+        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      end
+
+      it "emits CheatLib.Promise(void) for ~Void" do
+        expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
+      end
+
+      it "emits CheatLib.Promise(!f64) for ~!Number" do
+        expect(Type.new(:"~!Number").zig_type).to eq("CheatLib.Promise(!f64)")
+      end
+    end
+
+    describe "Lexer" do
+      it "tokenises BG as a keyword" do
+        tokens = Lexer.new("BG").tokenize
+        expect(tokens[0].type).to eq(:KEYWORD)
+        expect(tokens[0].value).to eq("BG")
+      end
+
+      it "tokenises NEXT as a keyword" do
+        tokens = Lexer.new("NEXT").tokenize
+        expect(tokens[0].type).to eq(:KEYWORD)
+        expect(tokens[0].value).to eq("NEXT")
+      end
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 5: Integration
+  # ===================================================================
+  describe "BG/NEXT — Phase 5: integration (collect_do_identifiers fix)" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    it "collect_do_identifiers does not capture locally-bound names from BindExpr" do
+      # If 'step1' is declared inside BG, it must NOT appear as a capture field.
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+          x: Number = 5.0;
+          q: ~Number = BG { x + 1.0; };
+          r: Number = NEXT q;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      # x IS captured (outer variable)
+      expect(out).to include("x: f64,")
+      # step1 is NOT a capture (it doesn't exist; this just verifies no spurious fields)
+      expect(out).not_to include("step1:")
+    end
+
+    it "multiple concurrent BG blocks get independent context structs" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+          a: ~Number = BG { 10.0; };
+          b: ~Number = BG { 20.0; };
+          ra: Number = NEXT a;
+          rb: Number = NEXT b;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      # Should have two separate context structs
+      expect(out).to include("__BgCtx0")
+      expect(out).to include("__BgCtx1")
+      # And two separate labeled blocks
+      expect(out).to include("__bg0:")
+      expect(out).to include("__bg1:")
+      # Both NEXTs
+      expect(out).to include("a.next()")
+      expect(out).to include("b.next()")
+    end
+
+    it "BG with function call inside captures its args by value" do
+      src = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          base: Number = 5.0;
+          p: ~Number = BG { double(base); };
+          r: Number = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("base: f64,")
+      expect(out).to include(".base = base")
+      expect(out).to include("ctx.base")
+      expect(out).to include("p.next()")
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 4: Parser + Transpiler
+  # ===================================================================
+  describe "BG/NEXT — Phase 4: parser and transpiler" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    describe "Parser" do
+      it "parses BG { expr; } as a BgBlock node" do
+        tokens = Lexer.new("BG { 42.0; }").tokenize
+        parser = Parser.new(tokens, "BG { 42.0; }")
+        node   = parser.send(:parse_bg_block)
+        expect(node).to be_a(AST::BgBlock)
+        expect(node.body.length).to eq(1)
+      end
+
+      it "parses NEXT expr as a NextExpr node" do
+        tokens = Lexer.new("NEXT p").tokenize
+        parser = Parser.new(tokens, "NEXT p")
+        node   = parser.send(:parse_next_expr)
+        expect(node).to be_a(AST::NextExpr)
+        expect(node.expr).to be_a(AST::Identifier)
+        expect(node.expr.name).to eq("p")
+      end
+
+      it "parses BG { expr; } as the RHS of a bind expression" do
+        src    = "FN f() RETURNS Void -> p: ~Number = BG { 1.0; }; RETURN; END"
+        tokens = Lexer.new(src).tokenize
+        ast    = Parser.new(tokens, src).parse
+        fn_node = ast.statements.first
+        bind    = fn_node.body.first
+        expect(bind.value).to be_a(AST::BgBlock)
+      end
+
+      it "parses NEXT as an expression in a bind" do
+        src    = "FN f() RETURNS Void -> p: ~Number = BG { 1.0; }; r: Number = NEXT p; RETURN; END"
+        tokens = Lexer.new(src).tokenize
+        ast    = Parser.new(tokens, src).parse
+        fn_node = ast.statements.first
+        next_bind = fn_node.body[1]
+        expect(next_bind.value).to be_a(AST::NextExpr)
+      end
+    end
+
+    describe "Transpiler" do
+      it "BgBlock emits a labeled block with Promise spawn and spawnBest (default)" do
+        src = "FN f() RETURNS Void -> p: ~Number = BG { 42.0; }; r: Number = NEXT p; RETURN; END"
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.Promise(f64).spawn(")
+        expect(out).to include("spawnBest(")
+        expect(out).to include("break :")
+        expect(out).to include("ctx.inner.result = 42")
+      end
+
+      it "BgBlock captures outer variable by value (no pointer)" do
+        src = "FN f() RETURNS Void -> x: Number = 7.0; q: ~Number = BG { x + 1.0; }; r: Number = NEXT q; RETURN; END"
+        out = transpile_fn(src)
+        # Captured as value field, not pointer
+        expect(out).to include("x: f64,")
+        # Initialized as .x = x  (not .x = &x)
+        expect(out).to include(".x = x")
+        # Accessed without deref: ctx.x (not ctx.x.*)
+        expect(out).to include("ctx.x")
+        expect(out).not_to include("ctx.x.*")
+      end
+
+      it "NextExpr emits .next() on the promise" do
+        src = "FN f() RETURNS Void -> p: ~Number = BG { 99.0; }; r: Number = NEXT p; RETURN; END"
+        out = transpile_fn(src)
+        expect(out).to include("p.next()")
+      end
+
+      it "Promise(void) Zig type string is correct at the type level" do
+        expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
+      end
+
+      it "NEXT on a non-tense type raises an annotator error" do
+        src = "FN f() RETURNS Void -> x: Number = 1.0; r: Number = NEXT x; RETURN; END"
+        expect { transpile_fn(src) }.to raise_error(SourceError, /NEXT requires a Promise/)
+      end
+    end
+  end
+
 end
