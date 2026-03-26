@@ -23,6 +23,10 @@ Run **all three** test suites after making changes to the compiler. The Zig inte
 - **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution, `--module` CLI flag
 - **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites (no rt/try), `@import` deduplication
 
+## Ignored Directories
+
+- `vm/` — Obsolete bytecode VM from the toy implementation. Not part of the current compiler. Ignore entirely.
+
 ## Architecture
 
 The compiler is a 3-pass system written in Ruby:
