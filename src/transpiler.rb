@@ -774,8 +774,7 @@ private
 
         if map_ft.sharded? || map_ft.striped?
           # Sharded/striped maps have direct .get() that returns ?V.
-          val_zig = map_ft.value_type.zig_type
-          "#{target}.get(#{index}) orelse @as(#{val_zig}, 0)"
+          "#{target}.get(#{index})"
         elsif map_ft.numeric_map?
           key_zig = map_ft.key_type.zig_type
           val_zig = map_ft.value_type.zig_type

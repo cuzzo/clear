@@ -10,13 +10,13 @@ FN cheatMain() RETURNS Void ->
   ASSERT scores.contains("bob")   == TRUE,  "bob should be present";
   ASSERT scores.contains("dave")  == FALSE, "dave should not be present";
 
-  -- get (existing behaviour): read values
-  ASSERT scores["alice"] == 10, "alice score should be 10";
-  ASSERT scores["bob"]   == 20, "bob score should be 20";
+  -- get: map[key] returns ?V — use OR to provide a fallback
+  ASSERT scores["alice"] OR 0 == 10, "alice score should be 10";
+  ASSERT scores["bob"] OR 0 == 20, "bob score should be 20";
 
   -- put (existing behaviour): update + insert
   scores["alice"] = 99_i64;
-  ASSERT scores["alice"] == 99, "alice score should be updated to 99";
+  ASSERT scores["alice"] OR 0 == 99, "alice score should be updated to 99";
   scores["dave"] = 40_i64;
   ASSERT scores.count() == 4, "count should be 4 after inserting dave";
   ASSERT scores.contains("dave") == TRUE, "dave should now be present";
@@ -25,7 +25,9 @@ FN cheatMain() RETURNS Void ->
   scores.delete("bob");
   ASSERT scores.count() == 3, "count should be 3 after deleting bob";
   ASSERT scores.contains("bob") == FALSE, "bob should no longer be present";
-  ASSERT scores["bob"] == 0, "missing key should return default 0";
+
+  -- missing key returns nil — OR provides default
+  ASSERT scores["bob"] OR 0 == 0, "missing key should return default 0 via OR";
 
   -- delete() on non-existent key is a no-op
   scores.delete("nobody");

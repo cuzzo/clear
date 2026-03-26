@@ -774,7 +774,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS Void ->
               MUTABLE m: HashMap<Int64>:sharded(2) = {};
               m["key"] = 42_i64;
-              v: Int64 = m["key"];
+              v = m["key"] OR 0;
               RETURN;
           END
         CLEAR
@@ -825,7 +825,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS Void ->
               MUTABLE m: HashMap<Int64>:sharded(4) @locked = {};
               m["key"] = 42_i64;
-              v: Int64 = m["key"];
+              v = m["key"] OR 0;
               RETURN;
           END
         CLEAR

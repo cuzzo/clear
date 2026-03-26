@@ -180,15 +180,8 @@ pub const CheatLib = struct {
     }
 
     // Smart return: if V is ArrayListUnmanaged(T), returns []T instead of the list struct.
-    pub fn mapGet(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) MapGetReturnType(V) {
-        const is_array_list = comptime isArrayListUnmanaged(V);
-        if (map.get(key)) |val| {
-            return if (comptime is_array_list) val.items else val;
-        }
-        if (comptime is_array_list) return &[_]ArrayListElement(V){};
-        if (V == i64 or V == f64) return 0;
-        if (V == []const u8) return "";
-        return undefined;
+    pub fn mapGet(comptime V: type, map: std.StringHashMapUnmanaged(V), key: []const u8) ?V {
+        return map.get(key);
     }
 
     // Delete a key. Frees the heap-duplicated key string via key_alloc.
@@ -233,11 +226,7 @@ pub const CheatLib = struct {
         return slice_info.child;
     }
 
-    // Helper: Compute return type for mapGet
-    fn MapGetReturnType(comptime V: type) type {
-        if (comptime isArrayListUnmanaged(V)) return []ArrayListElement(V);
-        return V;
-    }
+    // (MapGetReturnType removed — mapGet now returns ?V directly)
 
     // =========================================================================
     // Numeric-keyed HashMap (Option 3)
@@ -284,11 +273,8 @@ pub const CheatLib = struct {
         try map.put(alloc, key, value);
     }
 
-    pub fn numericMapGet(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) V {
-        return map.get(key) orelse {
-            if (V == i64 or V == f64) return 0;
-            return undefined;
-        };
+    pub fn numericMapGet(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) ?V {
+        return map.get(key);
     }
 
     pub fn numericMapDelete(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K) void {

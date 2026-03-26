@@ -1334,9 +1334,10 @@ private
 
     target_type_info = node.target.type_info
 
-    # Case 1: HashMap Access
+    # Case 1: HashMap Access — returns ?V (optional; nil if key missing)
     if target_type_info.map?
-      node.full_type = target_type_info.value_type
+      val_t = target_type_info.value_type
+      node.full_type = Type.new(:"?#{val_t.resolved}")
 
       # Validate Key Type
       # Numeric maps (HashMap<Int64,V> or HashMap<Number,V>) accept numeric keys.
