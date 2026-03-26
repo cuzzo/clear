@@ -1190,6 +1190,29 @@ private
     end
 
     resolve_call(node, node.args)
+
+    # Lazy type narrowing for collection constructors:
+    # append(list, value) where list has Any element type → narrow to typeof(value).
+    if node.name == "append" && node.args.size == 2
+      list_arg = node.args[0]
+      val_arg  = node.args[1]
+      if list_arg.is_a?(AST::Identifier)
+        scope = lookup_scope_for(list_arg.name)
+        scope_entry = scope&.locals&.dig(list_arg.name)
+        ti = scope_entry&.dig(:type)
+        if ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
+          val_type = val_arg.resolved_type
+          new_elem_sym = :"#{val_type}[]"
+          new_type = Type.new(new_elem_sym, collection: ti.collection)
+          new_type.soa = ti.soa if ti.soa
+          new_type.shard_count = ti.shard_count if ti.shard_count
+          new_type.location = ti.location
+          # Update the scope entry and the variable's type_info
+          scope_entry[:type] = new_type
+          list_arg.full_type = new_type if list_arg.respond_to?(:full_type=)
+        end
+      end
+    end
   end
 
   def visit_MethodCall(node)
@@ -2299,6 +2322,23 @@ private
     end
 
     if node.items.empty?
+      # Constructor sugar: List<T>[] or Pool<T>[] carries a pre-set type.
+      if (ct = node.instance_variable_get(:@constructor_type))
+        node.full_type = ct
+        node.storage = ct.pool? ? :heap : (ct.heap? ? :heap : :stack)
+        return
+      end
+      # Untyped constructor: List[] or Pool[] — deferred element type.
+      # The collection type is set; element type resolves on first append/insert.
+      if (coll = node.instance_variable_get(:@constructor_collection))
+        t = Type.new(:"Any[]", collection: coll)
+        t.soa = true if node.instance_variable_get(:@constructor_soa)
+        t.shard_count = node.instance_variable_get(:@constructor_shard_count)
+        t.location = :heap if coll == :pool
+        node.full_type = t
+        node.storage = coll == :pool ? :heap : :stack
+        return
+      end
       if node.storage == :heap
         node.full_type = Type.new(:"Any[]", location: :heap)
       else
