@@ -106,6 +106,7 @@ class Parser
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
+  primary(:KEYWORD, 'GIVE', AST::MoveNode, ['GIVE', :expression])
   primary(:KEYWORD, 'BG')   { parse_bg_block }
   primary(:KEYWORD, 'NEXT') { parse_next_expr }
   primary(:PERCENT, '%') { parse_sigil_construct }

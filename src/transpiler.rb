@@ -1286,6 +1286,11 @@ private
 
       if node.value.is_a?(AST::Identifier) && !rc_map.key?(node.value.name)
         ti = node.value.type_info
+        is_resource = (ti&.resolved == :File || ti&.resolved == :TCPServer || ti&.resolved == :TCPClient)
+        if is_resource
+          safe_name = zig_safe_name(node.value.name)
+          return "#{safe_name}_moved = true;\nreturn #{safe_name};"
+        end
         if ti&.any_rc?
           return "return #{transpile_rc_retain(ti, node.value.name)};"
         end
@@ -1393,8 +1398,14 @@ private
       end
 
     when AST::MoveNode
-      # MOVE expr — handled by parent VarDecl/ReturnNode; fallback emits raw value
-      visit(node.value)
+      # MOVE expr — if it's an identifier, set the moved flag and return the value.
+      # This ensures GIVE f; as a statement correctly suppresses the local defer.
+      if node.value.is_a?(AST::Identifier)
+        safe_name = zig_safe_name(node.value.name)
+        "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
+      else
+        visit(node.value)
+      end
 
     when AST::Copy
       # Zig copies structs by value on assignment, so just return the inner expression

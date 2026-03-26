@@ -1548,6 +1548,27 @@ private
       resource_schema = lookup_type_schema(final_type)
       is_resource     = resource_schema&.dig(:kind) == :resource
       resource_close  = is_resource ? resource_schema[:close_zig] : nil
+      
+      # RECURSIVE CHECK: if it's a struct, check if any fields are resources
+      # User-defined struct schemas are flat hashes of { name => type }.
+      # Built-in resource schemas have a :kind key.
+      if !is_resource && resource_schema.is_a?(Hash) && resource_schema[:kind].nil?
+        closes = []
+        resource_schema.each do |fname, ftype|
+          next if fname == :type_params || fname == :methods # skip meta-keys
+          f_resolved = Type.new(ftype).resolved
+          f_schema = lookup_type_schema(f_resolved)
+          if f_schema&.dig(:kind) == :resource
+            f_close = f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
+            closes << f_close
+          end
+          # TODO: handle nested structs recursively if needed
+        end
+        if closes.any?
+          is_resource = true
+          resource_close = closes.join("; ")
+        end
+      end
     end
     node.resource_close_zig = resource_close
 
@@ -1696,6 +1717,26 @@ private
         resource_schema = lookup_type_schema(final_type)
         is_resource     = resource_schema&.dig(:kind) == :resource
         resource_close  = is_resource ? resource_schema[:close_zig] : nil
+
+        # RECURSIVE CHECK: if it's a struct, check if any fields are resources
+        # User-defined struct schemas are flat hashes of { name => type }.
+        # Built-in resource schemas have a :kind key.
+        if !is_resource && resource_schema.is_a?(Hash) && resource_schema[:kind].nil?
+          closes = []
+          resource_schema.each do |fname, ftype|
+            next if fname == :type_params || fname == :methods # skip meta-keys
+            f_resolved = Type.new(ftype).resolved
+            f_schema = lookup_type_schema(f_resolved)
+            if f_schema&.dig(:kind) == :resource
+              f_close = f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
+              closes << f_close
+            end
+          end
+          if closes.any?
+            is_resource = true
+            resource_close = closes.join("; ")
+          end
+        end
       end
       node.resource_close_zig = resource_close
 
@@ -2491,8 +2532,17 @@ private
     end
 
     ti = node.value.type_info
-    unless ti&.multiowned? || ti&.shared?
-      error!(node, "MOVE can only be applied to @multiowned or @shared variables, got '#{node.value.resolved_type}'")
+    
+    # Check if the identifier is a resource
+    is_resource = false
+    if node.value.is_a?(AST::Identifier)
+      decl_scope = lookup_scope_for(node.value.name)
+      info = decl_scope&.locals&.[](node.value.name)
+      is_resource = info&.[](:resource)
+    end
+
+    unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource
+      error!(node, "MOVE can only be applied to @multiowned, @shared, promise, or resource variables, got '#{node.value.resolved_type}'")
     end
 
     # Inherit the capability type so the VarDecl or ReturnNode can infer storage correctly

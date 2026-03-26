@@ -1,10 +1,10 @@
 module OwnershipGenerator
   # Generates the `_moved` flag and `defer` cleanup block for a variable.
   def emit_cleanup(name, type_info, storage, resource_close: nil)
-    # Resources use a simple `defer close()` — no moved-flag needed in Phase 1.
+    # Resources use a simple `defer close()` — use moved-flag to prevent double-close.
     if resource_close
       close_stmt = resource_close.gsub("{0}", name)
-      return "defer #{close_stmt};\n"
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{close_stmt};\n"
     end
 
     # @list backing buffer lives in the frame arena — deinit is a no-op but safe.
@@ -99,11 +99,19 @@ module OwnershipGenerator
   # Marks the source identifier as moved if it requires affine transfer.
   def emit_move_suppression(rhs_node)
     if rhs_node.is_a?(AST::Identifier)
-      # Explicit MOVE for RC, or automatic MOVE for unique heap/arrays/sync
+      # Explicit MOVE for RC, or automatic MOVE for unique heap/arrays/sync/resources
       is_rc = rhs_node.type_info&.any_rc?
       is_sync = rhs_node.type_info&.any_sync?
+      
+      # Determine if the RHS is a resource based on its declaration node
+      # If we don't have decl_node, it might be a method call result or something;
+      # resources are always affine and should be moved.
+      ti = rhs_node.type_info
+      is_resource = (ti&.resolved == :File || ti&.resolved == :TCPServer || ti&.resolved == :TCPClient)
+
       should_suppress = (is_rc && @current_rhs_is_move) || 
-                        (!is_rc && (rhs_node.type_info&.requires_move? || is_sync) && rhs_node.storage == :heap)
+                        (!is_rc && (rhs_node.type_info&.requires_move? || is_sync || is_resource) && 
+                         (rhs_node.storage == :heap || is_resource))
       
       return "#{rhs_node.name}_moved = true;" if should_suppress
     end
