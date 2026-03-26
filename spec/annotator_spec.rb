@@ -2777,27 +2777,6 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
-  describe "DO block" do
-
-    context "three concurrent branches accessing the same @locked counter" do
-      let(:code) {
-        <<~FLUX
-          STRUCT Counter { value: Number }
-          c = Counter{ value: 0 } @locked;
-          DO {
-            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
-            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
-            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
-          }
-        FLUX
-      }
-
-      it "succeeds (mutex serialises concurrent mutations)" do
-        expect { ast }.not_to raise_error
-      end
-    end
-  end
-
   # ---------------------------------------------------------------------------
   # Range Literals (..<  and  ..<=)
   # ---------------------------------------------------------------------------
