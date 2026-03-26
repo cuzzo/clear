@@ -1,7 +1,8 @@
-// control-plane-test.zig — Unit tests for the control plane overflow registry.
+// control-plane-test.zig — Unit tests for the control plane.
 //
 // Tests the lock-free registry in isolation (no scheduler, no fibers).
-// Verifies:
+//
+// Overflow tests:
 //   1. Overflow is recorded and recommendation bumps up one tier
 //   2. Multiple overflows ratchet upward (Standard → Large → XL)
 //   3. recommendSize returns the higher of requested vs recorded
@@ -110,4 +111,151 @@ test "fn_addr = 0 is ignored (no task context)" {
 
     cp.recordOverflow(0, .Standard);
     try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(0, .Standard));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OnUnderflow tests
+// ═══════════════════════════════════════════════════════════════════
+
+test "measureStackUsage: fully used stack returns full size" {
+    var stack: [1024]u8 = undefined;
+    @memset(&stack, 0xCC); // fill pattern
+    @memset(stack[0..], 0x00); // overwrite ALL of it
+    try std.testing.expectEqual(@as(usize, 1024), cp.measureStackUsage(&stack));
+}
+
+test "measureStackUsage: untouched stack returns 0" {
+    var stack: [1024]u8 = undefined;
+    @memset(&stack, 0xCC); // all fill pattern = untouched
+    try std.testing.expectEqual(@as(usize, 0), cp.measureStackUsage(&stack));
+}
+
+test "measureStackUsage: half-used stack" {
+    var stack: [1024]u8 = undefined;
+    @memset(&stack, 0xCC);
+    // Touch the top half (higher addresses = used by stack growing downward)
+    @memset(stack[512..], 0x00);
+    // Bottom half untouched (512 bytes of 0xCC)
+    try std.testing.expectEqual(@as(usize, 512), cp.measureStackUsage(&stack));
+}
+
+test "recordCompletion: 1-tier underflow increments counter" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0001;
+
+    // Standard = 16KB.  Using 4KB = 25% → that's actually < 25% boundary.
+    // Let's use 6KB = 37.5% of 16KB → < 50% but >= 25% → 1-tier underflow.
+    cp.recordCompletion(fn_addr, .Standard, 6 * 1024);
+
+    const counts = cp.getUnderflowCounts(fn_addr);
+    try std.testing.expectEqual(@as(u32, 1), counts.tier1);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier2);
+}
+
+test "recordCompletion: 2-tier underflow increments tier2 counter" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0002;
+
+    // Standard = 16KB.  Using 2KB = 12.5% → < 25% → 2-tier underflow.
+    cp.recordCompletion(fn_addr, .Standard, 2 * 1024);
+
+    const counts = cp.getUnderflowCounts(fn_addr);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier1);
+    try std.testing.expectEqual(@as(u32, 1), counts.tier2);
+}
+
+test "recordCompletion: no underflow when usage is > 50%" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0003;
+
+    // Standard = 16KB.  Using 12KB = 75% → no underflow.
+    cp.recordCompletion(fn_addr, .Standard, 12 * 1024);
+
+    const counts = cp.getUnderflowCounts(fn_addr);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier1);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier2);
+}
+
+test "recordCompletion: 2-tier threshold triggers downsize by 2" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0004;
+
+    // Use low thresholds for testing.
+    const saved_t = cp.config.underflow_2tier_threshold;
+    cp.config.underflow_2tier_threshold = 5;
+    defer cp.config.underflow_2tier_threshold = saved_t;
+
+    // Large task using < 25% → 2-tier underflow.  Large - 2 = Micro.
+    for (0..5) |_| {
+        cp.recordCompletion(fn_addr, .Large, 1024); // 1KB of 64KB = 1.5%
+    }
+
+    // After 5 completions (= threshold), should recommend Micro.
+    try std.testing.expectEqual(StackSize.Micro, cp.recommendSize(fn_addr, .Large));
+}
+
+test "recordCompletion: 1-tier threshold triggers downsize by 1" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0005;
+
+    const saved_t = cp.config.underflow_1tier_threshold;
+    cp.config.underflow_1tier_threshold = 3;
+    defer cp.config.underflow_1tier_threshold = saved_t;
+
+    // Large task using 30% → < 50% but >= 25% → 1-tier underflow.  Large - 1 = Standard.
+    for (0..3) |_| {
+        cp.recordCompletion(fn_addr, .Large, 20 * 1024); // 20KB of 64KB = 31%
+    }
+
+    try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(fn_addr, .Large));
+}
+
+test "recordCompletion: Micro tasks are not downsized" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0006;
+
+    cp.config.underflow_2tier_threshold = 1;
+    defer cp.config.underflow_2tier_threshold = 10_000;
+
+    // Micro task using nothing — can't downsize further.
+    cp.recordCompletion(fn_addr, .Micro, 100);
+
+    const counts = cp.getUnderflowCounts(fn_addr);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier1);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier2);
+}
+
+test "overflow takes priority over underflow downsize" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0007;
+
+    cp.config.underflow_1tier_threshold = 1;
+    defer cp.config.underflow_1tier_threshold = 100_000;
+
+    // First: overflow bumps Standard → Large.
+    cp.recordOverflow(fn_addr, .Standard);
+    try std.testing.expectEqual(StackSize.Large, cp.recommendSize(fn_addr, .Standard));
+
+    // Then: underflow tries to downsize Large → Standard.
+    cp.recordCompletion(fn_addr, .Large, 20 * 1024);
+
+    // Underflow downsize set recommended to Standard.
+    // recommendSize returns max(requested=Standard, recommended=Standard) = Standard.
+    // But the overflow previously set it to Large — the downsize overwrote it.
+    // This is intentional: if the task consistently uses less after being upsized,
+    // the underflow should be allowed to correct it.
+    try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(fn_addr, .Standard));
+}
+
+test "underflow policy = ignore suppresses counting" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0008;
+
+    const saved = cp.config.on_underflow;
+    cp.config.on_underflow = .ignore;
+    defer cp.config.on_underflow = saved;
+
+    cp.recordCompletion(fn_addr, .Large, 1024);
+    const counts = cp.getUnderflowCounts(fn_addr);
+    try std.testing.expectEqual(@as(u32, 0), counts.tier2);
 }

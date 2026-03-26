@@ -485,6 +485,14 @@ pub const Scheduler = struct {
 
                 switch (task.status) {
                     .Finished => {
+                        // Control plane: check for stack underflow before freeing.
+                        const used = cp.measureStackUsage(task.base.stack.memory);
+                        cp.recordCompletion(
+                            @intFromPtr(task.user_fn),
+                            task.base.size_class,
+                            used,
+                        );
+
                         // Recycle
                         _ = self.active_tasks.fetchSub(1, .monotonic);
                         self.freeStack(task.base.stack.memory);
