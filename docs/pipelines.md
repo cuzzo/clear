@@ -131,6 +131,10 @@ alive = pool s> WHERE _.health > 0;
 MUTABLE soa_pool: Entity[]@pool:soa = [];
 total_hp = soa_pool s> SUM _.health;  -- iterates only the health array
 
+-- @list:soa (same SOA benefits for dense lists)
+MUTABLE soa_list: Entity[]@list:soa = [];
+avg = soa_list s> AVERAGE _.health;   -- contiguous f64 slice
+
 -- :sharded (parallel EACH via DO blocks)
 MUTABLE sharded: Entity[]@pool:sharded(4) = [];
 sharded s> EACH { _.processed = TRUE; };

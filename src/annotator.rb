@@ -1353,6 +1353,17 @@ private
       # Tag extern calls so the transpiler skips rt injection and try
       node.extern_call = true if node.respond_to?(:extern_call=) && func_type[:extern]
 
+      # Block @soa collections from being passed to EXTERN FN.
+      # SOA layout is not contiguous in memory — C/Zig FFI expects AOS (struct*).
+      if func_type[:extern]
+        args.each do |arg|
+          ti = arg.type_info rescue nil
+          if ti&.respond_to?(:soa?) && ti.soa?
+            error!(arg, "@soa collections cannot be passed to EXTERN FN — SOA memory layout is incompatible with C ABI. Materialize to a regular array first.")
+          end
+        end
+      end
+
       type_params = func_type[:type_params]
       if type_params&.any?
         # Generic function: infer type args from actual arguments

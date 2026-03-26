@@ -953,9 +953,12 @@ class Type
       return sharded? ? "CheatLib.ShardedPool(#{base_zig}, #{shard_count})" : "CheatLib.Pool(#{base_zig})"
     end
 
-    # 3c. Handle @list / ShardedList collection
+    # 3c. Handle @list / ShardedList / SoaList collection
     if list_collection?
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      if soa?
+        return "CheatLib.SoaList(#{base_zig})"
+      end
       return sharded? ? "CheatLib.ShardedList(#{base_zig}, #{shard_count})" : "std.ArrayListUnmanaged(#{base_zig})"
     end
 

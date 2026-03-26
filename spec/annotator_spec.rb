@@ -9999,6 +9999,98 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # @list:soa (SOA dynamic list)
+  # ===========================================================================
+  describe "@list:soa (SOA dynamic list)" do
+    it "accepts Entity[]@list:soa as a valid type annotation" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "generates SoaList Zig type" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("CheatLib.SoaList(Entity)")
+    end
+
+    it "uses field-slice iteration for SUM (no alive check)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Number ->
+          MUTABLE items: Entity[]@list:soa = [];
+          total = items s> SUM _.health;
+          RETURN total;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("data.items(.health)")
+      # SOA list path should NOT have alive check (that's pool-only)
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).not_to include("alive")
+    end
+
+    it "plain @list still generates ArrayListUnmanaged (not SoaList)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number }
+        FN f() RETURNS Void -> MUTABLE items: Entity[]@list = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("ArrayListUnmanaged(Entity)")
+      expect(zig).not_to include("SoaList")
+    end
+  end
+
+  # ===========================================================================
+  # SOA + FFI guard
+  # ===========================================================================
+  describe "SOA FFI guard" do
+    it "rejects @pool:soa passed to EXTERN FN" do
+      code = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
+        FN f() RETURNS Void ->
+          MUTABLE pool: Vec2[]@pool:soa = [];
+          process_vecs(pool);
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/@soa.*EXTERN|incompatible.*C ABI/i)
+    end
+
+    it "rejects @list:soa passed to EXTERN FN" do
+      code = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
+        FN f() RETURNS Void ->
+          MUTABLE items: Vec2[]@list:soa = [];
+          process_vecs(items);
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/@soa.*EXTERN|incompatible.*C ABI/i)
+    end
+
+    it "allows regular struct passed to EXTERN FN (non-SOA)" do
+      code = <<~CLEAR
+        STRUCT Vec2 { x: Number, y: Number }
+        EXTERN FN process_vec(data: Vec2) RETURNS Void FROM "native";
+        FN f() RETURNS Void ->
+          v = Vec2{ x: 1.0, y: 2.0 };
+          process_vec(v);
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+  end
+
+  # ===========================================================================
   # SOA Opportunity Detection
   # ===========================================================================
   describe "SOA opportunity warnings" do

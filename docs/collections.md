@@ -177,7 +177,16 @@ All pipeline operators (SUM, MIN, MAX, AVERAGE, COUNT, ANY, ALL, WHERE, FIND, SE
 
 For operators that produce struct output (WHERE, FIND), structs are reassembled only for matching elements — the predicate still uses field-slice access, so most iterations touch only the predicate field.
 
-`:soa` currently works on `@pool`. Same handle semantics: `insert`, `get`, `remove`, `count` all work identically. The difference is invisible except in pipeline performance.
+`:soa` works on both `@pool` and `@list`:
+
+```clear
+MUTABLE pool: Entity[]@pool:soa = [];   -- SOA pool (generational handles)
+MUTABLE items: Entity[]@list:soa = [];  -- SOA list (dense, indexed)
+```
+
+Same API as their non-SOA counterparts. The difference is invisible except in pipeline performance.
+
+**FFI restriction:** `@soa` collections cannot be passed to `EXTERN FN` — SOA memory layout is incompatible with the C ABI. Materialize to a regular collection first if you need FFI.
 
 ## Sharding — Lock-Free Parallel Collections
 

@@ -1510,6 +1510,52 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------
+    // SoaList(T): Dynamic list with Structure-of-Arrays layout.
+    //
+    // Same API as ArrayListUnmanaged(T) but stores fields in separate
+    // contiguous arrays via std.MultiArrayList.  Pipeline iteration
+    // over a single field reads a cache-optimal contiguous slice.
+    //
+    // Usage (CLEAR: `MUTABLE items: Entity[]@list:soa = []`):
+    //   var list = CheatLib.SoaList(Entity){};
+    //   defer list.deinit(allocator);
+    //   try list.append(allocator, Entity{ .x=1, .y=2, ... });
+    //   const val: Entity = list.get(0);
+    // -----------------------------------------------------------------
+    pub fn SoaList(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const MAL = std.MultiArrayList(T);
+
+            data: MAL = .{},
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                self.data.deinit(allocator);
+            }
+
+            pub fn append(self: *Self, allocator: std.mem.Allocator, value: T) !void {
+                try self.data.append(allocator, value);
+            }
+
+            pub fn get(self: *const Self, index: usize) T {
+                return self.data.get(index);
+            }
+
+            pub fn set(self: *Self, index: usize, value: T) void {
+                self.data.set(index, value);
+            }
+
+            pub fn length(self: *const Self) usize {
+                return self.data.len;
+            }
+
+            pub fn count(self: *const Self) usize {
+                return self.data.len;
+            }
+        };
+    }
+
+    // -----------------------------------------------------------------
     // SoaPool(T): Generational pool with Structure-of-Arrays layout.
     //
     // Same handle semantics as Pool(T), but stores fields in separate

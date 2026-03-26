@@ -9,7 +9,7 @@ module PipelineGenerator
     list_code = visit(list_node)
     alloc = storage_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
     lhs_type = list_node.type_info
-    is_soa_pool = lhs_type&.pool? && lhs_type&.soa?
+    is_soa = (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
 
     # Optional result initialization (e.g. creating the output ArrayList)
     res_init = if init
@@ -22,7 +22,7 @@ module PipelineGenerator
 
     body_code = yield(alloc)
 
-    if is_soa_pool
+    if is_soa
       # SOA path: field-slice declarations + SOA loop (no materialization).
       # @soa_needed_fields was populated during expression visit (GetField rewrite).
       field_slices = @soa_needed_fields.map { |f|
@@ -35,14 +35,18 @@ module PipelineGenerator
         "for (0..@intCast(__soa_src.data.len)) |__soa_i| {"
       )
 
-      # Insert alive check after the opening brace.  Also add `const it = ...` if
-      # the body references `it` as a whole struct (WHERE/FIND need it for output).
-      alive_check = "if (!__soa_src.alive.items[__soa_i]) continue;"
+      # Insert alive check (pools only) + whole-struct reassembly (WHERE/FIND).
+      inner_checks = ""
+      if lhs_type&.pool?
+        inner_checks = "if (!__soa_src.alive.items[__soa_i]) continue;"
+      end
       if body_code.match?(/\bit\b/)
         # Body uses `it` as a whole struct — reassemble (only for matching elements).
-        alive_check += "\n                const it = __soa_src.data.get(__soa_i);"
+        inner_checks += "\n                const it = __soa_src.data.get(__soa_i);"
       end
-      body_code = body_code.sub("__soa_i| {", "__soa_i| {\n                #{alive_check}")
+      if inner_checks.length > 0
+        body_code = body_code.sub("__soa_i| {", "__soa_i| {\n                #{inner_checks}")
+      end
 
       @soa_needed_fields.clear
 
@@ -122,7 +126,8 @@ module PipelineGenerator
   # are rewritten to __soa_field[__soa_i] (field-slice access).
   def visit_pipeline_expr(list_node, expr_node, placeholder = "it")
     @placeholder_name = placeholder
-    is_soa = list_node.type_info&.pool? && list_node.type_info&.soa?
+    lhs_t = list_node.type_info
+    is_soa = (lhs_t&.pool? || lhs_t&.list_collection?) && lhs_t&.soa?
     @soa_rewrite_active = is_soa
     @soa_needed_fields = Set.new if is_soa
     code = visit(expr_node)
@@ -335,6 +340,8 @@ module PipelineGenerator
       else
         transpile_each_pool(lhs, body_code)
       end
+    elsif lhs_type&.list_collection? && lhs_type&.soa?
+      transpile_each_soa_list(lhs, body_code)
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
       transpile_each_sharded_list(lhs, body_code, lhs_type)
     else
@@ -363,6 +370,20 @@ module PipelineGenerator
           for (__each_src.slots.items) |*__each_slot| {
               if (!__each_slot.alive) continue;
               const __each_item = &__each_slot.value;
+              #{body_code}
+          }
+      }
+    ZIG
+  end
+
+  def transpile_each_soa_list(list_node, body_code)
+    list_code = visit(list_node)
+    <<~ZIG.chomp
+      {
+          const __each_src = &#{list_code};
+          for (0..@intCast(__each_src.data.len)) |__each_i| {
+              var __each_item = __each_src.data.get(__each_i);
+              _ = &__each_item;
               #{body_code}
           }
       }
