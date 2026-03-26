@@ -48,6 +48,14 @@ module GenericAnalysis
   #   3. Generic type without args:   Pair           — error: args required
   #   4. Non-generic type without args: User         — nothing to validate (normal path)
   #
+  # Validates a type annotation where generics are involved.
+  # Called whenever a user-written type annotation is resolved (variable decls, params, returns).
+  # Covers four cases:
+  #   1. Generic type used correctly: Pair<Number> — validate arg count + arg types
+  #   2. Generic type missing args: Pair — error
+  #   3. Non-generic type with args: Int64<Number> — error
+  #   4. Type param used as arg: Cache<T> — skip validation (resolved at monomorphization)
+  #
   # Respects @current_fn_type_params so that Cache<T> in a generic function
   # does not raise "unknown type argument T".
   def validate_type_annotation!(node, type_obj)

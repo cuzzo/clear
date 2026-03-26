@@ -219,8 +219,12 @@ module EffectTracker
 
   # --- Reentrancy analysis ---
 
-  # Recursively scan an AST subtree and return [Set<function_names>, has_fnptr].
-  # Does not descend into nested FunctionDef nodes (they have their own scope).
+  # Recursively walk an annotated AST subtree and collect:
+  #   - names of every directly-called named function (FuncCall where !fn_var_call)
+  #   - whether any fn-type variable or lambda is invoked (fn_var_call)
+  #
+  # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
+  # all functions are top-level — but guarded for safety).
   def scan_for_calls(node)
     calls    = Set.new
     has_fnptr = [false]

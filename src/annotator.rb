@@ -1480,18 +1480,6 @@ private
     end
   end
 
-  # Finalize storage tier (stack/frame/heap) and record allocation effects.
-  def finalize_decl_storage!(node, final_type)
-    storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
-    storage = downgrade_frame_to_stack(node, storage)
-    @frame_usage_count += 1 if storage == :frame
-    if storage == :heap
-      @heap_usage_count += 1
-      record_effect(EffectTracker::HEAP)
-    end
-    storage
-  end
-
   # Propagate collection, shard_count, soa, and sync metadata from the declared
   # type annotation (or inferred value type) into node.type_info and node.full_type.
   # These fields are lost during finalize_storage! and coerce!.
@@ -1535,44 +1523,6 @@ private
     if node.value.respond_to?(:map_from_call) && node.value.map_from_call
       node.type_info.heap_map = true
     end
-  end
-
-  # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
-  # Returns [is_resource, resource_close_zig].
-  def resolve_resource_close(node, final_type)
-    ft_obj = node.type_info
-    is_pool        = ft_obj&.pool?
-    is_open_stream = ft_obj&.open_stream?
-    is_inf_stream  = ft_obj&.inf_stream?
-
-    if is_pool
-      return [true, "{0}.deinit(rt.heapAlloc())"]
-    elsif is_open_stream || is_inf_stream
-      return [true, "{0}.deinit()"]
-    end
-
-    resource_schema = lookup_type_schema(final_type)
-    is_resource     = resource_schema&.dig(:kind) == :resource
-    resource_close  = is_resource ? resource_schema[:close_zig] : nil
-
-    # Recursive check: if it's a user struct, check if any fields are resources.
-    if !is_resource && resource_schema.is_a?(Hash) && resource_schema[:kind].nil?
-      closes = []
-      resource_schema.each do |fname, ftype|
-        next if fname == :type_params || fname == :methods
-        f_resolved = Type.new(ftype).resolved
-        f_schema = lookup_type_schema(f_resolved)
-        if f_schema&.dig(:kind) == :resource
-          closes << f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
-        end
-      end
-      if closes.any?
-        is_resource = true
-        resource_close = closes.join("; ")
-      end
-    end
-
-    [is_resource, resource_close]
   end
 
   # ==========================================
@@ -2638,22 +2588,5 @@ private
   end
 
 
-  # Validates a type annotation where generics are involved.
-  # Called whenever a user-written type annotation is resolved (variable decls, params, returns).
-  # Covers four cases:
-  #   1. Generic type used correctly: Pair<Number>    — validate arg count + arg types
-  # Generic helpers (validate_type_annotation!, infer_generic_type_args!, etc.)
-  # live in src/generic_analysis.rb (included via GenericAnalysis module).
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Reentrancy helpers
-  # ──────────────────────────────────────────────────────────────────────────
-
-  # Recursively walk an annotated AST subtree and collect:
-  #   - names of every directly-called named function (FuncCall where !fn_var_call)
-  #   - whether any fn-type variable or lambda is invoked (fn_var_call)
-  #
-  # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
-  # all functions are top-level — but guarded for safety).
 end
 
