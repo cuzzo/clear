@@ -9,6 +9,7 @@ require_relative "./generic_analysis"
 require_relative "./capabilities"
 require_relative "./effects"
 require_relative "./alloc"
+require_relative "./method_analysis"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -23,6 +24,7 @@ class SemanticAnnotator
   include CapabilityHelper
   include CapabilityAudit
   include AllocHelper
+  include MethodAnalysis
 
   attr_reader :scope_stack
 
@@ -1090,134 +1092,12 @@ private
     visit(node.object)
     node.args.each { |arg| visit(arg) }
 
-    # Pool method dispatch: intercept before UFCS so pool.insert/get/remove
-    # resolve to the pool's own methods rather than global functions.
-    obj_type = node.object.type_info
-    if obj_type&.pool?
-      return visit_PoolMethod(node, obj_type)
-    end
+    # Collection method dispatch (Pool/HashMap) via declarative registry.
+    return if resolve_collection_method(node)
 
-    # HashMap method dispatch: intercept before UFCS for map-specific methods.
-    if obj_type&.map?
-      return visit_MapMethod(node, obj_type)
-    end
-
+    # Fall through to UFCS: obj.method(args) → method(obj, args)
     ufcs_args = [node.object] + node.args
     resolve_call(node, ufcs_args)
-  end
-
-  # Type-checks a method call on a Pool<T> and tags the node for transpilation.
-  def visit_PoolMethod(node, pool_type)
-    elem = pool_type.element_type
-    case node.name
-    when "insert"
-      unless node.args.length == 1
-        error!(node, "Pool.insert requires exactly 1 argument, got #{node.args.length}")
-        return
-      end
-      arg_type = node.args[0].resolved_type
-      unless arg_type == :Any || is_safe_autocast?(arg_type, elem.resolved)
-        error!(node, "Pool.insert: argument type #{arg_type} does not match pool element type #{elem.resolved}")
-      end
-      node.pool_method = :insert
-      node.full_type   = Type.new(:"Id<#{elem.resolved}>")
-
-    when "get"
-      unless node.args.length == 1
-        error!(node, "Pool.get requires exactly 1 argument (an Id handle), got #{node.args.length}")
-        return
-      end
-      node.pool_method = :get
-      node.full_type   = Type.new(:"?#{elem.resolved}")
-
-    when "remove"
-      unless node.args.length == 1
-        error!(node, "Pool.remove requires exactly 1 argument (an Id handle), got #{node.args.length}")
-        return
-      end
-      node.pool_method = :remove
-      node.full_type   = :Void
-
-    when "count"
-      unless node.args.empty?
-        error!(node, "Pool.count takes no arguments, got #{node.args.length}")
-        return
-      end
-      node.pool_method = :count
-      node.full_type   = Type.new(:Int64)
-
-    else
-      error!(node, "Unknown method '#{node.name}' on Pool<#{elem.resolved}>. Available: insert, get, remove, count")
-    end
-  end
-
-  # Type-checks a method call on a HashMap<V> and tags the node for transpilation.
-  def visit_MapMethod(node, map_type)
-    val_type = map_type.value_type
-    case node.name
-    when "delete"
-      unless node.args.length == 1
-        error!(node, "HashMap.delete requires exactly 1 argument (a key), got #{node.args.length}")
-        return
-      end
-      arg_type = Type.new(node.args[0].resolved_type)
-      if map_type.numeric_map?
-        unless arg_type.numeric?
-          error!(node, "HashMap.delete: key must be a numeric type, got #{node.args[0].resolved_type}")
-        end
-      else
-        unless arg_type.string?
-          error!(node, "HashMap.delete: key must be a String, got #{node.args[0].resolved_type}")
-        end
-      end
-      node.map_method = :delete
-      node.full_type  = :Void
-
-    when "contains"
-      unless node.args.length == 1
-        error!(node, "HashMap.contains requires exactly 1 argument (a key), got #{node.args.length}")
-        return
-      end
-      arg_type = Type.new(node.args[0].resolved_type)
-      if map_type.numeric_map?
-        unless arg_type.numeric?
-          error!(node, "HashMap.contains: key must be a numeric type, got #{node.args[0].resolved_type}")
-        end
-      else
-        unless arg_type.string?
-          error!(node, "HashMap.contains: key must be a String, got #{node.args[0].resolved_type}")
-        end
-      end
-      node.map_method = :contains
-      node.full_type  = :Bool
-
-    when "count"
-      unless node.args.empty?
-        error!(node, "HashMap.count takes no arguments, got #{node.args.length}")
-        return
-      end
-      node.map_method = :count
-      node.full_type  = Type.new(:Int64)
-
-    when "keys"
-      unless node.args.empty?
-        error!(node, "HashMap.keys takes no arguments, got #{node.args.length}")
-        return
-      end
-      node.map_method = :keys
-      node.full_type  = :"String[]"
-
-    when "values"
-      unless node.args.empty?
-        error!(node, "HashMap.values takes no arguments, got #{node.args.length}")
-        return
-      end
-      node.map_method = :values
-      node.full_type  = :"#{val_type.resolved}[]"
-
-    else
-      error!(node, "Unknown method '#{node.name}' on HashMap<#{val_type.resolved}>. Available: delete, contains, count, keys, values")
-    end
   end
 
   # Shared logic for resolving function/method calls.

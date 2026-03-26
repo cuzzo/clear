@@ -208,3 +208,77 @@ STD_LIB = {
     zig: "try CheatLib.socketWriteVoid({0}, {1})"
   },
 }
+
+# ============================================================================
+# Method Registry — type-specific method definitions for Pool and HashMap
+# ============================================================================
+# Each entry: { arity: N, validate: lambda, return_type: lambda, tag: symbol }
+#   arity:       expected arg count (-1 = any)
+#   validate:    lambda(node, args, obj_type, error_fn) — type-check args
+#   return_type: lambda(obj_type) — compute return type from receiver type
+#   tag:         symbol to set on the node (pool_method / map_method)
+
+POOL_METHODS = {
+  "insert" => {
+    arity: 1, tag: :pool_method,
+    validate: ->(node, args, obj_type, error_fn) {
+      elem = obj_type.element_type
+      arg_type = args[0].resolved_type
+      unless arg_type == :Any || arg_type == elem.resolved || Type.new(elem.resolved).accepts?(Type.new(arg_type))
+        error_fn.call(node, "Pool.insert: argument type #{arg_type} does not match pool element type #{elem.resolved}")
+      end
+    },
+    return_type: ->(obj_type) { Type.new(:"Id<#{obj_type.element_type.resolved}>") },
+  },
+  "get" => {
+    arity: 1, tag: :pool_method,
+    return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
+  },
+  "remove" => {
+    arity: 1, tag: :pool_method,
+    return_type: ->(_) { :Void },
+  },
+  "count" => {
+    arity: 0, tag: :pool_method,
+    return_type: ->(_) { Type.new(:Int64) },
+  },
+}.freeze
+
+MAP_METHODS = {
+  "delete" => {
+    arity: 1, tag: :map_method,
+    validate: ->(node, args, obj_type, error_fn) {
+      arg_type = Type.new(args[0].resolved_type)
+      if obj_type.numeric_map?
+        error_fn.call(node, "HashMap.delete: key must be a numeric type, got #{args[0].resolved_type}") unless arg_type.numeric?
+      else
+        error_fn.call(node, "HashMap.delete: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
+      end
+    },
+    return_type: ->(_) { :Void },
+  },
+  "contains" => {
+    arity: 1, tag: :map_method,
+    validate: ->(node, args, obj_type, error_fn) {
+      arg_type = Type.new(args[0].resolved_type)
+      if obj_type.numeric_map?
+        error_fn.call(node, "HashMap.contains: key must be a numeric type, got #{args[0].resolved_type}") unless arg_type.numeric?
+      else
+        error_fn.call(node, "HashMap.contains: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
+      end
+    },
+    return_type: ->(_) { :Bool },
+  },
+  "count" => {
+    arity: 0, tag: :map_method,
+    return_type: ->(_) { Type.new(:Int64) },
+  },
+  "keys" => {
+    arity: 0, tag: :map_method,
+    return_type: ->(_) { :"String[]" },
+  },
+  "values" => {
+    arity: 0, tag: :map_method,
+    return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]" },
+  },
+}.freeze

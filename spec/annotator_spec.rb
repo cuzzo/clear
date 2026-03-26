@@ -9513,7 +9513,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /Pool.insert requires exactly 1 argument/)
+        }.to raise_error(CompilerError, /Pool.*\.insert requires exactly 1 argument/)
       end
 
       it "raises when insert receives wrong element type" do
@@ -9573,7 +9573,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /Pool.get requires exactly 1 argument/)
+        }.to raise_error(CompilerError, /Pool.*\.get requires exactly 1 argument/)
       end
     end
 
@@ -9619,7 +9619,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /Pool.remove requires exactly 1 argument/)
+        }.to raise_error(CompilerError, /Pool.*\.remove requires exactly 1 argument/)
       end
     end
 
@@ -12351,7 +12351,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.count takes no arguments/)
+        }.to raise_error(CompilerError, /HashMap.*\.count takes no arguments/)
       end
     end
 
@@ -12389,7 +12389,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.contains requires exactly 1 argument/)
+        }.to raise_error(CompilerError, /HashMap.*\.contains requires exactly 1 argument/)
       end
 
       it "raises when contains key is not a String" do
@@ -12439,7 +12439,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.delete requires exactly 1 argument/)
+        }.to raise_error(CompilerError, /HashMap.*\.delete requires exactly 1 argument/)
       end
     end
 
@@ -12477,7 +12477,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.keys takes no arguments/)
+        }.to raise_error(CompilerError, /HashMap.*\.keys takes no arguments/)
       end
     end
 
@@ -12515,7 +12515,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.values takes no arguments/)
+        }.to raise_error(CompilerError, /HashMap.*\.values takes no arguments/)
       end
     end
 
