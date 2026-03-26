@@ -5,11 +5,11 @@ module PipelineGenerator
   # For @pool and @pool:sharded(N): materializes live slot values into a frame
   # buffer before iteration so all pipeline ops work correctly.
   # For @list:sharded(N): flattens all shard slices into a frame buffer.
-  def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil)
+  def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil, force_aos: false)
     list_code = visit(list_node)
     alloc = storage_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
     lhs_type = list_node.type_info
-    is_soa = (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
+    is_soa = !force_aos && (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
 
     # Optional result initialization (e.g. creating the output ArrayList)
     res_init = if init
@@ -34,6 +34,9 @@ module PipelineGenerator
         /for \(pipe_items\) \|it\| \{/,
         "for (0..@intCast(__soa_src.data.len)) |__soa_i| {"
       )
+
+      # Replace pipe_items.len references (used by MIN/MAX/AVERAGE).
+      body_code = body_code.gsub("pipe_items.len", "@as(usize, @intCast(__soa_src.data.len))")
 
       # Insert alive check (pools only) + whole-struct reassembly (WHERE/FIND).
       inner_checks = ""
@@ -91,6 +94,26 @@ module PipelineGenerator
             for (pipe_src_list.shards[__psi].slots.items) |*__pslot| {
                 if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);
             }
+        }
+        const pipe_items = pipe_mat.items;
+      ZIG
+    elsif lhs_type&.pool? && lhs_type&.soa?
+      elem_zig = lhs_type.element_type.zig_type
+      <<~ZIG.strip
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        defer pipe_mat.deinit(rt.heapAlloc());
+        for (0..@intCast(pipe_src_list.data.len)) |__psi| {
+            if (pipe_src_list.alive.items[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
+        }
+        const pipe_items = pipe_mat.items;
+      ZIG
+    elsif lhs_type&.list_collection? && lhs_type&.soa?
+      elem_zig = lhs_type.element_type.zig_type
+      <<~ZIG.strip
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        defer pipe_mat.deinit(rt.heapAlloc());
+        for (0..@intCast(pipe_src_list.data.len)) |__psi| {
+            try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
         }
         const pipe_items = pipe_mat.items;
       ZIG
@@ -176,7 +199,7 @@ module PipelineGenerator
 
     init = "var idx_result: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(#{element_zig_type})) = .{};"
 
-    transpile_pipeline_macro(list_node, smooth_node, init: init) do |alloc|
+    transpile_pipeline_macro(list_node, smooth_node, init: init, force_aos: true) do |alloc|
       <<~ZIG
         for (pipe_items) |it| {
             const idx_key = #{expr_code};
@@ -203,7 +226,7 @@ module PipelineGenerator
 
     init = "var acc: #{acc_type} = #{initial_code};"
 
-    transpile_pipeline_macro(list_node, reduce_node, init: init) do
+    transpile_pipeline_macro(list_node, reduce_node, init: init, force_aos: true) do
       <<~ZIG
         for (pipe_items) |it| {
             acc = #{expr_code};
@@ -227,7 +250,7 @@ module PipelineGenerator
       _ = &ord_result;
     ZIG
 
-    transpile_pipeline_macro(list_node, smooth_node, init: init) do
+    transpile_pipeline_macro(list_node, smooth_node, init: init, force_aos: true) do
       <<~ZIG
         // Sort using custom comparator
         std.mem.sort(#{element_zig_type}, ord_result.items, {}, struct {
@@ -245,7 +268,7 @@ module PipelineGenerator
     element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
     count_code = visit(limit_node.count)
 
-    transpile_pipeline_macro(list_node, smooth_node) do |alloc|
+    transpile_pipeline_macro(list_node, smooth_node, force_aos: true) do |alloc|
       <<~ZIG
         // Calculate actual count (min of requested and available)
         const lim_requested: usize = @intCast(#{count_code});
@@ -265,7 +288,7 @@ module PipelineGenerator
     expr_code = visit(unnest_node.expression)
     @placeholder_name = nil
 
-    transpile_pipeline_macro(list_node, smooth_node, res_type: inner_element_type) do |alloc|
+    transpile_pipeline_macro(list_node, smooth_node, res_type: inner_element_type, force_aos: true) do |alloc|
       <<~ZIG
         for (pipe_items) |it| {
             // Get the inner array from each element
@@ -291,7 +314,7 @@ module PipelineGenerator
     expr_code_inner = visit(distinct_node.expression)
     @placeholder_name = nil
 
-    transpile_pipeline_macro(list_node, smooth_node, res_type: list_node.full_type.to_s.gsub(/[\[\]]/, '')) do |alloc|
+    transpile_pipeline_macro(list_node, smooth_node, res_type: list_node.full_type.to_s.gsub(/[\[\]]/, ''), force_aos: true) do |alloc|
       <<~ZIG
         for (pipe_items) |it| {
             const dist_key = #{expr_code};
@@ -385,6 +408,7 @@ module PipelineGenerator
               var __each_item = __each_src.data.get(__each_i);
               _ = &__each_item;
               #{body_code}
+              __each_src.data.set(__each_i, __each_item);
           }
       }
     ZIG
@@ -404,6 +428,7 @@ module PipelineGenerator
               var __each_item = __each_src.data.get(__each_i);
               _ = &__each_item;
               #{body_code}
+              __each_src.data.set(__each_i, __each_item);
           }
       }
     ZIG
