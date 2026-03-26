@@ -7,7 +7,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT sum == 15, "Sum should be 15";
 
   -- Test 2: Reduce with struct field access
-  items: Item[] = [
+  items = [
     Item{ name: "a", value: 10_i64 },
     Item{ name: "b", value: 20_i64 },
     Item{ name: "c", value: 30_i64 }

@@ -48,7 +48,7 @@ FN cheatMain() RETURNS Void ->
     ASSERT big_evens == 2, "COUNT of evens > 4 should be 2";
 
     -- ANY on struct array
-    items: Item[] = [
+    items = [
         Item{ value: 10.0, active: TRUE },
         Item{ value: 20.0, active: FALSE }
     ];

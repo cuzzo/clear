@@ -19,7 +19,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT limited[1] == 20, "Second should be 20";
 
   -- Test 3: LIMIT with structs
-  items: Item[] = [
+  items = [
     Item{ name: "a", value: 1_i64 },
     Item{ name: "b", value: 2_i64 },
     Item{ name: "c", value: 3_i64 }

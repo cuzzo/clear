@@ -6,7 +6,7 @@ FN compute(w: Work) RETURNS Float64 ->
 END
 
 FN cheatMain() RETURNS Void ->
-    items: Work[] = [Work{value: 1.0}, Work{value: 2.0}, Work{value: 3.0}];
+    items = [Work{value: 1.0}, Work{value: 2.0}, Work{value: 3.0}];
     results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT compute(_);
     total = results s> SUM _;
     ASSERT total == 18.0, "parallel: TRUE should still produce correct results";

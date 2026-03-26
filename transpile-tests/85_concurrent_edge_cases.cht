@@ -13,13 +13,13 @@ FN cheatMain() RETURNS Void ->
     ASSERT empty_total == 0.0, "empty collection should produce empty results";
 
     -- Edge case 2: workers larger than collection
-    small: Item[] = [Item{value: 1.0}, Item{value: 2.0}];
+    small = [Item{value: 1.0}, Item{value: 2.0}];
     big_pool_results = small s> CONCURRENT(workers: 100) SELECT triple(_);
     big_pool_total = big_pool_results s> SUM _;
     ASSERT big_pool_total == 9.0, "workers > len should still work (3+6)";
 
     -- Edge case 3: chaining result of CONCURRENT SELECT into WHERE
-    items: Item[] = [Item{value: 1.0}, Item{value: 2.0}, Item{value: 3.0}, Item{value: 4.0}];
+    items = [Item{value: 1.0}, Item{value: 2.0}, Item{value: 3.0}, Item{value: 4.0}];
     tripled = items s> CONCURRENT(workers: 2) SELECT triple(_);
     big_ones = tripled s> WHERE _ > 7.0;
     big_total = big_ones s> SUM _;

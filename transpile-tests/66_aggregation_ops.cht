@@ -32,7 +32,7 @@ FN cheatMain() RETURNS Void ->
     ASSERT maximum == 5.0, "MAX should be 5";
 
     -- SUM of a struct field projection
-    measurements: Measurement[] = [
+    measurements = [
         Measurement{ value: 10.0 },
         Measurement{ value: 20.0 },
         Measurement{ value: 30.0 }
