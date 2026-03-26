@@ -10,6 +10,7 @@ require_relative "./capabilities"
 require_relative "./effects"
 require_relative "./alloc"
 require_relative "./method_analysis"
+require_relative "./union"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -25,6 +26,7 @@ class SemanticAnnotator
   include CapabilityAudit
   include AllocHelper
   include MethodAnalysis
+  include UnionAnalysis
 
   attr_reader :scope_stack
 
@@ -460,136 +462,10 @@ private
   # Called after Pass 2 (all function signatures registered).
   # Verifies that every method requirement declared inside the UNION body
   # is satisfied by a concrete top-level function with a matching signature.
-  def validate_union_methods!(node)
-    union_name = node.name
-
-    # Phase 5: detect duplicate method stub declarations in the same UNION.
-    seen_names = {}
-    node.methods.each do |req|
-      if seen_names.key?(req[:name])
-        error!(req[:token], :UNION_METHOD_DUPLICATE, union_name, req[:name])
-      end
-      seen_names[req[:name]] = true
-    end
-
-    node.methods.each do |req|
-      fn_name = req[:name]
-      req_tok = req[:token]
-      req_vis = req[:visibility] || :package
-
-      scope = lookup_scope_for(fn_name)
-      local = scope&.locals&.[](fn_name)
-
-      if local.nil?
-        if req[:body]
-          # No concrete override — synthesize a top-level function from the default body.
-          # Synthesized function inherits the stub's declared visibility.
-          fn_params = req[:params].map { |rp|
-            { name: rp[:name], type: rp[:type], default: nil, mutable: false, takes: false }
-          }
-          fn_node = AST::FunctionDef.new(
-            req[:token], req[:name], fn_params, [], req[:return_type],
-            nil, req[:body], nil, nil, req_vis, nil, nil
-          )
-          @synthetic_fns << fn_node
-          next  # signature will be pre-registered in visit_Program after this loop
-        else
-          error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
-        end
-      end
-
-      sig = local[:type]
-      unless sig.is_a?(Hash) && sig.key?(:params)
-        error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
-      end
-
-      # Phase 4: visibility check — concrete function must match the stub's declared visibility.
-      if req_vis != :package
-        actual_vis = sig[:visibility] || :package
-        unless actual_vis == req_vis
-          vis_label = { pub: "PUB", private: "PRIVATE", package: "package" }
-          error!(req_tok, :UNION_METHOD_WRONG_VISIBILITY,
-                 union_name, fn_name, vis_label[req_vis], fn_name, vis_label[actual_vis])
-        end
-      end
-
-      # Arity check
-      if req[:params].length != sig[:params].length
-        error!(req_tok, :UNION_METHOD_WRONG_ARITY,
-               union_name, fn_name, req[:params].length, fn_name, sig[:params].length)
-      end
-
-      # Parameter type checks
-      req[:params].each_with_index do |rp, i|
-        req_t  = to_type(rp[:type]).resolved.to_s
-        sig_t  = to_type(sig[:params][i][:type]).resolved.to_s
-        unless req_t == sig_t || req_t == 'Any' || sig_t == 'Any'
-          error!(req_tok, :UNION_METHOD_PARAM_TYPE,
-                 union_name, fn_name, i + 1, req_t, fn_name, sig_t)
-        end
-      end
-
-      # Return type check
-      if req[:return_type]
-        req_ret = to_type(req[:return_type]).resolved.to_s
-        sig_ret = to_type(sig[:return][:type]).resolved.to_s
-        unless req_ret == sig_ret || req_ret == 'Any' || sig_ret == 'Any'
-          error!(req_tok, :UNION_METHOD_RETURN_TYPE,
-                 union_name, fn_name, req_ret, fn_name, sig_ret)
-        end
-      end
-    end
-  end
-
   def visit_UnionVariantLit(node)
     schema = lookup_type_schema(node.union_name.to_sym)
-    if schema.nil?
-      error!(node, "Unknown union type: '#{node.union_name}'")
-    end
-    unless schema.is_a?(Hash) && schema[:kind] == :union
-      error!(node, "Type Error: '#{node.union_name}' is not a union type.")
-    end
-    unless schema[:variants].key?(node.variant_name)
-      error!(node, :UNION_UNKNOWN_VARIANT, node.union_name, node.variant_name)
-    end
-
-    var_data = schema[:variants][node.variant_name]
-    unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
-      if var_data.nil?
-        error!(node, "Union variant '#{node.variant_name}' is a unit variant — use '#{node.union_name}.#{node.variant_name}' (no fields).")
-      else
-        error!(node, "Union variant '#{node.variant_name}' takes a single typed payload — use '#{node.union_name}{ #{node.variant_name}: value }' instead.")
-      end
-    end
-
-    expected_fields = var_data[:fields]
-
-    # Check for unknown fields
-    node.fields.each_key do |fname|
-      unless expected_fields.key?(fname)
-        error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, node.union_name, node.variant_name, fname)
-      end
-    end
-
-    # Check for missing required fields
-    expected_fields.each_key do |fname|
-      unless node.fields.key?(fname)
-        error!(node, :UNION_INLINE_VARIANT_MISSING_FIELD, node.union_name, node.variant_name, fname)
-      end
-    end
-
-    # Type-check each field value
-    node.fields.each do |fname, val_node|
-      visit(val_node)
-      expected_type = expected_fields[fname]
-      actual = val_node.type_info
-      unless expected_type.accepts?(actual)
-        error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH,
-               node.union_name, node.variant_name, fname,
-               expected_type.resolved, actual&.resolved)
-      end
-    end
-
+    var_data = validate_union_schema!(node, schema)
+    validate_union_fields!(node, var_data[:fields])
     node.full_type = node.union_name.to_sym
   end
 
