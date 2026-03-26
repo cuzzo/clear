@@ -7,6 +7,7 @@ require_relative "./pipe_analysis"
 require_relative "./ownership_tracker"
 require_relative "./generic_analysis"
 require_relative "./capabilities"
+require_relative "./effects"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -17,6 +18,7 @@ class SemanticAnnotator
   include ScopeHelper
   include TypeHelper
   include GenericAnalysis
+  include EffectTracker
 
   attr_reader :scope_stack
 
@@ -48,6 +50,7 @@ class SemanticAnnotator
     @pipeline_accessed_fields = nil
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = false
+    effects_init!
     setup_builtins
   end
 
@@ -177,6 +180,10 @@ private
     # convention (*Runtime, params) !return. Mark them needs_rt=true so their signatures
     # are compatible with the fn-type Zig type emitted by type.rb#zig_type.
     mark_fn_value_references!(node)
+
+    # PASS 6: Compute effect sets for every function via call-graph fixed-point.
+    # Silent infrastructure for future STRICT mode / #HOT enforcement.
+    compute_effects!
 
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
@@ -350,6 +357,7 @@ private
     @heap_usage_count  = 0
     @alloc_call_count  = 0
     @current_function_name = node.name
+    effects_begin_function(node.name)
 
     # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
@@ -398,6 +406,10 @@ private
     @fn_nodes[node.name]     = node
 
     if directly_recursive
+      # TODO(v0.2): Detect tail-recursive calls and either transform to loops
+      # (eliminating REENTRANT effect) or emit Zig @call(.always_tail, ...) for TCO.
+      # Until then, tail recursion is treated as general recursion.
+      record_effect(EffectTracker::REENTRANT)
       case node.reentrant
       when :non_reentrant
         error!(node, "Reentrancy Error: '#{node.name}' directly calls itself. " \
@@ -851,6 +863,13 @@ private
       error!(node, "Condition must be a Boolean, got #{node.condition.resolved_type}")
     end
 
+    # Effect tracking: WHILE TRUE or any non-trivially-bounded loop.
+    if node.condition.is_a?(AST::Identifier) && node.condition.name == "TRUE"
+      record_effect(EffectTracker::LOOP_UNBOUND)
+    elsif node.condition.is_a?(AST::Literal) && node.condition.value == true
+      record_effect(EffectTracker::LOOP_UNBOUND)
+    end
+
     # 2. Capture outer-scope variable names before visiting the body.
     # Used to determine if per-iteration frame marks are safe.
     outer_vars = @scope_stack.flat_map { |s| s.locals.keys }.to_set
@@ -1085,6 +1104,7 @@ private
     if was_promoted
       @frame_usage_count -= 1
       @heap_usage_count  += 1
+      record_effect(EffectTracker::HEAP)
     end
 
     # 3. List Escape Detection
@@ -1375,7 +1395,10 @@ private
       # Tag cross-module calls so the transpiler can qualify them (e.g. mod.fn(rt, ...))
       node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
       # Tag extern calls so the transpiler skips rt injection and try
-      node.extern_call = true if node.respond_to?(:extern_call=) && func_type[:extern]
+      if node.respond_to?(:extern_call=) && func_type[:extern]
+        node.extern_call = true
+        record_effect(EffectTracker::EXTERN)
+      end
 
       # Block @soa collections from being passed to EXTERN FN.
       # SOA layout is not contiguous in memory — C/Zig FFI expects AOS (struct*).
@@ -1545,7 +1568,10 @@ private
     # to registers and dead-code-eliminate any that are never read.
     storage = downgrade_frame_to_stack(node, storage)
     @frame_usage_count += 1 if storage == :frame
-    @heap_usage_count  += 1 if storage == :heap
+    if storage == :heap
+      @heap_usage_count  += 1
+      record_effect(EffectTracker::HEAP)
+    end
 
     # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!).
     #     When there is no explicit type annotation (inferred), fall back to the value's type_info
@@ -1704,7 +1730,10 @@ private
       storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
       storage = downgrade_frame_to_stack(node, storage)
       @frame_usage_count += 1 if storage == :frame
-      @heap_usage_count  += 1 if storage == :heap
+      if storage == :heap
+        @heap_usage_count  += 1
+        record_effect(EffectTracker::HEAP)
+      end
 
       # Propagate collection + shard_count from declared type (lost during finalize_storage!).
       # When there is no explicit type annotation (inferred), fall back to the value's type_info
@@ -2207,6 +2236,7 @@ private
     node.full_type = :"HashMap<#{first_val_type}>"
     node.storage = :heap
     @heap_usage_count += 1
+    record_effect(EffectTracker::HEAP)
   end
 
   def visit_StructLit(node)
@@ -2344,6 +2374,7 @@ private
         t.location = :heap if coll == :pool
         node.full_type = t
         node.storage = coll == :pool ? :heap : :stack
+        record_effect(EffectTracker::HEAP)
         return
       end
       if node.storage == :heap
@@ -2586,7 +2617,10 @@ private
     ti.location  = :heap           if node.layout == :indirect
 
     # CapabilityWrap always allocates on the heap.
-    @heap_usage_count += 1 if node.ownership || node.sync || node.layout
+    if node.ownership || node.sync || node.layout
+      @heap_usage_count += 1
+      record_effect(EffectTracker::HEAP)
+    end
 
     # Store the Type directly — full_type= accepts Type objects
     node.full_type = ti
@@ -2699,6 +2733,9 @@ private
 
       validate_capability(node, cap[:capability], var_node)
 
+      # Effect tracking: EXCLUSIVE access acquires a mutex — may block the fiber.
+      record_effect(EffectTracker::BLOCKING) if cap[:capability] == :EXCLUSIVE
+
       # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
       if cap[:capability] == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
         audit_mark_mutated(var_node.name)
@@ -2785,6 +2822,9 @@ private
   end
 
   def visit_BgStreamBlock(node)
+    # Effect tracking: generators are inherently unbounded (run until exhausted or cancelled).
+    record_effect(EffectTracker::LOOP_UNBOUND)
+
     # Body runs in a separate generator fiber. YIELD expressions push values into the stream.
     # The stream element type T is inferred from YIELD expression types.
     prev_stream_ctx  = @current_stream_context
@@ -3147,6 +3187,8 @@ private
         visited.add(callee)
 
         if callee == fn_name
+          # Record REENTRANT effect for indirect recursion (direct was caught in visit_FunctionDef).
+          @fn_direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
           error!(node, "Reentrancy Error: '#{fn_name}' is part of a mutually recursive call cycle. " \
                        "Add @reentrant or @nonReentrant to the function signature.")
           break

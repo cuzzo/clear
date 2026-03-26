@@ -203,6 +203,7 @@ module AST
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
     attr_accessor :uses_alloc    # true when body calls stdlib fns that use rt.frameAlloc (e.g. append)
+    attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
