@@ -1559,6 +1559,7 @@ class Parser
     '@xl'       => { stack_size: :xl       },
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
+    '@arena'    => { pinned: true, arena: true },  # :arena implies @pinned
   }.freeze
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
@@ -1623,9 +1624,10 @@ class Parser
   def parse_bg_prefix
     pinned     = false
     parallel   = false
+    arena      = false
     stack_size = nil
 
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size } unless
+    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena } unless
       current.type == :VAR_ID && BG_SIGILS.key?(current.value)
 
     loop do
@@ -1640,6 +1642,7 @@ class Parser
       end
       pinned   = true if attrs[:pinned]
       parallel = true if attrs[:parallel]
+      arena    = true if attrs[:arena]
 
       # More sigils chained with ':'?
       break unless match?(:CHAR, ':')
@@ -1647,7 +1650,7 @@ class Parser
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size }
+    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena }
   end
 
   def parse_bg_block
@@ -1659,7 +1662,7 @@ class Parser
     prefix = parse_bg_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel])
+    AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena])
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.

@@ -375,7 +375,7 @@ module AST
   # body: Array of expression nodes. The last expression's type determines T.
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
-  BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel) { include Locatable }
+  BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode) { include Locatable }
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
   # steps: Array of { expr: ASTNode, binding: String | nil }

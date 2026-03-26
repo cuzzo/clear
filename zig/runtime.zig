@@ -41,6 +41,10 @@ pub const Runtime = struct {
     heap_allocator: std.mem.Allocator,    // GPA or tcmalloc/jemalloc/mimalloc/malloc
     frame_allocator: std.mem.Allocator,   // The VTable interface / FRAME
 
+    // @arena mode: when true, restoreFrameMark is a no-op.
+    // The entire arena is freed when the fiber finishes, not per-function.
+    arena_mode: bool = false,
+
     pub fn init(
         allocator: std.mem.Allocator,
         frame_size: usize,
@@ -147,6 +151,7 @@ pub const Runtime = struct {
 
     // Stack Helper: Reset to Mark (O(1) Free)
     pub fn restoreFrameMark(self: *Runtime, mark: FrameMark) void {
+        if (self.arena_mode) return; // Skip rewind — fiber owns the arena until completion.
         self.overflow_arena.rewind(mark.overflow_mark);
     }
 
@@ -167,7 +172,6 @@ pub const Runtime = struct {
 
     pub fn heapAlloc(self: *Runtime) std.mem.Allocator {
         // @pinned tasks use the scheduler's thread-local arena — zero locks.
-        const fp = @import("scheduler.zig");
         return fp.__pinned_local_alloc orelse self.heap_allocator;
     }
 

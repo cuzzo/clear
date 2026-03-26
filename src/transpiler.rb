@@ -1115,6 +1115,8 @@ private
         [stmts, result]
       end
 
+      arena_init = node.arena_mode ? "__rt.arena_mode = true;" : ""
+
       <<~ZIG.chomp
         #{blk_label}: {
             const #{ctx_type} = struct {
@@ -1124,6 +1126,7 @@ private
                 fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                     const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
                     _ = &__rt;
+                    #{arena_init}
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
                     defer ctx.inner.wg.done();

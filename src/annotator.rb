@@ -2783,6 +2783,14 @@ private
     # Hard error: @local and @multiowned CANNOT be used in @parallel blocks.
     # @local: no synchronization primitives.
     # @multiowned (Rc): non-atomic reference count — data race if cross-thread.
+    # @arena implies @pinned — thread-local arena memory can't be stolen.
+    if node.arena_mode
+      node.pinned = true
+      if node.parallel
+        error!(node, "@arena cannot be combined with @parallel — arena memory is thread-local and cannot be stolen.")
+      end
+    end
+
     if node.parallel
       if branch_captures_local_state?(node.body)
         error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
