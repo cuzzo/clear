@@ -2725,22 +2725,7 @@ private
     # 2. Enter a new scope for the capability block
     # This isolates any variables declared inside
     with_new_scope do
-      expanded_capabilities.each do |cap|
-        var_name = cap[:var_node].name
-        syn = cap[:old_scope]&.locals&.dig(var_name, :sync)
-        if syn && !cap[:var_node].is_a?(AST::GetField)
-          # Locked: acquire gives mutable access to the inner T.
-          # Declare the alias (if given) as the plain inner type.
-          inner_type = cap[:old_scope].resolve_type(var_name)  # e.g. :Node
-          alias_name = cap[:alias] || var_name
-          current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
-          current_scope.set_state(alias_name, :live)
-          # Also re-declare the locked var itself so it stays accessible in scope
-          current_scope.declare_with_new_capability(cap)
-        else
-          current_scope.declare_with_new_capability(cap)
-        end
-      end
+      expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
       node.body.each { |stmt| visit(stmt) }
       finalize_scope(node)
     end

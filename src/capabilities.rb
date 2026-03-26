@@ -179,6 +179,24 @@ module CapabilityHelper
     end
   end
 
+  # Declare a resolved capability into the current scope.
+  # For locked/write_locked vars, declares the alias as the plain inner type
+  # (mutable, stack-allocated) and re-declares the locked var for accessibility.
+  # For all others, delegates to scope.declare_with_new_capability.
+  def declare_capability_scope!(cap)
+    var_name = cap[:var_node].name
+    syn = cap[:old_scope]&.locals&.dig(var_name, :sync)
+    if syn && !cap[:var_node].is_a?(AST::GetField)
+      inner_type = cap[:old_scope].resolve_type(var_name)
+      alias_name = cap[:alias] || var_name
+      current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+      current_scope.set_state(alias_name, :live)
+      current_scope.declare_with_new_capability(cap)
+    else
+      current_scope.declare_with_new_capability(cap)
+    end
+  end
+
   # --- Capture analysis for auto-pinning BG/DO blocks ---
 
   # Returns true if any captured variable has @local sync.
