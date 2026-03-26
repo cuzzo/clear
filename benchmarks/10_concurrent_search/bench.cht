@@ -42,7 +42,7 @@ FN cheatMain() RETURNS Void ->
             content = readFile(filepath);
             countOccurrences(content, needle);
         });
-        i = i + 1;
+        i += 1;
     END
 
     -- Collect results by NEXTing each promise in order.
@@ -54,7 +54,7 @@ FN cheatMain() RETURNS Void ->
     WHILE j < n DO
         c: Int64 = NEXT futures[j];
         append(results, SearchResult{ filename: files[j], count: c });
-        j = j + 1;
+        j += 1;
     END
 
     -- Selection sort: find top-10 by swapping into the first 10 positions.
@@ -66,14 +66,14 @@ FN cheatMain() RETURNS Void ->
             IF results[m].count > results[best].count THEN
                 best = m;
             END
-            m = m + 1;
+            m += 1;
         END
         IF best != k THEN
             tmp = results[k];
             results[k] = results[best];
             results[best] = tmp;
         END
-        k = k + 1;
+        k += 1;
     END
 
     -- Print top 10.
@@ -82,7 +82,7 @@ FN cheatMain() RETURNS Void ->
     WHILE p < 10 DO
         r = results[p];
         print("  ", r.filename, "  ", r.count);
-        p = p + 1;
+        p += 1;
     END
 
     RETURN;

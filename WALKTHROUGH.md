@@ -121,7 +121,7 @@ For one-line field mutations on `@locked`/`@writeLocked` variables, the compiler
 ```clear
 -- ILLUSTRATIVE
 MUTABLE counter = Counter{ value: 0 } @locked;
-counter.value = counter.value + 1;  -- auto-acquires and releases the mutex
+counter.value += 1;  -- auto-acquires and releases the mutex
 ```
 
 For multi-statement access or passing to functions, use `WITH` blocks explicitly:
@@ -130,7 +130,7 @@ For multi-statement access or passing to functions, use `WITH` blocks explicitly
 -- ILLUSTRATIVE
 -- @locked multi-statement: use WITH EXCLUSIVE
 WITH EXCLUSIVE counter AS c {
-    c.value = c.value + 1;
+    c.value += 1;
     print(c.value);
 }
 
@@ -155,7 +155,7 @@ Functions that take MUTABLE parameters must use the `!` suffix:
 ```clear
 -- ILLUSTRATIVE
 FN increment!(MUTABLE counter: Counter) RETURNS Void ->
-  counter.value = counter.value + 1;
+  counter.value += 1;
   RETURN;
 END
 ```
@@ -356,8 +356,8 @@ For cross-fiber shared state, use capabilities:
 -- ILLUSTRATIVE
 counter = Counter{ value: 0 } @shared:locked;
 
-BG { WITH EXCLUSIVE counter AS c { c.value = c.value + 1; } };
-BG { WITH EXCLUSIVE counter AS c { c.value = c.value + 1; } };
+BG { WITH EXCLUSIVE counter AS c { c.value += 1; } };
+BG { WITH EXCLUSIVE counter AS c { c.value += 1; } };
 ```
 
 ---

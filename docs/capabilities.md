@@ -36,7 +36,7 @@ For one-line field mutations on `@locked`/`@writeLocked` variables, the compiler
 ```clear
 -- ILLUSTRATIVE
 MUTABLE b = Counter{ value: 0 } @locked;
-b.value = b.value + 1;  -- compiler auto-acquires and releases the mutex
+b.value += 1;  -- compiler auto-acquires and releases the mutex
 ```
 
 ## The Capability Dimensions

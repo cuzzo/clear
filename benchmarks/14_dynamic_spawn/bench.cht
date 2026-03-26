@@ -15,15 +15,15 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < 10000 DO
         append(futures, BG { i * 3; });
-        i = i + 1;
+        i += 1;
     END
 
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < 10000 DO
         result = NEXT futures[j];
-        total = total + result;
-        j = j + 1;
+        total += result;
+        j += 1;
     END
 
     print("Total:", total);

@@ -23,17 +23,17 @@ FN cheatMain() RETURNS Void ->
         append(futures, BG {
             MUTABLE j: Int64 = 0;
             WHILE j < 10000 DO
-                c.value = c.value + 1;
-                j = j + 1;
+                c.value += 1;
+                j += 1;
             END
         });
-        i = i + 1;
+        i += 1;
     END
 
     MUTABLE k: Int64 = 0;
     WHILE k < 1024 DO
         NEXT futures[k];
-        k = k + 1;
+        k += 1;
     END
 
     print("Counter:", c.value);

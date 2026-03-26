@@ -19,7 +19,7 @@ FN processItem(val: Int64) RETURNS Int64 ->
     MUTABLE i: Int64 = 0;
     WHILE i < 500 DO
         x = x * 6364136223846793005 + 1442695040888963407;
-        i = i + 1;
+        i += 1;
     END
     RETURN x;
 END
@@ -30,7 +30,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < 100000 DO
         append(items, Item{ seed: i, result: 0 });
-        i = i + 1;
+        i += 1;
     END
 
     -- Process with backpressure (workers: 8 = max 8 concurrent fibers)
@@ -40,8 +40,8 @@ FN cheatMain() RETURNS Void ->
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < 100000 DO
-        total = total + processed[j];
-        j = j + 1;
+        total += processed[j];
+        j += 1;
     END
 
     print("Total:", total);

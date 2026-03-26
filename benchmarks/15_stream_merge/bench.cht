@@ -28,7 +28,7 @@ FN cheatMain() RETURNS Void ->
         v4: Int64 = NEXT s4; v5: Int64 = NEXT s5;
         v6: Int64 = NEXT s6; v7: Int64 = NEXT s7;
         total = total + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;
-        j = j + 1_i64;
+        j += 1_i64;
     END
 
     print("Total:", total);

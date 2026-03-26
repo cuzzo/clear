@@ -22,7 +22,7 @@ FN processMessage(seed: Int64) RETURNS Int64 ->
     MUTABLE i: Int64 = 0;
     WHILE i < 200 DO
         x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
-        i = i + 1;
+        i += 1;
     END
     RETURN x;
 END
@@ -33,7 +33,7 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
     MUTABLE i: Int64 = 0;
     WHILE i < n DO
         append(msgs, Msg{ seed: i });
-        i = i + 1;
+        i += 1;
     END
     -- Process all messages with parallel workers
     results = msgs s> CONCURRENT(workers: 8, parallel: TRUE) SELECT processMessage(_.seed);
@@ -41,8 +41,8 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < length(results) DO
-        total = total + results[j];
-        j = j + 1;
+        total += results[j];
+        j += 1;
     END
     RETURN total;
 END
@@ -53,7 +53,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < 64 DO
         append(futures, BG { subscriberWork(100000); });
-        i = i + 1;
+        i += 1;
     END
 
     -- Collect results from all subscribers
@@ -61,8 +61,8 @@ FN cheatMain() RETURNS Void ->
     MUTABLE j: Int64 = 0;
     WHILE j < 64 DO
         result = NEXT futures[j];
-        total = total + result;
-        j = j + 1;
+        total += result;
+        j += 1;
     END
 
     print("Total:", total);

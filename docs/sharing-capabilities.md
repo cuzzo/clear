@@ -22,7 +22,7 @@ When multiple fibers need to access the same data, CLEAR must answer two questio
 ```clear
 MUTABLE c = Counter{ value: 0 } @local;
 
-BG { c.value = c.value + 1; }   -- direct field access, no WITH block
+BG { c.value += 1; }            -- direct field access, no WITH block
 BG { print(c.value); }          -- direct read
 ```
 
@@ -97,7 +97,7 @@ Sharing capabilities can be combined with sync capabilities for mutable cross-th
 -- ILLUSTRATIVE
 -- Arc + Mutex: cross-scheduler mutable access
 counter = Counter{ value: 0 } @shared:locked;
-BG { @parallel -> WITH EXCLUSIVE counter AS c { c.value = c.value + 1; } }
+BG { @parallel -> WITH EXCLUSIVE counter AS c { c.value += 1; } }
 
 -- Arc + RwLock: cross-scheduler read-heavy access
 config = Config{ port: 8080 } @shared:writeLocked;
