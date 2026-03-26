@@ -1,10 +1,11 @@
--- Test: HashMap:striped(N) — lock-striped hash maps for skew-safe parallel access.
--- Each stripe has its own Mutex.  Any thread can access any stripe.
--- Trades ~20ns/op lock overhead for resilience to hot-key skew.
+-- Test: HashMap:sharded(N) @locked — lock-striped hash maps via capability composition.
+-- :sharded(N) provides the topology; @locked adds per-shard Mutex for skew safety.
+-- Any thread can access any shard.  Trades ~20ns/op lock overhead for resilience
+-- to hot-key skew.
 
 FN cheatMain() RETURNS Void ->
-    -- String-keyed striped map with 4 stripes.
-    MUTABLE scores: HashMap<Int64>:striped(4) = {};
+    -- String-keyed sharded+locked map with 4 stripes.
+    MUTABLE scores: HashMap<Int64>:sharded(4) @locked = {};
 
     -- Put values (any thread can write to any stripe).
     scores["alice"] = 100_i64;

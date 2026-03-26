@@ -1354,19 +1354,22 @@ class Parser
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
-    # HashMap:sharded(N) or HashMap:striped(N) — detect modifier on HashMap types.
-    stripe_count = nil
+    # HashMap:sharded(N) — detect sharding modifier on HashMap types.
     if base.start_with?("HashMap") && !shard_count && match?(:CHAR, ':')
       if peek.type == :VAR_ID && peek.value == "sharded"
         dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
         shard_count = parse_sharded_modifier_if_present!(dummy_tok)
-      elsif peek.type == :VAR_ID && peek.value == "striped"
-        dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
-        stripe_count = parse_striped_modifier!(dummy_tok)
       end
     end
 
-    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count, stripe_count: stripe_count)
+    # Allow @locked / @writeLocked after :sharded(N) for skew-safe maps.
+    # e.g. HashMap<Int64>:sharded(4) @locked → StripedStringMap
+    if shard_count && !sync && match?(:VAR_ID) && %w[@locked @writeLocked].include?(current.value)
+      cap_tok = consume(:VAR_ID)
+      sync = cap_tok.value == "@locked" ? :locked : :write_locked
+    end
+
+    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
   end
 
   # Parses `CONCURRENT(pool_size: N)? SELECT|WHERE|EACH ...`
@@ -1436,18 +1439,7 @@ class Parser
     n
   end
 
-  def parse_striped_modifier!(cap_tok)
-    consume(:CHAR, ':')
-    consume(:VAR_ID) # consume 'striped'
-    consume(:CHAR, '(')
-    count_tok = consume(:NUMBER)
-    n = count_tok.value.to_i
-    if n < 2
-      error!(count_tok, "HashMap:striped requires N >= 2, got #{n}")
-    end
-    consume(:CHAR, ')')
-    n
-  end
+  # parse_striped_modifier! removed — striped is now :sharded(N) @locked composition
 
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')

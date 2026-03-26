@@ -1621,14 +1621,13 @@ private
       final_type, error = node.value.coerce!(node.type)
       error!(node, error) if error
 
-      # Propagate shard_count / stripe_count from declared type into the coerced final_type.
+      # Propagate shard_count from declared type into the coerced final_type.
       # coerce! resolves to a symbol/Type that loses these fields.
-      if node.type.is_a?(Type) && (node.type.shard_count || node.type.stripe_count)
+      if node.type.is_a?(Type) && node.type.shard_count
         if final_type.is_a?(Type)
-          final_type.shard_count = node.type.shard_count if node.type.shard_count
-          final_type.stripe_count = node.type.stripe_count if node.type.stripe_count
+          final_type.shard_count = node.type.shard_count
         else
-          final_type = Type.new(final_type, shard_count: node.type.shard_count, stripe_count: node.type.stripe_count)
+          final_type = Type.new(final_type, shard_count: node.type.shard_count)
         end
       end
 
@@ -1657,16 +1656,17 @@ private
         node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
       end
 
-      # Propagate shard_count / stripe_count for maps.  Maps don't use :collection,
+      # Propagate shard_count + sync for maps.  Maps don't use :collection,
       # so the general collection propagation above doesn't cover them.
       if (decl_t = node.type).is_a?(Type)
         if decl_t.shard_count && !node.type_info&.shard_count
           node.type_info.shard_count = decl_t.shard_count if node.type_info
           node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count) if node.full_type.is_a?(Type)
         end
-        if decl_t.stripe_count && !node.type_info&.stripe_count
-          node.type_info.stripe_count = decl_t.stripe_count if node.type_info
-          node.full_type.instance_variable_set(:@stripe_count, decl_t.stripe_count) if node.full_type.is_a?(Type)
+        # Propagate sync so striped? (sharded + locked) is visible to the transpiler.
+        if decl_t.sync && node.type_info && !node.type_info.sync
+          node.type_info.sync = decl_t.sync
+          node.full_type.sync = decl_t.sync if node.full_type.is_a?(Type)
         end
       end
 

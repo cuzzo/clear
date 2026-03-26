@@ -155,49 +155,59 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 
 **Pipeline operations** (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
 
-### Sharded vs Striped — Choosing the Right Parallel Map
+### Handling Skew — Capability Composition
 
-CLEAR offers two parallel map strategies. Same syntax, one word difference:
+By default, `:sharded(N)` is lock-free and scheduler-pinned. Each fiber accesses only its assigned shard — no locks, no contention.
 
-```clear
-MUTABLE balanced: HashMap<Int64>:sharded(8) = {};  -- zero locks, max speed
-MUTABLE skewed:   HashMap<Int64>:striped(8) = {};   -- per-stripe locks, skew-safe
-```
+But what if one key is much hotter than others? If `hash("alice") % 4 == 0` and "alice" is 90% of your traffic, Shard 0 gets all the work while the other 3 sit idle. That's **key skew**.
 
-| | `:sharded(N)` | `:striped(N)` |
-|---|---|---|
-| **Mechanism** | N independent maps, scheduler-pinned | N independent maps, per-stripe Mutex |
-| **Per-op cost** | ~0ns (no lock) | ~20ns (lock/unlock) |
-| **Skew-safe?** | No — hot key = hot shard = one core | Yes — any thread can access any stripe |
-| **Use when** | Keys are balanced (batch, data science) | Keys are unpredictable (web servers, real-time) |
-
-**The one-line fix for skew:**
+**The fix is one capability:**
 
 ```diff
 - MUTABLE counts: HashMap<Int64>:sharded(8) = {};
-+ MUTABLE counts: HashMap<Int64>:striped(8) = {};
++ MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
 ```
 
-No rearchitecture. No actor patterns. No map-reduce rewrites. Change one word.
+Adding `@locked` to a sharded collection enables **lock-striped** access: each shard gets its own Mutex, and any thread can access any shard. The topology stays the same — you're adding synchronization intent, not rearchitecting.
 
-The key insight: CLEAR's scheduler pins fibers to shards. No two fibers ever access the same shard simultaneously, so no synchronization is needed. The sharding IS the thread safety.
+| | `:sharded(N)` | `:sharded(N) @locked` | `:sharded(N) @writeLocked` |
+|---|---|---|---|
+| **Mechanism** | N independent maps, scheduler-pinned | N maps, per-shard Mutex | N maps, per-shard RwLock |
+| **Per-op cost** | ~0ns (no lock) | ~20ns (lock/unlock) | ~20ns (readers parallel) |
+| **Skew-safe?** | No | Yes | Yes (read-heavy optimized) |
+| **Use when** | Keys are balanced | Keys are unpredictable | Many readers, few writers |
 
-### Key Skew and Why It's Not Your Problem
+This works on any shardable collection:
 
-A common concern with sharding: what if one key is much hotter than others? If `hash("alice") % 4 == 0` and "alice" is 90% of your traffic, doesn't Shard 0 get overwhelmed?
-
-**In CLEAR's default mode (single scheduler), this doesn't matter.** All shards run on one thread sequentially. A "hot shard" just means more time is spent on that shard's data — the same as a non-sharded map. There's no idle-core waste because there's only one core.
-
-**In multi-scheduler mode (`CLEAR_THREADS=N`), the fix is one line:**
-
-```diff
-- MUTABLE counts: HashMap<Int64>:sharded(4) = {};
-+ MUTABLE counts: HashMap<Int64>:sharded(64) = {};
+```clear
+MUTABLE data: Number[]@list:sharded(4) @locked = [];    -- skew-safe sharded list
+MUTABLE entities: Enemy[]@pool:sharded(4) @locked = [];  -- skew-safe sharded pool
+MUTABLE scores: HashMap<Int64>:sharded(8) @locked = {};  -- skew-safe sharded map
 ```
 
-With 64 shards, the probability that two hot keys collide in the same shard drops from 25% to 1.5%. CLEAR's work-stealing scheduler balances fiber load across cores — if one shard's fibers are busy, idle cores steal other fibers to stay productive.
+The compiler can detect skew and suggest the fix:
 
-No rearchitecture. No actor patterns. No map-reduce rewrites. Change one number.
+```
+NOTE: Skew detected on 'counts' map. Add '@locked' to your :sharded(8)
+      declaration to enable cross-core work stealing.
+```
+
+No rearchitecture. No actor patterns. No new keywords to learn. Capabilities compose.
+
+### Key Skew in Single-Scheduler Mode
+
+**In CLEAR's default mode (single scheduler), skew doesn't matter.** All shards run on one thread sequentially. A "hot shard" just means more time is spent on that shard's data — the same as a non-sharded map. There's no idle-core waste because there's only one core.
+
+**In multi-scheduler mode (`CLEAR_THREADS=N`)**, you have two options:
+
+1. **Increase shards** — more shards = lower collision probability:
+   ```clear
+   MUTABLE counts: HashMap<Int64>:sharded(64) = {};
+   ```
+2. **Add locking** — allow work-stealing across shards:
+   ```clear
+   MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
+   ```
 
 ### When You Need Shared Mutable Maps
 
