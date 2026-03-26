@@ -258,4 +258,30 @@ RSpec.describe Lexer do
       expect(inner_values).to include("{", "a", ":", 1.0, "}")
     end
   end
+
+  describe "Compound Assignment Operators" do
+    it "tokenizes +=" do
+      tokens = Lexer.new("x += 1;").tokenize
+      expect(tokens[1].type).to eq(:COMPOUND_ASSIGN)
+      expect(tokens[1].value).to eq("+=")
+    end
+
+    it "tokenizes -=" do
+      tokens = Lexer.new("x -= 1;").tokenize
+      expect(tokens[1].type).to eq(:COMPOUND_ASSIGN)
+      expect(tokens[1].value).to eq("-=")
+    end
+
+    it "tokenizes *=" do
+      tokens = Lexer.new("x *= 2;").tokenize
+      expect(tokens[1].type).to eq(:COMPOUND_ASSIGN)
+      expect(tokens[1].value).to eq("*=")
+    end
+
+    it "tokenizes /=" do
+      tokens = Lexer.new("x /= 2;").tokenize
+      expect(tokens[1].type).to eq(:COMPOUND_ASSIGN)
+      expect(tokens[1].value).to eq("/=")
+    end
+  end
 end

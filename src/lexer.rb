@@ -57,6 +57,10 @@ class Lexer
       when @s.scan(/&&/) then add(:CHAR, '&&', start_col)
       when @s.scan(/\*\*/) then add(:CHAR, '**', start_col)
       when @s.scan(/\|\|/) then add(:CHAR, '||', start_col)
+      when @s.scan(/\+=/) then add(:COMPOUND_ASSIGN, '+=', start_col)
+      when @s.scan(/-=/)  then add(:COMPOUND_ASSIGN, '-=', start_col)
+      when @s.scan(/\*=/) then add(:COMPOUND_ASSIGN, '*=', start_col)
+      when @s.scan(/\/=/) then add(:COMPOUND_ASSIGN, '/=', start_col)
       when @s.scan(/_/) then add(:VAR_ID, '_', start_col)
 
       when @s.scan(/"""((?:.|\n)*?)"""/)

@@ -414,6 +414,29 @@ class Parser
       opt_type = parse_type_annotation
     end
 
+    # Compound assignment: x += expr  →  x = x + expr
+    if match?(:COMPOUND_ASSIGN)
+      unless target.is_a?(AST::Identifier) || target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
+        @pos = saved_pos
+        return nil
+      end
+
+      op_token = consume(:COMPOUND_ASSIGN)
+      op_char = op_token.value[0]  # '+=' → '+', '-=' → '-', etc.
+      op_sym = AST::OP_TO_OP_CODE[op_char] || op_char.to_sym
+      rhs = parse_expression
+      consume(:CHAR, ';')
+
+      # Desugar: target op= rhs  →  target = target op rhs
+      desugared_value = AST::BinaryOp.new(op_token, deep_clone_node(target), op_sym, rhs)
+
+      if target.is_a?(AST::Identifier)
+        return AST::BindExpr.new(target_token, target.name, nil, desugared_value)
+      else
+        return AST::Assignment.new(target_token, target, desugared_value)
+      end
+    end
+
     unless match?(:CHAR, '=')
       @pos = saved_pos
       return nil
@@ -1784,5 +1807,21 @@ class Parser
     end
     consume(:CHAR, close)
     [start_token, items]
+  end
+
+  # Deep-clone an AST node for compound assignment desugaring.
+  # The target appears on both sides (LHS = target, RHS = target op expr),
+  # so each side needs its own node to avoid double-visit issues.
+  def deep_clone_node(node)
+    case node
+    when AST::Identifier
+      AST::Identifier.new(node.token, node.name)
+    when AST::GetField
+      AST::GetField.new(node.token, deep_clone_node(node.target), node.field)
+    when AST::GetIndex
+      AST::GetIndex.new(node.token, deep_clone_node(node.target), deep_clone_node(node.index))
+    else
+      node.dup
+    end
   end
 end

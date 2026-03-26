@@ -3274,6 +3274,39 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "compound assignment += desugars to x = x + expr" do
+      let(:code) {
+        <<~FLUX
+          FN cheatMain() RETURNS Void ->
+            MUTABLE x = 10;
+            x += 5;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "succeeds and x ends up as Int64" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "compound assignment on struct field" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Int64 }
+          FN cheatMain() RETURNS Void ->
+            MUTABLE c = Counter{ value: 0 };
+            c.value += 10;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
     context "WITH EXCLUSIVE on a @shared variable (not a mutex)" do
       let(:code) {
         <<~FLUX

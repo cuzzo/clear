@@ -1,0 +1,44 @@
+-- Test: compound assignment operators (+=, -=, *=, /=)
+-- Desugared by the parser: x += 1  →  x = x + 1
+
+STRUCT Counter { value: Int64 }
+
+FN cheatMain() RETURNS Void ->
+    -- Simple variable compound assignment
+    MUTABLE x = 10;
+    x += 5;
+    ASSERT x == 15, "+= on variable";
+
+    x -= 3;
+    ASSERT x == 12, "-= on variable";
+
+    x *= 2;
+    ASSERT x == 24, "*= on variable";
+
+    -- Field compound assignment
+    MUTABLE c = Counter{ value: 100 };
+    c.value += 50;
+    ASSERT c.value == 150, "+= on field";
+
+    c.value -= 25;
+    ASSERT c.value == 125, "-= on field";
+
+    c.value *= 2;
+    ASSERT c.value == 250, "*= on field";
+
+    -- Compound assignment with auto-lock
+    MUTABLE locked = Counter{ value: 0 } @locked;
+    locked.value += 10;
+    locked.value += 5;
+
+    WITH EXCLUSIVE locked AS inner {
+        ASSERT inner.value == 15, "+= with auto-lock";
+    }
+
+    -- Array index compound assignment
+    MUTABLE arr: Int64[] = [10, 20, 30];
+    arr[1] += 5;
+    ASSERT arr[1] == 25, "+= on array index";
+
+    RETURN;
+END
