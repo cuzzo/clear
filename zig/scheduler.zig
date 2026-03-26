@@ -178,6 +178,7 @@ pub const Scheduler = struct {
     // -------------------------------------------------------------------------
     active_tasks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     shutdown_on_idle: bool = true,
+    fast_path_counter: u32 = 0,
 
     // Thread-local arena for @pinned tasks.  Pinned tasks use this
     // instead of the global heap allocator — zero locks, zero contention.
@@ -363,6 +364,61 @@ pub const Scheduler = struct {
         self.event_fd.notify();
     }
 
+    // Process all pending spawn/resume requests from the inbox.
+    fn drainInbox(self: *Scheduler) void {
+        var req_node = AtomicInbox.reverse(self.inbox.popAll());
+        while (req_node) |node| {
+            const next_node = node.next;
+            if (node.type == .Spawn) {
+                const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
+                const effective_size = cp.recommendSize(
+                    @intFromPtr(req.user_fn),
+                    req.config.stack_size,
+                );
+                const stack_mem = self.allocStack(effective_size) catch {
+                    self.allocator.destroy(req);
+                    req_node = next_node;
+                    continue;
+                };
+                const fiber_ptr = self.allocator.create(Fiber) catch {
+                    self.freeStack(stack_mem);
+                    self.allocator.destroy(req);
+                    req_node = next_node;
+                    continue;
+                };
+                fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr, effective_size);
+                const task = self.allocator.create(Task) catch {
+                    self.freeStack(stack_mem);
+                    self.allocator.destroy(fiber_ptr);
+                    self.allocator.destroy(req);
+                    req_node = next_node;
+                    continue;
+                };
+                task.* = .{
+                    .base = fiber_ptr,
+                    .user_fn = req.user_fn,
+                    .context = req.args,
+                    .status = .Ready,
+                    .config = req.config,
+                    .inbox_link = .{ .type = .Resume },
+                };
+                self.allocator.destroy(req);
+                self.ready_queue.push(self.allocator, task) catch {
+                    self.freeStack(stack_mem);
+                    self.allocator.destroy(task);
+                    req_node = next_node;
+                    continue;
+                };
+                _ = self.active_tasks.fetchAdd(1, .monotonic);
+            } else {
+                const task: *Task = @fieldParentPtr("inbox_link", node);
+                task.status = .Ready;
+                self.ready_queue.push(self.allocator, task) catch unreachable;
+            }
+            req_node = next_node;
+        }
+    }
+
     pub fn run(self: *Scheduler) void {
         const my_id = std.Thread.getCurrentId();
 
@@ -385,99 +441,35 @@ pub const Scheduler = struct {
                 if (flag.load(.monotonic)) break;
             }
 
-            // run all to-be-scheduled tasks
-            var req_node = AtomicInbox.reverse(self.inbox.popAll());
-
-            while (req_node) |node| {
-                const next_node = node.next;
-
-                // Determine what this node is.
-                if (node.type == .Spawn) {
-                    const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
-
-                    // 1. GET STACK FROM POOL (Fast!)
-                    // Control plane may upsize based on past overflow history.
-                    const effective_size = cp.recommendSize(
-                        @intFromPtr(req.user_fn),
-                        req.config.stack_size,
-                    );
-                    const stack_mem = self.allocStack(effective_size) catch |err| {
-                        std.debug.print("Stack Alloc Failed: {}\n", .{err});
-                        self.allocator.destroy(req);
-                        req_node = next_node;
-                        continue;
-                    };
-
-                    const fiber_ptr = self.allocator.create(Fiber) catch {
-                        self.freeStack(stack_mem); // Return memory to cache
-                        self.allocator.destroy(req);
-                        req_node = next_node; // Must advance, or infinite loop
-                        continue;
-                    };
-                    fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr, effective_size);
-
-                    // 2. Alloc Task shell (local allocator)
-                    const task = self.allocator.create(Task) catch {
-                        self.freeStack(stack_mem);
-                        self.allocator.destroy(fiber_ptr);
-                        self.allocator.destroy(req);
-                        req_node = next_node; // Must advance, or infinite loop
-                        continue;
-                    };
-
-                    task.* = .{
-                        .base = fiber_ptr,
-                        .user_fn = req.user_fn,
-                        .context = req.args,
-                        .status = .Ready,
-                        .config = req.config,
-                        .inbox_link = .{ .type = .Resume } // When it comes back, it's a resume
-                    };
-
-                    // Cleanup Request
-                    self.allocator.destroy(req);
-
-                    self.ready_queue.push(self.allocator, task) catch {
-                        // If we can't queue the task, we must rollback everything
-                        self.freeStack(stack_mem); // Save the fiber
-                        self.allocator.destroy(task);   // Destroy the task
-                        req_node = next_node; // must advance, or infinite loop
-                        continue;
-                    };
-                    _ = self.active_tasks.fetchAdd(1, .monotonic);
-
-                } else {
-                    // It is an existing Task
-                    const task: *Task = @fieldParentPtr("inbox_link", node);
-                    task.status = .Ready;
-                    // TODO: There must be a fix here before release.
-                    self.ready_queue.push(self.allocator, task) catch unreachable;
+            // ── Fast path: if the ready_queue has work, run it immediately.
+            // Skip inbox, sleepers, I/O checks, and work stealing.
+            // Every 64 fast-path iterations, drain the inbox to pick up
+            // newly spawned tasks so they aren't starved.
+            if (self.ready_queue.len() > 0) {
+                self.fast_path_counter +%= 1;
+                if (self.fast_path_counter & 63 == 0) {
+                    self.drainInbox();
                 }
+            } else {
+                // ── Slow path: no ready work — check all sources.
+                self.drainInbox();
 
-                req_node = next_node;
-            }
-
-            // Look for beautiful sleeping tasks to wake up
-            if (self.sleeping_queue.items.len > 0) {
-                const now = std.time.milliTimestamp();
-                var i: usize = 0;
-                while (i < self.sleeping_queue.items.len) {
-                    const task = self.sleeping_queue.items[i];
-                    if (now >= task.wake_time) {
-                        // WAKE UP, Sleeping Beauty! It's me, your scheduler!
-                        // Remove from sleeping queue (O(1) swap remove)
-                        _ = self.sleeping_queue.swapRemove(i);
-
-                        // Add to ready queue
-                        task.status = .Ready;
-                        self.ready_queue.push(self.allocator, task) catch unreachable;
-
-                        // Don't increment 'i' because we just swapped a new item here
-                    } else {
-                        i += 1;
+                // Wake sleeping tasks
+                if (self.sleeping_queue.items.len > 0) {
+                    const now = std.time.milliTimestamp();
+                    var i: usize = 0;
+                    while (i < self.sleeping_queue.items.len) {
+                        const task = self.sleeping_queue.items[i];
+                        if (now >= task.wake_time) {
+                            _ = self.sleeping_queue.swapRemove(i);
+                            task.status = .Ready;
+                            self.ready_queue.push(self.allocator, task) catch unreachable;
+                        } else {
+                            i += 1;
+                        }
                     }
                 }
-            }
+            } // end slow path
 
             // Look for tasks ready to start:
             if (self.ready_queue.len() > 0) {

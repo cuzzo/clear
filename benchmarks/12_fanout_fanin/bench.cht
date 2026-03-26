@@ -13,9 +13,9 @@
 FN doWork(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
     MUTABLE i: Int64 = 0;
-    WHILE i < 1000 DO
-        x = x * 6364136223846793005 + 1442695040888963407;
-        i = i + 1;
+    WHILE i < 1000_i64 DO
+        x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
+        i = i + 1_i64;
     END
     RETURN x;
 END

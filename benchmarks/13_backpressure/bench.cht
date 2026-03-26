@@ -17,9 +17,9 @@ STRUCT Item { seed: Int64, result: Int64 }
 FN processItem(val: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = val;
     MUTABLE i: Int64 = 0;
-    WHILE i < 500 DO
-        x = x * 6364136223846793005 + 1442695040888963407;
-        i = i + 1;
+    WHILE i < 500_i64 DO
+        x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
+        i = i + 1_i64;
     END
     RETURN x;
 END
