@@ -9957,6 +9957,120 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # SOA Opportunity Detection
+  # ===========================================================================
+  describe "SOA opportunity warnings" do
+    def capture_notes(code)
+      notes = []
+      allow($stderr).to receive(:puts) do |msg|
+        notes << msg if msg.include?("[Note]")
+      end
+      ZigTranspiler.new.transpile(code)
+      notes
+    end
+
+    it "warns when pipeline accesses < 50% of fields on a large struct (SUM)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          total = entities s> SUM _.x;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).not_to be_nil
+      expect(soa_note).to include("1 of 8")
+    end
+
+    it "warns for EACH accessing few fields" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          entities s> EACH { _.x = _.x + _.vx; };
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).not_to be_nil
+      expect(soa_note).to include("2 of 8")
+    end
+
+    it "does NOT warn for small structs (< 4 fields)" do
+      code = <<~CLEAR
+        STRUCT Point { x: Number, y: Number, z: Number }
+        FN f() RETURNS Void ->
+          MUTABLE pts: Point[] = [];
+          total = pts s> SUM _.x;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "does NOT warn when >= 50% of fields are accessed" do
+      code = <<~CLEAR
+        STRUCT Stats { a: Number, b: Number, c: Number, d: Number }
+        FN f() RETURNS Void ->
+          MUTABLE data: Stats[] = [];
+          data s> EACH { _.a = _.a + _.b; };
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "does NOT warn when most fields are accessed" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; _.health = _.health - 1.0; };
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "does NOT warn for non-struct element types" do
+      code = <<~CLEAR
+        FN f() RETURNS Void ->
+          MUTABLE nums: Number[] = [];
+          total = nums s> SUM _;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).to be_nil
+    end
+
+    it "warns for WHERE accessing few fields" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+        FN f() RETURNS Void ->
+          MUTABLE entities: Entity[] = [];
+          alive = entities s> WHERE _.health > 0;
+          RETURN;
+        END
+      CLEAR
+      notes = capture_notes(code)
+      soa_note = notes.find { |n| n.include?("@soa") }
+      expect(soa_note).not_to be_nil
+      expect(soa_note).to include("1 of 8")
+    end
+  end
+
+  # ===========================================================================
   # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
   # ===========================================================================
   describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do

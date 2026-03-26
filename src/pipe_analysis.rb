@@ -1,5 +1,6 @@
 require_relative "../src/ast"
 require_relative "../src/type"
+require 'set'
 
 module PipeAnalysis
   # =========================================================
@@ -96,7 +97,9 @@ module PipeAnalysis
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
 
       # Analyze the Body (e.g., _["count"])
-      visit(node.right.expression)
+      with_soa_tracking(node, item_type) do
+        visit(node.right.expression)
+      end
 
       if node.right.is_a?(AST::WhereOp) && node.right.expression.resolved_type != :Bool
         error!(node.right, "WHERE clause must evaluate to Bool")
@@ -299,7 +302,9 @@ module PipeAnalysis
     with_new_scope do
       # Mutable: EACH body may mutate the item via field assignment (_.field = value)
       current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-      node.right.body.each { |stmt| visit(stmt) }
+      with_soa_tracking(node, item_type) do
+        node.right.body.each { |stmt| visit(stmt) }
+      end
     end
 
     node.full_type = :Void
@@ -396,7 +401,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      with_soa_tracking(node, item_type) { visit(node.right.expression) }
     end
 
     expr_type = node.right.expression.resolved_type
@@ -415,7 +420,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      with_soa_tracking(node, item_type) { visit(node.right.expression) }
     end
 
     expr_type = node.right.expression.resolved_type
@@ -434,7 +439,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      with_soa_tracking(node, item_type) { visit(node.right.expression) }
     end
 
     expr_type = node.right.expression.resolved_type
@@ -453,7 +458,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      with_soa_tracking(node, item_type) { visit(node.right.expression) }
     end
 
     expr_type = node.right.expression.resolved_type
@@ -565,5 +570,47 @@ module PipeAnalysis
     else
       error!(node.left, "Cannot #{op_name} non-list type #{node.left.resolved_type}")
     end
+  end
+
+  # =========================================================
+  # SOA Opportunity Detection
+  # =========================================================
+  # Called after visiting a pipeline lambda body.  Checks whether
+  # the lambda accessed less than half of the element struct's
+  # fields — a signal that SOA layout would improve cache usage.
+  #
+  # Only triggers for struct elements with >= 4 fields (small
+  # structs don't benefit meaningfully from SOA).
+
+  SOA_MIN_FIELDS = 4
+  SOA_THRESHOLD  = 0.5  # warn when < 50% of fields accessed
+
+  def check_soa_opportunity!(node, item_type)
+    return unless @pipeline_accessed_fields
+    accessed = @pipeline_accessed_fields
+    return if accessed.empty?
+
+    schema = lookup_type_schema(item_type)
+    return unless schema.is_a?(Hash)
+    return if schema[:kind] # skip enums, unions, resources
+
+    total = schema.keys.reject { |k| k.is_a?(Symbol) }.size  # only real field names (skip :type_params etc.)
+    return if total < SOA_MIN_FIELDS
+
+    ratio = accessed.size.to_f / total
+    if ratio < SOA_THRESHOLD
+      fields_str = accessed.to_a.sort.join(", ")
+      note!(node, "Pipeline accesses #{accessed.size} of #{total} fields (#{fields_str}). " \
+                  "Consider @soa for better cache performance on '#{item_type}'.")
+    end
+  end
+
+  # Wraps a pipeline body visit with SOA field tracking.
+  def with_soa_tracking(node, item_type)
+    @pipeline_accessed_fields = Set.new
+    yield
+    check_soa_opportunity!(node, item_type)
+  ensure
+    @pipeline_accessed_fields = nil
   end
 end

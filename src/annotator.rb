@@ -42,6 +42,9 @@ class SemanticAnnotator
     # Capability audit — tracks declarations and usage to detect over-engineering.
     @capability_audit = {}     # "fn:var" => { sync:, ownership:, line:, mutated:, captured_bg:, captured_parallel:, pub: }
     @current_function_name = nil
+    # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
+    # nil = not inside a pipeline; Set = collecting field names.
+    @pipeline_accessed_fields = nil
     setup_builtins
   end
 
@@ -2078,6 +2081,10 @@ private
       error!(node, :UNION_FIELD_ACCESS, type)
     elsif schema && schema[node.field]
       field_type = schema[node.field]
+      # SOA tracking: record field access on pipeline variable `_`
+      if @pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+        @pipeline_accessed_fields << node.field
+      end
       # For generic instances (e.g. Pair<Number>), substitute type params into field type.
       type_obj = Type.new(type)
       if type_obj.generic_instance? && schema[:type_params] && field_type.is_a?(Type)
