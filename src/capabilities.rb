@@ -197,6 +197,33 @@ module CapabilityHelper
     end
   end
 
+  # --- Fiber capture validation (shared by BG and DO blocks) ---
+
+  # Validate capture safety for a fiber body: reject @local/@multiowned in
+  # @parallel blocks, auto-pin when shared state is captured.
+  # Returns true if the block was auto-pinned.
+  def validate_fiber_captures!(node, body, is_parallel, is_pinned)
+    if is_parallel
+      if branch_captures_local_state?(body)
+        error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
+      end
+      if branch_captures_rc_state?(body)
+        error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.")
+      end
+    end
+
+    if !is_pinned && !is_parallel && branch_captures_shared_state?(body)
+      return true  # caller should set pinned = true
+    end
+    false
+  end
+
+  # Walk a BG block's body AST and mark any outer-scope resource or affine
+  # variables as :moved. Stops at nested BgBlock boundaries.
+  def walk_bg_capture_moves(stmts, scope, locally_bound)
+    stmts.each { |expr| _bg_walk(expr, scope, locally_bound) }
+  end
+
   # --- Capture analysis for auto-pinning BG/DO blocks ---
 
   # Returns true if any captured variable has @local sync.
@@ -221,6 +248,38 @@ module CapabilityHelper
   end
 
   private
+
+  def _bg_walk(node, scope, locally_bound)
+    return unless node.is_a?(AST::Locatable)
+    return if node.is_a?(AST::BgBlock)
+
+    if node.is_a?(AST::Identifier)
+      name = node.name
+      return if locally_bound.include?(name)
+      info = scope.locals[name]
+      return unless info && scope.owned_names.include?(name)
+      return if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
+      if (info[:resource] || Type.new(info[:type]).requires_move?) &&
+         scope.get_state(name) == :live
+        scope.set_state(name, :moved)
+      end
+      return
+    end
+
+    lb = locally_bound
+    if node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)
+      lb = lb | Set[node.name.to_s] if node.name.is_a?(String)
+    end
+
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array)
+        val.each { |v| _bg_walk(v, scope, lb) }
+      elsif val.is_a?(AST::Locatable)
+        _bg_walk(val, scope, lb)
+      end
+    end
+  end
 
   def _captures_with_storage?(nodes, locally_bound, target_storage)
     nodes.each do |node|

@@ -1375,30 +1375,7 @@ private
   def visit_GetField(node)
     # Enum/Union variant access: TypeName.Variant
     # Must be checked BEFORE visiting target to avoid "variable not found" error.
-    if node.target.is_a?(AST::Identifier)
-      type_name = node.target.name.to_sym
-      schema = lookup_type_schema(type_name)
-      if schema.is_a?(Hash) && schema[:kind] == :enum
-        unless schema[:variants].include?(node.field)
-          error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
-        end
-        node.target.full_type = type_name
-        node.full_type = type_name
-        return
-      end
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        unless schema[:variants].key?(node.field)
-          error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
-        end
-        var_data = schema[:variants][node.field]
-        if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
-          error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, type_name, node.field, type_name, node.field)
-        end
-        node.target.full_type = type_name
-        node.full_type = type_name
-        return
-      end
-    end
+    return if resolve_variant_access(node)
 
     visit(node.target)
 
@@ -1986,30 +1963,16 @@ private
   end
 
   def visit_DoBlock(node)
-    # Each branch runs in a separate fiber (fork-join).
-    # Visit branches independently — no ownership transfer between parallel branches.
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
 
-      # Hard error: @local and @multiowned CANNOT be used in @parallel blocks.
-      if branch[:parallel]
-        if branch_captures_local_state?(branch[:body])
-          error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
-        end
-        if branch_captures_rc_state?(branch[:body])
-          error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.")
-        end
-      end
+      validate_fiber_captures!(node, branch[:body], branch[:parallel], branch[:pinned])
 
-      # Auto-pin: if the branch captures a @shared, @locked, @writeLocked, or @local
-      # variable and the user hasn't explicitly said @parallel, pin to the local scheduler.
-      next if branch[:pinned] || branch[:parallel]
-      if branch_captures_shared_state?(branch[:body])
+      if !branch[:pinned] && !branch[:parallel] && branch_captures_shared_state?(branch[:body])
         branch[:pinned] = true
         note!(node, "DO branch auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
       end
 
-      # Capability audit: mark captured variables in DO branches.
       audit_mark_bg_captures(branch[:body], branch[:parallel])
     end
     node.full_type = :Void
@@ -2072,9 +2035,6 @@ private
     end
     node.full_type = :"~#{last_type}"
 
-    # Hard error: @local and @multiowned CANNOT be used in @parallel blocks.
-    # @local: no synchronization primitives.
-    # @multiowned (Rc): non-atomic reference count — data race if cross-thread.
     # @arena implies @pinned — thread-local arena memory can't be stolen.
     if node.arena_mode
       node.pinned = true
@@ -2083,81 +2043,24 @@ private
       end
     end
 
-    if node.parallel
-      if branch_captures_local_state?(node.body)
-        error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
-      end
-      if branch_captures_rc_state?(node.body)
-        error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.")
-      end
-    end
+    validate_fiber_captures!(node, node.body, node.parallel, node.pinned)
 
-    # Safety: if the enclosing function/BG is @pinned (uses thread-local allocator),
-    # a non-pinned child BG block that captures outer variables would escape thread-local
-    # memory to a potentially stolen fiber — use-after-free or allocator corruption.
+    # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
     if @current_bg_pinned && !node.pinned && captures_outer_variables?(node.body, locally_bound)
       error!(node, "BG block inside @pinned scope captures local variables but is not @pinned. " \
                    "Thread-local memory cannot escape to a stealable fiber. " \
                    "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
     end
 
-    # Auto-pin: if the BG body captures a @shared, @locked, @writeLocked, or @local
-    # variable and the user hasn't explicitly said @parallel, pin to the local scheduler
-    # to avoid cache-line bouncing.  @parallel overrides auto-pinning (except for @local).
+    # Auto-pin when shared state is captured.
     if !node.pinned && !node.parallel && branch_captures_shared_state?(node.body)
       node.pinned = true
       note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
     end
 
-    # Capability audit: mark captured capability variables.
     audit_mark_bg_captures(node.body, node.parallel)
-
-    # Enforce linear ownership for BG captures.
     walk_bg_capture_moves(node.body, outer_scope, locally_bound)
     @current_bg_pinned = prev_bg_pinned
-  end
-
-  # Check if a BG body references any variables not declared locally inside it.
-
-  # Walk the BG block's body AST and mark any outer-scope resource or affine
-  # variables as :moved.  Stops at nested BgBlock boundaries (those captures
-  # belong to a different fiber's scope).
-  def walk_bg_capture_moves(stmts, scope, locally_bound)
-    stmts.each { |expr| _bg_walk(expr, scope, locally_bound) }
-  end
-
-  def _bg_walk(node, scope, locally_bound)
-    return unless node.is_a?(AST::Locatable)
-    # Don't cross nested BG block boundaries.
-    return if node.is_a?(AST::BgBlock)
-
-    if node.is_a?(AST::Identifier)
-      name = node.name
-      return if locally_bound.include?(name)
-      info = scope.locals[name]
-      return unless info && scope.owned_names.include?(name)
-      return if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
-      if (info[:resource] || Type.new(info[:type]).requires_move?) &&
-         scope.get_state(name) == :live
-        scope.set_state(name, :moved)
-      end
-      return
-    end
-
-    # Track names declared within the body to avoid treating them as outer captures.
-    lb = locally_bound
-    if node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)
-      lb = lb | Set[node.name.to_s] if node.name.is_a?(String)
-    end
-
-    node.class.members.each do |member|
-      val = node[member]
-      if val.is_a?(Array)
-        val.each { |v| _bg_walk(v, scope, lb) }
-      elsif val.is_a?(AST::Locatable)
-        _bg_walk(val, scope, lb)
-      end
-    end
   end
 
   def visit_ThenChain(node)

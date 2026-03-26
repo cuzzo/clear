@@ -86,6 +86,40 @@ module UnionAnalysis
     end
   end
 
+  # Resolve enum or union variant access on a GetField node (TypeName.Variant).
+  # Returns true if handled, false if the target is not an enum/union.
+  def resolve_variant_access(node)
+    return false unless node.target.is_a?(AST::Identifier)
+
+    type_name = node.target.name.to_sym
+    schema = lookup_type_schema(type_name)
+    return false unless schema.is_a?(Hash)
+
+    if schema[:kind] == :enum
+      unless schema[:variants].include?(node.field)
+        error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
+      end
+      node.target.full_type = type_name
+      node.full_type = type_name
+      return true
+    end
+
+    if schema[:kind] == :union
+      unless schema[:variants].key?(node.field)
+        error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
+      end
+      var_data = schema[:variants][node.field]
+      if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
+        error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, type_name, node.field, type_name, node.field)
+      end
+      node.target.full_type = type_name
+      node.full_type = type_name
+      return true
+    end
+
+    false
+  end
+
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
