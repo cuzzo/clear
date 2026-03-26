@@ -1412,15 +1412,9 @@ private
     if @smooth_depth > 0
       scope = lookup_scope_for(node.name)
     else
-      scope = current_scope
-      if !scope.locals.key?(node.name)
-        # Check if it's a named function being used as a value (Phase 4 fn-as-value)
-        fn_scope = lookup_scope_for(node.name)
-        if fn_scope && fn_scope.resolve_type(node.name).is_a?(Hash)
-          scope = fn_scope
-        else
-          error!(node, "Undefined variable '#{node.name}'")
-        end
+      scope = resolve_variable_scope(node.name)
+      unless scope
+        error!(node, "Undefined variable '#{node.name}'")
       end
     end
 

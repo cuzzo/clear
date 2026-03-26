@@ -358,6 +358,20 @@ module ScopeHelper
     nil
   end
 
+  # Resolve a name as either a local variable or a function-as-value reference.
+  # Returns the scope where the name is found, or nil if undefined.
+  # Checks current scope locals first, then falls back to lookup_scope_for
+  # to find named functions used as values (fn-type references).
+  def resolve_variable_scope(name)
+    scope = current_scope
+    if scope.locals.key?(name)
+      scope
+    else
+      fn_scope = lookup_scope_for(name)
+      fn_scope && fn_scope.resolve_type(name).is_a?(Hash) ? fn_scope : nil
+    end
+  end
+
   def lookup_type_schema(name)
     # For generic instances like :"Pair<Number>", look up the base type ":Pair"
     base_name = name.to_s.sub(/<.*>$/, '').to_sym
