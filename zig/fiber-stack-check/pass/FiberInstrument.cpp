@@ -6,13 +6,20 @@
 //
 // Usage:
 //   fiber-instrument input.bc -o output.o
+//   fiber-instrument input.bc -S -o output.s   # emit assembly
+//
+// How it works:
+//   A thin wrapper around the real TargetMachine overrides only
+//   createPassConfig() to call insertPass().  Every other virtual
+//   method delegates to the real TM, so AsmPrinter, ISel, and
+//   register allocation all see the real target state.
 
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/Passes.h"            // PrologEpilogCodeInserterID
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -36,6 +43,7 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
@@ -48,6 +56,8 @@ static cl::opt<std::string> OutputFilename("o",
     cl::init("a.o"));
 static cl::opt<char> OptLevel("O",
     cl::desc("Optimization level (0-3)"), cl::init('0'));
+static cl::opt<bool> EmitAsm("S",
+    cl::desc("Emit assembly instead of object"), cl::init(false));
 
 static codegen::RegisterCodeGenFlags CGF;
 
@@ -119,8 +129,12 @@ static RegisterPass<FiberStackCheckPass> Reg(
     false, false);
 
 // ── Wrapper TargetMachine ────────────────────────────────────────
-// Delegates everything to the real TM but overrides createPassConfig
-// to inject FiberStackCheckPass after PrologEpilogCodeInserter.
+// Thin wrapper that delegates EVERYTHING to the real TM except
+// createPassConfig(), where we call insertPass() to inject our
+// machine pass after PrologEpilogCodeInserter.
+//
+// The MC objects (AsmInfo, MRI, MII, STI) are borrowed from Inner
+// and released (not deleted) in the destructor.
 namespace {
 
 class FiberTargetMachine : public LLVMTargetMachine {
@@ -139,8 +153,7 @@ public:
               TM->getCodeModel(),
               TM->getOptLevel()),
           Inner(TM) {
-        // Share the MC objects from the real target machine.
-        // We do NOT call initAsmInfo() — the inner TM already owns these.
+        // Borrow MC objects from the real TM (don't call initAsmInfo).
         AsmInfo.reset(const_cast<MCAsmInfo *>(TM->getMCAsmInfo()));
         MRI.reset(const_cast<MCRegisterInfo *>(TM->getMCRegisterInfo()));
         MII.reset(const_cast<MCInstrInfo *>(TM->getMCInstrInfo()));
@@ -148,25 +161,40 @@ public:
     }
 
     ~FiberTargetMachine() override {
-        // Release without deleting — Inner still owns these.
+        // Release without deleting — Inner owns these.
         (void)AsmInfo.release();
         (void)MRI.release();
         (void)MII.release();
         (void)STI.release();
     }
 
-    const TargetSubtargetInfo *
-    getSubtargetImpl(const Function &F) const override {
-        return Inner->getSubtargetImpl(F);
-    }
-
+    // ── The one method we actually change ────────────────────────
     TargetPassConfig *createPassConfig(PassManagerBase &PM) override {
-        // Let the real target build its pass config.
         TargetPassConfig *Config = Inner->createPassConfig(PM);
-        // Inject our pass right after prologue/epilogue insertion.
+        // Uncomment to inject our pass:
         Config->insertPass(&PrologEpilogCodeInserterID,
                            &FiberStackCheckPass::ID);
         return Config;
+    }
+
+    // Ensure callers see Inner's subtarget, not a stale one from
+    // our wrapper's base class.
+    bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DstAS) const override {
+        return Inner->isNoopAddrSpaceCast(SrcAS, DstAS);
+    }
+
+    // ── Delegate everything else to Inner ────────────────────────
+    const TargetSubtargetInfo *
+    getSubtargetImpl(const Function &F) const override {
+        auto *STI = Inner->getSubtargetImpl(F);
+        if (!STI)
+            errs() << "WARNING: getSubtargetImpl returned null for "
+                   << F.getName() << "\n";
+        return STI;
+    }
+
+    TargetLoweringObjectFile *getObjFileLowering() const override {
+        return Inner->getObjFileLowering();
     }
 
     TargetTransformInfo
@@ -189,7 +217,7 @@ int main(int argc, char **argv) {
     cl::ParseCommandLineOptions(argc, argv,
         "Fiber stack-check instrumenting compiler\n"
         "  Reads LLVM bitcode, inserts __morestack before every\n"
-        "  function prologue, writes an object file.\n");
+        "  function prologue, writes object file or assembly.\n");
 
     // 1. Read input
     LLVMContext Ctx;
@@ -210,13 +238,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // 3. Create the real target machine
+    // 3. Create real target machine
     CodeGenOptLevel OLvl = CodeGenOptLevel::None;
     switch (OptLevel) {
     case '1': OLvl = CodeGenOptLevel::Less;       break;
     case '2': OLvl = CodeGenOptLevel::Default;    break;
     case '3': OLvl = CodeGenOptLevel::Aggressive; break;
-    default:  OLvl = CodeGenOptLevel::None;       break;
     }
 
     TargetOptions Options;
@@ -236,30 +263,36 @@ int main(int argc, char **argv) {
 
     M->setDataLayout(RealTM->createDataLayout());
 
-    // 4. Wrap it to inject our machine pass
+    // 4. Wrap the TM to inject our pass
     FiberTargetMachine FTM(
         static_cast<LLVMTargetMachine *>(RealTM.get()));
 
-    // 5. Build codegen pipeline and emit
-    legacy::PassManager PM;
+    // 5. Build codegen pipeline and emit.
+    //    PM and Out must be destroyed BEFORE FTM/RealTM (the
+    //    AsmPrinter holds a reference to the TM, and the MC
+    //    streamer references the output stream).
+    {
+        legacy::PassManager PM;
 
-    std::error_code EC;
-    raw_fd_ostream Out(OutputFilename, EC, sys::fs::OF_None);
-    if (EC) {
-        errs() << argv[0] << ": " << EC.message() << "\n";
-        return 1;
+        std::error_code EC;
+        raw_fd_ostream Out(OutputFilename, EC, sys::fs::OF_None);
+        if (EC) {
+            errs() << argv[0] << ": " << EC.message() << "\n";
+            return 1;
+        }
+
+        CodeGenFileType FT = EmitAsm ? CodeGenFileType::AssemblyFile
+                                     : CodeGenFileType::ObjectFile;
+
+        if (FTM.addPassesToEmitFile(PM, Out, nullptr, FT)) {
+            errs() << argv[0]
+                   << ": target does not support code generation\n";
+            return 1;
+        }
+
+        PM.run(*M);
+        Out.flush();
     }
 
-    if (FTM.addPassesToEmitFile(PM, Out, nullptr,
-                                CodeGenFileType::ObjectFile)) {
-        errs() << argv[0]
-               << ": target does not support object emission\n";
-        return 1;
-    }
-
-    PM.run(*M);
-    Out.flush();
-
-    outs() << "fiber-instrument: wrote " << OutputFilename << "\n";
     return 0;
 }

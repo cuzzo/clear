@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+# fiber-instrument — Insert __morestack before every function prologue.
+#
+# Usage:
+#   fiber-instrument input.bc -o output.o          # emit object
+#   fiber-instrument input.bc -S -o output.s       # emit assembly
+#
+# Pipeline:
+#   1. llc input.bc → raw assembly
+#   2. Post-process: insert stack check before each function's first instruction
+#   3. Assemble → object file (unless -S)
+#
+# The check is inserted after the function label and .cfi_startproc,
+# before the first real instruction (the prologue).  Functions named
+# __morestack, __lessstack, or starting with __fiber_/__mock_/__zig_
+# are skipped.
+#
+set -euo pipefail
+
+# ── Parse args ────────────────────────────────────────────────────
+OUTPUT=""
+EMIT_ASM=false
+INPUT=""
+LLC_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o)    OUTPUT="$2"; shift 2 ;;
+        -S)    EMIT_ASM=true; shift ;;
+        -O)    LLC_ARGS+=("-O$2"); shift 2 ;;
+        -*)    LLC_ARGS+=("$1"); shift ;;
+        *)     INPUT="$1"; shift ;;
+    esac
+done
+
+[[ -n "$INPUT" ]] || { echo "usage: fiber-instrument input.bc [-S] -o output" >&2; exit 1; }
+[[ -n "$OUTPUT" ]] || OUTPUT="a.o"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# ── Skip list (regex) ────────────────────────────────────────────
+SKIP_RE='^(__morestack|__lessstack|__fiber_|__mock_|__zig_)'
+
+# ── The check to insert (AT&T syntax, x86-64) ────────────────────
+# Uses initial-exec TLS matching switch.S.
+# testq/jz skips when limit is NULL (main thread / not on fiber).
+# CHECK_ASM is generated per-function by awk with unique label IDs.
+
+# ── 1. Compile to assembly ───────────────────────────────────────
+llc-18 "$INPUT" -o "$TMPDIR/raw.s" -filetype=asm "${LLC_ARGS[@]}" 2>/dev/null
+
+# ── 2. Post-process: insert checks ──────────────────────────────
+# State machine:
+#   - When we see "funcname:" (a global function label), record the name
+#   - If name is NOT in skip list, set inject=true
+#   - After seeing .cfi_startproc + the "# %bb.0" comment (or the first
+#     real instruction), emit the check and clear inject
+#
+awk -v skip_re="$SKIP_RE" '
+BEGIN { inject = 0; counter = 0; saw_bb0 = 0 }
+
+# Match function labels: plain (foo:) or quoted ("foo-bar.baz":)
+/^[a-zA-Z_].*:/ || /^".*":/ {
+    fname = $0; sub(/:.*/, "", fname)
+    gsub(/"/, "", fname)
+    # Skip .cfi/.loc/.Lfoo directives (not function labels)
+    if (fname ~ /^\./) next
+    inject = (fname !~ skip_re) ? 1 : 0
+    saw_bb0 = 0
+}
+
+inject && /^# %bb\.0/ { saw_bb0 = 1; print; next }
+
+inject && saw_bb0 && /^\t[a-z]/ {
+    n = counter++
+    print "\t#APP"
+    print "\t# -- fiber stack check --"
+    print ".Lfiber_chk_" n ":"
+    print "\tmovq\ttest_stack_limit@GOTTPOFF(%rip), %r11"
+    print "\tmovq\t%fs:(%r11), %r11"
+    print "\ttestq\t%r11, %r11"
+    print "\tje\t.Lfiber_ok_" n
+    print "\tcmpq\t%r11, %rsp"
+    print "\tja\t.Lfiber_ok_" n
+    print "\tcallq\t__morestack"
+    print "\tjmp\t.Lfiber_chk_" n
+    print ".Lfiber_ok_" n ":"
+    print "\t#NO_APP"
+    inject = 0; saw_bb0 = 0
+}
+
+{ print }
+' "$TMPDIR/raw.s" > "$TMPDIR/instrumented.s"
+
+# ── 3. Output ────────────────────────────────────────────────────
+if $EMIT_ASM; then
+    cp "$TMPDIR/instrumented.s" "$OUTPUT"
+else
+    # Assemble to object
+    llc-18 "$TMPDIR/instrumented.s" -o "$OUTPUT" -filetype=obj 2>/dev/null || \
+        as "$TMPDIR/instrumented.s" -o "$OUTPUT" 2>/dev/null || \
+        gcc -c "$TMPDIR/instrumented.s" -o "$OUTPUT"
+fi

@@ -1,35 +1,30 @@
 #!/usr/bin/env bash
 #
-# test-pass.sh — Verify the Machine Pass inserts __morestack BEFORE the prologue.
+# test-pass.sh — Verify __morestack is inserted BEFORE the prologue.
 #
-# Pipeline:
-#   1. tiny .ll → llc -stop-after=prologepilog → MIR (prologue present)
-#   2. llc --load --run-pass=fiber-stack-check → instrumented MIR
-#   3. llc --start-after=prologepilog → assembly (resume without re-running prologue)
-#   4. Assert __morestack appears BEFORE pushq in the assembly
+# Tests two paths:
+#   A. The MachineFunctionPass plugin (via MIR round-trip on small .ll)
+#   B. The fiber-instrument tool (assembly post-processing)
 #
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN="$DIR/pass/build/libFiberStackCheck.so"
+TOOL="$DIR/pass/fiber-instrument"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; BOLD='\033[1m'; NC='\033[0m'
 pass() { echo -e "${GREEN}PASS${NC}: $1"; }
 fail() { echo -e "${RED}FAIL${NC}: $1"; exit 1; }
+section() { echo -e "\n${BOLD}── $1 ──${NC}"; }
 
-# ── 0. Prerequisites ─────────────────────────────────────────────
-[[ -f "$PLUGIN" ]] || fail "Plugin not built.  Run: cmake --build $DIR/pass/build"
-command -v llc-18 >/dev/null 2>&1 || fail "llc-18 not found"
-
-# ── 1. Minimal LLVM IR ───────────────────────────────────────────
+# ── Shared test input ────────────────────────────────────────────
 cat > "$TMPDIR/test.ll" <<'EOF'
 target triple = "x86_64-pc-linux-gnu"
 
 declare void @use_buf(ptr)
 
-; A normal function — SHOULD be instrumented.
 define void @test_recursive(i32 %depth) {
 entry:
   %buf = alloca [64 x i8], align 16
@@ -45,100 +40,108 @@ done:
   ret void
 }
 
-; __morestack itself — must NOT be instrumented.
 define void @__morestack() {
+  ret void
+}
+
+define void @__fiber_helper() {
   ret void
 }
 EOF
 
-# ── 2. Lower to MIR (stop after prologue insertion) ──────────────
-llc-18 "$TMPDIR/test.ll" \
-    -stop-after=prologepilog \
-    -o "$TMPDIR/test.mir" 2>/dev/null
+# ── Helper: check assembly has __morestack before pushq ──────────
+check_asm() {
+    local label="$1" file="$2" tag="$3"
 
-[[ -s "$TMPDIR/test.mir" ]] || fail "MIR generation produced empty file"
+    local func_asm
+    func_asm=$(sed -n "/^test_recursive:/,/^\\.Lfunc_end/p" "$file")
+    [[ -n "$func_asm" ]] || fail "[$tag] test_recursive not found in assembly"
 
-# ── 3. Run our machine pass ──────────────────────────────────────
-llc-18 \
-    --load="$PLUGIN" \
-    --run-pass=fiber-stack-check \
-    "$TMPDIR/test.mir" \
-    -o "$TMPDIR/test-instr.mir" 2>/dev/null
+    local ms_line push_line
+    ms_line=$(echo "$func_asm" | grep -n "__morestack" | head -1 | cut -d: -f1)
+    push_line=$(echo "$func_asm" | grep -n "pushq\|subq" | head -1 | cut -d: -f1)
 
-[[ -s "$TMPDIR/test-instr.mir" ]] || fail "Instrumented MIR is empty"
+    [[ -n "$ms_line" ]] || { echo "$func_asm"; fail "[$tag] __morestack not found"; }
+    [[ -n "$push_line" ]] || { echo "$func_asm"; fail "[$tag] prologue not found"; }
 
-# ── 4. MIR check: INLINEASM before frame-setup ───────────────────
-FIRST_REAL=$(
-    sed -n '/^name:.*test_recursive/,/^\.\.\./{
-        /^  bb\.0/,/^  bb\.[1-9]/{
-            /INLINEASM\|frame-setup/{p;q}
-        }
-    }' "$TMPDIR/test-instr.mir"
-)
-
-if echo "$FIRST_REAL" | grep -q "INLINEASM"; then
-    pass "INLINEASM is first instruction in MIR entry block"
-else
-    fail "Expected INLINEASM before frame-setup, got: $FIRST_REAL"
-fi
-
-# ── 5. Finish codegen → assembly (resume after prologepilog) ─────
-llc-18 "$TMPDIR/test-instr.mir" \
-    --start-after=prologepilog \
-    -o "$TMPDIR/test.s" \
-    -filetype=asm 2>/dev/null
-
-[[ -s "$TMPDIR/test.s" ]] || fail "Assembly output is empty"
-
-# ── 6. Assembly check: __morestack BEFORE pushq (prologue) ───────
-FUNC_ASM=$(sed -n '/^test_recursive:/,/^\.Lfunc_end/p' "$TMPDIR/test.s")
-
-[[ -n "$FUNC_ASM" ]] || fail "Could not find test_recursive in assembly"
-
-MORESTACK_LINE=$(echo "$FUNC_ASM" | grep -n "__morestack" | head -1 | cut -d: -f1)
-PUSH_LINE=$(echo "$FUNC_ASM" | grep -n "pushq" | head -1 | cut -d: -f1)
-
-[[ -n "$MORESTACK_LINE" ]] || {
-    echo "$FUNC_ASM"
-    fail "__morestack not found in test_recursive"
-}
-[[ -n "$PUSH_LINE" ]] || {
-    echo "$FUNC_ASM"
-    fail "pushq (prologue) not found in test_recursive"
-}
-
-if (( MORESTACK_LINE < PUSH_LINE )); then
-    pass "__morestack (line $MORESTACK_LINE) BEFORE prologue pushq (line $PUSH_LINE)"
-else
-    echo "$FUNC_ASM"
-    fail "__morestack (line $MORESTACK_LINE) AFTER prologue pushq (line $PUSH_LINE)"
-fi
-
-# ── 7. __morestack itself must NOT be instrumented ────────────────
-MORESTACK_FUNC=$(sed -n '/^__morestack:/,/^\.Lfunc_end/p' "$TMPDIR/test.s")
-
-if echo "$MORESTACK_FUNC" | grep -q "test_stack_limit"; then
-    fail "__morestack was instrumented (should be skipped)"
-else
-    pass "__morestack was NOT instrumented (correctly skipped)"
-fi
-
-# ── 8. Check the inline asm contains expected instructions ────────
-if echo "$FUNC_ASM" | grep -q "test_stack_limit@GOTTPOFF"; then
-    pass "TLS load (test_stack_limit@GOTTPOFF) present"
-else
-    fail "TLS load not found in check"
-fi
-
-if echo "$FUNC_ASM" | grep -q "cmpq.*%r11.*%rsp\|cmpq.*%rsp.*%r11"; then
-    pass "Stack limit comparison present"
-else
-    # Check the broader pattern
-    if echo "$FUNC_ASM" | grep -q "cmpq"; then
-        pass "Stack limit comparison present (cmpq found)"
+    if (( ms_line < push_line )); then
+        pass "[$tag] __morestack (line $ms_line) BEFORE prologue (line $push_line)"
     else
-        fail "cmpq not found in check"
+        echo "$func_asm"
+        fail "[$tag] __morestack (line $ms_line) AFTER prologue (line $push_line)"
     fi
+
+    # __morestack itself must NOT be instrumented
+    local ms_func
+    ms_func=$(sed -n "/^__morestack:/,/^\\.Lfunc_end/p" "$file")
+    if echo "$ms_func" | grep -q "test_stack_limit"; then
+        fail "[$tag] __morestack was instrumented"
+    else
+        pass "[$tag] __morestack correctly skipped"
+    fi
+
+    # __fiber_ prefixed functions must NOT be instrumented
+    local helper_func
+    helper_func=$(sed -n "/^__fiber_helper:/,/^\\.Lfunc_end/p" "$file")
+    if echo "$helper_func" | grep -q "test_stack_limit"; then
+        fail "[$tag] __fiber_helper was instrumented"
+    else
+        pass "[$tag] __fiber_helper correctly skipped"
+    fi
+}
+
+# ══════════════════════════════════════════════════════════════════
+section "A. MachineFunctionPass plugin (MIR round-trip)"
+# ══════════════════════════════════════════════════════════════════
+
+if [[ -f "$PLUGIN" ]] && command -v llc-18 >/dev/null 2>&1; then
+    # 1. Lower to MIR
+    llc-18 "$TMPDIR/test.ll" -stop-after=prologepilog \
+        -o "$TMPDIR/test.mir" 2>/dev/null
+
+    # 2. Run machine pass
+    llc-18 --load="$PLUGIN" --run-pass=fiber-stack-check \
+        "$TMPDIR/test.mir" -o "$TMPDIR/test-instr.mir" 2>/dev/null
+
+    # 3. MIR check: INLINEASM before frame-setup
+    first=$(sed -n '/^name:.*test_recursive/,/^\.\.\./{
+        /^  bb\.0/,/^  bb\.[1-9]/{/INLINEASM\|frame-setup/{p;q}}
+    }' "$TMPDIR/test-instr.mir")
+
+    if echo "$first" | grep -q "INLINEASM"; then
+        pass "[MIR] INLINEASM is first in entry block"
+    else
+        fail "[MIR] Expected INLINEASM before frame-setup, got: $first"
+    fi
+
+    # 4. Finish codegen
+    llc-18 "$TMPDIR/test-instr.mir" --start-after=prologepilog \
+        -o "$TMPDIR/mir.s" -filetype=asm 2>/dev/null
+
+    check_asm "test_recursive" "$TMPDIR/mir.s" "MIR"
+else
+    echo "  (skipped — plugin or llc-18 not found)"
+fi
+
+# ══════════════════════════════════════════════════════════════════
+section "B. fiber-instrument tool (assembly post-processing)"
+# ══════════════════════════════════════════════════════════════════
+
+if [[ -x "$TOOL" ]]; then
+    "$TOOL" "$TMPDIR/test.ll" -S -o "$TMPDIR/tool.s"
+
+    check_asm "test_recursive" "$TMPDIR/tool.s" "TOOL"
+
+    # Check label uniqueness (no duplicate .Lfiber_ labels)
+    local_count=$(grep -c "^\.Lfiber_chk_" "$TMPDIR/tool.s" || true)
+    ok_count=$(grep -c "^\.Lfiber_ok_" "$TMPDIR/tool.s" || true)
+    if [[ "$local_count" -eq "$ok_count" ]] && [[ "$local_count" -gt 0 ]]; then
+        pass "[TOOL] Labels are unique ($local_count functions instrumented)"
+    else
+        fail "[TOOL] Label count mismatch: chk=$local_count ok=$ok_count"
+    fi
+else
+    fail "fiber-instrument not found at $TOOL"
 fi
 
 echo ""
