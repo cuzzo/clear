@@ -19,6 +19,8 @@ class SemanticAnnotator
   include TypeHelper
   include GenericAnalysis
   include EffectTracker
+  include CapabilityHelper
+  include CapabilityAudit
 
   attr_reader :scope_stack
 
@@ -43,7 +45,6 @@ class SemanticAnnotator
     # Performance analysis
     @fn_raises_directly = {}  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
     # Capability audit — tracks declarations and usage to detect over-engineering.
-    @capability_audit = {}     # "fn:var" => { sync:, ownership:, line:, mutated:, captured_bg:, captured_parallel:, pub: }
     @current_function_name = nil
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
@@ -51,6 +52,7 @@ class SemanticAnnotator
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = false
     effects_init!
+    capability_audit_init!
     setup_builtins
   end
 
@@ -2712,66 +2714,8 @@ private
   def visit_WithBlock(node)
     # 1. Validate each capability's variable exists and resolve its type
     expanded_capabilities = []
-
     node.capabilities.each do |cap|
-      var_node = cap[:var_node]
-      visit(var_node)
-      cap[:resolved_type] = var_node.full_type
-      
-      # For node.*, var_node.name will correctly return the root variable name
-      # because it's a GetField on Identifier.
-      cap[:old_scope] = lookup_scope_for(var_node.name)
-
-      # Infer capability from the variable's storage when not stated explicitly
-      if cap[:capability] == :infer
-        scope = lookup_scope_for(var_node.name)
-        storage = scope&.locals&.dig(var_node.name, :storage)
-        syn     = scope&.locals&.dig(var_node.name, :sync)
-        # Sync takes priority over ownership when both are present:
-        # @shared:locked → infer EXCLUSIVE (lock the mutex, not just unwrap the Arc).
-        cap[:capability] = case
-                           when syn == :locked            then :EXCLUSIVE
-                           when syn == :write_locked      then :write_locked_read
-                           when storage == :multiowned    then :multiowned
-                           when storage == :shared        then :shared
-                           else
-                             error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
-                             :unknown
-                           end
-      end
-
-      validate_capability(node, cap[:capability], var_node)
-
-      # Effect tracking: EXCLUSIVE access acquires a mutex — may block the fiber.
-      record_effect(EffectTracker::BLOCKING) if cap[:capability] == :EXCLUSIVE
-
-      # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
-      if cap[:capability] == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
-        audit_mark_mutated(var_node.name)
-      end
-
-      # Handle Wildcard Borrow: WITH RESTRICT node.* { ... }
-      if var_node.is_a?(AST::GetField) && var_node.wildcard?
-        # Retrieve the struct's schema for the target
-        target_type = var_node.target.resolved_type
-        schema = lookup_type_schema(target_type)
-        
-        unless schema
-          error!(node, "Wildcard borrow '*' requires a struct type, but '#{var_node.target.name}' is #{target_type}")
-        end
-
-        schema.each do |field_name, _|
-          # Create a synthetic GetField for each field in the struct
-          field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
-          expanded_capabilities << {
-            capability: cap[:capability],
-            var_node: field_node,
-            old_scope: cap[:old_scope]
-          }
-        end
-      else
-        expanded_capabilities << cap
-      end
+      acquire_capability!(node, cap, expanded_capabilities)
     end
 
     # 2. Enter a new scope for the capability block
@@ -3079,52 +3023,6 @@ private
   end
 
 
-  def validate_capability(node, capability_type, var_node)
-    var_type = var_node.full_type
-    if !var_node.is_a?(AST::Identifier) && !var_node.is_a?(AST::GetField)
-      error!(var_node, "WITH #{capability_type} expects an identifier or field, got '#{var_node.class}'.")
-    end
-
-    case capability_type
-    when :EXCLUSIVE
-      scope = lookup_scope_for(var_node.name)
-      syn = scope&.locals&.dig(var_node.name, :sync)
-      unless syn
-        storage = scope&.locals&.dig(var_node.name, :storage)
-        error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
-      end
-
-    when :write_locked_read
-      scope = lookup_scope_for(var_node.name)
-      syn = scope&.locals&.dig(var_node.name, :sync)
-      unless syn == :write_locked
-        error!(node, "WITH #{var_node.name}: read access requires a @writeLocked variable")
-      end
-
-    when :RESTRICT
-      # TODO: RESTRICT only mutables for now. Probably want to allow anything, as it doesn't matter.
-      scope = lookup_scope_for(var_node.name)
-      if scope && scope.is_immutable?(var_node.name)
-        error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
-      end
-
-    when :multiowned
-      scope = lookup_scope_for(var_node.name)
-      unless scope&.locals&.dig(var_node.name, :storage) == :multiowned
-        error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
-      end
-
-    when :shared
-      scope = lookup_scope_for(var_node.name)
-      unless scope&.locals&.dig(var_node.name, :storage) == :shared
-        error!(node, "WITH #{var_node.name}: expected a @shared variable")
-      end
-
-    else
-      error!(node, "Unknown capability type: #{capability_type}")
-    end
-  end
-
   # Validates a type annotation where generics are involved.
   # Called whenever a user-written type annotation is resolved (variable decls, params, returns).
   # Covers four cases:
@@ -3142,72 +3040,6 @@ private
   #
   # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
   # all functions are top-level — but guarded for safety).
-  def scan_for_calls(node)
-    calls    = Set.new
-    has_fnptr = [false]
-
-    traverse = lambda do |n|
-      case n
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-        # terminals — nothing to recurse into
-      when Array
-        n.each { |item| traverse.call(item) }
-      when Hash
-        n.each_value { |v| traverse.call(v) }
-      when AST::FunctionDef
-        # Don't descend into nested function definitions (own scope).
-      when AST::FuncCall
-        if n.fn_var_call
-          has_fnptr[0] = true
-        else
-          calls.add(n.name)
-        end
-        traverse.call(n.args)
-      else
-        # Generic Struct traversal: covers all other AST node types.
-        if n.respond_to?(:each_pair)
-          n.each_pair { |_, v| traverse.call(v) }
-        end
-      end
-    end
-
-    traverse.call(node)
-    [calls, has_fnptr[0]]
-  end
-
-  # Post-pass: detect indirect mutual recursion in the call graph and require
-  # @reentrant or @nonReentrant on every unannotated function involved in a cycle.
-  #
-  # Uses a simple DFS reachability check: for each function F, walk F's callees
-  # transitively and report an error if F is reachable from itself.
-  def check_indirect_reentrancy!
-    @call_graph.each_key do |fn_name|
-      node = @fn_nodes[fn_name]
-      next if node.nil?
-      next if node.reentrant  # already annotated — no complaint needed
-
-      # DFS from fn_name's callees; detect if we can reach fn_name.
-      visited = Set.new
-      queue   = (@call_graph[fn_name] || Set.new).to_a
-
-      until queue.empty?
-        callee = queue.shift
-        next if visited.include?(callee)
-        visited.add(callee)
-
-        if callee == fn_name
-          # Record REENTRANT effect for indirect recursion (direct was caught in visit_FunctionDef).
-          @fn_direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
-          error!(node, "Reentrancy Error: '#{fn_name}' is part of a mutually recursive call cycle. " \
-                       "Add @reentrant or @nonReentrant to the function signature.")
-          break
-        end
-
-        (@call_graph[callee] || Set.new).each { |c| queue << c }
-      end
-    end
-  end
-
   # Post-pass: compute needs_rt for every function.
   # A function needs rt if it uses the frame arena, calls a fn pointer, or any
   # transitive callee needs rt. cheatMain always needs rt (entry point).
@@ -3266,28 +3098,6 @@ private
 
   # Scan a function body for direct failure sources: AST::Raise or AST::OrRaise nodes.
   # Does not descend into nested FunctionDef nodes (their failures are tracked separately).
-  def scan_for_raises(body)
-    found = [false]
-    traverse = lambda do |n|
-      return if found[0]
-      case n
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      when Array
-        n.each { |item| traverse.call(item) }
-      when Hash
-        n.each_value { |v| traverse.call(v) }
-      when AST::FunctionDef
-        # Don't descend into nested function definitions.
-      when AST::Raise, AST::OrRaise
-        found[0] = true
-      else
-        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
-      end
-    end
-    traverse.call(body)
-    found[0]
-  end
-
   # PASS 5b: scan all AST nodes for Identifiers used as fn-type arguments.
   # Any named function referenced as a value must adopt the rt-bearing calling
   # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
@@ -3462,114 +3272,5 @@ private
   # Capability Audit — "Architecture Consultant"
   #
   # Tracks capability declarations and their actual usage.  At the end of
-  # annotation, emits notes when a capability is over-specified:
-  #   - Ghost Lock: @locked/@writeLocked but never mutated via WITH EXCLUSIVE
-  #   - Isolated Share: @shared but never captured in a @parallel block
-  #   - Unnecessary Local: @local but never captured in any BG/DO block
-  # ---------------------------------------------------------------------------
-
-  def record_capability_binding(var_name, node, final_type, storage)
-    return unless var_name.is_a?(String) && @current_function_name
-
-    # Capabilities live on the scope locals (set during declare), or on the
-    # value expression's full_type (CapabilityWrap).  Check the scope first
-    # since it's the most reliable source after declare().
-    info = current_scope.locals[var_name]
-    sync = info&.dig(:sync)
-    own  = storage if storage == :multiowned || storage == :shared
-    return unless sync || own
-
-    # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_node = @fn_nodes[@current_function_name]
-    return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
-
-    key = "#{@current_function_name}:#{var_name}"
-    line = node.respond_to?(:token) && node.token ? node.token.line : nil
-    @capability_audit[key] = {
-      fn: @current_function_name, var: var_name, line: line,
-      sync: sync, ownership: own, storage: storage,
-      mutated: false, captured_bg: false, captured_parallel: false
-    }
-  end
-
-  def audit_mark_mutated(var_name)
-    return unless @current_function_name
-    key = "#{@current_function_name}:#{var_name}"
-    @capability_audit[key][:mutated] = true if @capability_audit[key]
-  end
-
-  def audit_mark_bg_captures(body_exprs, is_parallel)
-    return unless @current_function_name
-    # Walk the body looking for identifiers that match tracked capability variables.
-    _audit_walk_captures(body_exprs, Set.new, is_parallel)
-  end
-
-  def _audit_walk_captures(nodes, locally_bound, is_parallel)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        key = "#{@current_function_name}:#{name}"
-        if @capability_audit[key]
-          @capability_audit[key][:captured_bg] = true
-          @capability_audit[key][:captured_parallel] = true if is_parallel
-        end
-        next
-      end
-      # Also check WITH block var_nodes.
-      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
-        node.capabilities.each do |cap|
-          vn = cap[:var_node]
-          next unless vn.is_a?(AST::Identifier)
-          next if locally_bound.include?(vn.name)
-          key = "#{@current_function_name}:#{vn.name}"
-          if @capability_audit[key]
-            @capability_audit[key][:captured_bg] = true
-            @capability_audit[key][:captured_parallel] = true if is_parallel
-          end
-        end
-      end
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          _audit_walk_captures(val, locally_bound, is_parallel)
-        elsif val.is_a?(AST::Locatable)
-          _audit_walk_captures([val], locally_bound, is_parallel)
-        end
-      end
-    end
-  end
-
-  def finalize_capability_audit!
-    @capability_audit.each do |_key, info|
-      loc = info[:line] ? " (line #{info[:line]})" : ""
-      sync = info[:sync]
-      own  = info[:ownership]
-
-      # Warning A: Ghost Lock — @locked/@writeLocked but never mutated.
-      if (sync == :locked || sync == :write_locked) && !info[:mutated]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
-                     "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
-      end
-
-      # Warning B: Isolated Share — @shared but never captured in @parallel.
-      if own == :shared && !info[:captured_parallel]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @shared (Arc) but never leaves the local scheduler. " \
-                     "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
-      end
-
-      # Warning C: Unnecessary Local — @local but never captured in any BG/DO.
-      if sync == :local && !info[:captured_bg]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @local but never shared across fibers. " \
-                     "You are paying for a heap allocation with no sharing benefit. Consider removing @local.#{loc}"
-      end
-    end
-  end
-
 end
 

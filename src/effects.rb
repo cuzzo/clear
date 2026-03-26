@@ -11,14 +11,12 @@ require 'set'
 #   2. Transitive propagation (fixed-point over @call_graph, after pass 5b)
 #
 # The result is stored on each FunctionDef node as `node.effects` (a frozen Set).
+#
+# Also includes reentrancy analysis helpers (scan_for_calls,
+# check_indirect_reentrancy!, scan_for_raises) since reentrancy is
+# both an effect and a call-graph property.
 module EffectTracker
   # Core effect constants.
-  #
-  # HEAP           — dynamic allocation (@list, @pool, HashMap, capability wraps)
-  # BLOCKING       — WITH EXCLUSIVE (mutex acquisition, may yield the fiber)
-  # REENTRANT      — function is directly or indirectly recursive
-  # LOOP_UNBOUND   — contains WHILE TRUE, unbounded WHILE, or infinite BG STREAM
-  # EXTERN         — calls an EXTERN FN (opaque to the compiler — may do I/O, syscalls, etc.)
   HEAP         = :HEAP
   BLOCKING     = :BLOCKING
   REENTRANT    = :REENTRANT
@@ -77,9 +75,97 @@ module EffectTracker
 
   # --- Queries (for future use by #HOT / STRICT mode) ---
 
-  # Returns the computed effect set for a named function, or nil if unknown.
   def effects_for(fn_name)
     node = @fn_nodes[fn_name]
     node&.effects
+  end
+
+  # --- Reentrancy analysis ---
+
+  # Recursively scan an AST subtree and return [Set<function_names>, has_fnptr].
+  # Does not descend into nested FunctionDef nodes (they have their own scope).
+  def scan_for_calls(node)
+    calls    = Set.new
+    has_fnptr = [false]
+
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+        # terminals
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested function definitions (own scope).
+      when AST::FuncCall
+        if n.fn_var_call
+          has_fnptr[0] = true
+        else
+          calls.add(n.name)
+        end
+        traverse.call(n.args)
+      else
+        if n.respond_to?(:each_pair)
+          n.each_pair { |_, v| traverse.call(v) }
+        end
+      end
+    end
+
+    traverse.call(node)
+    [calls, has_fnptr[0]]
+  end
+
+  # Post-pass: detect indirect mutual recursion in the call graph.
+  # DFS reachability: for each function F, walk F's callees transitively
+  # and report an error if F is reachable from itself.
+  def check_indirect_reentrancy!
+    @call_graph.each_key do |fn_name|
+      node = @fn_nodes[fn_name]
+      next if node.nil?
+      next if node.reentrant  # already annotated — no complaint needed
+
+      visited = Set.new
+      queue   = (@call_graph[fn_name] || Set.new).to_a
+
+      until queue.empty?
+        callee = queue.shift
+        next if visited.include?(callee)
+        visited.add(callee)
+
+        if callee == fn_name
+          @fn_direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
+          error!(node, "Reentrancy Error: '#{fn_name}' is part of a mutually recursive call cycle. " \
+                       "Add @reentrant or @nonReentrant to the function signature.")
+          break
+        end
+
+        (@call_graph[callee] || Set.new).each { |c| queue << c }
+      end
+    end
+  end
+
+  # Scan a function body for direct failure sources (Raise/OrRaise nodes).
+  # Does not descend into nested FunctionDef nodes.
+  def scan_for_raises(body)
+    found = [false]
+    traverse = lambda do |n|
+      return if found[0]
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested function definitions.
+      when AST::Raise, AST::OrRaise
+        found[0] = true
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(body)
+    found[0]
   end
 end

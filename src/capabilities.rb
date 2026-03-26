@@ -1,14 +1,15 @@
-# capabilities.rb — Capability validation for CLEAR's type system.
+# capabilities.rb — Capability validation, audit, and helpers for CLEAR's type system.
 #
-# Capabilities are orthogonal modifiers on types: ownership, sync,
-# layout, topology.  This module validates that a given combination
-# is legal and produces clear error messages for conflicts.
-#
-# Usage:
-#   Capabilities.validate!(node_or_token, type_obj)
-#
-# Future: will also centralize capability parsing (v0.2).
+# Three concerns, three modules:
+#   Capabilities       — static validation of capability combinations on Type objects
+#   CapabilityHelper   — runtime validation and inference for WITH blocks
+#   CapabilityAudit    — "Architecture Consultant" that warns about over-engineered capabilities
 
+require 'set'
+
+# ============================================================================
+# Capabilities — Static validation of capability combinations
+# ============================================================================
 module Capabilities
   # Capability groups — at most one from each group is allowed.
   GROUPS = {
@@ -24,18 +25,12 @@ module Capabilities
     [[:local],   [:parallel],            "@local requires single-scheduler affinity, incompatible with @parallel"],
   ].freeze
 
-  # Validate a Type object's capability combination.
-  # Raises a compile error (via the block) if invalid.
-  #
-  # @param type [Type] the type to validate
-  # @return [Array<String>] list of error messages (empty if valid)
   def self.errors_for(type)
     return [] unless type.is_a?(Type)
 
     errors = []
     caps = active_capabilities(type)
 
-    # Check for duplicates within groups
     GROUPS.each do |group_name, members|
       active = members.select { |c| caps.include?(c) }
       if active.size > 1
@@ -43,7 +38,6 @@ module Capabilities
       end
     end
 
-    # Check explicit conflicts
     CONFLICTS.each do |set_a, set_b, message|
       has_a = set_a.any? { |c| caps.include?(c) }
       has_b = set_b.any? { |c| caps.include?(c) }
@@ -53,15 +47,12 @@ module Capabilities
     errors
   end
 
-  # Validate and raise on first error.
-  # Requires a node/token for error location and an error! method.
   def self.validate!(node, type, &error_handler)
     errs = errors_for(type)
     return if errs.empty?
     error_handler.call(node, errs.first) if error_handler
   end
 
-  # Extract active capabilities from a Type as a Set of symbols.
   def self.active_capabilities(type)
     caps = Set.new
     caps << type.ownership if type.ownership && type.ownership != :affine
@@ -71,5 +62,229 @@ module Capabilities
     caps << :pool if type.respond_to?(:pool?) && type.pool?
     caps << :list if type.respond_to?(:list_collection?) && type.list_collection?
     caps
+  end
+end
+
+# ============================================================================
+# CapabilityHelper — WITH block validation and capability acquisition
+# ============================================================================
+# Mixed into SemanticAnnotator. Provides validate_capability and
+# acquire_capability! used by visit_WithBlock.
+module CapabilityHelper
+  # Validate that a capability type is legal for the given variable.
+  def validate_capability(node, capability_type, var_node)
+    var_type = var_node.full_type
+    if !var_node.is_a?(AST::Identifier) && !var_node.is_a?(AST::GetField)
+      error!(var_node, "WITH #{capability_type} expects an identifier or field, got '#{var_node.class}'.")
+    end
+
+    case capability_type
+    when :EXCLUSIVE
+      scope = lookup_scope_for(var_node.name)
+      syn = scope&.locals&.dig(var_node.name, :sync)
+      unless syn
+        storage = scope&.locals&.dig(var_node.name, :storage)
+        error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
+      end
+
+    when :write_locked_read
+      scope = lookup_scope_for(var_node.name)
+      syn = scope&.locals&.dig(var_node.name, :sync)
+      unless syn == :write_locked
+        error!(node, "WITH #{var_node.name}: read access requires a @writeLocked variable")
+      end
+
+    when :RESTRICT
+      scope = lookup_scope_for(var_node.name)
+      if scope && scope.is_immutable?(var_node.name)
+        error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
+      end
+
+    when :multiowned
+      scope = lookup_scope_for(var_node.name)
+      unless scope&.locals&.dig(var_node.name, :storage) == :multiowned
+        error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
+      end
+
+    when :shared
+      scope = lookup_scope_for(var_node.name)
+      unless scope&.locals&.dig(var_node.name, :storage) == :shared
+        error!(node, "WITH #{var_node.name}: expected a @shared variable")
+      end
+
+    else
+      error!(node, "Unknown capability type: #{capability_type}")
+    end
+  end
+
+  # Resolve and validate a single capability entry from a WITH block.
+  # Visits the var_node, infers capability if needed, validates it,
+  # records effects/audit, and handles wildcard expansion.
+  #
+  # @param node [AST::WithBlock] the WITH block (for error reporting)
+  # @param cap [Hash] the capability entry { :capability, :var_node, :alias }
+  # @param expanded [Array] accumulator for resolved capabilities
+  def acquire_capability!(node, cap, expanded)
+    var_node = cap[:var_node]
+    visit(var_node)
+    cap[:resolved_type] = var_node.full_type
+
+    cap[:old_scope] = lookup_scope_for(var_node.name)
+
+    # Infer capability from the variable's storage when not stated explicitly
+    if cap[:capability] == :infer
+      scope = lookup_scope_for(var_node.name)
+      storage = scope&.locals&.dig(var_node.name, :storage)
+      syn     = scope&.locals&.dig(var_node.name, :sync)
+      cap[:capability] = case
+                         when syn == :locked            then :EXCLUSIVE
+                         when syn == :write_locked      then :write_locked_read
+                         when storage == :multiowned    then :multiowned
+                         when storage == :shared        then :shared
+                         else
+                           error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
+                           :unknown
+                         end
+    end
+
+    validate_capability(node, cap[:capability], var_node)
+
+    # Effect tracking: EXCLUSIVE access acquires a mutex — may block the fiber.
+    record_effect(EffectTracker::BLOCKING) if cap[:capability] == :EXCLUSIVE
+
+    # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
+    if cap[:capability] == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
+      audit_mark_mutated(var_node.name)
+    end
+
+    # Handle Wildcard Borrow: WITH RESTRICT node.* { ... }
+    if var_node.is_a?(AST::GetField) && var_node.wildcard?
+      target_type = var_node.target.resolved_type
+      schema = lookup_type_schema(target_type)
+
+      unless schema
+        error!(node, "Wildcard borrow '*' requires a struct type, but '#{var_node.target.name}' is #{target_type}")
+      end
+
+      schema.each do |field_name, _|
+        field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
+        expanded << {
+          capability: cap[:capability],
+          var_node: field_node,
+          old_scope: cap[:old_scope]
+        }
+      end
+    else
+      expanded << cap
+    end
+  end
+end
+
+# ============================================================================
+# CapabilityAudit — "Architecture Consultant"
+# ============================================================================
+# Mixed into SemanticAnnotator. Tracks capability usage patterns and
+# warns about over-engineered capabilities (ghost locks, isolated shares, etc.)
+module CapabilityAudit
+  def capability_audit_init!
+    @capability_audit = {}
+  end
+
+  # Record a capability binding for later audit.
+  def record_capability_binding(var_name, node, final_type, storage)
+    return unless var_name.is_a?(String) && @current_function_name
+
+    info = current_scope.locals[var_name]
+    sync = info&.dig(:sync)
+    own  = storage if storage == :multiowned || storage == :shared
+    return unless sync || own
+
+    # Skip PUB functions — libraries can't know how consumers will use exports.
+    fn_node = @fn_nodes[@current_function_name]
+    return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
+
+    key = "#{@current_function_name}:#{var_name}"
+    line = node.respond_to?(:token) && node.token ? node.token.line : nil
+    @capability_audit[key] = {
+      fn: @current_function_name, var: var_name, line: line,
+      sync: sync, ownership: own, storage: storage,
+      mutated: false, captured_bg: false, captured_parallel: false
+    }
+  end
+
+  def audit_mark_mutated(var_name)
+    return unless @current_function_name
+    key = "#{@current_function_name}:#{var_name}"
+    @capability_audit[key][:mutated] = true if @capability_audit[key]
+  end
+
+  def audit_mark_bg_captures(body_exprs, is_parallel)
+    return unless @current_function_name
+    _audit_walk_captures(body_exprs, Set.new, is_parallel)
+  end
+
+  def finalize_capability_audit!
+    @capability_audit.each do |_key, info|
+      loc = info[:line] ? " (line #{info[:line]})" : ""
+      sync = info[:sync]
+      own  = info[:ownership]
+
+      if (sync == :locked || sync == :write_locked) && !info[:mutated]
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
+                     "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
+      end
+
+      if own == :shared && !info[:captured_parallel]
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @shared (Arc) but never leaves the local scheduler. " \
+                     "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
+      end
+
+      if sync == :local && !info[:captured_bg]
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @local but never shared across fibers. " \
+                     "You are paying for a heap allocation with no sharing benefit. Consider removing @local.#{loc}"
+      end
+    end
+  end
+
+  private
+
+  def _audit_walk_captures(nodes, locally_bound, is_parallel)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        key = "#{@current_function_name}:#{name}"
+        if @capability_audit[key]
+          @capability_audit[key][:captured_bg] = true
+          @capability_audit[key][:captured_parallel] = true if is_parallel
+        end
+        next
+      end
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          vn = cap[:var_node]
+          next unless vn.is_a?(AST::Identifier)
+          next if locally_bound.include?(vn.name)
+          key = "#{@current_function_name}:#{vn.name}"
+          if @capability_audit[key]
+            @capability_audit[key][:captured_bg] = true
+            @capability_audit[key][:captured_parallel] = true if is_parallel
+          end
+        end
+      end
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          _audit_walk_captures(val, locally_bound, is_parallel)
+        elsif val.is_a?(AST::Locatable)
+          _audit_walk_captures([val], locally_bound, is_parallel)
+        end
+      end
+    end
   end
 end
