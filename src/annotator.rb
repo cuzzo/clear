@@ -919,7 +919,7 @@ private
     # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
     node.mark_per_iter = !node.tight &&
                          loop_allocates_frame?(node.do_branch) &&
-                         !loop_appends_outer_list?(node.do_branch, outer_vars)
+                         !loop_frame_escapes_to_outer?(node.do_branch, outer_vars)
 
     node.full_type = :Void
   end
@@ -968,27 +968,72 @@ private
     end
   end
 
-  # Returns true if any append() call in stmts (or nested loops/ifs) targets a variable
-  # that was declared in an outer scope (before this loop body was entered).
-  def loop_appends_outer_list?(stmts, outer_vars)
+  # Returns true if any frame-arena allocation inside the loop body escapes
+  # the iteration — i.e., its result is stored in a variable declared in an
+  # outer scope. If true, mark_per_iter must be false (rewind would corrupt
+  # the outer variable's memory).
+  #
+  # Covers:
+  #   - append(outer_list, ...) — mutates outer list's backing storage
+  #   - outer_var = fn_that_uses_frame(...) — assigns frame-allocated return
+  #   - outer.field = frame_allocating_expr — stores into outer struct field
+  #   - Any FuncCall whose first arg is an outer var and whose zig_pattern
+  #     contains {alloc} (e.g., stdlib mutating functions)
+  def loop_frame_escapes_to_outer?(stmts, outer_vars)
     return false if stmts.nil?
     stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.any? do |stmt|
-      case stmt
-      when AST::FuncCall
-        if stmt.name == "append" && stmt.args&.first.is_a?(AST::Identifier)
-          outer_vars.include?(stmt.args.first.name)
-        else
-          false
-        end
-      when AST::WhileLoop
-        loop_appends_outer_list?(stmt.do_branch, outer_vars)
-      when AST::IfStatement
-        loop_appends_outer_list?(stmt.then_branch, outer_vars) ||
-          loop_appends_outer_list?(stmt.else_branch, outer_vars)
-      else
-        false
+    stmts.any? { |s| node_frame_escapes?(s, outer_vars) }
+  end
+
+  def node_frame_escapes?(node, outer_vars)
+    return false if node.nil?
+    case node
+    when AST::FuncCall
+      # append(outer_list, ...) or any {alloc} stdlib fn mutating an outer var
+      if node.args&.first.is_a?(AST::Identifier) && outer_vars.include?(node.args.first.name)
+        pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
+        return true if node.name == "append"
+        return true if pat.is_a?(String) && pat.include?("{alloc}")
+        fn = @fn_nodes&.[](node.name)
+        return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       end
+      false
+    when AST::MethodCall
+      # outer_var.method(...) where method allocates from frame
+      if node.respond_to?(:object) && node.object.is_a?(AST::Identifier) && outer_vars.include?(node.object.name)
+        pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
+        return true if pat.is_a?(String) && pat.include?("{alloc}")
+        fn = @fn_nodes&.[](node.name)
+        return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
+      end
+      false
+    when AST::Assignment
+      # outer_var = frame_allocating_expr OR outer.field = frame_allocating_expr
+      target_name = case node.name
+                    when AST::Identifier then node.name.name
+                    when AST::GetField then node.name.target.is_a?(AST::Identifier) ? node.name.target.name : nil
+                    when String then node.name
+                    end
+      if target_name && outer_vars.include?(target_name)
+        return true if node_allocates_frame?(node.value)
+      end
+      false
+    when AST::BindExpr
+      # outer_var = frame_allocating_expr (reassignment mode)
+      if node.name.is_a?(String) && outer_vars.include?(node.name)
+        return true if node_allocates_frame?(node.value)
+      end
+      false
+    when AST::WhileLoop
+      loop_frame_escapes_to_outer?(node.do_branch, outer_vars)
+    when AST::IfStatement
+      loop_frame_escapes_to_outer?(node.then_branch, outer_vars) ||
+        loop_frame_escapes_to_outer?(node.else_branch, outer_vars)
+    when AST::MatchStatement
+      node.cases.any? { |c| loop_frame_escapes_to_outer?(c[:body], outer_vars) } ||
+        loop_frame_escapes_to_outer?(node.default_case, outer_vars)
+    else
+      false
     end
   end
 

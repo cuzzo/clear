@@ -1295,6 +1295,29 @@ RSpec.describe SemanticAnnotator do
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
         expect(loop_node.mark_per_iter).to be false
       end
+
+      it "does NOT mark loop as safe when outer var is assigned a frame-allocating call" do
+        # BigS has 130 fields (>128 threshold) → frame allocation.
+        # Assigning frame-allocated return value to an outer var escapes the iteration.
+        fields = (1..130).map { |i| "f#{i}: Float64" }.join(", ")
+        src = <<~CLEAR
+          STRUCT BigS { #{fields} }
+          FN makeBig() RETURNS BigS -> RETURN BigS{ #{(1..130).map { |i| "f#{i}: 0.0" }.join(", ")} }; END
+          FN foo() RETURNS Void ->
+            MUTABLE result = makeBig();
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+              result = makeBig();
+              i += 1_i64;
+            END
+            RETURN;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "foo" }
+        loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+        expect(loop_node.mark_per_iter).to be false
+      end
     end
 
     context "ReturnNode list_return flag" do
