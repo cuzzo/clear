@@ -7,4 +7,5 @@ The VM is planned to be revived to enable rapid profile-guided development — r
 ## Contents
 
 - `compiler/` — Ruby bytecode compiler (lexer → parser → bytecode)
+- `compiler_spec/` — RSpec tests for the bytecode compiler
 - `examples/` — Sample `.cht` programs written for the VM
