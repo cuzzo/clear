@@ -155,59 +155,46 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 
 **Pipeline operations** (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
 
-### Handling Skew — Capability Composition
+### Key Skew — Fixed Automatically
 
-By default, `:sharded(N)` is lock-free and scheduler-pinned. Each fiber accesses only its assigned shard — no locks, no contention.
+A common concern with sharding: what if one key is much hotter than others? If `hash("alice") % 4 == 0` and "alice" is 90% of your traffic, Shard 0 gets all the work while the other 3 sit idle. That's **key skew**.
 
-But what if one key is much hotter than others? If `hash("alice") % 4 == 0` and "alice" is 90% of your traffic, Shard 0 gets all the work while the other 3 sit idle. That's **key skew**.
+**CLEAR fixes skew automatically.** Every sharded map has per-shard mutexes that are **elided by default** — the locks exist in memory (8 bytes per shard) but are never acquired. The runtime's control plane monitors per-shard operation counts, and when it detects skew (one shard handling disproportionate traffic), it disables lock elision LIVE. This enables cross-shard work stealing with no data structure rebuild, no restart, and no code change.
 
-**The fix is one capability:**
+The cost of always-on skew readiness:
+- **Memory**: 8 bytes per shard (one mutex). A 64-shard map pays 512 bytes — less than 1% of a typical map's entry data.
+- **Runtime**: One `mov` + one predicted-taken branch per operation (~1 CPU cycle). The branch is always predicted because the elision flag almost never flips.
 
-```diff
-- MUTABLE counts: HashMap<Int64>:sharded(8) = {};
-+ MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
-```
-
-Adding `@locked` to a sharded collection enables **lock-striped** access: each shard gets its own Mutex, and any thread can access any shard. The topology stays the same — you're adding synchronization intent, not rearchitecting.
-
-| | `:sharded(N)` | `:sharded(N) @locked` | `:sharded(N) @writeLocked` |
-|---|---|---|---|
-| **Mechanism** | N independent maps, scheduler-pinned | N maps, per-shard Mutex | N maps, per-shard RwLock |
-| **Per-op cost** | ~0ns (no lock) | ~20ns (lock/unlock) | ~20ns (readers parallel) |
-| **Skew-safe?** | No | Yes | Yes (read-heavy optimized) |
-| **Use when** | Keys are balanced | Keys are unpredictable | Many readers, few writers |
-
-This works on any shardable collection:
+This means you never need to think about skew. Just use `:sharded(N)`:
 
 ```clear
-MUTABLE data: Number[]@list:sharded(4) @locked = [];    -- skew-safe sharded list
-MUTABLE entities: Enemy[]@pool:sharded(4) @locked = [];  -- skew-safe sharded pool
-MUTABLE scores: HashMap<Int64>:sharded(8) @locked = {};  -- skew-safe sharded map
+MUTABLE counts: HashMap<Int64>:sharded(8) = {};
+-- Skew? The runtime handles it. You don't need @locked.
 ```
 
-The compiler can detect skew and suggest the fix:
+**For explicit control**, you can still force locks on from the start:
 
-```
-NOTE: Skew detected on 'counts' map. Add '@locked' to your :sharded(8)
-      declaration to enable cross-core work stealing.
+```clear
+MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
+-- Locks always active (no elision). Use when you KNOW you have skew.
 ```
 
-No rearchitecture. No actor patterns. No new keywords to learn. Capabilities compose.
+| | `:sharded(N)` | `:sharded(N) @locked` |
+|---|---|---|
+| **Locks** | Elided (enabled on skew) | Always active |
+| **Per-op cost** | ~1 cycle (branch) | ~20ns (lock/unlock) |
+| **Skew response** | Automatic (control plane) | Immediate (pre-configured) |
+| **Use when** | Default — works for everything | You want zero detection latency |
 
 ### Key Skew in Single-Scheduler Mode
 
 **In CLEAR's default mode (single scheduler), skew doesn't matter.** All shards run on one thread sequentially. A "hot shard" just means more time is spent on that shard's data — the same as a non-sharded map. There's no idle-core waste because there's only one core.
 
-**In multi-scheduler mode (`CLEAR_THREADS=N`)**, you have two options:
+**In multi-scheduler mode (`CLEAR_THREADS=N`)**, the control plane detects and fixes skew automatically. You can also increase shards to reduce collision probability:
 
-1. **Increase shards** — more shards = lower collision probability:
-   ```clear
-   MUTABLE counts: HashMap<Int64>:sharded(64) = {};
-   ```
-2. **Add locking** — allow work-stealing across shards:
-   ```clear
-   MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
-   ```
+```clear
+MUTABLE counts: HashMap<Int64>:sharded(64) = {};
+```
 
 ### When You Need Shared Mutable Maps
 

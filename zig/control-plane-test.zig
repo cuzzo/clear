@@ -259,3 +259,73 @@ test "underflow policy = ignore suppresses counting" {
     const counts = cp.getUnderflowCounts(fn_addr);
     try std.testing.expectEqual(@as(u32, 0), counts.tier2);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// OnSkew tests
+// ═══════════════════════════════════════════════════════════════════
+
+test "isSkewed: uniform distribution is not skewed" {
+    const counts = [_]u64{ 1000, 1000, 1000, 1000 };
+    try std.testing.expect(!cp.isSkewed(&counts));
+}
+
+test "isSkewed: one hot shard is skewed" {
+    // Shard 0 has nearly all traffic.  CV ≈ 3.4 (>> 2.0 threshold).
+    const counts = [_]u64{ 50000, 100, 100, 100 };
+    try std.testing.expect(cp.isSkewed(&counts));
+}
+
+test "isSkewed: below min_ops threshold is not skewed" {
+    // Looks skewed but total < 1000 (warmup period).
+    const counts = [_]u64{ 500, 1, 1, 1 };
+    try std.testing.expect(!cp.isSkewed(&counts));
+}
+
+test "isSkewed: mild imbalance is not skewed (CV < threshold)" {
+    // 2:1 ratio — uneven but not extreme.
+    const counts = [_]u64{ 2000, 1000, 1500, 1200 };
+    try std.testing.expect(!cp.isSkewed(&counts));
+}
+
+test "isSkewed: policy = ignore always returns false" {
+    const saved = cp.config.on_skew;
+    cp.config.on_skew = .ignore;
+    defer cp.config.on_skew = saved;
+
+    const counts = [_]u64{ 100000, 1, 1, 1 };
+    try std.testing.expect(!cp.isSkewed(&counts));
+}
+
+test "checkAndFixSkew: enables locks on skewed ShardedStringMap" {
+    const CheatLib = @import("runtime-header.zig").CheatLib;
+    var map = CheatLib.ShardedStringMap(i64, 4){};
+
+    // Verify locks start elided.
+    try std.testing.expect(map.locks_elided.load(.monotonic));
+
+    // Simulate skewed ops: shard 0 gets all traffic.
+    map.shards[0].ops.store(50000, .monotonic);
+    map.shards[1].ops.store(10, .monotonic);
+    map.shards[2].ops.store(10, .monotonic);
+    map.shards[3].ops.store(10, .monotonic);
+
+    const fixed = cp.checkAndFixSkew(&map);
+    try std.testing.expect(fixed);
+
+    // Locks should now be enabled (not elided).
+    try std.testing.expect(!map.locks_elided.load(.monotonic));
+}
+
+test "checkAndFixSkew: does not enable locks on balanced map" {
+    const CheatLib = @import("runtime-header.zig").CheatLib;
+    var map = CheatLib.ShardedStringMap(i64, 4){};
+
+    map.shards[0].ops.store(1000, .monotonic);
+    map.shards[1].ops.store(1000, .monotonic);
+    map.shards[2].ops.store(1000, .monotonic);
+    map.shards[3].ops.store(1000, .monotonic);
+
+    const fixed = cp.checkAndFixSkew(&map);
+    try std.testing.expect(!fixed);
+    try std.testing.expect(map.locks_elided.load(.monotonic)); // Still elided.
+}

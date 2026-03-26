@@ -39,17 +39,36 @@ pub const UnderflowPolicy = enum {
     ignore,
 };
 
+pub const SkewPolicy = enum {
+    /// Auto-enable locks on skewed sharded maps (default).
+    fix,
+    /// Log but don't change locking.
+    log,
+    /// Do nothing.
+    ignore,
+};
+
 pub const ControlPlane = struct {
     on_overflow: OverflowPolicy = .upsize,
     on_underflow: UnderflowPolicy = .downsize,
+    on_skew: SkewPolicy = .fix,
 
     /// Number of 1-tier underflows before downsizing by 1.
-    /// (Task used < 50% of its tier's capacity.)
     underflow_1tier_threshold: u32 = 100_000,
 
     /// Number of 2-tier underflows before downsizing by 2.
-    /// (Task used < 25% of its tier's capacity — e.g. Large but only needed Micro.)
     underflow_2tier_threshold: u32 = 10_000,
+
+    /// Skew detection: coefficient of variation threshold.
+    /// CV = stddev / mean.  CV > threshold → skew detected.
+    /// Default 1.5: catches when the busiest shard has ~3x+ the
+    /// traffic of the average.  For N=4, a perfectly one-hot
+    /// distribution has CV ≈ 1.73, so 1.5 triggers before that.
+    skew_cv_threshold: f64 = 1.5,
+
+    /// Minimum total ops across all shards before checking for skew.
+    /// Prevents false positives during warmup.
+    skew_min_ops: u64 = 1_000,
 };
 
 /// Global control plane instance.  Defaults are sane for production.
@@ -376,4 +395,56 @@ pub fn getUnderflowCounts(fn_addr: usize) struct { tier1: u32, tier2: u32 } {
         .tier1 = entry.underflow_1tier.load(.monotonic),
         .tier2 = entry.underflow_2tier.load(.monotonic),
     };
+}
+
+// ── OnSkew ───────────────────────────────────────────────────────
+// Detects key skew in sharded maps by checking per-shard operation
+// counters.  If the coefficient of variation (CV = stddev/mean)
+// exceeds the threshold, the map is skewed and locks are enabled.
+//
+// Called periodically by the scheduler or by the user.  Operates on
+// raw op-count arrays from ShardedStringMap.getOpCounts().
+
+/// Check if an op-count distribution is skewed.
+/// Returns true if CV > threshold (i.e., one shard is much busier).
+pub fn isSkewed(counts: []const u64) bool {
+    if (config.on_skew == .ignore) return false;
+
+    var total: u64 = 0;
+    for (counts) |c| total += c;
+    if (total < config.skew_min_ops) return false;
+
+    const n: f64 = @floatFromInt(counts.len);
+    const mean: f64 = @as(f64, @floatFromInt(total)) / n;
+    if (mean < 1.0) return false;
+
+    var sum_sq: f64 = 0;
+    for (counts) |c| {
+        const diff = @as(f64, @floatFromInt(c)) - mean;
+        sum_sq += diff * diff;
+    }
+    const variance = sum_sq / n;
+    const stddev = @sqrt(variance);
+    const cv = stddev / mean;
+
+    return cv > config.skew_cv_threshold;
+}
+
+/// Check a sharded map for skew and enable locks if detected.
+/// Returns true if skew was detected and locks were enabled.
+/// Works with any type that has getOpCounts() and enableLocks().
+pub fn checkAndFixSkew(map: anytype) bool {
+    if (config.on_skew == .ignore) return false;
+
+    const counts = map.getOpCounts();
+    if (!isSkewed(&counts)) return false;
+
+    if (config.on_skew == .log) {
+        std.debug.print("[control-plane] skew detected, would enable locks\n", .{});
+        return true;
+    }
+
+    // Fix: enable locks on this map.
+    map.enableLocks();
+    return true;
 }
