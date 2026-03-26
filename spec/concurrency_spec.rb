@@ -909,4 +909,467 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # CONCURRENT modifier — parallel SELECT, WHERE, EACH
+  # ===========================================================================
+  describe "CONCURRENT modifier (parallel pipeline operator)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # Type resolution
+    # -------------------------------------------------------------------------
+    it "CONCURRENT SELECT resolves to element_type[]" do
+      tree = run(<<~CLEAR)
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT SELECT double(_);
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "results" }
+      expect(bind.resolved_type).to eq(:"Number[]")
+    end
+
+    it "CONCURRENT WHERE resolves to item_type[]" do
+      tree = run(<<~CLEAR)
+        STRUCT Item { value: Number }
+        FN f() RETURNS Void ->
+          items: Item[] = [];
+          evens = items s> CONCURRENT WHERE _.value > 0.0;
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "evens" }
+      expect(bind.resolved_type).to eq(:"Item[]")
+    end
+
+    it "CONCURRENT EACH resolves to Void" do
+      tree = run(<<~CLEAR)
+        STRUCT Score { value: Number }
+        FN f() RETURNS Void ->
+          items: Score[] = [];
+          items s> CONCURRENT EACH { _.value = 0.0; };
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      # The EACH pipeline is a BinaryOp with SMOOTH operator at top level
+      smooth = fn_node.body.find { |n| n.is_a?(AST::BinaryOp) && n.op == :SMOOTH }
+      expect(smooth.resolved_type).to eq(:Void)
+    end
+
+    it "CONCURRENT(workers: N) SELECT accepts numeric workers" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            items: Number[] = [1.0, 2.0];
+            results = items s> CONCURRENT(workers: 4) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    # -------------------------------------------------------------------------
+    # Error cases
+    # -------------------------------------------------------------------------
+    it "raises an error when CONCURRENT SELECT is applied to a non-array" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            x: Number = 42.0;
+            r = x s> CONCURRENT SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot SELECT from non-list type/)
+    end
+
+    it "raises an error when CONCURRENT WHERE predicate is non-Bool" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            items: Number[] = [1.0, 2.0];
+            r = items s> CONCURRENT WHERE _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WHERE clause must evaluate to Bool/)
+    end
+
+    # -------------------------------------------------------------------------
+    # Zig output
+    # -------------------------------------------------------------------------
+    it "CONCURRENT SELECT emits WaitGroup and persistent worker pool" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT(workers: 3) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("WaitGroup")
+      expect(out).to include("submitSpawn")
+      expect(out).to include("fetchAdd") # atomic work index
+      expect(out).not_to include("Semaphore") # no semaphore in worker pool
+    end
+
+    it "CONCURRENT WHERE emits WaitGroup and persistent worker pool" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          evens = items s> CONCURRENT WHERE _ > 1.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("WaitGroup")
+      expect(out).to include("submitSpawn")
+      expect(out).to include("fetchAdd")
+      expect(out).not_to include("Semaphore")
+    end
+
+    it "CONCURRENT EACH emits WaitGroup and persistent worker pool" do
+      out = transpile_fn(<<~CLEAR)
+        STRUCT Score { value: Number }
+        FN f() RETURNS Void ->
+          items: Score[] = [];
+          items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("WaitGroup")
+      expect(out).to include("submitSpawn")
+      expect(out).to include("fetchAdd")
+      expect(out).not_to include("Semaphore")
+    end
+
+    it "CONCURRENT SELECT uses default 8 workers when omitted" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("@intCast(8)")
+    end
+
+    it "CONCURRENT SELECT fn OR PRUNE — expression type is unwrapped T (not !T)" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
+          RETURN;
+        END
+      CLEAR
+      # Should not raise; resolved type is Number[] not !Number[]
+      expect { transpile_fn(src) }.not_to raise_error
+      out = transpile_fn(src)
+      expect(out).to include("__CcsWorker0")
+      # result type should be Number (not error union)
+      expect(out).to include("?f64")
+    end
+
+    it "CONCURRENT SELECT fn OR RAISE — expression type is unwrapped T" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
+          RETURN;
+        END
+      CLEAR
+      expect { transpile_fn(src) }.not_to raise_error
+      out = transpile_fn(src)
+      expect(out).to include("__CcsWorker0")
+      expect(out).to include("?f64")
+    end
+
+    it "CONCURRENT default uses submitSpawn (local scheduler, deterministic)" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      user_code = out.split("// 3. Main Entry").first
+      expect(user_code).to include("submitSpawn")
+    end
+
+    it "CONCURRENT(parallel: TRUE) distributes via spawnBest (multi-core parallel)" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      user_code = out.split("// 3. Main Entry").first
+      expect(user_code).to include("spawnBest")
+    end
+
+    it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("catch return")
+    end
+
+    it "CONCURRENT SELECT fn OR RAISE emits cmpxchgStrong and @errorFromInt" do
+      src = <<~CLEAR
+        FN mayFail(x: Number) RETURNS !Number ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0];
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("cmpxchgStrong")
+      expect(out).to include("@errorFromInt")
+    end
+
+    # -------------------------------------------------------------------------
+    # CONCURRENT option validation
+    # -------------------------------------------------------------------------
+    context "CONCURRENT option validation" do
+      it "rejects workers of 0" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT(workers: 0) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/workers must be greater than 0/)
+      end
+
+      it "rejects negative workers" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> CONCURRENT(workers: -1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/workers must be greater than 0/)
+      end
+
+      it "rejects unknown options" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/Unknown CONCURRENT option/)
+      end
+
+      it "rejects non-Bool pin value" do
+        code = <<~CLEAR
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0];
+            result = nums s> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/parallel must be a Bool/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # CONCURRENT OR PRUNE / OR RAISE validation
+    # -------------------------------------------------------------------------
+    context "CONCURRENT OR PRUNE / OR RAISE validation" do
+      it "rejects OR PRUNE when expression is not error-returning" do
+        code = <<~CLEAR
+          FN double(x: Number) RETURNS Number ->
+            RETURN x * 2.0;
+          END
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT SELECT double(_) OR PRUNE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/OR PRUNE requires the expression to return an error union/)
+      end
+
+      it "rejects OR RAISE when expression is not error-returning" do
+        code = <<~CLEAR
+          FN double(x: Number) RETURNS Number ->
+            RETURN x * 2.0;
+          END
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT SELECT double(_) OR RAISE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/OR RAISE requires the expression to return an error union/)
+      end
+
+      it "accepts OR PRUNE when expression returns !T" do
+        code = <<~CLEAR
+          FN mayFail(x: Number) RETURNS !Number ->
+            RETURN x * 2.0;
+          END
+          FN cheatMain() RETURNS Void ->
+            nums: Number[] = [1.0, 2.0];
+            result = nums s> CONCURRENT SELECT mayFail(_) OR PRUNE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+  end
+
+  # ===========================================================================
+  # BG THEN chains
+  # ===========================================================================
+  describe "BG THEN chains" do
+    it "two-step THEN chain resolves to the last step's type" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { 5.0 AS n THEN double(n) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+
+    it "three-step THEN chain resolves to the last step's type" do
+      code = <<~CLEAR
+        FN add_one(x: Number) RETURNS Number ->
+          RETURN x + 1.0;
+        END
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+
+    it "THEN without AS binding resolves to last step's type" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { double(1.0) THEN double(2.0) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+
+    it "AS binding is accessible to subsequent THEN steps" do
+      code = <<~CLEAR
+        FN add(a: Number, b: Number) RETURNS Number ->
+          RETURN a + b;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { 3.0 AS x THEN add(x, x) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "raises a parse error when AS appears without THEN" do
+      code = <<~CLEAR
+        FN foo() RETURNS Number ->
+          RETURN 1.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { foo() AS f; };
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/Expected THEN after AS binding/)
+    end
+
+    it "ThenChain node is produced in BG block body" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG { double(1.0) AS r THEN double(r) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+                  .body.first.value
+      expect(bg_node.body.first).to be_a(AST::ThenChain)
+    end
+
+    it "THEN chain mixed with a setup statement resolves correctly" do
+      code = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2.0;
+        END
+        FN cheatMain() RETURNS Void ->
+          h = BG {
+            n = double(1.0);
+            n AS x THEN double(x)
+          };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Number")
+    end
+  end
+
 end
