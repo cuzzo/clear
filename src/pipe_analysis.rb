@@ -470,27 +470,27 @@ module PipeAnalysis
     node.storage   = :stack
   end
 
-  VALID_CONCURRENT_OPTIONS = %w[pool_size pin size].freeze
+  VALID_CONCURRENT_OPTIONS = %w[workers pin size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
   def analyze_concurrent_op(node)
     conc    = node.right   # the ConcurrentOp node
     options = conc.options
 
-    # Validate pool_size option if present
-    if (ps = options["pool_size"])
+    # Validate workers option if present
+    if (ps = options["workers"])
       visit(ps)
       unless [:Number, :Int64].include?(ps.resolved_type)
-        error!(ps, "CONCURRENT pool_size must be a number, got #{ps.resolved_type}")
+        error!(ps, "CONCURRENT workers must be a number, got #{ps.resolved_type}")
       end
-      # Validate pool_size > 0 for literal values (including negated literals like -1)
+      # Validate workers > 0 for literal values (including negated literals like -1)
       literal_val = if ps.is_a?(AST::Literal)
         ps.value.to_f
       elsif ps.is_a?(AST::UnaryOp) && ps.op == :SUB && ps.right.is_a?(AST::Literal)
         -ps.right.value.to_f
       end
       if literal_val && literal_val <= 0
-        error!(ps, "CONCURRENT pool_size must be greater than 0, got #{literal_val.to_i}")
+        error!(ps, "CONCURRENT workers must be greater than 0, got #{literal_val.to_i}")
       end
     end
 

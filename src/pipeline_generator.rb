@@ -650,16 +650,16 @@ module PipelineGenerator
     id = @conc_counter
     @conc_counter += 1
 
-    pool_size_code = options["pool_size"] ? visit(options["pool_size"]) : "8"
+    workers_code = options["workers"] ? visit(options["workers"]) : "8"
     rt_name = @do_rt_name || "rt"
 
     case inner
     when AST::SelectOp
-      transpile_concurrent_select(lhs, inner, id, pool_size_code, rt_name, options)
+      transpile_concurrent_select(lhs, inner, id, workers_code, rt_name, options)
     when AST::WhereOp
-      transpile_concurrent_where(lhs, inner, id, pool_size_code, rt_name, options)
+      transpile_concurrent_where(lhs, inner, id, workers_code, rt_name, options)
     when AST::EachOp
-      transpile_concurrent_each(lhs, inner, id, pool_size_code, rt_name, options)
+      transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
     end
   end
 
@@ -690,7 +690,7 @@ module PipelineGenerator
     [:default, expr]
   end
 
-  def transpile_concurrent_select(list_node, select_op, id, pool_size_code, rt_name, options = {})
+  def transpile_concurrent_select(list_node, select_op, id, workers_code, rt_name, options = {})
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
     result_type_sym = select_op.expression.full_type
@@ -701,7 +701,8 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
-    @placeholder_name = "ctx.item"
+    # For the worker body, items accessed via ctx.items (the context struct).
+    @placeholder_name = "ctx.items[__idx]"
     inner_code = with_fiber_capture_map({}) { visit(inner_expr) }
     @placeholder_name = nil
     bare_code = inner_code.sub(/^try /, '')
@@ -713,50 +714,56 @@ module PipelineGenerator
 
     fiber_result_code = case policy
     when :prune
-      "const __cv = #{bare_code} catch return;\n                  ctx.result.* = __cv;"
+      "const __cv = #{bare_code} catch continue;\n                      ctx.results[__idx] = __cv;"
     when :raise
-      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      return;\n                  };\n                  ctx.result.* = __cv;"
+      "const __cv = #{bare_code} catch |e| {\n                          _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                          continue;\n                      };\n                      ctx.results[__idx] = __cv;"
     else
-      "ctx.result.* = #{inner_code};"
+      "ctx.results[__idx] = #{inner_code};"
     end
 
-    spawn_call = concurrent_spawn_call(options, "__ccs#{id}_wg", "__ConcSelCtx#{id}", "__ccs#{id}_ctxs[__ccs#{id}_i]")
+    # Persistent worker pool: spawn N workers that each pull items
+    # from a shared atomic index.  Zero per-item heap allocation.
+    spawn_call = concurrent_spawn_call(options, "__ccs#{id}_wg", "__CcsWorker#{id}", "__ccs#{id}_workers[__w]")
 
     <<~ZIG.chomp
       blk: {
           const pipe_src_list = #{list_code};
           _ = &pipe_src_list;
           #{items_block}
-          const __ConcSelCtx#{id} = struct {
-              wg:     *CheatHeader.WaitGroup,
-              sem:    *CheatHeader.Semaphore,
-              item:   #{item_zig},
-              result: *?#{result_zig},#{err_field}
+          const __ccs#{id}_items = pipe_items;
+          const __ccs#{id}_len = __ccs#{id}_items.len;
+          const __ccs#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{result_zig}, __ccs#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__ccs#{id}_results);
+          for (__ccs#{id}_results) |*__s| __s.* = null;#{err_decl}
+          var __ccs#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __ccs#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __CcsWorker#{id} = struct {
+              wg:      *CheatHeader.WaitGroup,
+              items:   []const #{item_zig},
+              results: []?#{result_zig},
+              next:    *std.atomic.Value(usize),#{err_field}
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
                   _ = &__rt;
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
-                  defer ctx.sem.release();
-                  #{fiber_result_code}
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= ctx.items.len) break;
+                      #{fiber_result_code}
+                  }
               }
           };
-          const __ccs#{id}_len = pipe_items.len;
-          var __ccs#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{result_zig}, __ccs#{id}_len);
-          defer #{rt_name}.heapAlloc().free(__ccs#{id}_results);
-          for (__ccs#{id}_results) |*__s| __s.* = null;
-          var __ccs#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcSelCtx#{id}, __ccs#{id}_len);
-          defer #{rt_name}.heapAlloc().free(__ccs#{id}_ctxs);#{err_decl}
-          var __ccs#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          var __ccs#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
-          __ccs#{id}_wg.add(__ccs#{id}_len);
-          for (pipe_items, 0..) |__ccs#{id}_it, __ccs#{id}_i| {
-              __ccs#{id}_sem.acquire();
-              __ccs#{id}_ctxs[__ccs#{id}_i] = .{
-                  .wg     = &__ccs#{id}_wg,
-                  .sem    = &__ccs#{id}_sem,
-                  .item   = __ccs#{id}_it,
-                  .result = &__ccs#{id}_results[__ccs#{id}_i],#{err_ctx_init}
+          var __ccs#{id}_next = std.atomic.Value(usize).init(0);
+          var __ccs#{id}_workers: [64]__CcsWorker#{id} = undefined;
+          const __ccs#{id}_actual_workers = @min(__ccs#{id}_n_workers, 64);
+          __ccs#{id}_wg.add(__ccs#{id}_actual_workers);
+          for (0..__ccs#{id}_actual_workers) |__w| {
+              __ccs#{id}_workers[__w] = .{
+                  .wg      = &__ccs#{id}_wg,
+                  .items   = __ccs#{id}_items,
+                  .results = __ccs#{id}_results,
+                  .next    = &__ccs#{id}_next,#{err_ctx_init}
               };
               #{spawn_call}
           }
@@ -770,7 +777,7 @@ module PipelineGenerator
     ZIG
   end
 
-  def transpile_concurrent_where(list_node, where_op, id, pool_size_code, rt_name, options = {})
+  def transpile_concurrent_where(list_node, where_op, id, workers_code, rt_name, options = {})
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
     item_type_str = list_node.full_type.to_s.gsub(/[\[\]]/, '')
@@ -780,7 +787,7 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
-    @placeholder_name = "ctx.item"
+    @placeholder_name = "ctx.items[__idx]"
     inner_code = with_fiber_capture_map({}) { visit(inner_expr) }
     @placeholder_name = nil
     bare_code = inner_code.sub(/^try /, '')
@@ -792,50 +799,54 @@ module PipelineGenerator
 
     pred_body = case policy
     when :prune
-      "const __cv = #{bare_code} catch return;\n                  if (__cv) ctx.result.* = ctx.item;"
+      "const __cv = #{bare_code} catch continue;\n                      if (__cv) ctx.results[__idx] = ctx.items[__idx];"
     when :raise
-      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      return;\n                  };\n                  if (__cv) ctx.result.* = ctx.item;"
+      "const __cv = #{bare_code} catch |e| {\n                          _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                          continue;\n                      };\n                      if (__cv) ctx.results[__idx] = ctx.items[__idx];"
     else
-      "if (#{inner_code}) ctx.result.* = ctx.item;"
+      "if (#{inner_code}) ctx.results[__idx] = ctx.items[__idx];"
     end
 
-    spawn_call = concurrent_spawn_call(options, "__ccw#{id}_wg", "__ConcWhrCtx#{id}", "__ccw#{id}_ctxs[__ccw#{id}_i]")
+    spawn_call = concurrent_spawn_call(options, "__ccw#{id}_wg", "__CcwWorker#{id}", "__ccw#{id}_workers[__w]")
 
     <<~ZIG.chomp
       blk: {
           const pipe_src_list = #{list_code};
           _ = &pipe_src_list;
           #{items_block}
-          const __ConcWhrCtx#{id} = struct {
-              wg:     *CheatHeader.WaitGroup,
-              sem:    *CheatHeader.Semaphore,
-              item:   #{item_zig},
-              result: *?#{item_zig},#{err_field}
+          const __ccw#{id}_items = pipe_items;
+          const __ccw#{id}_len = __ccw#{id}_items.len;
+          const __ccw#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{item_zig}, __ccw#{id}_len);
+          defer #{rt_name}.heapAlloc().free(__ccw#{id}_results);
+          for (__ccw#{id}_results) |*__s| __s.* = null;#{err_decl}
+          var __ccw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __ccw#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __CcwWorker#{id} = struct {
+              wg:      *CheatHeader.WaitGroup,
+              items:   []const #{item_zig},
+              results: []?#{item_zig},
+              next:    *std.atomic.Value(usize),#{err_field}
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
                   _ = &__rt;
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
-                  defer ctx.sem.release();
-                  #{pred_body}
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= ctx.items.len) break;
+                      #{pred_body}
+                  }
               }
           };
-          const __ccw#{id}_len = pipe_items.len;
-          var __ccw#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{item_zig}, __ccw#{id}_len);
-          defer #{rt_name}.heapAlloc().free(__ccw#{id}_results);
-          for (__ccw#{id}_results) |*__s| __s.* = null;
-          var __ccw#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcWhrCtx#{id}, __ccw#{id}_len);
-          defer #{rt_name}.heapAlloc().free(__ccw#{id}_ctxs);#{err_decl}
-          var __ccw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          var __ccw#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
-          __ccw#{id}_wg.add(__ccw#{id}_len);
-          for (pipe_items, 0..) |__ccw#{id}_it, __ccw#{id}_i| {
-              __ccw#{id}_sem.acquire();
-              __ccw#{id}_ctxs[__ccw#{id}_i] = .{
-                  .wg     = &__ccw#{id}_wg,
-                  .sem    = &__ccw#{id}_sem,
-                  .item   = __ccw#{id}_it,
-                  .result = &__ccw#{id}_results[__ccw#{id}_i],#{err_ctx_init}
+          var __ccw#{id}_next = std.atomic.Value(usize).init(0);
+          var __ccw#{id}_workers: [64]__CcwWorker#{id} = undefined;
+          const __ccw#{id}_actual_workers = @min(__ccw#{id}_n_workers, 64);
+          __ccw#{id}_wg.add(__ccw#{id}_actual_workers);
+          for (0..__ccw#{id}_actual_workers) |__w| {
+              __ccw#{id}_workers[__w] = .{
+                  .wg      = &__ccw#{id}_wg,
+                  .items   = __ccw#{id}_items,
+                  .results = __ccw#{id}_results,
+                  .next    = &__ccw#{id}_next,#{err_ctx_init}
               };
               #{spawn_call}
           }
@@ -849,56 +860,62 @@ module PipelineGenerator
     ZIG
   end
 
-  def transpile_concurrent_each(list_node, each_op, id, pool_size_code, rt_name, options = {})
+  def transpile_concurrent_each(list_node, each_op, id, workers_code, rt_name, options = {})
     item_zig = transpile_type(list_node.type_info.element_type.resolved)
 
     list_code  = visit(list_node)
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
-    @placeholder_name = "__each_item"
+    # For EACH workers, the placeholder references the shared items array by index.
+    @placeholder_name = "&ctx.items[__idx]"
     body_code = with_fiber_capture_map({}) do
       each_op.body.map { |stmt|
         code = visit(stmt)
         code.strip.end_with?(";") ? code : "#{code};"
-      }.join("\n                ")
+      }.join("\n                      ")
     end
     @placeholder_name = nil
 
-    spawn_call = concurrent_spawn_call(options, "__cce#{id}_wg", "__ConcEachCtx#{id}", "__cce#{id}_ctxs[__cce#{id}_i]")
+    spawn_call = concurrent_spawn_call(options, "__cce#{id}_wg", "__CceWorker#{id}", "__cce#{id}_workers[__w]")
 
     <<~ZIG.chomp
       {
-          const pipe_src_list = #{list_code};
+          var pipe_src_list = #{list_code};
           _ = &pipe_src_list;
           #{items_block}
-          const __cce#{id}_len = pipe_items.len;
+          const __cce#{id}_items = pipe_items;
+          const __cce#{id}_len = __cce#{id}_items.len;
           if (__cce#{id}_len == 0) {} else {
-          const __ConcEachCtx#{id} = struct {
-              wg:       *CheatHeader.WaitGroup,
-              sem:      *CheatHeader.Semaphore,
-              item_ptr: *#{item_zig},
+          var __cce#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __cce#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __CceWorker#{id} = struct {
+              wg:    *CheatHeader.WaitGroup,
+              items: []#{item_zig},
+              next:  *std.atomic.Value(usize),
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
                   _ = &__rt;
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
-                  defer ctx.sem.release();
-                  const __each_item = ctx.item_ptr;
-                  #{body_code}
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= ctx.items.len) break;
+                      const __each_item = &ctx.items[__idx];
+                      _ = __each_item;
+                      #{body_code}
+                  }
               }
           };
-          var __cce#{id}_ctxs = try #{rt_name}.heapAlloc().alloc(__ConcEachCtx#{id}, __cce#{id}_len);
-          defer #{rt_name}.heapAlloc().free(__cce#{id}_ctxs);
-          var __cce#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          var __cce#{id}_sem = CheatHeader.Semaphore.init(@as(usize, @intCast(#{pool_size_code})), #{rt_name}.getSched());
-          __cce#{id}_wg.add(__cce#{id}_len);
-          for (pipe_items, 0..) |*__cce#{id}_it, __cce#{id}_i| {
-              __cce#{id}_sem.acquire();
-              __cce#{id}_ctxs[__cce#{id}_i] = .{
-                  .wg       = &__cce#{id}_wg,
-                  .sem      = &__cce#{id}_sem,
-                  .item_ptr = __cce#{id}_it,
+          var __cce#{id}_next = std.atomic.Value(usize).init(0);
+          var __cce#{id}_workers: [64]__CceWorker#{id} = undefined;
+          const __cce#{id}_actual_workers = @min(__cce#{id}_n_workers, 64);
+          __cce#{id}_wg.add(__cce#{id}_actual_workers);
+          for (0..__cce#{id}_actual_workers) |__w| {
+              __cce#{id}_workers[__w] = .{
+                  .wg    = &__cce#{id}_wg,
+                  .items = @constCast(__cce#{id}_items),
+                  .next  = &__cce#{id}_next,
               };
               #{spawn_call}
           }

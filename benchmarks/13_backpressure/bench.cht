@@ -2,7 +2,7 @@
 --
 -- Producer generates 100,000 items.  Consumer pool processes each item
 -- with CPU work (500 LCG iterations).  Backpressure is applied via
--- CONCURRENT(pool_size: 8) which uses a semaphore to limit in-flight
+-- CONCURRENT(workers: 8) which uses a semaphore to limit in-flight
 -- work — the producer fiber blocks when all 8 slots are busy.
 --
 -- CLEAR does not have bounded channels (v0.1).  The CONCURRENT pipeline
@@ -33,8 +33,8 @@ FN cheatMain() RETURNS Void ->
         i = i + 1;
     END
 
-    -- Process with backpressure (pool_size: 8 = max 8 concurrent fibers)
-    processed = items s> CONCURRENT(pool_size: 8) SELECT processItem(_.seed);
+    -- Process with backpressure (workers: 8 = max 8 concurrent fibers)
+    processed = items s> CONCURRENT(workers: 8) SELECT processItem(_.seed);
 
     -- Sum results (SUM returns Number, so we accumulate as Number)
     MUTABLE total: Int64 = 0;

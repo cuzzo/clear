@@ -1380,7 +1380,7 @@ class Parser
     t
   end
 
-  # Parses `CONCURRENT(pool_size: N)? SELECT|WHERE|EACH ...`
+  # Parses `CONCURRENT(workers: N)? SELECT|WHERE|EACH ...`
   def parse_concurrent_op
     token = consume(:KEYWORD, 'CONCURRENT')
     options = {}

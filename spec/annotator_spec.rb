@@ -4575,20 +4575,20 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "CONCURRENT(pool_size: 4, size: MICRO) WHERE" do
+    context "CONCURRENT(workers: 4, size: MICRO) WHERE" do
       let(:code) {
         preamble +
         "FN big(x: Number) RETURNS Bool -> RETURN x > 1.0; END\n" \
         "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT(pool_size: 4, size: MICRO) WHERE big(_); RETURN; END"
+        "r = items s> CONCURRENT(workers: 4, size: MICRO) WHERE big(_); RETURN; END"
       }
 
-      it "parses both pool_size and size options" do
+      it "parses both workers and size options" do
         fn   = ast.statements.last
         pipe = fn.body[1].value        # BinaryOp(:SMOOTH, items, ConcurrentOp)
         conc = pipe.right
         expect(conc).to be_a(AST::ConcurrentOp)
-        expect(conc.options["pool_size"]).to be_a(AST::Literal)
+        expect(conc.options["workers"]).to be_a(AST::Literal)
         size_node = conc.options["size"]
         expect(size_node).to be_a(AST::Identifier)
         expect(size_node.name).to eq("MICRO")
@@ -12350,12 +12350,12 @@ RSpec.describe SemanticAnnotator do
       expect(smooth.resolved_type).to eq(:Void)
     end
 
-    it "CONCURRENT(pool_size: N) SELECT accepts numeric pool_size" do
+    it "CONCURRENT(workers: N) SELECT accepts numeric workers" do
       expect {
         run(<<~CLEAR)
           FN f() RETURNS Void ->
             items: Number[] = [1.0, 2.0];
-            results = items s> CONCURRENT(pool_size: 4) SELECT _ * 2.0;
+            results = items s> CONCURRENT(workers: 4) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -12392,21 +12392,21 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------------
     # Zig output
     # -------------------------------------------------------------------------
-    it "CONCURRENT SELECT emits WaitGroup, Semaphore, and submitSpawn" do
+    it "CONCURRENT SELECT emits WaitGroup and persistent worker pool" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT(pool_size: 3) SELECT _ * 2.0;
+          results = items s> CONCURRENT(workers: 3) SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
       expect(out).to include("WaitGroup")
-      expect(out).to include("Semaphore")
       expect(out).to include("submitSpawn")
-      expect(out).to include("__ConcSelCtx0")
+      expect(out).to include("fetchAdd") # atomic work index
+      expect(out).not_to include("Semaphore") # no semaphore in worker pool
     end
 
-    it "CONCURRENT WHERE emits WaitGroup, Semaphore, and submitSpawn" do
+    it "CONCURRENT WHERE emits WaitGroup and persistent worker pool" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0, 3.0];
@@ -12415,27 +12415,27 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       expect(out).to include("WaitGroup")
-      expect(out).to include("Semaphore")
       expect(out).to include("submitSpawn")
-      expect(out).to include("__ConcWhrCtx0")
+      expect(out).to include("fetchAdd")
+      expect(out).not_to include("Semaphore")
     end
 
-    it "CONCURRENT EACH emits WaitGroup, Semaphore, and submitSpawn" do
+    it "CONCURRENT EACH emits WaitGroup and persistent worker pool" do
       out = transpile_fn(<<~CLEAR)
         STRUCT Score { value: Number }
         FN f() RETURNS Void ->
           items: Score[] = [];
-          items s> CONCURRENT(pool_size: 2) EACH { _.value = 0.0; };
+          items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
           RETURN;
         END
       CLEAR
       expect(out).to include("WaitGroup")
-      expect(out).to include("Semaphore")
       expect(out).to include("submitSpawn")
-      expect(out).to include("__ConcEachCtx0")
+      expect(out).to include("fetchAdd")
+      expect(out).not_to include("Semaphore")
     end
 
-    it "CONCURRENT SELECT uses default pool_size 8 when omitted" do
+    it "CONCURRENT SELECT uses default 8 workers when omitted" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0];
@@ -12443,7 +12443,7 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("Semaphore.init(@as(usize, @intCast(8))")
+      expect(out).to include("@intCast(8)")
     end
 
     it "CONCURRENT SELECT fn OR PRUNE — expression type is unwrapped T (not !T)" do
@@ -12453,14 +12453,14 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0];
-          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR PRUNE;
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
           RETURN;
         END
       CLEAR
       # Should not raise; resolved type is Number[] not !Number[]
       expect { transpile_fn(src) }.not_to raise_error
       out = transpile_fn(src)
-      expect(out).to include("__ConcSelCtx0")
+      expect(out).to include("__CcsWorker0")
       # result type should be Number (not error union)
       expect(out).to include("?f64")
     end
@@ -12472,13 +12472,13 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0];
-          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR RAISE;
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
           RETURN;
         END
       CLEAR
       expect { transpile_fn(src) }.not_to raise_error
       out = transpile_fn(src)
-      expect(out).to include("__ConcSelCtx0")
+      expect(out).to include("__CcsWorker0")
       expect(out).to include("?f64")
     end
 
@@ -12486,7 +12486,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT(pool_size: 2, pin: true) SELECT _ * 2.0;
+          results = items s> CONCURRENT(workers: 2, pin: true) SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
@@ -12502,7 +12502,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0];
-          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR PRUNE;
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
           RETURN;
         END
       CLEAR
@@ -12517,7 +12517,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0];
-          results = items s> CONCURRENT(pool_size: 2) SELECT mayFail(_) OR RAISE;
+          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
           RETURN;
         END
       CLEAR
@@ -12530,26 +12530,26 @@ RSpec.describe SemanticAnnotator do
     # CONCURRENT option validation
     # -------------------------------------------------------------------------
     context "CONCURRENT option validation" do
-      it "rejects pool_size of 0" do
+      it "rejects workers of 0" do
         code = <<~CLEAR
           FN cheatMain() RETURNS Void ->
             nums: Number[] = [1.0, 2.0];
-            result = nums s> CONCURRENT(pool_size: 0) SELECT _ * 2.0;
+            result = nums s> CONCURRENT(workers: 0) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/pool_size must be greater than 0/)
+        expect { run(code) }.to raise_error(/workers must be greater than 0/)
       end
 
-      it "rejects negative pool_size" do
+      it "rejects negative workers" do
         code = <<~CLEAR
           FN cheatMain() RETURNS Void ->
             nums: Number[] = [1.0];
-            result = nums s> CONCURRENT(pool_size: -1) SELECT _ * 2.0;
+            result = nums s> CONCURRENT(workers: -1) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/pool_size must be greater than 0/)
+        expect { run(code) }.to raise_error(/workers must be greater than 0/)
       end
 
       it "rejects unknown options" do
@@ -12567,7 +12567,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN cheatMain() RETURNS Void ->
             nums: Number[] = [1.0];
-            result = nums s> CONCURRENT(pool_size: 4, pin: 1) SELECT _ * 2.0;
+            result = nums s> CONCURRENT(workers: 4, pin: 1) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
