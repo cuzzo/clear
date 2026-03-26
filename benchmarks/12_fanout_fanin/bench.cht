@@ -1,0 +1,45 @@
+-- Fan-Out / Fan-In Benchmark — CLEAR
+--
+-- Spawns 10,000 fibers, each computes a CPU-bound result (iterated LCG),
+-- then collects all results into a single sum.
+--
+-- Tests: fiber spawn overhead, promise collection, fan-in latency.
+--
+-- CLEAR uses cooperative scheduling (single-threaded by default).
+-- All 10,000 fibers run on one core — no parallelism overhead, but
+-- also no multi-core speedup.  The benchmark measures raw fiber
+-- machinery: spawn, context switch, promise resolution, collection.
+
+FN doWork(seed: Int64) RETURNS Int64 ->
+    MUTABLE x: Int64 = seed;
+    MUTABLE i: Int64 = 0;
+    WHILE i < 1000 DO
+        x = x * 6364136223846793005 + 1442695040888963407;
+        i = i + 1;
+    END
+    RETURN x;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- Fan-out: spawn 10,000 workers
+    MUTABLE futures: ~Int64[]@list = [];
+    MUTABLE i: Int64 = 0;
+    WHILE i < 10000 DO
+        append(futures, BG { doWork(i); });
+        i = i + 1;
+    END
+
+    -- Fan-in: collect all results
+    MUTABLE total: Int64 = 0;
+    MUTABLE j: Int64 = 0;
+    WHILE j < 10000 DO
+        result = NEXT futures[j];
+        total = total + result;
+        j = j + 1;
+    END
+
+    print("Total:", total);
+    print("Workers: 10000, Iterations: 1000");
+
+    RETURN;
+END
