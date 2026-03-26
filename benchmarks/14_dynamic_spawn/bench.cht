@@ -1,0 +1,33 @@
+-- Dynamic Spawn Benchmark — CLEAR
+--
+-- Spawns 100K individual BG blocks, each does trivial work (return index * 3).
+-- Measures pure per-spawn overhead: GPA alloc for SpawnRequest + Fiber + Task,
+-- stack allocation, 0xCC fill, context switch, stack scan on completion.
+--
+-- This is CLEAR's WORST CASE — each BG block pays ~60μs of GPA overhead.
+-- For real workloads, use CONCURRENT(workers: N) which avoids per-item spawning.
+--
+-- Known issue: v0.1 uses GPA for task creation. Object pooling (v0.2) will
+-- reduce per-spawn cost to ~2-5μs, closing the gap with Go (~2.4μs/goroutine).
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE futures: ~Int64[]@list = [];
+    MUTABLE i: Int64 = 0;
+    WHILE i < 10000_i64 DO
+        append(futures, BG { i * 3_i64; });
+        i = i + 1_i64;
+    END
+
+    MUTABLE total: Int64 = 0;
+    MUTABLE j: Int64 = 0;
+    WHILE j < 10000_i64 DO
+        result = NEXT futures[j];
+        total = total + result;
+        j = j + 1_i64;
+    END
+
+    print("Total:", total);
+    print("Tasks: 10000");
+
+    RETURN;
+END
