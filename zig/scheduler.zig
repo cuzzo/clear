@@ -332,6 +332,7 @@ pub const Scheduler = struct {
     // ------------------------------------------------------------
     // 1. THE SPAWN (Producer Side - Thread A)
     // ------------------------------------------------------------
+    // TODO(v0.2): Pool SpawnRequest objects to avoid GPA alloc per spawn.
     pub fn submitSpawn(self: *Scheduler, trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: TaskConfig) !void {
         const req = try self.allocator.create(SpawnRequest);
         req.* = .{
@@ -375,6 +376,12 @@ pub const Scheduler = struct {
                     @intFromPtr(req.user_fn),
                     req.config.stack_size,
                 );
+                // TODO(v0.2): Object pool for Fiber + Task structs.
+                // These GPA alloc/free calls cost ~60μs per spawn. For bulk
+                // workloads, use CONCURRENT(workers: N) which spawns N persistent
+                // fibers (zero per-item allocation). Individual BG spawns pay
+                // the GPA cost — acceptable for I/O-bound tasks (network latency
+                // dwarfs 60μs) but shows up in spawn-heavy microbenchmarks.
                 const stack_mem = self.allocStack(effective_size) catch {
                     self.allocator.destroy(req);
                     req_node = next_node;
