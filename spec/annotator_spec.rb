@@ -10115,6 +10115,26 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # Capability validation (capabilities.rb)
+  # ===========================================================================
+  describe "Capability validation" do
+    it "rejects @locked:writeLocked (conflicting sync — caught by parser)" do
+      code = "FN f() RETURNS Void -> MUTABLE x = 1.0 @locked:writeLocked; RETURN; END"
+      expect { run(code) }.to raise_error(/Duplicate sync|Conflicting sync/i)
+    end
+
+    it "rejects @shared:multiowned (conflicting ownership — caught by parser)" do
+      code = "STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 1 } @shared:multiowned; RETURN; END"
+      expect { run(code) }.to raise_error(/Duplicate ownership|Conflicting ownership/i)
+    end
+
+    it "allows valid combinations (@shared:locked)" do
+      code = "STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 1 } @shared:locked; RETURN; END"
+      expect { run(code) }.not_to raise_error
+    end
+  end
+
+  # ===========================================================================
   # SOA Opportunity Detection
   # ===========================================================================
   describe "SOA opportunity warnings" do

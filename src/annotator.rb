@@ -6,6 +6,7 @@ require_relative "./function_analysis"
 require_relative "./pipe_analysis"
 require_relative "./ownership_tracker"
 require_relative "./generic_analysis"
+require_relative "./capabilities"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -1611,6 +1612,9 @@ private
     end
     node.resource_close_zig = resource_close
 
+    # 2c. Validate capability combination
+    Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
+
     # 3. Declare in Scope (include sync capability if present)
     node_sync = node.type_info&.sync
     current_scope.declare(
@@ -1785,6 +1789,9 @@ private
         end
       end
       node.resource_close_zig = resource_close
+
+      # Validate capability combination
+      Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 
       node_sync = node.type_info&.sync
       current_scope.declare(
