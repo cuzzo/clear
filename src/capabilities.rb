@@ -178,6 +178,154 @@ module CapabilityHelper
       expanded << cap
     end
   end
+
+  # --- Capture analysis for auto-pinning BG/DO blocks ---
+
+  # Returns true if any captured variable has @local sync.
+  def branch_captures_local_state?(body_exprs)
+    _captures_with_sync?(body_exprs, Set.new, :local)
+  end
+
+  # Returns true if any captured variable is @multiowned (Rc — non-atomic, NOT thread-safe).
+  def branch_captures_rc_state?(body_exprs)
+    _captures_with_storage?(body_exprs, Set.new, :multiowned)
+  end
+
+  # Returns true if any captured variable has shared/locked/write_locked/local/multiowned.
+  # Used for auto-pinning BG/DO blocks that capture shared mutable state.
+  def branch_captures_shared_state?(body_exprs)
+    _captures_shared?(body_exprs, Set.new)
+  end
+
+  # Returns true if body references any outer-scope variable not in locally_bound.
+  def captures_outer_variables?(body, locally_bound)
+    body.any? { |expr| _has_outer_ref?(expr, locally_bound) }
+  end
+
+  private
+
+  def _captures_with_storage?(nodes, locally_bound, target_storage)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        info = current_scope.locals[name]
+        return true if info && info[:storage] == target_storage
+        next
+      end
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          return true if _captures_with_storage?(val, locally_bound, target_storage)
+        elsif val.is_a?(AST::Locatable)
+          return true if _captures_with_storage?([val], locally_bound, target_storage)
+        end
+      end
+    end
+    false
+  end
+
+  def _captures_with_sync?(nodes, locally_bound, target_sync)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        info = current_scope.locals[name]
+        next unless info
+        return true if info[:sync] == target_sync
+        next
+      end
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          var_node = cap[:var_node]
+          next unless var_node.is_a?(AST::Identifier)
+          name = var_node.name
+          next if locally_bound.include?(name)
+          info = current_scope.locals[name]
+          return true if info && info[:sync] == target_sync
+        end
+      end
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          return true if _captures_with_sync?(val, locally_bound, target_sync)
+        elsif val.is_a?(AST::Locatable)
+          return true if _captures_with_sync?([val], locally_bound, target_sync)
+        end
+      end
+    end
+    false
+  end
+
+  def _captures_shared?(nodes, locally_bound)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        info = current_scope.locals[name]
+        next unless info
+        return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
+        return true if info[:storage] == :shared || info[:storage] == :multiowned
+        next
+      end
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          var_node = cap[:var_node]
+          next unless var_node.is_a?(AST::Identifier)
+          name = var_node.name
+          next if locally_bound.include?(name)
+          info = current_scope.locals[name]
+          next unless info
+          return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
+          return true if info[:storage] == :shared
+        end
+      end
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          return true if _captures_shared?(val, locally_bound)
+        elsif val.is_a?(AST::Locatable)
+          return true if _captures_shared?([val], locally_bound)
+        end
+      end
+    end
+    false
+  end
+
+  def _has_outer_ref?(node, locally_bound)
+    return false if node.nil?
+    if node.is_a?(AST::Identifier) && !locally_bound.include?(node.name) &&
+       !%w[TRUE FALSE VOID _].include?(node.name) &&
+       current_scope.lookup(node.name)
+      return true
+    end
+    if node.respond_to?(:members)
+      node.members.each do |m|
+        child = node.send(m) rescue next
+        if child.is_a?(Array)
+          return true if child.any? { |c| _has_outer_ref?(c, locally_bound) }
+        elsif child.respond_to?(:members)
+          return true if _has_outer_ref?(child, locally_bound)
+        end
+      end
+    end
+    false
+  end
 end
 
 # ============================================================================
