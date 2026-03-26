@@ -3,6 +3,7 @@
 require 'bundler/setup' # so `bundle exec` not needed
 require "optparse"
 require "logger"
+require "set"
 require "byebug"
 
 require_relative "./lexer"
@@ -24,6 +25,9 @@ class ZigTranspiler
   def initialize(importer: nil, source_dir: nil)
     @importer   = importer
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
+    # SOA field-slice rewrite state (active during pipeline expression visits)
+    @soa_rewrite_active = false
+    @soa_needed_fields = Set.new
   end
 
   # Single-file entry point (used by the CLI and simple callers).
@@ -1362,6 +1366,10 @@ private
       elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
         # *Locked(T) / *RwLocked(T): auto-deref pointer, then access .data field
         "#{target_code}.data.#{node.field}"
+      elsif @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+        # SOA field-slice rewrite: _.field → __soa_field[__soa_i]
+        @soa_needed_fields << node.field
+        "__soa_#{node.field}[__soa_i]"
       else
         "#{target_code}.#{node.field}"
       end

@@ -171,6 +171,12 @@ NOTE: Pipeline accesses 1 of 8 fields (health). Consider @soa
 - EACH that reads/writes most fields — no bandwidth savings
 - Random-access by handle (`pool.get(id)`) — must reassemble the struct
 
+**How it works under the hood:**
+
+All pipeline operators (SUM, MIN, MAX, AVERAGE, COUNT, ANY, ALL, WHERE, FIND, SELECT) automatically use field-slice iteration on `:soa` pools. The compiler rewrites `_.health` to `data.items(.health)[i]` — a direct index into the contiguous field array. No materialization, no struct reassembly for the common case.
+
+For operators that produce struct output (WHERE, FIND), structs are reassembled only for matching elements — the predicate still uses field-slice access, so most iterations touch only the predicate field.
+
 `:soa` currently works on `@pool`. Same handle semantics: `insert`, `get`, `remove`, `count` all work identically. The difference is invisible except in pipeline performance.
 
 ## Sharding — Lock-Free Parallel Collections
