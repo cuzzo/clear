@@ -1678,6 +1678,7 @@ private
         node.type_info.collection  = coll_src.collection
         node.type_info.location    = :heap if coll_src.collection == :pool
         node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
+        node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
       end
 
       # Propagate shard_count + sync for maps.  Maps don't use :collection,

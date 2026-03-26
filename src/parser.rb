@@ -1297,6 +1297,7 @@ class Parser
     ownership  = nil
     sync       = nil
     collection = nil
+    is_soa     = false
     if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @list @pool].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
@@ -1314,13 +1315,17 @@ class Parser
           error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
         end
         collection = :list
-        shard_count = parse_sharded_modifier_if_present!(cap_tok)
+        mods = parse_collection_modifiers!(cap_tok)
+        shard_count = mods[:shard_count]
+        is_soa = mods[:soa]
       when "@pool"
         unless inner.start_with?("[")
           error!(cap_tok, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
         end
         collection = :pool
-        shard_count = parse_sharded_modifier_if_present!(cap_tok)
+        mods = parse_collection_modifiers!(cap_tok)
+        shard_count = mods[:shard_count]
+        is_soa = mods[:soa]
       end
 
       # `:` join: allow combining ownership + sync in a single annotation (order-independent).
@@ -1370,7 +1375,9 @@ class Parser
       sync = cap_tok.value == "@locked" ? :locked : :write_locked
     end
 
-    Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
+    t = Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
+    t.soa = true if is_soa
+    t
   end
 
   # Parses `CONCURRENT(pool_size: N)? SELECT|WHERE|EACH ...`
@@ -1419,25 +1426,36 @@ class Parser
     AST::EachOp.new(token, body)
   end
 
-  # Parses an optional `:sharded(N)` suffix after @pool or @list.
-  # Returns the shard count (Integer >= 2) or nil if no :sharded modifier.
+  # Parses an optional `:sharded(N)` or `:soa` suffix after @pool or @list.
+  # Returns { shard_count:, soa: } hash with parsed values.
   # Raises a ParserError if the syntax is malformed or N < 2.
-  def parse_sharded_modifier_if_present!(cap_tok)
-    return nil unless match?(:CHAR, ':')
-    colon_pos = @pos
+  def parse_collection_modifiers!(cap_tok)
+    result = { shard_count: nil, soa: false }
+    return result unless match?(:CHAR, ':')
     consume(:CHAR, ':')
-    unless match?(:VAR_ID) && current.value == 'sharded'
-      error!(current, "Expected 'sharded(N)' after '#{cap_tok.value}:' — unknown modifier '#{current.value}'")
+    unless match?(:VAR_ID) && %w[sharded soa].include?(current.value)
+      error!(current, "Expected 'sharded(N)' or 'soa' after '#{cap_tok.value}:' — unknown modifier '#{current.value}'")
     end
-    consume(:VAR_ID) # consume 'sharded'
-    consume(:CHAR, '(')
-    count_tok = consume(:NUMBER)
-    n = count_tok.value.to_i
-    if n < 2
-      error!(count_tok, "@pool:sharded / @list:sharded requires N >= 2, got #{n}")
+    mod_name = current.value
+    consume(:VAR_ID)
+    if mod_name == 'sharded'
+      consume(:CHAR, '(')
+      count_tok = consume(:NUMBER)
+      n = count_tok.value.to_i
+      if n < 2
+        error!(count_tok, "@pool:sharded / @list:sharded requires N >= 2, got #{n}")
+      end
+      consume(:CHAR, ')')
+      result[:shard_count] = n
+    elsif mod_name == 'soa'
+      result[:soa] = true
     end
-    consume(:CHAR, ')')
-    n
+    result
+  end
+
+  # Backwards-compatible wrapper (returns shard_count only).
+  def parse_sharded_modifier_if_present!(cap_tok)
+    parse_collection_modifiers!(cap_tok)[:shard_count]
   end
 
   # parse_striped_modifier! removed — striped is now :sharded(N) @locked composition

@@ -108,9 +108,10 @@ module AST
       else
         base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
         new_t = Type.new(base_sym)
-        # Carry shard_count + sync through finalize — not encoded in the base symbol.
+        # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
         new_t.shard_count = final_type.shard_count if final_type.is_a?(Type) && final_type.shard_count
         new_t.sync = final_type.sync if final_type.is_a?(Type) && final_type.sync
+        new_t.soa = final_type.soa if final_type.is_a?(Type) && final_type.soa
         new_t
       end
       case storage

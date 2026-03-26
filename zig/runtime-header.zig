@@ -1509,6 +1509,101 @@ pub const CheatLib = struct {
         };
     }
 
+    // -----------------------------------------------------------------
+    // SoaPool(T): Generational pool with Structure-of-Arrays layout.
+    //
+    // Same handle semantics as Pool(T), but stores fields in separate
+    // arrays via std.MultiArrayList.  Iteration over a single field
+    // (e.g. all .x values) reads a contiguous cache-line-friendly
+    // array instead of striding over the entire struct width.
+    //
+    // Usage (CLEAR: `MUTABLE p: Entity[]@pool:soa = []`):
+    //   var p = CheatLib.SoaPool(Entity){};
+    //   defer p.deinit(allocator);
+    //   const id = try p.insert(allocator, Entity{ .x=1, .y=2, ... });
+    //   const val: Entity = p.get(id).?;   // returns by value (reassembled)
+    //   p.remove(id);
+    // -----------------------------------------------------------------
+    pub fn SoaPool(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const MAL = std.MultiArrayList(T);
+            const fields = std.meta.fields(T);
+
+            data: MAL = .{},
+            generations: std.ArrayListUnmanaged(u32) = .{},
+            alive: std.ArrayListUnmanaged(bool) = .{},
+            free_count: u32 = 0,
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                self.data.deinit(allocator);
+                self.generations.deinit(allocator);
+                self.alive.deinit(allocator);
+            }
+
+            pub fn insert(self: *Self, allocator: std.mem.Allocator, value: T) !u64 {
+                // Reuse a dead slot if available.
+                if (self.free_count > 0) {
+                    for (self.alive.items, 0..) |is_alive, i| {
+                        if (!is_alive) {
+                            self.free_count -= 1;
+                            const gen = self.generations.items[i];
+                            self.alive.items[i] = true;
+                            // Write each field into the MultiArrayList.
+                            self.data.set(i, value);
+                            return (@as(u64, gen) << 32) | @as(u64, @intCast(i));
+                        }
+                    }
+                }
+                // Grow: append to all parallel arrays.
+                const idx = @as(u32, @intCast(self.data.len));
+                try self.data.append(allocator, value);
+                try self.generations.append(allocator, 0);
+                try self.alive.append(allocator, true);
+                return @as(u64, idx);
+            }
+
+            /// Look up a handle.  Returns the struct by value (reassembled
+            /// from SOA arrays), or null if the handle is stale.
+            pub fn get(self: *const Self, id: u64) ?T {
+                const idx = @as(u32, @truncate(id));
+                const gen = @as(u32, @truncate(id >> 32));
+                if (idx >= self.data.len) return null;
+                if (!self.alive.items[idx] or self.generations.items[idx] != gen) return null;
+                return self.data.get(idx);
+            }
+
+            /// Get a mutable pointer to a specific field for a given handle.
+            /// Used by EACH pipeline for in-place mutation of individual fields.
+            pub fn getFieldPtr(self: *Self, comptime field: std.meta.FieldEnum(T), id: u64) ?*std.meta.fieldInfo(T, field).type {
+                const idx = @as(u32, @truncate(id));
+                const gen = @as(u32, @truncate(id >> 32));
+                if (idx >= self.data.len) return null;
+                if (!self.alive.items[idx] or self.generations.items[idx] != gen) return null;
+                const slice = self.data.items(field);
+                return &slice[idx];
+            }
+
+            pub fn remove(self: *Self, id: u64) void {
+                const idx = @as(u32, @truncate(id));
+                const gen = @as(u32, @truncate(id >> 32));
+                if (idx >= self.data.len) return;
+                if (!self.alive.items[idx] or self.generations.items[idx] != gen) return;
+                self.alive.items[idx] = false;
+                self.generations.items[idx] +%= 1;
+                self.free_count += 1;
+            }
+
+            pub fn count(self: *const Self) usize {
+                var n: usize = 0;
+                for (self.alive.items) |a| {
+                    if (a) n += 1;
+                }
+                return n;
+            }
+        };
+    }
+
     /// ShardedPool(T, N) — N independent Pool(T) shards behind a single insert/get/remove/count interface.
     /// Handles encode the shard index in the upper 8 bits:
     ///   [(shard_idx: u8) << 56 | (pool_handle: u56)]

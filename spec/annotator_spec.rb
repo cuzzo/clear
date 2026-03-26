@@ -9957,6 +9957,48 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # @pool:soa (Structure of Arrays pool)
+  # ===========================================================================
+  describe "@pool:soa (SOA generational pool)" do
+    it "accepts Entity[]@pool:soa as a valid type annotation" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "generates SoaPool Zig type" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("CheatLib.SoaPool(Entity)")
+      expect(zig).not_to include("CheatLib.Pool(Entity)")
+    end
+
+    it "plain @pool still generates Pool (not SoaPool)" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("CheatLib.Pool(Entity)")
+      expect(zig).not_to include("SoaPool")
+    end
+
+    it "emits defer deinit for @pool:soa" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      expect(zig).to include("pool.deinit(")
+    end
+  end
+
+  # ===========================================================================
   # SOA Opportunity Detection
   # ===========================================================================
   describe "SOA opportunity warnings" do

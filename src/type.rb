@@ -8,6 +8,7 @@ class Type
   attr_accessor :sync        # nil (default), :locked, :write_locked
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
+  attr_accessor :soa          # true when @pool:soa or @list:soa — Structure of Arrays layout
   attr_accessor :heap_list     # true when the list was promoted to heap (returned from frame-using fn)
   attr_accessor :heap_map      # true when the string map was promoted to heap (returned from any fn)
   attr_accessor :escaped_return # true when the list/map is returned — ownership transferred, no cleanup
@@ -129,7 +130,7 @@ class Type
       @sync               = other.sync
       @collection         = other.instance_variable_get(:@collection)
       @shard_count        = other.instance_variable_get(:@shard_count)
-      # @stripe_count removed — striped? is now sharded? && any_sync?
+      @soa                = other.instance_variable_get(:@soa)
       @location           = other.instance_variable_get(:@location)
       @is_error_union     = other.instance_variable_get(:@is_error_union)
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
@@ -469,6 +470,10 @@ class Type
   # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
   def sharded?
     !@shard_count.nil?
+  end
+
+  def soa?
+    !!@soa
   end
 
   # A sharded collection with sync capability = lock-striped (skew-safe).
@@ -942,6 +947,9 @@ class Type
     # 3b. Handle Pool / ShardedPool collection
     if pool?
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      if soa?
+        return "CheatLib.SoaPool(#{base_zig})"
+      end
       return sharded? ? "CheatLib.ShardedPool(#{base_zig}, #{shard_count})" : "CheatLib.Pool(#{base_zig})"
     end
 

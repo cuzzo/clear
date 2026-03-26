@@ -55,6 +55,16 @@ module PipelineGenerator
         }
         const pipe_items = pipe_mat.items;
       ZIG
+    elsif lhs_type&.pool? && lhs_type&.soa?
+      elem_zig = lhs_type.element_type.zig_type
+      <<~ZIG.strip
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        defer pipe_mat.deinit(rt.heapAlloc());
+        for (0..@intCast(pipe_src_list.data.len)) |__psi| {
+            if (pipe_src_list.alive.items[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
+        }
+        const pipe_items = pipe_mat.items;
+      ZIG
     elsif lhs_type&.pool?
       elem_zig = lhs_type.element_type.zig_type
       <<~ZIG.strip
@@ -287,6 +297,8 @@ module PipelineGenerator
     if lhs_type&.pool?
       if lhs_type.sharded?
         transpile_each_sharded_pool(lhs, body_code, lhs_type)
+      elsif lhs_type.soa?
+        transpile_each_soa_pool(lhs, body_code)
       else
         transpile_each_pool(lhs, body_code)
       end
@@ -318,6 +330,21 @@ module PipelineGenerator
           for (__each_src.slots.items) |*__each_slot| {
               if (!__each_slot.alive) continue;
               const __each_item = &__each_slot.value;
+              #{body_code}
+          }
+      }
+    ZIG
+  end
+
+  def transpile_each_soa_pool(pool_node, body_code)
+    pool_code = visit(pool_node)
+    <<~ZIG.chomp
+      {
+          const __each_src = &#{pool_code};
+          for (0..@intCast(__each_src.data.len)) |__each_i| {
+              if (!__each_src.alive.items[__each_i]) continue;
+              var __each_item = __each_src.data.get(__each_i);
+              _ = &__each_item;
               #{body_code}
           }
       }
