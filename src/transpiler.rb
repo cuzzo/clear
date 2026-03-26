@@ -313,7 +313,15 @@ private
     when AST::FunctionDef
       # CHEAT: FN test() RETURNS User ->
       # ZIG:   pub fn test(rt: *Runtime) !User {
-      final_type = transpile_type(node.return_type || :Void)
+      # For the function return type, frame-allocated structs must be returned
+      # by value (T, not *T).  The callee's arena is wiped by defer restoreFrameMark
+      # on return, so returning a pointer would be use-after-free.  The transpiler
+      # emits `return result.*` to copy the value before the wipe.
+      ret_type = node.return_type || :Void
+      if ret_type.is_a?(Type) && ret_type.frame? && ret_type.struct?
+        ret_type = Type.new(ret_type.resolved)  # strip frame location → value type
+      end
+      final_type = transpile_type(ret_type)
 
       # For MUTABLE scalar params, Zig function params are const — we can't reassign them.
       # We mangle the Zig param name to `_m_<name>` and emit `var <name> = _m_<name>;`
