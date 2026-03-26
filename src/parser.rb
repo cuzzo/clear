@@ -341,6 +341,17 @@ class Parser
     @tokens[@pos-1]
   end
 
+  # Consume a numeric literal (either :NUMBER float or :INT64 integer).
+  def consume_number
+    if current.type == :NUMBER || current.type == :INT64
+      tok = current
+      @pos += 1
+      tok
+    else
+      error!(current, "Expected a number, got #{current.value} (#{current.type})")
+    end
+  end
+
   def consume(type, value=nil)
     # 1. Capture the current token BEFORE moving the pointer
     token = current
@@ -1278,8 +1289,8 @@ class Parser
         inner = "[*]"
 
       # Case 3: Fixed Explicit "Number[10]"
-      elsif match?(:NUMBER)
-        size = consume(:NUMBER).value.to_i
+      elsif match?(:NUMBER) || match?(:INT64)
+        size = consume_number.value.to_i
         consume(:CHAR, ']')
         inner = "[#{size}]"
 
@@ -1304,8 +1315,8 @@ class Parser
         consume(:CHAR, '[')
         if match!(:CHAR, ']')
           inner += "[]"
-        elsif match?(:NUMBER)
-          size = consume(:NUMBER).value.to_i
+        elsif match?(:NUMBER) || match?(:INT64)
+          size = consume_number.value.to_i
           consume(:CHAR, ']')
           inner += "[#{size}]"
         else
@@ -1462,7 +1473,7 @@ class Parser
     consume(:VAR_ID)
     if mod_name == 'sharded'
       consume(:CHAR, '(')
-      count_tok = consume(:NUMBER)
+      count_tok = consume_number
       n = count_tok.value.to_i
       if n < 2
         error!(count_tok, "@pool:sharded / @list:sharded requires N >= 2, got #{n}")

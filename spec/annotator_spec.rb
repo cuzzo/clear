@@ -602,7 +602,7 @@ RSpec.describe SemanticAnnotator do
           FN get_inferred() -> RETURN 10; END -- Infers Number
           get_inferred();
         FLUX
-        expect(get_last_type(code)).to eq(:Number)
+        expect(get_last_type(code)).to eq(:Int64)
       end
 
       it "resolves to Void for functions with no return" do
@@ -637,7 +637,7 @@ RSpec.describe SemanticAnnotator do
 
         it "succeeds and resolves to the variable's type" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:Number)
+          expect(result).to eq(:Int64)
         end
       end
 
@@ -707,7 +707,7 @@ RSpec.describe SemanticAnnotator do
 
         it "succeeds" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:Number)
+          expect(result).to eq(:Int64)
         end
       end
 
@@ -916,7 +916,7 @@ RSpec.describe SemanticAnnotator do
       context "Oversized Assignment (Size > Capacity)" do
         let(:code) {
           <<~FLUX
-            list : Number[1] = [1, 2, 3];
+            list : Number[1] = [1.0, 2.0, 3.0];
           FLUX
         }
         it "raises a Fixed Array Size Mismatch error" do
@@ -1141,7 +1141,7 @@ RSpec.describe SemanticAnnotator do
         }
         it "infers the type based on the first element (Number[3])" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:"Number[3]")
+          expect(result).to eq(:"Int64[3]")
         end
       end
 
@@ -1155,7 +1155,7 @@ RSpec.describe SemanticAnnotator do
         }
         it "infers nested array types correctly" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:"Number[2][2]")
+          expect(result).to eq(:"Int64[2][2]")
         end
       end
 
@@ -1489,7 +1489,7 @@ RSpec.describe SemanticAnnotator do
           FLUX
         }
         it "raises argument type error on the explicit argument" do
-          expect { ast }.to raise_error(/Argument .* expects Point, got Number/i)
+          expect { ast }.to raise_error(/Argument .* expects Point, got Int64/i)
         end
       end
 
@@ -1765,7 +1765,7 @@ RSpec.describe SemanticAnnotator do
       it "infers a List of HashMaps" do
         # The Hash contains Int64s (since _ is Int and 2 is Int inferred)
         # So it is HashMap<Int64>[]
-        expect(result).to eq(:"HashMap<Number>[]")
+        expect(result).to eq(:"HashMap<Int64>[]")
       end
     end
 
@@ -1872,7 +1872,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "infers the accumulator type from initial value" do
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Int64)
       end
     end
 
@@ -2094,7 +2094,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "returns the same list type" do
-        expect(result).to eq(:"Number[]")
+        expect(result).to eq(:"Int64[]")
       end
     end
 
@@ -2561,13 +2561,13 @@ RSpec.describe SemanticAnnotator do
 
     context "Multi-dimensional Arrays" do
       it "resolves a 2D array literal correctly" do
-        code = "MUTABLE matrix: Number[][] = [[1, 2], [3, 4]];"
+        code = "MUTABLE matrix: Number[][] = [[1.0, 2.0], [3.0, 4.0]];"
         local_ast = run(code)
         expect(local_ast.statements.last.value.full_type.to_s).to eq("Number[2][2]")
       end
 
       it "resolves a 3D array literal correctly" do
-        code = "MUTABLE cube: Number[][][] = [[[1]]];"
+        code = "MUTABLE cube: Number[][][] = [[[1.0]]];"
         local_ast = run(code)
         expect(local_ast.statements.last.value.full_type.to_s).to eq("Number[1][1][1]")
       end
@@ -5194,11 +5194,11 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Point { x: Number, y: Number }
-          p = Point{ x: 10, y: 5 };
+          p = Point{ x: 10.0, y: 5.0 };
           MUTABLE result = 0;
           MATCH p START
-            {x: 10, ...} -> result = 1;,
-            {x: 20, ...} -> result = 2;,
+            {x: 10.0, ...} -> result = 1;,
+            {x: 20.0, ...} -> result = 2;,
             DEFAULT -> result = 3;
           END
         FLUX
@@ -5214,10 +5214,10 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Point { x: Number, y: Number, z: Number }
-          p = Point{ x: 1, y: 99, z: 3 };
+          p = Point{ x: 1.0, y: 99.0, z: 3.0 };
           MUTABLE result = 0;
           MATCH p START
-            {x: 1, y: _, z: 3} -> result = 42;,
+            {x: 1.0, y: _, z: 3.0} -> result = 42;,
             DEFAULT -> result = 0;
           END
         FLUX
@@ -5234,10 +5234,10 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Msg { code: Number }
           MUTABLE x = 0;
-          m = Msg{ code: 5 };
+          m = Msg{ code: 5.0 };
           MATCH m START
-            {code: 5, ...} -> x = 1;,
-            {code: 10, ...} -> x = 2;,
+            {code: 5.0, ...} -> x = 1;,
+            {code: 10.0, ...} -> x = 2;,
             DEFAULT -> x = 3;
           END
         FLUX
@@ -6231,7 +6231,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           FN cheatMain() RETURNS Void ->
-            x = native_add(3, 4);
+            x = native_add(3.0, 4.0);
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
@@ -8776,7 +8776,7 @@ RSpec.describe SemanticAnnotator do
 
       it "raises on wrong argument type" do
         src = 'FN f() RETURNS Void -> f = File::open(42); RETURN; END'
-        expect { run(src) }.to raise_error(SourceError, /expected String, got Number/)
+        expect { run(src) }.to raise_error(SourceError, /expected String, got Int64/)
       end
     end
 

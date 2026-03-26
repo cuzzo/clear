@@ -15,9 +15,9 @@ STRUCT Work { seed: Int64 }
 FN doWork(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
     MUTABLE i: Int64 = 0;
-    WHILE i < 1000_i64 DO
-        x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
-        i = i + 1_i64;
+    WHILE i < 1000 DO
+        x = x * 6364136223846793005 + 1442695040888963407;
+        i = i + 1;
     END
     RETURN x;
 END
@@ -26,9 +26,9 @@ FN cheatMain() RETURNS Void ->
     -- Build work items
     MUTABLE items: Work[] = [];
     MUTABLE i: Int64 = 0;
-    WHILE i < 10000_i64 DO
+    WHILE i < 10000 DO
         append(items, Work{ seed: i });
-        i = i + 1_i64;
+        i = i + 1;
     END
 
     -- Fan-out: 8 persistent workers, distributed across schedulers
@@ -37,9 +37,9 @@ FN cheatMain() RETURNS Void ->
     -- Fan-in: sum results
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
-    WHILE j < 10000_i64 DO
+    WHILE j < 10000 DO
         total = total + results[j];
-        j = j + 1_i64;
+        j = j + 1;
     END
 
     print("Total:", total);

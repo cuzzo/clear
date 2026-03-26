@@ -104,22 +104,26 @@ class Lexer
 
         case suffix
         when 'i64'
-          # Direct mapping to your new FluxInt64
           add(:INT64, val, start_col)
 
+        when 'f64'
+          add(:NUMBER, val.to_f, start_col)
+
         when 'u8'
-          # Maps to your existing Byte type
           raise_if_byte_overflow(val)
           add(:BYTE, val, start_col)
 
-        # when 'i32' ...
-        # when 'f32' ...
         else
           raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
         end
 
-      when @s.scan(/\d+(\.(?!\.)\d*)?/)
+      when @s.scan(/\d+\.\d+/)
+        # Float literal (has decimal point): 3.14, 0.5
         add(:NUMBER, @s.matched.to_f, start_col)
+
+      when @s.scan(/\d+/)
+        # Integer literal (no decimal): 42, 1000
+        add(:INT64, @s.matched.to_i, start_col)
 
       when @s.scan(/"/)
         advance_pos(@s.matched) # Advance past the opening quote
