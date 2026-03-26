@@ -52,6 +52,12 @@ pub export threadlocal var __fiber_stack_limit: ?*u8 = null;
 pub export threadlocal var __fiber_parent_ctx: ?*Context = null;
 pub export threadlocal var __fiber: ?*Fiber = null;
 
+// ── Control plane: current task identity ─────────────────────────
+// Set by the scheduler before switching to a task, read by
+// __zig_alloc_segment on overflow to identify the task class.
+pub threadlocal var __current_task_fn: usize = 0;
+pub threadlocal var __current_task_size: StackSize = .Standard;
+
 
 pub const StackSegment = struct {
     memory: []u8,
@@ -129,6 +135,11 @@ fn alloc_segment_impl() usize {
 pub export fn __zig_alloc_segment(old_sp: usize) callconv(.c) usize {
     _ = old_sp; // Currently unused, but keeps ABI honest
     @setRuntimeSafety(false);
+
+    // Notify the control plane that this task class overflowed.
+    const cp = @import("control-plane.zig");
+    cp.recordOverflow(__current_task_fn, __current_task_size);
+
     return alloc_segment_impl();
 }
 

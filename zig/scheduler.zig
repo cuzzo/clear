@@ -25,6 +25,8 @@ const StackSize = fc.StackSize;
 const StackPool = fm.StackPool;
 const STANDARD_STACK_SIZE = fm.STANDARD_STACK_SIZE;
 
+const cp = @import("control-plane.zig");
+
 const linux = std.os.linux;
 const posix = std.posix;
 const IoUring = linux.IoUring;
@@ -382,7 +384,12 @@ pub const Scheduler = struct {
                     const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
 
                     // 1. GET STACK FROM POOL (Fast!)
-                    const stack_mem = self.allocStack(req.config.stack_size) catch |err| {
+                    // Control plane may upsize based on past overflow history.
+                    const effective_size = cp.recommendSize(
+                        @intFromPtr(req.user_fn),
+                        req.config.stack_size,
+                    );
+                    const stack_mem = self.allocStack(effective_size) catch |err| {
                         std.debug.print("Stack Alloc Failed: {}\n", .{err});
                         self.allocator.destroy(req);
                         req_node = next_node;
@@ -395,7 +402,7 @@ pub const Scheduler = struct {
                         req_node = next_node; // Must advance, or infinite loop
                         continue;
                     };
-                    fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr, req.config.stack_size);
+                    fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr, effective_size);
 
                     // 2. Alloc Task shell (local allocator)
                     const task = self.allocator.create(Task) catch {
@@ -464,6 +471,12 @@ pub const Scheduler = struct {
             if (self.ready_queue.len() > 0) {
                 const task = self.ready_queue.pop().?;
                 self.current_task = task;
+
+                // Set task identity for the control plane.
+                // If this task overflows its stack, __zig_alloc_segment
+                // reads these to record which task class needs upsizing.
+                fc.__current_task_fn = @intFromPtr(task.user_fn);
+                fc.__current_task_size = task.base.size_class;
 
                 // 1. Switch to the Task
                 // The task will resume inside 'entryWrapper' (if new)
