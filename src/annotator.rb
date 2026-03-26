@@ -1542,8 +1542,6 @@ private
 
   def visit_VarDecl(node)
     # Pre-set :stack on list literals when the declared type is a fixed array (e.g. Number[3]).
-    # This must happen before visit(node.value) so visit_ListLit sees the correct storage
-    # and emits a fixed-size type (Number[3]) rather than a dynamic heap-array type.
     if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
       node.value.storage = :stack
     end
@@ -1553,121 +1551,29 @@ private
     handle_assign_move(node)
     handle_assign_borrow(node)
 
-    # 1a. Reject ~T@multiOwned — promises are multi-fiber; only @shared is valid.
-    if node.type.is_a?(Type) && node.type.tense? && node.type.multiowned?
-      error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
-    end
+    validate_type_annotation!(node, node.type) if node.type
+    validate_stream_type!(node)
 
-    # 1b. Reject bare ~T[] — must specify [N], [INF], [?], or @list (promise list).
-    if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
-      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
-    end
-
-    # 1. Resolve final type (handles coercion check internally)
     final_type, error = node.value.coerce!(node.type)
     error!(node, error) if error
 
-    # 2. Finalize Storage
-    storage = node.finalize_storage!(final_type) { |name| lookup_type_schema(name) }
-    # Loop-local SROA: a large struct literal created inside a loop body doesn't need the
-    # frame arena. The OS stack reclaims it each iteration; LLVM can then SROA the fields
-    # to registers and dead-code-eliminate any that are never read.
-    storage = downgrade_frame_to_stack(node, storage)
-    @frame_usage_count += 1 if storage == :frame
-    if storage == :heap
-      @heap_usage_count  += 1
-      record_effect(EffectTracker::HEAP)
-    end
-
-    # 2a. Propagate collection + shard_count from declared type (lost during finalize_storage!).
-    #     When there is no explicit type annotation (inferred), fall back to the value's type_info
-    #     so that e.g. `result = buildList()` still gets the @list collection flag.
-    coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
-      decl_t
-    elsif node.value.type_info&.collection
-      node.value.type_info
-    end
-    if coll_src
-      node.type_info.collection  = coll_src.collection
-      node.type_info.location    = :heap if coll_src.collection == :pool
-      node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
-    end
-
-    # 2a'. Propagate heap_list flag: list received from a frame-using function must
-    #      deinit with heapAlloc() because the callee promoted the buffer to heap.
-    if node.value.respond_to?(:list_from_call) && node.value.list_from_call
-      node.type_info.heap_list = true
-    end
-
-    # 2a''. Propagate heap_map flag: string map received from any function has been
-    #        promoted to heap by mapPromote() in the callee; deinit must use heapAlloc.
-    if node.value.respond_to?(:map_from_call) && node.value.map_from_call
-      node.type_info.heap_map = true
-    end
-
-    # 2b. Check if the declared type is a pool, open/infinite stream, or resource — tag node and scope entry
-    ft_obj          = node.type_info
-    is_pool         = ft_obj&.pool?
-    is_open_stream  = ft_obj&.open_stream?
-    is_inf_stream   = ft_obj&.inf_stream?
-    if is_pool
-      resource_close = "{0}.deinit(rt.heapAlloc())"
-      is_resource    = false
-    elsif is_open_stream || is_inf_stream
-      resource_close = "{0}.deinit()"
-      is_resource    = false
-    else
-      resource_schema = lookup_type_schema(final_type)
-      is_resource     = resource_schema&.dig(:kind) == :resource
-      resource_close  = is_resource ? resource_schema[:close_zig] : nil
-      
-      # RECURSIVE CHECK: if it's a struct, check if any fields are resources
-      # User-defined struct schemas are flat hashes of { name => type }.
-      # Built-in resource schemas have a :kind key.
-      if !is_resource && resource_schema.is_a?(Hash) && resource_schema[:kind].nil?
-        closes = []
-        resource_schema.each do |fname, ftype|
-          next if fname == :type_params || fname == :methods # skip meta-keys
-          f_resolved = Type.new(ftype).resolved
-          f_schema = lookup_type_schema(f_resolved)
-          if f_schema&.dig(:kind) == :resource
-            f_close = f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
-            closes << f_close
-          end
-          # TODO: handle nested structs recursively if needed
-        end
-        if closes.any?
-          is_resource = true
-          resource_close = closes.join("; ")
-        end
-      end
-    end
+    storage = finalize_decl_storage!(node, final_type)
+    propagate_collection_metadata!(node, final_type)
+    propagate_call_flags!(node)
+    is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
 
-    # 2c. Validate capability combination
     Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 
-    # 3. Declare in Scope (include sync capability if present)
     node_sync = node.type_info&.sync
     current_scope.declare(
-      node.name,
-      node,          # reg
-      final_type,
-      node.mutable,
-      false,         # rebindable? usually false for VAR
-      node.slot_size,
-      storage,
-      Set.new,       # capabilities
-      [],            # borrowed_paths
+      node.name, node, final_type, node.mutable, false, node.slot_size, storage,
+      Set.new, [],
       sync: node_sync,
-      resource: is_resource || is_pool || is_open_stream || is_inf_stream,
+      resource: is_resource,
       close_zig: resource_close
     )
-
-    # 4. Set live
     current_scope.set_state(node.name, :live)
-
-    # Capability audit: record after declare so scope locals have sync/storage.
     record_capability_binding(node.name, node, final_type, storage)
   end
 
@@ -1692,19 +1598,9 @@ private
       handle_assign_borrow(node)
 
       validate_type_annotation!(node, node.type) if node.type
+      validate_stream_type!(node)
 
-      # Reject ~T@multiOwned — promises are multi-fiber by nature; only @shared is valid.
-      if node.type.is_a?(Type) && node.type.tense? && node.type.multiowned?
-        error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
-      end
-
-      # Reject bare ~T[] — must specify [N], [INF], [?], or @list (promise list).
-      if node.type.is_a?(Type) && node.type.tense? && node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
-        error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
-      end
-
-      # For BgStreamBlock assigned to ~T[INF]: retype to ~T[INF] before coerce! so exact
-      # match works (BgStreamBlock infers ~T[?] by default; ~T[INF] is a separate runtime type).
+      # For BgStreamBlock assigned to ~T[INF]: retype before coerce! so exact match works.
       if node.value.is_a?(AST::BgStreamBlock) && node.type.is_a?(Type) && node.type.inf_stream?
         elem_sym = begin
           node.value.full_type.tense_type.element_type.to_sym
@@ -1718,7 +1614,6 @@ private
       error!(node, error) if error
 
       # Propagate shard_count from declared type into the coerced final_type.
-      # coerce! resolves to a symbol/Type that loses these fields.
       if node.type.is_a?(Type) && node.type.shard_count
         if final_type.is_a?(Type)
           final_type.shard_count = node.type.shard_count
@@ -1727,125 +1622,28 @@ private
         end
       end
 
-      # Propagate @shared ownership into the BgBlock so the transpiler emits
-      # SharedPromise.spawn() instead of Promise.spawn().
+      # Propagate @shared ownership into BgBlock for SharedPromise.spawn().
       if node.value.is_a?(AST::BgBlock) && node.type.is_a?(Type) && node.type.shared_promise?
         node.value.full_type = Type.new(node.value.full_type, ownership: :shared)
       end
 
-      storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
-      storage = downgrade_frame_to_stack(node, storage)
-      @frame_usage_count += 1 if storage == :frame
-      if storage == :heap
-        @heap_usage_count  += 1
-        record_effect(EffectTracker::HEAP)
-      end
-
-      # Propagate collection + shard_count from declared type (lost during finalize_storage!).
-      # When there is no explicit type annotation (inferred), fall back to the value's type_info
-      # so that e.g. `result = buildList()` still gets the @list collection flag.
-      coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
-        decl_t
-      elsif node.value.type_info&.collection
-        node.value.type_info
-      end
-      if coll_src
-        node.type_info.collection  = coll_src.collection
-        node.type_info.location    = :heap if coll_src.collection == :pool
-        node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
-        node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-        # Also propagate into full_type so zig_type sees it
-        if node.full_type.is_a?(Type)
-          node.full_type.collection  = coll_src.collection unless node.full_type.collection
-          node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-          node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node.full_type.shard_count
-        end
-      end
-
-      # Propagate shard_count + sync for maps.  Maps don't use :collection,
-      # so the general collection propagation above doesn't cover them.
-      if (decl_t = node.type).is_a?(Type)
-        if decl_t.shard_count && !node.type_info&.shard_count
-          node.type_info.shard_count = decl_t.shard_count if node.type_info
-          node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count) if node.full_type.is_a?(Type)
-        end
-        # Propagate sync so striped? (sharded + locked) is visible to the transpiler.
-        if decl_t.sync && node.type_info && !node.type_info.sync
-          node.type_info.sync = decl_t.sync
-          node.full_type.sync = decl_t.sync if node.full_type.is_a?(Type)
-        end
-      end
-
-      # Propagate heap_list flag: list received from a frame-using function must
-      # deinit with heapAlloc() because the callee promoted the buffer to heap.
-      if node.value.respond_to?(:list_from_call) && node.value.list_from_call
-        node.type_info.heap_list = true
-      end
-
-      # Propagate heap_map flag: string map received from any function has been
-      # promoted to heap by mapPromote() in the callee; deinit must use heapAlloc.
-      if node.value.respond_to?(:map_from_call) && node.value.map_from_call
-        node.type_info.heap_map = true
-      end
-
-      ft_obj          = node.type_info
-      is_pool         = ft_obj&.pool?
-      is_open_stream  = ft_obj&.open_stream?
-      is_inf_stream   = ft_obj&.inf_stream?
-      if is_pool
-        resource_close = "{0}.deinit(rt.heapAlloc())"
-        is_resource    = false
-      elsif is_open_stream || is_inf_stream
-        resource_close = "{0}.deinit()"
-        is_resource    = false
-      else
-        resource_schema = lookup_type_schema(final_type)
-        is_resource     = resource_schema&.dig(:kind) == :resource
-        resource_close  = is_resource ? resource_schema[:close_zig] : nil
-
-        # RECURSIVE CHECK: if it's a struct, check if any fields are resources
-        # User-defined struct schemas are flat hashes of { name => type }.
-        # Built-in resource schemas have a :kind key.
-        if !is_resource && resource_schema.is_a?(Hash) && resource_schema[:kind].nil?
-          closes = []
-          resource_schema.each do |fname, ftype|
-            next if fname == :type_params || fname == :methods # skip meta-keys
-            f_resolved = Type.new(ftype).resolved
-            f_schema = lookup_type_schema(f_resolved)
-            if f_schema&.dig(:kind) == :resource
-              f_close = f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
-              closes << f_close
-            end
-          end
-          if closes.any?
-            is_resource = true
-            resource_close = closes.join("; ")
-          end
-        end
-      end
+      storage = finalize_decl_storage!(node, final_type)
+      propagate_collection_metadata!(node, final_type)
+      propagate_call_flags!(node)
+      is_resource, resource_close = resolve_resource_close(node, final_type)
       node.resource_close_zig = resource_close
 
-      # Validate capability combination
       Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 
       node_sync = node.type_info&.sync
       current_scope.declare(
-        node.name,
-        node,
-        final_type,
-        false,   # immutable
-        false,
-        node.slot_size,
-        storage,
-        Set.new,
-        [],
+        node.name, node, final_type, false, false, node.slot_size, storage,
+        Set.new, [],
         sync: node_sync,
-        resource: is_resource || is_pool || is_open_stream || is_inf_stream,
+        resource: is_resource,
         close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
-
-      # Capability audit: record after declare so scope locals have sync/storage.
       record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
@@ -1923,6 +1721,116 @@ private
     return unless scope
     decl_node = scope.locals.dig(name, :reg)
     decl_node.var_mutated = true if decl_node&.respond_to?(:var_mutated=)
+  end
+
+  # ==========================================
+  # Declaration helpers (shared by VarDecl + BindExpr)
+  # ==========================================
+
+  # Validate stream type annotations on variable declarations.
+  def validate_stream_type!(node)
+    return unless node.type.is_a?(Type) && node.type.tense?
+    if node.type.multiowned?
+      error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
+    end
+    if node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
+      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
+    end
+  end
+
+  # Finalize storage tier (stack/frame/heap) and record allocation effects.
+  def finalize_decl_storage!(node, final_type)
+    storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
+    storage = downgrade_frame_to_stack(node, storage)
+    @frame_usage_count += 1 if storage == :frame
+    if storage == :heap
+      @heap_usage_count += 1
+      record_effect(EffectTracker::HEAP)
+    end
+    storage
+  end
+
+  # Propagate collection, shard_count, soa, and sync metadata from the declared
+  # type annotation (or inferred value type) into node.type_info and node.full_type.
+  # These fields are lost during finalize_storage! and coerce!.
+  def propagate_collection_metadata!(node, final_type)
+    # Collection propagation (from declared type or value's type_info).
+    coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
+      decl_t
+    elsif node.value.type_info&.collection
+      node.value.type_info
+    end
+    if coll_src
+      node.type_info.collection  = coll_src.collection
+      node.type_info.location    = :heap if coll_src.collection == :pool
+      node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
+      node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
+      if node.full_type.is_a?(Type)
+        node.full_type.collection  = coll_src.collection unless node.full_type.collection
+        node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
+        node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node.full_type.shard_count
+      end
+    end
+
+    # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
+    if (decl_t = node.type).is_a?(Type)
+      if decl_t.shard_count && !node.type_info&.shard_count
+        node.type_info.shard_count = decl_t.shard_count if node.type_info
+        node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count) if node.full_type.is_a?(Type)
+      end
+      if decl_t.sync && node.type_info && !node.type_info.sync
+        node.type_info.sync = decl_t.sync
+        node.full_type.sync = decl_t.sync if node.full_type.is_a?(Type)
+      end
+    end
+  end
+
+  # Propagate heap_list/heap_map flags from function call return values.
+  def propagate_call_flags!(node)
+    if node.value.respond_to?(:list_from_call) && node.value.list_from_call
+      node.type_info.heap_list = true
+    end
+    if node.value.respond_to?(:map_from_call) && node.value.map_from_call
+      node.type_info.heap_map = true
+    end
+  end
+
+  # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
+  # Returns [is_resource, resource_close_zig].
+  def resolve_resource_close(node, final_type)
+    ft_obj = node.type_info
+    is_pool        = ft_obj&.pool?
+    is_open_stream = ft_obj&.open_stream?
+    is_inf_stream  = ft_obj&.inf_stream?
+
+    if is_pool
+      return [true, "{0}.deinit(rt.heapAlloc())"]
+    elsif is_open_stream || is_inf_stream
+      return [true, "{0}.deinit()"]
+    end
+
+    resource_schema = lookup_type_schema(final_type)
+    is_resource     = resource_schema&.dig(:kind) == :resource
+    resource_close  = is_resource ? resource_schema[:close_zig] : nil
+
+    # Recursive check: if it's a user struct, check if any fields are resources.
+    if !is_resource && resource_schema.is_a?(Hash) && resource_schema[:kind].nil?
+      closes = []
+      resource_schema.each do |fname, ftype|
+        next if fname == :type_params || fname == :methods
+        f_resolved = Type.new(ftype).resolved
+        f_schema = lookup_type_schema(f_resolved)
+        if f_schema&.dig(:kind) == :resource
+          closes << f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
+        end
+      end
+      if closes.any?
+        is_resource = true
+        resource_close = closes.join("; ")
+      end
+    end
+
+    [is_resource, resource_close]
   end
 
   # ==========================================
