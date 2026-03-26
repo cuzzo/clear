@@ -1,0 +1,15 @@
+[package]
+name = "bench_rust"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bench_rust"
+path = "bench.rs"
+
+[dependencies]
+dashmap = "6"
+
+[profile.release]
+opt-level = 3
+lto = true
