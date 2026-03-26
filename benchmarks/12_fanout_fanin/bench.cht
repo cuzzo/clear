@@ -1,14 +1,16 @@
 -- Fan-Out / Fan-In Benchmark — CLEAR
 --
--- Spawns 10,000 fibers, each computes a CPU-bound result (iterated LCG),
--- then collects all results into a single sum.
+-- 10,000 items, each processed with CPU-bound work (1000 LCG iterations),
+-- results collected into a single sum.
 --
--- Tests: fiber spawn overhead, promise collection, fan-in latency.
+-- Uses CONCURRENT(workers: 8, parallel: TRUE) SELECT — persistent worker
+-- pool distributed across schedulers.  8 workers process 10K items via
+-- shared atomic index.  Zero per-item fiber spawn.
 --
--- CLEAR uses cooperative scheduling (single-threaded by default).
--- All 10,000 fibers run on one core — no parallelism overhead, but
--- also no multi-core speedup.  The benchmark measures raw fiber
--- machinery: spawn, context switch, promise resolution, collection.
+-- Compare to Go (10K goroutines + WaitGroup) and Rust (10K Tokio tasks
+-- + JoinSet).
+
+STRUCT Work { seed: Int64 }
 
 FN doWork(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
@@ -21,21 +23,23 @@ FN doWork(seed: Int64) RETURNS Int64 ->
 END
 
 FN cheatMain() RETURNS Void ->
-    -- Fan-out: spawn 10,000 workers
-    MUTABLE futures: ~Int64[]@list = [];
+    -- Build work items
+    MUTABLE items: Work[] = [];
     MUTABLE i: Int64 = 0;
-    WHILE i < 10000 DO
-        append(futures, BG { doWork(i); });
-        i = i + 1;
+    WHILE i < 10000_i64 DO
+        append(items, Work{ seed: i });
+        i = i + 1_i64;
     END
 
-    -- Fan-in: collect all results
+    -- Fan-out: 8 persistent workers, distributed across schedulers
+    results = items s> CONCURRENT(workers: 8, parallel: TRUE) SELECT doWork(_.seed);
+
+    -- Fan-in: sum results
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
-    WHILE j < 10000 DO
-        result = NEXT futures[j];
-        total = total + result;
-        j = j + 1;
+    WHILE j < 10000_i64 DO
+        total = total + results[j];
+        j = j + 1_i64;
     END
 
     print("Total:", total);
