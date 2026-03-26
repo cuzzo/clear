@@ -751,6 +751,7 @@ module PipelineGenerator
                       const __idx = ctx.next.fetchAdd(1, .monotonic);
                       if (__idx >= ctx.items.len) break;
                       #{fiber_result_code}
+                      __rt.checkYield();
                   }
               }
           };
@@ -834,6 +835,7 @@ module PipelineGenerator
                       const __idx = ctx.next.fetchAdd(1, .monotonic);
                       if (__idx >= ctx.items.len) break;
                       #{pred_body}
+                      __rt.checkYield();
                   }
               }
           };
@@ -904,6 +906,7 @@ module PipelineGenerator
                       const __each_item = &ctx.items[__idx];
                       _ = __each_item;
                       #{body_code}
+                      __rt.checkYield();
                   }
               }
           };
