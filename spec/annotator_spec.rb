@@ -12482,7 +12482,19 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("?f64")
     end
 
-    it "CONCURRENT(pin: true) SELECT emits spawnBest instead of submitSpawn" do
+    it "CONCURRENT default uses submitSpawn (local scheduler, deterministic)" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          items: Number[] = [1.0, 2.0, 3.0];
+          results = items s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      user_code = out.split("// 3. Main Entry").first
+      expect(user_code).to include("submitSpawn")
+    end
+
+    it "CONCURRENT(pin: true) distributes via spawnBest (multi-core parallel)" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0, 3.0];
@@ -12491,8 +12503,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       user_code = out.split("// 3. Main Entry").first
-      expect(out).to include("spawnBest")
-      expect(user_code).not_to include("submitSpawn")
+      expect(user_code).to include("spawnBest")
     end
 
     it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do

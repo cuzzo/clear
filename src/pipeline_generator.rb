@@ -663,16 +663,19 @@ module PipelineGenerator
     end
   end
 
-  # Returns the Zig spawn call: spawnBest (pin: true) or submitSpawn (default).
-  # Respects the `size` option to set TaskConfig.stack_size on each spawned fiber.
+  # Returns the Zig spawn call for CONCURRENT workers.
+  # CONCURRENT: submitSpawn — workers stay on the local scheduler (cache-local, SPSC-safe).
+  # @parallel: spawnBest — distributes across schedulers (true multi-core parallelism).
   def concurrent_spawn_call(options, wg_var, ctx_type, ctx_var)
-    pinned    = options["pin"]
+    parallel  = options["pin"]  # NOTE: "pin" option was the old @parallel toggle
     size_node = options["size"]
     size_sym  = size_node ? size_node.name.downcase.to_sym : nil
     task_cfg  = task_config_zig(size_sym)
-    if pinned
+    if parallel
+      # @parallel: distribute workers across all schedulers (multi-core).
       "try CheatHeader.spawnBest(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    #{task_cfg},\n);"
     else
+      # CONCURRENT (default): workers on local scheduler (deterministic, cache-local).
       "try #{wg_var}.sched.submitSpawn(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n    &#{ctx_var},\n    #{task_cfg},\n);"
     end
   end
