@@ -17,10 +17,11 @@ CLEAR has three collection types, each designed for a different access pattern. 
 Fixed-size, stack-allocated. The size is part of the type.
 
 ```clear
--- ILLUSTRATIVE
-scores: Int64[5] = [10, 20, 30, 40, 50];
+MUTABLE scores: Int64[5] = [10, 20, 30, 40, 50];
 x = scores[2];          -- 30
 scores[0] = 99;         -- mutation via index
+ASSERT x == 30, "index access";
+ASSERT scores[0] == 99, "mutation via index";
 ```
 
 **When to use**: Size is known at compile time. No insertions or removals. The fastest option — no heap allocation, no bounds-growth overhead.

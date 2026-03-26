@@ -61,7 +61,6 @@ CLEAR has three orthogonal capability dimensions. They can be combined in any or
 
 ### Combining dimensions
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 config = AppConfig{ port: 8080 } @shared:locked;     -- Arc<Mutex<T>>
@@ -70,9 +69,7 @@ cache  = LargeStruct{ data: [] } @local:indirect;     -- *T (both intents expres
 counter = Counter{ value: 0 }    @local;              -- *T (zero-cost sharing)
 ```
 
--- ILLUSTRATIVE
 Invalid same-dimension combinations are compile errors:
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 x = Foo{} @locked:writeLocked;    -- ERROR: duplicate sync
@@ -134,11 +131,8 @@ fn process(data: Arc<Mutex<AppState>>) { ... }
 fn helper(data: Arc<Mutex<AppState>>) { ... }
 fn inner(data: Arc<Mutex<AppState>>) { ... }
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 In CLEAR:
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 FN process(state: AppState) RETURNS Void -> helper(state); END
@@ -188,13 +182,9 @@ STRUCT Node {
     cache: Counter @local,   -- NOT valid CLEAR syntax
 }
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Capabilities are applied at the **declaration site**, when a value is bound to a variable:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 root = Node{ value: 1, left: NIL, right: NIL } @local;

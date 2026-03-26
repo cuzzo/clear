@@ -71,7 +71,6 @@ Blocks are cached — the arena reuses them across function calls without re-all
 
 Data that outlives its creating function (returned collections, cross-fiber communication, Rc/Arc wrappers) goes on the heap via the global allocator (GPA). This is the slowest path — ~60ns per allocation, with a global lock.
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 MUTABLE users = List[];      -- heap: dynamic list (growable)
@@ -112,9 +111,7 @@ This happens at compile time. The emitted Zig code uses the correct allocator wi
 ## @arena Mode — Fiber-Lifetime Allocation
 
 For request/response workloads (web servers, KV stores), most allocations live only for the duration of one request. The `@arena` modifier tells the runtime to skip per-function rewind — the entire frame arena lives for the fiber's lifetime and is freed in one reset when the fiber completes.
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 BG { @arena ->
@@ -134,11 +131,8 @@ With `@arena`, `restoreFrameMark` becomes a no-op. All allocations accumulate in
 
 ## @pinned — Shared-Nothing Allocation
 
--- ILLUSTRATIVE
 CLEAR is designed for shared-nothing architecture by default. `@pinned` fibers use a **thread-local arena** instead of the global GPA — zero locks, zero contention, zero cache-line bouncing. Since `@pinned` is the default for fibers that capture local state (the compiler auto-pins them), most server workloads never touch the GPA at all.
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 BG { @pinned ->

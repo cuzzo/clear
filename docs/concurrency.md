@@ -19,7 +19,6 @@ The last expression in the body becomes the promise's value. `NEXT` consumes the
 
 Modifiers go inside the braces, before a `->`:
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 BG { @large:@pinned -> heavy_work(); }
@@ -40,9 +39,7 @@ Combine with `:` — `@large:@arena` gives a large stack with arena allocation.
 ### Captures
 
 BG blocks capture outer variables **by value** (moved, not borrowed):
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 x = 42.0;
@@ -52,11 +49,8 @@ p = BG { x + 1.0; };  -- x is moved into the fiber
 
 ### THEN Chains
 
--- ILLUSTRATIVE
 Chain sequential steps inside a single fiber:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 result = BG {
@@ -69,13 +63,9 @@ result = BG {
 Each `AS name` binds the result for subsequent steps. The last step's value becomes the promise result.
 
 ## DO — Fork-Join
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Execute multiple branches concurrently, wait for all to complete:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 DO {
@@ -88,15 +78,10 @@ DO {
 
 Branches are separated by commas. Each runs in its own fiber. The DO block waits for all branches before continuing. Returns `Void`.
 
--- ILLUSTRATIVE
 ### Branch Modifiers
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Each branch can have its own modifiers:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 DO {
@@ -120,17 +105,11 @@ result: Float64 = NEXT p;
 | `~T @shared` | `T` | Returns cached result (safe for multiple NEXT) |
 | `~T[?]` | `?T` | Returns next value or nil (open stream) |
 | `~T[INF]` | `T` | Returns next value, never nil (infinite stream) |
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ## BG STREAM — Generators
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Spawn a fiber that yields values over time:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 -- Open stream (finite)
@@ -156,17 +135,11 @@ v1 = NEXT counter;  -- 0.0
 v2 = NEXT counter;  -- 1.0 (blocks until generator yields)
 -- ILLUSTRATIVE
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ## CONCURRENT — Parallel Pipelines
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Apply pipeline operators in parallel with a persistent worker pool:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 results = items s> CONCURRENT(workers: 8) SELECT transform(_);
@@ -183,21 +156,13 @@ items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 | `size` | Identifier | STANDARD | Stack size: MICRO, STANDARD, LARGE, XL |
 
 ### Supported Operators
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 - **CONCURRENT SELECT** — parallel map. Returns transformed array (order preserved).
--- ILLUSTRATIVE
 - **CONCURRENT WHERE** — parallel filter. Returns matching elements (order preserved).
--- ILLUSTRATIVE
 - **CONCURRENT EACH** — parallel side effects. Returns Void.
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ### Error Handling
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 -- Skip failed items

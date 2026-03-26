@@ -41,7 +41,6 @@ BG { @parallel -> c.value = 1; }
 
 ## @multiowned — Non-Atomic Reference Counting (Rc)
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 node = TreeNode{ left: NIL, right: NIL } @multiowned;
@@ -64,9 +63,7 @@ WITH node AS val { print(val.left); }
 
 **Why it's NOT thread-safe**: `Rc` uses a plain integer for its refcount — no atomic CAS, no memory barriers. If two threads increment/decrement simultaneously, the count corrupts (use-after-free or double-free).
 
--- ILLUSTRATIVE
 **Compile-time enforcement**:
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 BG { @parallel -> WITH node AS val { ... } }
@@ -76,11 +73,8 @@ BG { @parallel -> WITH node AS val { ... } }
 
 **When to use it**: Graphs, trees, and shared ownership patterns where all fibers run on the same scheduler and data is read-only. If you need mutation, use `@local`. If you need cross-scheduler sharing, use `@shared`.
 
--- ILLUSTRATIVE
 ## @shared — Atomic Reference Counting (Arc)
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 config = AppConfig{ port: 8080 } @shared;
@@ -96,13 +90,9 @@ BG { @parallel -> WITH config AS c { print(c.port); } }  -- OK
 **When to use it**: Only when you **genuinely need** cross-scheduler sharing — data accessed by fibers on different OS threads. This is rare in practice: most shared state is within a single function scope (use `@local`) or within a single scheduler (use `@multiowned`).
 
 ## Combining with Sync Capabilities
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Sharing capabilities can be combined with sync capabilities for mutable cross-thread access:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 -- Arc + Mutex: cross-scheduler mutable access
@@ -139,15 +129,10 @@ Stable heap address needed (graph edges, self-referential)?
 **Note on primitives**: Capabilities cannot be applied to primitive types (`Int64`, `Number`, `Bool`, `Byte`, `Float64`). Wrap in a `STRUCT` first — this makes the intent explicit and gives you named fields.
 
 ## Auto-Pinning
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 The compiler automatically pins BG/DO blocks to the local scheduler when they capture `@local`, `@multiowned`, `@shared`, `@locked`, or `@writeLocked` variables. This is a **cache-line bouncing optimization** for thread-safe types and a **safety requirement** for non-thread-safe types.
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 To override auto-pinning for thread-safe types:
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 BG { @parallel -> ... }   -- distribute across schedulers

@@ -22,7 +22,7 @@ RSpec.describe Lexer do
       # =
       expect_token(tokens[1], :CHAR, "=", 1, 3)
       # 42
-      expect_token(tokens[2], :NUMBER, 42.0, 1, 5)
+      expect_token(tokens[2], :INT64, 42, 1, 5)
       # EOF
       expect(tokens[3].type).to eq(:EOF)
     end
@@ -50,7 +50,7 @@ RSpec.describe Lexer do
       # = (Line 2, Col 3 -- indented by 2 spaces)
       expect_token(tokens[1], :CHAR, "=", 2, 3)
       # 10 (Line 2, Col 5)
-      expect_token(tokens[2], :NUMBER, 10.0, 2, 5)
+      expect_token(tokens[2], :INT64, 10, 2, 5)
     end
 
     it "skips comments but tracks position" do
@@ -144,7 +144,7 @@ RSpec.describe Lexer do
 
       expect_token(tokens[0], :VAR_ID, "x", 1, 1)
       expect_token(tokens[1], :CHAR,   "=", 1, 2)
-      expect_token(tokens[2], :NUMBER, 1.0, 1, 3)
+      expect_token(tokens[2], :INT64, 1, 1, 3)
       expect_token(tokens[3], :CHAR,   "+", 1, 4)
       expect_token(tokens[4], :VAR_ID, "y", 1, 5)
     end
@@ -210,13 +210,13 @@ RSpec.describe Lexer do
       expect(types).to eq([
         :STRING,          # "Result: "
         :CHAR, :CHAR,     # + (
-        :VAR_ID, :CHAR, :NUMBER, # x + 10 (The expression)
+        :VAR_ID, :CHAR, :INT64, # x + 10 (The expression)
         :CHAR, :CHAR,     # ) +
         :STRING,          # ""
         :EOF
       ])
 
-      expect(tokens[5].value).to eq(10.0)
+      expect(tokens[5].value).to eq(10)
     end
 
     it "handles multiple interpolations" do

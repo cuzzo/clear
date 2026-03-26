@@ -1,125 +1,172 @@
-# Error Handling in CLEAR
+# Error Handling
 
-CLEAR treats error handling as a first-class control flow construct. By leveraging Zig's **Error Unions** under the hood, CLEAR provides the safety of explicit error handling without the boilerplate of `if err != nil`.
+CLEAR uses **error unions** — errors are returned by value, not thrown. There is no stack unwinding, no hidden cost, and no `if err != nil` boilerplate.
 
-## The Core Principle: No Unwinding
-Unlike C++ or Java, CLEAR does **not** use stack unwinding for exceptions. Errors are returned by value as part of a **Sum Type** (an Error Union). This ensures:
-1.  **Deterministic Performance**: No "hidden" cost for throwing an error.
-2.  **Explicit Control Flow**: You can see exactly where a function might fail.
-3.  **Tiny Binaries**: No bulky exception-handling tables required.
+The most important thing to know: **the compiler handles error propagation for you by default.** If you call a function that can fail and don't handle the error, the compiler automatically propagates it to your caller. You only write explicit error handling when you want to *change* the default behavior.
 
-## 1. Error Unions (`!T`)
-A function that can fail is declared with the `!` prefix on its return type.
+## Automatic Error Propagation
+
+This is CLEAR's most important error handling feature. Consider:
 
 ```clear
--- Returns either a Number or an Error
-FN divide(a: Number, b: Number) RETURNS !Number ->
+-- ILLUSTRATIVE
+FN compute(x: Float64) RETURNS !Float64 ->
+    half = divide(x, 2.0);      -- if divide fails, compute fails too
+    quarter = divide(half, 2.0); -- same here
+    RETURN quarter;
+END
+```
+
+You don't need `OR RAISE` on every call. The compiler sees that `divide` can fail, and automatically emits error propagation (Zig's `try`) for unhandled error unions. The function's return type `!Float64` tells callers that `compute` can fail.
+
+This means:
+- **You write the happy path.** The compiler ensures errors propagate safely.
+- **You only write `OR` when you want to *handle* the error** — provide a fallback, silence it, or do something specific.
+- **No Go-style `if err != nil` on every line.** No Rust-style `?` on every call. Just write your code.
+
+The compiler computes `can_fail` for every function via a call-graph fixed-point pass. If a function allocates, calls a function that can fail, or contains a `RAISE`, it `can_fail` — and the return type is automatically widened to `!T`.
+
+## Error Unions (`!T`)
+
+A function that can fail declares its return type with the `!` prefix:
+
+```clear
+-- ILLUSTRATIVE
+FN divide(a: Float64, b: Float64) RETURNS !Float64 ->
     IF b == 0.0 THEN
-        RAISE "Division by Zero";
+        RAISE "Division by zero";
     END
     RETURN a / b;
 END
 ```
 
-In the Zig transpilation, this becomes `anyerror!f64`.
+`!Float64` means "returns either a `Float64` or an error." Under the hood, this compiles to Zig's `anyerror!f64` — a zero-cost tagged union where the happy path has no overhead.
 
-## 2. The `OR` Operator (Railway Oriented Programming)
-The most common way to handle errors in CLEAR is the `OR` operator. It allows you to provide a "fallback" path in a single line.
+### RAISE
 
-### `OR default` (Fallback)
-If the left-hand side fails, use the right-hand side value.
+`RAISE` signals an error from inside a function:
+
 ```clear
 -- ILLUSTRATIVE
--- val is guaranteed to be a Number
-val = divide(10.0, 0.0) OR 0.0;
+RAISE "Out of bounds";
 ```
-*Transpilation: `(divide(10.0, 0.0) catch 0.0)`*
 
-### `OR RAISE` (Bubble Up)
-Propagate the error to the caller (equivalent to Zig's `try`).
--- ILLUSTRATIVE
+The string is a human-readable message. Control flow returns immediately to the caller with an error value. There is no stack unwinding — it's a normal return with the error variant of the union.
+
+## Handling Errors: The OR Operator
+
+When you *do* want to handle an error (instead of letting it propagate), use `OR`:
+
+### OR *value* — Provide a fallback
+
 ```clear
 -- ILLUSTRATIVE
--- This function must also return !T
-FN process(x: Number) RETURNS !Number ->
-    res = divide(x, 2.0) OR RAISE;
-    RETURN res * 2.0;
+val = divide(10.0, 0.0) OR 0.0;
+-- val is guaranteed to be Float64 (0.0 if divide failed)
+```
+
+The most common pattern. If the left side fails, use the right side instead. The result type is always the payload type (`Float64`), never an error union.
+
+### OR RAISE — Propagate explicitly
+
+```clear
+-- ILLUSTRATIVE
+FN compute(x: Float64) RETURNS !Float64 ->
+    half = divide(x, 2.0) OR RAISE;
+    RETURN half * 2.0;
 END
 ```
-*Transpilation: `try divide(x, 2.0)`*
 
-### `OR PASS` (Silence)
--- ILLUSTRATIVE
-Ignore the error and use an undefined/default value. Useful only in low-level scenarios where failure is acceptable and handled elsewhere.
--- ILLUSTRATIVE
+Identical to automatic propagation, but makes the error path visible in the source. Use this when you want to document that a specific call can fail, even though the compiler would handle it automatically.
+
+### OR PASS — Silence the error
+
 ```clear
 -- ILLUSTRATIVE
 val = risky_operation() OR PASS;
 ```
-*Transpilation: `(risky_operation() catch undefined)`*
 
--- ILLUSTRATIVE
-### `OR PRUNE` (Filter)
--- ILLUSTRATIVE
-Specific to `CONCURRENT` pipelines. If an item causes an error, it is simply dropped from the result set rather than failing the whole pipeline.
--- ILLUSTRATIVE
+Ignores the error and uses an undefined/default value. **Use with extreme caution** — this is the closest thing CLEAR has to swallowing an exception. It exists for low-level scenarios where failure is acceptable and the value is never read on the error path.
+
+### OR PRUNE — Filter in concurrent pipelines
+
 ```clear
 -- ILLUSTRATIVE
-results = data s> CONCURRENT SELECT process(_) OR PRUNE;
+results = data s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
-### `OR EXIT` (Fatal)
--- ILLUSTRATIVE
-Terminate the program with a message if the operation fails.
--- ILLUSTRATIVE
+Specific to `CONCURRENT` pipelines. If an item causes an error, it is dropped from the result set rather than failing the whole pipeline. The output array will have fewer elements than the input.
+
+### Quick reference
+
+| Syntax | Behavior | Result type | Use when |
+|---|---|---|---|
+| *(no handler)* | Auto-propagate to caller | `!T` | Default — let errors bubble up |
+| `expr OR value` | Use fallback on error | `T` | You have a sensible default |
+| `expr OR RAISE` | Propagate explicitly | `!T` | You want the error path visible in source |
+| `expr OR PASS` | Silence, use undefined | `T` | Low-level code where failure is OK |
+| `expr OR PRUNE` | Drop item from pipeline | `T[]` (shorter) | Concurrent pipelines with acceptable failures |
+
+## Errors in Concurrency
+
+### BG (Background Fibers)
+
+When a BG fiber fails, the error is captured in the promise. It surfaces when you `NEXT` the promise:
+
 ```clear
 -- ILLUSTRATIVE
-file = File.open("config.json") OR EXIT "Missing config file";
+p = BG { divide(10.0, 0.0); };
+result = NEXT p OR 0.0;  -- handle the error from the fiber
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
-## 3. Explicit Panic (`!!`)
--- ILLUSTRATIVE
-If you are 100% certain an operation cannot fail (or if failing means the program state is unrecoverable), use the `!!` suffix.
--- ILLUSTRATIVE
+### DO (Fork-Join)
 
--- ILLUSTRATIVE
+DO blocks wait for all branches. If any branch fails, the error propagates after all branches complete.
+
+### CONCURRENT Pipelines
+
+CONCURRENT pipelines support two error strategies:
+
 ```clear
 -- ILLUSTRATIVE
--- Panics at runtime if the operation fails
-val = critical_operation()!!;
-```
--- ILLUSTRATIVE
-*Transpilation: `(critical_operation() catch unreachable)`*
--- ILLUSTRATIVE
+-- Strategy 1: Fail the whole pipeline on first error
+results = items s> CONCURRENT(workers: 4) SELECT process(_) OR RAISE;
 
--- ILLUSTRATIVE
-## 4. `CATCH` Blocks
--- ILLUSTRATIVE
-For complex error handling, CLEAR supports `CATCH` blocks at the end of functions or in `MATCH` statements.
--- ILLUSTRATIVE
-
--- ILLUSTRATIVE
-```clear
--- ILLUSTRATIVE
-FN main() RETURNS Void ->
-    res = divide(10.0, 0.0);
-CATCH err WITH "Division by Zero"
-    log("Caught division error");
-DEFAULT
-    log("Unknown error occurred");
-END
+-- Strategy 2: Skip failed items, keep the rest
+results = items s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
 ```
 
-## Transpiler Implementation
-CLEAR's transpiler performs **Automatic Error Propagation**. If a function call can return an error and you do *not* handle it with an `OR` operator, the transpiler automatically emits a `try` in the generated Zig code.
+`OR RAISE` propagates the first error encountered. `OR PRUNE` silently drops failed items. Without either, errors auto-propagate (same as `OR RAISE`).
 
-This means you only write `OR RAISE` when you want to be explicit, but the compiler ensures safety by default.
+## Design Principles
 
-### Key implementation details:
-*   **Railway logic**: The `OR` operator acts as a "switch" that diverts the execution flow to the error path.
-*   **Zero-Cost**: Since Zig error unions are just an integer (the error code) plus the payload, there is zero overhead for the "Happy Path."
-*   **Compile-Time Safety**: The `SemanticAnnotator` tracks `can_fail` for every function and ensures that errors are either handled or propagated.
+### No Unwinding
+
+CLEAR does not use stack unwinding (C++ exceptions, Java throws). Errors are returned by value as part of a sum type (error union). This means:
+- **Deterministic performance**: No hidden cost for the error path.
+- **Explicit control flow**: You can see exactly where a function might fail.
+- **Tiny binaries**: No exception-handling tables.
+
+### Zero-Cost Happy Path
+
+Error unions are a tagged union — an integer error code plus the payload. On the happy path, the error code is zero and the payload is used directly. There is no allocation, no vtable lookup, no string formatting unless you explicitly `RAISE`.
+
+### Errors Are Values
+
+Because errors are values (not control flow exceptions), they compose naturally with CLEAR's pipeline system. `OR PRUNE` in a `CONCURRENT SELECT` is just a value-level filter — no special exception-catching machinery.
+
+## Implementation Status
+
+| Feature | Status |
+|---|---|
+| Error unions (`!T`) | **v0.1** — shipping |
+| `RAISE` | **v0.1** — shipping |
+| `OR value` (fallback) | **v0.1** — shipping |
+| `OR RAISE` (propagate) | **v0.1** — shipping |
+| `OR PASS` (silence) | **v0.1** — shipping |
+| `OR PRUNE` (concurrent filter) | **v0.1** — shipping |
+| Automatic error propagation | **v0.1** — shipping |
+| `OR EXIT` (fatal termination) | v0.2 — planned |
+| `!!` (explicit panic/unwrap) | v0.2 — planned |
+| `CATCH` blocks (pattern-matched error handling) | v0.2 — planned |
+| Custom error types | v0.2 — planned |

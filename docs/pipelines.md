@@ -13,7 +13,6 @@ users s> SELECT _.name s> DISTINCT _;
 
 `s>` pipes a value into a function or operator. It's CLEAR's equivalent of `|>` (Elixir) or `.` method chaining (Ruby), but it also works with collection operators.
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 -- Pipe to a function: x s> f  →  f(x)
@@ -28,24 +27,23 @@ Pipelines chain left to right. Each stage passes its result to the next.
 ## The `_` Variable
 
 Inside pipeline expressions, `_` refers to the current element. For struct elements, access fields with `_.fieldname`:
--- ILLUSTRATIVE
-
--- ILLUSTRATIVE
 ```clear
--- ILLUSTRATIVE
 -- _ is the element itself (for scalar collections)
-nums s> WHERE _ > 5;
+nums: Float64[] = [1.0, 3.0, 7.0, 9.0];
+big = nums s> WHERE _ > 5.0;
+ASSERT length(big) == 2, "WHERE filters by element value";
 
 -- _.field for struct collections
-users s> SELECT _.name;
-pool s> SUM _.score;
+users = [User{name: "alice"}, User{name: "bob"}];
+names = users s> SELECT _.name;
+
+scores = [Score{value: 10.0}, Score{value: 20.0}];
+total = scores s> SUM _.value;
+ASSERT total == 30.0, "SUM aggregates field values";
 ```
 
--- ILLUSTRATIVE
 In EACH blocks, `_` is mutable — you can assign to fields:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 pool s> EACH { _.health = _.health - damage; };
@@ -74,17 +72,13 @@ pool s> EACH { _.health = _.health - damage; };
 | **MIN** | `list s> MIN expr` | `Number` | panics |
 | **MAX** | `list s> MAX expr` | `Number` | panics |
 | **REDUCE** | `list s> REDUCE(init) expr` | type of init | init |
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Aggregate expressions must be numeric (Number or Int64). REDUCE is the general fold — `acc` is the mutable accumulator, `_` is the current element:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
--- ILLUSTRATIVE
+nums: Float64[] = [2.0, 3.0, 4.0];
 product = nums s> REDUCE(1.0) acc * _;
-csv = names s> REDUCE("") acc + ", " + _;
+ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 ```
 
 ### Query
@@ -100,30 +94,19 @@ csv = names s> REDUCE("") acc + ", " + _;
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
--- ILLUSTRATIVE
 | **EACH** | `list s> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ## Chaining
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Operators compose naturally:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 -- Filter, sort, take top 3
@@ -136,19 +119,12 @@ leaderboard = scores
 n = users
     s> WHERE _.active == TRUE
     s> COUNT _.score > 1000;
--- ILLUSTRATIVE
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ## Collection Compatibility
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 Every operator works on every collection type:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 -- Array
@@ -195,21 +171,13 @@ The compiler warns when SOA would help:
 
 ```
 NOTE: Pipeline accesses 1 of 5 fields (health). Consider @soa
--- ILLUSTRATIVE
       for better cache performance on 'Entity'.
--- ILLUSTRATIVE
 ```
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ## Concurrency
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 The `CONCURRENT` modifier parallelizes SELECT, WHERE, and EACH across shards:
--- ILLUSTRATIVE
 
--- ILLUSTRATIVE
 ```clear
 -- ILLUSTRATIVE
 MUTABLE data: Score[]@pool:sharded(4) = [];
