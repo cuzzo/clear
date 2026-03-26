@@ -1,0 +1,38 @@
+-- Stream Merge Benchmark — CLEAR
+--
+-- 8 BG STREAM producers each yield 10K values (LCG sequence).
+-- Consumer reads round-robin from all 8 streams, sums all values.
+-- Total: 80K values merged from 8 streams.
+--
+-- Uses infinite streams (~T[INF]) — NEXT returns T directly (not optional).
+-- Each YIELD suspends the producer fiber; NEXT resumes it.
+-- Zero channel overhead, zero lock contention.
+
+FN cheatMain() RETURNS Void ->
+    -- Create 8 producer streams (infinite — consumer controls iteration count)
+    s0: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 1_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s1: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 2_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s2: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 3_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s3: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 4_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s4: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 5_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s5: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 6_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s6: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 7_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+    s7: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 8_i64; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };
+
+    -- Consumer: round-robin merge from all 8 streams
+    MUTABLE total: Int64 = 0_i64;
+    MUTABLE j: Int64 = 0_i64;
+    WHILE j < 10000_i64 DO
+        v0: Int64 = NEXT s0; v1: Int64 = NEXT s1;
+        v2: Int64 = NEXT s2; v3: Int64 = NEXT s3;
+        v4: Int64 = NEXT s4; v5: Int64 = NEXT s5;
+        v6: Int64 = NEXT s6; v7: Int64 = NEXT s7;
+        total = total + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;
+        j = j + 1_i64;
+    END
+
+    print("Total:", total);
+    print("Producers: 8, Items/producer: 10000");
+
+    RETURN;
+END
