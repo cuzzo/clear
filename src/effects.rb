@@ -131,6 +131,43 @@ module EffectTracker
     end
   end
 
+  # PASS 5b: scan all AST nodes for Identifiers used as fn-type arguments.
+  # Any named function referenced as a value must adopt the rt-bearing calling
+  # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
+  def mark_fn_value_references!(program_node)
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FuncCall, AST::MethodCall
+        n.args&.each do |arg|
+          arg_ft = arg.respond_to?(:full_type) ? arg.full_type : nil
+          if arg.is_a?(AST::Identifier) && arg_ft.is_a?(Type) && arg_ft.fn_type?
+            fn = @fn_nodes[arg.name]
+            if fn
+              fn.needs_rt = true
+              fn.can_fail  = true
+            end
+          end
+          traverse.call(arg)
+        end
+        traverse.call(n.respond_to?(:object) ? n.object : nil)
+      when AST::VarDecl, AST::BindExpr
+        traverse.call(n.value)
+      when AST::ReturnNode
+        traverse.call(n.value)
+      when AST::FunctionDef
+        traverse.call(n.body)
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(program_node.statements)
+  end
+
   # --- Queries (for future use by #HOT / STRICT mode) ---
 
   def effects_for(fn_name)
