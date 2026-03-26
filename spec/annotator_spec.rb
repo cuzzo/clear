@@ -3214,6 +3214,66 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "auto-lock: one-line field mutation on @locked without WITH block" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Int64 }
+          FN cheatMain() RETURNS Void ->
+            MUTABLE c = Counter{ value: 0 } @locked;
+            c.value = c.value + 1;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "succeeds and sets auto_lock on the assignment" do
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+        assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
+        expect(assign).not_to be_nil
+        expect(assign.auto_lock).to eq({ var: "c", sync: :locked })
+      end
+    end
+
+    context "auto-lock: one-line field mutation on @writeLocked without WITH block" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Int64 }
+          FN cheatMain() RETURNS Void ->
+            MUTABLE c = Counter{ value: 0 } @writeLocked;
+            c.value = c.value + 1;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "succeeds and sets auto_lock with write_locked sync" do
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+        assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
+        expect(assign).not_to be_nil
+        expect(assign.auto_lock).to eq({ var: "c", sync: :write_locked })
+      end
+    end
+
+    context "auto-lock: field mutation on plain struct does NOT set auto_lock" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Int64 }
+          FN cheatMain() RETURNS Void ->
+            MUTABLE c = Counter{ value: 0 };
+            c.value = c.value + 1;
+            RETURN;
+          END
+        FLUX
+      }
+
+      it "does not set auto_lock" do
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+        assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
+        expect(assign).not_to be_nil
+        expect(assign.auto_lock).to be_nil
+      end
+    end
+
     context "WITH EXCLUSIVE on a @shared variable (not a mutex)" do
       let(:code) {
         <<~FLUX

@@ -31,6 +31,14 @@ WITH c AS val { increment(val) }          -- arc unwrap
 
 One function definition. Three concurrency strategies. Zero code changes to `increment`.
 
+For one-line field mutations on `@locked`/`@writeLocked` variables, the compiler auto-wraps the statement in an inline mutex guard — no `WITH` block needed:
+
+```clear
+-- ILLUSTRATIVE
+MUTABLE b = Counter{ value: 0 } @locked;
+b.value = b.value + 1;  -- compiler auto-acquires and releases the mutex
+```
+
 ## The Capability Dimensions
 
 CLEAR has three orthogonal capability dimensions. They can be combined in any order via `:` chaining.

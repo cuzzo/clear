@@ -554,6 +554,27 @@ private
         elsif node.name.is_a?(AST::Identifier)
           node.name.name
         elsif node.name.is_a?(AST::GetField)
+          # Auto-lock: emit inline mutex guard for one-line mutations on @locked/@writeLocked vars.
+          if node.auto_lock
+            var_name  = node.auto_lock[:var]
+            sync      = node.auto_lock[:sync]
+            guard_var = "__#{var_name}_guard"
+            alias_var = "__#{var_name}_inner"
+            zig_var   = @do_capture_map&.dig(var_name) || var_name
+            lock_expr = zig_var
+
+            acquire = sync == :write_locked ? "#{lock_expr}.write()" : "#{lock_expr}.acquire()"
+            # Install locked unwrap map so RHS field reads also use the dereferenced pointer.
+            prev_locked_map = @locked_unwrap_map || {}
+            @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
+            # Transpile field and value with the alias substituted for the target.
+            field = node.name.field
+            value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
+            @locked_unwrap_map = prev_locked_map
+
+            return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value};\n}"
+          end
+
           target = visit(node.name.target)
           field  = node.name.field
           value  = visit(node.value)

@@ -2004,9 +2004,18 @@ private
         error!(assignment_node, "Cannot modify field of immutable struct '#{var_name}'")
       end
       mark_var_mutated(var_name)
+
+      # 3. Auto-lock: if the target variable is @locked or @writeLocked, mark the
+      # assignment for inline guard emission. The borrow cannot escape because
+      # field assignments are statements (not expressions).
+      scope = lookup_scope_for(var_name)
+      syn = scope&.locals&.dig(var_name, :sync)
+      if syn == :locked || syn == :write_locked
+        assignment_node.auto_lock = { var: var_name, sync: syn }
+      end
     end
 
-    # 3. Type Check
+    # 4. Type Check
     validate_assignment_type(assignment_node, field_node.resolved_type, assignment_node.value.resolved_type)
 
     # Assignments are statements (void), not expressions that produce a value.

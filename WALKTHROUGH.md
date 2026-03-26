@@ -116,13 +116,23 @@ If you change `@shared` to `@multiowned`, the `process` function remains untouch
 
 ### WITH Blocks for Capability Unwrapping
 
-Capabilities are unwrapped at the call site using `WITH` blocks:
+For one-line field mutations on `@locked`/`@writeLocked` variables, the compiler auto-wraps the statement in an inline mutex guard — no `WITH` block needed:
 
 ```clear
 -- ILLUSTRATIVE
--- @locked requires EXCLUSIVE access (mutex)
-counter = Counter{ value: 0 } @shared:locked;
-WITH EXCLUSIVE counter AS c { c.value = c.value + 1; }
+MUTABLE counter = Counter{ value: 0 } @locked;
+counter.value = counter.value + 1;  -- auto-acquires and releases the mutex
+```
+
+For multi-statement access or passing to functions, use `WITH` blocks explicitly:
+
+```clear
+-- ILLUSTRATIVE
+-- @locked multi-statement: use WITH EXCLUSIVE
+WITH EXCLUSIVE counter AS c {
+    c.value = c.value + 1;
+    print(c.value);
+}
 
 -- @shared requires WITH to unwrap the Arc
 config = Config{ port: 8080 } @shared;

@@ -207,7 +207,10 @@ module AST
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
-  Assignment   = Struct.new(:token, :name, :value) { include Locatable }
+  Assignment   = Struct.new(:token, :name, :value) do
+    include Locatable
+    attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
+  end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) { include Locatable; attr_accessor :mode }
   BinaryOp     = Struct.new(:token, :left, :op, :right) { include Locatable }
