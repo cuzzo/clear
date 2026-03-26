@@ -26,12 +26,12 @@ scores[0] = 99;         -- mutation via index
 
 **Limitations**: Cannot append, remove, or resize. Index out of bounds is a runtime panic.
 
-## Lists — `List<T>[]`
+## Lists — `@list`
 
 Dynamic-size, heap-allocated. Backed by `std.ArrayListUnmanaged(T)`.
 
 ```clear
-MUTABLE users = List<String>[];
+MUTABLE users = List[];
 users.append("Alice");
 users.append("Bob");
 n = users.length();       -- 2
@@ -42,23 +42,23 @@ name = users[0];           -- "Alice"
 
 **Limitations**: Removing from the middle is O(N) (shift elements). Handles/pointers to elements are invalidated on reallocation. Not suitable for frequent insert/remove of interior elements.
 
-**Variant — sharded list**: `List<T>[]@sharded(N)` splits the list into N shards for parallel pipeline operations (`s> EACH`, `s> SUM`). Each shard is an independent list. Round-robin distribution on append.
+**Variant — sharded list**: `T[]@list:sharded(N)` splits the list into N shards for parallel pipeline operations (`s> EACH`, `s> SUM`). Each shard is an independent list. Round-robin distribution on append.
 
 **Lazy inference**: `List[]` creates an untyped list. The element type is inferred from the first `append`:
 
 ```clear
 MUTABLE items = List[];
-items.append(42.0);  -- items is now List<Number>
+items.append(42.0);  -- type inferred as Float64[]@list
 ```
 
-## Pools — `Pool<T>[]`
+## Pools — `@pool`
 
 Handle-based, heap-allocated. Backed by `Pool(T)` with **generational handles** for ABA safety.
 
 ```clear
 STRUCT Enemy { hp: Int64, name: String }
 
-MUTABLE enemies = Pool<Enemy>[];
+MUTABLE enemies: Enemy[]@pool = [];
 id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
 id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 

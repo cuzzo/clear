@@ -120,23 +120,23 @@ nums: Float64[] = [1, 2, 3];
 total = nums s> SUM _;
 
 -- List
-MUTABLE data = List<Score>[];
+MUTABLE data: Score[]@list = [];
 avg = data s> AVERAGE _.value;
 
 -- Pool
-MUTABLE pool = Pool<Entity>[];
+MUTABLE pool: Entity[]@pool = [];
 alive = pool s> WHERE _.health > 0;
 
 -- Pool with SOA (field-slice iteration — cache-optimal)
-MUTABLE soa_pool = Pool<Entity>[]@soa;
+MUTABLE soa_pool: Entity[]@pool:soa = [];
 total_hp = soa_pool s> SUM _.health;  -- iterates only the health array
 
 -- List with SOA
-MUTABLE soa_list = List<Entity>[]@soa;
+MUTABLE soa_list: Entity[]@list:soa = [];
 avg = soa_list s> AVERAGE _.health;   -- contiguous f64 slice
 
 -- Sharded (parallel EACH via DO blocks)
-MUTABLE sharded = Pool<Entity>[]@sharded(4);
+MUTABLE sharded: Entity[]@pool:sharded(4) = [];
 sharded s> EACH { _.processed = TRUE; };
 ```
 
