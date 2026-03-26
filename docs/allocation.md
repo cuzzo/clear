@@ -1,8 +1,14 @@
 # Allocation
 
-Allocation is the single largest hidden cost in most programs. A typical web server handling 10K requests/second makes millions of allocations per second — each one touching a global lock, a free list, or a system call. The difference between a well-tuned allocator and a naive one is often 2-10x total throughput.
+Allocation is the single largest hidden cost in most programs.
 
-CLEAR eliminates most allocation overhead by default. The compiler analyzes every variable and assigns it to the cheapest allocator that's safe for its lifetime. The programmer never chooses an allocator — they write normal code and the compiler does the right thing.
+A typical web server handling 10K requests/second makes millions of allocations per second — each one touching a global lock, a free list, or a system call.  This inherently does not scale.
+
+The difference between a well-tuned allocator and a naive one is often 2-10x total throughput.
+
+CLEAR eliminates most allocation overhead by default. It gives you State-of-the-Art allocation strategies, without you needing to think about allocation at all.
+
+The compiler analyzes every variable and assigns it to the cheapest allocator that's safe for its lifetime. The programmer never chooses an allocator — they write normal code and the compiler does the right thing.
 
 ## The Three Tiers
 
