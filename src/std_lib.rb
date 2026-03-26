@@ -42,15 +42,15 @@ STD_LIB = {
   # toInt() (Overloaded)
   "toInt" => [
     { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})" },
-    { args: [:Number], return: :Int64, zig: "@intFromFloat({0})" },
+    { args: [:Float64], return: :Int64, zig: "@intFromFloat({0})" },
     { args: [:Int64], return: :Int64, zig: "{0}" }
   ],
 
   # toFloat() (Overloaded)
   "toFloat" => [
-    { args: [STRING_TYPE], return: :Number, zig: "try std.fmt.parseFloat(f64, {0})" },
-    { args: [:Int64],      return: :Number, zig: "@floatFromInt({0})" },
-    { args: [:Number],     return: :Number, zig: "{0}" }
+    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})" },
+    { args: [:Int64],      return: :Float64, zig: "@floatFromInt({0})" },
+    { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
 
   # 5. print()
@@ -123,27 +123,23 @@ STD_LIB = {
     zig: "(std.mem.indexOf(u8, {0}, {1}) != null)"
   },
 
-  # TODO: only works with directly with :Number
-  # All other types will do implicit casts, slow
-  "max" => {
-    args: [:Number, :Number], # Works for f64 (and i64 via implicit cast)
-    return: :Number,
-    zig: "@max({0}, {1})"
-  },
+  # max(a, b) -> larger value
+  "max" => [
+    { args: [:Int64, :Int64], return: :Int64, zig: "@max({0}, {1})" },
+    { args: [:Float64, :Float64], return: :Float64, zig: "@max({0}, {1})" },
+  ],
 
-  # min(10, 20) -> 10
-  "min" => {
-    args: [:Number, :Number],
-    return: :Number,
-    zig: "@min({0}, {1})"
-  },
+  # min(a, b) -> smaller value
+  "min" => [
+    { args: [:Int64, :Int64], return: :Int64, zig: "@min({0}, {1})" },
+    { args: [:Float64, :Float64], return: :Float64, zig: "@min({0}, {1})" },
+  ],
 
-  # abs(-5) -> 5
-  "abs" => {
-    args: [:Number],
-    return: :Number,
-    zig: "@abs({0})"
-  },
+  # abs(x) -> absolute value
+  "abs" => [
+    { args: [:Int64], return: :Int64, zig: "@intCast(@abs({0}))" },
+    { args: [:Float64], return: :Float64, zig: "@abs({0})" },
+  ],
 
   "shell" => {
     args: [STRING_TYPE],
