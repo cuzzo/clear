@@ -1,11 +1,11 @@
-// shared_promise_test.zig
+// shared-promise-test.zig
 // Unit tests for CheatLib.SharedPromise(T) — Phase 2 shared/memoized promises.
 //
 // Full behavioral tests (concurrent BG fibers, multi-holder NEXT) require a
 // live scheduler and are covered by transpile-tests/74_shared_promise.cht.
 //
 // Run with:
-//   zig test zig/shared_promise_test.zig -lc zig/switch.S zig/onRoot.S
+//   zig test zig/shared-promise-test.zig -lc zig/switch.S zig/onRoot.S
 const std = @import("std");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 

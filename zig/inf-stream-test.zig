@@ -1,11 +1,11 @@
-// inf_stream_test.zig
+// inf-stream-test.zig
 // Unit tests for CheatLib.InfStream(T) — Phase 4 infinite rendezvous streams.
 //
 // Full behavioral tests (concurrent push/next rendezvous) require a live scheduler
 // and are covered by transpile-tests/76_inf_stream.cht.
 //
 // Run with:
-//   zig test zig/inf_stream_test.zig -lc zig/switch.S zig/onRoot.S
+//   zig test zig/inf-stream-test.zig -lc zig/switch.S zig/onRoot.S
 const std = @import("std");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 

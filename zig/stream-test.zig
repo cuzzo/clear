@@ -1,11 +1,11 @@
-// stream_test.zig
+// stream-test.zig
 // Unit tests for CheatLib.Stream(T) — Phase 3 open/closeable streams.
 //
 // Full behavioral tests (concurrent generator fiber, multi-YIELD) require a
 // live scheduler and are covered by transpile-tests/75_open_stream.cht.
 //
 // Run with:
-//   zig test zig/stream_test.zig -lc zig/switch.S zig/onRoot.S
+//   zig test zig/stream-test.zig -lc zig/switch.S zig/onRoot.S
 const std = @import("std");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 

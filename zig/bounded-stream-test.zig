@@ -1,4 +1,4 @@
-// bounded_stream_test.zig
+// bounded-stream-test.zig
 // Unit tests for CheatLib.BoundedStream(T, N) — Phase 1 bounded streams.
 //
 // These tests exercise the Zig runtime struct directly, independent of the
@@ -6,7 +6,7 @@
 // require a live scheduler and are covered by transpile-tests/70_bounded_stream.cht.
 //
 // Run with:
-//   zig test zig/bounded_stream_test.zig -lc zig/switch.S zig/onRoot.S
+//   zig test zig/bounded-stream-test.zig -lc zig/switch.S zig/onRoot.S
 const std = @import("std");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 
