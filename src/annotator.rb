@@ -8,6 +8,7 @@ require_relative "./ownership_tracker"
 require_relative "./generic_analysis"
 require_relative "./capabilities"
 require_relative "./effects"
+require_relative "./alloc"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -21,6 +22,7 @@ class SemanticAnnotator
   include EffectTracker
   include CapabilityHelper
   include CapabilityAudit
+  include AllocHelper
 
   attr_reader :scope_stack
 
@@ -887,164 +889,6 @@ private
   # Walks the full AST subtree (nested ifs, whiles, match blocks) looking for
   # any call to a @reentrant or EXTERN FN function. Stops at FunctionDef
   # boundaries — nested lambdas/closures are separate compilation units.
-  def validate_tight_body!(stmts, loop_node)
-    return if stmts.nil?
-    stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.each { |s| validate_tight_node!(s, loop_node) }
-  end
-
-  def validate_tight_node!(node, loop_node)
-    return if node.nil?
-    case node
-    when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      # primitive — nothing to check
-    when Array
-      node.each { |n| validate_tight_node!(n, loop_node) }
-    when AST::FunctionDef
-      # Don't descend into nested function definitions.
-    when AST::FuncCall
-      if node.respond_to?(:extern_call) && node.extern_call
-        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
-      end
-      fn = @fn_nodes[node.name]
-      if fn&.reentrant == :reentrant
-        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
-      end
-      node.args&.each { |a| validate_tight_node!(a, loop_node) }
-    when AST::MethodCall
-      if node.respond_to?(:extern_call) && node.extern_call
-        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
-      end
-      fn = @fn_nodes[node.name]
-      if fn&.reentrant == :reentrant
-        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
-      end
-      validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node)
-      node.args&.each { |a| validate_tight_node!(a, loop_node) }
-    else
-      # Generic: walk all struct fields of the AST node
-      node.each_pair { |_, v| validate_tight_node!(v, loop_node) } if node.respond_to?(:each_pair)
-    end
-  end
-
-  # Returns true if any frame-arena allocation inside the loop body escapes
-  # the iteration — i.e., its result is stored in a variable declared in an
-  # outer scope. If true, mark_per_iter must be false (rewind would corrupt
-  # the outer variable's memory).
-  #
-  # Covers:
-  #   - append(outer_list, ...) — mutates outer list's backing storage
-  #   - outer_var = fn_that_uses_frame(...) — assigns frame-allocated return
-  #   - outer.field = frame_allocating_expr — stores into outer struct field
-  #   - Any FuncCall whose first arg is an outer var and whose zig_pattern
-  #     contains {alloc} (e.g., stdlib mutating functions)
-  def loop_frame_escapes_to_outer?(stmts, outer_vars)
-    return false if stmts.nil?
-    stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.any? { |s| node_frame_escapes?(s, outer_vars) }
-  end
-
-  def node_frame_escapes?(node, outer_vars)
-    return false if node.nil?
-    case node
-    when AST::FuncCall
-      # append(outer_list, ...) or any {alloc} stdlib fn mutating an outer var
-      if node.args&.first.is_a?(AST::Identifier) && outer_vars.include?(node.args.first.name)
-        pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-        return true if node.name == "append"
-        return true if pat.is_a?(String) && pat.include?("{alloc}")
-        fn = @fn_nodes&.[](node.name)
-        return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
-      end
-      false
-    when AST::MethodCall
-      # outer_var.method(...) where method allocates from frame
-      if node.respond_to?(:object) && node.object.is_a?(AST::Identifier) && outer_vars.include?(node.object.name)
-        pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-        return true if pat.is_a?(String) && pat.include?("{alloc}")
-        fn = @fn_nodes&.[](node.name)
-        return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
-      end
-      false
-    when AST::Assignment
-      # outer_var = frame_allocating_expr OR outer.field = frame_allocating_expr
-      target_name = case node.name
-                    when AST::Identifier then node.name.name
-                    when AST::GetField then node.name.target.is_a?(AST::Identifier) ? node.name.target.name : nil
-                    when String then node.name
-                    end
-      if target_name && outer_vars.include?(target_name)
-        return true if node_allocates_frame?(node.value)
-      end
-      false
-    when AST::BindExpr
-      # outer_var = frame_allocating_expr (reassignment mode)
-      if node.name.is_a?(String) && outer_vars.include?(node.name)
-        return true if node_allocates_frame?(node.value)
-      end
-      false
-    when AST::WhileLoop
-      loop_frame_escapes_to_outer?(node.do_branch, outer_vars)
-    when AST::IfStatement
-      loop_frame_escapes_to_outer?(node.then_branch, outer_vars) ||
-        loop_frame_escapes_to_outer?(node.else_branch, outer_vars)
-    when AST::MatchStatement
-      node.cases.any? { |c| loop_frame_escapes_to_outer?(c[:body], outer_vars) } ||
-        loop_frame_escapes_to_outer?(node.default_case, outer_vars)
-    else
-      false
-    end
-  end
-
-  # Returns true if any statement in stmts (or nested nodes) allocates from the
-  # frame arena — either a direct :frame VarDecl/BindExpr, a stdlib call with
-  # {alloc} in its zig_pattern, or a call to a function that uses_frame.
-  def loop_allocates_frame?(stmts)
-    return false if stmts.nil?
-    stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.any? { |s| node_allocates_frame?(s) }
-  end
-
-  def node_allocates_frame?(node)
-    return false if node.nil?
-    case node
-    when AST::VarDecl, AST::BindExpr
-      return true if node.storage == :frame
-      node_allocates_frame?(node.value)
-    when AST::FuncCall
-      pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-      return true if pat.is_a?(String) && pat.include?("{alloc}")
-      return false if node.respond_to?(:extern_call) && node.extern_call
-      fn = @fn_nodes&.[](node.name)
-      return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
-      node.args&.any? { |a| node_allocates_frame?(a) } || false
-    when AST::MethodCall
-      return false if node.respond_to?(:pool_method) && node.pool_method
-      pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-      return true if pat.is_a?(String) && pat.include?("{alloc}")
-      fn = @fn_nodes&.[](node.name)
-      return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
-      ([node.object] + (node.args || [])).any? { |a| node_allocates_frame?(a) }
-    when AST::BinaryOp
-      node_allocates_frame?(node.left) || node_allocates_frame?(node.right)
-    when AST::UnaryOp
-      node_allocates_frame?(node.right)
-    when AST::IfStatement
-      loop_allocates_frame?(node.then_branch) || loop_allocates_frame?(node.else_branch)
-    when AST::WhileLoop
-      loop_allocates_frame?(node.do_branch)
-    when AST::MatchStatement
-      node.cases.any? { |c| loop_allocates_frame?(c[:body]) } ||
-        loop_allocates_frame?(node.default_case)
-    when AST::ReturnNode
-      node_allocates_frame?(node.value)
-    when AST::Assignment
-      node_allocates_frame?(node.value)
-    else
-      false
-    end
-  end
-
   def visit_BreakNode(node)
     if @loop_depth <= 0
       error!(node, "BREAK must be used inside a loop")
@@ -1381,99 +1225,6 @@ private
   #
   # @param node [AST::FuncCall, AST::MethodCall] The call node
   # @param args [Array] The arguments (includes receiver for UFCS method calls)
-  def resolve_call(node, args)
-    func_name = node.name
-
-    # 1. Look up function in scope
-    scope = lookup_scope_for(func_name)
-    unless scope
-      error!(node, "Undefined function '#{func_name}'")
-      return
-    end
-
-    func_type = scope.resolve_type(func_name)
-
-    # 2. Dispatch based on function type
-    if func_type == :Intrinsic
-      visit_IntrinsicFunc(node, args)
-
-    elsif func_type.is_a?(Hash)
-      # Tag cross-module calls so the transpiler can qualify them (e.g. mod.fn(rt, ...))
-      node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
-      # Tag extern calls so the transpiler skips rt injection and try
-      if node.respond_to?(:extern_call=) && func_type[:extern]
-        node.extern_call = true
-        record_effect(EffectTracker::EXTERN)
-      end
-
-      # Block @soa collections from being passed to EXTERN FN.
-      # SOA layout is not contiguous in memory — C/Zig FFI expects AOS (struct*).
-      if func_type[:extern]
-        args.each do |arg|
-          ti = arg.type_info rescue nil
-          if ti&.respond_to?(:soa?) && ti.soa?
-            error!(arg, "@soa collections cannot be passed to EXTERN FN — SOA memory layout is incompatible with C ABI. Materialize to a regular array first.")
-          end
-        end
-      end
-
-      type_params = func_type[:type_params]
-      if type_params&.any?
-        # Generic function: infer type args from actual arguments
-        subst = infer_generic_type_args!(node, func_type, args, type_params)
-        # Store inferred types on node so the transpiler can emit them
-        node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
-        # Build a substituted signature and validate with concrete types
-        substituted = substitute_type_params(func_type, subst)
-        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
-        verify_function_signature!(call_node, substituted)
-        node.full_type = substituted[:return][:type]
-      else
-        # Named Function or Lambda (both use standard signature format)
-        # Create synthetic node with correct args for UFCS method calls
-        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
-        verify_function_signature!(call_node, func_type)
-        node.full_type = func_type[:return][:type]
-      end
-
-    elsif func_type.is_a?(Type) && func_type.fn_type?
-      # Calling a fn-type variable: cb(5) where cb: FN(Int64) -> Bool
-      node.fn_var_call = true if node.respond_to?(:fn_var_call=)
-      # Mark the variable as read so the transpiler skips `_ = cb;` suppression.
-      lookup_scope_for(func_name)&.mark_read(func_name)
-      synthetic_sig = {
-        params: func_type.raw[:params],
-        return: { type: func_type.raw[:return][:type] }
-      }
-      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
-      verify_function_signature!(call_node, synthetic_sig)
-      node.full_type = func_type.raw[:return][:type]
-
-    elsif func_type.is_a?(Symbol)
-      node.full_type = func_type
-
-    else
-      error!(node, "Cannot call '#{func_name}' - not a function")
-    end
-
-    # Tag calls that return a @list from a frame-using function.
-    # The caller's variable will need heapAlloc() for deinit instead of frameAlloc().
-    if node.respond_to?(:list_from_call=) &&
-       node.type_info&.list_collection? && !node.type_info.sharded? &&
-       @fn_nodes[func_name]&.uses_frame
-      node.list_from_call = true
-    end
-
-    # Tag calls that return a String HashMap.
-    # String map keys are frame-allocated and get promoted to heap in the callee
-    # before return (mapPromote).  The caller's deinit must use heapAlloc for both
-    # key strings and the bucket array.
-    if node.respond_to?(:map_from_call=) &&
-       node.type_info&.map? && !node.type_info&.numeric_map?
-      node.map_from_call = true
-    end
-  end
-
   # Handles intrinsic function calls by finding the matching overload and
   # using verify_function_signature! for validation (same as user-defined functions).
   #
@@ -1531,15 +1282,6 @@ private
   # Safety: CLEAR uses value semantics for structs (pass/return by copy).  A large
   # struct on the stack cannot have its address escape the loop body through normal
   # CLEAR operations, so :stack is always safe here.
-  def downgrade_frame_to_stack(node, storage)
-    return storage unless storage == :frame && @loop_depth > 0
-    return storage unless node.value.is_a?(AST::StructLit)
-
-    node.type_info.location = :stack
-    node.value.storage      = :stack
-    :stack
-  end
-
   def visit_VarDecl(node)
     # Pre-set :stack on list literals when the declared type is a fixed array (e.g. Number[3]).
     if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?

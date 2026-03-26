@@ -97,6 +97,86 @@ module FunctionAnalysis
     }
   end
 
+  # Resolve a function call: look up the function, dispatch based on type
+  # (intrinsic, user-defined, fn-type variable, generic), validate args,
+  # and set the call node's full_type. Also tags cross-module, extern,
+  # list_from_call, and map_from_call flags.
+  def resolve_call(node, args)
+    func_name = node.name
+
+    scope = lookup_scope_for(func_name)
+    unless scope
+      error!(node, "Undefined function '#{func_name}'")
+      return
+    end
+
+    func_type = scope.resolve_type(func_name)
+
+    if func_type == :Intrinsic
+      visit_IntrinsicFunc(node, args)
+
+    elsif func_type.is_a?(Hash)
+      node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
+      if node.respond_to?(:extern_call=) && func_type[:extern]
+        node.extern_call = true
+        record_effect(EffectTracker::EXTERN)
+      end
+
+      if func_type[:extern]
+        args.each do |arg|
+          ti = arg.type_info rescue nil
+          if ti&.respond_to?(:soa?) && ti.soa?
+            error!(arg, "@soa collections cannot be passed to EXTERN FN — SOA memory layout is incompatible with C ABI. Materialize to a regular array first.")
+          end
+        end
+      end
+
+      type_params = func_type[:type_params]
+      if type_params&.any?
+        subst = infer_generic_type_args!(node, func_type, args, type_params)
+        node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
+        substituted = substitute_type_params(func_type, subst)
+        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+        verify_function_signature!(call_node, substituted)
+        node.full_type = substituted[:return][:type]
+      else
+        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+        verify_function_signature!(call_node, func_type)
+        node.full_type = func_type[:return][:type]
+      end
+
+    elsif func_type.is_a?(Type) && func_type.fn_type?
+      node.fn_var_call = true if node.respond_to?(:fn_var_call=)
+      lookup_scope_for(func_name)&.mark_read(func_name)
+      synthetic_sig = {
+        params: func_type.raw[:params],
+        return: { type: func_type.raw[:return][:type] }
+      }
+      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+      verify_function_signature!(call_node, synthetic_sig)
+      node.full_type = func_type.raw[:return][:type]
+
+    elsif func_type.is_a?(Symbol)
+      node.full_type = func_type
+
+    else
+      error!(node, "Cannot call '#{func_name}' - not a function")
+    end
+
+    # Tag calls that return a @list from a frame-using function.
+    if node.respond_to?(:list_from_call=) &&
+       node.type_info&.list_collection? && !node.type_info.sharded? &&
+       @fn_nodes[func_name]&.uses_frame
+      node.list_from_call = true
+    end
+
+    # Tag calls that return a String HashMap.
+    if node.respond_to?(:map_from_call=) &&
+       node.type_info&.map? && !node.type_info&.numeric_map?
+      node.map_from_call = true
+    end
+  end
+
   def normalize_intrinsic_signature(config)
     return nil if config[:args] == :Varargs
 

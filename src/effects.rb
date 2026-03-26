@@ -175,6 +175,48 @@ module EffectTracker
     node&.effects
   end
 
+  # --- TIGHT loop validation ---
+
+  # Deep validation for TIGHT loops: walks the full AST subtree looking for
+  # calls to @reentrant or EXTERN FN functions. Stops at FunctionDef boundaries.
+  def validate_tight_body!(stmts, loop_node)
+    return if stmts.nil?
+    stmts = [stmts] unless stmts.is_a?(Array)
+    stmts.each { |s| validate_tight_node!(s, loop_node) }
+  end
+
+  def validate_tight_node!(node, loop_node)
+    return if node.nil?
+    case node
+    when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+    when Array
+      node.each { |n| validate_tight_node!(n, loop_node) }
+    when AST::FunctionDef
+      # Don't descend into nested function definitions.
+    when AST::FuncCall
+      if node.respond_to?(:extern_call) && node.extern_call
+        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
+      end
+      fn = @fn_nodes[node.name]
+      if fn&.reentrant == :reentrant
+        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
+      end
+      node.args&.each { |a| validate_tight_node!(a, loop_node) }
+    when AST::MethodCall
+      if node.respond_to?(:extern_call) && node.extern_call
+        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
+      end
+      fn = @fn_nodes[node.name]
+      if fn&.reentrant == :reentrant
+        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
+      end
+      validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node)
+      node.args&.each { |a| validate_tight_node!(a, loop_node) }
+    else
+      node.each_pair { |_, v| validate_tight_node!(v, loop_node) } if node.respond_to?(:each_pair)
+    end
+  end
+
   # --- Reentrancy analysis ---
 
   # Recursively scan an AST subtree and return [Set<function_names>, has_fnptr].
