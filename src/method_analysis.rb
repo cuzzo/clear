@@ -20,6 +20,34 @@ module MethodAnalysis
     end
   end
 
+  # Narrow a collection's element type after an intrinsic call with
+  # narrows_collection: true (e.g., append). When the collection has
+  # Any element type and the value arg has a concrete type, updates
+  # the scope entry and the collection variable's type_info.
+  #
+  # @param matched_def [Hash] the STD_LIB definition that matched
+  # @param args [Array] the resolved argument nodes
+  def narrow_collection_type!(matched_def, args)
+    return unless matched_def[:narrows_collection] && args.size >= 2
+
+    list_arg = args[0]
+    val_arg  = args[1]
+    return unless list_arg.is_a?(AST::Identifier)
+
+    scope = lookup_scope_for(list_arg.name)
+    scope_entry = scope&.locals&.dig(list_arg.name)
+    ti = scope_entry&.dig(:type)
+    return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
+
+    val_type = val_arg.resolved_type
+    new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
+    new_type.soa = ti.soa if ti.respond_to?(:soa) && ti.soa
+    new_type.shard_count = ti.shard_count if ti.shard_count
+    new_type.location = ti.location
+    scope_entry[:type] = new_type
+    list_arg.full_type = new_type if list_arg.respond_to?(:full_type=)
+  end
+
   private
 
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)

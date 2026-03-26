@@ -13,8 +13,9 @@ STD_LIB = {
 
   "append" => {
     args: [:"Any[]", :Any],
-    return: :Void, # Zig's append returns !void, so chaining isn't supported yet
-    zig: "try {0}.append({alloc}, {1})"
+    return: :Void,
+    zig: "try {0}.append({alloc}, {1})",
+    narrows_collection: true,  # narrows Any[] element type from arg 1
   },
 
   # 1. String.length()
