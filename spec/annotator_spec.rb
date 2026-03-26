@@ -10014,6 +10014,19 @@ RSpec.describe SemanticAnnotator do
       expect(zig).to include("items.append(")
     end
 
+    it "List[] used in pipeline before append raises helpful error" do
+      code = <<~CLEAR
+        STRUCT Score { value: Float64 }
+        FN f() RETURNS Void ->
+          MUTABLE items = List[];
+          total = items s> SUM _.value;
+          RETURN;
+        END
+      CLEAR
+      # TODO: improve this error to suggest "append an item first or use explicit type: Score[]@list"
+      expect { run(code) }.to raise_error(/Cannot determine struct type.*'Any'/i)
+    end
+
     it "old syntax T[]@list still works" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS Void -> MUTABLE items: Int64[]@list = []; RETURN; END
