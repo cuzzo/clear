@@ -64,6 +64,7 @@ Blocks are cached — the arena reuses them across function calls without re-all
 - Allocation: align pointer + bump cursor = ~2ns
 - Deallocation: reset cursor to saved mark = O(1), regardless of how many allocations were made
 - No free-list, no coalescing, no fragmentation
+- Returned frame structs are copied by value — Zig's optimizer applies Return Value Optimization (RVO) to eliminate the copy when possible
 
 ### Heap — The Escape Hatch
 
@@ -101,6 +102,8 @@ Is it returned from a function?
   or promoted to heap (lists, maps)
 ```
 
+String literals are compile-time constants in read-only memory — zero allocation. `@indirect` forces heap allocation for recursive types (e.g., tree nodes with self-referential pointers).
+
 This happens at compile time. The emitted Zig code uses the correct allocator with zero runtime decision-making.
 
 ## @arena Mode — Fiber-Lifetime Allocation
@@ -123,9 +126,9 @@ With `@arena`, `restoreFrameMark` becomes a no-op. All allocations accumulate in
 
 `@arena` implies `@pinned` because the arena memory is thread-local.
 
-## @pinned — Lock-Free Heap
+## @pinned — Shared-Nothing Allocation
 
-For `@pinned` fibers, `heapAlloc()` returns a **thread-local arena** instead of the global GPA. Zero locks, zero contention:
+CLEAR is designed for shared-nothing architecture by default. `@pinned` fibers use a **thread-local arena** instead of the global GPA — zero locks, zero contention, zero cache-line bouncing. Since `@pinned` is the default for fibers that capture local state (the compiler auto-pins them), most server workloads never touch the GPA at all.
 
 ```clear
 BG { @pinned ->
@@ -136,7 +139,7 @@ BG { @pinned ->
 }
 ```
 
-This matters when multiple fibers on different threads all allocate concurrently. Without `@pinned`, they contend on the GPA's global lock. With `@pinned`, each thread's fibers use their own arena — linear scaling.
+With `@pinned`, each thread's fibers use their own arena — allocation scales linearly with core count. This is the default path for request handlers, background tasks, and any fiber that captures local state.
 
 ## Stack Pool — Fiber Stack Reuse
 
