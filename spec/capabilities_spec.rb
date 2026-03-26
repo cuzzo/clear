@@ -801,4 +801,105 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "Capability combinations — ordering and conflicts" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    context "valid cross-dimension combinations" do
+      it "@local:indirect parses and compiles" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local:indirect; RETURN; END"
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "@indirect:local (reversed order) parses and compiles" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @indirect:local; RETURN; END"
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "@shared:locked (ownership + sync) parses and compiles" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @shared:locked; RETURN; END"
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    context "invalid same-dimension duplicates" do
+      it "@locked:writeLocked (duplicate sync) raises parser error" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @locked:writeLocked; RETURN; END"
+        expect { run(code) }.to raise_error(ParserError, /Duplicate sync/)
+      end
+
+      it "@shared:multiowned (duplicate ownership) raises parser error" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @shared:multiowned; RETURN; END"
+        expect { run(code) }.to raise_error(ParserError, /Duplicate ownership/)
+      end
+
+      it "@local:locked (duplicate sync) raises parser error" do
+        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local:locked; RETURN; END"
+        expect { run(code) }.to raise_error(ParserError, /Duplicate sync/)
+      end
+    end
+  end
+
+  describe "Capability audit — over-engineering detection" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    it "warns about Ghost Lock: @locked but never WITH EXCLUSIVE" do
+      code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @locked; RETURN; END"
+      expect {
+        ZigTranspiler.new.transpile(code)
+      }.to output(/Variable 'c' is @locked but never mutated/).to_stderr
+    end
+
+    it "warns about Isolated Share: @shared but never @parallel" do
+      code = counter_struct + <<~FLUX
+        FN useC(c: Counter) RETURNS Void -> RETURN; END
+        FN f() RETURNS Void ->
+            c = Counter{ value: 0 } @shared;
+            p: ~Void = BG { useC(c); };
+            NEXT p;
+            RETURN;
+        END
+      FLUX
+      expect {
+        ZigTranspiler.new.transpile(code)
+      }.to output(/Variable 'c' is @shared.*never leaves the local scheduler/).to_stderr
+    end
+
+    it "warns about Unnecessary Local: @local never captured in BG" do
+      code = counter_struct + <<~FLUX
+        FN useC(c: Counter) RETURNS Void -> RETURN; END
+        FN f() RETURNS Void -> c = Counter{ value: 0 } @local; useC(c); RETURN; END
+      FLUX
+      expect {
+        ZigTranspiler.new.transpile(code)
+      }.to output(/Variable 'c' is @local but never shared/).to_stderr
+    end
+
+    it "does NOT warn when @locked is properly used with WITH EXCLUSIVE" do
+      code = counter_struct + <<~FLUX
+        FN f() RETURNS Void ->
+            c = Counter{ value: 0 } @locked;
+            WITH EXCLUSIVE c AS inner { inner.value = 1; }
+            RETURN;
+        END
+      FLUX
+      expect {
+        ZigTranspiler.new.transpile(code)
+      }.not_to output(/Variable 'c' is @locked/).to_stderr
+    end
+
+    it "does NOT warn when @local is captured in BG" do
+      code = counter_struct + <<~FLUX
+        FN f() RETURNS Void ->
+            MUTABLE c = Counter{ value: 0 } @local;
+            p: ~Void = BG { c.value = c.value + 1; };
+            NEXT p;
+            RETURN;
+        END
+      FLUX
+      expect {
+        ZigTranspiler.new.transpile(code)
+      }.not_to output(/Variable 'c' is @local but never shared/).to_stderr
+    end
+  end
+
 end
