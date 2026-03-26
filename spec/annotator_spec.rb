@@ -12494,11 +12494,11 @@ RSpec.describe SemanticAnnotator do
       expect(user_code).to include("submitSpawn")
     end
 
-    it "CONCURRENT(pin: true) distributes via spawnBest (multi-core parallel)" do
+    it "CONCURRENT(parallel: TRUE) distributes via spawnBest (multi-core parallel)" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT(workers: 2, pin: true) SELECT _ * 2.0;
+          results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
@@ -12578,11 +12578,11 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN cheatMain() RETURNS Void ->
             nums: Number[] = [1.0];
-            result = nums s> CONCURRENT(workers: 4, pin: 1) SELECT _ * 2.0;
+            result = nums s> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/pin must be a Bool/)
+        expect { run(code) }.to raise_error(/parallel must be a Bool/)
       end
     end
 

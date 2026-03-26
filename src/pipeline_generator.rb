@@ -667,7 +667,7 @@ module PipelineGenerator
   # CONCURRENT: submitSpawn — workers stay on the local scheduler (cache-local, SPSC-safe).
   # @parallel: spawnBest — distributes across schedulers (true multi-core parallelism).
   def concurrent_spawn_call(options, wg_var, ctx_type, ctx_var)
-    parallel  = options["pin"]  # NOTE: "pin" option was the old @parallel toggle
+    parallel  = options["parallel"]
     size_node = options["size"]
     size_sym  = size_node ? size_node.name.downcase.to_sym : nil
     task_cfg  = task_config_zig(size_sym)

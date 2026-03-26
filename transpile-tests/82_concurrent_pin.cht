@@ -1,4 +1,4 @@
--- Test: CONCURRENT SELECT with pin: true — dispatches to least-loaded scheduler
+-- Test: CONCURRENT SELECT with parallel: TRUE — dispatches to least-loaded scheduler
 STRUCT Work { value: Number }
 
 FN compute(w: Work) RETURNS Number ->
@@ -7,8 +7,8 @@ END
 
 FN cheatMain() RETURNS Void ->
     items: Work[] = [Work{value: 1.0}, Work{value: 2.0}, Work{value: 3.0}];
-    results = items s> CONCURRENT(workers: 2, pin: true) SELECT compute(_);
+    results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT compute(_);
     total = results s> SUM _;
-    ASSERT total == 18.0, "pin: true should still produce correct results";
+    ASSERT total == 18.0, "parallel: TRUE should still produce correct results";
     RETURN;
 END

@@ -470,7 +470,7 @@ module PipeAnalysis
     node.storage   = :stack
   end
 
-  VALID_CONCURRENT_OPTIONS = %w[workers pin size].freeze
+  VALID_CONCURRENT_OPTIONS = %w[workers parallel size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
   def analyze_concurrent_op(node)
@@ -494,13 +494,12 @@ module PipeAnalysis
       end
     end
 
-    # Validate pin option is Bool if present
-    if (pin_val = options["pin"])
-      # true/false may appear as lowercase identifiers (VAR_ID) or BOOLEAN literals
-      is_bool = (pin_val.is_a?(AST::Literal) && pin_val.type == :BOOLEAN) ||
-                (pin_val.is_a?(AST::Identifier) && %w[true false].include?(pin_val.name))
+    # Validate parallel option is Bool if present
+    if (par_val = options["parallel"])
+      is_bool = (par_val.is_a?(AST::Literal) && par_val.type == :BOOLEAN) ||
+                (par_val.is_a?(AST::Identifier) && %w[true false TRUE FALSE].include?(par_val.name))
       unless is_bool
-        error!(pin_val, "CONCURRENT pin must be a Bool (true or false), got #{pin_val.class.name.split('::').last}")
+        error!(par_val, "CONCURRENT parallel must be a Bool (TRUE or FALSE), got #{par_val.class.name.split('::').last}")
       end
     end
 
