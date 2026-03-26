@@ -354,10 +354,19 @@ For cross-fiber shared state, use capabilities:
 
 ```clear
 -- ILLUSTRATIVE
-counter = Counter{ value: 0 } @shared:locked;
+MUTABLE counter = Counter{ value: 0 } @shared:locked;
 
-BG { WITH EXCLUSIVE counter AS c { c.value += 1; } };
-BG { WITH EXCLUSIVE counter AS c { c.value += 1; } };
+-- Auto-lock: compiler wraps each mutation in acquire/release
+BG { counter.value += 1; };
+BG { counter.value += 1; };
+
+-- WITH EXCLUSIVE is still available for multi-statement access:
+BG {
+    WITH EXCLUSIVE counter AS c {
+        c.value += 1;
+        print(c.value);
+    }
+};
 ```
 
 ---

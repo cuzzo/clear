@@ -95,14 +95,14 @@ Sharing capabilities can be combined with sync capabilities for mutable cross-th
 
 ```clear
 -- ILLUSTRATIVE
--- Arc + Mutex: cross-scheduler mutable access
-counter = Counter{ value: 0 } @shared:locked;
-BG { @parallel -> WITH EXCLUSIVE counter AS c { c.value += 1; } }
+-- Arc + Mutex: one-line mutations auto-lock
+MUTABLE counter = Counter{ value: 0 } @shared:locked;
+BG { @parallel -> counter.value += 1; }                             -- auto mutex
 
 -- Arc + RwLock: cross-scheduler read-heavy access
-config = Config{ port: 8080 } @shared:writeLocked;
+MUTABLE config = Config{ port: 8080 } @shared:writeLocked;
 BG { @parallel -> WITH config AS c { print(c.port); } }            -- read lock
-BG { @parallel -> WITH EXCLUSIVE config AS c { c.port = 9090; } }  -- write lock
+BG { @parallel -> config.port = 9090; }                             -- auto write lock
 ```
 
 `@local` does not combine with `@locked` or `@writeLocked` — it's already a bare pointer with no wrapper. Mutation is direct.
