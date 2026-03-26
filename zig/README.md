@@ -1,6 +1,11 @@
 ## Stack Overflow Detection
 
-### Step 1: Build LLVM Pass
+The fiber runtime uses **segmented stacks**: a Machine Function Pass injects
+a stack-limit check at the very start of every function, *before* the
+prologue.  If the check fails, `__morestack` (in `switch.S`) allocates a
+new segment and the function retries on fresh stack space.
+
+### Step 1: Build the LLVM Machine Pass plugin
 
 ```bash
 rm -rf fiber-stack-check/pass/build
@@ -8,25 +13,43 @@ cmake -B fiber-stack-check/pass/build -S fiber-stack-check/pass
 cmake --build fiber-stack-check/pass/build
 ```
 
-### Step 2: Build the LLVM IR:
+### Step 2: Run the pass test
 
 ```bash
-zig test fiber-overflow-test.zig switch.S onRoot.S     --library c     -femit-llvm-bc=fiber-overflow-test.bc     -fno-emit-bin
+bash fiber-stack-check/test-pass.sh
 ```
 
-### Step 3: Run the Plugin:
+### Step 3: Full pipeline (BC → instrumented object)
 
 ```bash
-opt -load-pass-plugin=fiber-stack-check/pass/build/libFiberStackCheck.so \
-    -passes="fiber-stack-check" \
-    fiber-overflow-test.bc \
-    -o fiber-overflow-test-instrumented.bc
-```
+# Emit LLVM bitcode from Zig
+zig test fiber-overflow-test.zig switch.S onRoot.S \
+    --library c \
+    -femit-llvm-bc=fiber-overflow-test.bc \
+    -fno-emit-bin
 
-### Step 4: Run the exe:
+# Lower to MIR (stop after prologue/epilogue insertion)
+llc-18 fiber-overflow-test.bc \
+    -stop-after=prologepilog \
+    -o fiber-overflow-test.mir
 
-```bash
-zig build-exe fiber-overflow-test-instrumented.bc switch.S onRoot.S --library c --name fiber-test-runner
+# Run the Machine Pass (inserts __morestack before prologue)
+llc-18 \
+    --load=fiber-stack-check/pass/build/libFiberStackCheck.so \
+    --run-pass=fiber-stack-check \
+    fiber-overflow-test.mir \
+    -o fiber-overflow-test-instrumented.mir
+
+# Finish code generation (resume after prologepilog)
+llc-18 fiber-overflow-test-instrumented.mir \
+    --start-after=prologepilog \
+    -o fiber-overflow-test.o \
+    -filetype=obj
+
+# Link and run
+zig build-exe fiber-overflow-test.o switch.S onRoot.S \
+    --library c --name fiber-test-runner
+./fiber-test-runner
 ```
 
 
