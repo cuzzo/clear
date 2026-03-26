@@ -338,6 +338,10 @@ module PipelineGenerator
 
   def transpile_each_soa_pool(pool_node, body_code)
     pool_code = visit(pool_node)
+    # For SOA pools, use data.get(i) to reassemble the struct for the body.
+    # This is correct but not cache-optimal for single-field access.
+    # Full field-slice optimization for EACH requires tracking which fields
+    # the body writes vs reads, which is future work (EACH bodies are mutable).
     <<~ZIG.chomp
       {
           const __each_src = &#{pool_code};
@@ -349,6 +353,145 @@ module PipelineGenerator
           }
       }
     ZIG
+  end
+
+  # =========================================================
+  # SOA Field-Slice Aggregation
+  # =========================================================
+  # For SUM/MIN/MAX/AVERAGE on SOA pools, iterate ONLY the field slice
+  # that the expression accesses.  No materialization, no struct reassembly.
+  #
+  # Example: `pool s> SUM _.health`
+  #   AOS: materialise all structs → iterate → access .health (bad cache)
+  #   SOA: iterate data.items(.health) directly (contiguous f64 array)
+  #
+  # This only works for simple `_.field` expressions (single GetField on _).
+  # Complex expressions (e.g. `_.x + _.y`) fall back to materialization.
+
+  def transpile_soa_aggregate(list_node, expr_node, op)
+    # Extract the field name from `_.fieldname`.
+    field_name = extract_soa_field(expr_node)
+
+    unless field_name
+      # Complex expression — fall back to materialized path.
+      return transpile_soa_aggregate_fallback(list_node, expr_node, op)
+    end
+
+    list_code = visit(list_node)
+
+    body = case op
+    when :sum
+      <<~ZIG
+        var __soa_result: f64 = 0;
+        var __soa_count: usize = 0;
+        const __soa_slice = __soa_src.data.items(.#{field_name});
+        for (0..@intCast(__soa_src.data.len)) |__soa_i| {
+            if (!__soa_src.alive.items[__soa_i]) continue;
+            __soa_result += __soa_slice[__soa_i];
+            __soa_count += 1;
+        }
+        _ = __soa_count;
+        break :blk __soa_result;
+      ZIG
+    when :average
+      <<~ZIG
+        var __soa_sum: f64 = 0;
+        var __soa_count: usize = 0;
+        const __soa_slice = __soa_src.data.items(.#{field_name});
+        for (0..@intCast(__soa_src.data.len)) |__soa_i| {
+            if (!__soa_src.alive.items[__soa_i]) continue;
+            __soa_sum += __soa_slice[__soa_i];
+            __soa_count += 1;
+        }
+        break :blk if (__soa_count == 0) @as(f64, 0) else __soa_sum / @as(f64, @floatFromInt(__soa_count));
+      ZIG
+    when :min
+      <<~ZIG
+        var __soa_result: f64 = std.math.floatMax(f64);
+        var __soa_found = false;
+        const __soa_slice = __soa_src.data.items(.#{field_name});
+        for (0..@intCast(__soa_src.data.len)) |__soa_i| {
+            if (!__soa_src.alive.items[__soa_i]) continue;
+            __soa_found = true;
+            const __soa_val = __soa_slice[__soa_i];
+            if (__soa_val < __soa_result) __soa_result = __soa_val;
+        }
+        if (!__soa_found) @panic("MIN applied to empty pool");
+        break :blk __soa_result;
+      ZIG
+    when :max
+      <<~ZIG
+        var __soa_result: f64 = -std.math.floatMax(f64);
+        var __soa_found = false;
+        const __soa_slice = __soa_src.data.items(.#{field_name});
+        for (0..@intCast(__soa_src.data.len)) |__soa_i| {
+            if (!__soa_src.alive.items[__soa_i]) continue;
+            __soa_found = true;
+            const __soa_val = __soa_slice[__soa_i];
+            if (__soa_val > __soa_result) __soa_result = __soa_val;
+        }
+        if (!__soa_found) @panic("MAX applied to empty pool");
+        break :blk __soa_result;
+      ZIG
+    end
+
+    <<~ZIG
+      blk: {
+          const __soa_src = &#{list_code};
+          #{body}
+      }
+    ZIG
+  end
+
+  # Extract field name from a simple `_.field` expression.
+  # Returns nil for complex expressions (e.g. `_.x + _.y`).
+  def extract_soa_field(expr_node)
+    return nil unless expr_node.is_a?(AST::GetField)
+    return nil unless expr_node.target.is_a?(AST::Identifier)
+    return nil unless expr_node.target.name == "_"
+    expr_node.field
+  end
+
+  # Fallback: SOA pool with complex expression — materialize then iterate.
+  def transpile_soa_aggregate_fallback(list_node, expr_node, op)
+    # Use the standard materialized path.
+    method_name = :"transpile_#{op}"
+    # We need the smooth_node for the macro — use a simple stand-in.
+    @placeholder_name = "it"
+    expr_code = visit(expr_node)
+    @placeholder_name = nil
+
+    transpile_pipeline_macro(list_node, list_node) do
+      case op
+      when :sum
+        <<~ZIG
+          var sum_result: f64 = 0;
+          for (pipe_items) |it| { sum_result += #{expr_code}; }
+          break :blk sum_result;
+        ZIG
+      when :average
+        <<~ZIG
+          var avg_sum: f64 = 0;
+          const avg_count = pipe_items.len;
+          for (pipe_items) |it| { avg_sum += #{expr_code}; }
+          break :blk if (avg_count == 0) @as(f64, 0) else avg_sum / @as(f64, @floatFromInt(avg_count));
+        ZIG
+      when :min
+        <<~ZIG
+          if (pipe_items.len == 0) @panic("MIN applied to empty pool");
+          var min_result: f64 = std.math.floatMax(f64);
+          for (pipe_items) |it| { const v = #{expr_code}; if (v < min_result) min_result = v; }
+          break :blk min_result;
+        ZIG
+      when :max
+        <<~ZIG
+          if (pipe_items.len == 0) @panic("MAX applied to empty pool");
+          var max_result: f64 = -std.math.floatMax(f64);
+          for (pipe_items) |it| { const v = #{expr_code}; if (v > max_result) max_result = v; }
+          break :blk max_result;
+        ZIG
+      end
+    end
   end
 
   def transpile_each_sharded_pool(pool_node, body_code, pool_type)
@@ -548,6 +691,11 @@ module PipelineGenerator
   # =========================================================
 
   def transpile_sum(list_node, sum_node, smooth_node)
+    lhs_type = list_node.type_info
+    if lhs_type&.pool? && lhs_type&.soa?
+      return transpile_soa_aggregate(list_node, sum_node.expression, :sum)
+    end
+
     @placeholder_name = "it"
     expr_code = visit(sum_node.expression)
     @placeholder_name = nil
@@ -564,6 +712,11 @@ module PipelineGenerator
   end
 
   def transpile_average(list_node, avg_node, smooth_node)
+    lhs_type = list_node.type_info
+    if lhs_type&.pool? && lhs_type&.soa?
+      return transpile_soa_aggregate(list_node, avg_node.expression, :average)
+    end
+
     @placeholder_name = "it"
     expr_code = visit(avg_node.expression)
     @placeholder_name = nil
@@ -581,6 +734,11 @@ module PipelineGenerator
   end
 
   def transpile_min(list_node, min_node, smooth_node)
+    lhs_type = list_node.type_info
+    if lhs_type&.pool? && lhs_type&.soa?
+      return transpile_soa_aggregate(list_node, min_node.expression, :min)
+    end
+
     @placeholder_name = "it"
     expr_code = visit(min_node.expression)
     @placeholder_name = nil
@@ -599,6 +757,11 @@ module PipelineGenerator
   end
 
   def transpile_max(list_node, max_node, smooth_node)
+    lhs_type = list_node.type_info
+    if lhs_type&.pool? && lhs_type&.soa?
+      return transpile_soa_aggregate(list_node, max_node.expression, :max)
+    end
+
     @placeholder_name = "it"
     expr_code = visit(max_node.expression)
     @placeholder_name = nil

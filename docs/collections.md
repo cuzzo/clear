@@ -136,6 +136,43 @@ scores.count();                           -- 1
 
 **When to use**: Lookup by key. The general-purpose associative container.
 
+## SOA Layout — Cache-Optimal Iteration
+
+By default, collections store elements as **Array of Structures** (AOS): each element is a contiguous block of all its fields. When a pipeline accesses only a subset of fields, the CPU loads entire cache lines but uses only a fraction — wasting memory bandwidth.
+
+The `:soa` capability switches to **Structure of Arrays** layout: each field gets its own contiguous array. A pipeline that touches one field iterates a dense, cache-friendly slice.
+
+```clear
+STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+
+-- AOS (default): each entity is 8 fields × 8 bytes = 64 bytes per cache line.
+-- SUM _.health loads all 8 fields but uses only 1 — 87.5% wasted bandwidth.
+MUTABLE pool: Entity[]@pool = [];
+
+-- SOA: health values are stored in a contiguous f64 array.
+-- SUM _.health touches only that array — zero waste.
+MUTABLE pool: Entity[]@pool:soa = [];
+```
+
+The compiler detects when SOA would help and suggests it:
+
+```
+NOTE: Pipeline accesses 1 of 8 fields (health). Consider @soa
+      for better cache performance on 'Entity'.
+```
+
+**When `:soa` helps most:**
+- Pipelines that touch < 50% of fields (SUM, MIN, MAX, AVERAGE on one field)
+- Large structs (8+ fields)
+- High-volume iteration (thousands of elements)
+
+**When `:soa` doesn't help:**
+- Small structs (< 4 fields) — cache lines already fit the whole struct
+- EACH that reads/writes most fields — no bandwidth savings
+- Random-access by handle (`pool.get(id)`) — must reassemble the struct
+
+`:soa` currently works on `@pool`. Same handle semantics: `insert`, `get`, `remove`, `count` all work identically. The difference is invisible except in pipeline performance.
+
 ## Sharding — Lock-Free Parallel Collections
 
 Lists, pools, and hash maps all support sharding for parallel access:
