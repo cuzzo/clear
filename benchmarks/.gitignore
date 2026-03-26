@@ -1,3 +1,8 @@
 bench_clear
 bench_go
 bench_rust
+target/
+bench_clear
+bench_go
+data/
+*.o

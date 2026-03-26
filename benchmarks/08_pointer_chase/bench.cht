@@ -57,7 +57,7 @@ FN cheatMain() RETURNS Void ->
     n_nodes = 2000000_i64;
     step    = 999983_i64;
 
-    MUTABLE pool:    Node[]@pool     = [];
+    MUTABLE pool: Node[]@pool = [];
     MUTABLE id_list: Id<Node>[]@list = [];
 
     -- Phase 1: insert N nodes, record IDs in insertion order.

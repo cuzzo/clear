@@ -49,7 +49,7 @@ FN cheatMain() RETURNS Void ->
     -- futures[j] returns a CheatLib.Promise(i64) by value;
     -- NEXT calls .next() which blocks until the fiber completes.
     -- files[j] gives the actual filename for future j, regardless of listDir order.
-    MUTABLE results: SearchResult[]@list = [];
+    MUTABLE results = List[];
     MUTABLE j: Int64 = 0;
     WHILE j < n DO
         c: Int64 = NEXT futures[j];

@@ -120,7 +120,7 @@ nums: Float64[] = [1, 2, 3];
 total = nums s> SUM _;
 
 -- List
-MUTABLE data: Score[]@list = [];
+MUTABLE data = List[];
 avg = data s> AVERAGE _.value;
 
 -- Pool
