@@ -71,7 +71,7 @@ Blocks are cached — the arena reuses them across function calls without re-all
 Data that outlives its creating function (returned collections, cross-fiber communication, Rc/Arc wrappers) goes on the heap via the global allocator (GPA). This is the slowest path — ~60ns per allocation, with a global lock.
 
 ```clear
-MUTABLE users: User[]@list = [];    -- heap: dynamic list (growable)
+MUTABLE users = List<User>[];        -- heap: dynamic list (growable)
 counts: HashMap<Int64> = {};         -- heap: hash map
 shared_ref = counter @shared;       -- heap: Arc-wrapped
 ```

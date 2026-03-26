@@ -32,10 +32,10 @@ Dynamic-size, heap-allocated. Backed by `std.ArrayListUnmanaged(T)`.
 
 ```clear
 MUTABLE users = List<String>[];
-append(users, "Alice");
-append(users, "Bob");
-n = length(users);       -- 2
-name = users[0];          -- "Alice"
+users.append("Alice");
+users.append("Bob");
+n = users.length();       -- 2
+name = users[0];           -- "Alice"
 ```
 
 **When to use**: Size is unknown or grows over time. Elements accessed by index. The general-purpose dynamic array — equivalent to `Vec<T>` in Rust or `[]T` in Go.
@@ -48,7 +48,7 @@ name = users[0];          -- "Alice"
 
 ```clear
 MUTABLE items = List[];
-append(items, 42_i64);  -- items is now List<Int64>
+items.append(42.0);  -- items is now List<Number>
 ```
 
 ## Pools — `Pool<T>[]`

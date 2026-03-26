@@ -1094,45 +1094,9 @@ class Parser
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
       name = type_token.value
-      if match?(:CHAR, '<') && peek_is_generic_struct_lit?
-        # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }
-        consume(:CHAR, '<')
-        type_args = []
-        until match?(:CHAR, '>')
-          type_args << consume(:TYPE_ID).value
-          match!(:CHAR, ',')
-        end
-        consume(:CHAR, '>')
-        _, fields = parse_comma_seq(:CHAR, '{', '}') do
-          k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
-          [k, v]
-        end
-        return AST::StructLit.new(type_token, name, fields.to_h, storage, type_args)
-      elsif %w[List Pool].include?(name) && type_args&.size == 1 && match?(:CHAR, '[')
-        # Typed collection constructor: List<Int64>[] or Pool<Entity>[]
-        consume(:CHAR, '[')
-        consume(:CHAR, ']')
-        collection = name == "List" ? :list : :pool
-        is_soa = false
-        shard_count = nil
-        if match?(:VAR_ID) && current.value == "@soa"
-          consume(:VAR_ID)
-          is_soa = true
-        elsif match?(:CHAR, ':')
-          dummy_tok = Lexer::Token.new(:VAR_ID, "@#{name.downcase}", type_token.line, type_token.column)
-          mods = parse_collection_modifiers!(dummy_tok)
-          shard_count = mods[:shard_count]
-          is_soa = mods[:soa]
-        end
-        elem_type_sym = :"#{type_args[0]}[]"
-        t = Type.new(elem_type_sym, collection: collection, shard_count: shard_count)
-        t.soa = true if is_soa
-        t.location = :heap if collection == :pool
-        node = AST::ListLit.new(type_token, [], storage)
-        node.instance_variable_set(:@constructor_type, t)
-        return node
-      elsif %w[List Pool].include?(name) && match?(:CHAR, '[')
-        # Collection constructor: List[] or Pool[] (with optional @soa, :sharded)
+      # Collection constructor: List[] / Pool[] (with optional capabilities)
+      # Element type is inferred from first append/insert.
+      if %w[List Pool].include?(name) && match?(:CHAR, '[')
         consume(:CHAR, '[')
         consume(:CHAR, ']')
         collection = name == "List" ? :list : :pool
@@ -1152,6 +1116,20 @@ class Parser
         node.instance_variable_set(:@constructor_soa, is_soa)
         node.instance_variable_set(:@constructor_shard_count, shard_count)
         return node
+      elsif match?(:CHAR, '<') && peek_is_generic_struct_lit?
+        # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }
+        consume(:CHAR, '<')
+        type_args = []
+        until match?(:CHAR, '>')
+          type_args << consume(:TYPE_ID).value
+          match!(:CHAR, ',')
+        end
+        consume(:CHAR, '>')
+        _, fields = parse_comma_seq(:CHAR, '{', '}') do
+          k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
+          [k, v]
+        end
+        return AST::StructLit.new(type_token, name, fields.to_h, storage, type_args)
       elsif match?(:CHAR, '{')
         # Struct literal: User{ id: 1 }
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
@@ -1336,36 +1314,12 @@ class Parser
       end
     end
 
-    # Constructor sugar: List<T>[] → T[]@list, Pool<T>[] → T[]@pool.
-    # Desugar before capability processing so modifiers (@soa, :sharded) still work.
-    collection_keyword = nil
-    if base =~ /\A(List|Pool)<(.+)>\z/ && inner.start_with?("[")
-      collection_keyword = $1
-      base = $2  # element type (e.g. "Int64", "Entity")
-      # inner stays as "[]" — the array part
-    end
-
     # Check for capability suffix: Type @multiowned, Type @shared, Type @locked, @list, @pool.
     # Not permitted on function parameters (functions take plain Types, not Capabilities).
     ownership  = nil
     sync       = nil
     collection = nil
     is_soa     = false
-
-    # Apply constructor sugar collection type
-    if defined?(collection_keyword) && collection_keyword
-      collection = collection_keyword == "List" ? :list : :pool
-      # Parse any trailing modifiers (@soa, :sharded)
-      if match?(:VAR_ID) && current.value == "@soa"
-        consume(:VAR_ID)
-        is_soa = true
-      elsif match?(:CHAR, ':')
-        dummy_tok = Lexer::Token.new(:VAR_ID, "@#{collection_keyword.downcase}", current.line, current.column)
-        mods = parse_collection_modifiers!(dummy_tok)
-        shard_count = mods[:shard_count]
-        is_soa = mods[:soa]
-      end
-    end
     if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @list @pool].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")

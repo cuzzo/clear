@@ -5,11 +5,11 @@
 STRUCT Point { x: Number, y: Number }
 
 FN cheatMain() RETURNS Void ->
-    -- @list: explicit heap list (same Zig output as a plain dynamic array)
+    -- @list with UFCS append
     MUTABLE pts: Point[]@list = [];
-    append(pts, Point{ x: 1.0, y: 2.0 });
-    append(pts, Point{ x: 3.0, y: 4.0 });
-    append(pts, Point{ x: 5.0, y: 6.0 });
+    pts.append(Point{ x: 1.0, y: 2.0 });
+    pts.append(Point{ x: 3.0, y: 4.0 });
+    pts.append(Point{ x: 5.0, y: 6.0 });
     ASSERT pts.length() == 3, "@list should hold 3 points";
 
     -- Pipeline operators on @list work the same as on plain arrays
@@ -31,7 +31,7 @@ FN cheatMain() RETURNS Void ->
     small_pts = pts s> WHERE _.x < 4.0;
     ASSERT small_pts.length() == 2, "@list WHERE should return 2 items";
 
-    -- @pool: generational pool with handle-based access
+    -- Pool constructor with handle-based access (lazy inference via insert)
     MUTABLE pool: Point[]@pool = [];
 
     -- insert returns an Id<Point> (u64 handle)

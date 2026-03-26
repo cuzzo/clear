@@ -119,24 +119,24 @@ Every operator works on every collection type:
 nums: Number[] = [1, 2, 3];
 total = nums s> SUM _;
 
--- @list
-MUTABLE data: Score[]@list = [];
+-- List
+MUTABLE data = List<Score>[];
 avg = data s> AVERAGE _.value;
 
--- @pool
-MUTABLE pool: Entity[]@pool = [];
+-- Pool
+MUTABLE pool = Pool<Entity>[];
 alive = pool s> WHERE _.health > 0;
 
--- @pool:soa (field-slice iteration — cache-optimal)
-MUTABLE soa_pool: Entity[]@pool:soa = [];
+-- Pool with SOA (field-slice iteration — cache-optimal)
+MUTABLE soa_pool = Pool<Entity>[]@soa;
 total_hp = soa_pool s> SUM _.health;  -- iterates only the health array
 
--- @list:soa (same SOA benefits for dense lists)
-MUTABLE soa_list: Entity[]@list:soa = [];
+-- List with SOA
+MUTABLE soa_list = List<Entity>[]@soa;
 avg = soa_list s> AVERAGE _.health;   -- contiguous f64 slice
 
--- :sharded (parallel EACH via DO blocks)
-MUTABLE sharded: Entity[]@pool:sharded(4) = [];
+-- Sharded (parallel EACH via DO blocks)
+MUTABLE sharded = Pool<Entity>[]@sharded(4);
 sharded s> EACH { _.processed = TRUE; };
 ```
 

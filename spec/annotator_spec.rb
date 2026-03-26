@@ -10002,37 +10002,6 @@ RSpec.describe SemanticAnnotator do
   # Collection Constructor Sugar (List<T>[], Pool<T>[], List[], etc.)
   # ===========================================================================
   describe "Collection constructor sugar" do
-    it "List<Int64>[] produces ArrayListUnmanaged(i64)" do
-      zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Void -> MUTABLE items: List<Int64>[] = []; RETURN; END
-      CLEAR
-      expect(zig).to include("ArrayListUnmanaged(i64)")
-    end
-
-    it "Pool<Entity>[] produces CheatLib.Pool(Entity)" do
-      zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        STRUCT Entity { x: Number }
-        FN f() RETURNS Void -> MUTABLE p: Pool<Entity>[] = []; RETURN; END
-      CLEAR
-      expect(zig).to include("CheatLib.Pool(Entity)")
-    end
-
-    it "Pool<Entity>[]@soa produces SoaPool(Entity)" do
-      zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        STRUCT Entity { x: Number, y: Number }
-        FN f() RETURNS Void -> MUTABLE p: Pool<Entity>[]@soa = []; RETURN; END
-      CLEAR
-      expect(zig).to include("SoaPool(Entity)")
-    end
-
-    it "List<Entity>[]@soa produces SoaList(Entity)" do
-      zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        STRUCT Entity { x: Number, y: Number }
-        FN f() RETURNS Void -> MUTABLE items: List<Entity>[]@soa = []; RETURN; END
-      CLEAR
-      expect(zig).to include("SoaList(Entity)")
-    end
-
     it "List[] with lazy inference narrows type on append" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS Void ->

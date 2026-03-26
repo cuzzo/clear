@@ -1715,6 +1715,12 @@ private
         node.type_info.location    = :heap if coll_src.collection == :pool
         node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
         node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
+        # Also propagate into full_type so zig_type sees it
+        if node.full_type.is_a?(Type)
+          node.full_type.collection  = coll_src.collection unless node.full_type.collection
+          node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
+          node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node.full_type.shard_count
+        end
       end
 
       # Propagate shard_count + sync for maps.  Maps don't use :collection,
@@ -2322,12 +2328,6 @@ private
     end
 
     if node.items.empty?
-      # Constructor sugar: List<T>[] or Pool<T>[] carries a pre-set type.
-      if (ct = node.instance_variable_get(:@constructor_type))
-        node.full_type = ct
-        node.storage = ct.pool? ? :heap : (ct.heap? ? :heap : :stack)
-        return
-      end
       # Untyped constructor: List[] or Pool[] — deferred element type.
       # The collection type is set; element type resolves on first append/insert.
       if (coll = node.instance_variable_get(:@constructor_collection))

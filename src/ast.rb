@@ -109,9 +109,14 @@ module AST
         base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
         new_t = Type.new(base_sym)
         # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
+        # Check both final_type and the value's type_info (for constructor sugar: List[], Pool[]).
+        val_ti = respond_to?(:value) && value.respond_to?(:type_info) ? value.type_info : nil
         new_t.shard_count = final_type.shard_count if final_type.is_a?(Type) && final_type.shard_count
+        new_t.shard_count ||= val_ti.shard_count if val_ti&.shard_count
         new_t.sync = final_type.sync if final_type.is_a?(Type) && final_type.sync
         new_t.soa = final_type.soa if final_type.is_a?(Type) && final_type.soa
+        new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
+        new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
         new_t
       end
       case storage
