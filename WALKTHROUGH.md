@@ -1,4 +1,4 @@
-# CLEAR Language Reference Guide
+# CLEAR Language Walkthrough
 
 A memory-safe language with Rust-level guarantees but substantially simpler syntax, optimized for local reasoning and architectural flexibility.
 
@@ -13,7 +13,7 @@ A memory-safe language with Rust-level guarantees but substantially simpler synt
 7. [Lifetimes and Scoping](#lifetimes-and-scoping)
 8. [Error Handling](#error-handling)
 9. [Concurrency](#concurrency)
-10. [Streams and Pipelines](#streams-and-pipelines)
+10. [Pipelines](#pipelines)
 11. [Memory Model](#memory-model)
 
 ---
@@ -30,7 +30,7 @@ A memory-safe language with Rust-level guarantees but substantially simpler synt
 **Capabilities over Magic Types**
 - Separate what an object *is* (Type) from how it is *accessed* (Capability).
 - Functions take Types, not Capabilities, to minimize refactoring cost.
-- Explicit scopes for mutation and borrowing.
+- Explicit scopes for mutation and sharing.
 
 ---
 
@@ -46,16 +46,23 @@ A memory-safe language with Rust-level guarantees but substantially simpler synt
 - `FN` - Function definition
 - `RETURN` - Return from function
 - `IF/THEN/ELSE/END` - Conditionals
-- `WHILE/DO/END;FOR/DO/END;BREAK/CONTINUE` - Loops
+- `WHILE/DO/END` - Loops
+- `BREAK/CONTINUE` - Loop control
 - `STRUCT` - Struct definition
+- `ENUM` - Enum definition
+- `UNION` - Tagged union definition
+- `MATCH/START/DEFAULT/END` - Pattern matching
 - `WITH` - Capability scoping block
+- `BG` - Background fiber spawn
+- `DO` - Fork-join parallel execution
+- `CONCURRENT` - Parallel pipeline operator
 
 ---
 
 ## Variables and Mutability
 
 ### Immutable Variables (Default)
-```
+```clear
 x = 5;                        -- Immutable binding (no keyword)
 name = "Alice";               -- Immutable string
 pi = 3.14159;                 -- Immutable float
@@ -64,7 +71,7 @@ x = 6;                        -- COMPILER ERROR: x is immutable
 ```
 
 ### Mutable Variables (Explicit)
-```
+```clear
 MUTABLE counter = 0;          -- Mutable binding
 counter = 1;                  -- OK: can reassign
 ```
@@ -73,102 +80,100 @@ counter = 1;                  -- OK: can reassign
 
 ## Types vs Capabilities
 
-CLEAR distinguishes between what data *is* (Type) and how it is *accessed* (Capability). In Rust, capabilities like `Arc`, `Rc`, and `Mutex` are often conflated with types, leading to "function coloring" and high refactoring costs. In CLEAR, functions take **Types**, not **Capabilities**.
+CLEAR distinguishes between what data *is* (Type) and how it is *accessed* (Capability). In Rust, capabilities like `Arc`, `Rc`, and `Mutex` are part of the type, leading to "function coloring" and high refactoring costs. In CLEAR, functions take **Types**, not **Capabilities**.
 
-### The CLEAR Model
+### Capability Annotations
 
-* **Ownership:** Rc = `multiowned`, Arc = `shared`
-* **Synchronization:** Mvcc = `shared:read`, RwLock = `shared:writeLocked`, Mutex = `shared:locked`
-* **Interior Mutability:** Cell, RefCell -> combined = `alwaysMutable`
-  * Automatically acts like Cell for data under 16 bytes
-  * `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
-* **Existence:** Option, Result => not a capability -> a tense:
-  * `T?` = Optional T
-  * Unwrapped like in Rust and Zig with `.?`
+Capabilities are applied at the **declaration site** with `@` suffixes:
 
-### Synchronization (Sub-capabilities of `shared`)
+| Capability | Rust Equivalent | CLEAR Syntax |
+|---|---|---|
+| Single-threaded shared ownership | `Rc<T>` | `value @multiowned` |
+| Multi-threaded shared ownership | `Arc<T>` | `value @shared` |
+| Mutex (exclusive lock) | `Arc<Mutex<T>>` | `value @shared:locked` |
+| RwLock (read-write lock) | `Arc<RwLock<T>>` | `value @shared:writeLocked` |
+| Heap pointer | `Box<T>` | `value @indirect` |
+| Thread-local pointer | *(no direct equivalent)* | `value @local` |
 
-When an object is `shared` across threads, you choose a synchronization strategy:
+### Zero Blast Radius Refactoring
 
-- `shared:read`: Optimized for read-heavy MVCC.
-- `shared:atomic`: Optimized for lock-free primitive updates (e.g., counters).
-- `shared:writeLocked`: Equivalent to `Arc<RwLock<T>>`.
-- `shared:locked`: Equivalent to `Arc<Mutex<T>>`.
+In Rust, changing `Rc<User>` to `Arc<User>` means rewriting every function signature in the call chain. In CLEAR, functions take the plain type:
 
-```CLEAR
-u = User.new();                     -- affine User (default)
-s = SHARE(User.new());              -- shared User (thread-safe)
-sa = SHARE:atomic(0);               -- shared:atomic Integer
-sw = SHARE:writeLocked(User.new()); -- shared:writeLocked User
-```
-
-### Why This is Superior: Zero Blast Radius Refactoring
-
-In Rust, if you need to change a `Rc<User>` to an `Arc<User>` (e.g., to pass it to another thread), you must:
-1. Find every function signature taking `Rc<User>`.
-2. Rewrite them to `Arc<User>`.
-3. Update every call site.
-
-In CLEAR, capabilities are acquired and discharged at the edges. Functions simply ask for a `User`.
-
-```CLEAR
+```clear
+-- ILLUSTRATIVE
 -- Function doesn't care about the capability
-FN process(u: User) ->
-  PRINT(u.name);
+FN process(u: User) RETURNS Void ->
+  print(u.name);
+  RETURN;
 END
 
--- At the call site, you unwrap/sync the capability
-sharedU = SHARE(User.new());
-process(sharedU); -- CLEAR automatically handles the "unwrapping" for the call
+-- At the call site, capabilities are unwrapped:
+shared_u = User{ name: "Alice" } @shared;
+WITH shared_u AS val { process(val); }
 ```
 
-If you change `sharedU` from `multiowned` to `shared`, the `process` function remains untouched. The refactor is a one-line change at the definition.
+If you change `@shared` to `@multiowned`, the `process` function remains untouched. The refactor is a one-line change at the declaration.
 
-### Interior Mutability & Scoping
+### WITH Blocks for Capability Unwrapping
 
-For objects with the `alwaysMutable` capability (like `RefCell` in Rust), CLEAR provides elegant syntax to avoid manual `borrow_mut()` calls.
+Capabilities are unwrapped at the call site using `WITH` blocks:
 
-```CLEAR
--- 99% case: One-liners "just work"
--- Compiler handles the temporary lock/borrow
-user.login_count += 1;
+```clear
+-- ILLUSTRATIVE
+-- @locked requires EXCLUSIVE access (mutex)
+counter = Counter{ value: 0 } @shared:locked;
+WITH EXCLUSIVE counter AS c { c.value = c.value + 1; }
 
--- 1% case: Complex multi-field updates
-WITH user.config {
-  -- 'this' (_) is now the mutable inner content
-  _.theme = "Light";
-  _.retries = 5;
-  _.last_updated = now();
-} -- Lock is released here
+-- @shared requires WITH to unwrap the Arc
+config = Config{ port: 8080 } @shared;
+WITH config AS c { print(c.port); }
 ```
-
-This makes code-smell easy to detect. If you see `shared:locked` or `alwaysMutable` being passed around excessively, it's a sign that you should be unwrapping at the call site instead.
 
 ---
 
 ## Functions
 
 ### Definition
-```
-FN add(a, b) ->
+```clear
+FN add(a: Int64, b: Int64) RETURNS Int64 ->
   RETURN a + b;
 END
 ```
 
-### UpValues (Closures)
-Functions must explicitly declare captured variables:
-```
-x = 5;
-FN readOnly() USE(x) ->
-  PRINT(x);
+### Mutation Suffix `!`
+Functions that take MUTABLE parameters must use the `!` suffix:
+```clear
+-- ILLUSTRATIVE
+FN increment!(MUTABLE counter: Counter) RETURNS Void ->
+  counter.value = counter.value + 1;
+  RETURN;
 END
 ```
 
-### Mutation Suffix `!`
-Functions that mutate their parameters use the `!` suffix:
+### Ownership Transfer: `TAKES` and `GIVE`
+CLEAR uses affine types by default — each value has one owner. To transfer ownership into a function, the parameter is marked `TAKES` and the caller uses `GIVE`:
+
+```clear
+-- ILLUSTRATIVE
+FN consume(TAKES u: User) RETURNS Void ->
+  -- This function now owns 'u'
+  print(u.name);
+  RETURN;
+END
+
+u = User{ name: "Alice" };
+consume(GIVE u);              -- Ownership transferred
+-- u is no longer usable here
 ```
-FN increment!(MUTABLE counter) ->
-  counter = counter + 1;
+
+Note: `GIVE` is required at the call site to make ownership transfer visible to the reader.
+
+### Recursion
+Recursive functions must be explicitly annotated:
+```clear
+FN fib(n: Int64) RETURNS Int64 @reentrant ->
+  IF n <= 1 THEN RETURN n; END
+  RETURN fib(n - 1) + fib(n - 2);
 END
 ```
 
@@ -176,30 +181,40 @@ END
 
 ## Collections
 
-### Arrays
-In CLEAR, arrays are optimized automatically. You do not need a sigil to distinguish between stack and heap; the compiler handles it.
-
+### Arrays (Fixed-Size)
+```clear
+MUTABLE scores: Int64[5] = [10, 20, 30, 40, 50];
+x = scores[2];               -- 30
+scores[0] = 99;              -- Mutation via index
 ```
--- Fixed-size immutable array
-coords = [1, 2, 3];
 
--- Dynamic mutable array
-MUTABLE items = [1, 2, 3];
-items.push!(4);               -- OK
+### Lists (Dynamic)
+```clear
+MUTABLE items = List[];
+append(items, "Alice");
+append(items, "Bob");
+```
+
+### Pools (Generational Handles)
+```clear
+-- ILLUSTRATIVE
+MUTABLE pool: Entity[]@pool = [];
+id = pool.insert(Entity{ x: 0.0, y: 0.0 });
+entity = pool.get(id);       -- O(1) lookup, generation-checked
 ```
 
 ### Structs
-```
+```clear
 STRUCT Point {
   x: Float64,
   y: Float64
 }
 
--- Recursive structures use 'indirect'
+-- Recursive structures use @indirect
 STRUCT Node {
   value: Int64,
-  left: indirect Node,
-  right: indirect Node
+  left: Node @indirect,
+  right: Node @indirect
 }
 ```
 
@@ -209,38 +224,25 @@ STRUCT Node {
 
 In Rust, lifetimes are globally tracked and can create "hidden poison" in mutable inputs. In CLEAR, lifetimes are **strictly local** to the function they occur in.
 
-### 1. The Local-Only Rule
+### The Local-Only Rule
 
 Lifetimes in CLEAR:
-- Cannot cross thread boundaries.
+- Cannot cross fiber boundaries.
 - Cannot be passed into async functions or callbacks.
 - Only exist within the scope of the calling function.
 
-This eliminates "spooky action at a distance" where an async task holds onto a borrow, preventing you from mutating it later.
+This eliminates "spooky action at a distance" where an async task holds onto a borrow, preventing mutation later.
 
-### 2. No Poison for Immutable Objects
+### No Poison for Immutable Objects
 
-In Rust, even a read-only borrow of an immutable object can prevent mutation later (if the input was mutable). In CLEAR, >90% of objects are immutable and thus **never** require lifetime tracking.
+In Rust, even a read-only borrow of an immutable object can prevent mutation later. In CLEAR, >90% of objects are immutable and thus **never** require lifetime tracking.
 
-### 3. Explicit Path-Based Scoping
-
-In Rust, a lifetime annotation like `'a` is often opaque. In CLEAR, you explicitly link a returned reference to its source path.
-
-```CLEAR
--- CLEAR: Path is explicitly linked to the source field
-FN grandChild(n: Node) -> n.child::Node
-  RETURN n.child.child;
-END
-
--- Rust (for comparison): Opaque lifetime symbol 'a
--- fn grandChild<'a>(&'a n: Node) -> &'a Node { ... }
-```
-
-### 4. `WITH RESTRICT` for Mutable Scopes
+### `WITH RESTRICT` for Mutable Scopes
 
 If you borrow from a mutable object, it becomes "poisoned" (restricted). This is explicitly scoped using `WITH RESTRICT`.
 
-```CLEAR
+```clear
+-- ILLUSTRATIVE
 MUTABLE node = buildTree();
 
 WITH RESTRICT node.child {
@@ -253,70 +255,133 @@ WITH RESTRICT node.child {
 -- 'node.child' is mutable again here.
 ```
 
-### 5. `GIVE` and `TAKES` (Ownership)
-
-CLEAR uses affine types by default. Passing an object to a function "borrows" it unless the function explicitly `TAKES` it.
-
-```CLEAR
-FN saveUser(TAKES u: User) ->
-  -- This function now owns 'u'
-END
-
-u = User.new();
-saveUser(GIVE u);             -- Explicitly move ownership
--- u is now dead here
-```
-
 ---
-
 
 ## Error Handling
 
+### Automatic Error Propagation
+The compiler automatically propagates errors for you. If you call a function that can fail and don't handle the error, the compiler inserts error propagation:
+
+```clear
+-- ILLUSTRATIVE
+FN compute(x: Float64) RETURNS !Float64 ->
+    half = divide(x, 2.0);      -- auto-propagates if divide fails
+    RETURN half * 2.0;
+END
+```
+
 ### The `OR` Operator
-CLEAR handles errors via control flow, keeping the "Happy Path" clear.
+When you want to *handle* an error instead of propagating:
 
-```
-val = fetchData() OR RAISE;
-name = getName() OR "Guest";
+```clear
+-- ILLUSTRATIVE
+val = divide(10.0, 0.0) OR 0.0;   -- Fallback value
+name = getName() OR RAISE;         -- Explicit propagation
+result = risky() OR PASS;          -- Silence (use with caution)
 ```
 
-### The `!!` Operator
-Used for explicit panics:
-```
-item = list.get(idx)!!;       -- Panic if out of bounds
+### Error Unions (`!T`)
+Functions that can fail declare it in their return type:
+
+```clear
+-- ILLUSTRATIVE
+FN divide(a: Float64, b: Float64) RETURNS !Float64 ->
+    IF b == 0.0 THEN
+        RAISE "Division by zero";
+    END
+    RETURN a / b;
+END
 ```
 
 ---
 
 ## Concurrency
 
-### `SPAWN` and `PARALLEL`
-CLEAR achieves parallelism via isolated processes.
+### BG — Background Fibers
+Spawn a fiber that runs concurrently:
 
-```
-PARALLEL FOR item IN data ->
-  process(item);
-END
+```clear
+-- ILLUSTRATIVE
+p = BG { expensive_computation(data); };
+-- ... do other work ...
+result = NEXT p;  -- Block until the fiber finishes
 ```
 
-For shared state, use the `shared` capability or `shared:atomic`:
+Modifiers control stack size and scheduling:
+
+| Modifier | Effect |
+|---|---|
+| `@micro` | 4 KB stack |
+| `@standard` | 16 KB stack (default) |
+| `@large` | 64 KB stack |
+| `@xl` | 256 KB stack |
+| `@pinned` | Pin to local scheduler (no work stealing) |
+| `@arena` | Thread-local arena allocation; implies @pinned |
+
+### DO — Fork-Join
+
+```clear
+-- ILLUSTRATIVE
+DO {
+    update_database(record),
+    send_notification(user),
+    log_event(event)
+}
+-- All three are done here.
 ```
-counter = SHARE:atomic(0);      -- Atomic shared across threads
-counter.increment!();
+
+### CONCURRENT — Parallel Pipelines
+
+```clear
+-- ILLUSTRATIVE
+results = items s> CONCURRENT(workers: 8) SELECT transform(_);
+filtered = items s> CONCURRENT(workers: 4) WHERE predicate(_);
+items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
+```
+
+### Shared State
+For cross-fiber shared state, use capabilities:
+
+```clear
+-- ILLUSTRATIVE
+counter = Counter{ value: 0 } @shared:locked;
+
+BG { WITH EXCLUSIVE counter AS c { c.value = c.value + 1; } };
+BG { WITH EXCLUSIVE counter AS c { c.value = c.value + 1; } };
 ```
 
 ---
 
-## Streams and Pipelines
+## Pipelines
 
-### SMOOTH Operator `s>`
-The `s>` operator is a "Safe, Smooth, Smart" pipe that manages unwrapping and error bubbling.
+### The Smooth Operator `s>`
+The `s>` operator pipes values through higher-order functions and collection operators:
 
+```clear
+-- ILLUSTRATIVE
+-- Filter, aggregate
+alive = entities s> WHERE _.health > 0;
+total = scores s> SUM _.value;
+names = users s> SELECT _.name;
+
+-- In-place mutation
+entities s> EACH { _.x = _.x + _.vx; };
 ```
-result = data
-  s> filter(%(x) -> x > 5)
-  s> map(%(x) -> x * 2)
-  s> sum();
+
+### Pipeline Operators
+
+| Category | Operators |
+|---|---|
+| **Transform** | `SELECT`, `WHERE`, `ORDER_BY`, `LIMIT`, `DISTINCT`, `UNNEST`, `INDEX` |
+| **Aggregate** | `SUM`, `AVERAGE`, `MIN`, `MAX`, `REDUCE`, `COUNT`, `ANY`, `ALL`, `FIND` |
+| **Side Effects** | `EACH` |
+
+### Function Piping
+`s>` also pipes to functions:
+
+```clear
+-- ILLUSTRATIVE
+result = data s> process s> validate s> format;
 ```
 
 ---
@@ -326,33 +391,38 @@ result = data
 ### Arena Allocation
 Every function has its own memory arena. Variables live as long as the function they were born in.
 
+- **Stack** (~0ns): Primitives and small structs (≤ 128 slots)
+- **Frame Arena** (~2ns): Large structs, temporary buffers
+- **Heap** (~60ns): Dynamic collections, cross-fiber data, Rc/Arc
+
 ### Escaping the Arena
-- `RETURN`: Values are moved or copied to the caller's arena.
+- `RETURN`: Values are copied by value to the caller's arena (RVO eliminates the copy when possible).
 - `GIVE`: Ownership is transferred.
-- `shared` / `multiowned`: Reference-counted objects that live as long as they are needed.
+- `@shared` / `@multiowned`: Reference-counted objects that live as long as they are needed.
 
 ---
 
 ## Quick Reference: Capabilities
 
-| Keyword | Purpose |
-|---------|---------|
-| `multiowned` | Single-threaded shared ownership (Rc) |
-| `shared` | Multi-threaded shared ownership (Arc) |
-| `alwaysMutable` | Interior Mutability (Cell/RefCell) |
-| `read` | Syncronization without blocking (MVCC) |
-| `locked` | Syncronization *ALWAYS* blocking (Mutex) |
-| `writeLocked` | Syncronization blocking only to write (RwLock) |
-| `indirect` | Explicit heap allocation (Box) |
-| `Linear` | Must be consumed (Linear types) |
+| Annotation | Purpose |
+|---|---|
+| `@multiowned` | Single-threaded shared ownership (Rc) |
+| `@shared` | Multi-threaded shared ownership (Arc) |
+| `@shared:locked` | Arc + Mutex |
+| `@shared:writeLocked` | Arc + RwLock |
+| `@locked` | Mutex (single-scheduler) |
+| `@writeLocked` | RwLock (single-scheduler) |
+| `@local` | Thread-local heap pointer |
+| `@indirect` | Explicit heap allocation (Box) |
 
 ## Quick Reference: Sigils
 
 | Sigil | Meaning | Example |
-|-------|---------|---------|
-| `&` | Borrow memory | `&data[1..10]` |
-| `@` | Pipeline binding | `s> process AS @p` |
-| `!` | Mutation suffix | `list.push!(item)` |
-| `?` | Predicate suffix | `list.exists?(item)` |
-| `!!` | Panic on error | `data.get(i)!!` |
-| `_` | Placeholder | `s> SELECT _.name` |
+|---|---|---|
+| `@` | Capability / pipeline binding | `value @shared`, `s> process AS @p` |
+| `!` | Mutation suffix | `FN increment!(...)` |
+| `s>` | Smooth operator (pipeline) | `items s> WHERE _ > 5` |
+| `_` | Pipeline element placeholder | `s> SELECT _.name` |
+| `!T` | Error union type | `RETURNS !Float64` |
+| `?T` | Optional type | `RETURNS ?User` |
+| `~T` | Promise / stream type | `p: ~Int64 = BG { 42; }` |
