@@ -2,13 +2,13 @@
 -- Functions take plain Types — the caller handles unwrapping.
 -- A single function must accept stack, @indirect, and @local structs.
 
-STRUCT Point { x: Number, y: Number }
+STRUCT Point { x: Float64, y: Float64 }
 
-FN sum(p: Point) RETURNS Number ->
+FN sum(p: Point) RETURNS Float64 ->
     RETURN p.x + p.y;
 END
 
-FN scale(p: Point, factor: Number) RETURNS Point ->
+FN scale(p: Point, factor: Float64) RETURNS Point ->
     RETURN Point{ x: p.x * factor, y: p.y * factor };
 END
 

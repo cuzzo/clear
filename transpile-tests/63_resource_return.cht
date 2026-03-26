@@ -1,0 +1,15 @@
+-- Test: Returning a File resource (RAII regression test)
+-- The file should NOT be closed when returned.
+
+FN openFile(path: String) RETURNS File ->
+    f = File::open(path);
+    RETURN f;
+END
+
+FN cheatMain() RETURNS Void ->
+    f = openFile("testdata/fruits.csv");
+    -- If f was closed by the defer in openFile, this readAll will fail.
+    contents = fileReadAll(f);
+    ASSERT contents.length() > 0, "File should be readable after return";
+    RETURN;
+END

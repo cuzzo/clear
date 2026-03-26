@@ -1,11 +1,11 @@
 -- MATCH IFF on unions with AS payload capture
 -- Regular MATCH: partial coverage allowed
 
-UNION Shape { Circle: Number, Rectangle: Number, Point }
-UNION Result { Ok: Number, Err: Number, Empty }
+UNION Shape { Circle: Float64, Rectangle: Float64, Point }
+UNION Result { Ok: Float64, Err: Float64, Empty }
 UNION Option<T> { Some: T, None }
 
-FN area(s: Shape) RETURNS Number ->
+FN area(s: Shape) RETURNS Float64 ->
   MUTABLE a = 0.0;
   MATCH IFF s START
     Shape.Circle    AS r -> a = r * 3.14;,
@@ -15,7 +15,7 @@ FN area(s: Shape) RETURNS Number ->
   RETURN a;
 END
 
-FN unwrap_ok(r: Result) RETURNS Number ->
+FN unwrap_ok(r: Result) RETURNS Float64 ->
   MUTABLE val = 0.0;
   MATCH IFF r START
     Result.Ok    AS v -> val = v;,
@@ -50,7 +50,7 @@ FN cheatMain() RETURNS Void ->
 
   -- MATCH IFF inline with AS capture on generic union
   MUTABLE got = 0.0;
-  opt = Option<Number>{ Some: 99.0 };
+  opt = Option<Float64>{ Some: 99.0 };
   MATCH IFF opt START
     Option.Some AS x -> got = x;,
     Option.None      -> got = -1.0;
@@ -58,7 +58,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT got == 99.0, "Option.Some AS x: extracts payload";
 
   MUTABLE got2 = 0.0;
-  none_val = Option<Number>{ Some: 0.0 };
+  none_val = Option<Float64>{ Some: 0.0 };
   MATCH IFF none_val START
     Option.Some AS x -> got2 = x;,
     Option.None      -> got2 = -1.0;

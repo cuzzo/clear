@@ -1,5 +1,5 @@
 -- Test: CONCURRENT EACH — parallel side-effect iteration
-STRUCT Counter { value: Number }
+STRUCT Counter { value: Float64 }
 
 FN cheatMain() RETURNS Void ->
     MUTABLE items: Counter[]@list = [];

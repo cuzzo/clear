@@ -6,7 +6,7 @@
 --   Produces a permutation of [0, N-1].
 --
 -- Both algorithms are in-place (or near-in-place for mergesort with external buffer).
--- Function parameters use plain Number[] (slice) — CLEAR auto-converts @list to slice
+-- Function parameters use plain Float64[] (slice) — CLEAR auto-converts @list to slice
 -- at the call site via CheatLib's @hasField comptime check.
 --
 -- Key optimizations active:
@@ -17,7 +17,7 @@
 
 -- Iterative Lomuto quicksort over a plain slice.
 -- The `!` suffix marks a function with MUTABLE parameters (CLEAR convention).
-FN qsort!(MUTABLE arr: Number[], n: Int64) RETURNS Void ->
+FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS Void ->
   -- Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
   -- Using @list so both stacks live in the frame arena; trivially freed on exit.
   MUTABLE lo_stk: Int64[]@list = [];
@@ -70,8 +70,8 @@ FN qsort!(MUTABLE arr: Number[], n: Int64) RETURNS Void ->
 END
 
 -- Bottom-up iterative mergesort.
--- arr and tmp are both plain slices (Number[]); no allocation inside this function.
-FN msort!(MUTABLE arr: Number[], MUTABLE tmp: Number[], n: Int64) RETURNS Void ->
+-- arr and tmp are both plain slices (Float64[]); no allocation inside this function.
+FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void ->
   MUTABLE width = 1_i64;
   -- TIGHT: all loops here are pure compare/copy, no allocation.
   TIGHT WHILE width < n DO
@@ -114,7 +114,7 @@ FN cheatMain() RETURNS Void ->
   n = 1000000_i64;
 
   -- Build data: permutation of [0, N-1] via Knuth multiplicative hash
-  MUTABLE arr: Number[]@list = [];
+  MUTABLE arr: Float64[]@list = [];
   MUTABLE seed_i = 0_i64;
   WHILE seed_i < n DO
     v = seed_i * 2654435761_i64 MOD n + 0.0;
@@ -137,7 +137,7 @@ FN cheatMain() RETURNS Void ->
   END
 
   -- Mergesort (needs a temp buffer of the same size)
-  MUTABLE tmp_arr: Number[]@list = [];
+  MUTABLE tmp_arr: Float64[]@list = [];
   MUTABLE ti = 0_i64;
   WHILE ti < n DO
     append(tmp_arr, 0.0);

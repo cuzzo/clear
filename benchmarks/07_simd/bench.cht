@@ -48,20 +48,20 @@
 --   potential ceiling is 4× (or 8× with float32) for pure compute loops.
 
 STRUCT Vec4 {
-    x: Number,
-    y: Number,
-    z: Number,
-    w: Number
+    x: Float64,
+    y: Float64,
+    z: Float64,
+    w: Float64
 }
 
 -- Scalar dot product: 4 fmul + 3 fadd.
 -- No SIMD equivalent exists in CLEAR today.
-FN dot4(a: Vec4, b: Vec4) RETURNS Number @reentrant ->
+FN dot4(a: Vec4, b: Vec4) RETURNS Float64 @reentrant ->
     RETURN a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
 END
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE sum: Number = 0.0;
+    MUTABLE sum: Float64 = 0.0;
     MUTABLE i = 0_i64;
     WHILE i < 100000000 DO
         a = Vec4{ x: i+0.0, y: i+1.0, z: i+2.0, w: i+3.0 };

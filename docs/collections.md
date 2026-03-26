@@ -150,7 +150,7 @@ By default, collections store elements as **Array of Structures** (AOS): each el
 The `:soa` capability switches to **Structure of Arrays** layout: each field gets its own contiguous array. A pipeline that touches one field iterates a dense, cache-friendly slice.
 
 ```clear
-STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number, mana: Number, name: String, level: Number }
+STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
 
 -- AOS (default): each entity is 8 fields × 8 bytes = 64 bytes per cache line.
 -- SUM _.health loads all 8 fields but uses only 1 — 87.5% wasted bandwidth.
@@ -200,7 +200,7 @@ Same API as their non-SOA counterparts. The difference is invisible except in pi
 Lists, pools, and hash maps all support sharding for parallel access:
 
 ```clear
-MUTABLE data: Number[]@list:sharded(4) = [];
+MUTABLE data: Float64[]@list:sharded(4) = [];
 MUTABLE entities: Enemy[]@pool:sharded(4) = [];
 MUTABLE counts: HashMap<Int64>:sharded(4) = {};
 ```

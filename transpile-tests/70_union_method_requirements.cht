@@ -3,16 +3,16 @@
 -- the compiler verifies that matching top-level functions exist.
 
 UNION Shape {
-  Circle    { radius: Number },
-  Rectangle { width: Number, height: Number },
+  Circle    { radius: Float64 },
+  Rectangle { width: Float64, height: Float64 },
   Point,
 
-  FN area(s: Shape) RETURNS Number,
-  FN perimeter(s: Shape) RETURNS Number
+  FN area(s: Shape) RETURNS Float64,
+  FN perimeter(s: Shape) RETURNS Float64
 }
 
 -- Satisfy both method requirements with concrete implementations.
-FN area(s: Shape) RETURNS Number ->
+FN area(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
   MATCH IFF s START
     Shape.Circle    AS ci -> result = 3.14159 * ci.radius * ci.radius;,
@@ -22,7 +22,7 @@ FN area(s: Shape) RETURNS Number ->
   RETURN result;
 END
 
-FN perimeter(s: Shape) RETURNS Number ->
+FN perimeter(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
   MATCH IFF s START
     Shape.Circle    AS ci -> result = 2.0 * 3.14159 * ci.radius;,

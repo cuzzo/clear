@@ -30,10 +30,10 @@
 -- CLEAR: frame arena + per-loop rewind — 0 GPA calls in the hot path.
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE total: Number = 0.0;
+    MUTABLE total: Float64 = 0.0;
     MUTABLE outer = 0_i64;
     WHILE outer < 1000 DO
-        MUTABLE vals: Number[]@list = [];
+        MUTABLE vals: Float64[]@list = [];
         MUTABLE inner = 0_i64;
         WHILE inner < 1000 DO
             append(vals, inner + 0.0);

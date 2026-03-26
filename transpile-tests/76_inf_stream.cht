@@ -6,17 +6,17 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Infinite counter stream — consume first 3 values.
     -- -------------------------------------------------------
-    counter: ~Number[INF] = BG STREAM {
-        MUTABLE i: Number = 0.0;
+    counter: ~Float64[INF] = BG STREAM {
+        MUTABLE i: Float64 = 0.0;
         WHILE TRUE DO
             YIELD i;
             i = i + 1.0;
         END
     };
 
-    v1: Number = NEXT counter;
-    v2: Number = NEXT counter;
-    v3: Number = NEXT counter;
+    v1: Float64 = NEXT counter;
+    v2: Float64 = NEXT counter;
+    v3: Float64 = NEXT counter;
 
     ASSERT v1 == 0.0, "inf stream: first value is 0";
     ASSERT v2 == 1.0, "inf stream: second value is 1";
@@ -25,17 +25,17 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 2: Stream with captured variable.
     -- -------------------------------------------------------
-    base: Number = 10.0;
-    multiplier: ~Number[INF] = BG STREAM {
-        MUTABLE j: Number = 1.0;
+    base: Float64 = 10.0;
+    multiplier: ~Float64[INF] = BG STREAM {
+        MUTABLE j: Float64 = 1.0;
         WHILE TRUE DO
             YIELD base * j;
             j = j + 1.0;
         END
     };
 
-    u1: Number = NEXT multiplier;
-    u2: Number = NEXT multiplier;
+    u1: Float64 = NEXT multiplier;
+    u2: Float64 = NEXT multiplier;
 
     ASSERT u1 == 10.0, "inf stream with capture: first value";
     ASSERT u2 == 20.0, "inf stream with capture: second value";

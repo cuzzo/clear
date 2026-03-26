@@ -5,7 +5,7 @@ ENUM Color { Red, Green, Blue }
 ENUM Direction { North, South, East, West }
 ENUM Bit { Zero, One }
 
-FN color_name(c: Color) RETURNS Number ->
+FN color_name(c: Color) RETURNS Float64 ->
   MUTABLE n = 0_i64;
   MATCH IFF c START
     Color.Red   -> n = 1_i64;,
@@ -15,7 +15,7 @@ FN color_name(c: Color) RETURNS Number ->
   RETURN n;
 END
 
-FN direction_code(d: Direction) RETURNS Number ->
+FN direction_code(d: Direction) RETURNS Float64 ->
   MUTABLE code = 0_i64;
   MATCH IFF d START
     Direction.North -> code = 1_i64;,

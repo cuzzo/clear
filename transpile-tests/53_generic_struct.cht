@@ -6,21 +6,21 @@ STRUCT Wrapper<T> { value: T }
 STRUCT KeyValue<K, V> { key: K, value: V }
 
 -- Phase 2: generic types in function signatures compile to correct Zig.
-FN identity(p: Pair<Number>) RETURNS Pair<Number> ->
+FN identity(p: Pair<Float64>) RETURNS Pair<Float64> ->
   RETURN p;
 END
 
-FN wrapNumber(n: Number) RETURNS Wrapper<Number> ->
-  RETURN Wrapper<Number>{ value: n };
+FN wrapNumber(n: Float64) RETURNS Wrapper<Float64> ->
+  RETURN Wrapper<Float64>{ value: n };
 END
 
 FN cheatMain() RETURNS Void ->
   -- Phase 3: generic struct literals with type args.
-  p = Pair<Number>{ first: 1.0, second: 2.0 };
+  p = Pair<Float64>{ first: 1.0, second: 2.0 };
   ASSERT p.first == 1.0;
   ASSERT p.second == 2.0;
 
-  w = Wrapper<Number>{ value: 42.0 };
+  w = Wrapper<Float64>{ value: 42.0 };
   ASSERT w.value == 42.0;
 
   -- Round-trip through a function
@@ -28,12 +28,12 @@ FN cheatMain() RETURNS Void ->
   ASSERT w2.value == 99.0;
 
   -- Multi-param generic
-  kv = KeyValue<Number, Bool>{ key: 7.0, value: TRUE };
+  kv = KeyValue<Float64, Bool>{ key: 7.0, value: TRUE };
   ASSERT kv.key == 7.0;
   ASSERT kv.value == TRUE;
 
   -- identity round-trip
-  orig = Pair<Number>{ first: 3.0, second: 4.0 };
+  orig = Pair<Float64>{ first: 3.0, second: 4.0 };
   copy = identity(orig);
   ASSERT copy.first == 3.0;
   ASSERT copy.second == 4.0;

@@ -83,7 +83,7 @@ The compiler only uses the heap when it must. The vast majority of variables sta
 The annotator walks the AST and assigns storage based on type properties:
 
 ```
-Is it a primitive (Number, Int64, Bool, Byte)?
+Is it a primitive (Float64, Int64, Bool, Byte)?
   → stack (always, no exceptions)
 
 Is it a dynamic collection (@list, @pool, HashMap)?

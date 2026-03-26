@@ -4,15 +4,15 @@
 -- FN        -> emits `fn` in Zig (package-private, same directory)
 -- PRIVATE FN -> emits `fn` in Zig (private, not importable even within directory)
 
-PUB FN publicAdd(a: Number, b: Number) RETURNS Number ->
+PUB FN publicAdd(a: Float64, b: Float64) RETURNS Float64 ->
   RETURN a + b;
 END
 
-FN packageHelper(x: Number) RETURNS Number ->
+FN packageHelper(x: Float64) RETURNS Float64 ->
   RETURN x * 2;
 END
 
-PRIVATE FN privateImpl(x: Number) RETURNS Number ->
+PRIVATE FN privateImpl(x: Float64) RETURNS Float64 ->
   RETURN x + 99;
 END
 

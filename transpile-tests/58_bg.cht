@@ -3,14 +3,14 @@
 
 FN cheatMain() RETURNS Void ->
     -- Simple case: BG block with a literal result.
-    p: ~Number = BG { 42.0; };
-    result: Number = NEXT p;
+    p: ~Float64 = BG { 42.0; };
+    result: Float64 = NEXT p;
     ASSERT result == 42.0, "BG block: simple literal result";
 
     -- Capture an outer variable by value into the fiber.
-    x: Number = 7.0;
-    q: ~Number = BG { x + 1.0; };
-    result2: Number = NEXT q;
+    x: Float64 = 7.0;
+    q: ~Float64 = BG { x + 1.0; };
+    result2: Float64 = NEXT q;
     ASSERT result2 == 8.0, "BG block: captures outer variable by value";
 
     RETURN;

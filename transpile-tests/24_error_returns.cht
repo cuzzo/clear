@@ -3,8 +3,8 @@
 -- This demonstrates !T error union types
 -- ==========================================
 
--- A function that can fail, returning !Number
-FN divide(a: Number, b: Number) RETURNS !Number ->
+-- A function that can fail, returning !Float64
+FN divide(a: Float64, b: Float64) RETURNS !Float64 ->
   IF b == 0 THEN
     RAISE "Division by zero";
   END
@@ -12,20 +12,20 @@ FN divide(a: Number, b: Number) RETURNS !Number ->
 END
 
 -- Using OR with a default value: !T OR val -> T
-FN safe_divide(a: Number, b: Number) RETURNS Number ->
+FN safe_divide(a: Float64, b: Float64) RETURNS Float64 ->
   result = divide(a, b) OR 0;
   RETURN result;
 END
 
 -- Using OR RAISE to bubble up errors (like Zig's `try`)
-FN compute(x: Number) RETURNS !Number ->
+FN compute(x: Float64) RETURNS !Float64 ->
   half = divide(x, 2) OR RAISE;
   quarter = divide(half, 2) OR RAISE;
   RETURN quarter;
 END
 
 -- Using OR PASS to ignore errors (use undefined)
-FN maybe_compute(x: Number) RETURNS Number ->
+FN maybe_compute(x: Float64) RETURNS Float64 ->
   result = divide(x, 0) OR PASS;
   RETURN 42;
 END

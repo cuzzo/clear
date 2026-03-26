@@ -2,7 +2,7 @@
 -- Exercises sharded pool declarations, round-robin insert/get/remove/count,
 -- EACH iteration over both array/list and sharded pools.
 
-STRUCT Score { value: Number }
+STRUCT Score { value: Float64 }
 
 FN cheatMain() RETURNS Void ->
     -- @pool:sharded(4): 4 independent Pool(Score) shards behind a single interface

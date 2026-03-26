@@ -1,7 +1,7 @@
 -- Test: CONCURRENT edge cases
-STRUCT Item { value: Number }
+STRUCT Item { value: Float64 }
 
-FN triple(item: Item) RETURNS Number ->
+FN triple(item: Item) RETURNS Float64 ->
     RETURN item.value * 3.0;
 END
 

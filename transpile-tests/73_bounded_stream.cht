@@ -2,11 +2,11 @@
 -- NEXT consumes items in spawn order (FIFO). Calling NEXT on the same stream
 -- variable N times returns the N results; the Nth+1 call panics at runtime.
 
-FN double(x: Number) RETURNS Number ->
+FN double(x: Float64) RETURNS Float64 ->
     RETURN x * 2.0;
 END
 
-FN add(a: Number, b: Number) RETURNS Number ->
+FN add(a: Float64, b: Float64) RETURNS Float64 ->
     RETURN a + b;
 END
 
@@ -14,15 +14,15 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Basic bounded stream — 3 concurrent BG fibers.
     -- -------------------------------------------------------
-    stream: ~Number[3] = [
+    stream: ~Float64[3] = [
         BG { 10.0; },
         BG { 20.0; },
         BG { 30.0; }
     ];
 
-    r0: Number = NEXT stream;
-    r1: Number = NEXT stream;
-    r2: Number = NEXT stream;
+    r0: Float64 = NEXT stream;
+    r1: Float64 = NEXT stream;
+    r2: Float64 = NEXT stream;
 
     ASSERT r0 == 10.0, "bounded stream item 0";
     ASSERT r1 == 20.0, "bounded stream item 1";
@@ -32,16 +32,16 @@ FN cheatMain() RETURNS Void ->
     -- Test 2: Stream with captured outer variables.
     -- Each BG block captures its own snapshot of outer vars.
     -- -------------------------------------------------------
-    base: Number = 5.0;
-    factor: Number = 3.0;
+    base: Float64 = 5.0;
+    factor: Float64 = 3.0;
 
-    work: ~Number[2] = [
+    work: ~Float64[2] = [
         BG { double(base); },
         BG { add(base, factor); }
     ];
 
-    w0: Number = NEXT work;
-    w1: Number = NEXT work;
+    w0: Float64 = NEXT work;
+    w1: Float64 = NEXT work;
 
     ASSERT w0 == 10.0, "bounded stream: captured double(5)";
     ASSERT w1 == 8.0,  "bounded stream: captured add(5, 3)";
@@ -49,10 +49,10 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 3: Single-element stream (degenerate case).
     -- -------------------------------------------------------
-    solo: ~Number[1] = [
+    solo: ~Float64[1] = [
         BG { 99.0; }
     ];
-    s0: Number = NEXT solo;
+    s0: Float64 = NEXT solo;
     ASSERT s0 == 99.0, "single-element bounded stream";
 
     RETURN;

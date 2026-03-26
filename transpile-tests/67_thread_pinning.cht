@@ -1,7 +1,7 @@
 -- Test: Phase 5 Thread Pinning and Pool/Sharded-List Pipeline Ops
 -- Exercises DO { @pinned -> expr } syntax and pipeline ops on @pool / @list:sharded.
 
-STRUCT Item { value: Number }
+STRUCT Item { value: Float64 }
 
 FN noop() RETURNS Void ->
     RETURN;
@@ -62,7 +62,7 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------
     -- 3. @list:sharded pipeline operators
     -- -------------------------
-    MUTABLE slist: Number[]@list:sharded(2) = [];
+    MUTABLE slist: Float64[]@list:sharded(2) = [];
     append(slist, 1.0);
     append(slist, 2.0);
     append(slist, 3.0);

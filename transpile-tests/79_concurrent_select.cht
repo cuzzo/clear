@@ -1,7 +1,7 @@
 -- Test: CONCURRENT SELECT — parallel transform with workers backpressure
-STRUCT Work { value: Number }
+STRUCT Work { value: Float64 }
 
-FN double(w: Work) RETURNS Number ->
+FN double(w: Work) RETURNS Float64 ->
     RETURN w.value * 2.0;
 END
 

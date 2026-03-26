@@ -12,7 +12,7 @@
 --   CLEAR Numeric/f64        | ~110 ms    |  ~65 ms   | ~175 ms    |  0.50×  ← faster than C!
 --   CLEAR Numeric/i64        | ~110 ms    |  ~58 ms   | ~168 ms    |  0.48×  ← faster than C!
 --
--- This benchmark exercises the numeric-key fast path: HashMap<Int64, Number>.
+-- This benchmark exercises the numeric-key fast path: HashMap<Int64, Float64>.
 --   - No key duplication (integers passed by value)
 --   - Single frameAlloc for the bucket array (no GPA lock contention)
 --   - AutoHashMapUnmanaged with integer comparison (~1 ns vs string hash+strcmp ~5 ns)
@@ -26,7 +26,7 @@
 -- On function return the arena is rewound — zero GPA free calls in the hot path.
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE m: HashMap<Int64, Number> = {};
+    MUTABLE m: HashMap<Int64, Float64> = {};
 
     -- Insert phase: 1M numeric key-value pairs
     MUTABLE i = 0_i64;

@@ -28,7 +28,7 @@ FN firstOf<T>(p: Pair<T>) RETURNS T ->
 END
 
 FN cheatMain() RETURNS Void ->
-  -- identity with Number
+  -- identity with Float64
   n = identity(42.0);
   ASSERT n == 42.0;
 
@@ -47,7 +47,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT val == 99.0;
 
   -- firstOf extracts typed field from generic struct
-  pair = Pair<Number>{ first: 3.0, second: 4.0 };
+  pair = Pair<Float64>{ first: 3.0, second: 4.0 };
   f = firstOf(pair);
   ASSERT f == 3.0;
 END

@@ -3,18 +3,18 @@
 -- without requiring a separate STRUCT definition.
 
 UNION Shape {
-  Circle    { radius: Number },
-  Rectangle { width: Number, height: Number },
+  Circle    { radius: Float64 },
+  Rectangle { width: Float64, height: Float64 },
   Point
 }
 
 UNION Event {
-  Click    { x: Number, y: Number },
-  KeyPress { code: Number },
+  Click    { x: Float64, y: Float64 },
+  KeyPress { code: Float64 },
   Quit
 }
 
-FN classify(s: Shape) RETURNS Number ->
+FN classify(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
   MATCH IFF s START
     Shape.Circle    -> result = 1.0;,
@@ -26,7 +26,7 @@ END
 
 -- Exhaustive match with payload capture — subject is a function parameter
 -- so Zig's compile-time analysis cannot statically prove the active tag.
-FN extract_radius(s: Shape) RETURNS Number ->
+FN extract_radius(s: Shape) RETURNS Float64 ->
   MUTABLE r = 0.0;
   MATCH IFF s START
     Shape.Circle    AS ci -> r = ci.radius;,
@@ -36,7 +36,7 @@ FN extract_radius(s: Shape) RETURNS Number ->
   RETURN r;
 END
 
-FN extract_event_x(ev: Event) RETURNS Number ->
+FN extract_event_x(ev: Event) RETURNS Float64 ->
   MUTABLE x = 0.0;
   MATCH IFF ev START
     Event.Click    AS click -> x = click.x;,

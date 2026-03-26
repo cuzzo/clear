@@ -16,7 +16,7 @@
 --   buildList creates a local BigS (triggering uses_frame=true) and also builds a list.
 --   cheatMain calls buildList() and verifies the returned list contains correct values.
 
-STRUCT Chunk5 { a: Number, b: Number, c: Number, d: Number, e: Number }
+STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
 STRUCT BigS {
   c1:  Chunk5, c2:  Chunk5, c3:  Chunk5, c4:  Chunk5, c5:  Chunk5,
   c6:  Chunk5, c7:  Chunk5, c8:  Chunk5, c9:  Chunk5, c10: Chunk5,
@@ -29,7 +29,7 @@ STRUCT BigS {
 -- buildList creates a large local struct (→ frame arena, uses_frame=true)
 -- and returns a @list built from it.  The compiler must emit promoteList
 -- to copy the list's arena buffer to heap before the frame mark rewinds.
-FN buildList() RETURNS Number[]@list ->
+FN buildList() RETURNS Float64[]@list ->
   zero:  Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
   first: Chunk5 = Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 };
   big: BigS = BigS{
@@ -40,7 +40,7 @@ FN buildList() RETURNS Number[]@list ->
     c21: zero,  c22: zero, c23: zero, c24: zero, c25: zero,
     c26: zero
   };
-  MUTABLE vals: Number[]@list = [];
+  MUTABLE vals: Float64[]@list = [];
   append(vals, big.c1.a);
   append(vals, big.c1.b);
   append(vals, big.c1.c);

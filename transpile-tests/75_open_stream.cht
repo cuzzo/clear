@@ -2,7 +2,7 @@
 -- BG STREAM { YIELD x; } spawns a generator fiber that buffers values.
 -- NEXT blocks until the generator completes, then pops one value per call.
 
-FN generate_squares(n: Number) RETURNS Number ->
+FN generate_squares(n: Float64) RETURNS Float64 ->
     RETURN n * n;
 END
 
@@ -10,16 +10,16 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Simple number stream with three YIELD statements.
     -- -------------------------------------------------------
-    s: ~Number[?] = BG STREAM {
+    s: ~Float64[?] = BG STREAM {
         YIELD 1.0;
         YIELD 4.0;
         YIELD 9.0;
     };
 
-    v1: ?Number = NEXT s;
-    v2: ?Number = NEXT s;
-    v3: ?Number = NEXT s;
-    v4: ?Number = NEXT s;
+    v1: ?Float64 = NEXT s;
+    v2: ?Float64 = NEXT s;
+    v3: ?Float64 = NEXT s;
+    v4: ?Float64 = NEXT s;
 
     ASSERT v1 == 1.0, "open stream: first NEXT returns first yield";
     ASSERT v2 == 4.0, "open stream: second NEXT returns second yield";
@@ -29,15 +29,15 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 2: Stream with a captured variable.
     -- -------------------------------------------------------
-    base: Number = 10.0;
-    s2: ~Number[?] = BG STREAM {
+    base: Float64 = 10.0;
+    s2: ~Float64[?] = BG STREAM {
         YIELD base;
         YIELD base * 2.0;
     };
 
-    u1: ?Number = NEXT s2;
-    u2: ?Number = NEXT s2;
-    u3: ?Number = NEXT s2;
+    u1: ?Float64 = NEXT s2;
+    u2: ?Float64 = NEXT s2;
+    u3: ?Float64 = NEXT s2;
 
     ASSERT u1 == 10.0, "stream with capture: first NEXT";
     ASSERT u2 == 20.0, "stream with capture: second NEXT";

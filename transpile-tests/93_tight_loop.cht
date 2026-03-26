@@ -9,7 +9,7 @@
 -- must be minimised.
 
 -- Iterative power: tight inner loop, no alloc, no yield
-FN ipow!(base: Number, MUTABLE exp: Int64) RETURNS Number ->
+FN ipow!(base: Float64, MUTABLE exp: Int64) RETURNS Float64 ->
   MUTABLE result = 1.0;
   TIGHT WHILE exp > 0 DO
     result = result * base;
@@ -19,7 +19,7 @@ FN ipow!(base: Number, MUTABLE exp: Int64) RETURNS Number ->
 END
 
 -- Sum of squares: tight loop over a slice (n elements)
-FN sumSq(arr: Number[], n: Int64) RETURNS Number ->
+FN sumSq(arr: Float64[], n: Int64) RETURNS Float64 ->
   MUTABLE total = 0.0;
   MUTABLE i = 0_i64;
   TIGHT WHILE i < n DO
@@ -45,7 +45,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT ipow!(2.0, exp10) == 1024.0;
 
   -- TIGHT sum-of-squares over a small array
-  MUTABLE data: Number[]@list = [];
+  MUTABLE data: Float64[]@list = [];
   append(data, 1.0);
   append(data, 2.0);
   append(data, 3.0);

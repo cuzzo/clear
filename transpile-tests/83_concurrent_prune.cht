@@ -1,5 +1,5 @@
 -- Test: CONCURRENT SELECT with OR PRUNE — errors are swallowed, item skipped
-FN safeDouble(x: Number) RETURNS !Number ->
+FN safeDouble(x: Float64) RETURNS !Float64 ->
     IF x == 3.0 THEN
         RAISE "bad value";
     END
@@ -7,7 +7,7 @@ FN safeDouble(x: Number) RETURNS !Number ->
 END
 
 FN cheatMain() RETURNS Void ->
-    nums: Number[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
     -- item 3.0 will error and be pruned
     results = nums s> CONCURRENT(pool_size: 3) SELECT safeDouble(_) OR PRUNE;
     -- results should have [2.0, 4.0, 8.0, 10.0] (4 items, 3.0 pruned)

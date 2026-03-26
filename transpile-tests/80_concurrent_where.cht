@@ -1,7 +1,7 @@
 -- Test: CONCURRENT WHERE — parallel filter
-STRUCT Item { value: Number }
+STRUCT Item { value: Float64 }
 
-FN isPositive(x: Number) RETURNS Bool ->
+FN isPositive(x: Float64) RETURNS Bool ->
     RETURN x > 0.0;
 END
 

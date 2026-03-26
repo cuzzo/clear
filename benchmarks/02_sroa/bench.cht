@@ -2,7 +2,7 @@
 --
 -- WHAT THIS MEASURES:
 --
---   BigVec has 130 Number fields (1040 bytes). sum3() reads only x1, x2, x3.
+--   BigVec has 130 Float64 fields (1040 bytes). sum3() reads only x1, x2, x3.
 --   127 of the 130 field initialisations are dead writes.
 --
 --   C at -O3:   LLVM applies SROA → decomposes BigVec into scalars → DCE
@@ -35,44 +35,44 @@
 -- arithmetic is defined, so the loop body continues to execute at full speed.
 
 STRUCT BigVec {
-  x1: Number, x2: Number, x3: Number, x4: Number, x5: Number,
-  x6: Number, x7: Number, x8: Number, x9: Number, x10: Number,
-  x11: Number, x12: Number, x13: Number, x14: Number, x15: Number,
-  x16: Number, x17: Number, x18: Number, x19: Number, x20: Number,
-  x21: Number, x22: Number, x23: Number, x24: Number, x25: Number,
-  x26: Number, x27: Number, x28: Number, x29: Number, x30: Number,
-  x31: Number, x32: Number, x33: Number, x34: Number, x35: Number,
-  x36: Number, x37: Number, x38: Number, x39: Number, x40: Number,
-  x41: Number, x42: Number, x43: Number, x44: Number, x45: Number,
-  x46: Number, x47: Number, x48: Number, x49: Number, x50: Number,
-  x51: Number, x52: Number, x53: Number, x54: Number, x55: Number,
-  x56: Number, x57: Number, x58: Number, x59: Number, x60: Number,
-  x61: Number, x62: Number, x63: Number, x64: Number, x65: Number,
-  x66: Number, x67: Number, x68: Number, x69: Number, x70: Number,
-  x71: Number, x72: Number, x73: Number, x74: Number, x75: Number,
-  x76: Number, x77: Number, x78: Number, x79: Number, x80: Number,
-  x81: Number, x82: Number, x83: Number, x84: Number, x85: Number,
-  x86: Number, x87: Number, x88: Number, x89: Number, x90: Number,
-  x91: Number, x92: Number, x93: Number, x94: Number, x95: Number,
-  x96: Number, x97: Number, x98: Number, x99: Number, x100: Number,
-  x101: Number, x102: Number, x103: Number, x104: Number, x105: Number,
-  x106: Number, x107: Number, x108: Number, x109: Number, x110: Number,
-  x111: Number, x112: Number, x113: Number, x114: Number, x115: Number,
-  x116: Number, x117: Number, x118: Number, x119: Number, x120: Number,
-  x121: Number, x122: Number, x123: Number, x124: Number, x125: Number,
-  x126: Number, x127: Number, x128: Number, x129: Number, x130: Number
+  x1: Float64, x2: Float64, x3: Float64, x4: Float64, x5: Float64,
+  x6: Float64, x7: Float64, x8: Float64, x9: Float64, x10: Float64,
+  x11: Float64, x12: Float64, x13: Float64, x14: Float64, x15: Float64,
+  x16: Float64, x17: Float64, x18: Float64, x19: Float64, x20: Float64,
+  x21: Float64, x22: Float64, x23: Float64, x24: Float64, x25: Float64,
+  x26: Float64, x27: Float64, x28: Float64, x29: Float64, x30: Float64,
+  x31: Float64, x32: Float64, x33: Float64, x34: Float64, x35: Float64,
+  x36: Float64, x37: Float64, x38: Float64, x39: Float64, x40: Float64,
+  x41: Float64, x42: Float64, x43: Float64, x44: Float64, x45: Float64,
+  x46: Float64, x47: Float64, x48: Float64, x49: Float64, x50: Float64,
+  x51: Float64, x52: Float64, x53: Float64, x54: Float64, x55: Float64,
+  x56: Float64, x57: Float64, x58: Float64, x59: Float64, x60: Float64,
+  x61: Float64, x62: Float64, x63: Float64, x64: Float64, x65: Float64,
+  x66: Float64, x67: Float64, x68: Float64, x69: Float64, x70: Float64,
+  x71: Float64, x72: Float64, x73: Float64, x74: Float64, x75: Float64,
+  x76: Float64, x77: Float64, x78: Float64, x79: Float64, x80: Float64,
+  x81: Float64, x82: Float64, x83: Float64, x84: Float64, x85: Float64,
+  x86: Float64, x87: Float64, x88: Float64, x89: Float64, x90: Float64,
+  x91: Float64, x92: Float64, x93: Float64, x94: Float64, x95: Float64,
+  x96: Float64, x97: Float64, x98: Float64, x99: Float64, x100: Float64,
+  x101: Float64, x102: Float64, x103: Float64, x104: Float64, x105: Float64,
+  x106: Float64, x107: Float64, x108: Float64, x109: Float64, x110: Float64,
+  x111: Float64, x112: Float64, x113: Float64, x114: Float64, x115: Float64,
+  x116: Float64, x117: Float64, x118: Float64, x119: Float64, x120: Float64,
+  x121: Float64, x122: Float64, x123: Float64, x124: Float64, x125: Float64,
+  x126: Float64, x127: Float64, x128: Float64, x129: Float64, x130: Float64
 }
 
 -- Only reads x1, x2, x3. The other 127 fields are dead.
 -- With SROA the compiler would eliminate those 127 field initialisations.
 -- Note: not @reentrant — TIGHT loops cannot call @reentrant functions.
-FN sum3(v: BigVec) RETURNS Number ->
+FN sum3(v: BigVec) RETURNS Float64 ->
     RETURN v.x1 + v.x2 + v.x3;
 END
 
 FN cheatMain() RETURNS Void ->
     MUTABLE i = 0_i64;
-    MUTABLE acc: Number = 1.0;
+    MUTABLE acc: Float64 = 1.0;
 
     -- TIGHT: pure compute loop — no arena cleanup needed, no yield overhead.
     -- Eliminates saveLoopMark/restoreLoopMark (the dominant cost in the previous

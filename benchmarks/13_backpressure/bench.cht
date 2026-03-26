@@ -36,7 +36,7 @@ FN cheatMain() RETURNS Void ->
     -- Process with backpressure (workers: 8 = max 8 concurrent fibers)
     processed = items s> CONCURRENT(workers: 8, parallel: TRUE) SELECT processItem(_.seed);
 
-    -- Sum results (SUM returns Number, so we accumulate as Number)
+    -- Sum results (SUM returns Float64, so we accumulate as Float64)
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < 100000 DO

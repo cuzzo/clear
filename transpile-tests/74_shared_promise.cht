@@ -2,7 +2,7 @@
 -- Multiple NEXT calls on the same handle return the cached result after the
 -- first block.  The underlying Inner is freed when the last handle is consumed.
 
-FN expensive(x: Number) RETURNS Number ->
+FN expensive(x: Float64) RETURNS Float64 ->
     RETURN x * x;
 END
 
@@ -10,22 +10,22 @@ FN cheatMain() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Single holder, NEXT called twice (idempotent).
     -- -------------------------------------------------------
-    sp: ~Number@shared = BG { expensive(7.0); };
+    sp: ~Float64@shared = BG { expensive(7.0); };
 
-    r1: Number = NEXT sp;
+    r1: Float64 = NEXT sp;
     ASSERT r1 == 49.0, "shared promise: first NEXT returns correct value";
 
-    r2: Number = NEXT sp;
+    r2: Float64 = NEXT sp;
     ASSERT r2 == 49.0, "shared promise: second NEXT returns same cached value";
 
     -- -------------------------------------------------------
     -- Test 2: Simple shared promise with a captured variable.
     -- -------------------------------------------------------
-    base: Number = 6.0;
-    sp2: ~Number@shared = BG { expensive(base); };
+    base: Float64 = 6.0;
+    sp2: ~Float64@shared = BG { expensive(base); };
 
-    v1: Number = NEXT sp2;
-    v2: Number = NEXT sp2;
+    v1: Float64 = NEXT sp2;
+    v2: Float64 = NEXT sp2;
 
     ASSERT v1 == 36.0, "shared promise with capture: first NEXT";
     ASSERT v2 == 36.0, "shared promise with capture: second NEXT (cached)";

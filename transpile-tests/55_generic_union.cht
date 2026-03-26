@@ -3,14 +3,14 @@
 UNION Option<T> { Some: T, None }
 UNION Result<T, E> { Ok: T, Err: E }
 
-FN safeDivide(a: Number, b: Number) RETURNS Result<Number, Bool> ->
-  IF b == 0.0 THEN RETURN Result<Number, Bool>{ Err: TRUE }; END
-  RETURN Result<Number, Bool>{ Ok: a };
+FN safeDivide(a: Float64, b: Float64) RETURNS Result<Float64, Bool> ->
+  IF b == 0.0 THEN RETURN Result<Float64, Bool>{ Err: TRUE }; END
+  RETURN Result<Float64, Bool>{ Ok: a };
 END
 
 FN cheatMain() RETURNS Void ->
-  -- Option<Number> with a payload variant
-  opt = Option<Number>{ Some: 42.0 };
+  -- Option<Float64> with a payload variant
+  opt = Option<Float64>{ Some: 42.0 };
   MUTABLE got = 0.0;
   MATCH opt START
     Option.Some -> got = 1.0;,
@@ -18,8 +18,8 @@ FN cheatMain() RETURNS Void ->
   END
   ASSERT got == 1.0;
 
-  -- Option<Number> with unit variant
-  none_val = Option<Number>{ Some: 0.0 };
+  -- Option<Float64> with unit variant
+  none_val = Option<Float64>{ Some: 0.0 };
   MUTABLE got2 = 0.0;
   MATCH none_val START
     Option.Some -> got2 = 10.0;,
@@ -27,7 +27,7 @@ FN cheatMain() RETURNS Void ->
   END
   ASSERT got2 == 10.0;
 
-  -- Result<Number, Bool>: Ok path
+  -- Result<Float64, Bool>: Ok path
   ok = safeDivide(10.0, 2.0);
   MUTABLE ok_matched = 0.0;
   MATCH ok START
@@ -36,7 +36,7 @@ FN cheatMain() RETURNS Void ->
   END
   ASSERT ok_matched == 1.0;
 
-  -- Result<Number, Bool>: Err path
+  -- Result<Float64, Bool>: Err path
   err = safeDivide(10.0, 0.0);
   MUTABLE err_matched = 0.0;
   MATCH err START

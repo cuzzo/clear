@@ -741,6 +741,11 @@ class Type
 
     str = @raw.to_s
 
+    # Type alias: Float64 → Number (canonical internal name for f64).
+    # Users write Float64; the type system uses :Number everywhere.
+    str = str.gsub(/\bFloat64\b/, 'Number')
+    @raw = str.to_sym
+
     # A0. Detect Tense prefix: ~T (Future/Promise — a BG task producing T)
     # Parsed first so ~!T = "promise of failable T", ~?T = "promise of optional T".
     # When tense, we bail early — tense_type handles its own inner parsing.

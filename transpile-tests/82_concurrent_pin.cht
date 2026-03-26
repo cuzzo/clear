@@ -1,7 +1,7 @@
 -- Test: CONCURRENT SELECT with parallel: TRUE — dispatches to least-loaded scheduler
-STRUCT Work { value: Number }
+STRUCT Work { value: Float64 }
 
-FN compute(w: Work) RETURNS Number ->
+FN compute(w: Work) RETURNS Float64 ->
     RETURN w.value * 3.0;
 END
 

@@ -2,7 +2,7 @@
 -- Exercises explicit @list annotations and @pool generational pool declarations
 -- with insert / get / remove and Id<T> handle semantics.
 
-STRUCT Point { x: Number, y: Number }
+STRUCT Point { x: Float64, y: Float64 }
 
 FN cheatMain() RETURNS Void ->
     -- @list with UFCS append

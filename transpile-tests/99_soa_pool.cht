@@ -2,7 +2,7 @@
 -- All higher-order pipeline operators work on SOA pools with
 -- field-slice iteration (no materialization for aggregates).
 
-STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 
 FN cheatMain() RETURNS Void ->
     -- Regular array (AOS baseline) for comparison.

@@ -1,4 +1,4 @@
-STRUCT Point { x: Number, y: Number, z: Number }
+STRUCT Point { x: Float64, y: Float64, z: Float64 }
 
 FN cheatMain() RETURNS Void ->
   -- PASS no-op test

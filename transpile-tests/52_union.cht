@@ -1,7 +1,7 @@
-UNION Shape { Circle: Number, Rectangle: Number, Point }
-UNION Result { Ok: Number, Err: Number, Empty }
+UNION Shape { Circle: Float64, Rectangle: Float64, Point }
+UNION Result { Ok: Float64, Err: Float64, Empty }
 
-FN area(s: Shape) RETURNS Number ->
+FN area(s: Shape) RETURNS Float64 ->
   MUTABLE a = 0.0;
   MATCH s START
     Shape.Circle    -> a = 3.14;,

@@ -2,11 +2,11 @@
 -- Exercises: multiple concurrent fibers, outer-variable capture by value,
 -- NEXT in reverse-spawn order, and BG inside a helper function.
 
-FN double(x: Number) RETURNS Number ->
+FN double(x: Float64) RETURNS Float64 ->
     RETURN x * 2.0;
 END
 
-FN add(a: Number, b: Number) RETURNS Number ->
+FN add(a: Float64, b: Float64) RETURNS Float64 ->
     RETURN a + b;
 END
 
@@ -19,13 +19,13 @@ FN cheatMain() RETURNS Void ->
     -- (fast-path) or interleave them (slow-path).
     -- Either way each promise must return exactly its own value.
 
-    a: ~Number = BG { 10.0; };
-    b: ~Number = BG { 20.0; };
-    c: ~Number = BG { 30.0; };
+    a: ~Float64 = BG { 10.0; };
+    b: ~Float64 = BG { 20.0; };
+    c: ~Float64 = BG { 30.0; };
 
-    rc: Number = NEXT c;
-    rb: Number = NEXT b;
-    ra: Number = NEXT a;
+    rc: Float64 = NEXT c;
+    rb: Float64 = NEXT b;
+    ra: Float64 = NEXT a;
 
     ASSERT ra == 10.0, "concurrent BG a";
     ASSERT rb == 20.0, "concurrent BG b";
@@ -36,28 +36,28 @@ FN cheatMain() RETURNS Void ->
     -- Mutating the outer variable after spawning must not
     -- affect the fiber (fiber owns its own copy).
     -- -------------------------------------------------------
-    MUTABLE base: Number = 5.0;
-    p: ~Number = BG { double(base); };
+    MUTABLE base: Float64 = 5.0;
+    p: ~Float64 = BG { double(base); };
     base = 99.0;          -- change outer copy after spawn
-    r_base: Number = NEXT p;
+    r_base: Float64 = NEXT p;
     ASSERT r_base == 10.0, "BG captures by value: mutation of outer does not affect fiber";
 
     -- -------------------------------------------------------
     -- Test 3: BG using a helper function with captured arg.
     -- -------------------------------------------------------
-    x: Number = 7.0;
-    y: Number = 3.0;
-    q: ~Number = BG { add(x, y); };
-    r_sum: Number = NEXT q;
+    x: Float64 = 7.0;
+    y: Float64 = 3.0;
+    q: ~Float64 = BG { add(x, y); };
+    r_sum: Float64 = NEXT q;
     ASSERT r_sum == 10.0, "BG with helper function call using two captured args";
 
     -- -------------------------------------------------------
     -- Test 4: Chained BG — result of one feeds the next.
     -- -------------------------------------------------------
-    step1: ~Number = BG { double(4.0); };
-    v1: Number = NEXT step1;
-    step2: ~Number = BG { double(v1); };
-    v2: Number = NEXT step2;
+    step1: ~Float64 = BG { double(4.0); };
+    v1: Float64 = NEXT step1;
+    step2: ~Float64 = BG { double(v1); };
+    v2: Float64 = NEXT step2;
     ASSERT v2 == 16.0, "chained BG: double(double(4)) == 16";
 
     RETURN;

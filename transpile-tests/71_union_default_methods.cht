@@ -3,23 +3,23 @@
 -- function overrides it. An override replaces the default entirely.
 
 UNION Shape {
-  Circle    { radius: Number },
-  Rectangle { width: Number, height: Number },
+  Circle    { radius: Float64 },
+  Rectangle { width: Float64, height: Float64 },
   Point,
 
   -- Default: 0 for any variant not covered by a concrete override.
-  FN area(s: Shape) RETURNS Number ->
+  FN area(s: Shape) RETURNS Float64 ->
     RETURN 0.0;
   END,
 
   -- Default label works for all variants.
-  FN label(s: Shape) RETURNS Number ->
+  FN label(s: Shape) RETURNS Float64 ->
     RETURN -1.0;
   END
 }
 
 -- Concrete override replaces the default for 'area'.
-FN area(s: Shape) RETURNS Number ->
+FN area(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
   MATCH IFF s START
     Shape.Circle    AS ci -> result = 3.14159 * ci.radius * ci.radius;,

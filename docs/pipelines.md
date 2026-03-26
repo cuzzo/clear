@@ -116,7 +116,7 @@ Every operator works on every collection type:
 
 ```clear
 -- Array
-nums: Number[] = [1, 2, 3];
+nums: Float64[] = [1, 2, 3];
 total = nums s> SUM _;
 
 -- List
@@ -145,7 +145,7 @@ sharded s> EACH { _.processed = TRUE; };
 When a `@pool:soa` is used in a pipeline, the compiler rewrites field accesses to iterate directly over contiguous field arrays instead of striding over whole structs. This happens automatically for all operators — no syntax change needed.
 
 ```clear
-STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
+STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 MUTABLE pool: Entity[]@pool:soa = [];
 
 -- SUM _.health iterates only the health array (contiguous f64[]).

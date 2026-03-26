@@ -90,7 +90,7 @@ Block until a promise resolves:
 
 ```clear
 p: ~Number = BG { 42.0; };
-result: Number = NEXT p;
+result: Float64 = NEXT p;
 ```
 
 | Promise Type | NEXT returns | Behavior |
@@ -106,7 +106,7 @@ Spawn a fiber that yields values over time:
 
 ```clear
 -- Open stream (finite)
-s: ~Number[?] = BG STREAM {
+s: ~Float64[?] = BG STREAM {
     YIELD 1.0;
     YIELD 4.0;
     YIELD 9.0;
@@ -117,7 +117,7 @@ v3 = NEXT s;  -- 9.0
 v4 = NEXT s;  -- nil (exhausted)
 
 -- Infinite stream
-counter: ~Number[INF] = BG STREAM {
+counter: ~Float64[INF] = BG STREAM {
     MUTABLE i = 0.0;
     WHILE TRUE DO
         YIELD i;

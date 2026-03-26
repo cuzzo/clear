@@ -1,5 +1,5 @@
 FN cheatMain() RETURNS Void ->
-  MUTABLE matrix: Number[][] = [[1, 2, 3], [4, 5, 6]];
+  MUTABLE matrix: Float64[][] = [[1, 2, 3], [4, 5, 6]];
 
   ASSERT matrix.length() == 2, "Outer length should be 2";
   ASSERT matrix[0].length() == 3, "Inner length should be 3";
@@ -16,7 +16,7 @@ FN cheatMain() RETURNS Void ->
   ASSERT matrix[1][1] == 99, "matrix[1][1] should be 99 after mutation";
 
   -- Nesting another level
-  MUTABLE cube: Number[][][] = [[[1, 2]], [[3, 4]]];
+  MUTABLE cube: Float64[][][] = [[[1, 2]], [[3, 4]]];
   ASSERT cube.length() == 2, "Cube length should be 2";
   ASSERT cube[0].length() == 1, "Cube[0] length should be 1";
   ASSERT cube[0][0].length() == 2, "Cube[0][0] length should be 2";

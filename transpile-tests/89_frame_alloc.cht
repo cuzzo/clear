@@ -6,8 +6,8 @@
 --  2. Small fixed-array literals with T[N] annotation emit [N]T{...} raw arrays
 --     (enabling LLVM SROA).  Array indexing must produce the right values.
 
--- Chunk5 = 5 Number fields = 5 slots
-STRUCT Chunk5 { a: Number, b: Number, c: Number, d: Number, e: Number }
+-- Chunk5 = 5 Float64 fields = 5 slots
+STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
 
 -- BigS = 26 × Chunk5 = 130 slots → exceeds the 128-slot threshold → :frame allocation
 STRUCT BigS {
@@ -20,7 +20,7 @@ STRUCT BigS {
 }
 
 -- Return a field from a frame-allocated struct (tests RETURN s.field path).
-FN first_a(s: BigS) RETURNS Number ->
+FN first_a(s: BigS) RETURNS Float64 ->
   RETURN s.c1.a;
 END
 
@@ -44,20 +44,20 @@ FN test_frame_struct() RETURNS Void ->
   ASSERT big.c26.a == 0.0, "frame struct: last chunk is zero";
 
   -- Pass frame variable to a function (transpiler emits big.* at call site)
-  result: Number = first_a(big);
+  result: Float64 = first_a(big);
   ASSERT result == 7.0, "frame struct passed to function returns correct field";
 END
 
 FN test_stack_arrays() RETURNS Void ->
   -- Explicit T[N] annotation → annotator pre-sets :stack → transpiler emits [N]T{...}
-  -- (Using Number/f64 literals to avoid integer-coercion edge cases in the lexer.)
-  nums: Number[4] = [10.0, 20.0, 30.0, 40.0];
-  ASSERT nums[0] == 10.0, "stack array Number[4]: element 0 is 10";
-  ASSERT nums[3] == 40.0, "stack array Number[4]: element 3 is 40";
+  -- (Using Float64/f64 literals to avoid integer-coercion edge cases in the lexer.)
+  nums: Float64[4] = [10.0, 20.0, 30.0, 40.0];
+  ASSERT nums[0] == 10.0, "stack array Float64[4]: element 0 is 10";
+  ASSERT nums[3] == 40.0, "stack array Float64[4]: element 3 is 40";
 
-  small: Number[3] = [1.5, 2.5, 3.5];
-  ASSERT small[0] == 1.5, "stack array Number[3]: element 0 is 1.5";
-  ASSERT small[2] == 3.5, "stack array Number[3]: element 2 is 3.5";
+  small: Float64[3] = [1.5, 2.5, 3.5];
+  ASSERT small[0] == 1.5, "stack array Float64[3]: element 0 is 1.5";
+  ASSERT small[2] == 3.5, "stack array Float64[3]: element 2 is 3.5";
 END
 
 FN cheatMain() RETURNS Void ->

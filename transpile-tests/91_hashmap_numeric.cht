@@ -1,11 +1,11 @@
--- 91_hashmap_numeric.cht — Numeric-key HashMap (HashMap<Int64, Number>)
+-- 91_hashmap_numeric.cht — Numeric-key HashMap (HashMap<Int64, Float64>)
 --
 -- Exercises the [] operator for both read and write on a numeric map.
 -- The transpiler must emit numericMapPut/numericMapGet (not string variants).
 
 FN cheatMain() RETURNS Void ->
-    -- HashMap<Int64, Number> uses AutoHashMapUnmanaged (no key copies)
-    MUTABLE scores: HashMap<Int64, Number> = {};
+    -- HashMap<Int64, Float64> uses AutoHashMapUnmanaged (no key copies)
+    MUTABLE scores: HashMap<Int64, Float64> = {};
 
     -- write via [] operator → numericMapPut
     scores[1_i64] = 10.0;

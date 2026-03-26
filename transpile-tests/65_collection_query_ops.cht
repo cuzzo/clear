@@ -1,10 +1,10 @@
 -- Test: Phase 3 Collection Query Operators
 -- Exercises FIND, ANY, ALL, COUNT pipeline operators.
 
-STRUCT Item { value: Number, active: Bool }
+STRUCT Item { value: Float64, active: Bool }
 
 FN cheatMain() RETURNS Void ->
-    nums: Number[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
     -- COUNT: how many elements are greater than 3?
     big_count: Int64 = nums s> COUNT _ > 3.0;
@@ -43,7 +43,7 @@ FN cheatMain() RETURNS Void ->
     ASSERT not_found == NIL, "FIND > 100 should return NIL";
 
     -- Chained: WHERE then COUNT
-    evens: Number[] = [2.0, 4.0, 6.0, 8.0];
+    evens: Float64[] = [2.0, 4.0, 6.0, 8.0];
     big_evens: Int64 = evens s> COUNT _ > 4.0;
     ASSERT big_evens == 2, "COUNT of evens > 4 should be 2";
 

@@ -1,17 +1,17 @@
 -- Test: Phase 4 Numeric Aggregation Operators
 -- Exercises SUM, AVERAGE, MIN, MAX pipeline operators.
 
-STRUCT Measurement { value: Number }
+STRUCT Measurement { value: Float64 }
 
 FN cheatMain() RETURNS Void ->
-    nums: Number[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
     -- SUM
     total = nums s> SUM _;
     ASSERT total == 15.0, "SUM should be 15";
 
     -- SUM on empty list returns 0
-    empty: Number[] = [];
+    empty: Float64[] = [];
     empty_sum = empty s> SUM _;
     ASSERT empty_sum == 0.0, "SUM of empty list should be 0";
 
@@ -53,7 +53,7 @@ FN cheatMain() RETURNS Void ->
     ASSERT field_max == 30.0, "MAX of field should be 30";
 
     -- Chained: WHERE then SUM (use intermediate binding to avoid ambiguous parse)
-    big_nums: Number[] = nums s> WHERE _ > 3.0;
+    big_nums: Float64[] = nums s> WHERE _ > 3.0;
     big_sum = big_nums s> SUM _;
     ASSERT big_sum == 9.0, "SUM of [4,5] should be 9";
 

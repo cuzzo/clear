@@ -9,16 +9,16 @@ UNION Color {
   Blue,
 
   -- PUB stub with a default body — synthesized as pub fn.
-  PUB FN name(c: Color) RETURNS Number ->
+  PUB FN name(c: Color) RETURNS Float64 ->
     RETURN -1.0;
   END,
 
   -- Plain package stub satisfied by a concrete package function.
-  FN code(c: Color) RETURNS Number
+  FN code(c: Color) RETURNS Float64
 }
 
 -- Satisfies the plain FN stub.
-FN code(c: Color) RETURNS Number ->
+FN code(c: Color) RETURNS Float64 ->
   MUTABLE result = 0.0;
   MATCH IFF c START
     Color.Red   -> result = 1.0;,

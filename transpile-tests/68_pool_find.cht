@@ -2,7 +2,7 @@
 -- Verifies that FIND on a @pool source returns the first matching live slot
 -- as an optional element, and returns NIL when no slot matches.
 
-STRUCT Item { value: Number }
+STRUCT Item { value: Float64 }
 
 FN cheatMain() RETURNS Void ->
     MUTABLE pool: Item[]@pool = [];
