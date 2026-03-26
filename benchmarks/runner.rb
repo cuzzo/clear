@@ -99,8 +99,13 @@ def run_bench(dir)
   end
 
   if has_clear
-    puts "Running CLEAR (best of 5)..."
-    results[:clear] = measure_min("./#{dir}/bench_clear")
+    # Match Go/Rust behavior: use all available cores by default.
+    # Go defaults to GOMAXPROCS=num_cpu; Tokio defaults to num_cpu threads.
+    # CLEAR defaults to 1 thread unless CLEAR_THREADS is set.
+    threads = ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+    threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
+    puts "Running CLEAR (best of 5, CLEAR_THREADS=#{threads})..."
+    results[:clear] = measure_min("CLEAR_THREADS=#{threads} ./#{dir}/bench_clear")
   end
 
   # 6. Reporting
