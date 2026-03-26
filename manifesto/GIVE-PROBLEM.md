@@ -5,7 +5,7 @@ In CLEAR, we separate **Types** from **Capabilities**.
 *   **Type:** What the data is (e.g., `User`).
 *   **Capability:** How the data is accessed (e.g., `affine`, `shared`).
 
-By default, objects in CLEAR are **affine** (meaning they can only be used once, and passing them to a function "borrows" them). When a function needs to take ownership of an object (e.g., to store it in a long-lived list), it must explicitly `TAKE` it.
+By default, objects in CLEAR are **affine** (meaning they can only be used once, and passing them to a function "borrows" them). When a function needs to take ownership of an object (e.g., to store it in a long-lived list), it must explicitly `TAKES` it.
 
 ## The Friction: `GIVE` vs. `COPY`
 
@@ -14,16 +14,20 @@ If you have an affine object and you need to pass it to a function that `TAKES` 
 2.  **COPY it:** Create a duplicate. The original variable remains "alive" and can still be used.
 
 ```CLEAR
--- CLEAR Example
-FN addToCache(TAKES u: User) -> ...
+STRUCT User { name: String }
 
-u = User.new();
+FN addToCache(TAKES u: User) RETURNS Void ->
+  -- This function now owns 'u'
+  RETURN;
+END
+
+u = User{ name: "Alice" };
 addToCache(GIVE u);           -- Explicit Move
-PRINT(u.name);                -- COMPILER ERROR: u is dead.
+print(u.name);                -- COMPILER ERROR: u is dead.
 
-u2 = User.new();
+u2 = User{ name: "Bob" };
 addToCache(COPY u2);          -- Explicit Copy
-PRINT(u2.name);               -- OKAY: u2 is still alive.
+print(u2.name);               -- OKAY: u2 is still alive.
 ```
 
 ### Why this is Better than Rust
