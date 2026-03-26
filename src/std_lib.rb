@@ -109,8 +109,14 @@ STD_LIB = {
     zig: "std.mem.endsWith(u8, {0}, {1})"
   },
 
+  # indexOf("hello world", "world") -> 6  (or nil if not found)
+  "indexOf" => {
+    args: [STRING_TYPE, STRING_TYPE],
+    return: :"?Int64",
+    zig: "CheatLib.indexOf({0}, {1})"
+  },
+
   # contains("hello", "ll") -> true
-  # Zig returns an optional index (?usize). We check if it is not null.
   "contains" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,

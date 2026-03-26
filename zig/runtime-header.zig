@@ -467,6 +467,14 @@ pub const CheatLib = struct {
         return a == b;
     }
 
+    // indexOf: returns ?i64 position of needle in haystack, or null if not found.
+    pub fn indexOf(haystack: []const u8, needle: []const u8) ?i64 {
+        if (std.mem.indexOf(u8, haystack, needle)) |pos| {
+            return @intCast(pos);
+        }
+        return null;
+    }
+
     // Split: String -> List
     pub fn split(allocator: std.mem.Allocator, str: []const u8, delimiter: []const u8) !std.ArrayListUnmanaged([]const u8) {
         var list = std.ArrayListUnmanaged([]const u8){};
