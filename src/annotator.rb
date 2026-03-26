@@ -1299,6 +1299,8 @@ private
     final_type, error = node.value.coerce!(node.type)
     error!(node, error) if error
 
+    propagate_declared_type_to_value!(node, final_type)
+
     storage = finalize_decl_storage!(node, final_type)
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
@@ -1345,26 +1347,9 @@ private
       final_type, error = node.value.coerce!(node.type)
       error!(node, error) if error
 
-      # BgStreamBlock infers ~T[?] but the declared type picks the runtime wrapper.
-      # After coerce! accepts the match, update the value's full_type so the transpiler
-      # emits the correct stream type (InfStream vs Stream).
-      if node.value.is_a?(AST::BgStreamBlock) && node.type.is_a?(Type) && node.type.inf_stream?
-        node.value.full_type = final_type
-      end
-
-      # Propagate shard_count from declared type into the coerced final_type.
-      if node.type.is_a?(Type) && node.type.shard_count
-        if final_type.is_a?(Type)
-          final_type.shard_count = node.type.shard_count
-        else
-          final_type = Type.new(final_type, shard_count: node.type.shard_count)
-        end
-      end
-
-      # Propagate @shared ownership into BgBlock for SharedPromise.spawn().
-      if node.value.is_a?(AST::BgBlock) && node.type.is_a?(Type) && node.type.shared_promise?
-        node.value.full_type = Type.new(node.value.full_type, ownership: :shared)
-      end
+      # Post-coerce value type updates: coerce! validates compatibility but the
+      # value node's full_type may need updating for the transpiler.
+      propagate_declared_type_to_value!(node, final_type)
 
       storage = finalize_decl_storage!(node, final_type)
       propagate_collection_metadata!(node, final_type)
@@ -1454,66 +1439,6 @@ private
     return unless scope
     decl_node = scope.locals.dig(name, :reg)
     decl_node.var_mutated = true if decl_node&.respond_to?(:var_mutated=)
-  end
-
-  # ==========================================
-  # Declaration helpers (shared by VarDecl + BindExpr)
-  # ==========================================
-
-  # Validate stream type annotations on variable declarations.
-  def validate_stream_type!(node)
-    return unless node.type.is_a?(Type) && node.type.tense?
-    if node.type.multiowned?
-      error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
-    end
-    if node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
-      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
-    end
-  end
-
-  # Propagate collection, shard_count, soa, and sync metadata from the declared
-  # type annotation (or inferred value type) into node.type_info and node.full_type.
-  # These fields are lost during finalize_storage! and coerce!.
-  def propagate_collection_metadata!(node, final_type)
-    # Collection propagation (from declared type or value's type_info).
-    coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
-      decl_t
-    elsif node.value.type_info&.collection
-      node.value.type_info
-    end
-    if coll_src
-      node.type_info.collection  = coll_src.collection
-      node.type_info.location    = :heap if coll_src.collection == :pool
-      node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
-      node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-      if node.full_type.is_a?(Type)
-        node.full_type.collection  = coll_src.collection unless node.full_type.collection
-        node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-        node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node.full_type.shard_count
-      end
-    end
-
-    # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
-    if (decl_t = node.type).is_a?(Type)
-      if decl_t.shard_count && !node.type_info&.shard_count
-        node.type_info.shard_count = decl_t.shard_count if node.type_info
-        node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count) if node.full_type.is_a?(Type)
-      end
-      if decl_t.sync && node.type_info && !node.type_info.sync
-        node.type_info.sync = decl_t.sync
-        node.full_type.sync = decl_t.sync if node.full_type.is_a?(Type)
-      end
-    end
-  end
-
-  # Propagate heap_list/heap_map flags from function call return values.
-  def propagate_call_flags!(node)
-    if node.value.respond_to?(:list_from_call) && node.value.list_from_call
-      node.type_info.heap_list = true
-    end
-    if node.value.respond_to?(:map_from_call) && node.value.map_from_call
-      node.type_info.heap_map = true
-    end
   end
 
   # ==========================================
