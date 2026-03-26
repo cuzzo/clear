@@ -291,6 +291,13 @@ class Type
       # Promise list (~T[]@list) accepts an empty list literal [] or another ~T[] type.
       return true if self.promise_list? && (other_type.empty_list? || (other_type.tense? && other_type.tense_type.dynamic?))
       return false unless other_type.tense?
+      # Stream coercion: ~T[INF] accepts ~T[?] and vice versa (BG STREAM infers [?],
+      # declared type picks the runtime wrapper). Match on element type only.
+      if (self.inf_stream? && other_type.open_stream?) || (self.open_stream? && other_type.inf_stream?)
+        self_elem  = self.tense_type.element_type
+        other_elem = other_type.tense_type.element_type
+        return self_elem.accepts?(other_elem) if self_elem && other_elem
+      end
       return tense_type.accepts?(other_type.tense_type)
     end
 

@@ -1342,18 +1342,15 @@ private
       validate_type_annotation!(node, node.type) if node.type
       validate_stream_type!(node)
 
-      # For BgStreamBlock assigned to ~T[INF]: retype before coerce! so exact match works.
-      if node.value.is_a?(AST::BgStreamBlock) && node.type.is_a?(Type) && node.type.inf_stream?
-        elem_sym = begin
-          node.value.full_type.tense_type.element_type.to_sym
-        rescue
-          :Void
-        end
-        node.value.full_type = :"~#{elem_sym}[INF]"
-      end
-
       final_type, error = node.value.coerce!(node.type)
       error!(node, error) if error
+
+      # BgStreamBlock infers ~T[?] but the declared type picks the runtime wrapper.
+      # After coerce! accepts the match, update the value's full_type so the transpiler
+      # emits the correct stream type (InfStream vs Stream).
+      if node.value.is_a?(AST::BgStreamBlock) && node.type.is_a?(Type) && node.type.inf_stream?
+        node.value.full_type = final_type
+      end
 
       # Propagate shard_count from declared type into the coerced final_type.
       if node.type.is_a?(Type) && node.type.shard_count
