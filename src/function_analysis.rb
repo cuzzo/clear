@@ -36,6 +36,49 @@ module FunctionAnalysis
   #     lambda: true
   #   }
   #
+  # Analyze a function or lambda body: enter scope, declare params/captures,
+  # visit all statements, finalize scope, and resolve the return type.
+  def analyze_routine(node, body, declared_return, is_implicit)
+    # 1. Routine Prologue (Before Scope)
+    verify_captures!(node)
+    @return_collection_stack.push([])
+
+    # 2. Body Analysis (Inside Scope)
+    with_new_scope do
+      declare_and_verify_params(node)
+      declare_captures(node)
+
+      if body.is_a?(Array)
+        body.each { |stmt| visit(stmt) }
+      else
+        visit(body)
+      end
+
+      finalize_scope(node)
+    end
+
+    # 3. Routine Epilogue (Process Returns)
+    found_returns = @return_collection_stack.pop.uniq
+    verify_returns(node, found_returns, is_implicit ? nil : declared_return)
+
+    # Resolve return type (infer if implicit or :Any)
+    return_type = if body.is_a?(Array)
+      found_returns.any? ? found_returns.first[:type] : :Any
+    else
+      body.resolved_type
+    end
+
+    # Update return type if we can narrow it
+    if (is_implicit || declared_return == :Any) && found_returns.any?
+      inferred = found_returns.first[:type]
+      if is_implicit || found_returns.size == 1
+        return_type = inferred
+      end
+    end
+
+    return_type
+  end
+
   def build_lambda_signature(params, return_type)
     normalized_params = params.map do |param|
       {

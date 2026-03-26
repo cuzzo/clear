@@ -304,47 +304,6 @@ private
   # @param is_implicit [Boolean] True if no return type was specified in source
   # @return [Symbol] The final resolved/inferred return type
   #
-  def analyze_routine(node, body, declared_return, is_implicit)
-    # 1. Routine Prologue (Before Scope)
-    verify_captures!(node)
-    @return_collection_stack.push([])
-
-    # 2. Body Analysis (Inside Scope)
-    with_new_scope do
-      declare_and_verify_params(node)
-      declare_captures(node)
-
-      if body.is_a?(Array)
-        body.each { |stmt| visit(stmt) }
-      else
-        visit(body)
-      end
-
-      finalize_scope(node)
-    end
-
-    # 3. Routine Epilogue (Process Returns)
-    found_returns = @return_collection_stack.pop.uniq
-    verify_returns(node, found_returns, is_implicit ? nil : declared_return)
-
-    # Resolve return type (infer if implicit or :Any)
-    return_type = if body.is_a?(Array)
-      found_returns.any? ? found_returns.first[:type] : :Any
-    else
-      body.resolved_type
-    end
-
-    # Update return type if we can narrow it
-    if (is_implicit || declared_return == :Any) && found_returns.any?
-      inferred = found_returns.first[:type]
-      if is_implicit || found_returns.size == 1
-        return_type = inferred
-      end
-    end
-
-    return_type
-  end
-
   def visit_LambdaLit(node)
     # Lambdas are always implicit return unless we add syntax for it later
     return_type = analyze_routine(node, node.body, :Any, true)
@@ -3085,64 +3044,6 @@ private
   #
   # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
   # all functions are top-level — but guarded for safety).
-  # Post-pass: compute needs_rt for every function.
-  # A function needs rt if it uses the frame arena, calls a fn pointer, or any
-  # transitive callee needs rt. cheatMain always needs rt (entry point).
-  def compute_needs_rt!
-    needs_rt = {}
-    @fn_nodes.each do |name, fn_node|
-      ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
-      heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || name == "cheatMain"
-    end
-
-    changed = true
-    while changed
-      changed = false
-      @call_graph.each do |fn_name, callees|
-        next if needs_rt[fn_name]
-        if callees.any? { |c| needs_rt[c] }
-          needs_rt[fn_name] = true
-          changed = true
-        end
-      end
-    end
-
-    @fn_nodes.each do |name, fn_node|
-      fn_node.needs_rt = (needs_rt[name] == true)
-    end
-  end
-
-  # Post-pass: compute can_fail for every function.
-  # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
-  # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
-  # cheatMain always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
-  # are excluded from propagation — they don't use CLEAR's error union convention.
-  def compute_can_fail!
-    can_fail = {}
-    @fn_nodes.each do |name, _|
-      can_fail[name] = @fn_raises_directly[name] == true || name == "cheatMain"
-    end
-
-    changed = true
-    while changed
-      changed = false
-      @call_graph.each do |fn_name, callees|
-        next if can_fail[fn_name]
-        if callees.any? { |c| @fn_nodes.key?(c) && can_fail[c] }
-          can_fail[fn_name] = true
-          changed = true
-        end
-      end
-    end
-
-    @fn_nodes.each do |name, fn_node|
-      fn_node.can_fail = (can_fail[name] == true)
-    end
-  end
-
-  # Scan a function body for direct failure sources: AST::Raise or AST::OrRaise nodes.
-  # Does not descend into nested FunctionDef nodes (their failures are tracked separately).
   # PASS 5b: scan all AST nodes for Identifiers used as fn-type arguments.
   # Any named function referenced as a value must adopt the rt-bearing calling
   # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.

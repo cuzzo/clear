@@ -73,6 +73,64 @@ module EffectTracker
     end
   end
 
+  # --- Call-graph fixed-point passes ---
+
+  # Post-pass: compute needs_rt for every function.
+  # A function needs rt if it uses the frame arena, calls a fn pointer, or any
+  # transitive callee needs rt. cheatMain always needs rt (entry point).
+  def compute_needs_rt!
+    needs_rt = {}
+    @fn_nodes.each do |name, fn_node|
+      ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
+      heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || name == "cheatMain"
+    end
+
+    changed = true
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        next if needs_rt[fn_name]
+        if callees.any? { |c| needs_rt[c] }
+          needs_rt[fn_name] = true
+          changed = true
+        end
+      end
+    end
+
+    @fn_nodes.each do |name, fn_node|
+      fn_node.needs_rt = (needs_rt[name] == true)
+    end
+  end
+
+  # Post-pass: compute can_fail for every function.
+  # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
+  # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
+  # cheatMain always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
+  # are excluded from propagation — they don't use CLEAR's error union convention.
+  def compute_can_fail!
+    can_fail = {}
+    @fn_nodes.each do |name, _|
+      can_fail[name] = @fn_raises_directly[name] == true || name == "cheatMain"
+    end
+
+    changed = true
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        next if can_fail[fn_name]
+        if callees.any? { |c| @fn_nodes.key?(c) && can_fail[c] }
+          can_fail[fn_name] = true
+          changed = true
+        end
+      end
+    end
+
+    @fn_nodes.each do |name, fn_node|
+      fn_node.can_fail = (can_fail[name] == true)
+    end
+  end
+
   # --- Queries (for future use by #HOT / STRICT mode) ---
 
   def effects_for(fn_name)
