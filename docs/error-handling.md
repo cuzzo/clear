@@ -29,6 +29,7 @@ The most common way to handle errors in CLEAR is the `OR` operator. It allows yo
 ### `OR default` (Fallback)
 If the left-hand side fails, use the right-hand side value.
 ```clear
+-- ILLUSTRATIVE
 -- val is guaranteed to be a Number
 val = divide(10.0, 0.0) OR 0.0;
 ```
@@ -36,7 +37,9 @@ val = divide(10.0, 0.0) OR 0.0;
 
 ### `OR RAISE` (Bubble Up)
 Propagate the error to the caller (equivalent to Zig's `try`).
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 -- This function must also return !T
 FN process(x: Number) RETURNS !Number ->
     res = divide(x, 2.0) OR RAISE;
@@ -46,37 +49,62 @@ END
 *Transpilation: `try divide(x, 2.0)`*
 
 ### `OR PASS` (Silence)
+-- ILLUSTRATIVE
 Ignore the error and use an undefined/default value. Useful only in low-level scenarios where failure is acceptable and handled elsewhere.
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 val = risky_operation() OR PASS;
 ```
 *Transpilation: `(risky_operation() catch undefined)`*
 
+-- ILLUSTRATIVE
 ### `OR PRUNE` (Filter)
+-- ILLUSTRATIVE
 Specific to `CONCURRENT` pipelines. If an item causes an error, it is simply dropped from the result set rather than failing the whole pipeline.
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 results = data s> CONCURRENT SELECT process(_) OR PRUNE;
 ```
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ### `OR EXIT` (Fatal)
+-- ILLUSTRATIVE
 Terminate the program with a message if the operation fails.
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 file = File.open("config.json") OR EXIT "Missing config file";
 ```
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ## 3. Explicit Panic (`!!`)
+-- ILLUSTRATIVE
 If you are 100% certain an operation cannot fail (or if failing means the program state is unrecoverable), use the `!!` suffix.
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 -- Panics at runtime if the operation fails
 val = critical_operation()!!;
 ```
+-- ILLUSTRATIVE
 *Transpilation: `(critical_operation() catch unreachable)`*
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ## 4. `CATCH` Blocks
+-- ILLUSTRATIVE
 For complex error handling, CLEAR supports `CATCH` blocks at the end of functions or in `MATCH` statements.
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 FN main() RETURNS Void ->
     res = divide(10.0, 0.0);
 CATCH err WITH "Division by Zero"

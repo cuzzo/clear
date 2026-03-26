@@ -14,6 +14,7 @@ Capability  = how the data is ACCESSED (@local, @locked, @shared)
 Functions take **Types**. Capabilities are applied at the **declaration site** and unwrapped at the **call site**. The function never knows or cares.
 
 ```clear
+-- ILLUSTRATIVE
 FN increment(c: Counter) RETURNS Counter ->
     RETURN Counter{ value: c.value + 1 };
 END
@@ -60,15 +61,20 @@ CLEAR has three orthogonal capability dimensions. They can be combined in any or
 
 ### Combining dimensions
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 config = AppConfig{ port: 8080 } @shared:locked;     -- Arc<Mutex<T>>
 node   = TreeNode{ left: NIL }   @multiowned;         -- Rc<T>
 cache  = LargeStruct{ data: [] } @local:indirect;     -- *T (both intents expressed)
 counter = Counter{ value: 0 }    @local;              -- *T (zero-cost sharing)
 ```
 
+-- ILLUSTRATIVE
 Invalid same-dimension combinations are compile errors:
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 x = Foo{} @locked:writeLocked;    -- ERROR: duplicate sync
 x = Foo{} @shared:multiowned;     -- ERROR: duplicate ownership
 ```
@@ -128,9 +134,13 @@ fn process(data: Arc<Mutex<AppState>>) { ... }
 fn helper(data: Arc<Mutex<AppState>>) { ... }
 fn inner(data: Arc<Mutex<AppState>>) { ... }
 ```
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 In CLEAR:
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 FN process(state: AppState) RETURNS Void -> helper(state); END
 FN helper(state: AppState) RETURNS Void -> inner(state); END
 FN inner(state: AppState) RETURNS Void -> ... END
@@ -178,10 +188,15 @@ STRUCT Node {
     cache: Counter @local,   -- NOT valid CLEAR syntax
 }
 ```
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 Capabilities are applied at the **declaration site**, when a value is bound to a variable:
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 root = Node{ value: 1, left: NIL, right: NIL } @local;
 ```
 

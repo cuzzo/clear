@@ -38,6 +38,7 @@ The compiler uses a **128-slot threshold** (~1KB on 64-bit): structs with ≤ 12
 The frame arena is a bump allocator that lives for the duration of a function call. Every function that needs it saves a mark on entry and rewinds on exit — all allocations between those two points are freed in one O(1) pointer reset.
 
 ```clear
+-- ILLUSTRATIVE
 FN process() RETURNS Result ->
     -- These allocations use the frame arena (~2ns each):
     big_matrix = Matrix{ ... };          -- 16KB struct → frame arena
@@ -70,7 +71,9 @@ Blocks are cached — the arena reuses them across function calls without re-all
 
 Data that outlives its creating function (returned collections, cross-fiber communication, Rc/Arc wrappers) goes on the heap via the global allocator (GPA). This is the slowest path — ~60ns per allocation, with a global lock.
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 MUTABLE users = List[];      -- heap: dynamic list (growable)
 counts: HashMap<Int64> = {};         -- heap: hash map
 shared_ref = counter @shared;       -- heap: Arc-wrapped
@@ -109,8 +112,11 @@ This happens at compile time. The emitted Zig code uses the correct allocator wi
 ## @arena Mode — Fiber-Lifetime Allocation
 
 For request/response workloads (web servers, KV stores), most allocations live only for the duration of one request. The `@arena` modifier tells the runtime to skip per-function rewind — the entire frame arena lives for the fiber's lifetime and is freed in one reset when the fiber completes.
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 BG { @arena ->
     request = parse(conn);       -- arena allocation (no per-function rewind)
     data = lookup(request.key);  -- arena allocation
@@ -128,9 +134,13 @@ With `@arena`, `restoreFrameMark` becomes a no-op. All allocations accumulate in
 
 ## @pinned — Shared-Nothing Allocation
 
+-- ILLUSTRATIVE
 CLEAR is designed for shared-nothing architecture by default. `@pinned` fibers use a **thread-local arena** instead of the global GPA — zero locks, zero contention, zero cache-line bouncing. Since `@pinned` is the default for fibers that capture local state (the compiler auto-pins them), most server workloads never touch the GPA at all.
+-- ILLUSTRATIVE
 
+-- ILLUSTRATIVE
 ```clear
+-- ILLUSTRATIVE
 BG { @pinned ->
     -- Every heap allocation goes through the scheduler's local arena.
     -- No GPA lock, no atomic ops, no cache-line bouncing.
