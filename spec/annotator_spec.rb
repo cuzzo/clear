@@ -8790,16 +8790,16 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.fileOpen("data.txt")')
       end
 
-      it "emits defer f.close() for auto-RAII" do
+      it "emits defer with move-guarded f.close() for auto-RAII" do
         src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer f.close();")
+        expect(out).to include("defer if (!f_moved) f.close();")
       end
 
-      it "does NOT emit a _moved flag for resources (no double-close risk in Phase 1)" do
+      it "emits a _moved flag for resource move tracking" do
         src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
         out = transpile_fn(src)
-        expect(out).not_to include("f_moved")
+        expect(out).to include("f_moved")
       end
 
       it "maps File to std.fs.File Zig type" do
@@ -8934,10 +8934,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketListen(@intCast(8080))')
       end
 
-      it "emits defer CheatLib.socketClose for server RAII" do
+      it "emits defer with move-guarded CheatLib.socketClose for server RAII" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(8080); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer CheatLib.socketClose(s);")
+        expect(out).to include("defer if (!s_moved) CheatLib.socketClose(s);")
       end
 
       it "emits CheatLib.socketAccept for accept()" do
@@ -8946,10 +8946,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketAccept(s)')
       end
 
-      it "emits defer CheatLib.socketClose for client RAII" do
+      it "emits defer with move-guarded CheatLib.socketClose for client RAII" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer CheatLib.socketClose(c);")
+        expect(out).to include("defer if (!c_moved) CheatLib.socketClose(c);")
       end
 
       it "emits CheatLib.socketRead for tcpRead()" do
@@ -8972,10 +8972,10 @@ RSpec.describe SemanticAnnotator do
         expect(Type.new(:TCPClient).zig_type).to eq("i32")
       end
 
-      it "does NOT emit a _moved flag for TCPServer resources" do
+      it "emits a _moved flag for TCPServer resource move tracking" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); RETURN; END'
         out = transpile_fn(src)
-        expect(out).not_to include("s_moved")
+        expect(out).to include("s_moved")
       end
     end
 
@@ -9090,10 +9090,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.fileCreate(')
       end
 
-      it "emits defer f.close() RAII for File::create" do
+      it "emits defer with move-guarded f.close() RAII for File::create" do
         src = 'FN f() RETURNS Void -> f = File::create("out.txt"); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer f.close();")
+        expect(out).to include("defer if (!f_moved) f.close();")
       end
 
       it "raises on File::create with wrong arg count" do
@@ -9153,10 +9153,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketConnect(')
       end
 
-      it "emits defer CheatLib.socketClose RAII for TCPClient::connect" do
+      it "emits defer with move-guarded CheatLib.socketClose RAII for TCPClient::connect" do
         src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer CheatLib.socketClose(c);")
+        expect(out).to include("defer if (!c_moved) CheatLib.socketClose(c);")
       end
 
       it "raises on TCPClient::connect with wrong arg count" do
@@ -9306,7 +9306,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.Pool(User){}")
       end
 
-      it "emits defer pool.deinit for @pool cleanup (RAII)" do
+      it "emits defer with move-guarded pool.deinit for @pool cleanup (RAII)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
           FN f() RETURNS Void ->
@@ -9314,7 +9314,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("defer pool.deinit(rt.heapAlloc())")
+        expect(out).to include("defer if (!pool_moved) pool.deinit(rt.heapAlloc())")
       end
     end
 
@@ -9541,7 +9541,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect(out).to include("CheatLib.Pool(User){}")
-        expect(out).to include("defer pool.deinit(rt.heapAlloc())")
+        expect(out).to include("defer if (!pool_moved) pool.deinit(rt.heapAlloc())")
         expect(out).to include("try pool.insert(rt.heapAlloc(),")
         expect(out).to include("pool.get(id)")
         expect(out).to include("pool.remove(id)")
@@ -9603,7 +9603,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.ShardedPool(Score, 4){}")
       end
 
-      it "emits defer sp.deinit for @pool:sharded cleanup (RAII)" do
+      it "emits defer with move-guarded sp.deinit for @pool:sharded cleanup (RAII)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
@@ -9611,7 +9611,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("defer sp.deinit(rt.heapAlloc())")
+        expect(out).to include("defer if (!sp_moved) sp.deinit(rt.heapAlloc())")
       end
 
       it "raises for @pool:sharded(1) — shard count must be >= 2" do
@@ -11385,7 +11385,7 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits defer s.deinit() for ~Number[?] declaration" do
+      it "emits defer with move-guarded s.deinit() for ~Number[?] declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Number[?] = BG STREAM { YIELD 1.0; };
@@ -11393,7 +11393,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer s.deinit()")
+        expect(out).to include("defer if (!s_moved) s.deinit()")
       end
     end
 
@@ -11644,7 +11644,7 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits defer s.deinit() for ~Number[INF] declaration" do
+      it "emits defer with move-guarded s.deinit() for ~Number[INF] declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
@@ -11652,7 +11652,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer s.deinit()")
+        expect(out).to include("defer if (!s_moved) s.deinit()")
       end
     end
 
