@@ -126,7 +126,8 @@ pub const RunQueue = struct {
         return b -% t;
     }
 
-    // Used internally by tryStealFrom
+    // Used internally by tryStealFrom.
+    // Skips pinned tasks — they must stay on their owning scheduler's thread.
     fn stealOne(self: *RunQueue) ?*Task {
         const t = self.top.load(.acquire);
         const b = self.bottom.load(.seq_cst);
@@ -135,6 +136,10 @@ pub const RunQueue = struct {
         if (size == 0 or size > self.mask) return null;
 
         const task = self.buffer[t & self.mask].load(.monotonic);
+
+        // Pinned tasks cannot be stolen.  Leave them in the victim's queue.
+        if (task != null and task.?.config.pinned) return null;
+
         if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
             return null;  // Lost race
         }
@@ -182,6 +187,7 @@ pub const TaskStatus = enum {
 pub const TaskConfig = struct {
     timeout_ms: u64 = 0,
     stack_size: StackSize = .Standard,  // Default to Standard
+    pinned: bool = false,              // true = cannot be stolen by other schedulers
 };
 
 pub const Task = struct {

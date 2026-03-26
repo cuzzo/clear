@@ -166,7 +166,9 @@ pub const Runtime = struct {
     }
 
     pub fn heapAlloc(self: *Runtime) std.mem.Allocator {
-        return self.heap_allocator;
+        // @pinned tasks use the scheduler's thread-local arena — zero locks.
+        const fp = @import("scheduler.zig");
+        return fp.__pinned_local_alloc orelse self.heap_allocator;
     }
 
     // TODO: Deprecate

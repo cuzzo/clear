@@ -1887,7 +1887,7 @@ private
 
   # BG spawn call: spawnBest by default, submitSpawn when @pinned.
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
-    task_cfg = task_config_zig(node.stack_size)
+    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
     if node.pinned
       <<~ZIG.chomp
         try #{rt_name}.getSched().submitSpawn(
@@ -1909,9 +1909,13 @@ private
     end
   end
 
-  def task_config_zig(stack_size)
+  def task_config_zig(stack_size, pinned: false)
     variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")
-    ".{ .stack_size = .#{variant} }"
+    if pinned
+      ".{ .stack_size = .#{variant}, .pinned = true }"
+    else
+      ".{ .stack_size = .#{variant} }"
+    end
   end
 
   # Temporarily installs a new fiber capture map and rt alias, runs the block, then restores.

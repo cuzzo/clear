@@ -45,6 +45,8 @@ class SemanticAnnotator
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = nil
+    # @pinned escape safety: true when inside a @pinned BG block.
+    @current_bg_pinned = false
     setup_builtins
   end
 
@@ -2764,6 +2766,8 @@ private
     # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
     outer_scope = current_scope
     locally_bound = Set.new
+    prev_bg_pinned = @current_bg_pinned
+    @current_bg_pinned = node.pinned
 
     last_type = :Void
     node.body.each do |expr|
@@ -2788,6 +2792,15 @@ private
       end
     end
 
+    # Safety: if the enclosing function/BG is @pinned (uses thread-local allocator),
+    # a non-pinned child BG block that captures outer variables would escape thread-local
+    # memory to a potentially stolen fiber — use-after-free or allocator corruption.
+    if @current_bg_pinned && !node.pinned && captures_outer_variables?(node.body, locally_bound)
+      error!(node, "BG block inside @pinned scope captures local variables but is not @pinned. " \
+                   "Thread-local memory cannot escape to a stealable fiber. " \
+                   "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
+    end
+
     # Auto-pin: if the BG body captures a @shared, @locked, @writeLocked, or @local
     # variable and the user hasn't explicitly said @parallel, pin to the local scheduler
     # to avoid cache-line bouncing.  @parallel overrides auto-pinning (except for @local).
@@ -2801,6 +2814,33 @@ private
 
     # Enforce linear ownership for BG captures.
     walk_bg_capture_moves(node.body, outer_scope, locally_bound)
+    @current_bg_pinned = prev_bg_pinned
+  end
+
+  # Check if a BG body references any variables not declared locally inside it.
+  def captures_outer_variables?(body, locally_bound)
+    body.any? { |expr| _has_outer_ref?(expr, locally_bound) }
+  end
+
+  def _has_outer_ref?(node, locally_bound)
+    return false if node.nil?
+    if node.is_a?(AST::Identifier) && !locally_bound.include?(node.name) &&
+       !%w[TRUE FALSE VOID _].include?(node.name) &&
+       current_scope.lookup(node.name)
+      return true
+    end
+    # Recurse into child nodes
+    if node.respond_to?(:members)
+      node.members.each do |m|
+        child = node.send(m) rescue next
+        if child.is_a?(Array)
+          return true if child.any? { |c| _has_outer_ref?(c, locally_bound) }
+        elsif child.respond_to?(:members)
+          return true if _has_outer_ref?(child, locally_bound)
+        end
+      end
+    end
+    false
   end
 
   # Walk the BG block's body AST and mark any outer-scope resource or affine

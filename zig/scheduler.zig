@@ -27,6 +27,11 @@ const STANDARD_STACK_SIZE = fm.STANDARD_STACK_SIZE;
 
 const cp = @import("control-plane.zig");
 
+/// Thread-local allocator for @pinned tasks.  Set by the scheduler
+/// before switching to a pinned task; cleared after the task yields.
+/// The Runtime reads this in heapAlloc() to avoid the global GPA.
+pub threadlocal var __pinned_local_alloc: ?std.mem.Allocator = null;
+
 const linux = std.os.linux;
 const posix = std.posix;
 const IoUring = linux.IoUring;
@@ -174,6 +179,11 @@ pub const Scheduler = struct {
     active_tasks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     shutdown_on_idle: bool = true,
 
+    // Thread-local arena for @pinned tasks.  Pinned tasks use this
+    // instead of the global heap allocator — zero locks, zero contention.
+    // The arena is backed by the scheduler's own allocator (page-level).
+    local_arena: std.heap.ArenaAllocator,
+
     pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
         const p = Poller.init() catch unreachable;
         const efd = try SmartEventFd.init();
@@ -198,6 +208,7 @@ pub const Scheduler = struct {
             .current_task = null,
             .active_tasks = std.atomic.Value(usize).init(0),
             .shutdown_on_idle = true,
+            .local_arena = std.heap.ArenaAllocator.init(allocator),
         };
 
         try sched.poller.register(sched.event_fd.fd, 0);
@@ -269,6 +280,7 @@ pub const Scheduler = struct {
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
+        self.local_arena.deinit();
         self.ring.deinit();
         self.poller.deinit();
     }
@@ -478,10 +490,19 @@ pub const Scheduler = struct {
                 fc.__current_task_fn = @intFromPtr(task.user_fn);
                 fc.__current_task_size = task.base.size_class;
 
+                // For @pinned tasks, expose the thread-local arena so the
+                // Runtime's heapAlloc() can use it instead of the global GPA.
+                if (task.config.pinned) {
+                    __pinned_local_alloc = self.local_arena.allocator();
+                }
+
                 // 1. Switch to the Task
                 // The task will resume inside 'entryWrapper' (if new)
                 // or wherever it yielded (if old).
                 task.base.switchTo(&self.main_ctx);
+
+                // Clear pinned allocator — we're back on the scheduler's context.
+                __pinned_local_alloc = null;
 
                 switch (task.status) {
                     .Finished => {
