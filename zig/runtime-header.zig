@@ -1885,38 +1885,48 @@ pub const CheatLib = struct {
             // Remote-call context structs — live on the calling fiber's stack.
             // The remote function must NOT call wg.done(); drainInbox does it.
 
+            // Remote operation context structs.  Each has a `done` atomic flag
+            // that the target sets after completing the operation.  The caller
+            // spins on this flag — no WaitGroup, no cross-thread scheduler access.
             const PutCtx = struct {
                 map: *Self, shard: usize,
-                key: []const u8, value: V, // key is pre-duped to remote_alloc
+                key: []const u8, value: V,
                 err: bool = false,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
-                    // key is already on remote_alloc — use directly as owned key.
                     c.map.shards[c.shard].map.put(remote_alloc, c.key, c.value) catch {
                         remote_alloc.free(c.key); c.err = true;
                     };
+                    c.done.store(true, .release);
                 }
             };
             const GetCtx = struct {
                 map: *Self, shard: usize, key: []const u8, result: ?V = null,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
                     c.result = c.map.shards[c.shard].map.get(c.key);
+                    c.done.store(true, .release);
                 }
             };
             const ContainsCtx = struct {
                 map: *Self, shard: usize, key: []const u8, result: bool = false,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
                     c.result = c.map.shards[c.shard].map.contains(c.key);
+                    c.done.store(true, .release);
                 }
             };
             const RemoveCtx = struct {
                 map: *Self, shard: usize, key: []const u8,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
                     if (c.map.shards[c.shard].map.fetchRemove(c.key)) |kv|
                         remote_alloc.free(kv.key);
+                    c.done.store(true, .release);
                 }
             };
 
@@ -1951,25 +1961,25 @@ pub const CheatLib = struct {
                     const owned_key = try remote_alloc.dupe(u8, key);
                     try self.shards[s].map.put(remote_alloc, owned_key, value);
                 } else {
-                    // COLD PATH: send via SPSC channel (value-copied, no linked list).
+                    // COLD PATH: send via SPSC channel. Caller spins on done flag.
+                    // No WaitGroup, no cross-thread scheduler access.
                     const safe_key = try remote_alloc.dupe(u8, key);
-                    var wg = WaitGroup.init(fp.active_scheduler);
-                    wg.add(1);
                     var ctx = PutCtx{ .map = self, .shard = s, .key = safe_key, .value = value };
                     const msg = fp.SpscMessage{
                         .tag = .RemoteCall,
                         .rc_func = @ptrCast(&PutCtx.run),
                         .rc_ctx = @ptrCast(&ctx),
-                        .rc_wg = @ptrCast(&wg),
                     };
                     const target = self.owners[s].?;
                     const sender_idx = fp.active_scheduler.index;
                     while (!target.channels[sender_idx].push(msg)) {
-                        // Ring full — yield and retry
                         std.Thread.yield() catch {};
                     }
                     target.event_fd.notify();
-                    wg.wait();
+                    // Spin until target completes the operation
+                    while (!ctx.done.load(.acquire)) {
+                        std.Thread.yield() catch {};
+                    }
                     if (ctx.err) return error.OutOfMemory;
                 }
             }
@@ -1981,18 +1991,21 @@ pub const CheatLib = struct {
                     return self.shards[s].map.get(key);
                 } else {
                     const safe_key = remote_alloc.dupe(u8, key) catch return null;
-                    const b = remote_alloc.create(GetBundle) catch { remote_alloc.free(safe_key); return null; };
-                    b.wg = WaitGroup.init(fp.active_scheduler);
-                    b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = safe_key };
-                    b.rc = .{ .func = &GetCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
-                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
-                    self.owners[s].?.event_fd.notify();
-                    b.wg.wait();
-                    const result = b.ctx.result;
-                    remote_alloc.free(safe_key);
-                    remote_alloc.destroy(b);
-                    return result;
+                    defer remote_alloc.free(safe_key);
+                    var ctx = GetCtx{ .map = self, .shard = s, .key = safe_key };
+                    const msg = fp.SpscMessage{
+                        .tag = .RemoteCall,
+                        .rc_func = @ptrCast(&GetCtx.run),
+                        .rc_ctx = @ptrCast(&ctx),
+                    };
+                    const target = self.owners[s].?;
+                    const sender_idx = fp.active_scheduler.index;
+                    while (!target.channels[sender_idx].push(msg))
+                        std.Thread.yield() catch {};
+                    target.event_fd.notify();
+                    while (!ctx.done.load(.acquire))
+                        std.Thread.yield() catch {};
+                    return ctx.result;
                 }
             }
 
@@ -2003,18 +2016,21 @@ pub const CheatLib = struct {
                     return self.shards[s].map.contains(key);
                 } else {
                     const safe_key = remote_alloc.dupe(u8, key) catch return false;
-                    const b = remote_alloc.create(ContainsBundle) catch { remote_alloc.free(safe_key); return false; };
-                    b.wg = WaitGroup.init(fp.active_scheduler);
-                    b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = safe_key };
-                    b.rc = .{ .func = &ContainsCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
-                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
-                    self.owners[s].?.event_fd.notify();
-                    b.wg.wait();
-                    const result = b.ctx.result;
-                    remote_alloc.free(safe_key);
-                    remote_alloc.destroy(b);
-                    return result;
+                    defer remote_alloc.free(safe_key);
+                    var ctx = ContainsCtx{ .map = self, .shard = s, .key = safe_key };
+                    const msg = fp.SpscMessage{
+                        .tag = .RemoteCall,
+                        .rc_func = @ptrCast(&ContainsCtx.run),
+                        .rc_ctx = @ptrCast(&ctx),
+                    };
+                    const target = self.owners[s].?;
+                    const sender_idx = fp.active_scheduler.index;
+                    while (!target.channels[sender_idx].push(msg))
+                        std.Thread.yield() catch {};
+                    target.event_fd.notify();
+                    while (!ctx.done.load(.acquire))
+                        std.Thread.yield() catch {};
+                    return ctx.result;
                 }
             }
 
@@ -2025,16 +2041,20 @@ pub const CheatLib = struct {
                     if (self.shards[s].map.fetchRemove(key)) |kv| remote_alloc.free(kv.key);
                 } else {
                     const safe_key = remote_alloc.dupe(u8, key) catch return;
-                    const b = remote_alloc.create(RemoveBundle) catch { remote_alloc.free(safe_key); return; };
-                    b.wg = WaitGroup.init(fp.active_scheduler);
-                    b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = safe_key };
-                    b.rc = .{ .func = &RemoveCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
-                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
-                    self.owners[s].?.event_fd.notify();
-                    b.wg.wait();
-                    remote_alloc.free(safe_key);
-                    remote_alloc.destroy(b);
+                    defer remote_alloc.free(safe_key);
+                    var ctx = RemoveCtx{ .map = self, .shard = s, .key = safe_key };
+                    const msg = fp.SpscMessage{
+                        .tag = .RemoteCall,
+                        .rc_func = @ptrCast(&RemoveCtx.run),
+                        .rc_ctx = @ptrCast(&ctx),
+                    };
+                    const target = self.owners[s].?;
+                    const sender_idx = fp.active_scheduler.index;
+                    while (!target.channels[sender_idx].push(msg))
+                        std.Thread.yield() catch {};
+                    target.event_fd.notify();
+                    while (!ctx.done.load(.acquire))
+                        std.Thread.yield() catch {};
                 }
             }
 

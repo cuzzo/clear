@@ -144,9 +144,10 @@ pub const Scheduler = struct {
 
     // 2. Communication
     inbox: AtomicInbox = .{},  // Legacy MPSC inbox (kept for work-stealing fallback & non-scheduler senders)
-    /// SPSC channels: heap-allocated array of rings, one per potential sender.
+    /// SPSC channels: heap-allocated, one per potential sender (max 8).
     /// channels[i] is the ring FROM scheduler i TO this scheduler.
-    channels: []spsc.DefaultRing = &.{},
+    channels: *[8]spsc.DefaultRing = undefined,
+    channels_count: u32 = 0,
     stack_pool: *StackPool,    // GLOBAL Stack Cache
     event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
@@ -217,9 +218,7 @@ pub const Scheduler = struct {
         // io_uring ring for async file I/O (256 SQE slots).
         const ring = try IoUring.init(256, 0);
 
-        // Heap-allocate SPSC channels (one per potential sender scheduler).
-        const max_scheds: usize = 8; // max supported schedulers for SPSC channels
-        const ch = try allocator.alloc(spsc.DefaultRing, max_scheds);
+        const ch = try allocator.create([8]spsc.DefaultRing);
         for (ch) |*ring_slot| ring_slot.* = .{};
 
         var sched = Scheduler{
@@ -230,6 +229,7 @@ pub const Scheduler = struct {
             .sleeping_queue = .{},
             .inbox = .{},
             .channels = ch,
+            .channels_count = 8,
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -315,7 +315,7 @@ pub const Scheduler = struct {
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
-        self.allocator.free(self.channels);
+        self.allocator.destroy(self.channels);
         self.local_arena.deinit();
         self.ring.deinit();
         self.poller.deinit();
@@ -560,11 +560,10 @@ pub const Scheduler = struct {
                         self.ready_queue.push(self.allocator, task) catch unreachable;
                     },
                     .RemoteCall => {
+                        // func sets ctx.done atomically — no WaitGroup needed.
                         const func = msg.rc_func.?;
                         const ctx = msg.rc_ctx.?;
-                        const wg: *WaitGroup = @ptrCast(@alignCast(msg.rc_wg.?));
                         func(ctx);
-                        wg.done();
                     },
                 }
             }
