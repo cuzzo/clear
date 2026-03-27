@@ -11,6 +11,18 @@ pub const InboxType = enum { Spawn, Resume, RemoteCall };
 pub const InboxNode = struct {
     next: ?*InboxNode = null,
     type: InboxType,
+    canary: u64 = INBOX_CANARY,
+
+    pub const INBOX_CANARY: u64 = 0xCAFE_BABE_DEAD_BEEF;
+
+    pub fn validate(self: *const InboxNode, label: []const u8) void {
+        if (self.canary != INBOX_CANARY) {
+            std.debug.print("INBOX CANARY FAIL [{s}]: addr={*} canary=0x{x} type={d} next={?*}\n", .{
+                label, self, self.canary, @intFromEnum(self.type), self.next,
+            });
+            @panic("InboxNode canary corrupted");
+        }
+    }
 };
 
 // Multi-Producer, Single-Consumer Atomic Stack
@@ -22,6 +34,7 @@ pub const AtomicInbox = struct {
 
     /// Producer: Push a single node. Wait-Free.
     pub fn push(self: *AtomicInbox, node: *InboxNode) void {
+        node.validate("push");
         var old_head = self.head.load(.monotonic);
         while (true) {
             node.next = old_head;
@@ -49,6 +62,7 @@ pub const AtomicInbox = struct {
         var curr = list;
         var depth: usize = 0;
         while (curr) |node| {
+            node.validate("reverse");
             depth += 1;
             if (depth > 100_000) {
                 std.debug.print("INBOX CYCLE: reverse depth > 100K, node={*}\n", .{node});
@@ -205,6 +219,9 @@ pub const Task = struct {
     status: TaskStatus = .Ready,
     config: TaskConfig = .{},
     is_on_root_stack: bool = false,
+    /// Debug guard: set to true when inbox_link is pushed to an inbox,
+    /// cleared when drainInbox processes it. Detects double-push.
+    in_inbox: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
 };
 

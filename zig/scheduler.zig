@@ -13,6 +13,10 @@ const AtomicInbox = qs.AtomicInbox;
 const RunQueue = qs.RunQueue;
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;
+
+const spsc = @import("spsc.zig");
+pub const SpscMessage = spsc.Message;
+pub const SpscMessageTag = spsc.MessageTag;
 pub const TaskConfig = qs.TaskConfig;
 const TaskFn = qs.TaskFn;
 
@@ -138,8 +142,11 @@ pub const Scheduler = struct {
     stack_cache: std.ArrayListUnmanaged([]u8) = .{},   // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
 
-    // 2. Communcation
-    inbox: AtomicInbox = .{},  // Lock-free Inbox
+    // 2. Communication
+    inbox: AtomicInbox = .{},  // Legacy MPSC inbox (kept for work-stealing fallback & non-scheduler senders)
+    /// SPSC channels: heap-allocated array of rings, one per potential sender.
+    /// channels[i] is the ring FROM scheduler i TO this scheduler.
+    channels: []spsc.DefaultRing = &.{},
     stack_pool: *StackPool,    // GLOBAL Stack Cache
     event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
@@ -210,13 +217,19 @@ pub const Scheduler = struct {
         // io_uring ring for async file I/O (256 SQE slots).
         const ring = try IoUring.init(256, 0);
 
+        // Heap-allocate SPSC channels (one per potential sender scheduler).
+        const max_scheds: usize = 8; // max supported schedulers for SPSC channels
+        const ch = try allocator.alloc(spsc.DefaultRing, max_scheds);
+        for (ch) |*ring_slot| ring_slot.* = .{};
+
         var sched = Scheduler{
             .stack_pool = stack_pool,
             .fiber_pool = .{},
             .ready_queue = .{},
-            .stack_cache = .{}, // probs needs to be unmanaged
+            .stack_cache = .{},
             .sleeping_queue = .{},
             .inbox = .{},
+            .channels = ch,
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -302,6 +315,7 @@ pub const Scheduler = struct {
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
+        self.allocator.free(self.channels);
         self.local_arena.deinit();
         self.ring.deinit();
         self.poller.deinit();
@@ -353,22 +367,36 @@ pub const Scheduler = struct {
     // ------------------------------------------------------------
     // 1. THE SPAWN (Producer Side - Thread A)
     // ------------------------------------------------------------
-    // TODO(v0.2): Pool SpawnRequest objects to avoid GPA alloc per spawn.
     pub fn submitSpawn(self: *Scheduler, trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: TaskConfig) !void {
+        // Use SPSC channel if sender is a scheduler thread.
+        if (scheduler_running) {
+            const sender_idx = active_scheduler.index;
+            const msg = SpscMessage{
+                .tag = .Spawn,
+                .trampoline_addr = trampoline_addr,
+                .user_fn = user_fn,
+                .args = args,
+                .config_stack_size = @intFromEnum(config.stack_size),
+                .config_pinned = config.pinned,
+                .config_timeout_ms = config.timeout_ms,
+            };
+            if (self.channels[sender_idx].push(msg)) {
+                self.event_fd.notify();
+                return;
+            }
+            // Ring full — fall through to legacy inbox
+        }
+        // Fallback: legacy MPSC inbox (for non-scheduler contexts or full ring)
         const req = try self.allocator.create(SpawnRequest);
         req.* = .{
             .inbox_link = .{.type = .Spawn},
             .user_fn = user_fn,
             .args = args,
-            .context = null, // TODO: remove the field from struct
+            .context = null,
             .config = config,
             .trampoline_addr = trampoline_addr,
         };
-
-        // Push to target's inbox (Lock Free)
         self.inbox.push(&req.inbox_link);
-
-        // Wake up target
         self.event_fd.notify();
     }
 
@@ -376,28 +404,54 @@ pub const Scheduler = struct {
     // 2. THE RESUME (Producer Side - Thread B, WaitGroup, etc)
     // ------------------------------------------------------------
     pub fn submitResume(self: *Scheduler, task: *Task) void {
+        // Use SPSC channel if the sender's index is known.
+        if (scheduler_running) {
+            const sender_idx = active_scheduler.index;
+            const msg = SpscMessage{
+                .tag = .Resume,
+                .task = @ptrCast(task),
+            };
+            if (self.channels[sender_idx].push(msg)) {
+                self.event_fd.notify();
+                return;
+            }
+            // Ring full — fall through to legacy inbox
+        }
+        // Fallback: legacy MPSC inbox (for non-scheduler contexts or full ring)
         task.inbox_link.type = .Resume;
-
-        // Push the existing task back to the inbox
-        // Note: Task now has an 'inbox_link' field
         self.inbox.push(&task.inbox_link);
-
-        // Wake up target (ignore error in hot path)
         self.event_fd.notify();
     }
 
     // Process all pending spawn/resume requests from the inbox.
-    // Pop all at once, reverse for FIFO order, then process one by one.
-    // IMPORTANT: next_node is captured BEFORE processing because wg.done()
-    // in RemoteCall handling may cause the current node to be freed.
+    //
+    // CRITICAL: We must snapshot ALL nodes into an array BEFORE processing
+    // any of them.  Processing a node (especially RemoteCall wg.done())
+    // can trigger submitResume on a DIFFERENT task whose inbox_link is
+    // still in the chain.  submitResume overwrites inbox_link.next,
+    // corrupting the chain if we're still traversing it.
     fn drainInbox(self: *Scheduler) void {
         const chain = self.inbox.popAll() orelse return;
-        var req_node = AtomicInbox.reverse(chain);
-        while (req_node) |node| {
-            const next_node = node.next;
-            // Detach node from chain before processing — prevents any
-            // accidental traversal of freed nodes.
-            node.next = null;
+
+        // CRITICAL: Snapshot all nodes immediately by traversing the chain
+        // ONCE and detaching each node.  We do NOT call reverse() because
+        // the chain traversal reads node.next — and another thread's
+        // submitResume can overwrite a task's inbox_link.next at any time.
+        // Processing in LIFO order (popAll returns newest-first) is fine.
+        var nodes: [512]*qs.InboxNode = undefined;
+        var count: usize = 0;
+        var curr: ?*qs.InboxNode = chain;
+        while (curr) |node| {
+            if (count >= nodes.len) break;
+            const next = node.next; // capture before detach
+            node.next = null;       // detach from chain
+            nodes[count] = node;
+            count += 1;
+            curr = next;
+        }
+
+        for (nodes[0..count]) |node| {
+
             if (node.type == .Spawn) {
                 const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
                 const effective_size = cp.recommendSize(
@@ -412,13 +466,11 @@ pub const Scheduler = struct {
                 // dwarfs 60μs) but shows up in spawn-heavy microbenchmarks.
                 const stack_mem = self.allocStack(effective_size) catch {
                     self.allocator.destroy(req);
-                    req_node = next_node;
                     continue;
                 };
                 const fiber_ptr = self.allocator.create(Fiber) catch {
                     self.freeStack(stack_mem);
                     self.allocator.destroy(req);
-                    req_node = next_node;
                     continue;
                 };
                 fiber_ptr.* = Fiber.init(stack_mem, req.trampoline_addr, effective_size);
@@ -426,7 +478,6 @@ pub const Scheduler = struct {
                     self.freeStack(stack_mem);
                     self.allocator.destroy(fiber_ptr);
                     self.allocator.destroy(req);
-                    req_node = next_node;
                     continue;
                 };
                 task.* = .{
@@ -441,7 +492,6 @@ pub const Scheduler = struct {
                 self.ready_queue.push(self.allocator, task) catch {
                     self.freeStack(stack_mem);
                     self.allocator.destroy(task);
-                    req_node = next_node;
                     continue;
                 };
                 _ = self.active_tasks.fetchAdd(1, .monotonic);
@@ -454,11 +504,79 @@ pub const Scheduler = struct {
                 wg.done();
             } else {
                 const task: *Task = @fieldParentPtr("inbox_link", node);
+                task.in_inbox.store(false, .release);
                 task.status = .Ready;
                 self.ready_queue.push(self.allocator, task) catch unreachable;
             }
-            req_node = next_node;
         }
+    }
+
+    /// Drain all SPSC channels (one per sender scheduler).
+    /// Messages are value-copied, so no linked-list corruption is possible.
+    fn drainChannels(self: *Scheduler) void {
+        const n = global_registry.count();
+        for (0..n) |sender_idx| {
+            while (self.channels[sender_idx].pop()) |msg| {
+                switch (msg.tag) {
+                    .Spawn => {
+                        const config = TaskConfig{
+                            .stack_size = @enumFromInt(msg.config_stack_size),
+                            .pinned = msg.config_pinned,
+                            .timeout_ms = msg.config_timeout_ms,
+                        };
+                        const effective_size = cp.recommendSize(
+                            if (msg.user_fn) |f| @intFromPtr(f) else 0,
+                            config.stack_size,
+                        );
+                        const stack_mem = self.allocStack(effective_size) catch continue;
+                        const fiber_ptr = self.allocator.create(Fiber) catch {
+                            self.freeStack(stack_mem);
+                            continue;
+                        };
+                        fiber_ptr.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
+                        const task = self.allocator.create(Task) catch {
+                            self.freeStack(stack_mem);
+                            self.allocator.destroy(fiber_ptr);
+                            continue;
+                        };
+                        task.* = .{
+                            .base = fiber_ptr,
+                            .user_fn = msg.user_fn.?,
+                            .context = msg.args,
+                            .status = .Ready,
+                            .config = config,
+                            .inbox_link = .{ .type = .Resume },
+                        };
+                        self.ready_queue.push(self.allocator, task) catch {
+                            self.freeStack(stack_mem);
+                            self.allocator.destroy(task);
+                            continue;
+                        };
+                        _ = self.active_tasks.fetchAdd(1, .monotonic);
+                    },
+                    .Resume => {
+                        const task: *Task = @ptrCast(@alignCast(msg.task.?));
+                        task.status = .Ready;
+                        self.ready_queue.push(self.allocator, task) catch unreachable;
+                    },
+                    .RemoteCall => {
+                        const func = msg.rc_func.?;
+                        const ctx = msg.rc_ctx.?;
+                        const wg: *WaitGroup = @ptrCast(@alignCast(msg.rc_wg.?));
+                        func(ctx);
+                        wg.done();
+                    },
+                }
+            }
+        }
+    }
+
+    fn hasChannelMessages(self: *Scheduler) bool {
+        const n = global_registry.count();
+        for (0..n) |i| {
+            if (!self.channels[i].isEmpty()) return true;
+        }
+        return false;
     }
 
     pub fn run(self: *Scheduler) void {
@@ -485,10 +603,12 @@ pub const Scheduler = struct {
             if (self.ready_queue.len() > 0) {
                 self.fast_path_counter +%= 1;
                 if (self.fast_path_counter & 63 == 0) {
+                    self.drainChannels();
                     self.drainInbox();
                 }
             } else {
                 // ── Slow path: no ready work — check all sources.
+                self.drainChannels();
                 self.drainInbox();
 
                 // Wake sleeping tasks
@@ -605,7 +725,7 @@ pub const Scheduler = struct {
             // We must check for new work ONE LAST TIME after setting the flag.
             // If we don't do this, a task could arrive between our last check
             // and the 'markSleeping' call, and we would sleep forever.
-            if (self.ready_queue.len() > 0 or self.inbox.head.load(.monotonic) != null) {
+            if (self.ready_queue.len() > 0 or self.inbox.head.load(.monotonic) != null or self.hasChannelMessages()) {
                 self.event_fd.markAwake();
                 continue; // Restart loop to process the new work
             }

@@ -1951,22 +1951,26 @@ pub const CheatLib = struct {
                     const owned_key = try remote_alloc.dupe(u8, key);
                     try self.shards[s].map.put(remote_alloc, owned_key, value);
                 } else {
-                    // COLD PATH: dupe key to remote_alloc NOW (on caller's thread)
-                    // because the original key may point to the caller's thread-local
-                    // arena, which the remote scheduler cannot safely read.
+                    // COLD PATH: send via SPSC channel (value-copied, no linked list).
                     const safe_key = try remote_alloc.dupe(u8, key);
-                    const b = try remote_alloc.create(RemoteBundle);
-                    b.wg = WaitGroup.init(fp.active_scheduler);
-                    b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = safe_key, .value = value };
-                    b.rc = .{ .func = &PutCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
-                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
-                    self.owners[s].?.event_fd.notify();
-                    b.wg.wait();
-                    const had_err = b.ctx.err;
-                    remote_alloc.destroy(b);
-                    // On error: PutCtx.run freed safe_key. On success: hashmap owns it.
-                    if (had_err) return error.OutOfMemory;
+                    var wg = WaitGroup.init(fp.active_scheduler);
+                    wg.add(1);
+                    var ctx = PutCtx{ .map = self, .shard = s, .key = safe_key, .value = value };
+                    const msg = fp.SpscMessage{
+                        .tag = .RemoteCall,
+                        .rc_func = @ptrCast(&PutCtx.run),
+                        .rc_ctx = @ptrCast(&ctx),
+                        .rc_wg = @ptrCast(&wg),
+                    };
+                    const target = self.owners[s].?;
+                    const sender_idx = fp.active_scheduler.index;
+                    while (!target.channels[sender_idx].push(msg)) {
+                        // Ring full — yield and retry
+                        std.Thread.yield() catch {};
+                    }
+                    target.event_fd.notify();
+                    wg.wait();
+                    if (ctx.err) return error.OutOfMemory;
                 }
             }
 
