@@ -157,6 +157,67 @@ pub const CheatLib = struct {
         try map.put(bucket_alloc, key_copy, value);
     }
 
+    // -----------------------------------------------------------------------
+    // StringMap(V) — thin wrapper around StringHashMapUnmanaged(V) that
+    // provides the same .put()/.get()/.remove()/.contains() API as
+    // PartitionedStringMap and ShardedStringMap.  This allows functions to
+    // accept any map variant via `anytype` — changing HashMap to
+    // HashMap@sharded(N) at the declaration site is a one-line change that
+    // doesn't ripple through function signatures.
+    // -----------------------------------------------------------------------
+    pub fn StringMap(comptime V: type) type {
+        return struct {
+            const Self = @This();
+            inner: std.StringHashMapUnmanaged(V) = .{},
+
+            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                if (self.inner.getPtr(key)) |val_ptr| {
+                    val_ptr.* = value;
+                    return;
+                }
+                const key_copy = try key_alloc.dupe(u8, key);
+                try self.inner.put(bucket_alloc, key_copy, value);
+            }
+
+            pub fn get(self: *Self, key: []const u8) ?V {
+                return self.inner.get(key);
+            }
+
+            pub fn contains(self: *Self, key: []const u8) bool {
+                return self.inner.contains(key);
+            }
+
+            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                if (self.inner.fetchRemove(key)) |kv| {
+                    key_alloc.free(kv.key);
+                }
+            }
+
+            pub fn count(self: *Self) i64 {
+                return @intCast(self.inner.count());
+            }
+
+            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                var it = self.inner.iterator();
+                while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
+                self.inner.deinit(bucket_alloc);
+            }
+
+            // Delegate to inner for code that still uses raw HashMap API
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                return self.inner.getPtr(key);
+            }
+
+            pub fn iterator(self: *Self) @TypeOf(self.inner).Iterator {
+                return self.inner.iterator();
+            }
+
+            pub fn keyIterator(self: *Self) @TypeOf(self.inner).KeyIterator {
+                return self.inner.keyIterator();
+            }
+        };
+    }
+
     /// Promotes a frame-allocated string map to heap before it escapes a function.
     /// Clones the bucket array to heap (via map.clone) and re-dupes each key string
     /// to heap so both survive the caller's frame rewind.  Called by the transpiler

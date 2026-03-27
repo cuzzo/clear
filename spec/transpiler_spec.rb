@@ -125,7 +125,7 @@ RSpec.describe ZigTranspiler do
 
     it "emits CheatLib.mapPromote before returning a String HashMap" do
       zig = transpile(map_return_src)
-      expect(zig).to include("CheatLib.mapPromote(i64, rt.heapAlloc(), &m)")
+      expect(zig).to include("CheatLib.mapPromote(i64, rt.heapAlloc(), &m.inner)")
     end
 
     it "emits mapPromote before the return statement" do
@@ -137,12 +137,12 @@ RSpec.describe ZigTranspiler do
 
     it "uses heapAlloc for mapPut key copies (keys outlive frame)" do
       zig = transpile(map_return_src)
-      expect(zig).to include("mapPut(i64, rt.heapAlloc(), rt.heapAlloc()")
+      expect(zig).to include(".put(rt.heapAlloc(), rt.heapAlloc()")
     end
 
     it "caller uses mapDeinit with heapAlloc for promoted map" do
       zig = transpile(map_return_src)
-      expect(zig).to include("CheatLib.mapDeinit(i64, rt.heapAlloc(), rt.heapAlloc(), &result)")
+      expect(zig).to include("result.deinit(rt.heapAlloc(), rt.heapAlloc())")
     end
 
     it "non-escaping map uses frameAlloc deinit (no-op)" do
@@ -154,7 +154,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("m.deinit(rt.frameAlloc())")
+      expect(zig).to include("m.deinit(rt.frameAlloc(), rt.frameAlloc())")
       expect(zig).not_to include("mapPromote")
       expect(zig).not_to include("mapDeinit")
     end

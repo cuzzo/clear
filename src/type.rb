@@ -1013,7 +1013,7 @@ class Type
         key_zig = key_type.zig_type
         return "CheatLib.NumericMapType(#{key_zig}, #{val_zig})"
       end
-      return "std.StringHashMapUnmanaged(#{val_zig})"
+      return "CheatLib.StringMap(#{val_zig})"
     end
 
     # 5b. Handle Generic Struct Instances

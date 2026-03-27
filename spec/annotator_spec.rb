@@ -2762,7 +2762,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapCount(i64, m)")
+        expect(out).to include("m.count()")
       end
 
       it "raises when count receives arguments" do
@@ -2800,7 +2800,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include('CheatLib.mapContains(i64, m, "x")')
+        expect(out).to include('m.contains("x")')
       end
 
       it "raises when contains receives no arguments" do
@@ -2850,7 +2850,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include('CheatLib.mapDelete(i64, rt.frameAlloc(), &m, "x")')
+        expect(out).to include('m.remove(rt.frameAlloc(), "x")')
       end
 
       it "raises when delete receives no arguments" do
@@ -2888,7 +2888,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m)")
+        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m.inner)")
       end
 
       it "raises when keys receives arguments" do
@@ -2926,7 +2926,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapValues(i64, rt.frameAlloc(), m)")
+        expect(out).to include("CheatLib.mapValues(i64, rt.frameAlloc(), m.inner)")
       end
 
       it "raises when values receives arguments" do
@@ -2950,7 +2950,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapPut(i64, rt.frameAlloc(), rt.frameAlloc()")
+        expect(out).to include("__hl0_map.put(rt.frameAlloc(), rt.frameAlloc()")
         expect(out).to include('"a"')
         expect(out).to include('"b"')
       end
@@ -2962,7 +2962,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("std.StringHashMapUnmanaged(i64){}")
+        expect(out).to include("CheatLib.StringMap(i64){}")
         expect(out).not_to include("mapPut")
       end
     end

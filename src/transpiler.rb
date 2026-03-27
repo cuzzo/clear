@@ -345,11 +345,11 @@ private
         is_user_struct = @struct_schemas&.key?(p_type_sym)
         if is_user_struct
           "#{p_name}: anytype"
-        elsif p_type_obj.striped? || (p_type_obj.sharded? && p_type_obj.map?)
-          # Sharded/striped maps must be passed by pointer — they contain internal
-          # locks and hash buckets that must be shared across fibers, not copied.
-          p_type = transpile_type(param[:type], is_param: true)
-          "#{p_name}: *#{p_type}"
+        elsif p_type_obj.map?
+          # All HashMap variants (StringMap, PartitionedStringMap, ShardedStringMap)
+          # use anytype so the function accepts any map regardless of @sharded.
+          # Maps are always passed by pointer (shared mutable state).
+          "#{p_name}: anytype"
         else
           p_type = transpile_type(param[:type], is_param: true)
           "#{p_name}: #{p_type}"
@@ -595,21 +595,17 @@ private
              val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
 
-             if map_ft.sharded? || map_ft.striped?
-               # Sharded/striped maps have direct .put() methods on the struct.
-               # Key alloc must use heapAlloc (key is duped and stored permanently).
-               if map_ft.numeric_map?
+             if map_ft.numeric_map?
+               if map_ft.sharded? || map_ft.striped?
                  return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
                else
-                 return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
+                 key_zig = map_ft.key_type.zig_type
+                 val_zig = map_ft.value_type.zig_type
+                 return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
                end
-             elsif map_ft.numeric_map?
-               key_zig = map_ft.key_type.zig_type
-               val_zig = map_ft.value_type.zig_type
-               return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              else
-               val_zig = map_ft.value_type.zig_type
-               return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+               # Unified .put() API works for StringMap, PartitionedStringMap, ShardedStringMap
+               return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
              end
           end
           arr_ref = visit(target_node)
@@ -779,23 +775,13 @@ private
       if node.target.metatype == :hashmap
         map_ft = Type.new(node.target.full_type)
 
-        if map_ft.sharded? || map_ft.striped?
-          # Sharded/striped maps have direct .get() that returns ?V.
-          "#{target}.get(#{index})"
-        elsif map_ft.numeric_map?
+        if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
           key_zig = map_ft.key_type.zig_type
           val_zig = map_ft.value_type.zig_type
           "CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target}, #{index})"
         else
-          inner_type = node.target.full_type.to_s.match(/HashMap<(.+)>/)[1]
-          if inner_type.end_with?("[]")
-            element_type = inner_type.gsub(/[\[\]]/, '')
-            zig_element = transpile_type(element_type)
-            zig_type = "std.ArrayListUnmanaged(#{zig_element})"
-          else
-            zig_type = map_ft.value_type.zig_type
-          end
-          "CheatLib.mapGet(#{zig_type}, #{target}, #{index})"
+          # Unified .get() API works for StringMap, PartitionedStringMap, ShardedStringMap
+          "#{target}.get(#{index})"
         end
       elsif node.target.type_info&.pool?
         "#{target}.get(#{index})"
@@ -1084,8 +1070,8 @@ private
       capture_fields = captured.map do |name, type_obj|
         t = type_obj ? Type.new(type_obj) : nil
         zig_t = t ? t.zig_type : "anyopaque"
-        # Sharded/striped maps must be captured by pointer (shared mutable state).
-        if t && (t.striped? || (t.sharded? && t.map?))
+        # All maps must be captured by pointer (shared mutable state).
+        if t && t.map?
           "#{name}: *#{zig_t},"
         else
           "#{name}: #{zig_t},"
@@ -1095,7 +1081,7 @@ private
       capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
         captured.map do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
-          if t && (t.striped? || (t.sharded? && t.map?))
+          if t && t.map?
             ".#{name} = &#{name}"
           else
             ".#{name} = #{name}"
@@ -1300,6 +1286,11 @@ private
         # Array/List args: convert to slice via .items for function params.
         if a.type_info&.array?
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
+        elsif a.type_info&.is_a?(Type) && Type.new(a.type_info).map?
+          # HashMap params use anytype — pass by pointer so the callee can mutate.
+          # BG captures already store maps as *MapType, so don't double-wrap.
+          is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
+          is_capture ? arg_code : "&#{arg_code}"
         else
           arg_code
         end
@@ -1366,7 +1357,7 @@ private
         val_zig  = node.value.type_info&.value_type&.zig_type || "f64"
         var_name = zig_safe_name(node.value.name)
         rt_name  = @do_rt_name || "rt"
-        "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name});"
+        "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);"
       end
 
       # 3. Standard Return with Move Suppression for unique heap
@@ -1860,11 +1851,10 @@ private
         "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{var}, #{key_str}, #{val_str});"
       end.join("\n            ")
     else
-      val_zig = map_ft.value_type.zig_type
       puts_stmts = node.pairs.map do |k, v|
         key_str = visit(k)
         val_str = visit(v)
-        "try CheatLib.mapPut(#{val_zig}, #{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), &#{var}, #{key_str}, #{val_str});"
+        "try #{var}.put(#{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), #{key_str}, #{val_str});"
       end.join("\n            ")
     end
 
@@ -1877,21 +1867,23 @@ private
     rt_name  = @do_rt_name || "rt"
     map_ft   = Type.new(node.object.full_type)
 
-    # Sharded maps have direct methods on the struct.
-    if map_ft.sharded? || map_ft.striped?
+    # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
+    if !map_ft.numeric_map?
       case node.map_method
       when :delete
         key_code = visit(node.args[0])
-        if map_ft.numeric_map?
-          "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
-        else
-          "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
-        end
+        "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
       when :contains
         key_code = visit(node.args[0])
         "#{obj_code}.contains(#{key_code})"
       when :count
         "#{obj_code}.count()"
+      when :keys
+        val_zig = map_ft.value_type.zig_type
+        "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
+      when :values
+        val_zig = map_ft.value_type.zig_type
+        "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
       end
     elsif map_ft.numeric_map?
       key_zig = map_ft.key_type.zig_type
@@ -1915,16 +1907,16 @@ private
       case node.map_method
       when :delete
         key_code = visit(node.args[0])
-        "CheatLib.mapDelete(#{val_zig}, #{rt_name}.frameAlloc(), &#{obj_code}, #{key_code})"
+        "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
       when :contains
         key_code = visit(node.args[0])
-        "CheatLib.mapContains(#{val_zig}, #{obj_code}, #{key_code})"
+        "#{obj_code}.contains(#{key_code})"
       when :count
-        "CheatLib.mapCount(#{val_zig}, #{obj_code})"
+        "#{obj_code}.count()"
       when :keys
-        "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
+        "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
       when :values
-        "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
+        "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
       end
     end
   end
