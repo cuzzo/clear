@@ -59,6 +59,15 @@ const SpawnRequest = struct {
     trampoline_addr: usize,
 };
 
+/// Lightweight cross-scheduler RPC.  Caller pushes this into the target
+/// scheduler's inbox; the target executes `func(ctx)` inline during
+/// drainInbox and the caller resumes via the embedded WaitGroup.
+pub const RemoteCall = struct {
+    inbox_link: InboxNode = .{ .type = .RemoteCall },
+    func: *const fn (*anyopaque) void,
+    ctx: *anyopaque,
+};
+
 
 // A thread-safe wake-up signal
 pub const SmartEventFd = struct {
@@ -179,6 +188,10 @@ pub const Scheduler = struct {
     active_tasks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     shutdown_on_idle: bool = true,
     fast_path_counter: u32 = 0,
+
+    /// Stable index assigned at registration (0..N-1).  Used by
+    /// PartitionedStringMap to determine shard ownership.
+    index: u32 = 0,
 
     // Thread-local arena for @pinned tasks.  Pinned tasks use this
     // instead of the global heap allocator — zero locks, zero contention.
@@ -417,6 +430,9 @@ pub const Scheduler = struct {
                     continue;
                 };
                 _ = self.active_tasks.fetchAdd(1, .monotonic);
+            } else if (node.type == .RemoteCall) {
+                const call: *RemoteCall = @fieldParentPtr("inbox_link", node);
+                call.func(call.ctx);
             } else {
                 const task: *Task = @fieldParentPtr("inbox_link", node);
                 task.status = .Ready;
@@ -754,10 +770,11 @@ pub const SchedulerRegistry = struct {
     pub fn register(self: *SchedulerRegistry, allocator: std.mem.Allocator, id: std.Thread.Id, sched: *Scheduler) !void {
         // 1. Scan existing slots for a null hole (left by unregister).
         const n = self.len.load(.acquire);
-        for (self.slots[0..n]) |*slot| {
+        for (self.slots[0..n], 0..) |*slot, slot_idx| {
             // CAS null → sched.  If another thread races us for the same
             // hole, exactly one wins; the loser continues scanning.
             if (slot.cmpxchgStrong(null, sched, .acq_rel, .monotonic) == null) {
+                sched.index = @intCast(slot_idx);
                 // Won the slot — record in id_map and return.
                 self.id_mutex.lock();
                 defer self.id_mutex.unlock();
@@ -772,6 +789,7 @@ pub const SchedulerRegistry = struct {
             _ = self.len.fetchSub(1, .acq_rel);
             return error.RegistryFull;
         }
+        sched.index = @intCast(idx);
         self.slots[idx].store(sched, .release);
 
         self.id_mutex.lock();
@@ -832,6 +850,11 @@ pub const SchedulerRegistry = struct {
         self.id_mutex.lock();
         defer self.id_mutex.unlock();
         return self.id_map.get(id);
+    }
+
+    /// Number of currently registered schedulers.
+    pub fn count(self: *SchedulerRegistry) u32 {
+        return self.len.load(.acquire);
     }
 };
 

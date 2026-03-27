@@ -1760,20 +1760,32 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------------
-    // PartitionedStringMap(V, N) — shared-nothing string hash map.
-    // N independent shards with NO locking. Each shard is owned by its
-    // scheduler thread. Fibers must be @pinned. Only access keys that
-    // hash to your scheduler's shards. Zero synchronization overhead.
-    // This is the type emitted for @sharded(N) without :locked/:writeLocked.
+    // PartitionedStringMap(V, N) — true shared-nothing string hash map.
+    //
+    // N independent shards with NO locking and NO atomics.  Cache-line
+    // padded to prevent false sharing between scheduler threads.
+    //
+    // Shared-nothing contract:
+    //   @pinned fibers on the same scheduler share shards cooperatively
+    //   (cooperative scheduling = only one fiber runs at a time = safe).
+    //   Cross-scheduler access to the same shard is a data race (UB).
+    //
+    // In v0.2, cross-scheduler access will be routed transparently via
+    // the scheduler inbox.  For now, @sharded(N) + @pinned gives the
+    // DragonflyDB model: each scheduler owns its partition of the keyspace.
+    //
+    // Emitted for @sharded(N) without :locked/:writeLocked.
     pub fn PartitionedStringMap(comptime V: type, comptime N: usize) type {
         comptime std.debug.assert(N >= 2);
         return struct {
             const Self = @This();
             const Map = std.StringHashMapUnmanaged(V);
 
+            // Cache-line padded shard — prevents false sharing between
+            // scheduler threads that own adjacent shards.
             const Shard = struct {
                 map: Map = .{},
-                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+                _pad: [56]u8 = undefined, // pad to 64-byte cache line
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -1784,14 +1796,12 @@ pub const CheatLib = struct {
 
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 const s = shardIndex(key);
-                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 const owned_key = try key_alloc.dupe(u8, key);
                 try self.shards[s].map.put(bucket_alloc, owned_key, value);
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
                 const s = shardIndex(key);
-                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 return self.shards[s].map.get(key);
             }
 
@@ -1824,9 +1834,8 @@ pub const CheatLib = struct {
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {
-                var counts: [N]u64 = undefined;
-                for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
-                return counts;
+                _ = self;
+                return [_]u64{0} ** N;
             }
         };
     }

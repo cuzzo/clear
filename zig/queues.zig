@@ -4,7 +4,7 @@ const fc = @import("fiber-core.zig");
 const Fiber = fc.Fiber;
 const StackSize = fc.StackSize;
 
-pub const InboxType = enum { Spawn, Resume };
+pub const InboxType = enum { Spawn, Resume, RemoteCall };
 
 
 // A generic node header that must be embedded in any struct sent to the Inbox.
