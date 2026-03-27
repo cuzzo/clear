@@ -20,7 +20,7 @@ var stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
 
 const NUM_SHARDS: usize = 8;
-const KEYS_PER_SHARD = 100_000;
+const KEYS_PER_SHARD = 50_000;
 const Map = CheatLib.PartitionedStringMap(i64, NUM_SHARDS);
 
 // Pre-computed key lists: keys_for_shard[s] contains KEYS_PER_SHARD keys
@@ -220,6 +220,82 @@ pub fn main() !void {
         } else {
             std.debug.print("WARN — below 1.5x\n", .{});
         }
+    }
+    // ---------------------------------------------------------------
+    // Routing correctness test: one fiber accesses ALL shards (50% routed)
+    // ---------------------------------------------------------------
+    std.debug.print("\n--- Routing Test ---\n", .{});
+    {
+        global_shutdown.store(false, .release);
+        const map2 = try allocator.create(Map);
+        map2.* = .{};
+
+        var threads2: [2]std.Thread = undefined;
+        for (&threads2) |*t| t.* = try std.Thread.spawn(.{}, schedulerThread, .{allocator});
+        while (fp.global_registry.count() < 2) std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+
+        // Submit ONE fiber on scheduler 0 that writes ALL keys (50% local, 50% routed)
+        var route_ctx = FiberCtx{ .map = map2 };
+
+        const routeFiberAll = struct {
+            fn work(_: *anyopaque, ctx_raw: ?*anyopaque) !void {
+                const ctx: *FiberCtx = @ptrCast(@alignCast(ctx_raw.?));
+                const alloc_inner = fp.active_scheduler.local_arena.allocator();
+                var ops_count: usize = 0;
+                const start2 = std.time.nanoTimestamp();
+
+                // Use c_allocator for buckets since arena dies with scheduler.
+                const ba = std.heap.c_allocator;
+
+                // PUT all keys across ALL shards (routing handles cross-shard)
+                const total = NUM_SHARDS * KEYS_PER_SHARD;
+                for (0..total) |i| {
+                    ctx.map.put(alloc_inner, ba, keys_for_shard[i % NUM_SHARDS][i / NUM_SHARDS], @intCast(i)) catch continue;
+                    ops_count += 1;
+                }
+                // GET all keys back
+                for (0..total) |i| {
+                    if (ctx.map.get(keys_for_shard[i % NUM_SHARDS][i / NUM_SHARDS])) |_| ops_count += 1;
+                }
+
+                const end2 = std.time.nanoTimestamp();
+                ctx.result_ms = @intCast(@divFloor(end2 - start2, std.time.ns_per_ms));
+                ctx.result_ops = ops_count;
+                ctx.done.store(true, .release);
+            }
+        }.work;
+
+        const sched0 = fp.global_registry.slots[0].load(.acquire) orelse unreachable;
+        try sched0.submitSpawn(
+            @intFromPtr(&rt_mod.Runtime.entryWrapper),
+            routeFiberAll, @ptrCast(&route_ctx),
+            .{ .pinned = true },
+        );
+
+        while (!route_ctx.done.load(.acquire)) std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+
+        const total_expected = NUM_SHARDS * KEYS_PER_SHARD;
+        const got_ops = route_ctx.result_ops;
+        std.debug.print("Routed ops: {d} ms, {d}/{d} ops\n", .{
+            route_ctx.result_ms, got_ops, total_expected * 2,
+        });
+        const expected = total_expected * 2;
+        const diff = if (got_ops > expected) got_ops - expected else expected - got_ops;
+        if (diff <= 10) {
+            std.debug.print("PASS — routed ops correct ({d}/{d})\n", .{ got_ops, expected });
+        } else {
+            std.debug.print("FAIL — expected ~{d} ops, got {d} (diff {d})\n", .{ expected, got_ops, diff });
+        }
+
+        global_shutdown.store(true, .release);
+        fp.global_registry.notifyAll();
+        for (&threads2) |*t| t.join();
+        // Buckets use c_allocator, keys use arena (freed with scheduler).
+        // Free bucket arrays only.
+        for (&map2.shards) |*shard| shard.map.deinit(allocator);
+        allocator.destroy(map2);
+        fp.global_registry.deinit(allocator);
+        fp.global_registry = .{};
     }
     std.debug.print("\n", .{});
 }

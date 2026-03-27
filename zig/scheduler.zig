@@ -61,11 +61,16 @@ const SpawnRequest = struct {
 
 /// Lightweight cross-scheduler RPC.  Caller pushes this into the target
 /// scheduler's inbox; the target executes `func(ctx)` inline during
-/// drainInbox and the caller resumes via the embedded WaitGroup.
+/// drainInbox, then drainInbox calls `wg.done()` to resume the caller.
+///
+/// SAFETY: The remote function must NOT call wg.done() itself.
+/// drainInbox captures func/ctx/wg into OS-thread locals before calling
+/// func, so the caller's fiber stack is never touched after wg.done().
 pub const RemoteCall = struct {
     inbox_link: InboxNode = .{ .type = .RemoteCall },
     func: *const fn (*anyopaque) void,
     ctx: *anyopaque,
+    wg: *WaitGroup,
 };
 
 
@@ -431,8 +436,15 @@ pub const Scheduler = struct {
                 };
                 _ = self.active_tasks.fetchAdd(1, .monotonic);
             } else if (node.type == .RemoteCall) {
+                // SAFETY: Capture all fields into OS-thread locals BEFORE
+                // calling func.  After wg.done(), the caller's fiber may
+                // resume and free the RemoteCall — we must not touch it.
                 const call: *RemoteCall = @fieldParentPtr("inbox_link", node);
-                call.func(call.ctx);
+                const func = call.func;
+                const ctx = call.ctx;
+                const wg = call.wg;
+                func(ctx);
+                wg.done();
             } else {
                 const task: *Task = @fieldParentPtr("inbox_link", node);
                 task.status = .Ready;

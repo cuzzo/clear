@@ -1762,17 +1762,20 @@ pub const CheatLib = struct {
     // -----------------------------------------------------------------------
     // PartitionedStringMap(V, N) — true shared-nothing string hash map.
     //
-    // N independent shards with NO locking and NO atomics.  Cache-line
-    // padded to prevent false sharing between scheduler threads.
+    // N independent shards with cache-line padding.  Each shard is owned
+    // by scheduler (shard_index % num_schedulers).
     //
-    // Shared-nothing contract:
-    //   @pinned fibers on the same scheduler share shards cooperatively
-    //   (cooperative scheduling = only one fiber runs at a time = safe).
-    //   Cross-scheduler access to the same shard is a data race (UB).
+    // HOT PATH (shard owned by current scheduler):
+    //   Direct access — zero locks, zero atomics.  Cooperative scheduling
+    //   ensures only one fiber runs at a time per scheduler.
     //
-    // In v0.2, cross-scheduler access will be routed transparently via
-    // the scheduler inbox.  For now, @sharded(N) + @pinned gives the
-    // DragonflyDB model: each scheduler owns its partition of the keyspace.
+    // COLD PATH (shard owned by another scheduler):
+    //   Transparently routed via the scheduler inbox.  The calling fiber
+    //   parks (WaitGroup), the owning scheduler executes the operation
+    //   inline in drainInbox, then signals completion.  The caller's
+    //   WaitGroup and context live on the fiber stack — safe because
+    //   drainInbox captures all fields into OS-thread locals before
+    //   calling func(), and calls wg.done() after func() returns.
     //
     // Emitted for @sharded(N) without :locked/:writeLocked.
     pub fn PartitionedStringMap(comptime V: type, comptime N: usize) type {
@@ -1780,49 +1783,154 @@ pub const CheatLib = struct {
         return struct {
             const Self = @This();
             const Map = std.StringHashMapUnmanaged(V);
+            // Thread-safe allocator for cold-path key/bucket allocations.
+            const remote_alloc = std.heap.c_allocator;
 
-            // Cache-line padded shard — prevents false sharing between
-            // scheduler threads that own adjacent shards.
             const Shard = struct {
                 map: Map = .{},
-                _pad: [56]u8 = undefined, // pad to 64-byte cache line
+                _pad: [56]u8 = undefined, // cache-line padding
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
+            owners: [N]?*fp.Scheduler = [_]?*fp.Scheduler{null} ** N,
+            ownership_init: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
             fn shardIndex(key: []const u8) usize {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
+            fn ensureOwnership(self: *Self) void {
+                if (self.ownership_init.load(.acquire) == 2) return;
+                if (self.ownership_init.cmpxchgStrong(0, 1, .acquire, .monotonic)) |_| {
+                    while (self.ownership_init.load(.acquire) != 2)
+                        std.Thread.yield() catch {};
+                    return;
+                }
+                var scheds: [64]?*fp.Scheduler = [_]?*fp.Scheduler{null} ** 64;
+                var sc: u32 = 0;
+                const n = fp.global_registry.len.load(.acquire);
+                for (fp.global_registry.slots[0..n]) |*slot| {
+                    if (slot.load(.acquire)) |s| { scheds[sc] = s; sc += 1; }
+                }
+                if (sc == 0) { scheds[0] = fp.active_scheduler; sc = 1; }
+                for (0..N) |i| self.owners[i] = scheds[i % sc];
+                self.ownership_init.store(2, .release);
+            }
+
+            inline fn isLocal(self: *Self, s: usize) bool {
+                return (self.owners[s] == fp.active_scheduler);
+            }
+
+            // Remote-call context structs — live on the calling fiber's stack.
+            // The remote function must NOT call wg.done(); drainInbox does it.
+
+            const PutCtx = struct {
+                map: *Self, shard: usize,
+                key: []const u8, value: V,
+                err: bool = false,
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    const k = remote_alloc.dupe(u8, c.key) catch { c.err = true; return; };
+                    c.map.shards[c.shard].map.put(remote_alloc, k, c.value) catch {
+                        remote_alloc.free(k); c.err = true;
+                    };
+                }
+            };
+            const GetCtx = struct {
+                map: *Self, shard: usize, key: []const u8, result: ?V = null,
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    c.result = c.map.shards[c.shard].map.get(c.key);
+                }
+            };
+            const ContainsCtx = struct {
+                map: *Self, shard: usize, key: []const u8, result: bool = false,
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    c.result = c.map.shards[c.shard].map.contains(c.key);
+                }
+            };
+            const RemoveCtx = struct {
+                map: *Self, shard: usize, key: []const u8,
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    if (c.map.shards[c.shard].map.fetchRemove(c.key)) |kv|
+                        remote_alloc.free(kv.key);
+                }
+            };
+
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                self.ensureOwnership();
                 const s = shardIndex(key);
-                const owned_key = try key_alloc.dupe(u8, key);
-                try self.shards[s].map.put(bucket_alloc, owned_key, value);
+                if (self.isLocal(s)) {
+                    const owned_key = try key_alloc.dupe(u8, key);
+                    try self.shards[s].map.put(bucket_alloc, owned_key, value);
+                } else {
+                    var wg = WaitGroup.init(fp.active_scheduler);
+                    wg.add(1);
+                    var ctx = PutCtx{ .map = self, .shard = s, .key = key, .value = value };
+                    var rc = fp.RemoteCall{ .func = &PutCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
+                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    self.owners[s].?.event_fd.notify();
+                    wg.wait();
+                    if (ctx.err) return error.OutOfMemory;
+                }
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
+                self.ensureOwnership();
                 const s = shardIndex(key);
-                return self.shards[s].map.get(key);
+                if (self.isLocal(s)) {
+                    return self.shards[s].map.get(key);
+                } else {
+                    var wg = WaitGroup.init(fp.active_scheduler);
+                    wg.add(1);
+                    var ctx = GetCtx{ .map = self, .shard = s, .key = key };
+                    var rc = fp.RemoteCall{ .func = &GetCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
+                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    self.owners[s].?.event_fd.notify();
+                    wg.wait();
+                    return ctx.result;
+                }
             }
 
             pub fn contains(self: *Self, key: []const u8) bool {
+                self.ensureOwnership();
                 const s = shardIndex(key);
-                return self.shards[s].map.contains(key);
+                if (self.isLocal(s)) {
+                    return self.shards[s].map.contains(key);
+                } else {
+                    var wg = WaitGroup.init(fp.active_scheduler);
+                    wg.add(1);
+                    var ctx = ContainsCtx{ .map = self, .shard = s, .key = key };
+                    var rc = fp.RemoteCall{ .func = &ContainsCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
+                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    self.owners[s].?.event_fd.notify();
+                    wg.wait();
+                    return ctx.result;
+                }
             }
 
             pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                self.ensureOwnership();
                 const s = shardIndex(key);
-                if (self.shards[s].map.fetchRemove(key)) |kv| {
-                    key_alloc.free(kv.key);
+                if (self.isLocal(s)) {
+                    if (self.shards[s].map.fetchRemove(key)) |kv| key_alloc.free(kv.key);
+                } else {
+                    var wg = WaitGroup.init(fp.active_scheduler);
+                    wg.add(1);
+                    var ctx = RemoveCtx{ .map = self, .shard = s, .key = key };
+                    var rc = fp.RemoteCall{ .func = &RemoveCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
+                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    self.owners[s].?.event_fd.notify();
+                    wg.wait();
                 }
             }
 
             pub fn count(self: *Self) i64 {
-                var n: i64 = 0;
-                for (&self.shards) |*shard| {
-                    n += @intCast(shard.map.count());
-                }
-                return n;
+                var nc: i64 = 0;
+                for (&self.shards) |*shard| nc += @intCast(shard.map.count());
+                return nc;
             }
 
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
