@@ -46,6 +46,13 @@ STD_LIB = {
     { args: [:Int64], return: :Int64, zig: "{0}" }
   ],
 
+  # toString() (Overloaded)
+  "toString" => [
+    { args: [:Int64],   return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, {0})" },
+    { args: [:Float64], return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))" },
+    { args: [STRING_TYPE], return: STRING_TYPE, zig: "{0}" }
+  ],
+
   # toFloat() (Overloaded)
   "toFloat" => [
     { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})" },

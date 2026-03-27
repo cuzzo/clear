@@ -339,11 +339,17 @@ private
       params_zig = node.params.map do |param|
         p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
         p_type_sym = param[:type].is_a?(Type) ? param[:type].resolved : param[:type]
+        p_type_obj = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
         # Only real structs (not enums/unions/primitives) use anytype for transparent
         # stack/heap monomorphization.  Zig monomorphizes for T and *T automatically.
         is_user_struct = @struct_schemas&.key?(p_type_sym)
         if is_user_struct
           "#{p_name}: anytype"
+        elsif p_type_obj.striped? || (p_type_obj.sharded? && p_type_obj.map?)
+          # Sharded/striped maps must be passed by pointer — they contain internal
+          # locks and hash buckets that must be shared across fibers, not copied.
+          p_type = transpile_type(param[:type], is_param: true)
+          "#{p_name}: *#{p_type}"
         else
           p_type = transpile_type(param[:type], is_param: true)
           "#{p_name}: #{p_type}"
@@ -591,18 +597,19 @@ private
 
              if map_ft.sharded? || map_ft.striped?
                # Sharded/striped maps have direct .put() methods on the struct.
+               # Key alloc must use heapAlloc (key is duped and stored permanently).
                if map_ft.numeric_map?
-                 return "try #{map_ref}.put(#{rt_name}.frameAlloc(), #{key_ref}, #{val_ref});"
+                 return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
                else
-                 return "try #{map_ref}.put(#{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), #{key_ref}, #{val_ref});"
+                 return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
                end
              elsif map_ft.numeric_map?
                key_zig = map_ft.key_type.zig_type
                val_zig = map_ft.value_type.zig_type
-               return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+               return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              else
                val_zig = map_ft.value_type.zig_type
-               return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+               return "try CheatLib.mapPut(#{val_zig}, #{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
              end
           end
           arr_ref = visit(target_node)
@@ -1075,12 +1082,25 @@ private
       captured = collect_do_identifiers(node.body)
 
       capture_fields = captured.map do |name, type_obj|
-        zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
-        "#{name}: #{zig_t},"
+        t = type_obj ? Type.new(type_obj) : nil
+        zig_t = t ? t.zig_type : "anyopaque"
+        # Sharded/striped maps must be captured by pointer (shared mutable state).
+        if t && (t.striped? || (t.sharded? && t.map?))
+          "#{name}: *#{zig_t},"
+        else
+          "#{name}: #{zig_t},"
+        end
       end.join("\n        ")
 
       capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
-        captured.map { |name, _| ".#{name} = #{name}" }).join(", ")
+        captured.map do |name, type_obj|
+          t = type_obj ? Type.new(type_obj) : nil
+          if t && (t.striped? || (t.sharded? && t.map?))
+            ".#{name} = &#{name}"
+          else
+            ".#{name} = #{name}"
+          end
+        end).join(", ")
 
       rt_name = @do_rt_name || "rt"
 

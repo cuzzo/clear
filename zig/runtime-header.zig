@@ -475,6 +475,40 @@ pub const CheatLib = struct {
         return null;
     }
 
+    // toString: Int64 -> String (heap-allocated decimal representation)
+    pub fn intToString(allocator: std.mem.Allocator, value: i64) ![]const u8 {
+        // Max i64 is 19 digits + sign + null = 21 bytes; allocate 21
+        var buf: [21]u8 = undefined;
+        var slen: usize = 0;
+        var v: u64 = if (value < 0) @intCast(-value) else @intCast(value);
+        if (v == 0) {
+            buf[0] = '0';
+            slen = 1;
+        } else {
+            while (v > 0) : (slen += 1) {
+                buf[slen] = @intCast('0' + (v % 10));
+                v /= 10;
+            }
+            if (value < 0) {
+                buf[slen] = '-';
+                slen += 1;
+            }
+            // Reverse in-place
+            var lo: usize = 0;
+            var hi: usize = slen - 1;
+            while (lo < hi) {
+                const tmp = buf[lo];
+                buf[lo] = buf[hi];
+                buf[hi] = tmp;
+                lo += 1;
+                hi -= 1;
+            }
+        }
+        const result = try allocator.alloc(u8, slen);
+        @memcpy(result, buf[0..slen]);
+        return result;
+    }
+
     // Split: String -> List
     pub fn split(allocator: std.mem.Allocator, str: []const u8, delimiter: []const u8) !std.ArrayListUnmanaged([]const u8) {
         var list = std.ArrayListUnmanaged([]const u8){};

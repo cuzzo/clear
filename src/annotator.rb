@@ -1234,21 +1234,25 @@ private
     visit(index_node)
 
     # 2. Check Mutability of the owner
-    #    If we are doing x[0] = 1, 'x' must be mutable.
     if index_node.target.is_a?(AST::Identifier)
       var_name = index_node.target.name
       if current_scope.is_immutable?(var_name)
-        # matches your test expectation
         error!(assignment_node, "Cannot modify index of immutable list '#{var_name}'")
       end
       mark_var_mutated(var_name)
     end
 
-    # 3. Type Check
-    #    The value being assigned must match the type of the index
-    validate_assignment_type(assignment_node, index_node.resolved_type, assignment_node.value.resolved_type)
+    # 3. Type Check — for map assignments, use the unwrapped value type (V, not ?V).
+    #    map[key] READ returns ?V, but map[key] = val STORES V.
+    assign_type = index_node.type_info
+    if assign_type&.optional?
+      assign_type_resolved = assign_type.wrapped_type.resolved
+    else
+      assign_type_resolved = index_node.resolved_type
+    end
+    validate_assignment_type(assignment_node, assign_type_resolved, assignment_node.value.resolved_type)
 
-    assignment_node.full_type = index_node.full_type
+    assignment_node.full_type = assign_type_resolved
   end
 
   def visit_assignment_field(field_node, assignment_node)
@@ -1811,14 +1815,20 @@ private
       return
     end
 
+    # Handle optional types: ?T OR default -> T
+    if t_left_type.optional?
+      wrapped = t_left_type.wrapped_type
+      unless wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
+        error!(node, "Type mismatch in OR: expected #{wrapped.resolved}, got #{t_right_type.resolved}")
+      end
+      node.full_type = wrapped.resolved
+      return
+    end
+
     # Standard OR behavior
-    # Type Safety: Usually we want them to match.
-    # If LHS is "Number?" (Nullable), RHS must be "Number".
     if t_left_type.resolved == t_right_type.resolved
       node.full_type = t_left_type.resolved
     else
-      # If types mismatch, it might be :Any, or you could support Union types
-      # For this stage, default to the LHS type or :Any
       node.full_type = t_left_type.resolved
     end
   end
