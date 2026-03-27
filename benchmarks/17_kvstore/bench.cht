@@ -138,7 +138,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE wi: Int64 = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        set_futures.append(BG { @pinned -> doSet!(map, start, chunk); });
+        set_futures.append(BG { doSet!(map, start, chunk); });
         wi += 1;
     END
     MUTABLE si: Int64 = 0;
@@ -149,7 +149,7 @@ FN cheatMain() RETURNS Void ->
     wi = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        get_futures.append(BG { @pinned -> doGet!(map, start, chunk); });
+        get_futures.append(BG { doGet!(map, start, chunk); });
         wi += 1;
     END
     MUTABLE total_hits: Int64 = 0;
@@ -160,7 +160,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE zipf_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        zipf_futures.append(BG { @pinned -> doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
+        zipf_futures.append(BG { doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
         wi += 1;
     END
     MUTABLE zipf_hits: Int64 = 0;
@@ -171,7 +171,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE mix_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        mix_futures.append(BG { @pinned -> doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
+        mix_futures.append(BG { doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
         wi += 1;
     END
     MUTABLE mix_hits: Int64 = 0;

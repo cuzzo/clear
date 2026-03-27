@@ -357,6 +357,9 @@ module CapabilityHelper
         next unless info
         return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
         return true if info[:storage] == :shared || info[:storage] == :multiowned
+        # @sharded maps require pinning — shared-nothing model needs fiber affinity.
+        ti = info[:type]
+        return true if ti.is_a?(Type) && ti.sharded?
         next
       end
       if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
