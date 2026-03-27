@@ -696,6 +696,30 @@ private
     node.full_type = :Void
   end
 
+  def visit_ForRange(node)
+    # 1. Type-check range bounds
+    visit(node.start_expr)
+    visit(node.end_expr)
+    start_type = node.start_expr.resolved_type
+    end_type   = node.end_expr.resolved_type
+    error!(node, "FOR range start must be Int64, got #{start_type}") unless start_type == :Int64
+    error!(node, "FOR range end must be Int64, got #{end_type}") unless end_type == :Int64
+
+    # 2. Analyze body in new scope with loop variable declared as immutable Int64
+    @loop_depth += 1
+    analyze_control_flow_branches([
+      proc {
+        current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
+        node.body.each { |stmt| visit(stmt) }
+        finalize_scope(node)
+        node.deferred_drops
+      }
+    ], merge_to_parent: false)
+    @loop_depth -= 1
+
+    node.full_type = :Void
+  end
+
   def visit_WhileLoop(node)
     # 1. Analyze Condition
     visit(node.condition)

@@ -1,0 +1,51 @@
+-- Test: FOR range loop — inclusive (..=) and exclusive (..<) ranges.
+
+FN cheatMain() RETURNS Void ->
+    -- Inclusive range: 1 + 2 + 3 + 4 + 5 = 15
+    MUTABLE sum_incl: Int64 = 0;
+    FOR i IN (1_i64..=5_i64) DO
+        sum_incl += i;
+    END
+    ASSERT sum_incl == 15_i64, "inclusive range sum should be 15";
+
+    -- Exclusive range: 0 + 1 + 2 + 3 + 4 = 10
+    MUTABLE sum_excl: Int64 = 0;
+    FOR j IN (0_i64..<5_i64) DO
+        sum_excl += j;
+    END
+    ASSERT sum_excl == 10_i64, "exclusive range sum should be 10";
+
+    -- Variable bounds
+    n = 100_i64;
+    MUTABLE total: Int64 = 0;
+    FOR k IN (1_i64..=n) DO
+        total += k;
+    END
+    ASSERT total == 5050_i64, "sum 1..=100 should be 5050";
+
+    -- Zero-trip loop (start > end)
+    MUTABLE zero: Int64 = 0;
+    FOR z IN (10_i64..<5_i64) DO
+        zero += z;
+    END
+    ASSERT zero == 0_i64, "zero-trip loop should not execute";
+
+    -- Nested FOR loops
+    MUTABLE product: Int64 = 0;
+    FOR a IN (1_i64..=3_i64) DO
+        FOR b IN (1_i64..=3_i64) DO
+            product += a * b;
+        END
+    END
+    ASSERT product == 36_i64, "nested FOR sum of products should be 36";
+
+    -- Legacy ..<=  syntax
+    MUTABLE legacy: Int64 = 0;
+    FOR m IN (1_i64..<=3_i64) DO
+        legacy += m;
+    END
+    ASSERT legacy == 6_i64, "legacy ..<=  range sum should be 6";
+
+    print("FOR range: all tests passed");
+    RETURN;
+END

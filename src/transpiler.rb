@@ -860,6 +860,21 @@ private
 
       result
 
+    when AST::ForRange
+      start_val = visit(node.start_expr)
+      end_val   = visit(node.end_expr)
+      var       = zig_safe_name(node.var_name)
+      body      = transpile_block(node.body)
+      rt_ref    = @do_rt_name || "rt"
+      cmp       = node.inclusive ? "<=" : "<"
+      @for_counter = (@for_counter || 0) + 1
+      iter_var  = "__for_#{@for_counter}"
+      if @current_fn_has_rt
+        "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
+      else
+        "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var};\n #{body} \n}\n}"
+      end
+
     when AST::WhileLoop
       cond   = visit(node.condition)
       body   = transpile_block(node.do_branch)

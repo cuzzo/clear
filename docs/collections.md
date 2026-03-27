@@ -278,7 +278,7 @@ This follows CLEAR's "Correct > Scalable > Fast" ordering: the default is safe a
 
 For performance-critical internal infrastructure where keys are not attacker-controlled (e.g., internal service meshes, compiler symbol tables, game engine registries), CLEAR plans to offer an opt-in unsalted hash:
 
-```clear
+```
 -- Planned syntax (not yet implemented):
 MUTABLE symbols: HashMap<SymbolInfo>@fastTrusted = {};
 MUTABLE fast_sharded: HashMap<Int64>@sharded(8):fastTrusted = {};

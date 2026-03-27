@@ -73,6 +73,7 @@ class Parser
   stmt(:KEYWORD, 'ENUM')   { parse_enum_def }
   stmt(:KEYWORD, 'UNION')  { parse_union_def }
   stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
+  stmt(:KEYWORD, 'FOR') { parse_for_range }
   stmt(:KEYWORD, 'TIGHT') { parse_tight_stmt }
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
@@ -979,6 +980,26 @@ class Parser
     end
 
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+  end
+
+  # FOR var IN (start ..= end) DO body END   — inclusive
+  # FOR var IN (start ..< end) DO body END   — exclusive
+  def parse_for_range
+    tok = consume(:KEYWORD, 'FOR')
+    var_name = consume(:VAR_ID).value
+    consume(:KEYWORD, 'IN')
+    consume(:CHAR, '(')
+    range_expr = parse_expression  # Parses "start ..= end" or "start ..< end"
+    consume(:CHAR, ')')
+    consume(:KEYWORD, 'DO')
+    body = parse_stmts_until_end
+    consume(:KEYWORD, 'END')
+
+    unless range_expr.is_a?(AST::RangeLit)
+      error!(tok, "FOR ... IN requires a range expression: (start..=end) or (start..<end)")
+    end
+
+    AST::ForRange.new(tok, var_name, range_expr.start, range_expr.finish, range_expr.inclusive, body, nil)
   end
 
   def parse_match_statement

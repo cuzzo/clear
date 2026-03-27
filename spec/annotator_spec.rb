@@ -3225,5 +3225,91 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
+
+  # ===================================================================
+  # FOR range loop
+  # ===================================================================
+  describe "FOR range loop" do
+    it "transpiles inclusive FOR loop (..=)" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Int64 ->
+          MUTABLE sum: Int64 = 0;
+          FOR i IN (1_i64..=5_i64) DO
+            sum += i;
+          END
+          RETURN sum;
+        END
+      CLEAR
+      expect(zig).to match(/__for_\d+ <= 5/)
+      expect(zig).to match(/const i: i64 = __for_\d+/)
+    end
+
+    it "transpiles exclusive FOR loop (..<)" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Int64 ->
+          MUTABLE sum: Int64 = 0;
+          FOR i IN (0_i64..<5_i64) DO
+            sum += i;
+          END
+          RETURN sum;
+        END
+      CLEAR
+      expect(zig).to match(/__for_\d+ < 5/)
+    end
+
+    it "rejects non-Int64 range bounds" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            FOR i IN (1.0..=10.0) DO
+              RETURN;
+            END
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/FOR range start must be Int64/)
+    end
+
+    it "loop variable is immutable" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            FOR i IN (0_i64..<10_i64) DO
+              i = 5_i64;
+            END
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/immutable|cannot reassign/i)
+    end
+
+    it "loop variable is visible in body" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Int64 ->
+          MUTABLE sum: Int64 = 0;
+          FOR i IN (0_i64..<3_i64) DO
+            sum += i;
+          END
+          RETURN sum;
+        END
+      CLEAR
+      expect(zig).to include("sum = (sum + i)")
+    end
+
+    it "supports ..<=  (legacy inclusive syntax)" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Int64 ->
+          MUTABLE sum: Int64 = 0;
+          FOR i IN (1_i64..<=5_i64) DO
+            sum += i;
+          END
+          RETURN sum;
+        END
+      CLEAR
+      expect(zig).to match(/__for_\d+ <= 5/)
+    end
+  end
+
+  # ===================================================================
 end
 

@@ -9,7 +9,7 @@ class Lexer
       MUTABLE
       FN RETURN RETURNS USE
       IF THEN ELSE ELSE_IF END
-      WHILE DO BG NEXT BREAK CONTINUE
+      WHILE DO FOR IN BG NEXT BREAK CONTINUE
       CAST AS
       STRUCT ENUM UNION TRUE FALSE NIL
       ASSERT RAISE CATCH EXIT DIE PASS PRUNE
@@ -45,6 +45,7 @@ class Lexer
       # --- TOKENS (Auto-advance via add) ---
       when @s.scan(/\.\.\./) then add(:ELLIPSIS, '...', start_col)
       when @s.scan(/\.\.<=/) then add(:RANGE_INCL, '..<=', start_col)
+      when @s.scan(/\.\.=/) then add(:RANGE_INCL, '..=', start_col)
       when @s.scan(/\.\.</) then add(:RANGE_EXCL, '..<', start_col)
       when @s.scan(/\.\./) then add(:RANGE, '..', start_col)
       when @s.scan(/->/) then add(:ARROW, '->', start_col)

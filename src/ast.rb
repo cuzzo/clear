@@ -412,6 +412,10 @@ module AST
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive) { include Locatable }
 
+  # ForRange: FOR var IN (start ..= end) DO body END
+  # inclusive: true = ..= (start to end), false = ..< (start to end-1)
+  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops) { include Locatable }
+
   UNARY_OPS = ['-', '!', '~']
 
   PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64]
