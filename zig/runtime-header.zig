@@ -1760,20 +1760,10 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------------
-    // ShardedStringMap(V, N) — Unified sharded string hash map.
-    //
-    // Every shard has a Mutex that is ELIDED by default (lock/unlock are
-    // skipped when locks_elided=true).  This costs 8 bytes per shard in
-    // memory but zero cycles at runtime — a monotonic load + predicted
-    // branch per operation.
-    //
-    // When the control plane detects key skew, it flips locks_elided to
-    // false LIVE, enabling cross-shard work stealing with no data
-    // structure rebuild.  The mutexes were always there.
-    //
-    // :sharded(N)         → locks_elided = true  (default, zero-lock)
-    // :sharded(N) @locked → locks_elided = false (explicit, skew-safe)
-    // -----------------------------------------------------------------------
+    // ShardedStringMap(V, N) — RwLock-sharded string hash map.
+    // N independent shards, each protected by a RwLock. Readers are concurrent
+    // within a shard; writers are exclusive per-shard. Sharding provides N-way
+    // parallelism; RwLock ensures thread safety with minimal read contention.
     pub fn ShardedStringMap(comptime V: type, comptime N: usize) type {
         comptime std.debug.assert(N >= 2);
         return struct {
@@ -1782,56 +1772,44 @@ pub const CheatLib = struct {
 
             const Shard = struct {
                 map: Map = .{},
-                lock: std.Thread.Mutex = .{},
+                lock: std.Thread.RwLock = .{},
                 ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
-            locks_elided: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
 
             fn shardIndex(key: []const u8) usize {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
-            inline fn acquire(shard: *Shard, elided: bool) void {
-                _ = shard.ops.fetchAdd(1, .monotonic);
-                if (!elided) shard.lock.lock();
-            }
-
-            inline fn release(shard: *Shard, elided: bool) void {
-                if (!elided) shard.lock.unlock();
-            }
-
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 const s = shardIndex(key);
-                const elided = self.locks_elided.load(.monotonic);
-                acquire(&self.shards[s], elided);
-                defer release(&self.shards[s], elided);
+                self.shards[s].lock.lock();
+                defer self.shards[s].lock.unlock();
+                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 const owned_key = try key_alloc.dupe(u8, key);
                 try self.shards[s].map.put(bucket_alloc, owned_key, value);
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
                 const s = shardIndex(key);
-                const elided = self.locks_elided.load(.monotonic);
-                acquire(&self.shards[s], elided);
-                defer release(&self.shards[s], elided);
+                self.shards[s].lock.lockShared();
+                defer self.shards[s].lock.unlockShared();
+                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 return self.shards[s].map.get(key);
             }
 
             pub fn contains(self: *Self, key: []const u8) bool {
                 const s = shardIndex(key);
-                const elided = self.locks_elided.load(.monotonic);
-                acquire(&self.shards[s], elided);
-                defer release(&self.shards[s], elided);
+                self.shards[s].lock.lockShared();
+                defer self.shards[s].lock.unlockShared();
                 return self.shards[s].map.contains(key);
             }
 
             pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
                 const s = shardIndex(key);
-                const elided = self.locks_elided.load(.monotonic);
-                acquire(&self.shards[s], elided);
-                defer release(&self.shards[s], elided);
+                self.shards[s].lock.lock();
+                defer self.shards[s].lock.unlock();
                 if (self.shards[s].map.fetchRemove(key)) |kv| {
                     key_alloc.free(kv.key);
                 }
@@ -1839,10 +1817,9 @@ pub const CheatLib = struct {
 
             pub fn count(self: *Self) i64 {
                 var n: i64 = 0;
-                const elided = self.locks_elided.load(.monotonic);
                 for (&self.shards) |*shard| {
-                    acquire(shard, elided);
-                    defer release(shard, elided);
+                    shard.lock.lockShared();
+                    defer shard.lock.unlockShared();
                     n += @intCast(shard.map.count());
                 }
                 return n;
@@ -1856,38 +1833,18 @@ pub const CheatLib = struct {
                 }
             }
 
-            /// Read per-shard op counts (for control plane skew detection).
             pub fn getOpCounts(self: *const Self) [N]u64 {
                 var counts: [N]u64 = undefined;
                 for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
                 return counts;
             }
-
-            /// Enable locks (disable elision).  Called by control plane on skew.
-            pub fn enableLocks(self: *Self) void {
-                self.locks_elided.store(false, .release);
-            }
         };
     }
 
-    // StripedStringMap wraps ShardedStringMap with locks NOT elided.
-    // The compiler emits this for :sharded(N) @locked.
-    // Identical type, but default-initializes with locks_elided = false.
+    // StripedStringMap — alias for ShardedStringMap (backward compat).
+    // Lock elision removed; @sharded(N) always uses RwLock.
     pub fn StripedStringMap(comptime V: type, comptime N: usize) type {
-        const Base = ShardedStringMap(V, N);
-        return struct {
-            const Self = @This();
-            inner: Base = .{ .locks_elided = std.atomic.Value(bool).init(false) },
-
-            pub fn put(self: *Self, ka: std.mem.Allocator, ba: std.mem.Allocator, k: []const u8, v: V) !void { return self.inner.put(ka, ba, k, v); }
-            pub fn get(self: *Self, k: []const u8) ?V { return self.inner.get(k); }
-            pub fn contains(self: *Self, k: []const u8) bool { return self.inner.contains(k); }
-            pub fn remove(self: *Self, ka: std.mem.Allocator, k: []const u8) void { self.inner.remove(ka, k); }
-            pub fn count(self: *Self) i64 { return self.inner.count(); }
-            pub fn deinit(self: *Self, ka: std.mem.Allocator, ba: std.mem.Allocator) void { self.inner.deinit(ka, ba); }
-            pub fn getOpCounts(self: *const Self) [N]u64 { return self.inner.getOpCounts(); }
-            pub fn enableLocks(self: *Self) void { self.inner.enableLocks(); }
-        };
+        return ShardedStringMap(V, N);
     }
 
     // -----------------------------------------------------------------------

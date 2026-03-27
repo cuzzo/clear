@@ -1,12 +1,12 @@
--- KV Store Benchmark — CLEAR (HashMap@sharded(8):locked)
+-- KV Store Benchmark — CLEAR (HashMap@sharded(8))
 --
--- The idiomatic CLEAR way: one shared HashMap@sharded(8):locked,
--- accessed from 8 @parallel BG fibers. The developer writes concurrent
--- code naturally — CLEAR handles sharding, locking, and distribution.
+-- The idiomatic CLEAR way: one shared HashMap@sharded(8), accessed
+-- from 8 @parallel BG fibers. The developer writes concurrent code
+-- naturally — CLEAR handles sharding, locking, and distribution.
 --
 -- @sharded(8) splits the map into 8 independent shards by key hash.
--- :locked adds per-shard mutexes for thread safety across @parallel fibers.
--- Lock elision (without :locked) is for single-scheduler cooperative mode.
+-- Each shard is protected by a RwLock: readers are concurrent within
+-- a shard, writers are exclusive per-shard. No :locked modifier needed.
 --
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys (split across 8 fibers)
@@ -63,7 +63,7 @@ END
 -- Workload functions
 -- =========================================================================
 
-FN doSet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Void ->
+FN doSet!(MUTABLE map: HashMap<String>@sharded(8), start: Int64, count: Int64) RETURNS Void ->
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
         map["key:" + toString(i)] = "value-" + toString(i);
@@ -72,7 +72,7 @@ FN doSet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: I
     RETURN;
 END
 
-FN doGet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Int64 ->
+FN doGet!(MUTABLE map: HashMap<String>@sharded(8), start: Int64, count: Int64) RETURNS Int64 ->
     MUTABLE hits: Int64 = 0;
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
@@ -83,7 +83,7 @@ FN doGet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: I
     RETURN hits;
 END
 
-FN doZipfGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
+FN doZipfGet!(MUTABLE map: HashMap<String>@sharded(8), seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
     hIntegral = hInt(toFloat(n) + 0.5, s);
     hFraction = hFunc(1.5, s) - 1.0;
     MUTABLE hits: Int64 = 0;
@@ -99,7 +99,7 @@ FN doZipfGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count
     RETURN hits;
 END
 
-FN doZipfMixed!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
+FN doZipfMixed!(MUTABLE map: HashMap<String>@sharded(8), seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
     hIntegral = hInt(toFloat(n) + 0.5, s);
     hFraction = hFunc(1.5, s) - 1.0;
     MUTABLE hits: Int64 = 0;
@@ -126,7 +126,7 @@ END
 -- =========================================================================
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(8):locked = {};
+    MUTABLE map: HashMap<String>@sharded(8) = {};
     n = 1000000;
     workers = 8;
     chunk = n / workers;
