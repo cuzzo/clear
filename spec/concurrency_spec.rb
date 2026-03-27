@@ -240,11 +240,11 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "auto-pins to local scheduler (emits submitSpawn, not spawnBest)" do
+      it "auto-pins (emits spawnPinned, not spawnBest)" do
         zig = ZigTranspiler.new.transpile(code)
-        # The BG block should be auto-pinned: emits submitSpawn, not spawnBest
+        # The BG block should be auto-pinned: emits spawnPinned, not spawnBest
         user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("submitSpawn")
+        expect(user_code).to include("spawnPinned")
         expect(user_code).not_to include("spawnBest")
       end
     end
@@ -261,10 +261,10 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "auto-pins to local scheduler" do
+      it "auto-pins to scheduler (distributed)" do
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("submitSpawn")
+        expect(user_code).to include("spawnPinned")
         expect(user_code).not_to include("spawnBest")
       end
     end
@@ -380,7 +380,7 @@ RSpec.describe SemanticAnnotator do
         expect(zig).not_to include("var c =")
       end
 
-      it "BG capturing @local emits submitSpawn (auto-pinned)" do
+      it "BG capturing @local emits spawnPinned (auto-pinned)" do
         code = counter_struct + <<~FLUX
           FN f() RETURNS Void ->
               MUTABLE c = Counter{ value: 0 } @local;
@@ -391,7 +391,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("submitSpawn")
+        expect(user_code).to include("spawnPinned")
         expect(user_code).not_to include("spawnBest")
       end
     end

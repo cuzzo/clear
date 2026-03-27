@@ -1939,12 +1939,14 @@ private
     :xl       => "Xl",
   }.freeze
 
-  # BG spawn call: spawnBest by default, submitSpawn when @pinned.
+  # BG spawn call: spawnBest by default, spawnPinned when @pinned.
+  # spawnPinned distributes fibers round-robin across schedulers — each
+  # scheduler gets its own set of pinned fibers (shared-nothing model).
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
     task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
     if node.pinned
       <<~ZIG.chomp
-        try #{rt_name}.getSched().submitSpawn(
+        try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
                     @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                     #{ctx_var},

@@ -2183,6 +2183,27 @@ pub const CheatLib = struct {
     }
 };
 
+/// Module-level spawnPinned: distribute a pinned fiber round-robin across
+/// schedulers.  Each call picks the next scheduler in sequence.  The fiber
+/// is pinned to that scheduler (config.pinned = true).  This gives each
+/// scheduler its own set of fibers — the shared-nothing model.
+pub fn spawnPinned(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+    const n = fp.global_registry.len.load(.acquire);
+    if (n == 0) {
+        if (fp.scheduler_running) {
+            try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+            return;
+        }
+        return error.NoSchedulerAvailable;
+    }
+    const idx = fp.global_registry.next.fetchAdd(1, .monotonic) % n;
+    const sched = fp.global_registry.slots[idx].load(.acquire) orelse {
+        try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+        return;
+    };
+    try sched.submitSpawn(trampoline_addr, user_fn, args, config);
+}
+
 /// Module-level spawnBest: distribute a fiber to the least-loaded scheduler.
 /// Default dispatch for BG/DO blocks; @pinned blocks bypass this.
 /// Fully lock-free via pickTwo (1 fetchAdd + 2 atomic loads).
