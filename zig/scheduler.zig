@@ -429,19 +429,14 @@ pub const Scheduler = struct {
     pub fn run(self: *Scheduler) void {
         const my_id = std.Thread.getCurrentId();
 
-        std.debug.print("[Sched {d}] Registering...\n", .{my_id});
-
         global_registry.register(self.allocator, std.Thread.getCurrentId(), self) catch |err| {
             std.debug.print("SCHEDULER REGISTRATION FAILED: {}\n", .{err});
             return;
         };
 
         defer {
-            std.debug.print("[Sched {d}] Exiting & Unregistering...\n", .{my_id});
             global_registry.unregister(my_id);
         }
-
-        std.debug.print("[Sched {d}] Loop Started\n", .{my_id});
 
         while (true) {
             if (self.global_shutdown) |flag| {
