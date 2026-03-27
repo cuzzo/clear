@@ -7,10 +7,60 @@
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys (split across 8 fibers)
 --   2. Uniform GET   — 1M sequential keys (100% hit)
---   3. LCG GET       — 1M ops, pseudo-random key distribution
---   4. Mixed 80/20   — 1M ops, 80% GET / 20% SET, LCG distribution
+--   3. Zipfian GET   — 1M ops, power-law key distribution (hot keys)
+--   4. Mixed 80/20   — 1M ops, 80% GET / 20% SET, Zipfian
 --
 -- Compare to Go (sync.Map) and Rust (dashmap).
+
+-- =========================================================================
+-- Zipfian distribution (rejection-inversion method)
+-- =========================================================================
+
+FN hFunc(x: Float64, s: Float64) RETURNS Float64 ->
+    RETURN exp(0.0 - s * log(x));
+END
+
+FN hInt(x: Float64, s: Float64) RETURNS Float64 ->
+    t = 1.0 - s;
+    IF abs(t) > 0.00000001 THEN
+        RETURN (x ** t - 1.0) / t;
+    END
+    RETURN log(x);
+END
+
+FN hIntInv(x: Float64, s: Float64) RETURNS Float64 ->
+    t = 1.0 - s;
+    IF abs(t) > 0.00000001 THEN
+        RETURN (t * x + 1.0) ** (1.0 / t);
+    END
+    RETURN exp(x);
+END
+
+FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFraction: Float64) RETURNS Int64 ->
+    nf = toFloat(n);
+    hIntHalf = hInt(0.5, s);
+    WHILE TRUE DO
+        -- LCG to generate u in [0, 1)
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        MUTABLE uBits = state;
+        IF uBits < 0 THEN uBits = 0 - uBits; END
+        MUTABLE u = toFloat(uBits MOD 1000000000) / 1000000000.0;
+
+        u = hIntegral + u * (hIntHalf - hIntegral);
+        x = hIntInv(u, s);
+        MUTABLE k = toInt(x + 0.5);
+        IF k < 1 THEN k = 1; END
+        IF k > n THEN k = n; END
+        kf = toFloat(k);
+        IF kf - x <= hFraction THEN RETURN k - 1; END
+        IF u >= hInt(kf + 0.5, s) - hFunc(kf, s) THEN RETURN k - 1; END
+    END
+    RETURN 0;
+END
+
+-- =========================================================================
+-- Workload functions
+-- =========================================================================
 
 FN doSet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Void ->
     MUTABLE i: Int64 = start;
@@ -32,14 +82,17 @@ FN doGet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: I
     RETURN hits;
 END
 
-FN doLcgGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64) RETURNS Int64 ->
+FN doZipfGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
+    nf = toFloat(n);
+    hIntegral = hInt(nf + 0.5, s);
+    hFraction = hFunc(1.5, s) - 1.0;
     MUTABLE hits: Int64 = 0;
-    MUTABLE x: Int64 = seed;
+    MUTABLE state: Int64 = seed;
     MUTABLE i: Int64 = 0;
     WHILE i < count DO
-        x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE k = x MOD n;
-        IF k < 0 THEN k = 0 - k; END
+        k = zipfNext!(state, n, s, hIntegral, hFraction);
+        -- Advance state (same LCG step as inside zipfNext)
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
         MUTABLE got = map["key:" + toString(k)] OR "";
         IF got.length() > 0 THEN hits += 1; END
         i += 1;
@@ -47,15 +100,18 @@ FN doLcgGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count:
     RETURN hits;
 END
 
-FN doMixed!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64) RETURNS Int64 ->
+FN doZipfMixed!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
+    nf = toFloat(n);
+    hIntegral = hInt(nf + 0.5, s);
+    hFraction = hFunc(1.5, s) - 1.0;
     MUTABLE hits: Int64 = 0;
-    MUTABLE x: Int64 = seed;
+    MUTABLE state: Int64 = seed;
     MUTABLE i: Int64 = 0;
     WHILE i < count DO
-        x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE k = x MOD n;
-        IF k < 0 THEN k = 0 - k; END
-        MUTABLE decision = x MOD 100;
+        k = zipfNext!(state, n, s, hIntegral, hFraction);
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        -- 80/20 split using state bits
+        MUTABLE decision = state MOD 100;
         IF decision < 0 THEN decision = 0 - decision; END
         IF decision < 80 THEN
             MUTABLE got = map["key:" + toString(k)] OR "";
@@ -68,11 +124,16 @@ FN doMixed!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: 
     RETURN hits;
 END
 
+-- =========================================================================
+-- Main: spawn fibers for each workload
+-- =========================================================================
+
 FN cheatMain() RETURNS Void ->
     MUTABLE map: HashMap<String>@sharded(8):locked = {};
     n = 1000000;
     workers = 8;
     chunk = n / workers;
+    zipfSkew = 1.0;
 
     -- Workload 1: Uniform SET
     MUTABLE set_futures: ~Void[]@list = [];
@@ -97,22 +158,22 @@ FN cheatMain() RETURNS Void ->
     MUTABLE gi: Int64 = 0;
     WHILE gi < workers DO total_hits += NEXT get_futures[gi]; gi += 1; END
 
-    -- Workload 3: LCG GET
-    MUTABLE lcg_futures: ~Int64[]@list = [];
+    -- Workload 3: Zipfian GET
+    MUTABLE zipf_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        lcg_futures.append(BG { @parallel -> doLcgGet!(map, wi + 42, chunk, n); });
+        zipf_futures.append(BG { @parallel -> doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
         wi += 1;
     END
-    MUTABLE lcg_hits: Int64 = 0;
-    MUTABLE li: Int64 = 0;
-    WHILE li < workers DO lcg_hits += NEXT lcg_futures[li]; li += 1; END
+    MUTABLE zipf_hits: Int64 = 0;
+    MUTABLE zi: Int64 = 0;
+    WHILE zi < workers DO zipf_hits += NEXT zipf_futures[zi]; zi += 1; END
 
-    -- Workload 4: Mixed 80/20
+    -- Workload 4: Mixed 80/20 (Zipfian)
     MUTABLE mix_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        mix_futures.append(BG { @parallel -> doMixed!(map, wi + 99, chunk, n); });
+        mix_futures.append(BG { @parallel -> doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
         wi += 1;
     END
     MUTABLE mix_hits: Int64 = 0;
@@ -120,6 +181,6 @@ FN cheatMain() RETURNS Void ->
     WHILE mi < workers DO mix_hits += NEXT mix_futures[mi]; mi += 1; END
 
     print("Keys:", n, "Workers:", workers);
-    print("GET hits:", total_hits, "LCG hits:", lcg_hits, "Mixed hits:", mix_hits);
+    print("GET hits:", total_hits, "Zipf hits:", zipf_hits, "Mixed hits:", mix_hits);
     RETURN;
 END
