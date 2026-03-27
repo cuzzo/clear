@@ -61,32 +61,32 @@ FN cheatMain() RETURNS Void ->
     MUTABLE id_list: Id<Node>[]@list = [];
 
     -- Phase 1: insert N nodes, record IDs in insertion order.
-    MUTABLE i = 0_i64;
+    MUTABLE i = 0;
     WHILE i < n_nodes DO
         id = pool.insert(Node{ val: i, next: NIL });
-        append(id_list, id);
-        i = i + 1_i64;
+        id_list.append(id);
+        i += 1;
     END
 
     -- Phase 2: wire additive permutation — node[i].next = id[(i+step) MOD n].
-    MUTABLE j = 0_i64;
+    MUTABLE j = 0;
     WHILE j < n_nodes DO
         next_pos = (j + step) MOD n_nodes;
         next_id  = id_list[next_pos];
         cur_node = pool.get(id_list[j]);
         cur_node?.next = next_id;
-        j = j + 1_i64;
+        j += 1;
     END
 
     -- Phase 3: walk N steps, accumulate sum.
     MUTABLE cur:   ?Id<Node> = id_list[0];
-    MUTABLE steps  = 0_i64;
-    MUTABLE sum    = 0_i64;
+    MUTABLE steps  = 0;
+    MUTABLE sum    = 0;
     WHILE steps < n_nodes DO
         n     = pool.get(cur?);
         sum   = sum + n?.val;
         cur   = n?.next;
-        steps = steps + 1_i64;
+        steps += 1;
     END
 
     ASSERT sum > 0, "sum must be positive";

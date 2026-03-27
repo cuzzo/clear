@@ -35,17 +35,17 @@ FN cheatMain() RETURNS Void ->
     -- The fiber runs concurrently with the reader loop below.
     msg = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
     w: ~Void = BG {
-        MUTABLE wi = 0_i64;
+        MUTABLE wi = 0;
         WHILE wi < 100000 DO
             tcpWrite(conn, msg);
-            wi = wi + 1_i64;
+            wi += 1;
         END
     };
 
     -- Reader loop: reads until all 25 600 000 bytes received (100 000 × 256).
     -- TCP coalesces writes so each tcpRead may return more than 256 bytes.
-    MUTABLE total_bytes = 0_i64;
-    WHILE total_bytes < 25600000_i64 DO
+    MUTABLE total_bytes = 0;
+    WHILE total_bytes < 25600000 DO
         data = tcpRead(client);
         total_bytes = total_bytes + data.length();
     END

@@ -28,7 +28,7 @@ FN cheatMain() RETURNS Void ->
 
     -- List all files in the data directory (filenames only, not full paths).
     files = listDir(data_dir);
-    n: Int64 = length(files);
+    n: Int64 = files.length();
 
     -- Spawn one fiber per file using a promise list.
     -- append(futures, BG { ... }) adds a Promise(i64) to the ArrayList.
@@ -38,7 +38,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < n DO
         filepath = data_dir + "/" + files[i];
-        append(futures, BG {
+        futures.append(BG {
             content = readFile(filepath);
             countOccurrences(content, needle);
         });
@@ -53,7 +53,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE j: Int64 = 0;
     WHILE j < n DO
         c: Int64 = NEXT futures[j];
-        append(results, SearchResult{ filename: files[j], count: c });
+        results.append(SearchResult{ filename: files[j], count: c });
         j += 1;
     END
 

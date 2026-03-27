@@ -22,47 +22,47 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS Void ->
   -- Using @list so both stacks live in the frame arena; trivially freed on exit.
   MUTABLE lo_stk: Int64[]@list = [];
   MUTABLE hi_stk: Int64[]@list = [];
-  MUTABLE fill_i = 0_i64;
+  MUTABLE fill_i = 0;
   -- Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
   WHILE fill_i < 48 DO
-    append(lo_stk, 0_i64);
-    append(hi_stk, 0_i64);
-    fill_i = fill_i + 1_i64;
+    lo_stk.append(0);
+    hi_stk.append(0);
+    fill_i += 1;
   END
-  lo_stk[0] = 0_i64;
-  hi_stk[0] = n - 1_i64;
-  MUTABLE sp = 1_i64;
+  lo_stk[0] = 0;
+  hi_stk[0] = n - 1;
+  MUTABLE sp = 1;
   MUTABLE tmp = 0.0;
 
   -- TIGHT: pure compare-and-swap, no per-iteration allocation.
   TIGHT WHILE sp > 0 DO
-    sp = sp - 1_i64;
+    sp -= 1;
     lo = lo_stk[sp];
     hi = hi_stk[sp];
 
     IF lo < hi THEN
       pivot = arr[hi];
-      MUTABLE i = lo - 1_i64;
+      MUTABLE i = lo - 1;
       MUTABLE j = lo;
       TIGHT WHILE j < hi DO
         IF arr[j] <= pivot THEN
-          i = i + 1_i64;
+          i += 1;
           tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
         END
-        j = j + 1_i64;
+        j += 1;
       END
-      i = i + 1_i64;
+      i += 1;
       tmp = arr[i]; arr[i] = arr[hi]; arr[hi] = tmp;
       pi = i;
 
       left_size  = pi - lo;
       right_size = hi - pi;
       IF left_size > right_size THEN
-        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1_i64; sp = sp + 1_i64;
-        lo_stk[sp] = pi + 1_i64; hi_stk[sp] = hi;       sp = sp + 1_i64;
+        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1; sp += 1;
+        lo_stk[sp] = pi + 1; hi_stk[sp] = hi;       sp += 1;
       ELSE
-        lo_stk[sp] = pi + 1_i64; hi_stk[sp] = hi;       sp = sp + 1_i64;
-        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1_i64; sp = sp + 1_i64;
+        lo_stk[sp] = pi + 1; hi_stk[sp] = hi;       sp += 1;
+        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1; sp += 1;
       END
     END
   END
@@ -72,10 +72,10 @@ END
 -- Bottom-up iterative mergesort.
 -- arr and tmp are both plain slices (Float64[]); no allocation inside this function.
 FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void ->
-  MUTABLE width = 1_i64;
+  MUTABLE width = 1;
   -- TIGHT: all loops here are pure compare/copy, no allocation.
   TIGHT WHILE width < n DO
-    MUTABLE lo = 0_i64;
+    MUTABLE lo = 0;
     TIGHT WHILE lo < n DO
       MUTABLE mid = lo + width;
       IF mid > n THEN mid = n; END
@@ -89,17 +89,17 @@ FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void
         TIGHT WHILE k < hi DO
           IF j >= hi || (i < mid && arr[i] <= arr[j]) THEN
             tmp[k] = arr[i];
-            i = i + 1_i64;
+            i += 1;
           ELSE
             tmp[k] = arr[j];
-            j = j + 1_i64;
+            j += 1;
           END
-          k = k + 1_i64;
+          k += 1;
         END
         MUTABLE ci = lo;
         TIGHT WHILE ci < hi DO
           arr[ci] = tmp[ci];
-          ci = ci + 1_i64;
+          ci += 1;
         END
       END
 
@@ -115,37 +115,37 @@ FN cheatMain() RETURNS Void ->
 
   -- Build data: permutation of [0, N-1] via Knuth multiplicative hash
   MUTABLE arr: Float64[]@list = [];
-  MUTABLE seed_i = 0_i64;
+  MUTABLE seed_i = 0;
   WHILE seed_i < n DO
     v = seed_i * 2654435761_i64 MOD n + 0.0;
-    append(arr, v);
-    seed_i = seed_i + 1_i64;
+    arr.append(v);
+    seed_i += 1;
   END
 
   -- Quicksort
   qsort!(arr, n);
-  ASSERT arr[0_i64] <= arr[1_i64], "qsort: not sorted at start";
-  ASSERT arr[n - 2_i64] <= arr[n - 1_i64], "qsort: not sorted at end";
+  ASSERT arr[0] <= arr[1], "qsort: not sorted at start";
+  ASSERT arr[n - 2] <= arr[n - 1], "qsort: not sorted at end";
 
   -- Refill for mergesort
   -- TIGHT: pure write loop, no allocation.
-  seed_i = 0_i64;
+  seed_i = 0;
   TIGHT WHILE seed_i < n DO
     v = seed_i * 2654435761_i64 MOD n + 0.0;
     arr[seed_i] = v;
-    seed_i = seed_i + 1_i64;
+    seed_i += 1;
   END
 
   -- Mergesort (needs a temp buffer of the same size)
   MUTABLE tmp_arr: Float64[]@list = [];
-  MUTABLE ti = 0_i64;
+  MUTABLE ti = 0;
   WHILE ti < n DO
-    append(tmp_arr, 0.0);
-    ti = ti + 1_i64;
+    tmp_arr.append(0.0);
+    ti += 1;
   END
   msort!(arr, tmp_arr, n);
-  ASSERT arr[0_i64] <= arr[1_i64], "msort: not sorted at start";
-  ASSERT arr[n - 2_i64] <= arr[n - 1_i64], "msort: not sorted at end";
+  ASSERT arr[0] <= arr[1], "msort: not sorted at start";
+  ASSERT arr[n - 2] <= arr[n - 1], "msort: not sorted at end";
 
   RETURN;
 END

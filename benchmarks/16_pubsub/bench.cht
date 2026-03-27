@@ -32,7 +32,7 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
     MUTABLE msgs: Msg[] = [];
     MUTABLE i: Int64 = 0;
     WHILE i < n DO
-        append(msgs, Msg{ seed: i });
+        msgs.append(Msg{ seed: i });
         i += 1;
     END
     -- Process all messages with parallel workers
@@ -40,7 +40,7 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
     -- Manual sum (SUM _ returns Float64, we need Int64)
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
-    WHILE j < length(results) DO
+    WHILE j < results.length() DO
         total += results[j];
         j += 1;
     END
@@ -52,7 +52,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE futures: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 64 DO
-        append(futures, BG { subscriberWork(100000); });
+        futures.append(BG { subscriberWork(100000); });
         i += 1;
     END
 

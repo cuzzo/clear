@@ -26,7 +26,7 @@ FN doGet!(MUTABLE map: HashMap<String>:sharded(8) @locked, start: Int64, count: 
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
         MUTABLE got = map["key:" + toString(i)] OR "";
-        IF length(got) > 0 THEN hits += 1; END
+        IF got.length() > 0 THEN hits += 1; END
         i += 1;
     END
     RETURN hits;
@@ -41,7 +41,7 @@ FN doLcgGet!(MUTABLE map: HashMap<String>:sharded(8) @locked, seed: Int64, count
         MUTABLE k = x MOD n;
         IF k < 0 THEN k = 0 - k; END
         MUTABLE got = map["key:" + toString(k)] OR "";
-        IF length(got) > 0 THEN hits += 1; END
+        IF got.length() > 0 THEN hits += 1; END
         i += 1;
     END
     RETURN hits;
@@ -59,7 +59,7 @@ FN doMixed!(MUTABLE map: HashMap<String>:sharded(8) @locked, seed: Int64, count:
         IF decision < 0 THEN decision = 0 - decision; END
         IF decision < 80 THEN
             MUTABLE got = map["key:" + toString(k)] OR "";
-            IF length(got) > 0 THEN hits += 1; END
+            IF got.length() > 0 THEN hits += 1; END
         ELSE
             map["key:" + toString(k)] = "updated-" + toString(i);
         END
@@ -79,7 +79,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE wi: Int64 = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        append(set_futures, BG { @parallel -> doSet!(map, start, chunk); });
+        set_futures.append(BG { @parallel -> doSet!(map, start, chunk); });
         wi += 1;
     END
     MUTABLE si: Int64 = 0;
@@ -90,7 +90,7 @@ FN cheatMain() RETURNS Void ->
     wi = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        append(get_futures, BG { @parallel -> doGet!(map, start, chunk); });
+        get_futures.append(BG { @parallel -> doGet!(map, start, chunk); });
         wi += 1;
     END
     MUTABLE total_hits: Int64 = 0;
@@ -101,7 +101,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE lcg_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        append(lcg_futures, BG { @parallel -> doLcgGet!(map, wi + 42, chunk, n); });
+        lcg_futures.append(BG { @parallel -> doLcgGet!(map, wi + 42, chunk, n); });
         wi += 1;
     END
     MUTABLE lcg_hits: Int64 = 0;
@@ -112,7 +112,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE mix_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        append(mix_futures, BG { @parallel -> doMixed!(map, wi + 99, chunk, n); });
+        mix_futures.append(BG { @parallel -> doMixed!(map, wi + 99, chunk, n); });
         wi += 1;
     END
     MUTABLE mix_hits: Int64 = 0;

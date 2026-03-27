@@ -29,18 +29,18 @@ FN cheatMain() RETURNS Void ->
     MUTABLE m: HashMap<Int64, Float64> = {};
 
     -- Insert phase: 1M numeric key-value pairs
-    MUTABLE i = 0_i64;
+    MUTABLE i = 0;
     WHILE i < 1000000 DO
         m[i] = i + 0.0;
-        i = i + 1_i64;
+        i += 1;
     END
 
     -- Lookup phase: sum all values to prevent dead-code elimination
     MUTABLE total = 0.0;
-    MUTABLE j = 0_i64;
+    MUTABLE j = 0;
     WHILE j < 1000000 DO
         total = total + m[j];
-        j = j + 1_i64;
+        j += 1;
     END
 
     ASSERT total > 0.0, "total must be positive";

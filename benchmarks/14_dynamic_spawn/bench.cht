@@ -14,7 +14,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE futures: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 10000 DO
-        append(futures, BG { i * 3; });
+        futures.append(BG { i * 3; });
         i += 1;
     END
 

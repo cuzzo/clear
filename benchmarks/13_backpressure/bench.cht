@@ -29,7 +29,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE items: Item[] = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 100000 DO
-        append(items, Item{ seed: i, result: 0 });
+        items.append(Item{ seed: i, result: 0 });
         i += 1;
     END
 

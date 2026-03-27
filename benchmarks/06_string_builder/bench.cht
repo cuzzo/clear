@@ -34,25 +34,25 @@
 --   At 10 000 runs the scheduler startup (~10 ms) is < 5% of total work.
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE total = 0_i64;
+    MUTABLE total = 0;
 
-    MUTABLE run = 0_i64;
+    MUTABLE run = 0;
     WHILE run < 10000 DO
         -- `parts` declared inside the loop → compiler emits saveLoopMark/restoreLoopMark,
         -- rewinding the frame arena each iteration.
         MUTABLE parts = List[];
 
-        MUTABLE i = 0_i64;
+        MUTABLE i = 0;
         WHILE i < 1000 DO
-            append(parts, "hello");
-            i = i + 1_i64;
+            parts.append("hello");
+            i += 1;
         END
 
         result = join(parts, "");
         total = total + result.length();
-        run = run + 1_i64;
+        run += 1;
     END
 
-    ASSERT total > 0_i64, "total must be positive";
+    ASSERT total > 0, "total must be positive";
     RETURN;
 END
