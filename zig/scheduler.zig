@@ -227,7 +227,10 @@ pub const Scheduler = struct {
             .current_task = null,
             .active_tasks = std.atomic.Value(usize).init(0),
             .shutdown_on_idle = true,
-            .local_arena = std.heap.ArenaAllocator.init(allocator),
+            // Use c_allocator as backing for per-scheduler arenas.
+            // This avoids GPA mutex contention when pinned fibers allocate
+            // concurrently on different schedulers — libc malloc has per-thread arenas.
+            .local_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator),
         };
 
         try sched.poller.register(sched.event_fd.fd, 0);

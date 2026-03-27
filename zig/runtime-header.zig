@@ -1887,13 +1887,13 @@ pub const CheatLib = struct {
 
             const PutCtx = struct {
                 map: *Self, shard: usize,
-                key: []const u8, value: V,
+                key: []const u8, value: V, // key is pre-duped to remote_alloc
                 err: bool = false,
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
-                    const k = remote_alloc.dupe(u8, c.key) catch { c.err = true; return; };
-                    c.map.shards[c.shard].map.put(remote_alloc, k, c.value) catch {
-                        remote_alloc.free(k); c.err = true;
+                    // key is already on remote_alloc — use directly as owned key.
+                    c.map.shards[c.shard].map.put(remote_alloc, c.key, c.value) catch {
+                        remote_alloc.free(c.key); c.err = true;
                     };
                 }
             };
@@ -1951,16 +1951,21 @@ pub const CheatLib = struct {
                     const owned_key = try remote_alloc.dupe(u8, key);
                     try self.shards[s].map.put(remote_alloc, owned_key, value);
                 } else {
+                    // COLD PATH: dupe key to remote_alloc NOW (on caller's thread)
+                    // because the original key may point to the caller's thread-local
+                    // arena, which the remote scheduler cannot safely read.
+                    const safe_key = try remote_alloc.dupe(u8, key);
                     const b = try remote_alloc.create(RemoteBundle);
                     b.wg = WaitGroup.init(fp.active_scheduler);
                     b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = key, .value = value };
+                    b.ctx = .{ .map = self, .shard = s, .key = safe_key, .value = value };
                     b.rc = .{ .func = &PutCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
                     self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
                     b.wg.wait();
                     const had_err = b.ctx.err;
                     remote_alloc.destroy(b);
+                    // On error: PutCtx.run freed safe_key. On success: hashmap owns it.
                     if (had_err) return error.OutOfMemory;
                 }
             }
@@ -1971,15 +1976,17 @@ pub const CheatLib = struct {
                 if (self.isLocal(s)) {
                     return self.shards[s].map.get(key);
                 } else {
-                    const b = remote_alloc.create(GetBundle) catch return null;
+                    const safe_key = remote_alloc.dupe(u8, key) catch return null;
+                    const b = remote_alloc.create(GetBundle) catch { remote_alloc.free(safe_key); return null; };
                     b.wg = WaitGroup.init(fp.active_scheduler);
                     b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = key };
+                    b.ctx = .{ .map = self, .shard = s, .key = safe_key };
                     b.rc = .{ .func = &GetCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
                     self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
                     b.wg.wait();
                     const result = b.ctx.result;
+                    remote_alloc.free(safe_key);
                     remote_alloc.destroy(b);
                     return result;
                 }
@@ -1991,15 +1998,17 @@ pub const CheatLib = struct {
                 if (self.isLocal(s)) {
                     return self.shards[s].map.contains(key);
                 } else {
-                    const b = remote_alloc.create(ContainsBundle) catch return false;
+                    const safe_key = remote_alloc.dupe(u8, key) catch return false;
+                    const b = remote_alloc.create(ContainsBundle) catch { remote_alloc.free(safe_key); return false; };
                     b.wg = WaitGroup.init(fp.active_scheduler);
                     b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = key };
+                    b.ctx = .{ .map = self, .shard = s, .key = safe_key };
                     b.rc = .{ .func = &ContainsCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
                     self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
                     b.wg.wait();
                     const result = b.ctx.result;
+                    remote_alloc.free(safe_key);
                     remote_alloc.destroy(b);
                     return result;
                 }
@@ -2011,14 +2020,16 @@ pub const CheatLib = struct {
                 if (self.isLocal(s)) {
                     if (self.shards[s].map.fetchRemove(key)) |kv| remote_alloc.free(kv.key);
                 } else {
-                    const b = remote_alloc.create(RemoveBundle) catch return;
+                    const safe_key = remote_alloc.dupe(u8, key) catch return;
+                    const b = remote_alloc.create(RemoveBundle) catch { remote_alloc.free(safe_key); return; };
                     b.wg = WaitGroup.init(fp.active_scheduler);
                     b.wg.add(1);
-                    b.ctx = .{ .map = self, .shard = s, .key = key };
+                    b.ctx = .{ .map = self, .shard = s, .key = safe_key };
                     b.rc = .{ .func = &RemoveCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
                     self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
                     b.wg.wait();
+                    remote_alloc.free(safe_key);
                     remote_alloc.destroy(b);
                 }
             }

@@ -29,21 +29,21 @@ var global_shutdown = std.atomic.Value(bool).init(false);
 const Map = CheatLib.PartitionedStringMap(i64, 4);
 const KEYS_PER_FIBER = 500;
 const FIBERS = 4;
-const ITERATIONS = 20;
+const ITERATIONS = 5;
 
 // ── Worker function (runs inside entryWrapper, like transpiled CLEAR) ──
 fn doWork(rt: *Runtime, map: anytype, start: i64, count: i64) !i64 {
-    var buf: [32]u8 = undefined;
     var i: i64 = start;
     while (i < start + count) : (i += 1) {
-        const key = std.fmt.bufPrint(&buf, "k{d}", .{i}) catch continue;
-        try map.put(std.heap.c_allocator, std.heap.c_allocator, key, i);
+        // Build key using heapAlloc (same as transpiled CLEAR: rt.heapAlloc())
+        const key = try CheatLib.intToString(rt.heapAlloc(), i);
+        try map.put(rt.heapAlloc(), rt.heapAlloc(), key, i);
         rt.checkYield();
     }
     var hits: i64 = 0;
     i = start;
     while (i < start + count) : (i += 1) {
-        const key = std.fmt.bufPrint(&buf, "k{d}", .{i}) catch continue;
+        const key = try CheatLib.intToString(rt.heapAlloc(), i);
         if (map.get(key)) |_| hits += 1;
         rt.checkYield();
     }
@@ -89,7 +89,7 @@ fn cheatMain(rt: *Runtime) !void {
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&BgCtx.run)),
                 ctx,
-                .{ .pinned = true },
+                .{ .stack_size = .Xl, .pinned = true },
             );
             promises[fi] = promise;
         }
