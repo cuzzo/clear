@@ -1416,16 +1416,35 @@ class Parser
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
-    # HashMap:sharded(N) — detect sharding modifier on HashMap types.
+    # HashMap@sharded(N) — sharding capability for HashMap types.
+    # Syntax: HashMap<V>@sharded(N) or HashMap<V>@sharded(N):locked
+    if base.start_with?("HashMap") && !shard_count && match?(:VAR_ID) && current.value == "@sharded"
+      cap_tok = consume(:VAR_ID)
+      consume(:CHAR, '(')
+      n = consume_number.value.to_i
+      error!(cap_tok, "@sharded requires N >= 2, got #{n}") if n < 2
+      consume(:CHAR, ')')
+      shard_count = n
+
+      # Optional :locked or :writeLocked modifier joined to @sharded
+      if match?(:CHAR, ':')
+        consume(:CHAR, ':')
+        if match?(:VAR_ID) && %w[locked writeLocked].include?(current.value)
+          mod_tok = consume(:VAR_ID)
+          sync = mod_tok.value == "locked" ? :locked : :write_locked
+        else
+          error!(current, "Expected 'locked' or 'writeLocked' after @sharded(N):")
+        end
+      end
+    end
+
+    # Legacy: HashMap<V>:sharded(N) @locked (backward compat — TODO: remove in v0.2)
     if base.start_with?("HashMap") && !shard_count && match?(:CHAR, ':')
       if peek.type == :VAR_ID && peek.value == "sharded"
         dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
         shard_count = parse_sharded_modifier_if_present!(dummy_tok)
       end
     end
-
-    # Allow @locked / @writeLocked after :sharded(N) for skew-safe maps.
-    # e.g. HashMap<Int64>:sharded(4) @locked → StripedStringMap
     if shard_count && !sync && match?(:VAR_ID) && %w[@locked @writeLocked].include?(current.value)
       cap_tok = consume(:VAR_ID)
       sync = cap_tok.value == "@locked" ? :locked : :write_locked

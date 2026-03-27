@@ -204,7 +204,7 @@ Lists, pools, and hash maps all support sharding for parallel access:
 ```clear
 MUTABLE data: Float64[]@list:sharded(4) = [];
 MUTABLE entities: Enemy[]@pool:sharded(4) = [];
-MUTABLE counts: HashMap<Int64>:sharded(4) = {};
+MUTABLE counts: HashMap<Int64>@sharded(4) = {};
 ```
 
 Sharding splits the collection into N independent partitions. Each shard is a complete, independent data structure — no shared state, no locks, no atomic operations between shards.
@@ -229,18 +229,18 @@ The cost of always-on skew readiness:
 This means you never need to think about skew. Just use `:sharded(N)`:
 
 ```clear
-MUTABLE counts: HashMap<Int64>:sharded(8) = {};
+MUTABLE counts: HashMap<Int64>@sharded(8) = {};
 -- Skew? The runtime handles it. You don't need @locked.
 ```
 
 **For explicit control**, you can still force locks on from the start:
 
 ```clear
-MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
+MUTABLE counts: HashMap<Int64>@sharded(8):locked = {};
 -- Locks always active (no elision). Use when you KNOW you have skew.
 ```
 
-| | `:sharded(N)` | `:sharded(N) @locked` |
+| | `@sharded(N)` | `@sharded(N):locked` |
 |---|---|---|
 | **Locks** | Elided (enabled on skew) | Always active |
 | **Per-op cost** | ~1 cycle (branch) | ~20ns (lock/unlock) |
@@ -254,7 +254,7 @@ MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
 **In multi-scheduler mode (`CLEAR_THREADS=N`)**, the control plane detects and fixes skew automatically. You can also increase shards to reduce collision probability:
 
 ```clear
-MUTABLE counts: HashMap<Int64>:sharded(64) = {};
+MUTABLE counts: HashMap<Int64>@sharded(64) = {};
 ```
 
 ### When You Need Shared Mutable Maps

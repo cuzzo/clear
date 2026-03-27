@@ -64,7 +64,7 @@ Every sharded map has per-shard mutexes that are **elided by default** — the l
 For cases where you know the access pattern upfront, you can force locks on at declaration time:
 
 ```clear
-MUTABLE counts: HashMap<Int64>:sharded(8) @locked = {};
+MUTABLE counts: HashMap<Int64>@sharded(8):locked = {};
 ```
 
 This skips the elision phase — locks are always active from the start. Use this when you want zero detection latency (e.g., you know keys are skewed before the program starts).

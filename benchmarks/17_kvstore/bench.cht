@@ -1,4 +1,4 @@
--- KV Store Benchmark — CLEAR (HashMap:sharded(8))
+-- KV Store Benchmark — CLEAR (HashMap@sharded(8):locked)
 --
 -- Embedded concurrent key-value store using CLEAR's sharded HashMap.
 -- 8 BG fibers perform SET/GET operations on a shared sharded map.
@@ -12,7 +12,7 @@
 --
 -- Compare to Go (sync.Map) and Rust (dashmap).
 
-FN doSet!(MUTABLE map: HashMap<String>:sharded(8) @locked, start: Int64, count: Int64) RETURNS Void ->
+FN doSet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Void ->
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
         map["key:" + toString(i)] = "value-" + toString(i);
@@ -21,7 +21,7 @@ FN doSet!(MUTABLE map: HashMap<String>:sharded(8) @locked, start: Int64, count: 
     RETURN;
 END
 
-FN doGet!(MUTABLE map: HashMap<String>:sharded(8) @locked, start: Int64, count: Int64) RETURNS Int64 ->
+FN doGet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Int64 ->
     MUTABLE hits: Int64 = 0;
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
@@ -32,7 +32,7 @@ FN doGet!(MUTABLE map: HashMap<String>:sharded(8) @locked, start: Int64, count: 
     RETURN hits;
 END
 
-FN doLcgGet!(MUTABLE map: HashMap<String>:sharded(8) @locked, seed: Int64, count: Int64, n: Int64) RETURNS Int64 ->
+FN doLcgGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64) RETURNS Int64 ->
     MUTABLE hits: Int64 = 0;
     MUTABLE x: Int64 = seed;
     MUTABLE i: Int64 = 0;
@@ -47,7 +47,7 @@ FN doLcgGet!(MUTABLE map: HashMap<String>:sharded(8) @locked, seed: Int64, count
     RETURN hits;
 END
 
-FN doMixed!(MUTABLE map: HashMap<String>:sharded(8) @locked, seed: Int64, count: Int64, n: Int64) RETURNS Int64 ->
+FN doMixed!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64) RETURNS Int64 ->
     MUTABLE hits: Int64 = 0;
     MUTABLE x: Int64 = seed;
     MUTABLE i: Int64 = 0;
@@ -69,7 +69,7 @@ FN doMixed!(MUTABLE map: HashMap<String>:sharded(8) @locked, seed: Int64, count:
 END
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE map: HashMap<String>:sharded(8) @locked = {};
+    MUTABLE map: HashMap<String>@sharded(8):locked = {};
     n = 1000000;
     workers = 8;
     chunk = n / workers;
