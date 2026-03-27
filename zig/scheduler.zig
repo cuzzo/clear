@@ -387,10 +387,17 @@ pub const Scheduler = struct {
     }
 
     // Process all pending spawn/resume requests from the inbox.
+    // Pop all at once, reverse for FIFO order, then process one by one.
+    // IMPORTANT: next_node is captured BEFORE processing because wg.done()
+    // in RemoteCall handling may cause the current node to be freed.
     fn drainInbox(self: *Scheduler) void {
-        var req_node = AtomicInbox.reverse(self.inbox.popAll());
+        const chain = self.inbox.popAll() orelse return;
+        var req_node = AtomicInbox.reverse(chain);
         while (req_node) |node| {
             const next_node = node.next;
+            // Detach node from chain before processing — prevents any
+            // accidental traversal of freed nodes.
+            node.next = null;
             if (node.type == .Spawn) {
                 const req: *SpawnRequest = @fieldParentPtr("inbox_link", node);
                 const effective_size = cp.recommendSize(

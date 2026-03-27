@@ -32,7 +32,7 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {})
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false)
     @source_dir = File.expand_path(source_dir)
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
@@ -53,6 +53,10 @@ class ZigTranspiler
     end
     body = visit(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
+    # Auto-detect: use c_allocator when @sharded maps or @pinned BG blocks are present.
+    # GPA is not suitable for multi-threaded workloads (canary corruption under concurrent load).
+    needs_c_alloc = use_c_allocator || @used_sharded_map
+    alloc_config = needs_c_alloc ? "pub const USE_C_ALLOCATOR = true;\n" : ""
 
     <<~ZIG
       const std = @import("std");
@@ -60,7 +64,7 @@ class ZigTranspiler
       const CheatLib = CheatHeader.CheatLib;
       const Runtime = CheatHeader.Runtime;
       const EbrContext = CheatHeader.EbrContext;
-      #{safety_line}
+      #{safety_line}#{alloc_config}
       // -------------------------------------------------------------------------
       // 2. User Types & Functions (Transpiled)
       // -------------------------------------------------------------------------
@@ -495,6 +499,7 @@ private
         end
       elsif node.type.is_a?(Type) && node.type.map? && (node.type.sharded? || node.type.striped?)
         # Sharded/striped map: zero-initialize using the declared type's zig_type.
+        @used_sharded_map = true
         "#{node.type.zig_type}{}"
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
@@ -2212,6 +2217,9 @@ if __FILE__ == $0
     opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.cht"') do |spec|
       name, path = spec.split('=', 2)
       options[:pkg_paths][name] = File.expand_path(path)
+    end
+    opts.on('--use-c-allocator', 'Use the C allocator (jemalloc/mimalloc) instead of GPA') do
+      options[:use_c_allocator] = true
     end
   end.parse!
 

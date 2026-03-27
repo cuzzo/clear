@@ -47,7 +47,13 @@ pub const AtomicInbox = struct {
     pub fn reverse(list: ?*InboxNode) ?*InboxNode {
         var prev: ?*InboxNode = null;
         var curr = list;
+        var depth: usize = 0;
         while (curr) |node| {
+            depth += 1;
+            if (depth > 100_000) {
+                std.debug.print("INBOX CYCLE: reverse depth > 100K, node={*}\n", .{node});
+                @panic("inbox linked list cycle detected");
+            }
             const next = node.next;
             node.next = prev;
             prev = node;

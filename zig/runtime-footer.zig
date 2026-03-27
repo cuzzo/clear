@@ -17,8 +17,9 @@
 
 pub fn main() !void {
     // 1. Setup Allocator
-    // Use C allocator (sharded/concurrent) if requested by the transpiler flag,
-    // otherwise default to Zig's GeneralPurposeAllocator (safe/debug).
+    // Compile-time flag: USE_C_ALLOCATOR = true uses libc malloc (thread-safe,
+    // per-thread arenas in glibc/musl). Otherwise uses GPA for leak detection.
+    // Multi-threaded builds should always set USE_C_ALLOCATOR.
     const use_c_alloc = if (@hasDecl(@import("root"), "USE_C_ALLOCATOR")) @import("root").USE_C_ALLOCATOR else false;
 
     var gpa = if (use_c_alloc) {} else std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
@@ -92,6 +93,14 @@ pub fn main() !void {
     var workers: [64]std.Thread = undefined;
     for (0..num_workers) |i| {
         workers[i] = std.Thread.spawn(.{}, workerMain, .{&worker_ctx}) catch break;
+    }
+
+    // Wait for all workers to register before starting main scheduler.
+    // This prevents ensureOwnership from seeing partial scheduler state.
+    if (num_workers > 0) {
+        while (fp.global_registry.count() < num_workers) {
+            std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+        }
     }
 
     // 7. Main scheduler (runs on the main thread).
