@@ -1920,12 +1920,15 @@ pub const CheatLib = struct {
                 }
             };
 
-            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+            pub fn put(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator, key: []const u8, value: V) !void {
                 self.ensureOwnership();
                 const s = shardIndex(key);
                 if (self.isLocal(s)) {
-                    const owned_key = try key_alloc.dupe(u8, key);
-                    try self.shards[s].map.put(bucket_alloc, owned_key, value);
+                    // HOT PATH: use remote_alloc (c_allocator) for consistency —
+                    // keys may be allocated on scheduler A but freed on scheduler B
+                    // or main. Thread-local arenas would cause use-after-free.
+                    const owned_key = try remote_alloc.dupe(u8, key);
+                    try self.shards[s].map.put(remote_alloc, owned_key, value);
                 } else {
                     var wg = WaitGroup.init(fp.active_scheduler);
                     wg.add(1);
@@ -1972,11 +1975,11 @@ pub const CheatLib = struct {
                 }
             }
 
-            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+            pub fn remove(self: *Self, _: std.mem.Allocator, key: []const u8) void {
                 self.ensureOwnership();
                 const s = shardIndex(key);
                 if (self.isLocal(s)) {
-                    if (self.shards[s].map.fetchRemove(key)) |kv| key_alloc.free(kv.key);
+                    if (self.shards[s].map.fetchRemove(key)) |kv| remote_alloc.free(kv.key);
                 } else {
                     var wg = WaitGroup.init(fp.active_scheduler);
                     wg.add(1);
@@ -1994,11 +1997,12 @@ pub const CheatLib = struct {
                 return nc;
             }
 
-            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+            pub fn deinit(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator) void {
+                // Always use remote_alloc (c_allocator) — consistent with put/remove.
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
-                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
-                    shard.map.deinit(bucket_alloc);
+                    while (it.next()) |entry| remote_alloc.free(entry.key_ptr.*);
+                    shard.map.deinit(remote_alloc);
                 }
             }
 

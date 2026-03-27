@@ -2123,7 +2123,12 @@ private
     # Auto-pin when shared state is captured.
     if !node.pinned && !node.parallel && branch_captures_shared_state?(node.body)
       node.pinned = true
-      note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
+      reason = auto_pin_reason(node.body)
+      if reason == :sharded
+        note!(node, "BG block auto-pinned — captures @sharded map (shared-nothing requires scheduler affinity).")
+      else
+        note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to override.")
+      end
     end
 
     audit_mark_bg_captures(node.body, node.parallel)

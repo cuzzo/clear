@@ -178,7 +178,14 @@ FN cheatMain() RETURNS Void ->
     MUTABLE mi: Int64 = 0;
     WHILE mi < workers DO mix_hits += NEXT mix_futures[mi]; mi += 1; END
 
+    -- Correctness validation: if any of these fail, the benchmark died early
+    -- or has a data race / heap corruption.
+    ASSERT total_hits == n, "GET hits must equal key count — data corruption detected";
+    ASSERT zipf_hits > 0, "Zipf hits must be > 0 — workload 3 failed";
+    ASSERT mix_hits > 0, "Mixed hits must be > 0 — workload 4 failed";
+
     print("Keys:", n, "Workers:", workers);
     print("GET hits:", total_hits, "Zipf hits:", zipf_hits, "Mixed hits:", mix_hits);
+    print("VERIFIED: all workloads completed correctly");
     RETURN;
 END

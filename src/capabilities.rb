@@ -236,10 +236,45 @@ module CapabilityHelper
     _captures_with_storage?(body_exprs, Set.new, :multiowned)
   end
 
-  # Returns true if any captured variable has shared/locked/write_locked/local/multiowned.
+  # Returns true if any captured variable has shared/locked/write_locked/local/multiowned/sharded.
   # Used for auto-pinning BG/DO blocks that capture shared mutable state.
   def branch_captures_shared_state?(body_exprs)
     _captures_shared?(body_exprs, Set.new)
+  end
+
+  # Returns :sharded if auto-pin is due to a @sharded map, :shared otherwise.
+  # Uses the same recursive walk as _captures_shared? but checks for sharded first.
+  def auto_pin_reason(body_exprs)
+    _auto_pin_reason(body_exprs, Set.new)
+  end
+
+  def _auto_pin_reason(nodes, locally_bound)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        info = current_scope.locals[name]
+        next unless info
+        ti = info[:type]
+        return :sharded if ti.is_a?(Type) && ti.sharded?
+      end
+      # Recurse into struct members of the node
+      node.class.members.each do |member|
+        val = node.send(member) rescue next
+        if val.is_a?(Array)
+          sub = _auto_pin_reason(val.select { |v| v.is_a?(AST::Locatable) }, locally_bound)
+          return sub if sub == :sharded
+        elsif val.is_a?(AST::Locatable)
+          sub = _auto_pin_reason([val], locally_bound)
+          return sub if sub == :sharded
+        end
+      end
+    end
+    :shared
   end
 
   # Returns true if body references any outer-scope variable not in locally_bound.
