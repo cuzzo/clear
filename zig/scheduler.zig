@@ -436,9 +436,6 @@ pub const Scheduler = struct {
                 };
                 _ = self.active_tasks.fetchAdd(1, .monotonic);
             } else if (node.type == .RemoteCall) {
-                // SAFETY: Capture all fields into OS-thread locals BEFORE
-                // calling func.  After wg.done(), the caller's fiber may
-                // resume and free the RemoteCall — we must not touch it.
                 const call: *RemoteCall = @fieldParentPtr("inbox_link", node);
                 const func = call.func;
                 const ctx = call.ctx;

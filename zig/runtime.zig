@@ -167,7 +167,10 @@ pub const Runtime = struct {
     }
 
     pub fn frameAlloc(self: *Runtime) std.mem.Allocator {
-        return self.frame_allocator;
+        // @pinned tasks use the scheduler's thread-local arena — the shared
+        // frame_allocator is NOT thread-safe and must not be used from
+        // fibers distributed across multiple schedulers.
+        return fp.__pinned_local_alloc orelse self.frame_allocator;
     }
 
     pub fn heapAlloc(self: *Runtime) std.mem.Allocator {

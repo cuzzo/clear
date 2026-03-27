@@ -17,9 +17,15 @@
 
 pub fn main() !void {
     // 1. Setup Allocator
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Use C allocator (sharded/concurrent) if requested by the transpiler flag,
+    // otherwise default to Zig's GeneralPurposeAllocator (safe/debug).
+    const use_c_alloc = if (@hasDecl(@import("root"), "USE_C_ALLOCATOR")) @import("root").USE_C_ALLOCATOR else false;
+
+    var gpa = if (use_c_alloc) {} else std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
+    defer if (!use_c_alloc) {
+        _ = gpa.deinit();
+    };
+    const allocator = if (use_c_alloc) std.heap.c_allocator else gpa.allocator();
 
     // 2. Setup Contexts
     var global_ctx = EbrContext{};

@@ -1920,24 +1920,48 @@ pub const CheatLib = struct {
                 }
             };
 
+            // Heap-allocated bundle for cross-scheduler RPC.
+            // Must be heap-allocated because the calling fiber's stack may be
+            // modified between inbox.push() and drainInbox processing.
+            const RemoteBundle = struct {
+                rc: fp.RemoteCall,
+                wg: WaitGroup,
+                ctx: PutCtx,
+            };
+            const GetBundle = struct {
+                rc: fp.RemoteCall,
+                wg: WaitGroup,
+                ctx: GetCtx,
+            };
+            const ContainsBundle = struct {
+                rc: fp.RemoteCall,
+                wg: WaitGroup,
+                ctx: ContainsCtx,
+            };
+            const RemoveBundle = struct {
+                rc: fp.RemoteCall,
+                wg: WaitGroup,
+                ctx: RemoveCtx,
+            };
+
             pub fn put(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator, key: []const u8, value: V) !void {
                 self.ensureOwnership();
                 const s = shardIndex(key);
                 if (self.isLocal(s)) {
-                    // HOT PATH: use remote_alloc (c_allocator) for consistency —
-                    // keys may be allocated on scheduler A but freed on scheduler B
-                    // or main. Thread-local arenas would cause use-after-free.
                     const owned_key = try remote_alloc.dupe(u8, key);
                     try self.shards[s].map.put(remote_alloc, owned_key, value);
                 } else {
-                    var wg = WaitGroup.init(fp.active_scheduler);
-                    wg.add(1);
-                    var ctx = PutCtx{ .map = self, .shard = s, .key = key, .value = value };
-                    var rc = fp.RemoteCall{ .func = &PutCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
-                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    const b = try remote_alloc.create(RemoteBundle);
+                    b.wg = WaitGroup.init(fp.active_scheduler);
+                    b.wg.add(1);
+                    b.ctx = .{ .map = self, .shard = s, .key = key, .value = value };
+                    b.rc = .{ .func = &PutCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
+                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
-                    wg.wait();
-                    if (ctx.err) return error.OutOfMemory;
+                    b.wg.wait();
+                    const had_err = b.ctx.err;
+                    remote_alloc.destroy(b);
+                    if (had_err) return error.OutOfMemory;
                 }
             }
 
@@ -1947,14 +1971,17 @@ pub const CheatLib = struct {
                 if (self.isLocal(s)) {
                     return self.shards[s].map.get(key);
                 } else {
-                    var wg = WaitGroup.init(fp.active_scheduler);
-                    wg.add(1);
-                    var ctx = GetCtx{ .map = self, .shard = s, .key = key };
-                    var rc = fp.RemoteCall{ .func = &GetCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
-                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    const b = remote_alloc.create(GetBundle) catch return null;
+                    b.wg = WaitGroup.init(fp.active_scheduler);
+                    b.wg.add(1);
+                    b.ctx = .{ .map = self, .shard = s, .key = key };
+                    b.rc = .{ .func = &GetCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
+                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
-                    wg.wait();
-                    return ctx.result;
+                    b.wg.wait();
+                    const result = b.ctx.result;
+                    remote_alloc.destroy(b);
+                    return result;
                 }
             }
 
@@ -1964,14 +1991,17 @@ pub const CheatLib = struct {
                 if (self.isLocal(s)) {
                     return self.shards[s].map.contains(key);
                 } else {
-                    var wg = WaitGroup.init(fp.active_scheduler);
-                    wg.add(1);
-                    var ctx = ContainsCtx{ .map = self, .shard = s, .key = key };
-                    var rc = fp.RemoteCall{ .func = &ContainsCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
-                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    const b = remote_alloc.create(ContainsBundle) catch return false;
+                    b.wg = WaitGroup.init(fp.active_scheduler);
+                    b.wg.add(1);
+                    b.ctx = .{ .map = self, .shard = s, .key = key };
+                    b.rc = .{ .func = &ContainsCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
+                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
-                    wg.wait();
-                    return ctx.result;
+                    b.wg.wait();
+                    const result = b.ctx.result;
+                    remote_alloc.destroy(b);
+                    return result;
                 }
             }
 
@@ -1981,13 +2011,15 @@ pub const CheatLib = struct {
                 if (self.isLocal(s)) {
                     if (self.shards[s].map.fetchRemove(key)) |kv| remote_alloc.free(kv.key);
                 } else {
-                    var wg = WaitGroup.init(fp.active_scheduler);
-                    wg.add(1);
-                    var ctx = RemoveCtx{ .map = self, .shard = s, .key = key };
-                    var rc = fp.RemoteCall{ .func = &RemoveCtx.run, .ctx = @ptrCast(&ctx), .wg = &wg };
-                    self.owners[s].?.inbox.push(&rc.inbox_link);
+                    const b = remote_alloc.create(RemoveBundle) catch return;
+                    b.wg = WaitGroup.init(fp.active_scheduler);
+                    b.wg.add(1);
+                    b.ctx = .{ .map = self, .shard = s, .key = key };
+                    b.rc = .{ .func = &RemoveCtx.run, .ctx = @ptrCast(&b.ctx), .wg = &b.wg };
+                    self.owners[s].?.inbox.push(&b.rc.inbox_link);
                     self.owners[s].?.event_fd.notify();
-                    wg.wait();
+                    b.wg.wait();
+                    remote_alloc.destroy(b);
                 }
             }
 
