@@ -1,26 +1,20 @@
--- KV Store Benchmark — CLEAR (manual shared-nothing, per-fiber HashMap)
+-- KV Store Benchmark — CLEAR (HashMap@sharded(8):locked)
 --
--- Manual shared-nothing: each @parallel fiber owns its own HashMap.
--- Zero locks, zero contention — same model as DragonflyDB.
--- Keys partitioned by hash: fiber i owns keys where key % N == i.
+-- The idiomatic CLEAR way: one shared HashMap@sharded(8):locked,
+-- accessed from 8 @parallel BG fibers. The developer writes concurrent
+-- code naturally — CLEAR handles sharding, locking, and distribution.
 --
--- NOTE: This is the "expert escape hatch", NOT the idiomatic CLEAR way.
--- The CLEAR way is: HashMap<V>@sharded(N) — which distributes across
--- cores with lock elision and automatic skew detection. That approach
--- is blocked on a runtime bug (@parallel promise lifetime — v0.2 fix).
--- Once fixed, the idiomatic version will look like:
---
---   MUTABLE map: HashMap<String>@sharded(8) = {};
---   -- use from any fiber, any core — CLEAR handles distribution + skew
+-- @sharded(8) splits the map into 8 independent shards by key hash.
+-- :locked adds per-shard mutexes for thread safety across @parallel fibers.
+-- Lock elision (without :locked) is for single-scheduler cooperative mode.
 --
 -- Workloads:
---   1. Uniform SET   — 1M sequential keys partitioned across 8 fibers
+--   1. Uniform SET   — 1M sequential keys (split across 8 fibers)
 --   2. Uniform GET   — 1M sequential keys (100% hit)
 --   3. Zipfian GET   — 1M ops, power-law key distribution (hot keys)
 --   4. Mixed 80/20   — 1M ops, 80% GET / 20% SET, Zipfian
 --
--- Compare to Go (sync.Map — shared-everything, lock-based) and
--- Rust (dashmap — lock-striped, shared with contention).
+-- Compare to Go (sync.Map) and Rust (dashmap).
 
 -- =========================================================================
 -- Zipfian distribution (rejection-inversion method)
@@ -66,93 +60,124 @@ FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFr
 END
 
 -- =========================================================================
--- Per-fiber workload: each fiber owns its own HashMap (shared-nothing)
+-- Workload functions
 -- =========================================================================
 
-FN fiberWork(fiberId: Int64, nKeys: Int64, nFibers: Int64, opsPerFiber: Int64, s: Float64) RETURNS Int64 ->
-    -- Each fiber owns a private HashMap — no sharing, no locks
-    MUTABLE map: HashMap<String> = {};
-
-    -- Phase 1: SET — only keys that belong to this fiber (key % nFibers == fiberId)
-    MUTABLE i: Int64 = fiberId;
-    WHILE i < nKeys DO
+FN doSet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Void ->
+    MUTABLE i: Int64 = start;
+    WHILE i < start + count DO
         map["key:" + toString(i)] = "value-" + toString(i);
-        i += nFibers;
+        i += 1;
     END
+    RETURN;
+END
 
-    -- Phase 2: Uniform GET — read back our own keys
+FN doGet!(MUTABLE map: HashMap<String>@sharded(8):locked, start: Int64, count: Int64) RETURNS Int64 ->
     MUTABLE hits: Int64 = 0;
-    i = fiberId;
-    WHILE i < nKeys DO
+    MUTABLE i: Int64 = start;
+    WHILE i < start + count DO
         MUTABLE got = map["key:" + toString(i)] OR "";
         IF got.length() > 0 THEN hits += 1; END
-        i += nFibers;
+        i += 1;
     END
+    RETURN hits;
+END
 
-    -- Phase 3: Zipfian GET — generate Zipfian keys, only process those belonging to us
-    hIntegral = hInt(toFloat(nKeys) + 0.5, s);
+FN doZipfGet!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
+    hIntegral = hInt(toFloat(n) + 0.5, s);
     hFraction = hFunc(1.5, s) - 1.0;
-    MUTABLE state: Int64 = fiberId + 42;
-    MUTABLE zipfHits: Int64 = 0;
-    MUTABLE j: Int64 = 0;
-    WHILE j < opsPerFiber DO
-        k = zipfNext!(state, nKeys, s, hIntegral, hFraction);
+    MUTABLE hits: Int64 = 0;
+    MUTABLE state: Int64 = seed;
+    MUTABLE i: Int64 = 0;
+    WHILE i < count DO
+        k = zipfNext!(state, n, s, hIntegral, hFraction);
         state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        -- Only process keys that hash to our fiber
-        IF k MOD nFibers == fiberId THEN
+        MUTABLE got = map["key:" + toString(k)] OR "";
+        IF got.length() > 0 THEN hits += 1; END
+        i += 1;
+    END
+    RETURN hits;
+END
+
+FN doZipfMixed!(MUTABLE map: HashMap<String>@sharded(8):locked, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
+    hIntegral = hInt(toFloat(n) + 0.5, s);
+    hFraction = hFunc(1.5, s) - 1.0;
+    MUTABLE hits: Int64 = 0;
+    MUTABLE state: Int64 = seed;
+    MUTABLE i: Int64 = 0;
+    WHILE i < count DO
+        k = zipfNext!(state, n, s, hIntegral, hFraction);
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        MUTABLE decision = state MOD 100;
+        IF decision < 0 THEN decision = 0 - decision; END
+        IF decision < 80 THEN
             MUTABLE got = map["key:" + toString(k)] OR "";
-            IF got.length() > 0 THEN zipfHits += 1; END
+            IF got.length() > 0 THEN hits += 1; END
+        ELSE
+            map["key:" + toString(k)] = "updated-" + toString(i);
         END
-        j += 1;
+        i += 1;
     END
-
-    -- Phase 4: Mixed 80/20 Zipfian
-    MUTABLE mixHits: Int64 = 0;
-    state = fiberId + 99;
-    j = 0;
-    WHILE j < opsPerFiber DO
-        k = zipfNext!(state, nKeys, s, hIntegral, hFraction);
-        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        IF k MOD nFibers == fiberId THEN
-            MUTABLE decision = state MOD 100;
-            IF decision < 0 THEN decision = 0 - decision; END
-            IF decision < 80 THEN
-                MUTABLE got = map["key:" + toString(k)] OR "";
-                IF got.length() > 0 THEN mixHits += 1; END
-            ELSE
-                map["key:" + toString(k)] = "updated-" + toString(j);
-            END
-        END
-        j += 1;
-    END
-
-    RETURN hits + zipfHits + mixHits;
+    RETURN hits;
 END
 
 -- =========================================================================
--- Main: spawn one fiber per core, each with its own HashMap
+-- Main
 -- =========================================================================
 
 FN cheatMain() RETURNS Void ->
+    MUTABLE map: HashMap<String>@sharded(8):locked = {};
     n = 1000000;
     workers = 8;
-    opsPerFiber = n / workers;
+    chunk = n / workers;
     zipfSkew = 1.0;
 
-    MUTABLE futures: ~Int64[]@list = [];
+    -- Workload 1: Uniform SET
+    MUTABLE set_futures: ~Void[]@list = [];
     MUTABLE wi: Int64 = 0;
     WHILE wi < workers DO
-        futures.append(BG { @parallel -> fiberWork(wi, n, workers, opsPerFiber, zipfSkew); });
+        start = wi * chunk;
+        set_futures.append(BG { @parallel -> doSet!(map, start, chunk); });
         wi += 1;
     END
+    MUTABLE si: Int64 = 0;
+    WHILE si < workers DO NEXT set_futures[si]; si += 1; END
 
-    MUTABLE totalHits: Int64 = 0;
-    MUTABLE i: Int64 = 0;
-    WHILE i < workers DO
-        totalHits += NEXT futures[i];
-        i += 1;
+    -- Workload 2: Uniform GET
+    MUTABLE get_futures: ~Int64[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        start = wi * chunk;
+        get_futures.append(BG { @parallel -> doGet!(map, start, chunk); });
+        wi += 1;
     END
+    MUTABLE total_hits: Int64 = 0;
+    MUTABLE gi: Int64 = 0;
+    WHILE gi < workers DO total_hits += NEXT get_futures[gi]; gi += 1; END
 
-    print("Keys:", n, "Workers:", workers, "Total hits:", totalHits);
+    -- Workload 3: Zipfian GET
+    MUTABLE zipf_futures: ~Int64[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        zipf_futures.append(BG { @parallel -> doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
+        wi += 1;
+    END
+    MUTABLE zipf_hits: Int64 = 0;
+    MUTABLE zi: Int64 = 0;
+    WHILE zi < workers DO zipf_hits += NEXT zipf_futures[zi]; zi += 1; END
+
+    -- Workload 4: Mixed 80/20 (Zipfian)
+    MUTABLE mix_futures: ~Int64[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        mix_futures.append(BG { @parallel -> doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
+        wi += 1;
+    END
+    MUTABLE mix_hits: Int64 = 0;
+    MUTABLE mi: Int64 = 0;
+    WHILE mi < workers DO mix_hits += NEXT mix_futures[mi]; mi += 1; END
+
+    print("Keys:", n, "Workers:", workers);
+    print("GET hits:", total_hits, "Zipf hits:", zipf_hits, "Mixed hits:", mix_hits);
     RETURN;
 END

@@ -2430,7 +2430,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).to include("native_math.native_add(3, 4)")
+        expect(output).to include("native_math.native_add(3.0, 4.0)")
         expect(output).not_to match(/try native_math\.native_add/)
         expect(output).not_to match(/native_math\.native_add\(rt,/)
       end
@@ -3054,7 +3054,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       small_zig = ZigTranspiler.new.transpile(small_code)
       expect(small_zig).not_to include("frameAlloc().create(Tiny)")
-      expect(small_zig).to     include("Tiny{ .x = 1, .y = 2 }")
+      expect(small_zig).to     include("Tiny{ .x = 1.0, .y = 2.0 }")
     end
   end
 
@@ -3189,7 +3189,7 @@ RSpec.describe SemanticAnnotator do
     let(:zig) { ZigTranspiler.new.transpile(code) }
 
     it "emits a raw Zig array literal [N]T{...} instead of makeList" do
-      expect(zig).to include("[3]f64{ 1, 2, 3 }")
+      expect(zig).to include("[3]f64{ 1.0, 2.0, 3.0 }")
     end
 
     it "does NOT emit makeList for a stack-fixed array" do

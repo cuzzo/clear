@@ -625,7 +625,7 @@ RSpec.describe SemanticAnnotator do
             END
           CLEAR
           # NUMBER literals are emitted as integers (existing transpiler behaviour).
-          expect(out).to include("Shape{ .Circle = Shape_Circle{ .radius = 5 } }")
+          expect(out).to include("Shape{ .Circle = Shape_Circle{ .radius = 5.0 } }")
         end
 
         it "emits multi-field inline variant constructor correctly" do
@@ -635,7 +635,7 @@ RSpec.describe SemanticAnnotator do
               r: Shape = Shape.Rectangle{ width: 3.0, height: 4.0 };
             END
           CLEAR
-          expect(out).to include("Shape{ .Rectangle = Shape_Rectangle{ .width = 3, .height = 4 } }")
+          expect(out).to include("Shape{ .Rectangle = Shape_Rectangle{ .width = 3.0, .height = 4.0 } }")
         end
 
         it "emits const binding = subject.Variant for AS capture" do

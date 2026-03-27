@@ -1507,9 +1507,16 @@ private
       when :STRING
         "\"#{node.value}\""  # Add quotes!
       when :NUMBER
-        # If it's a whole number, emit as integer string to allow Zig coersion to both f64 and i64.
-        # Otherwise emit as float string.
-        (node.value == node.value.to_i) ? node.value.to_i.to_s : node.value.to_s
+        # NUMBER literals are Float64 in CLEAR. Emit as Zig comptime int
+        # when coerced to Int64, otherwise preserve float form to avoid
+        # integer division bugs (1/t must be float division, not int).
+        if node.coerced_type == :Int64
+          node.value.to_i.to_s
+        else
+          s = node.value.to_s
+          s = "#{s}.0" if node.value == node.value.to_i && !s.include?('.')
+          s
+        end
       when :INT64
         node.value.to_s
       when :BOOLEAN

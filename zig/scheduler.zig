@@ -873,11 +873,17 @@ pub const WaitGroup = struct {
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
-        defer self.lock.store(0, .release);
 
-        if (self.waiting_task) |task| {
-            self.sched.schedule(task);
-            self.waiting_task = null;
+        const task = self.waiting_task;
+        const sched = self.sched;
+        // Clear state BEFORE scheduling — once the waiter is scheduled, it may
+        // immediately wake, consume the result, and free the WaitGroup (Promise Inner).
+        // Accessing self after schedule() would be use-after-free.
+        self.waiting_task = null;
+        self.lock.store(0, .release);
+
+        if (task) |t| {
+            sched.schedule(t);
         }
     }
 
