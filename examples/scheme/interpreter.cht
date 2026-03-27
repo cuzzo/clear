@@ -1,0 +1,338 @@
+-- Mal (Make-a-Lisp) Level 4 Interpreter in CLEAR
+--
+-- Features:
+--   - Types: Nil, Bool, Number, String, Symbol, List, Vector, HashMap
+--   - Functions: Lambdas (fn*), Native Functions
+--   - Forms: def!, let*, do, if, fn*
+--   - Environment: Nested scoping
+--
+-- STATUS: Does not yet compile. See TODO.md for the ordered list of
+-- compiler features needed. Each blocker is annotated inline below
+-- with [P0], [P1], or [P2] priority tags.
+
+-- [P0:6] @indirect on Body breaks Value -> Lambda -> Value recursion.
+-- The compiler must emit a heap-allocated pointer for this field.
+-- v0.2+: The compiler should infer @indirect automatically on recursive variants.
+UNION Value {
+    Nil,
+    Bool(Val: Bool),
+    Number(Val: Float64),
+    String(Val: String),
+    Symbol(Val: String),
+    List(Items: Value[]),
+    Vector(Items: Value[]),
+    HashMap(Entries: HashMap<Value>),
+    NativeFn(Name: String),
+    Lambda(Params: Value[], Body: Value @indirect, Env: Env@shared)
+}
+
+STRUCT Env {
+    Data: HashMap<Value>,
+    -- [P0:7] @shared? means optional Arc-wrapped Env.
+    -- [P1:12] .? syntax needed to unwrap the optional in envGet.
+    Outer: Env@shared?
+}
+
+-- =========================================================================
+-- Reader
+-- =========================================================================
+
+-- [P0:1] String escape sequences: the string literals below use \", \n, \t.
+-- The CLEAR lexer must support these before this file can parse.
+--
+-- v0.2+: Replace this entire function with @regex tokenization.
+FN tokenize(str: String) RETURNS String[] ->
+    MUTABLE tokens: String[] = [];
+    MUTABLE i = 0;
+    WHILE i < str.length() DO
+        -- [P0:2] str[i] — string indexing must return a character.
+        c = str[i];
+        IF c == " " OR c == "," OR c == "\n" OR c == "\t" THEN
+            i += 1;
+        ELSE IF c == "(" OR c == ")" OR c == "[" OR c == "]" OR c == "{" OR c == "}" OR c == "'" OR c == "`" OR c == "~" OR c == "@" OR c == "^" THEN
+            tokens.append(toString(c));
+            i += 1;
+        ELSE IF c == "\"" THEN
+            MUTABLE s = "\"";
+            i += 1;
+            WHILE i < str.length() AND str[i] != "\"" DO
+                s += toString(str[i]);
+                i += 1;
+            END
+            s += "\"";
+            tokens.append(s);
+            i += 1;
+        ELSE IF c == ";" THEN
+            WHILE i < str.length() AND str[i] != "\n" DO i += 1; END
+        ELSE
+            MUTABLE s = "";
+            WHILE i < str.length() AND str[i] != " " AND str[i] != "," AND str[i] != "\n" AND str[i] != "\t" AND str[i] != "(" AND str[i] != ")" AND str[i] != "[" AND str[i] != "]" AND str[i] != "{" AND str[i] != "}" AND str[i] != "\"" DO
+                s += toString(str[i]);
+                i += 1;
+            END
+            tokens.append(s);
+        END
+    END
+    RETURN tokens;
+END
+
+STRUCT Reader {
+    Tokens: String[],
+    Pos: Int64
+}
+
+FN readAtom(token: String) RETURNS Value ->
+    IF token == "nil" THEN RETURN Value.Nil; END
+    IF token == "true" THEN RETURN Value.Bool(true); END
+    IF token == "false" THEN RETURN Value.Bool(false); END
+    -- [P0:2] token[0] — string indexing for quote detection.
+    IF token[0] == "\"" THEN
+        -- [P0:3] .substring(start, end) — strip surrounding quotes.
+        RETURN Value.String(token.substring(1, token.length() - 1));
+    END
+    -- [P0:4] toNumber(string) returning ?Float64. OR provides fallback.
+    -- TODO: Replace -999.999 sentinel with proper optional handling once
+    -- toNumber returns ?Float64 and we can use `toNumber(token) OR NIL`.
+    n = toNumber(token) OR -999.999;
+    IF n != -999.999 THEN RETURN Value.Number(n); END
+    RETURN Value.Symbol(token);
+END
+
+-- [P0:8] Error union propagation: !Value return type means RAISE inside
+-- the WHILE body must propagate to the caller.
+-- [P1:11] `readForm!(r) OR BREAK` — error-to-break coercion in loops.
+FN readForm(MUTABLE r: Reader) RETURNS !Value ->
+    IF r.Pos >= r.Tokens.length() THEN RAISE "EOF"; END
+    token = r.Tokens[r.Pos];
+    r.Pos += 1;
+
+    IF token == "(" THEN
+        MUTABLE items: Value[] = [];
+        WHILE r.Pos < r.Tokens.length() AND r.Tokens[r.Pos] != ")" DO
+            items.append(readForm!(r));
+        END
+        IF r.Pos >= r.Tokens.length() THEN RAISE "Expected )"; END
+        r.Pos += 1;
+        RETURN Value.List(items);
+    ELSE IF token == "[" THEN
+        MUTABLE items: Value[] = [];
+        WHILE r.Pos < r.Tokens.length() AND r.Tokens[r.Pos] != "]" DO
+            items.append(readForm!(r));
+        END
+        IF r.Pos >= r.Tokens.length() THEN RAISE "Expected ]"; END
+        r.Pos += 1;
+        RETURN Value.Vector(items);
+    ELSE
+        RETURN readAtom(token);
+    END
+END
+
+-- =========================================================================
+-- Env
+-- =========================================================================
+
+-- [P1:12] inner.Outer.? — unwrap optional @shared Env.
+FN envGet(e: Env@shared, key: String) RETURNS ?Value ->
+    WITH e AS inner {
+        v = inner.Data[key];
+        IF v THEN RETURN v; END
+        IF inner.Outer THEN
+            RETURN envGet(inner.Outer.?, key);
+        END
+    }
+    RETURN NIL;
+END
+
+-- [P0:7] @shared Env — WITH EXCLUSIVE for mutable access.
+FN envSet!(MUTABLE e: Env@shared, key: String, val: Value) RETURNS Void ->
+    WITH EXCLUSIVE e AS inner {
+        inner.Data[key] = val;
+    }
+    RETURN;
+END
+
+-- =========================================================================
+-- Eval
+-- =========================================================================
+
+-- [P0:5] MATCH payload extraction is the heart of the evaluator.
+-- Every `Value.X(payload) -> expr` pattern depends on it.
+FN eval(v: Value, MUTABLE env: Env@shared) RETURNS !Value ->
+    MATCH v START
+        Value.Symbol(s) ->
+            got = envGet(env, s) OR RAISE "Symbol not found: " + s;
+            RETURN got;
+        Value.List(items) ->
+            IF items.length() == 0 THEN RETURN v; END
+
+            -- Special Forms
+            head = items[0];
+            MATCH head START
+                Value.Symbol(s) ->
+                    IF s == "def!" THEN
+                        val = eval(items[2], env);
+                        key = MATCH items[1] START Value.Symbol(k) -> k; DEFAULT -> RAISE "def! key must be symbol"; END;
+                        envSet!(env, key, val);
+                        RETURN val;
+                    ELSE IF s == "let*" THEN
+                        -- [P0:7] Env{...} @shared — Arc-wrapped struct construction.
+                        MUTABLE new_env = Env{ Data: {}, Outer: env } @shared;
+                        bindings = MATCH items[1] START Value.List(l) -> l; Value.Vector(v) -> v; DEFAULT -> RAISE "let* bindings must be list/vector"; END;
+                        MUTABLE i = 0;
+                        WHILE i < bindings.length() DO
+                            b_key = MATCH bindings[i] START Value.Symbol(k) -> k; DEFAULT -> RAISE "let* key must be symbol"; END;
+                            b_val = eval(bindings[i+1], new_env);
+                            envSet!(new_env, b_key, b_val);
+                            i += 2;
+                        END
+                        RETURN eval(items[2], new_env);
+                    ELSE IF s == "do" THEN
+                        MUTABLE res = Value.Nil;
+                        -- NOTE: Could use FOR i IN (1_i64..<items.length()) DO here once
+                        -- .length() returns Int64 and range bounds work with expressions.
+                        MUTABLE i = 1;
+                        WHILE i < items.length() DO
+                            res = eval(items[i], env);
+                            i += 1;
+                        END
+                        RETURN res;
+                    ELSE IF s == "if" THEN
+                        cond = eval(items[1], env);
+                        is_truthy = MATCH cond START Value.Nil -> false; Value.Bool(b) -> b; DEFAULT -> true; END;
+                        IF is_truthy THEN
+                            RETURN eval(items[2], env);
+                        ELSE
+                            IF items.length() > 3 THEN
+                                RETURN eval(items[3], env);
+                            ELSE
+                                RETURN Value.Nil;
+                            END
+                        END
+                    ELSE IF s == "fn*" THEN
+                        params = MATCH items[1] START Value.List(l) -> l; Value.Vector(v) -> v; DEFAULT -> RAISE "fn* params must be list/vector"; END;
+                        RETURN Value.Lambda(params, items[2], env);
+                    END
+                DEFAULT -> PASS;
+            END
+
+            -- Function Application
+            MUTABLE evaluated: Value[] = [];
+            MUTABLE j = 0;
+            WHILE j < items.length() DO
+                evaluated.append(eval(items[j], env));
+                j += 1;
+            END
+
+            f = evaluated[0];
+            -- [P0:3] .substring on array — slice to get args (items 1..end).
+            -- May need a different API: evaluated.slice(1) or evaluated[1..].
+            args = evaluated.substring(1, evaluated.length());
+
+            MATCH f START
+                Value.NativeFn(name) ->
+                    -- [P1:9] Math operators: only + is implemented.
+                    -- Add -, *, / for step4_tests.mal to pass.
+                    IF name == "+" THEN
+                        a = MATCH args[0] START Value.Number(n) -> n; DEFAULT -> 0.0; END;
+                        b = MATCH args[1] START Value.Number(n) -> n; DEFAULT -> 0.0; END;
+                        RETURN Value.Number(a + b);
+                    ELSE IF name == "list" THEN
+                        RETURN Value.List(args);
+                    ELSE IF name == "list?" THEN
+                        is_l = MATCH args[0] START Value.List -> true; DEFAULT -> false; END;
+                        RETURN Value.Bool(is_l);
+                    ELSE IF name == "empty?" THEN
+                        is_e = MATCH args[0] START Value.List(l) -> l.length() == 0; DEFAULT -> false; END;
+                        RETURN Value.Bool(is_e);
+                    ELSE IF name == "count" THEN
+                        c = MATCH args[0] START Value.List(l) -> l.length(); Value.Nil -> 0; DEFAULT -> 0; END;
+                        RETURN Value.Number(toFloat(c));
+                    END
+                    RAISE "Unknown native fn: " + name;
+                Value.Lambda(l_params, l_body, l_env) ->
+                    MUTABLE call_env = Env{ Data: {}, Outer: l_env } @shared;
+                    MUTABLE k = 0;
+                    WHILE k < l_params.length() DO
+                        p_name = MATCH l_params[k] START Value.Symbol(s) -> s; DEFAULT -> ""; END;
+                        envSet!(call_env, p_name, args[k]);
+                        k += 1;
+                    END
+                    RETURN eval(l_body, call_env);
+                DEFAULT -> RAISE "Not a function";
+            END
+
+        Value.Vector(items) ->
+            -- NOTE: Uses FOR-each loop (just shipped).
+            MUTABLE res: Value[] = [];
+            FOR item IN items DO res.append(eval(item, env)); END
+            RETURN Value.Vector(res);
+
+        DEFAULT -> RETURN v;
+    END
+END
+
+-- =========================================================================
+-- Printer
+-- =========================================================================
+
+FN prStr(v: Value, readably: Bool) RETURNS String ->
+    MATCH v START
+        Value.Nil -> RETURN "nil";
+        Value.Bool(b) -> RETURN IF b THEN "true" ELSE "false";
+        Value.Number(n) -> RETURN toString(n);
+        Value.String(s) ->
+            IF readably THEN RETURN "\"" + s + "\"";
+            ELSE RETURN s;
+        Value.Symbol(s) -> RETURN s;
+        Value.List(items) ->
+            -- NOTE: Could use FOR-each + string join pattern once available.
+            MUTABLE out = "(";
+            MUTABLE i = 0;
+            WHILE i < items.length() DO
+                out += prStr(items[i], readably);
+                IF i < items.length() - 1 THEN out += " "; END
+                i += 1;
+            END
+            RETURN out + ")";
+        Value.Vector(items) ->
+            MUTABLE out = "[";
+            MUTABLE i = 0;
+            WHILE i < items.length() DO
+                out += prStr(items[i], readably);
+                IF i < items.length() - 1 THEN out += " "; END
+                i += 1;
+            END
+            RETURN out + "]";
+        -- [P2] HashMap printing: use FOR k IN map DO once map iteration works.
+        Value.HashMap(m) -> RETURN "{...}";
+        Value.NativeFn(name) -> RETURN "#<native " + name + ">";
+        Value.Lambda -> RETURN "#<function>";
+    END
+    RETURN "";
+END
+
+-- =========================================================================
+-- Main
+-- =========================================================================
+
+FN cheatMain() RETURNS Void ->
+    -- [P0:7] @shared struct construction.
+    MUTABLE global_env = Env{ Data: {}, Outer: NIL } @shared;
+    envSet!(global_env, "+", Value.NativeFn("+"));
+    envSet!(global_env, "list", Value.NativeFn("list"));
+    envSet!(global_env, "list?", Value.NativeFn("list?"));
+    envSet!(global_env, "empty?", Value.NativeFn("empty?"));
+    envSet!(global_env, "count", Value.NativeFn("count"));
+    -- [P1:9] Add -, *, /, =, <, >, <=, >= native functions.
+
+    -- [P2:13] Replace with stdin REPL for interactive use.
+    tokens = tokenize("(def! a 10) (def! f (fn* [x] (+ x a))) (f 5)");
+    MUTABLE r = Reader{ Tokens: tokens, Pos: 0 };
+    WHILE r.Pos < r.Tokens.length() DO
+        -- [P1:11] OR BREAK — error-to-break coercion for loop control.
+        expr = readForm!(r) OR BREAK;
+        res = eval(expr, global_env) OR BREAK;
+        print(prStr(res, true));
+    END
+    RETURN;
+END
