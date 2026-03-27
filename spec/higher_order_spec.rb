@@ -754,7 +754,7 @@ RSpec.describe SemanticAnnotator do
       it "generates ShardedStringMap Zig type" do
         code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("CheatLib.ShardedStringMap(i64, 2)")
+        expect(zig).to include("CheatLib.PartitionedStringMap(i64, 2)")
       end
 
       it "emits .put() for index assignment on sharded map" do
@@ -802,10 +802,10 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "generates StripedStringMap Zig type from :sharded @locked" do
+      it "generates ShardedStringMap (RwLock) Zig type from @sharded:locked" do
         code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
+        expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
       end
 
       it "emits .put() for index assignment" do
@@ -833,17 +833,17 @@ RSpec.describe SemanticAnnotator do
         expect(zig).to include('.get(')
       end
 
-      it "plain :sharded(4) without @locked generates ShardedStringMap (not striped)" do
+      it "plain :sharded(4) without @locked generates PartitionedStringMap (shared-nothing)" do
         code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4) = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
+        expect(zig).to include("CheatLib.PartitionedStringMap(i64, 4)")
         expect(zig).not_to include("Striped")
       end
 
       it "supports @writeLocked for read-heavy workloads" do
         code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
+        expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
       end
     end
   end

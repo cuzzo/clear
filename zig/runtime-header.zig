@@ -1760,10 +1760,81 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------------
+    // PartitionedStringMap(V, N) — shared-nothing string hash map.
+    // N independent shards with NO locking. Each shard is owned by its
+    // scheduler thread. Fibers must be @pinned. Only access keys that
+    // hash to your scheduler's shards. Zero synchronization overhead.
+    // This is the type emitted for @sharded(N) without :locked/:writeLocked.
+    pub fn PartitionedStringMap(comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = std.StringHashMapUnmanaged(V);
+
+            const Shard = struct {
+                map: Map = .{},
+                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+            };
+
+            shards: [N]Shard = [_]Shard{.{}} ** N,
+
+            fn shardIndex(key: []const u8) usize {
+                return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
+            }
+
+            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const s = shardIndex(key);
+                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
+                const owned_key = try key_alloc.dupe(u8, key);
+                try self.shards[s].map.put(bucket_alloc, owned_key, value);
+            }
+
+            pub fn get(self: *Self, key: []const u8) ?V {
+                const s = shardIndex(key);
+                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
+                return self.shards[s].map.get(key);
+            }
+
+            pub fn contains(self: *Self, key: []const u8) bool {
+                const s = shardIndex(key);
+                return self.shards[s].map.contains(key);
+            }
+
+            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                const s = shardIndex(key);
+                if (self.shards[s].map.fetchRemove(key)) |kv| {
+                    key_alloc.free(kv.key);
+                }
+            }
+
+            pub fn count(self: *Self) i64 {
+                var n: i64 = 0;
+                for (&self.shards) |*shard| {
+                    n += @intCast(shard.map.count());
+                }
+                return n;
+            }
+
+            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                for (&self.shards) |*shard| {
+                    var it = shard.map.iterator();
+                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
+                    shard.map.deinit(bucket_alloc);
+                }
+            }
+
+            pub fn getOpCounts(self: *const Self) [N]u64 {
+                var counts: [N]u64 = undefined;
+                for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
+                return counts;
+            }
+        };
+    }
+
     // ShardedStringMap(V, N) — RwLock-sharded string hash map.
     // N independent shards, each protected by a RwLock. Readers are concurrent
-    // within a shard; writers are exclusive per-shard. Sharding provides N-way
-    // parallelism; RwLock ensures thread safety with minimal read contention.
+    // within a shard; writers are exclusive per-shard. Thread-safe for @parallel.
+    // Emitted for @sharded(N):locked and @sharded(N):writeLocked.
     pub fn ShardedStringMap(comptime V: type, comptime N: usize) type {
         comptime std.debug.assert(N >= 2);
         return struct {

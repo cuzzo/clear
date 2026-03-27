@@ -1,12 +1,13 @@
--- KV Store Benchmark — CLEAR (HashMap@sharded(8))
+-- KV Store Benchmark — CLEAR (HashMap@sharded(8), shared-nothing)
 --
--- The idiomatic CLEAR way: one shared HashMap@sharded(8), accessed
--- from 8 @parallel BG fibers. The developer writes concurrent code
--- naturally — CLEAR handles sharding, locking, and distribution.
+-- The idiomatic CLEAR way: HashMap@sharded(8) with @pinned fibers.
+-- True shared-nothing: each shard is an independent HashMap with no
+-- locks. Fibers are pinned to their scheduler — each scheduler owns
+-- its partition of the keyspace. Zero synchronization, zero contention.
 --
--- @sharded(8) splits the map into 8 independent shards by key hash.
--- Each shard is protected by a RwLock: readers are concurrent within
--- a shard, writers are exclusive per-shard. No :locked modifier needed.
+-- @sharded(N) = shared-nothing (no locks, requires @pinned)
+-- @sharded(N):locked = RwLock per shard (thread-safe, for @pinned)
+-- @sharded(N):writeLocked = same as :locked (RwLock)
 --
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys (split across 8 fibers)
@@ -137,7 +138,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE wi: Int64 = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        set_futures.append(BG { @parallel -> doSet!(map, start, chunk); });
+        set_futures.append(BG { @pinned -> doSet!(map, start, chunk); });
         wi += 1;
     END
     MUTABLE si: Int64 = 0;
@@ -148,7 +149,7 @@ FN cheatMain() RETURNS Void ->
     wi = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        get_futures.append(BG { @parallel -> doGet!(map, start, chunk); });
+        get_futures.append(BG { @pinned -> doGet!(map, start, chunk); });
         wi += 1;
     END
     MUTABLE total_hits: Int64 = 0;
@@ -159,7 +160,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE zipf_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        zipf_futures.append(BG { @parallel -> doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
+        zipf_futures.append(BG { @pinned -> doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
         wi += 1;
     END
     MUTABLE zipf_hits: Int64 = 0;
@@ -170,7 +171,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE mix_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        mix_futures.append(BG { @parallel -> doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
+        mix_futures.append(BG { @pinned -> doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
         wi += 1;
     END
     MUTABLE mix_hits: Int64 = 0;

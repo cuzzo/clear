@@ -988,27 +988,26 @@ class Type
     end
 
     # 5. Handle HashMaps
-    #    HashMap<V>         → std.StringHashMapUnmanaged(V)        (String keys)
-    #    HashMap<K, V>      → CheatLib.NumericMapType(K, V)        (numeric keys)
-    #    HashMap<V>:sharded(N)          → CheatLib.ShardedStringMap(V, N)
-    #    HashMap<K,V>:sharded(N)        → CheatLib.ShardedNumericMap(K, V, N)
-    #    HashMap<V>:sharded(N) @locked   → CheatLib.StripedStringMap(V, N)   (skew-safe)
-    #    HashMap<K,V>:sharded(N) @locked → CheatLib.StripedNumericMap(K, V, N)
+    #    HashMap<V>                        → std.StringHashMapUnmanaged(V)
+    #    HashMap<K, V>                     → CheatLib.NumericMapType(K, V)
+    #    HashMap<V>@sharded(N)             → CheatLib.PartitionedStringMap(V, N)     (shared-nothing)
+    #    HashMap<V>@sharded(N):locked      → CheatLib.ShardedStringMap(V, N)         (RwLock per shard)
+    #    HashMap<V>@sharded(N):writeLocked → CheatLib.ShardedStringMap(V, N)         (RwLock per shard)
     if map?
       val_zig = value_type.zig_type
-      if striped?  # sharded + sync = lock-striped
+      if striped?  # sharded + sync = lock-striped (RwLock)
         if numeric_map?
           key_zig = key_type.zig_type
           return "CheatLib.StripedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
         end
-        return "CheatLib.StripedStringMap(#{val_zig}, #{shard_count})"
+        return "CheatLib.ShardedStringMap(#{val_zig}, #{shard_count})"
       end
-      if sharded?
+      if sharded?  # sharded without sync = shared-nothing (no locks)
         if numeric_map?
           key_zig = key_type.zig_type
           return "CheatLib.ShardedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
         end
-        return "CheatLib.ShardedStringMap(#{val_zig}, #{shard_count})"
+        return "CheatLib.PartitionedStringMap(#{val_zig}, #{shard_count})"
       end
       if numeric_map?
         key_zig = key_type.zig_type
