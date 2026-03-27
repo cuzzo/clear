@@ -56,7 +56,7 @@ STD_LIB = {
   # toFloat() (Overloaded)
   "toFloat" => [
     { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})" },
-    { args: [:Int64],      return: :Float64, zig: "@floatFromInt({0})" },
+    { args: [:Int64],      return: :Float64, zig: "@as(f64, @floatFromInt({0}))" },
     { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
 
@@ -144,8 +144,8 @@ STD_LIB = {
 
   # abs(x) -> absolute value
   "abs" => [
-    { args: [:Int64], return: :Int64, zig: "@intCast(@abs({0}))" },
     { args: [:Float64], return: :Float64, zig: "@abs({0})" },
+    { args: [:Int64], return: :Int64, zig: "@intCast(@abs({0}))" },
   ],
 
   # log(x) -> natural logarithm
