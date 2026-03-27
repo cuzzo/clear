@@ -1556,9 +1556,13 @@ private
       end
 
       if node.op == :POW
-        # Assuming i64 for now.
-        # If types are float, you might need std.math.pow(f64, ...)
-        return "std.math.pow(i64, #{left}, #{right})"
+        left_type = node.left.full_type
+        resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
+        if resolved == :Int64
+          return "std.math.pow(i64, #{left}, #{right})"
+        else
+          return "std.math.pow(f64, #{left}, #{right})"
+        end
       end
 
       if node.op == :MOD

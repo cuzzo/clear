@@ -148,6 +148,27 @@ STD_LIB = {
     { args: [:Float64], return: :Float64, zig: "@abs({0})" },
   ],
 
+  # log(x) -> natural logarithm
+  "log" => {
+    args: [:Float64],
+    return: :Float64,
+    zig: "@log({0})"
+  },
+
+  # exp(x) -> e^x
+  "exp" => {
+    args: [:Float64],
+    return: :Float64,
+    zig: "@exp({0})"
+  },
+
+  # floor(x) -> largest integer <= x (as Float64)
+  "floor" => {
+    args: [:Float64],
+    return: :Float64,
+    zig: "@floor({0})"
+  },
+
   "shell" => {
     args: [STRING_TYPE],
     return: STRING_TYPE, # Returns %String (Heap String)
