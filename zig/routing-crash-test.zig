@@ -124,10 +124,8 @@ fn schedulerThread(a: std.mem.Allocator) void {
 }
 
 pub fn main() !void {
-    // Use GPA with thread_safe (same as transpiled CLEAR runtime)
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Use c_allocator exclusively to eliminate GPA as a variable.
+    const allocator = std.heap.c_allocator;
 
     stack_pool = fm.StackPool.init(allocator);
     defer stack_pool.deinit();
