@@ -197,7 +197,7 @@ Same API as their non-SOA counterparts. The difference is invisible except in pi
 
 **FFI restriction:** `@soa` collections cannot be passed to `EXTERN FN` — SOA memory layout is incompatible with the C ABI. Materialize to a regular collection first if you need FFI.
 
-## Sharding — Lock-Free Parallel Collections
+## Sharding — True Shared-Nothing Parallel Collections
 
 Lists, pools, and hash maps all support sharding for parallel access:
 
@@ -216,46 +216,46 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 
 **Pipeline operations** (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
 
-### Key Skew — Fixed Automatically
+### The DragonflyDB Model — Each Thread Owns Its Partition
 
-A common concern with sharding: what if one key is much hotter than others? If `hash("alice") % 4 == 0` and "alice" is 90% of your traffic, Shard 0 gets all the work while the other 3 sit idle. That's **key skew**.
+`@sharded(N)` uses the same architecture as DragonflyDB: each scheduler thread owns a subset of shards, and fibers pinned to that scheduler access those shards with zero locks, zero atomics, and zero synchronization.
 
-**CLEAR fixes skew automatically.** Every sharded map has per-shard mutexes that are **elided by default** — the locks exist in memory (8 bytes per shard) but are never acquired. The runtime's control plane monitors per-shard operation counts, and when it detects skew (one shard handling disproportionate traffic), it disables lock elision LIVE. This enables cross-shard work stealing with no data structure rebuild, no restart, and no code change.
+**Shard ownership**: Shard `i` is owned by scheduler `i % S` (where S = number of schedulers). With 8 shards and 2 schedulers, each scheduler owns 4 shards.
 
-The cost of always-on skew readiness:
-- **Memory**: 8 bytes per shard (one mutex). A 64-shard map pays 512 bytes — less than 1% of a typical map's entry data.
-- **Runtime**: One `mov` + one predicted-taken branch per operation (~1 CPU cycle). The branch is always predicted because the elision flag almost never flips.
+**Hot path** (shard owned by the current scheduler): Direct access. No locks, no atomics. Cooperative scheduling ensures only one fiber runs at a time per scheduler, so there's no data race.
 
-This means you never need to think about skew. Just use `:sharded(N)`:
+**Cold path** (shard owned by another scheduler): The operation is transparently routed to the owning scheduler via the runtime's lock-free inbox. The calling fiber yields until the owning scheduler executes the operation inline and signals completion. Correct, but slower — design your workload to minimize cross-shard access.
 
-```clear
-MUTABLE counts: HashMap<Int64>@sharded(8) = {};
--- Skew? The runtime handles it. You don't need @locked.
-```
+### One-Line Optimization
 
-**For explicit control**, you can still force locks on from the start:
+`@sharded(N)` is a one-line declaration change. Functions don't need to know — a function that takes `HashMap<String>` seamlessly accepts `HashMap<String>@sharded(8)`:
 
 ```clear
-MUTABLE counts: HashMap<Int64>@sharded(8):locked = {};
--- Locks always active (no elision). Use when you KNOW you have skew.
+-- One-line change: add @sharded(8) to the declaration
+MUTABLE map: HashMap<String>@sharded(8) = {};
+
+-- Functions: no @sharded needed in parameter types
+FN doWork!(MUTABLE map: HashMap<String>, key: String) RETURNS Void ->
+    map[key] = "value";
+END
+
+-- BG blocks: auto-pinned when they capture a @sharded map
+BG { doWork!(map, "hello"); }
+-- [Note] BG block auto-pinned — captures shared/locked resource.
 ```
 
-| | `@sharded(N)` | `@sharded(N):locked` |
-|---|---|---|
-| **Locks** | Elided (enabled on skew) | Always active |
-| **Per-op cost** | ~1 cycle (branch) | ~20ns (lock/unlock) |
-| **Skew response** | Automatic (control plane) | Immediate (pre-configured) |
-| **Use when** | Default — works for everything | You want zero detection latency |
+The compiler handles everything:
+- **Unified API**: All HashMap variants (plain, `@sharded`, `@sharded:locked`) have the same `.put()`/`.get()` interface. Functions use Zig `anytype` generics to accept any variant.
+- **Auto-pinning**: BG blocks that capture a `@sharded` map are automatically pinned to a scheduler. No `@pinned` annotation needed.
+- **Fiber distribution**: Pinned BG fibers are distributed round-robin across schedulers via `spawnPinned()`, so each scheduler gets work.
 
-### Key Skew in Single-Scheduler Mode
+### Sharding Variants
 
-**In CLEAR's default mode (single scheduler), skew doesn't matter.** All shards run on one thread sequentially. A "hot shard" just means more time is spent on that shard's data — the same as a non-sharded map. There's no idle-core waste because there's only one core.
-
-**In multi-scheduler mode (`CLEAR_THREADS=N`)**, the control plane detects and fixes skew automatically. You can also increase shards to reduce collision probability:
-
-```clear
-MUTABLE counts: HashMap<Int64>@sharded(64) = {};
-```
+| Variant | Model | Locking | Use when |
+|---|---|---|---|
+| `@sharded(N)` | Shared-nothing | None (fiber-pinned) | Default — maximum throughput |
+| `@sharded(N):locked` | Lock-striped (RwLock) | Per-shard RwLock | Known cross-scheduler contention |
+| `@sharded(N):writeLocked` | Lock-striped (RwLock) | Per-shard RwLock | Read-heavy cross-scheduler access |
 
 ### When You Need Shared Mutable Maps
 
@@ -267,3 +267,23 @@ MUTABLE sessions: HashMap<Session> @shared:writeLocked = {};
 ```
 
 This is CLEAR's escape hatch — it works like Java's `ConcurrentHashMap` but with explicit intent. The capability annotation makes the cost visible at the declaration site, and the compiler's capability audit will tell you if you're paying for it unnecessarily.
+
+## Hashing — Secure by Default
+
+CLEAR uses **seeded Wyhash** as the default hash function for all hash maps. The seed is randomized per process, which prevents Hash DoS attacks (where an attacker crafts keys that all collide, turning O(1) lookups into O(n) traversals).
+
+This follows CLEAR's "Correct > Scalable > Fast" ordering: the default is safe against adversarial input, with near-zero overhead compared to unsalted hashes.
+
+### Future: `@fastTrusted` Capability
+
+For performance-critical internal infrastructure where keys are not attacker-controlled (e.g., internal service meshes, compiler symbol tables, game engine registries), CLEAR plans to offer an opt-in unsalted hash:
+
+```clear
+-- Planned syntax (not yet implemented):
+MUTABLE symbols: HashMap<SymbolInfo>@fastTrusted = {};
+MUTABLE fast_sharded: HashMap<Int64>@sharded(8):fastTrusted = {};
+```
+
+`@fastTrusted` would switch to unsalted FNV-1a or raw Wyhash — faster, but vulnerable to Hash DoS if keys come from untrusted input. The name is deliberate: it forces the developer to declare "I trust this data source."
+
+**Why not yet**: The default seeded Wyhash is fast enough for v1 (within ~5% of unsalted FNV). The capability will be added when real-world profiling shows the hash function is the bottleneck, not before. Premature escape hatches encourage premature optimization.
