@@ -744,15 +744,15 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    describe "HashMap:sharded(N) (sharded hash map)" do
-      it "accepts HashMap<Int64>:sharded(2) as a valid type annotation" do
+    describe "HashMap@sharded(N) (sharded hash map)" do
+      it "accepts HashMap<Int64>@sharded(2) as a valid type annotation" do
         expect {
-          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END")
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END")
         }.not_to raise_error
       end
 
       it "generates ShardedStringMap Zig type" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END"
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.ShardedStringMap(i64, 2)")
       end
@@ -760,7 +760,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .put() for index assignment on sharded map" do
         code = <<~CLEAR
           FN f() RETURNS Void ->
-              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              MUTABLE m: HashMap<Int64>@sharded(2) = {};
               m["key"] = 42_i64;
               RETURN;
           END
@@ -772,7 +772,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .get() for index access on sharded map" do
         code = <<~CLEAR
           FN f() RETURNS Void ->
-              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              MUTABLE m: HashMap<Int64>@sharded(2) = {};
               m["key"] = 42_i64;
               v = m["key"] OR 0;
               RETURN;
@@ -785,7 +785,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .count() for count method on sharded map" do
         code = <<~CLEAR
           FN f() RETURNS Void ->
-              MUTABLE m: HashMap<Int64>:sharded(2) = {};
+              MUTABLE m: HashMap<Int64>@sharded(2) = {};
               n: Int64 = m.count();
               RETURN;
           END
@@ -795,15 +795,15 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    describe "HashMap:sharded(N) @locked (lock-striped hash map via composition)" do
-      it "accepts HashMap<Int64>:sharded(4) @locked as a valid type annotation" do
+    describe "HashMap@sharded(N):locked (lock-striped hash map via composition)" do
+      it "accepts HashMap<Int64>@sharded(4):locked as a valid type annotation" do
         expect {
-          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) @locked = {}; RETURN; END")
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END")
         }.not_to raise_error
       end
 
       it "generates StripedStringMap Zig type from :sharded @locked" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) @locked = {}; RETURN; END"
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
       end
@@ -811,7 +811,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .put() for index assignment" do
         code = <<~CLEAR
           FN f() RETURNS Void ->
-              MUTABLE m: HashMap<Int64>:sharded(4) @locked = {};
+              MUTABLE m: HashMap<Int64>@sharded(4):locked = {};
               m["key"] = 42_i64;
               RETURN;
           END
@@ -823,7 +823,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .get() for index access" do
         code = <<~CLEAR
           FN f() RETURNS Void ->
-              MUTABLE m: HashMap<Int64>:sharded(4) @locked = {};
+              MUTABLE m: HashMap<Int64>@sharded(4):locked = {};
               m["key"] = 42_i64;
               v = m["key"] OR 0;
               RETURN;
@@ -834,14 +834,14 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "plain :sharded(4) without @locked generates ShardedStringMap (not striped)" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) = {}; RETURN; END"
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4) = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
         expect(zig).not_to include("Striped")
       end
 
       it "supports @writeLocked for read-heavy workloads" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(4) @writeLocked = {}; RETURN; END"
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.StripedStringMap(i64, 4)")
       end

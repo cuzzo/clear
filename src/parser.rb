@@ -1390,11 +1390,11 @@ class Parser
       if (ownership || sync) && !collection && match?(:CHAR, ':')
         consume(:CHAR, ':')
         unless current.type == :VAR_ID
-          error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+          error!(current, "Expected a capability modifier (locked, writeLocked, shared, multiowned) after ':'")
         end
         normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
         unless %w[@multiowned @shared @locked @writeLocked].include?(normalized)
-          error!(current, "Expected a capability sigil (@multiowned, @shared, @locked, @writeLocked) after ':'")
+          error!(current, "Expected a capability modifier (locked, writeLocked, shared, multiowned) after ':'")
         end
         second_tok = consume(:VAR_ID)
         case normalized
@@ -1412,6 +1412,7 @@ class Parser
           sync = :write_locked
         end
       end
+
     end
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
@@ -1438,17 +1439,6 @@ class Parser
       end
     end
 
-    # Legacy: HashMap<V>:sharded(N) @locked (backward compat — TODO: remove in v0.2)
-    if base.start_with?("HashMap") && !shard_count && match?(:CHAR, ':')
-      if peek.type == :VAR_ID && peek.value == "sharded"
-        dummy_tok = Lexer::Token.new(:VAR_ID, "@map", current.line, current.column)
-        shard_count = parse_sharded_modifier_if_present!(dummy_tok)
-      end
-    end
-    if shard_count && !sync && match?(:VAR_ID) && %w[@locked @writeLocked].include?(current.value)
-      cap_tok = consume(:VAR_ID)
-      sync = cap_tok.value == "@locked" ? :locked : :write_locked
-    end
 
     t = Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
     t.soa = true if is_soa
@@ -1601,6 +1591,11 @@ class Parser
       end
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(next_tok, attrs, dims)
+    end
+
+    # Reject T @cap1 @cap2 (must use : join, e.g. @shared:locked)
+    if match?(:VAR_ID) && current.value.start_with?('@') && CAP_SIGIL_ATTRS.key?(current.value)
+      error!(current, "Cannot use two separate @ capabilities. Join with ':' instead (e.g., @shared:locked not @shared @locked).")
     end
 
     [dims[:ownership], dims[:sync], dims[:layout]]

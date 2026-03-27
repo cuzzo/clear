@@ -1136,4 +1136,69 @@ RSpec.describe SemanticAnnotator do
 
   end
 
+  # ---------------------------------------------------------------------------
+  # Capability syntax enforcement
+  # ---------------------------------------------------------------------------
+  describe "capability syntax enforcement" do
+    it "capabilities must start with @" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared:locked; RETURN; END")
+      }.not_to raise_error
+    end
+
+    it "rejects two separate @ capabilities without : join" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared @locked; RETURN; END")
+      }.to raise_error(/Cannot use two separate @ capabilities.*Join with ':'/)
+    end
+
+    it "rejects @locked @shared (two separate @)" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @locked @shared; RETURN; END")
+      }.to raise_error(/Cannot use two separate @ capabilities/)
+    end
+
+    it "accepts @shared:locked (joined with :)" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared:locked; RETURN; END")
+      }.not_to raise_error
+    end
+
+    it "accepts @locked:shared (reversed order, joined with :)" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @locked:shared; RETURN; END")
+      }.not_to raise_error
+    end
+
+    it "rejects duplicate sync: @locked:writeLocked" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @locked:writeLocked; RETURN; END")
+      }.to raise_error(/Duplicate sync capability/)
+    end
+
+    it "rejects duplicate ownership: @shared:multiowned" do
+      expect {
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared:multiowned; RETURN; END")
+      }.to raise_error(/Duplicate ownership capability/)
+    end
+
+    it "HashMap@sharded(N):locked is valid syntax" do
+      expect {
+        run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2):locked = {}; RETURN; END")
+      }.not_to raise_error
+    end
+
+    it "HashMap@sharded(N) without :locked is valid (lock-elided)" do
+      expect {
+        run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END")
+      }.not_to raise_error
+    end
+
+    it "rejects old HashMap:sharded syntax (capabilities must start with @)" do
+      expect {
+        run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END")
+      }.to raise_error(ParserError)
+    end
+  end
+
 end
