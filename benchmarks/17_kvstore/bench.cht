@@ -1,8 +1,17 @@
--- KV Store Benchmark — CLEAR (shared-nothing, per-fiber HashMap)
+-- KV Store Benchmark — CLEAR (manual shared-nothing, per-fiber HashMap)
 --
--- True shared-nothing architecture: each fiber owns its own HashMap.
--- No locks, no synchronization, no contention — same model as DragonflyDB.
--- Keys are partitioned by hash: fiber i owns keys where hash(key) % N == i.
+-- Manual shared-nothing: each @parallel fiber owns its own HashMap.
+-- Zero locks, zero contention — same model as DragonflyDB.
+-- Keys partitioned by hash: fiber i owns keys where key % N == i.
+--
+-- NOTE: This is the "expert escape hatch", NOT the idiomatic CLEAR way.
+-- The CLEAR way is: HashMap<V>@sharded(N) — which distributes across
+-- cores with lock elision and automatic skew detection. That approach
+-- is blocked on a runtime bug (@parallel promise lifetime — v0.2 fix).
+-- Once fixed, the idiomatic version will look like:
+--
+--   MUTABLE map: HashMap<String>@sharded(8) = {};
+--   -- use from any fiber, any core — CLEAR handles distribution + skew
 --
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys partitioned across 8 fibers
