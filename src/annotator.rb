@@ -720,6 +720,39 @@ private
     node.full_type = :Void
   end
 
+  def visit_ForEach(node)
+    # 1. Visit collection to determine element type
+    visit(node.collection)
+    coll_type = node.collection.full_type
+    ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
+
+    # Determine element type from collection
+    elem_type = if ct.array? || ct.list_collection?
+      ct.element_type || ct.value_type || :Any
+    elsif ct.map?
+      # FOR k IN map iterates over keys (strings)
+      :String
+    else
+      error!(node, "FOR ... IN requires an array, list, or map, got #{coll_type}")
+    end
+
+    elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
+
+    # 2. Analyze body with loop variable
+    @loop_depth += 1
+    analyze_control_flow_branches([
+      proc {
+        current_scope.declare(node.var_name, nil, elem_sym, false, false, nil, :stack)
+        node.body.each { |stmt| visit(stmt) }
+        finalize_scope(node)
+        node.deferred_drops
+      }
+    ], merge_to_parent: false)
+    @loop_depth -= 1
+
+    node.full_type = :Void
+  end
+
   def visit_WhileLoop(node)
     # 1. Analyze Condition
     visit(node.condition)

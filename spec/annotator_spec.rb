@@ -3296,6 +3296,49 @@ RSpec.describe SemanticAnnotator do
       expect(zig).to include("sum = (sum + i)")
     end
 
+    it "iterates over a fixed array" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Int64 ->
+          items: Int64[3] = [1_i64, 2_i64, 3_i64];
+          MUTABLE sum: Int64 = 0;
+          FOR x IN items DO
+            sum += x;
+          END
+          RETURN sum;
+        END
+      CLEAR
+      expect(zig).to include("for (&items) |x|")
+    end
+
+    it "iterates over a list" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Void ->
+          MUTABLE nums: Int64[]@list = [];
+          nums.append(1_i64);
+          MUTABLE sum: Int64 = 0;
+          FOR n IN nums DO
+            sum += n;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(zig).to include("for (nums.items) |n|")
+    end
+
+    it "rejects non-collection FOR IN" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            x: Int64 = 5_i64;
+            FOR i IN x DO
+              RETURN;
+            END
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/requires an array, list, or map/)
+    end
+
     it "supports ..<=  (legacy inclusive syntax)" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS Int64 ->

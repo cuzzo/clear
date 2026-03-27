@@ -982,24 +982,32 @@ class Parser
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
   end
 
-  # FOR var IN (start ..= end) DO body END   — inclusive
-  # FOR var IN (start ..< end) DO body END   — exclusive
+  # FOR var IN (start ..= end) DO body END   — range iteration
+  # FOR var IN (start ..< end) DO body END   — range iteration
+  # FOR var IN collection DO body END         — collection iteration
   def parse_for_range
     tok = consume(:KEYWORD, 'FOR')
     var_name = consume(:VAR_ID).value
     consume(:KEYWORD, 'IN')
-    consume(:CHAR, '(')
-    range_expr = parse_expression  # Parses "start ..= end" or "start ..< end"
-    consume(:CHAR, ')')
+
+    # Ranges need parens for precedence; collections don't.
+    if match?(:CHAR, '(')
+      consume(:CHAR, '(')
+      expr = parse_expression
+      consume(:CHAR, ')')
+    else
+      expr = parse_expression
+    end
+
     consume(:KEYWORD, 'DO')
     body = parse_stmts_until_end
     consume(:KEYWORD, 'END')
 
-    unless range_expr.is_a?(AST::RangeLit)
-      error!(tok, "FOR ... IN requires a range expression: (start..=end) or (start..<end)")
+    if expr.is_a?(AST::RangeLit)
+      AST::ForRange.new(tok, var_name, expr.start, expr.finish, expr.inclusive, body, nil)
+    else
+      AST::ForEach.new(tok, var_name, expr, body, nil)
     end
-
-    AST::ForRange.new(tok, var_name, range_expr.start, range_expr.finish, range_expr.inclusive, body, nil)
   end
 
   def parse_match_statement

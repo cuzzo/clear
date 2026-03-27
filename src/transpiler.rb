@@ -860,6 +860,25 @@ private
 
       result
 
+    when AST::ForEach
+      coll_code = visit(node.collection)
+      var       = zig_safe_name(node.var_name)
+      body      = transpile_block(node.body)
+      rt_ref    = @do_rt_name || "rt"
+      coll_type = node.collection.full_type
+      ct        = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
+      yield_line = @current_fn_has_rt ? "\n#{rt_ref}.checkYield();" : ""
+
+      if ct.map?
+        # HashMap iteration: while-loop over keyIterator
+        @for_counter = (@for_counter || 0) + 1
+        iter_var = "__kit_#{@for_counter}"
+        "{\nvar #{iter_var} = #{coll_code}.keyIterator();\nwhile (#{iter_var}.next()) |#{var}| {\n #{body} #{yield_line}\n}\n}"
+      else
+        iterable = ct.list_collection? ? "#{coll_code}.items" : "&#{coll_code}"
+        "for (#{iterable}) |#{var}| {\n #{body} #{yield_line}\n}"
+      end
+
     when AST::ForRange
       start_val = visit(node.start_expr)
       end_val   = visit(node.end_expr)

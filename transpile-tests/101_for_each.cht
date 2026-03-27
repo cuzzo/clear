@@ -1,0 +1,35 @@
+-- Test: FOR ... IN collection — iterate over arrays, lists, and maps.
+
+FN cheatMain() RETURNS Void ->
+    -- Fixed array iteration
+    items: Int64[4] = [10_i64, 20_i64, 30_i64, 40_i64];
+    MUTABLE arr_sum: Int64 = 0;
+    FOR x IN items DO
+        arr_sum += x;
+    END
+    ASSERT arr_sum == 100_i64, "array FOR sum should be 100";
+
+    -- List iteration
+    MUTABLE nums: Int64[]@list = [];
+    nums.append(1_i64);
+    nums.append(2_i64);
+    nums.append(3_i64);
+    MUTABLE list_sum: Int64 = 0;
+    FOR n IN nums DO
+        list_sum += n;
+    END
+    ASSERT list_sum == 6_i64, "list FOR sum should be 6";
+
+    -- Nested FOR: array + range
+    MUTABLE combo: Int64 = 0;
+    FOR val IN items DO
+        FOR i IN (1_i64..=3_i64) DO
+            combo += val * i;
+        END
+    END
+    -- (10+20+30+40) * (1+2+3) = 100 * 6 = 600
+    ASSERT combo == 600_i64, "nested FOR combo should be 600";
+
+    print("FOR each: all tests passed");
+    RETURN;
+END
