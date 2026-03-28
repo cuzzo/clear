@@ -705,7 +705,11 @@ module PipelineGenerator
     when AST::WhereOp
       transpile_concurrent_where(lhs, inner, id, workers_code, rt_name, options)
     when AST::EachOp
-      transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
+      if conc.shard_context
+        transpile_shard_concurrent_each(lhs, inner, id, rt_name, conc.shard_context)
+      else
+        transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
+      end
     end
   end
 
@@ -972,6 +976,127 @@ module PipelineGenerator
               #{spawn_call}
           }
           __cce#{id}_wg.wait();
+          }
+      }
+    ZIG
+  end
+
+  # =========================================================
+  # SHARD + CONCURRENT EACH: true shared-nothing pipeline
+  # =========================================================
+  #
+  # Emits:
+  #   1. Route phase: iterate input, hash keys, fill per-shard queues
+  #   2. Execute phase: spawn one fiber per shard on owning scheduler
+  #   3. Join: WaitGroup.wait()
+  #
+  def transpile_shard_concurrent_each(lhs_node, each_op, id, rt_name, shard_ctx)
+    # lhs_node is BinaryOp(SMOOTH, range, ShardOp) — we need the original range
+    range_node = lhs_node.left
+    shard_op   = lhs_node.right  # ShardOp
+    shard_count = shard_ctx[:shard_count]
+    map_node   = shard_ctx[:map_var]
+
+    map_code = visit(map_node)
+
+    # Visit range to get start/end for the routing loop
+    range_start = visit(range_node.start)
+    range_end   = visit(range_node.finish)
+    exclusive   = !range_node.inclusive
+
+    # Build the key expression with `_` bound to the loop variable.
+    # Routing phase runs on the calling fiber (not a spawned worker), so use the caller's rt.
+    @placeholder_name = "__sh#{id}_i"
+    key_code = visit(shard_op.key_expr)
+    @placeholder_name = nil
+
+    # Build the EACH body with `_` bound to the key from the shard queue.
+    # The map variable is redirected to ctx.map_ptr (fiber can't see outer locals).
+    map_var_name = map_node.is_a?(AST::Identifier) ? map_node.name : nil
+    captures = map_var_name ? { map_var_name => "ctx.map_ptr" } : {}
+    @placeholder_name = "__sh#{id}_keys[__sh#{id}_ki]"
+    body_code = with_fiber_capture_map(captures) do
+      each_op.body.map { |stmt|
+        code = visit(stmt)
+        code.strip.end_with?(";") ? code : "#{code};"
+      }.join("\n                          ")
+    end
+    @placeholder_name = nil
+
+    range_op = exclusive ? "<" : "<="
+
+    <<~ZIG.chomp
+      {
+          // ── SHARD + CONCURRENT EACH (shared-nothing) ──
+          const __sh#{id}_map = &#{map_code};
+          __sh#{id}_map.ensureOwnership();
+          const __sh#{id}_N = #{shard_count};
+
+          // Per-shard key queues
+          var __sh#{id}_queues: [__sh#{id}_N]std.ArrayListUnmanaged([]const u8) = undefined;
+          for (&__sh#{id}_queues) |*q| q.* = .{};
+          defer for (&__sh#{id}_queues) |*q| {
+              for (q.items) |k| std.heap.c_allocator.free(k);
+              q.deinit(std.heap.c_allocator);
+          };
+
+          // Route phase: hash each key, append to owning shard's queue.
+          // Keys are duped to c_allocator so they can be freed after workers complete.
+          {
+              var __sh#{id}_i: i64 = #{range_start};
+              const __sh#{id}_end: i64 = #{range_end};
+              while (__sh#{id}_i #{range_op} __sh#{id}_end) : (__sh#{id}_i += 1) {
+                  const __sh#{id}_tmp_key = #{key_code};
+                  const __sh#{id}_key = try std.heap.c_allocator.dupe(u8, __sh#{id}_tmp_key);
+                  const __sh#{id}_sidx = @TypeOf(__sh#{id}_map.*).shardIndex(__sh#{id}_key);
+                  try __sh#{id}_queues[__sh#{id}_sidx].append(std.heap.c_allocator, __sh#{id}_key);
+              }
+          }
+
+          // Execute phase: one fiber per shard, pinned to owning scheduler
+          const __ShardWorker#{id} = struct {
+              wg: *CheatHeader.WaitGroup,
+              map_ptr: *@TypeOf(__sh#{id}_map.*),
+              keys: []const []const u8,
+              shard_idx: usize,
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  const __sh#{id}_keys = ctx.keys;
+                  var __sh#{id}_ki: usize = 0;
+                  while (__sh#{id}_ki < __sh#{id}_keys.len) : (__sh#{id}_ki += 1) {
+                      #{body_code}
+                      __rt.checkYield();
+                  }
+              }
+          };
+
+          var __sh#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          // Count non-empty shards
+          var __sh#{id}_active: usize = 0;
+          for (__sh#{id}_queues) |q| { if (q.items.len > 0) __sh#{id}_active += 1; }
+          if (__sh#{id}_active > 0) {
+              __sh#{id}_wg.add(__sh#{id}_active);
+              var __sh#{id}_ctxs: [__sh#{id}_N]__ShardWorker#{id} = undefined;
+              for (0..__sh#{id}_N) |__sh#{id}_si| {
+                  if (__sh#{id}_queues[__sh#{id}_si].items.len == 0) continue;
+                  __sh#{id}_ctxs[__sh#{id}_si] = .{
+                      .wg = &__sh#{id}_wg,
+                      .map_ptr = __sh#{id}_map,
+                      .keys = __sh#{id}_queues[__sh#{id}_si].items,
+                      .shard_idx = __sh#{id}_si,
+                  };
+                  // Submit to the scheduler that OWNS this shard
+                  try __sh#{id}_map.owners[__sh#{id}_si].?.submitSpawn(
+                      @intFromPtr(&Runtime.entryWrapper),
+                      @as(CheatHeader.TaskFn, @ptrCast(&__ShardWorker#{id}.run)),
+                      &__sh#{id}_ctxs[__sh#{id}_si],
+                      .{ .pinned = true },
+                  );
+              }
+              __sh#{id}_wg.wait();
           }
       }
     ZIG

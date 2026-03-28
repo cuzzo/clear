@@ -1856,11 +1856,11 @@ pub const CheatLib = struct {
             owners: [N]?*fp.Scheduler = [_]?*fp.Scheduler{null} ** N,
             ownership_init: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
-            fn shardIndex(key: []const u8) usize {
+            pub fn shardIndex(key: []const u8) usize {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
-            fn ensureOwnership(self: *Self) void {
+            pub fn ensureOwnership(self: *Self) void {
                 if (self.ownership_init.load(.acquire) == 2) return;
                 if (self.ownership_init.cmpxchgStrong(0, 1, .acquire, .monotonic)) |_| {
                     while (self.ownership_init.load(.acquire) != 2)

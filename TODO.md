@@ -49,14 +49,16 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 - [x] Slab allocator threadlocal magazine ownership fix
 - [x] Benchmark (@sharded(8):locked): 2.1s (Rust 2.4s = 1.2x slower, Go 5.8s = 2.8x slower)
 
-**TODO — True shared-nothing syntax:**
-- [ ] `(1..<N)@sharded s> CONCURRENT EACH |shard| -> ...` — each fiber owns one partition
-- [ ] Design: range@sharded distributes iterations to pinned schedulers; each iteration
-      gets exclusive access to its shard (no locks, no routing, zero synchronization)
-- [ ] This is the DragonflyDB model: partition the keyspace, pin threads to partitions
-- [ ] Current @sharded(N) (no :locked) + PartitionedStringMap + sendAndWait is correct
-      but has high overhead for cross-shard workloads (fiber yield per remote op)
-- [ ] The right workload for shared-nothing: each fiber processes ONLY its own shard
+**DONE — SHARD pipeline (true shared-nothing syntax):**
+- [x] `(range) s> SHARD(key_expr, map) s> CONCURRENT EACH { body }` — implemented
+- [x] SHARD routes items by key hash to owning scheduler (one fiber per shard)
+- [x] Every operation is LOCAL — zero locks, zero SPSC, zero cross-scheduler routing
+- [x] Benchmark: 1.8s (Rust 2.0s = 1.1x slower, Go 4.9s = 2.7x slower)
+
+**TODO — SHARD v0.2:**
+- [ ] Annotator auto-infer target map from CONCURRENT EACH body (drop 2nd SHARD arg)
+- [ ] Support non-string key types (numeric sharding)
+- [ ] Streaming routing (generate + route in one pass, no intermediate queues)
 
 ### Milestone: FOR Loop
 

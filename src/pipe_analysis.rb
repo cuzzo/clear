@@ -48,7 +48,8 @@ module PipeAnalysis
     node.is_a?(AST::AverageOp) ||
     node.is_a?(AST::MinOp) ||
     node.is_a?(AST::MaxOp) ||
-    node.is_a?(AST::ConcurrentOp)
+    node.is_a?(AST::ConcurrentOp) ||
+    node.is_a?(AST::ShardOp)
   end
 
   def analyze_higher_order_op(node)
@@ -83,6 +84,8 @@ module PipeAnalysis
       analyze_max_op(node)
     when AST::ConcurrentOp
       analyze_concurrent_op(node)
+    when AST::ShardOp
+      analyze_shard_op(node)
     end
   end
 
@@ -470,6 +473,72 @@ module PipeAnalysis
     node.storage   = :stack
   end
 
+  # =========================================================
+  # SHARD: route pipeline items to owning schedulers by key hash
+  # =========================================================
+
+  # SHARD + CONCURRENT EACH: the EACH body sees `_` as a String key.
+  def analyze_shard_each_op(node, shard_node)
+    conc = node.right
+    each_op = conc.op
+
+    with_new_scope do
+      # `_` is a String key (the output of SHARD's key expression)
+      current_scope.declare("_", nil, :String, true, false, nil, :stack)
+      each_op.body.each { |stmt| visit(stmt) }
+    end
+
+    node.full_type = :Void
+    node.storage   = :stack
+  end
+
+  def analyze_shard_op(node)
+    shard_op = node.right  # ShardOp node
+
+    # LHS must be iterable (range or array)
+    lhs_type = node.left.type_info
+    is_range = node.left.is_a?(AST::RangeLit)
+    is_array = node.left.metatype == :array
+    is_list  = lhs_type&.list_collection?
+
+    unless is_range || is_array || is_list
+      error!(node.left, "SHARD input must be a range or collection, got #{node.left.resolved_type}")
+      node.full_type = :Void
+      return
+    end
+
+    # Determine element type for `_` binding
+    item_type = if is_range
+      :Int64
+    else
+      lhs_type.element_type.resolved
+    end
+
+    # Type-check key expression with `_` in scope
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(shard_op.key_expr)
+    end
+
+    key_type = shard_op.key_expr.resolved_type
+    unless key_type == :String
+      error!(shard_op.key_expr, "SHARD key expression must evaluate to String, got #{key_type}")
+    end
+
+    # Target must be a @sharded (PartitionedStringMap) — NOT :locked
+    visit(shard_op.target_map)
+    target_info = shard_op.target_map.type_info
+    unless target_info&.sharded? && !target_info&.any_sync?
+      error!(shard_op.target_map, "SHARD target must be a HashMap@sharded(N) without :locked. " \
+             "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
+    end
+
+    # SHARD is consumed by the subsequent CONCURRENT EACH — not standalone.
+    # Set type to Void; the ConcurrentOp handler reads ShardOp from its LHS.
+    node.full_type = :Void
+    node.storage = :stack
+  end
+
   VALID_CONCURRENT_OPTIONS = %w[workers parallel size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
@@ -519,6 +588,19 @@ module PipeAnalysis
       end
     end
 
+    # Detect SHARD predecessor: (range) s> SHARD(key, map) s> CONCURRENT EACH { ... }
+    # node.left is BinaryOp(SMOOTH, range, ShardOp) when SHARD precedes CONCURRENT.
+    shard_node = nil
+    if node.left.is_a?(AST::BinaryOp) && node.left.op == :SMOOTH && node.left.right.is_a?(AST::ShardOp)
+      shard_node = node.left.right
+      target_info = shard_node.target_map.type_info
+      conc.shard_context = {
+        map_var: shard_node.target_map,
+        shard_count: target_info&.shard_count,
+        key_expr: shard_node.key_expr
+      }
+    end
+
     # Type analysis for concurrent ops is identical to synchronous versions.
     # Create a proxy BinaryOp(SMOOTH, left, inner_op) so we can reuse the existing analyze_* methods.
     proxy = AST::BinaryOp.new(node.token, node.left, :SMOOTH, conc.op)
@@ -527,7 +609,12 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       analyze_select_family_op(proxy)
     when AST::EachOp
-      analyze_each_op(proxy)
+      # For SHARD + CONCURRENT EACH, the items are String keys (not the original range type).
+      if shard_node
+        analyze_shard_each_op(node, shard_node)
+      else
+        analyze_each_op(proxy)
+      end
     else
       error!(conc, "CONCURRENT does not support #{conc.op.class.name.split('::').last}")
     end

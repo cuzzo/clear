@@ -1583,7 +1583,8 @@ private
         # Annotator ensures full_type is set (e.g. "String" or "%String")
         t_left = node.left.full_type.to_s
         t_right = node.right.full_type.to_s
-        alloc = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+        rt_ref = @do_rt_name || "rt"
+        alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
 
         if Type.new(t_left).string? || Type.new(t_right).string?
           # Generate call to runtime helper
@@ -1701,6 +1702,11 @@ private
 
     elsif node.right.is_a?(AST::MaxOp)
       return transpile_max(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::ShardOp)
+      # SHARD is consumed by the subsequent CONCURRENT EACH — not visited standalone.
+      # The ConcurrentOp handler reads the ShardOp from its LHS.
+      raise "SHARD must be followed by s> CONCURRENT EACH"
 
     elsif node.right.is_a?(AST::ConcurrentOp)
       return transpile_concurrent(node)

@@ -130,6 +130,7 @@ class Parser
   primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :expression])
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :expression])
+  primary(:KEYWORD, 'SHARD') { parse_shard_op }
   primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
 
   # Expression Grouping
@@ -1247,6 +1248,20 @@ class Parser
     consume(:CHAR, ')')
     body = parse_expression
     AST::ReduceOp.new(reduce_token, initial_value, body)
+  end
+
+  # SHARD(key_expr, target_map)
+  # e.g., (0..<n) s> SHARD("key:" + _, map) s> CONCURRENT EACH { ... }
+  # Routes items to owning schedulers by hashing the key expression.
+  # `_` is the implicit item binding (same as SELECT/WHERE).
+  def parse_shard_op
+    shard_token = consume(:KEYWORD, 'SHARD')
+    consume(:CHAR, '(')
+    key_expr = parse_expression
+    consume(:CHAR, ',')
+    target_map = parse_expression
+    consume(:CHAR, ')')
+    AST::ShardOp.new(shard_token, key_expr, target_map)
   end
 
   # Parses a function type annotation: FN(Type, ...) -> ReturnType

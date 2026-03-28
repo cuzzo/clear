@@ -1,0 +1,119 @@
+-- KV Store Benchmark — Shared-Nothing vs Locked Comparison
+--
+-- Same workload, two strategies. Both run in the same binary.
+--
+-- Strategy 1: @sharded(8):locked  — RwLock per shard, any fiber touches any key
+-- Strategy 2: @sharded(8) + SHARD — true shared-nothing, each fiber owns its shard
+--
+-- The workload: 1M SET + 1M GET + 200K SET + 800K GET = 3M total ops.
+
+FN cheatMain() RETURNS Void ->
+    n = 1000000;
+    workers = 8;
+    chunk = n / workers;
+
+    -- ═══════════════════════════════════════════════════
+    -- Strategy 1: @sharded(8):locked (RwLock per shard)
+    -- ═══════════════════════════════════════════════════
+
+    MUTABLE locked_map: HashMap<String>@sharded(8):locked = {};
+
+    -- SET 1M
+    MUTABLE set_futures: ~Void[]@list = [];
+    MUTABLE wi: Int64 = 0;
+    WHILE wi < workers DO
+        start = wi * chunk;
+        set_futures.append(BG {
+            MUTABLE i: Int64 = start;
+            WHILE i < start + chunk DO
+                locked_map["key:" + toString(i)] = "value";
+                i += 1;
+            END
+        });
+        wi += 1;
+    END
+    MUTABLE si: Int64 = 0;
+    WHILE si < workers DO NEXT set_futures[si]; si += 1; END
+
+    -- GET 1M
+    MUTABLE get_futures: ~Void[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        start = wi * chunk;
+        get_futures.append(BG {
+            MUTABLE i: Int64 = start;
+            WHILE i < start + chunk DO
+                MUTABLE got = locked_map["key:" + toString(i)] OR "";
+                i += 1;
+            END
+        });
+        wi += 1;
+    END
+    MUTABLE gi: Int64 = 0;
+    WHILE gi < workers DO NEXT get_futures[gi]; gi += 1; END
+
+    -- Mixed: 200K SET + 800K GET
+    MUTABLE mix_set_futures: ~Void[]@list = [];
+    wi = 0;
+    MUTABLE mix_chunk = (n / 5) / workers;
+    WHILE wi < workers DO
+        start = wi * mix_chunk;
+        mix_set_futures.append(BG {
+            MUTABLE i: Int64 = start;
+            WHILE i < start + mix_chunk DO
+                locked_map["key:" + toString(i)] = "updated";
+                i += 1;
+            END
+        });
+        wi += 1;
+    END
+    MUTABLE msi: Int64 = 0;
+    WHILE msi < workers DO NEXT mix_set_futures[msi]; msi += 1; END
+
+    MUTABLE mix_get_futures: ~Void[]@list = [];
+    wi = 0;
+    MUTABLE mix_get_chunk = ((n / 5) * 4) / workers;
+    WHILE wi < workers DO
+        start = wi * mix_get_chunk;
+        mix_get_futures.append(BG {
+            MUTABLE i: Int64 = start;
+            WHILE i < start + mix_get_chunk DO
+                MUTABLE got = locked_map["key:" + toString(i)] OR "";
+                i += 1;
+            END
+        });
+        wi += 1;
+    END
+    MUTABLE mgi: Int64 = 0;
+    WHILE mgi < workers DO NEXT mix_get_futures[mgi]; mgi += 1; END
+
+    ASSERT locked_map.count() == n;
+    print("locked: OK");
+
+    -- ═══════════════════════════════════════════════════
+    -- Strategy 2: @sharded(8) + SHARD (shared-nothing)
+    -- ═══════════════════════════════════════════════════
+
+    MUTABLE sn_map: HashMap<String>@sharded(8) = {};
+
+    -- SET 1M
+    (0..<n) s> SHARD("key:" + toString(_), sn_map) s> CONCURRENT EACH {
+        sn_map[_] = "value";
+    };
+
+    -- GET 1M
+    (0..<n) s> SHARD("key:" + toString(_), sn_map) s> CONCURRENT EACH {
+        got = sn_map[_] OR "";
+    };
+
+    -- Mixed: 200K SET + 800K GET
+    (0..<(n / 5)) s> SHARD("key:" + toString(_), sn_map) s> CONCURRENT EACH {
+        sn_map[_] = "updated";
+    };
+    (0..<((n / 5) * 4)) s> SHARD("key:" + toString(_), sn_map) s> CONCURRENT EACH {
+        got = sn_map[_] OR "";
+    };
+
+    ASSERT sn_map.count() == n;
+    print("shared-nothing: OK");
+END

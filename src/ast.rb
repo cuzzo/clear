@@ -316,10 +316,18 @@ module AST
   AverageOp = Struct.new(:token, :expression) { include Locatable } # Number
   MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
   MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
+  # ShardOp: route items to owning schedulers by key hash.
+  # Syntax: collection s> SHARD(key_expr, target_map) s> CONCURRENT EACH { body }
+  # key_expr uses `_` as the implicit item binding (consistent with SELECT/WHERE).
+  # target_map is the @sharded HashMap whose shardIndex determines routing.
+  ShardOp = Struct.new(:token, :key_expr, :target_map) { include Locatable }
   # ConcurrentOp: CONCURRENT modifier wrapping a pipeline op for parallel execution.
   # op: SelectOp | WhereOp | EachOp
   # options: Hash of String => ASTNode  (e.g. {"pool_size" => Literal(8)})
-  ConcurrentOp = Struct.new(:token, :op, :options) { include Locatable }
+  ConcurrentOp = Struct.new(:token, :op, :options) do
+    include Locatable
+    attr_accessor :shard_context  # set by annotator: { map_var:, shard_count:, key_expr: }
+  end
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
