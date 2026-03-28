@@ -244,7 +244,10 @@ pub const Scheduler = struct {
             // Use c_allocator as backing for per-scheduler arenas.
             // This avoids GPA mutex contention when pinned fibers allocate
             // concurrently on different schedulers — libc malloc has per-thread arenas.
-            .local_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator),
+            // Use the same allocator as the scheduler for arena backing.
+            // When USE_C_ALLOCATOR is set, this is c_allocator (per-thread arenas,
+            // zero contention). When GPA, it's GPA (with leak detection).
+            .local_arena = std.heap.ArenaAllocator.init(allocator),
         };
 
         try sched.poller.register(sched.event_fd.fd, 0);

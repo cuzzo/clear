@@ -1882,7 +1882,7 @@ pub const CheatLib = struct {
             // The `done` atomic flag is set by the target scheduler after
             // completing the operation. The caller drains channels + yields
             // while waiting, preventing deadlock.
-            const is_slice_value = @typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .Slice;
+            const is_slice_value = @typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .slice;
 
             const PutCtx = struct {
                 map: *Self, shard: usize,
