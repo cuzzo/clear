@@ -3,6 +3,14 @@
 require 'fileutils'
 require 'benchmark'
 
+# Find the Zig compiler (local or system). Resolve to absolute path
+# since the runner chdir's into zig/ for compilation.
+ZIG = [
+  File.expand_path("zig/zig-new/zig"),
+  File.expand_path("zig/zig/zig"),
+  `which zig 2>/dev/null`.strip
+].find { |p| !p.empty? && File.exist?(p) } || "zig"
+
 def measure_min(command, runs = 5)
   times = runs.times.map { Benchmark.measure { `#{command}` }.real }
   times.min
@@ -38,7 +46,8 @@ def run_bench(dir)
   if has_go
     puts "Compiling Go baseline..."
     Dir.chdir(dir) do
-      `go build -o bench_go .`
+      `go mod init bench 2>/dev/null` unless File.exist?("go.mod")
+      `go build -o bench_go bench.go`
     end
   end
 
@@ -69,7 +78,7 @@ def run_bench(dir)
   has_clear = false
   if File.exist?("zig/bench.zig")
     Dir.chdir("zig") do
-      `zig build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
+      `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
     end
     if File.exist?("zig/bench_clear")
       FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
@@ -104,8 +113,18 @@ def run_bench(dir)
     # CLEAR defaults to 1 thread unless CLEAR_THREADS is set.
     threads = ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
     threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
-    puts "Running CLEAR (best of 5, CLEAR_THREADS=#{threads})..."
-    results[:clear] = measure_min("CLEAR_THREADS=#{threads} ./#{dir}/bench_clear")
+
+    # Use jemalloc for CLEAR benchmarks if available. CLEAR's runtime uses
+    # std.heap.c_allocator (libc malloc); jemalloc provides per-thread arenas
+    # with less fragmentation and better multi-threaded scaling.
+    jemalloc_lib = Dir.glob("/lib/x86_64-linux-gnu/libjemalloc.so*").first ||
+                   Dir.glob("/usr/lib/libjemalloc.so*").first ||
+                   Dir.glob("/usr/local/lib/libjemalloc.so*").first
+    jemalloc_preload = jemalloc_lib ? "LD_PRELOAD=#{jemalloc_lib} " : ""
+    jemalloc_note = jemalloc_lib ? ", jemalloc" : ""
+
+    puts "Running CLEAR (best of 5, CLEAR_THREADS=#{threads}#{jemalloc_note})..."
+    results[:clear] = measure_min("#{jemalloc_preload}CLEAR_THREADS=#{threads} ./#{dir}/bench_clear")
   end
 
   # 6. Reporting
