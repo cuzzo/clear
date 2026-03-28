@@ -1961,11 +1961,20 @@ private
       when :count
         "#{obj_code}.count()"
       when :keys
-        val_zig = map_ft.value_type.zig_type
-        "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
+        if map_ft.sharded? || map_ft.striped?
+          # Sharded maps have a direct keys() method that iterates all shards
+          "try #{obj_code}.keys(#{rt_name}.heapAlloc())"
+        else
+          val_zig = map_ft.value_type.zig_type
+          "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
+        end
       when :values
-        val_zig = map_ft.value_type.zig_type
-        "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
+        if map_ft.sharded? || map_ft.striped?
+          "try #{obj_code}.values(#{rt_name}.heapAlloc())"
+        else
+          val_zig = map_ft.value_type.zig_type
+          "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
+        end
       end
     elsif map_ft.numeric_map?
       key_zig = map_ft.key_type.zig_type

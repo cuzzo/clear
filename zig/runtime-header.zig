@@ -2102,6 +2102,24 @@ pub const CheatLib = struct {
                 return nc;
             }
 
+            pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
+                var list = std.ArrayListUnmanaged([]const u8){};
+                for (&self.shards) |*shard| {
+                    var it = shard.map.keyIterator();
+                    while (it.next()) |k| try list.append(alloc, k.*);
+                }
+                return list;
+            }
+
+            pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
+                var list = std.ArrayListUnmanaged(V){};
+                for (&self.shards) |*shard| {
+                    var it = shard.map.valueIterator();
+                    while (it.next()) |v| try list.append(alloc, v.*);
+                }
+                return list;
+            }
+
             pub fn deinit(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator) void {
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
@@ -2183,6 +2201,28 @@ pub const CheatLib = struct {
                     n += @intCast(shard.map.count());
                 }
                 return n;
+            }
+
+            pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
+                var list = std.ArrayListUnmanaged([]const u8){};
+                for (&self.shards) |*shard| {
+                    shard.lock.lockShared();
+                    defer shard.lock.unlockShared();
+                    var it = shard.map.keyIterator();
+                    while (it.next()) |k| try list.append(alloc, k.*);
+                }
+                return list;
+            }
+
+            pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
+                var list = std.ArrayListUnmanaged(V){};
+                for (&self.shards) |*shard| {
+                    shard.lock.lockShared();
+                    defer shard.lock.unlockShared();
+                    var it = shard.map.valueIterator();
+                    while (it.next()) |v| try list.append(alloc, v.*);
+                }
+                return list;
             }
 
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
