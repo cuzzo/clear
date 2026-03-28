@@ -1933,7 +1933,15 @@ pub const CheatLib = struct {
 
             // Send a RemoteCall via SPSC and wait for completion.
             // Drains our own channels + yields fiber while waiting.
-            noinline fn sendAndWait(target: *fp.Scheduler, func_ptr: *const fn (*anyopaque) void, ctx_ptr: *anyopaque, done_flag: *std.atomic.Value(bool)) void {
+            fn sendAndWait(target: *fp.Scheduler, func_ptr: *const fn (*anyopaque) void, ctx_ptr: *anyopaque, done_flag: *std.atomic.Value(bool)) void {
+                if (target == fp.active_scheduler) {
+                    // LOCAL: target is our own scheduler — call directly, no SPSC.
+                    // This avoids context-switch overhead for self-sends and keeps
+                    // the stack shallow (no drainChannels in the call chain).
+                    func_ptr(ctx_ptr);
+                    return;
+                }
+                // REMOTE: send via SPSC channel and yield until complete.
                 const sender_idx = fp.active_scheduler.index;
                 std.debug.assert(sender_idx < target.channels.len);
                 const msg = fp.SpscMessage{
@@ -1941,18 +1949,15 @@ pub const CheatLib = struct {
                     .rc_func = @ptrCast(func_ptr),
                     .rc_ctx = ctx_ptr,
                 };
-                // Push to target's SPSC channel (retry if full)
                 while (!target.channels[sender_idx].push(msg)) {
-                    fp.active_scheduler.drainChannels();
                     fp.active_scheduler.coopYield();
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
                 target.event_fd.notify();
-                // Wait for target to complete — drain channels + yield.
                 while (!done_flag.load(.acquire)) {
-                    fp.active_scheduler.drainChannels();
-                    fp.active_scheduler.coopYield();
-                    std.Thread.yield() catch {};
+                    const task = fp.active_scheduler.getCurrent();
+                    task.status = .Ready;
+                    task.base.yield();
                 }
             }
 

@@ -185,7 +185,7 @@ test "L2: submitSpawn via SPSC to remote scheduler" {
             @intFromPtr(&Runtime.entryWrapper),
             @as(CheatHeader.TaskFn, @ptrCast(&SpawnCounter.run)),
             &ctxs[i],
-            .{ .stack_size = .Huge, .pinned = true },
+            .{ .stack_size = .Standard, .pinned = true },
         );
     }
 
@@ -247,7 +247,7 @@ test "L3: submitResume via SPSC channel" {
                 try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
                     @as(CheatHeader.TaskFn, @ptrCast(&BgCtx.run)),
-                    ctx, .{ .stack_size = .Huge, .pinned = true },
+                    ctx, .{ .stack_size = .Standard, .pinned = true },
                 );
                 promises[_fi] = promise;
             }
@@ -262,7 +262,7 @@ test "L3: submitResume via SPSC channel" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Huge },
+        &runner, .{ .stack_size = .Standard },
     );
     sched.run();
 }
@@ -337,7 +337,7 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Huge },
+        &runner, .{ .stack_size = .Standard },
     );
     sched.run();
 }
@@ -399,7 +399,7 @@ test "L5: PartitionedStringMap cross-scheduler put+get" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Huge },
+        &runner, .{ .stack_size = .Standard },
     );
     sched.run();
 
@@ -485,7 +485,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
                     try CheatHeader.spawnPinned(
                         @intFromPtr(&Runtime.entryWrapper),
                         @as(CheatHeader.TaskFn, @ptrCast(&BgWork.run)),
-                        ctx, .{ .stack_size = .Huge, .pinned = true },
+                        ctx, .{ .stack_size = .Standard, .pinned = true },
                     );
                     promises[fi] = promise;
                 }
@@ -508,7 +508,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Huge },
+        &runner, .{ .stack_size = .Standard },
     );
     sched.run();
 }
