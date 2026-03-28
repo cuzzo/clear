@@ -385,8 +385,13 @@ pub const CheatLib = struct {
     pub fn fileReadAll(allocator: std.mem.Allocator, file: std.fs.File) ![]const u8 {
         const stat = try file.stat();
         const buffer = try allocator.alloc(u8, stat.size);
-        _ = try file.readAll(buffer);
-        return buffer;
+        var total: usize = 0;
+        while (total < buffer.len) {
+            const n = try std.posix.read(file.handle, buffer[total..]);
+            if (n == 0) break;
+            total += n;
+        }
+        return buffer[0..total];
     }
 
     // Create (or truncate) a file for writing. Caller owns the returned File resource.
@@ -439,8 +444,13 @@ pub const CheatLib = struct {
         }
 
         // 3. Blocking fallback for test / non-scheduler contexts.
-        _ = try file.readAll(buffer);
-        return buffer;
+        var total: usize = 0;
+        while (total < buffer.len) {
+            const n = try std.posix.read(file.handle, buffer[total..]);
+            if (n == 0) break;
+            total += n;
+        }
+        return buffer[0..total];
     }
 
     // List all files in a directory. Returns an ArrayListUnmanaged of heap-allocated

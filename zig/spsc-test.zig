@@ -318,15 +318,15 @@ test "DefaultRing: basic push/pop" {
     try std.testing.expect(msg.trampoline_addr == 42);
 }
 
-test "DefaultRing: fill to capacity (256)" {
+test "DefaultRing: fill to capacity (4096)" {
     var ring = spsc.DefaultRing{};
-    for (0..256) |i| {
+    for (0..4096) |i| {
         try std.testing.expect(ring.push(.{ .tag = .Spawn, .trampoline_addr = i }));
     }
     try std.testing.expect(!ring.push(.{ .tag = .Spawn })); // full
-    try std.testing.expect(ring.len() == 256);
+    try std.testing.expect(ring.len() == 4096);
 
-    for (0..256) |i| {
+    for (0..4096) |i| {
         try std.testing.expect(ring.pop().?.trampoline_addr == i);
     }
     try std.testing.expect(ring.isEmpty());

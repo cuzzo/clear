@@ -6,6 +6,12 @@ const ebr_mod = @import("ebr.zig");
 
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const EbrContext = ebr_mod.EbrContext;
+
+// Compat: std.time.milliTimestamp was removed in newer Zig versions.
+fn milliTimestamp() i64 {
+    const ts = std.posix.clock_gettime(.MONOTONIC) catch return 0;
+    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+}
 const Scheduler = fp.Scheduler;
 const Task = qs.Task;
 const Fiber = qs.Fiber;
@@ -70,7 +76,7 @@ pub const Runtime = struct {
 
         var deadline: i64 = 0;
         if (timeout_ms > 0) {
-            deadline = std.time.milliTimestamp() + @as(i64, @intCast(timeout_ms));
+            deadline = milliTimestamp() + @as(i64, @intCast(timeout_ms));
         }
 
         return Runtime{
@@ -192,7 +198,7 @@ pub const Runtime = struct {
     // For green fibers
     pub fn checkpoint(self: *Runtime) !void {
         if (self.deadline > 0) {
-            const now = std.time.milliTimestamp();
+            const now = milliTimestamp();
             if (now > self.deadline) {
                 return error.Timeout;
             }
@@ -277,7 +283,7 @@ pub const Runtime = struct {
         const task = sched.getCurrent();
 
         // Calculate wake time
-        const now = std.time.milliTimestamp();
+        const now = milliTimestamp();
         const wake_time = now + @as(i64, @intCast(ms));
 
         // Tell scheduler to hold us

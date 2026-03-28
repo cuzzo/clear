@@ -7,6 +7,11 @@ const fm = @import("fiber-memory.zig");
 const EbrContext = @import("ebr.zig").EbrContext;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
+fn milliTimestamp() i64 {
+    const ts = std.posix.clock_gettime(.MONOTONIC) catch return 0;
+    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+}
+
 const InboxType = qs.InboxType;
 const InboxNode = qs.InboxNode;
 const AtomicInbox = qs.AtomicInbox;
@@ -539,7 +544,7 @@ pub const Scheduler = struct {
 
                 // Wake sleeping tasks
                 if (self.sleeping_queue.items.len > 0) {
-                    const now = std.time.milliTimestamp();
+                    const now = milliTimestamp();
                     var i: usize = 0;
                     while (i < self.sleeping_queue.items.len) {
                         const task = self.sleeping_queue.items[i];

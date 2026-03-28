@@ -8,6 +8,11 @@ const fc = @import("fiber-core.zig");
 const fm = @import("fiber-memory.zig");
 const fp = @import("scheduler.zig");
 
+fn milliTimestamp() i64 {
+    const ts = std.posix.clock_gettime(.MONOTONIC) catch return 0;
+    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+}
+
 const Stack = fc.Stack;
 const Fiber = fc.Fiber;
 const Context = fc.Context;
@@ -260,7 +265,7 @@ fn infiniteLoop(rt: *Runtime) !void {
         if (i % 100000 == 0) {
              // Yield occasionally to let the clock update
              // (In single-threaded schedulers, time only passes when we yield or check OS)
-             // But std.time.milliTimestamp() is a syscall, so it works.
+             // But milliTimestamp() is a syscall, so it works.
              fp.active_scheduler.getCurrent().base.yield();
         }
     }
@@ -288,9 +293,9 @@ test "Timeout Cancellation" {
         null,
         .{ .timeout_ms = 10 });
 
-    const start = std.time.milliTimestamp();
+    const start = milliTimestamp();
     sched.run();
-    const end = std.time.milliTimestamp();
+    const end = milliTimestamp();
 
     std.debug.print("\n--- End Timeout Test (Duration: {d}ms) ---\n", .{end - start});
 
@@ -329,7 +334,7 @@ test "Non-Blocking Sleep" {
 
     std.debug.print("\n\n--- Start Sleep Test ---", .{});
 
-    const start = std.time.milliTimestamp();
+    const start = milliTimestamp();
 
     // Spawn both.
     // If sleep was blocking, this would take 100 + 300 = 400ms.
@@ -345,7 +350,7 @@ test "Non-Blocking Sleep" {
 
     sched.run();
 
-    const end = std.time.milliTimestamp();
+    const end = milliTimestamp();
     const duration = end - start;
 
     std.debug.print("\n--- Total Duration: {d}ms ---\n", .{duration});

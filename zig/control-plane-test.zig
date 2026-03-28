@@ -296,12 +296,9 @@ test "isSkewed: policy = ignore always returns false" {
     try std.testing.expect(!cp.isSkewed(&counts));
 }
 
-test "checkAndFixSkew: enables locks on skewed ShardedStringMap" {
+test "checkAndFixSkew: detects skew on ShardedStringMap" {
     const CheatLib = @import("runtime-header.zig").CheatLib;
     var map = CheatLib.ShardedStringMap(i64, 4){};
-
-    // Verify locks start elided.
-    try std.testing.expect(map.locks_elided.load(.monotonic));
 
     // Simulate skewed ops: shard 0 gets all traffic.
     map.shards[0].ops.store(50000, .monotonic);
@@ -309,14 +306,11 @@ test "checkAndFixSkew: enables locks on skewed ShardedStringMap" {
     map.shards[2].ops.store(10, .monotonic);
     map.shards[3].ops.store(10, .monotonic);
 
-    const fixed = cp.checkAndFixSkew(&map);
-    try std.testing.expect(fixed);
-
-    // Locks should now be enabled (not elided).
-    try std.testing.expect(!map.locks_elided.load(.monotonic));
+    const skewed = cp.checkAndFixSkew(&map);
+    try std.testing.expect(skewed);
 }
 
-test "checkAndFixSkew: does not enable locks on balanced map" {
+test "checkAndFixSkew: no skew on balanced map" {
     const CheatLib = @import("runtime-header.zig").CheatLib;
     var map = CheatLib.ShardedStringMap(i64, 4){};
 
@@ -325,7 +319,6 @@ test "checkAndFixSkew: does not enable locks on balanced map" {
     map.shards[2].ops.store(1000, .monotonic);
     map.shards[3].ops.store(1000, .monotonic);
 
-    const fixed = cp.checkAndFixSkew(&map);
-    try std.testing.expect(!fixed);
-    try std.testing.expect(map.locks_elided.load(.monotonic)); // Still elided.
+    const skewed = cp.checkAndFixSkew(&map);
+    try std.testing.expect(!skewed);
 }

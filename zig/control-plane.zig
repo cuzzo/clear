@@ -431,9 +431,9 @@ pub fn isSkewed(counts: []const u64) bool {
     return cv > config.skew_cv_threshold;
 }
 
-/// Check a sharded map for skew and enable locks if detected.
-/// Returns true if skew was detected and locks were enabled.
-/// Works with any type that has getOpCounts() and enableLocks().
+/// Check a sharded map for skew.
+/// Returns true if skew was detected.
+/// Works with any type that has getOpCounts().
 pub fn checkAndFixSkew(map: anytype) bool {
     if (config.on_skew == .ignore) return false;
 
@@ -441,11 +441,8 @@ pub fn checkAndFixSkew(map: anytype) bool {
     if (!isSkewed(&counts)) return false;
 
     if (config.on_skew == .log) {
-        std.debug.print("[control-plane] skew detected, would enable locks\n", .{});
-        return true;
+        std.debug.print("[control-plane] skew detected on sharded map\n", .{});
     }
 
-    // Fix: enable locks on this map.
-    map.enableLocks();
     return true;
 }
