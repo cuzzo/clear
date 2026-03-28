@@ -991,36 +991,49 @@ module PipelineGenerator
   #   3. Join: WaitGroup.wait()
   #
   def transpile_shard_concurrent_each(lhs_node, each_op, id, rt_name, shard_ctx)
-    # lhs_node is BinaryOp(SMOOTH, range, ShardOp) — we need the original range
-    range_node = lhs_node.left
-    shard_op   = lhs_node.right  # ShardOp
+    auto_detected = shard_ctx[:auto_detected]
     shard_count = shard_ctx[:shard_count]
-    map_node   = shard_ctx[:map_var]
+    map_node    = shard_ctx[:map_var]
+    key_expr_node = shard_ctx[:key_expr]
 
     map_code = visit(map_node)
+    map_var_name = map_node.is_a?(AST::Identifier) ? map_node.name : nil
 
-    # Visit range to get start/end for the routing loop
+    # Determine range node
+    if auto_detected
+      # LHS is the raw range (no ShardOp wrapper)
+      range_node = lhs_node
+    else
+      # LHS is BinaryOp(SMOOTH, range, ShardOp)
+      range_node = lhs_node.left
+    end
+
     range_start = visit(range_node.start)
     range_end   = visit(range_node.finish)
     exclusive   = !range_node.inclusive
 
-    # Build the key expression with `_` bound to the loop variable.
-    # Routing phase runs on the calling fiber (not a spawned worker), so use the caller's rt.
+    # Build the key expression with `_` bound to the routing loop variable.
     @placeholder_name = "__sh#{id}_i"
-    key_code = visit(shard_op.key_expr)
+    key_code = visit(key_expr_node)
     @placeholder_name = nil
 
-    # Build the EACH body with `_` bound to the key from the shard queue.
-    # The map variable is redirected to ctx.map_ptr (fiber can't see outer locals).
-    map_var_name = map_node.is_a?(AST::Identifier) ? map_node.name : nil
+    # Build the EACH body. Map accesses use putDirect/getDirect (no double hash).
+    # The map is redirected to ctx.map_ptr. For auto-detected, we also set a flag
+    # so the transpiler emits Direct methods and passes shard_idx.
     captures = map_var_name ? { map_var_name => "ctx.map_ptr" } : {}
     @placeholder_name = "__sh#{id}_keys[__sh#{id}_ki]"
+    @shard_direct_map = map_var_name  # flag: emit putDirect/getDirect for this map
+    @shard_direct_idx = "ctx.shard_idx"
+    @shard_direct_key = "__sh#{id}_keys[__sh#{id}_ki]"  # pre-routed key from queue
     body_code = with_fiber_capture_map(captures) do
       each_op.body.map { |stmt|
         code = visit(stmt)
         code.strip.end_with?(";") ? code : "#{code};"
       }.join("\n                          ")
     end
+    @shard_direct_map = nil
+    @shard_direct_idx = nil
+    @shard_direct_key = nil
     @placeholder_name = nil
 
     range_op = exclusive ? "<" : "<="

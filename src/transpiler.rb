@@ -612,6 +612,11 @@ private
                  return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
                end
              else
+               # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing
+               # Key comes from the pre-routed queue, not recomputed from the body expression.
+               if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
+                 return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
+               end
                # Unified .put() API works for StringMap, PartitionedStringMap, ShardedStringMap
                return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
              end
@@ -788,8 +793,14 @@ private
           val_zig = map_ft.value_type.zig_type
           "CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target}, #{index})"
         else
-          # Unified .get() API works for StringMap, PartitionedStringMap, ShardedStringMap
-          "#{target}.get(#{index})"
+          # Shard-direct: getDirect(shard_idx, key) — no hash, no routing
+          # Key comes from the pre-routed queue, not recomputed from the index expression.
+          if @shard_direct_map && node.target.is_a?(AST::Identifier) && node.target.name == @shard_direct_map
+            "#{target}.getDirect(#{@shard_direct_idx}, #{@shard_direct_key})"
+          else
+            # Unified .get() API works for StringMap, PartitionedStringMap, ShardedStringMap
+            "#{target}.get(#{index})"
+          end
         end
       elsif node.target.type_info&.pool?
         "#{target}.get(#{index})"

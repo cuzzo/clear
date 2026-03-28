@@ -2058,6 +2058,39 @@ pub const CheatLib = struct {
                 remote_alloc.free(safe_key);
             }
 
+            // ── Direct shard access (no hash, no routing) ──
+            // Used by the SHARD pipeline: the fiber is already pinned to the
+            // owning scheduler, and the shard index is known from routing.
+            // Zero overhead: no shardIndex(), no sendAndWait(), no key dupe.
+
+            pub fn putDirect(self: *Self, shard: usize, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const owned_key = try alloc.dupe(u8, key);
+                const safe_val = if (comptime is_slice_value)
+                    try alloc.dupe(@typeInfo(V).pointer.child, value)
+                else
+                    value;
+                self.shards[shard].map.put(alloc, owned_key, safe_val) catch |e| {
+                    alloc.free(owned_key);
+                    if (comptime is_slice_value) alloc.free(safe_val);
+                    return e;
+                };
+            }
+
+            pub fn getDirect(self: *Self, shard: usize, key: []const u8) ?V {
+                return self.shards[shard].map.get(key);
+            }
+
+            pub fn containsDirect(self: *Self, shard: usize, key: []const u8) bool {
+                return self.shards[shard].map.contains(key);
+            }
+
+            pub fn removeDirect(self: *Self, shard: usize, alloc: std.mem.Allocator, key: []const u8) void {
+                if (self.shards[shard].map.fetchRemove(key)) |kv| {
+                    alloc.free(kv.key);
+                    if (is_slice_value) alloc.free(kv.value);
+                }
+            }
+
             pub fn count(self: *Self) i64 {
                 var nc: i64 = 0;
                 for (&self.shards) |*shard| nc += @intCast(shard.map.count());

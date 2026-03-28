@@ -492,6 +492,164 @@ module PipeAnalysis
     node.storage   = :stack
   end
 
+  # Pre-scan: check if the EACH body references any @sharded map variable
+  # by scanning for identifiers that are in scope as @sharded (without :locked).
+  # This runs BEFORE visiting the body, so we only check unvisited AST.
+  def pre_scan_sharded_map(body_stmts)
+    body_stmts.any? { |stmt| pre_scan_node_for_sharded(stmt) }
+  end
+
+  def pre_scan_node_for_sharded(node)
+    return false unless node.is_a?(AST::Locatable)
+    if node.is_a?(AST::Identifier)
+      scope = lookup_scope_for(node.name) rescue nil
+      return false unless scope
+      entry = scope.locals[node.name]
+      return false unless entry
+      t = entry[:type]
+      t = Type.new(t) unless t.is_a?(Type)
+      return t.sharded? && !t.any_sync?
+    end
+    return false if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+    node.class.members.any? do |member|
+      val = node[member]
+      if val.is_a?(Array)
+        val.any? { |v| pre_scan_node_for_sharded(v) }
+      elsif val.is_a?(AST::Locatable)
+        pre_scan_node_for_sharded(val)
+      else
+        false
+      end
+    end
+  end
+
+  # Analyze CONCURRENT EACH with auto-detected @sharded map access.
+  # Accepts range inputs (unlike analyze_each_op which requires collections).
+  # Visits the body, then extracts the key expression and sets shard_context.
+  def analyze_auto_shard_each_op(smooth_node, conc, proxy)
+    lhs_type = smooth_node.left.type_info
+    is_range = smooth_node.left.is_a?(AST::RangeLit)
+    is_array = smooth_node.left.metatype == :array
+    is_list  = lhs_type&.list_collection?
+
+    item_type = if is_range
+      :Int64
+    elsif is_array || is_list
+      lhs_type.element_type.resolved
+    else
+      error!(smooth_node.left, "CONCURRENT EACH input must be a range or collection, got #{smooth_node.left.resolved_type}")
+      :Any
+    end
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+      conc.op.body.each { |stmt| visit(stmt) }
+    end
+
+    smooth_node.full_type = :Void
+    smooth_node.storage   = :stack
+
+    # Now extract the @sharded map access from the visited body
+    auto_detect_sharded_access(smooth_node, conc)
+  end
+
+  # Auto-detect @sharded map access in CONCURRENT EACH body.
+  # Walks the body AST looking for map[key_expr] patterns where map is @sharded.
+  # If found, sets shard_context on the ConcurrentOp so the transpiler emits
+  # routed sharding instead of the normal worker pool.
+  def auto_detect_sharded_access(smooth_node, conc)
+    each_op = conc.op
+    return unless each_op.is_a?(AST::EachOp)
+
+    # Collect all GetIndex nodes that target a @sharded map
+    sharded_accesses = []
+    walk_for_sharded_access(each_op.body, sharded_accesses)
+
+    return if sharded_accesses.empty?
+
+    # All accesses must target the same @sharded map variable
+    map_names = sharded_accesses.map { |a| a[:map_name] }.uniq
+    return if map_names.length > 1  # multiple sharded maps — too complex, fall back
+
+    map_name = map_names.first
+    # Find the map's scope entry to get shard_count
+    scope = lookup_scope_for(map_name)
+    return unless scope
+    entry = scope.locals[map_name]
+    map_type = entry&.dig(:type)
+    map_type = Type.new(map_type) unless map_type.is_a?(Type)
+    return unless map_type.sharded? && !map_type.any_sync?
+
+    # All key expressions must be structurally identical
+    # (we don't enforce this strictly — just take the first one)
+    key_expr = sharded_accesses.first[:key_expr]
+
+    # Build a synthetic map identifier node for the shard_context
+    map_ident = AST::Identifier.new(sharded_accesses.first[:map_token], map_name)
+    map_ident.full_type = map_type
+
+    conc.shard_context = {
+      map_var: map_ident,
+      shard_count: map_type.shard_count,
+      key_expr: key_expr,
+      auto_detected: true  # flag so transpiler knows body uses original _ not key
+    }
+  end
+
+  # Recursively walk AST nodes to find GetIndex on @sharded maps.
+  def walk_for_sharded_access(nodes, results)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+
+      # Assignment: map[key] = value
+      if node.is_a?(AST::Assignment) && node.name.is_a?(AST::GetIndex)
+        gi = node.name
+        if gi.target.is_a?(AST::Identifier)
+          ti = gi.target.type_info
+          if ti.is_a?(Type) && ti.sharded? && !ti.any_sync?
+            results << { map_name: gi.target.name, key_expr: gi.index, map_token: gi.target.token }
+          end
+        end
+      end
+
+      # BindExpr: got = map[key] OR "" (the map[key] is inside value)
+      if node.is_a?(AST::BindExpr) && node.value
+        walk_for_sharded_getindex([node.value], results)
+      end
+
+      # Walk children (skip nested BG/DO blocks)
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array) && member != :body  # don't re-walk body arrays we handle above
+          walk_for_sharded_access(val, results)
+        end
+      end
+    end
+  end
+
+  # Find GetIndex on @sharded maps in expression context (reads)
+  def walk_for_sharded_getindex(nodes, results)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+      if node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
+        ti = node.target.type_info
+        if ti.is_a?(Type) && ti.sharded? && !ti.any_sync?
+          results << { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
+        end
+      end
+      # Recurse into sub-expressions
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          walk_for_sharded_getindex(val, results)
+        elsif val.is_a?(AST::Locatable)
+          walk_for_sharded_getindex([val], results)
+        end
+      end
+    end
+  end
+
   def analyze_shard_op(node)
     shard_op = node.right  # ShardOp node
 
@@ -609,9 +767,14 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       analyze_select_family_op(proxy)
     when AST::EachOp
-      # For SHARD + CONCURRENT EACH, the items are String keys (not the original range type).
       if shard_node
+        # Explicit SHARD + CONCURRENT EACH: items are String keys.
         analyze_shard_each_op(node, shard_node)
+      elsif pre_scan_sharded_map(conc.op.body)
+        # Auto-detected: body accesses a @sharded map.
+        # Visit the body with `_` as the range/collection item type,
+        # then extract the key expression and set shard_context.
+        analyze_auto_shard_each_op(node, conc, proxy)
       else
         analyze_each_op(proxy)
       end
