@@ -710,6 +710,16 @@ module PipelineGenerator
       else
         transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
       end
+    when AST::SumOp
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :sum)
+    when AST::CountOp
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :count)
+    when AST::MinOp
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :min)
+    when AST::MaxOp
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :max)
+    when AST::AverageOp
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :average)
     end
   end
 
@@ -979,6 +989,140 @@ module PipelineGenerator
           }
       }
     ZIG
+  end
+
+  # =========================================================
+  # CONCURRENT SUM/COUNT/MIN/MAX/AVERAGE: partial aggregation
+  # =========================================================
+  #
+  # Each worker has a private accumulator (cache-line padded).
+  # Zero contention during the parallel phase. Sequential O(N)
+  # combine after WaitGroup.wait().
+  #
+  def transpile_concurrent_reduce(list_node, op_node, id, workers_code, rt_name, options, kind)
+    item_zig = transpile_type(list_node.type_info.element_type.resolved)
+
+    list_code  = visit(list_node)
+    lhs_type   = list_node.type_info
+    items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
+
+    @placeholder_name = "ctx.items[__idx]"
+    expr_code = with_fiber_capture_map({}) { visit(op_node.expression) }
+    @placeholder_name = nil
+
+    spawn_call = concurrent_spawn_call(options, "__ccr#{id}_wg", "__CcrWorker#{id}", "__ccr#{id}_workers[__w]")
+
+    # Per-kind configuration
+    case kind
+    when :sum
+      partial_type = "f64"
+      partial_init = "0"
+      worker_body  = "ctx.partial.* += #{expr_code};"
+      result_type  = "f64"
+      result_init  = "0"
+    when :count
+      partial_type = "i64"
+      partial_init = "0"
+      worker_body  = "if (#{expr_code}) { ctx.partial.* += 1; }"
+      result_type  = "i64"
+      result_init  = "0"
+    when :min
+      partial_type = "f64"
+      partial_init = "std.math.floatMax(f64)"
+      worker_body  = "const __v = #{expr_code}; if (__v < ctx.partial.*) ctx.partial.* = __v;"
+      result_type  = "f64"
+      result_init  = "std.math.floatMax(f64)"
+    when :max
+      partial_type = "f64"
+      partial_init = "-std.math.floatMax(f64)"
+      worker_body  = "const __v = #{expr_code}; if (__v > ctx.partial.*) ctx.partial.* = __v;"
+      result_type  = "f64"
+      result_init  = "-std.math.floatMax(f64)"
+    when :average
+      partial_type = "f64"
+      partial_init = "0"
+      worker_body  = "ctx.partial.* += #{expr_code};"
+      result_type  = "f64"
+      result_init  = "0"
+    end
+
+    # AVERAGE needs the total count for the final division
+    average_suffix = if kind == :average
+      "\n          const __ccr#{id}_len_f: f64 = @floatFromInt(__ccr#{id}_len);\n" \
+      "          break :blk if (__ccr#{id}_len == 0) @as(f64, 0) else __ccr#{id}_result / __ccr#{id}_len_f;"
+    else
+      "\n          break :blk __ccr#{id}_result;"
+    end
+
+    <<~ZIG.chomp
+      blk: {
+          var pipe_src_list = #{list_code};
+          _ = &pipe_src_list;
+          #{items_block}
+          const __ccr#{id}_items = pipe_items;
+          const __ccr#{id}_len = __ccr#{id}_items.len;
+          if (__ccr#{id}_len == 0) {
+              break :blk @as(#{result_type}, #{result_init});
+          }
+          var __ccr#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __ccr#{id}_n_workers: usize = @intCast(#{workers_code});
+
+          // Per-worker partial accumulators (cache-line padded to avoid false sharing)
+          const __CcrPartial#{id} = struct { value: #{partial_type} align(64) = #{partial_init} };
+          var __ccr#{id}_partials_store: [64]__CcrPartial#{id} = [_]__CcrPartial#{id}{.{}} ** 64;
+
+          const __CcrWorker#{id} = struct {
+              wg:      *CheatHeader.WaitGroup,
+              items:   []#{item_zig},
+              next:    *std.atomic.Value(usize),
+              partial: *#{partial_type},
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= ctx.items.len) break;
+                      #{worker_body}
+                  }
+              }
+          };
+
+          var __ccr#{id}_next = std.atomic.Value(usize).init(0);
+          var __ccr#{id}_workers: [64]__CcrWorker#{id} = undefined;
+          const __ccr#{id}_actual = @min(__ccr#{id}_n_workers, 64);
+          __ccr#{id}_wg.add(__ccr#{id}_actual);
+          for (0..__ccr#{id}_actual) |__w| {
+              __ccr#{id}_workers[__w] = .{
+                  .wg      = &__ccr#{id}_wg,
+                  .items   = @constCast(__ccr#{id}_items),
+                  .next    = &__ccr#{id}_next,
+                  .partial = &__ccr#{id}_partials_store[__w].value,
+              };
+              #{spawn_call}
+          }
+          __ccr#{id}_wg.wait();
+
+          // Combine: merge partial results (sequential, O(workers))
+          var __ccr#{id}_result: #{result_type} = #{result_init};
+          for (0..__ccr#{id}_actual) |__w| {
+              const __ccr#{id}_p = __ccr#{id}_partials_store[__w].value;
+              #{combine_body_inline(kind, id)}
+          }#{average_suffix}
+      }
+    ZIG
+  end
+
+  def combine_body_inline(kind, id)
+    p = "__ccr#{id}_p"
+    r = "__ccr#{id}_result"
+    case kind
+    when :sum, :average then "#{r} += #{p};"
+    when :count         then "#{r} += #{p};"
+    when :min           then "if (#{p} < #{r}) #{r} = #{p};"
+    when :max           then "if (#{p} > #{r}) #{r} = #{p};"
+    end
   end
 
   # =========================================================

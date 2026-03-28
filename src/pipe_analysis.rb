@@ -824,6 +824,16 @@ module PipeAnalysis
           analyze_each_op(proxy)
         end
       end
+    when AST::SumOp
+      analyze_sum_op(proxy)
+    when AST::CountOp
+      analyze_count_op(proxy)
+    when AST::MinOp
+      analyze_min_op(proxy)
+    when AST::MaxOp
+      analyze_max_op(proxy)
+    when AST::AverageOp
+      analyze_average_op(proxy)
     else
       error!(conc, "CONCURRENT does not support #{conc.op.class.name.split('::').last}")
     end

@@ -1525,8 +1525,28 @@ class Parser
       AST::WhereOp.new(previous, expr)
     elsif match?(:KEYWORD, 'EACH')
       parse_each_op
+    elsif match?(:KEYWORD, 'SUM')
+      consume(:KEYWORD, 'SUM')
+      expr = parse_expression
+      AST::SumOp.new(previous, expr)
+    elsif match?(:KEYWORD, 'COUNT')
+      consume(:KEYWORD, 'COUNT')
+      expr = parse_expression
+      AST::CountOp.new(previous, expr)
+    elsif match?(:KEYWORD, 'MIN')
+      consume(:KEYWORD, 'MIN')
+      expr = parse_expression
+      AST::MinOp.new(previous, expr)
+    elsif match?(:KEYWORD, 'MAX')
+      consume(:KEYWORD, 'MAX')
+      expr = parse_expression
+      AST::MaxOp.new(previous, expr)
+    elsif match?(:KEYWORD, 'AVERAGE')
+      consume(:KEYWORD, 'AVERAGE')
+      expr = parse_expression
+      AST::AverageOp.new(previous, expr)
     else
-      error!(current, "Expected SELECT, WHERE, or EACH after CONCURRENT, got #{current.value.inspect}")
+      error!(current, "Expected SELECT, WHERE, EACH, SUM, COUNT, MIN, MAX, or AVERAGE after CONCURRENT, got #{current.value.inspect}")
     end
   end
 
