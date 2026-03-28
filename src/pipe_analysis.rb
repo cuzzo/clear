@@ -495,8 +495,45 @@ module PipeAnalysis
   # Pre-scan: check if the EACH body references any @sharded map variable
   # by scanning for identifiers that are in scope as @sharded (without :locked).
   # This runs BEFORE visiting the body, so we only check unvisited AST.
-  def pre_scan_sharded_map(body_stmts)
-    body_stmts.any? { |stmt| pre_scan_node_for_sharded(stmt) }
+  def emit_multi_map_warning(conc, sharded_names)
+    shard_counts = sharded_names.map do |name|
+      sc = lookup_scope_for(name)&.locals&.dig(name, :type)
+      t = sc.is_a?(Type) ? sc : Type.new(sc)
+      t.shard_count
+    end.compact.uniq
+    names_str = sharded_names.to_a.join(', ')
+    if shard_counts.length == 1
+      note!(conc, "CONCURRENT EACH accesses #{sharded_names.length} @sharded maps " \
+            "(#{names_str}). Co-located (same shard count #{shard_counts.first}), " \
+            "but auto-sharding requires a single map. Use explicit SHARD() or @sharded(N):locked.")
+    else
+      note!(conc, "CONCURRENT EACH accesses @sharded maps with different shard counts " \
+            "(#{names_str}). Cross-shard routing is likely — consider @sharded(N):locked.")
+    end
+  end
+
+  def collect_sharded_names(node, names)
+    return unless node.is_a?(AST::Locatable)
+    if node.is_a?(AST::Identifier)
+      scope = lookup_scope_for(node.name) rescue nil
+      if scope
+        entry = scope.locals[node.name]
+        if entry
+          t = entry[:type]
+          t = Type.new(t) unless t.is_a?(Type)
+          names << node.name if t.sharded? && !t.any_sync?
+        end
+      end
+    end
+    return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array)
+        val.each { |v| collect_sharded_names(v, names) }
+      elsif val.is_a?(AST::Locatable)
+        collect_sharded_names(val, names)
+      end
+    end
   end
 
   def pre_scan_node_for_sharded(node)
@@ -567,11 +604,8 @@ module PipeAnalysis
 
     return if sharded_accesses.empty?
 
-    # All accesses must target the same @sharded map variable
-    map_names = sharded_accesses.map { |a| a[:map_name] }.uniq
-    return if map_names.length > 1  # multiple sharded maps — too complex, fall back
-
-    map_name = map_names.first
+    # At this point, sharded_accesses should all target one map (multi-map handled upstream).
+    map_name = sharded_accesses.first[:map_name]
     # Find the map's scope entry to get shard_count
     scope = lookup_scope_for(map_name)
     return unless scope
@@ -580,9 +614,15 @@ module PipeAnalysis
     map_type = Type.new(map_type) unless map_type.is_a?(Type)
     return unless map_type.sharded? && !map_type.any_sync?
 
-    # All key expressions must be structurally identical
-    # (we don't enforce this strictly — just take the first one)
-    key_expr = sharded_accesses.first[:key_expr]
+    # Check for multiple different key expressions on the same map
+    this_map_accesses = sharded_accesses.select { |a| a[:map_name] == map_name }
+    key_sources = this_map_accesses.map { |a| a[:key_expr].class.name + ":" + (a[:key_expr].respond_to?(:name) ? a[:key_expr].name.to_s : a[:key_expr].to_s) }.uniq
+    if key_sources.length > 1
+      note!(conc, "CONCURRENT EACH uses #{key_sources.length} different key expressions on " \
+            "@sharded map '#{map_name}'. Routing is based on the first key; other accesses " \
+            "with different keys may trigger cross-shard remote calls.")
+    end
+    key_expr = this_map_accesses.first[:key_expr]
 
     # Build a synthetic map identifier node for the shard_context
     map_ident = AST::Identifier.new(sharded_accesses.first[:map_token], map_name)
@@ -770,13 +810,19 @@ module PipeAnalysis
       if shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
         analyze_shard_each_op(node, shard_node)
-      elsif pre_scan_sharded_map(conc.op.body)
-        # Auto-detected: body accesses a @sharded map.
-        # Visit the body with `_` as the range/collection item type,
-        # then extract the key expression and set shard_context.
-        analyze_auto_shard_each_op(node, conc, proxy)
       else
-        analyze_each_op(proxy)
+        # Check for @sharded map access — emit warnings for multi-map, auto-shard for single map.
+        sharded_names = Set.new
+        conc.op.body.each { |stmt| collect_sharded_names(stmt, sharded_names) }
+
+        if sharded_names.length > 1
+          emit_multi_map_warning(conc, sharded_names)
+          analyze_each_op(proxy)
+        elsif sharded_names.length == 1
+          analyze_auto_shard_each_op(node, conc, proxy)
+        else
+          analyze_each_op(proxy)
+        end
       end
     else
       error!(conc, "CONCURRENT does not support #{conc.op.class.name.split('::').last}")

@@ -1909,6 +1909,11 @@ pub const CheatLib = struct {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
+            /// Initialize shard-to-scheduler ownership mapping.
+            /// CO-LOCATION GUARANTEE: All PartitionedStringMap(V, N) instances with the
+            /// same N get the same owners[] mapping (deterministic: owners[i] = scheds[i % sc]).
+            /// This means two @sharded(8) maps accessed with the same key will always route
+            /// to the same scheduler — zero cross-shard overhead for co-located access.
             pub fn ensureOwnership(self: *Self) void {
                 if (self.ownership_init.load(.acquire) == 2) return;
                 if (self.ownership_init.cmpxchgStrong(0, 1, .acquire, .monotonic)) |_| {

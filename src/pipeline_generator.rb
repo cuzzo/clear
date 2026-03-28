@@ -1045,22 +1045,24 @@ module PipelineGenerator
           __sh#{id}_map.ensureOwnership();
           const __sh#{id}_N = #{shard_count};
 
-          // Per-shard key queues
+          // Routing arena: all keys are allocated from a single arena that
+          // is freed in one shot after workers complete. Zero per-key free.
+          var __sh#{id}_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+          defer __sh#{id}_arena.deinit();
+          const __sh#{id}_alloc = __sh#{id}_arena.allocator();
+
+          // Per-shard key queues (queue metadata uses c_allocator, keys use arena)
           var __sh#{id}_queues: [__sh#{id}_N]std.ArrayListUnmanaged([]const u8) = undefined;
           for (&__sh#{id}_queues) |*q| q.* = .{};
-          defer for (&__sh#{id}_queues) |*q| {
-              for (q.items) |k| std.heap.c_allocator.free(k);
-              q.deinit(std.heap.c_allocator);
-          };
+          defer for (&__sh#{id}_queues) |*q| q.deinit(std.heap.c_allocator);
 
           // Route phase: hash each key, append to owning shard's queue.
-          // Keys are duped to c_allocator so they can be freed after workers complete.
           {
               var __sh#{id}_i: i64 = #{range_start};
               const __sh#{id}_end: i64 = #{range_end};
               while (__sh#{id}_i #{range_op} __sh#{id}_end) : (__sh#{id}_i += 1) {
                   const __sh#{id}_tmp_key = #{key_code};
-                  const __sh#{id}_key = try std.heap.c_allocator.dupe(u8, __sh#{id}_tmp_key);
+                  const __sh#{id}_key = try __sh#{id}_alloc.dupe(u8, __sh#{id}_tmp_key);
                   const __sh#{id}_sidx = @TypeOf(__sh#{id}_map.*).shardIndex(__sh#{id}_key);
                   try __sh#{id}_queues[__sh#{id}_sidx].append(std.heap.c_allocator, __sh#{id}_key);
               }
