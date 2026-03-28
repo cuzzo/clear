@@ -121,7 +121,7 @@ pub fn SlabAllocator(comptime T: type) type {
             return self.createSlow();
         }
 
-        fn createSlow(self: *Self) !*T {
+        noinline fn createSlow(self: *Self) !*T {
             self.lock.lock();
             defer self.lock.unlock();
 
@@ -228,7 +228,7 @@ pub fn SlabAllocator(comptime T: type) type {
             }
         }
 
-        fn grow(self: *Self) !*SlabHeader {
+        noinline fn grow(self: *Self) !*SlabHeader {
             // Allocate raw memory with correct alignment
             const bytes = try self.allocAligned(self.slab_size);
 

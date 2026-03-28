@@ -406,7 +406,7 @@ pub const Scheduler = struct {
         _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
         self.event_fd.notify();
     }
-    pub fn drainChannels(self: *Scheduler) void {
+    pub noinline fn drainChannels(self: *Scheduler) void {
         var mask = self.dirty_mask.swap(0, .acquire);
         while (mask != 0) {
             const sender_idx = @ctz(mask);

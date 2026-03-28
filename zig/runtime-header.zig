@@ -1933,7 +1933,7 @@ pub const CheatLib = struct {
 
             // Send a RemoteCall via SPSC and wait for completion.
             // Drains our own channels + yields fiber while waiting.
-            fn sendAndWait(target: *fp.Scheduler, func_ptr: *const fn (*anyopaque) void, ctx_ptr: *anyopaque, done_flag: *std.atomic.Value(bool)) void {
+            noinline fn sendAndWait(target: *fp.Scheduler, func_ptr: *const fn (*anyopaque) void, ctx_ptr: *anyopaque, done_flag: *std.atomic.Value(bool)) void {
                 const sender_idx = fp.active_scheduler.index;
                 std.debug.assert(sender_idx < target.channels.len);
                 const msg = fp.SpscMessage{
