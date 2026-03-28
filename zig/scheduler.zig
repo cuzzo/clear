@@ -144,9 +144,9 @@ pub const Scheduler = struct {
 
     // 2. Communication
     inbox: AtomicInbox = .{},  // Legacy MPSC inbox (kept for work-stealing fallback & non-scheduler senders)
-    /// SPSC channels: heap-allocated, one per potential sender (max 8).
+    /// SPSC channels: heap-allocated, one per potential sender (max 64).
     /// channels[i] is the ring FROM scheduler i TO this scheduler.
-    channels: *[8]spsc.DefaultRing = undefined,
+    channels: *[64]spsc.DefaultRing = undefined,
     channels_count: u32 = 0,
     stack_pool: *StackPool,    // GLOBAL Stack Cache
     event_fd: SmartEventFd,
@@ -218,7 +218,7 @@ pub const Scheduler = struct {
         // io_uring ring for async file I/O (256 SQE slots).
         const ring = try IoUring.init(256, 0);
 
-        const ch = try allocator.create([8]spsc.DefaultRing);
+        const ch = try allocator.create([64]spsc.DefaultRing);
         for (ch) |*ring_slot| ring_slot.* = .{};
 
         var sched = Scheduler{
@@ -229,7 +229,7 @@ pub const Scheduler = struct {
             .sleeping_queue = .{},
             .inbox = .{},
             .channels = ch,
-            .channels_count = 8,
+            .channels_count = 64,
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -404,9 +404,14 @@ pub const Scheduler = struct {
     // 2. THE RESUME (Producer Side - Thread B, WaitGroup, etc)
     // ------------------------------------------------------------
     pub fn submitResume(self: *Scheduler, task: *Task) void {
-        // Use SPSC channel if the sender's index is known.
+        // Double-push guard: skip if already queued
+        if (task.in_inbox.load(.acquire)) return;
+        task.in_inbox.store(true, .release);
+
+        // Use SPSC channel if the sender is a scheduler thread
         if (scheduler_running) {
             const sender_idx = active_scheduler.index;
+            std.debug.assert(sender_idx < self.channels.len);
             const msg = SpscMessage{
                 .tag = .Resume,
                 .task = @ptrCast(task),
@@ -417,7 +422,7 @@ pub const Scheduler = struct {
             }
             // Ring full — fall through to legacy inbox
         }
-        // Fallback: legacy MPSC inbox (for non-scheduler contexts or full ring)
+        // Fallback: legacy MPSC inbox
         task.inbox_link.type = .Resume;
         self.inbox.push(&task.inbox_link);
         self.event_fd.notify();
@@ -513,7 +518,7 @@ pub const Scheduler = struct {
 
     /// Drain all SPSC channels (one per sender scheduler).
     /// Messages are value-copied, so no linked-list corruption is possible.
-    fn drainChannels(self: *Scheduler) void {
+    pub fn drainChannels(self: *Scheduler) void {
         const n = global_registry.count();
         for (0..n) |sender_idx| {
             while (self.channels[sender_idx].pop()) |msg| {
@@ -556,6 +561,7 @@ pub const Scheduler = struct {
                     },
                     .Resume => {
                         const task: *Task = @ptrCast(@alignCast(msg.task.?));
+                        task.in_inbox.store(false, .release);
                         task.status = .Ready;
                         self.ready_queue.push(self.allocator, task) catch unreachable;
                     },
