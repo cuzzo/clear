@@ -79,7 +79,7 @@ test "AtomicInbox: LIFO Reversal" {
     // Push 0, 1, 2
     for (0..3) |i| {
         const node = try std.testing.allocator.create(StressNode);
-        node.id = i;
+        node.* = .{ .link = .{ .type = .Resume }, .id = i };
         inbox.push(&node.link);
     }
 

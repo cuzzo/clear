@@ -143,16 +143,17 @@ test "Full Scheduler Integration" {
 
     // Link the global pointer (so entryWrapper can find us)
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     std.debug.print("\n--- Spawning Tasks ---", .{});
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&userTask1)),
         null,
-        .{});
+        .{ .stack_size = .Large });
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&userTask2)),
         null,
-        .{});
+        .{ .stack_size = .Large });
 
     std.debug.print("\n--- Running Scheduler ---", .{});
     sched.run();
@@ -231,6 +232,7 @@ test "Structured Concurrency with WaitGroup" {
     defer sched.deinit();
 
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     std.debug.print("\n\n--- Start Concurrency Test ---", .{});
 
@@ -238,7 +240,7 @@ test "Structured Concurrency with WaitGroup" {
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&mainTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
 
     sched.run();
 
@@ -251,7 +253,8 @@ test "Structured Concurrency with WaitGroup" {
 
 // Runaway Task
 
-fn infiniteLoop(rt: *Runtime) !void {
+fn infiniteLoop(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
+    const rt: *Runtime = @ptrCast(@alignCast(raw_rt));
     std.debug.print("\n[Task] Starting infinite loop (Timeout: 10ms)...", .{});
 
     var i: usize = 0;
@@ -284,6 +287,7 @@ test "Timeout Cancellation" {
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     std.debug.print("\n\n--- Start Timeout Test ---", .{});
 
@@ -291,7 +295,7 @@ test "Timeout Cancellation" {
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&infiniteLoop)),
         null,
-        .{ .timeout_ms = 10 });
+        .{ .timeout_ms = 10, .stack_size = .Large });
 
     const start = milliTimestamp();
     sched.run();
@@ -305,14 +309,16 @@ test "Timeout Cancellation" {
 // Sleeping Beauty Test
 
 // Sleep for 100ms
-fn fastTask(rt: *Runtime) !void {
+fn fastTask(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
+    const rt: *Runtime = @ptrCast(@alignCast(raw_rt));
     std.debug.print("\n[Fast] Sleeping 100ms...", .{});
     rt.sleep(100);
     std.debug.print("\n[Fast] Woke up!", .{});
 }
 
 // Sleep for 300ms
-fn slowTask(rt: *Runtime) !void {
+fn slowTask(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
+    const rt: *Runtime = @ptrCast(@alignCast(raw_rt));
     std.debug.print("\n[Slow] Sleeping 300ms...", .{});
     rt.sleep(300);
     std.debug.print("\n[Slow] Woke up!", .{});
@@ -331,6 +337,7 @@ test "Non-Blocking Sleep" {
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     std.debug.print("\n\n--- Start Sleep Test ---", .{});
 
@@ -342,11 +349,11 @@ test "Non-Blocking Sleep" {
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&slowTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&fastTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
 
     sched.run();
 
@@ -375,7 +382,7 @@ var read_fd: i32 = undefined;
 var write_fd: i32 = undefined;
 
 // Task A: Tries to read. It should BLOCK (Yield) initially because there is no data.
-fn readerTask(_: *Runtime) !void {
+fn readerTask(_: *anyopaque, _: ?*anyopaque) anyerror!void {
     std.debug.print("\n[Reader] Starting. Trying to read...", .{});
 
     var buf: [128]u8 = undefined;
@@ -392,7 +399,8 @@ fn readerTask(_: *Runtime) !void {
 }
 
 // Task B: Sleeps, then writes data.
-fn writerTask(rt: *Runtime) !void {
+fn writerTask(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
+    const rt: *Runtime = @ptrCast(@alignCast(raw_rt));
     std.debug.print("\n[Writer] Sleeping 100ms...", .{});
     rt.sleep(100);
 
@@ -414,6 +422,7 @@ test "Async I/O with Epoll" {
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     // 1. Setup Socket Pair (Simulates Client/Server connection)
     var fds: [2]i32 = undefined;
@@ -434,11 +443,11 @@ test "Async I/O with Epoll" {
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&readerTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&writerTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
 
     sched.run();
 
@@ -449,7 +458,8 @@ test "Async I/O with Epoll" {
 // Multi-threaded Fiber Pools
 
 // A heavy task to simulate work
-fn heavyTask(rt: *Runtime) !void {
+fn heavyTask(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
+    const rt: *Runtime = @ptrCast(@alignCast(raw_rt));
     const thread_id = std.Thread.getCurrentId();
     std.debug.print("\n[Thread {d}] Task Started.", .{thread_id});
 
@@ -467,16 +477,17 @@ fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack
 
     // 2. Set the thread-local pointer
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     // 3. Spawn Fibers (These stay on THIS thread)
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&heavyTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&heavyTask)),
         null,
-        .{});
+        .{ .stack_size = .Large });
 
     // 4. Run Loop
     sched.run();
@@ -554,6 +565,7 @@ test "Root Stack Trampoline: Stack Isolation" {
     var sched = try Scheduler.init(allocator, &global_ctx, &stack_pool);
     defer sched.deinit();
     fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
 
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&testRootStackBasic)),
