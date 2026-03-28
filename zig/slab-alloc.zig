@@ -11,6 +11,7 @@ pub fn SlabAllocator(comptime T: type) type {
         const Magazine = struct {
             objects: [MAGAZINE_SIZE]?*T = [_]?*T{null} ** MAGAZINE_SIZE,
             count: usize = 0,
+            owner: ?*Self = null, // which instance owns these objects
         };
         const MAGAZINE_SIZE = 64;
 
@@ -77,7 +78,34 @@ pub fn SlabAllocator(comptime T: type) type {
             self.full_slabs = null;
         }
 
+        /// If the threadlocal magazine belongs to a different instance, flush it.
+        fn ensureMagazineOwnership(self: *Self) void {
+            if (local_alloc_mag.owner != null and local_alloc_mag.owner != self) {
+                // Magazine has objects from a different instance — flush them
+                // back to their owner before we use the magazine.
+                const old_owner = local_alloc_mag.owner.?;
+                old_owner.lock.lock();
+                for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
+                    old_owner.destroyToDepot(o.?);
+                }
+                old_owner.lock.unlock();
+                local_alloc_mag = .{};
+            }
+            if (local_free_mag.owner != null and local_free_mag.owner != self) {
+                const old_owner = local_free_mag.owner.?;
+                old_owner.lock.lock();
+                for (local_free_mag.objects[0..local_free_mag.count]) |o| {
+                    old_owner.destroyToDepot(o.?);
+                }
+                old_owner.lock.unlock();
+                local_free_mag = .{};
+            }
+            local_alloc_mag.owner = self;
+            local_free_mag.owner = self;
+        }
+
         pub fn create(self: *Self) !*T {
+            self.ensureMagazineOwnership();
             // Try local magazine first (no lock!)
             if (local_free_mag.count > 0) {
                 local_free_mag.count -= 1;
@@ -148,6 +176,7 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         pub fn destroy(self: *Self, obj: *T) void {
+            self.ensureMagazineOwnership();
             // Try local free magazine first (no lock!)
             if (local_free_mag.count < MAGAZINE_SIZE) {
                 local_free_mag.objects[local_free_mag.count] = obj;
@@ -163,11 +192,11 @@ pub fn SlabAllocator(comptime T: type) type {
             self.lock.lock();
             defer self.lock.unlock();
 
-            // Flush objects from free magazine — only those belonging to this instance
+            // Magazine is full — flush all objects back to depot
             for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                if (self.ownsSlab(o.?)) self.destroyToDepot(o.?);
+                self.destroyToDepot(o.?);
             }
-            local_free_mag.count = 0;
+            local_free_mag = .{ .owner = self };
 
             self.destroyToDepot(obj);
         }
@@ -386,18 +415,19 @@ pub fn SlabAllocator(comptime T: type) type {
             self.lock.lock();
             defer self.lock.unlock();
 
-            // Only return objects that belong to slabs owned by THIS instance.
-            // Threadlocal magazines are shared across all SlabAllocator(T)
-            // instances — objects from a destroyed instance must be skipped.
-            for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
-                if (self.ownsSlab(o.?)) self.destroyToDepot(o.?);
+            // Only flush if this thread's magazine belongs to this instance.
+            if (local_alloc_mag.owner == self) {
+                for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
+                    self.destroyToDepot(o.?);
+                }
+                local_alloc_mag = .{};
             }
-            local_alloc_mag.count = 0;
-
-            for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                if (self.ownsSlab(o.?)) self.destroyToDepot(o.?);
+            if (local_free_mag.owner == self) {
+                for (local_free_mag.objects[0..local_free_mag.count]) |o| {
+                    self.destroyToDepot(o.?);
+                }
+                local_free_mag = .{};
             }
-            local_free_mag.count = 0;
         }
     };
 }

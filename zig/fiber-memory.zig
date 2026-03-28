@@ -14,6 +14,7 @@ pub const MICRO_STACK_SIZE:    usize =   4 * 1024;   //   4 KB
 pub const STANDARD_STACK_SIZE: usize =  16 * 1024;   //  16 KB  (default)
 pub const LARGE_STACK_SIZE:    usize =  64 * 1024;   //  64 KB
 pub const XL_STACK_SIZE:       usize = 256 * 1024;   // 256 KB
+pub const HUGE_STACK_SIZE:     usize =   2 * 1024 * 1024; // 2 MB (tests only)
 
 // Typed array aliases — each SlabAllocator is parameterized by a fixed-size type.
 const MicroArray    = [MICRO_STACK_SIZE]u8;
@@ -65,25 +66,23 @@ pub const StackPool = struct {
         self.xl_slab.flushThreadCache();
     }
 
-    /// Allocate a stack of the requested size class.
-    /// Returns a []u8 slice whose .len equals the stack size constant.
     pub fn alloc(self: *StackPool, size: StackSize) ![]u8 {
         return switch (size) {
             .Micro    => blk: { const p = try self.micro_slab.create();    break :blk p[0..]; },
             .Standard => blk: { const p = try self.standard_slab.create(); break :blk p[0..]; },
             .Large    => blk: { const p = try self.large_slab.create();    break :blk p[0..]; },
             .Xl       => blk: { const p = try self.xl_slab.create();       break :blk p[0..]; },
+            .Huge     => try self.allocator.alloc(u8, HUGE_STACK_SIZE),
         };
     }
 
-    /// Return a previously-allocated stack to the right slab.
-    /// Size class is determined from stack.len — no extra tag needed.
     pub fn free(self: *StackPool, stack: []u8) void {
         switch (stack.len) {
             MICRO_STACK_SIZE    => { const p: *MicroArray    = @ptrCast(stack.ptr); self.micro_slab.destroy(p); },
             STANDARD_STACK_SIZE => { const p: *StandardArray = @ptrCast(stack.ptr); self.standard_slab.destroy(p); },
             LARGE_STACK_SIZE    => { const p: *LargeArray    = @ptrCast(stack.ptr); self.large_slab.destroy(p); },
             XL_STACK_SIZE       => { const p: *XlArray       = @ptrCast(stack.ptr); self.xl_slab.destroy(p); },
+            HUGE_STACK_SIZE     => self.allocator.free(stack),
             else => unreachable,
         }
     }

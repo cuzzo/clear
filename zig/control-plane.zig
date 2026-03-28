@@ -110,26 +110,27 @@ fn nextSize(size: StackSize) StackSize {
         .Standard => .Large,
         .Large => .Xl,
         .Xl => .Xl,
+        .Huge => .Huge,
     };
 }
 
-/// Drop a StackSize down one tier.  Micro stays at Micro.
 fn prevSize(size: StackSize) StackSize {
     return switch (size) {
         .Micro => .Micro,
         .Standard => .Micro,
         .Large => .Standard,
         .Xl => .Large,
+        .Huge => .Xl,
     };
 }
 
-/// Byte size for a StackSize tier.
 fn tierBytes(size: StackSize) usize {
     return switch (size) {
         .Micro => fm.MICRO_STACK_SIZE,
         .Standard => fm.STANDARD_STACK_SIZE,
         .Large => fm.LARGE_STACK_SIZE,
         .Xl => fm.XL_STACK_SIZE,
+        .Huge => fm.HUGE_STACK_SIZE,
     };
 }
 

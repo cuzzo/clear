@@ -160,6 +160,8 @@ pub const StackSize = enum {
     Large,
     /// Xl: 256 KB total (252 KB stack + 4 KB arena)
     Xl,
+    /// Huge: 2 MB total — for tests where __morestack is not available
+    Huge,
 };
 
 pub const Stack = struct {
