@@ -321,6 +321,7 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
                 };
                 while (!target.channels[my_idx].push(msg))
                     std.Thread.yield() catch {};
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .release);
                 target.event_fd.notify();
 
                 while (!ctx.done.load(.acquire)) {
@@ -427,9 +428,9 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
     defer rt.deinit();
     rt.wireAllocator();
 
-    const KEYS = 50;
-    const FIBERS = 2;
-    const ITERS = 2;
+    const KEYS = 10000;
+    const FIBERS = 8;
+    const ITERS = 5;
     const Map = CheatLib.PartitionedStringMap(i64, 4);
 
     const BgWork = struct {

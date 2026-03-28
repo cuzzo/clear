@@ -159,13 +159,12 @@ pub fn SlabAllocator(comptime T: type) type {
             self.lock.lock();
             defer self.lock.unlock();
 
-            // Flush all objects from free magazine to depot
+            // Flush objects from free magazine — only those belonging to this instance
             for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                self.destroyToDepot(o.?);
+                if (self.ownsSlab(o.?)) self.destroyToDepot(o.?);
             }
             local_free_mag.count = 0;
 
-            // Also destroy the current object
             self.destroyToDepot(obj);
         }
 
@@ -366,20 +365,35 @@ pub fn SlabAllocator(comptime T: type) type {
              }
         }
 
+        /// Check if an object's slab header belongs to this instance.
+        fn ownsSlab(self: *Self, obj: *T) bool {
+            const mask = ~(self.slab_size - 1);
+            const slab: *SlabHeader = @ptrFromInt(@intFromPtr(obj) & mask);
+            // Check partial_slabs list
+            var it = self.partial_slabs;
+            while (it) |s| : (it = s.next) { if (s == slab) return true; }
+            // Check full_slabs list
+            it = self.full_slabs;
+            while (it) |s| : (it = s.next) { if (s == slab) return true; }
+            return false;
+        }
+
         pub fn flushThreadCache(self: *Self) void {
             self.lock.lock();
             defer self.lock.unlock();
 
+            // Only return objects that belong to slabs owned by THIS instance.
+            // Threadlocal magazines are shared across all SlabAllocator(T)
+            // instances — objects from a destroyed instance must be skipped.
             for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
-                self.destroyToDepot(o.?);
+                if (self.ownsSlab(o.?)) self.destroyToDepot(o.?);
             }
             local_alloc_mag.count = 0;
 
             for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                self.destroyToDepot(o.?);
+                if (self.ownsSlab(o.?)) self.destroyToDepot(o.?);
             }
             local_free_mag.count = 0;
-
         }
     };
 }

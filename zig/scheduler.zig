@@ -504,11 +504,9 @@ pub const Scheduler = struct {
                 self.fast_path_counter +%= 1;
                 if (self.fast_path_counter & 63 == 0) {
                     self.drainChannels();
-                    self.drainChannels();
                 }
             } else {
                 // ── Slow path: no ready work — check all sources.
-                self.drainChannels();
                 self.drainChannels();
 
                 // Wake sleeping tasks
@@ -555,17 +553,11 @@ pub const Scheduler = struct {
 
                 switch (task.status) {
                     .Finished => {
-                        const used = cp.measureStackUsage(task.base.stack.memory);
-                        cp.recordCompletion(
-                            @intFromPtr(task.user_fn),
-                            task.base.size_class,
-                            used,
-                        );
                         _ = self.active_tasks.fetchSub(1, .monotonic);
                         // Recycle: return stack to cache, keep Task+Fiber for reuse
                         self.freeStack(task.base.stack.memory);
+                        task.base.stack.memory = &.{}; // clear to prevent double-free in deinit
                         self.fiber_pool.append(self.allocator, task) catch {
-                            // Pool full — destroy instead
                             self.allocator.destroy(task.base);
                             self.allocator.destroy(task);
                         };

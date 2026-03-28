@@ -275,3 +275,115 @@ test "Producer-Consumer contention" {
     slab.flushThreadCache();
 }
 
+// ========================================================================
+// BUG REPRODUCTION: Two instances of SlabAllocator(T) share threadlocal
+// magazines. Objects allocated from instance A end up in instance B's
+// magazine, causing used_count underflow on flushThreadCache.
+// ========================================================================
+
+test "two slab instances on same thread do not corrupt each other" {
+
+    var slab_a = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+    var slab_b = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+
+    // Allocate from A — fills threadlocal magazine with A's objects
+    var objs_a: [10]*TestObj = undefined;
+    for (&objs_a) |*slot| slot.* = try slab_a.create();
+
+    // Free them back to A — fills threadlocal free magazine
+    for (objs_a) |obj| slab_a.destroy(obj);
+
+    // Now allocate from B — should NOT get A's objects
+    var objs_b: [10]*TestObj = undefined;
+    for (&objs_b) |*slot| slot.* = try slab_b.create();
+
+    // Free them back to B
+    for (objs_b) |obj| slab_b.destroy(obj);
+
+    // Deinit both — should not crash (used_count underflow)
+    slab_b.deinit();
+    slab_a.deinit();
+}
+
+test "cross-thread slab: thread A allocs, thread B frees, no crash" {
+    var slab = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+    defer slab.deinit();
+
+    // Thread A allocates objects
+    var objs: [64]*TestObj = undefined;
+    for (&objs) |*slot| slot.* = try slab.create();
+
+    // Thread B destroys them
+    const t = try std.Thread.spawn(.{}, struct {
+        fn run(s: *Slab, os: []const *TestObj) void {
+            for (os) |o| s.destroy(o);
+            s.flushThreadCache();
+        }
+    }.run, .{ &slab, &objs });
+    t.join();
+}
+
+test "slab: thread creates/destroys instance, second thread reuses — no underflow" {
+    // This reproduces the scheduler crash: thread A creates a slab, allocs,
+    // frees, deinits. Thread B then creates a NEW slab of same type.
+    // The threadlocal magazine on thread A still has stale pointers.
+    // If thread A then calls create/destroy/flush on the NEW slab,
+    // the stale pointers route to wrong slabs.
+
+    var shared_slab: ?*Slab = null;
+    var phase = std.atomic.Value(u32).init(0);
+
+    const t = try std.Thread.spawn(.{}, struct {
+        fn run(s: *?*Slab, p: *std.atomic.Value(u32)) void {
+            // Phase 1: create slab, alloc, free, deinit
+            var slab1 = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+            var objs: [20]*TestObj = undefined;
+            for (&objs) |*slot| slot.* = slab1.create() catch return;
+            for (objs) |o| slab1.destroy(o);
+            slab1.deinit();
+
+            // Phase 2: create NEW slab, expose to main thread
+            var slab2 = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+            s.* = &slab2;
+            p.store(1, .release); // signal main thread
+
+            // Wait for main to finish
+            while (p.load(.acquire) != 2) std.Thread.yield() catch {};
+
+            // Phase 3: alloc from slab2 — threadlocal mag may have stale ptrs from slab1
+            var objs2: [20]*TestObj = undefined;
+            for (&objs2) |*slot| slot.* = slab2.create() catch return;
+            for (objs2) |o| slab2.destroy(o);
+            slab2.deinit();
+            p.store(3, .release);
+        }
+    }.run, .{ &shared_slab, &phase });
+
+    // Wait for slab2 to be ready
+    while (phase.load(.acquire) != 1) std.Thread.yield() catch {};
+    phase.store(2, .release); // signal thread to continue
+    while (phase.load(.acquire) != 3) std.Thread.yield() catch {};
+    t.join();
+}
+
+test "sequential create-destroy of slab instances does not leak state" {
+
+    // First instance: alloc, free, deinit
+    {
+        var slab = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+        var objs: [20]*TestObj = undefined;
+        for (&objs) |*slot| slot.* = try slab.create();
+        for (objs) |obj| slab.destroy(obj);
+        slab.deinit();
+    }
+
+    // Second instance: should work cleanly with no leftover state
+    {
+        var slab = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+        var objs: [20]*TestObj = undefined;
+        for (&objs) |*slot| slot.* = try slab.create();
+        for (objs) |obj| slab.destroy(obj);
+        slab.deinit();
+    }
+}
+

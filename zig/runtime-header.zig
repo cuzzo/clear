@@ -1923,8 +1923,10 @@ pub const CheatLib = struct {
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
-                    if (c.map.shards[c.shard].map.fetchRemove(c.key)) |kv|
+                    if (c.map.shards[c.shard].map.fetchRemove(c.key)) |kv| {
                         remote_alloc.free(kv.key);
+                        if (is_slice_value) remote_alloc.free(kv.value);
+                    }
                     c.done.store(true, .release);
                 }
             };
@@ -1946,10 +1948,12 @@ pub const CheatLib = struct {
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
                 target.event_fd.notify();
-                // Wait for target to complete — drain + yield to avoid deadlock
+                // Wait for target to complete — drain channels, yield fiber,
+                // and yield OS thread to ensure the target gets CPU time.
                 while (!done_flag.load(.acquire)) {
                     fp.active_scheduler.drainChannels();
                     fp.active_scheduler.coopYield();
+                    std.Thread.yield() catch {};
                 }
             }
 
@@ -2001,10 +2005,12 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator) void {
-                // Always use remote_alloc (c_allocator) — consistent with put/remove.
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
-                    while (it.next()) |entry| remote_alloc.free(entry.key_ptr.*);
+                    while (it.next()) |entry| {
+                        remote_alloc.free(entry.key_ptr.*);
+                        if (is_slice_value) remote_alloc.free(entry.value_ptr.*);
+                    }
                     shard.map.deinit(remote_alloc);
                 }
             }
