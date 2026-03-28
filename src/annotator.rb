@@ -2125,7 +2125,7 @@ private
       node.pinned = true
       reason = auto_pin_reason(node.body)
       if reason == :sharded
-        note!(node, "BG block auto-pinned — captures @sharded map (shared-nothing requires scheduler affinity).")
+        note!(node, "BG block auto-pinned — captures @sharded map (scheduler affinity for shard locality).")
       else
         note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to override.")
       end

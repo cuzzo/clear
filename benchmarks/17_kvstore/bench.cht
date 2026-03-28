@@ -1,13 +1,11 @@
--- KV Store Benchmark — CLEAR (HashMap@sharded(8), shared-nothing)
+-- KV Store Benchmark — CLEAR (HashMap@sharded(8):locked, RwLock per shard)
 --
--- The idiomatic CLEAR way: HashMap@sharded(8) with @pinned fibers.
--- True shared-nothing: each shard is an independent HashMap with no
--- locks. Fibers are pinned to their scheduler — each scheduler owns
--- its partition of the keyspace. Zero synchronization, zero contention.
+-- Uses @sharded(8):locked — 8 RwLock-protected shards. Readers are
+-- concurrent within a shard; writers are exclusive per-shard.
+-- Best for workloads where any fiber may touch any key (cross-shard).
 --
--- @sharded(N) = shared-nothing (no locks, requires @pinned)
--- @sharded(N):locked = RwLock per shard (thread-safe, for @pinned)
--- @sharded(N):writeLocked = same as :locked (RwLock)
+-- For true shared-nothing (zero locks), use @sharded(N) with
+-- (1..<N)@sharded s> CONCURRENT EACH — each fiber owns its partition.
 --
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys (split across 8 fibers)
@@ -127,7 +125,7 @@ END
 -- =========================================================================
 
 FN cheatMain() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(8) = {};
+    MUTABLE map: HashMap<String>@sharded(8):locked = {};
     n = 1000000;
     workers = 8;
     chunk = n / workers;

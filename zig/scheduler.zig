@@ -406,6 +406,33 @@ pub const Scheduler = struct {
         _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
         self.event_fd.notify();
     }
+    /// Lightweight: only process RemoteCall messages. Spawn and Resume are
+    /// left in the ring for the full drainChannels to handle. Safe to call
+    /// from a fiber's stack — RemoteCall handlers use <1KB of stack.
+    /// Lightweight: only process RemoteCall messages from SPSC channels.
+    /// Uses peek() to avoid consuming Spawn/Resume messages.
+    /// Safe to call from a fiber — RemoteCall handlers use <1KB stack.
+    pub fn drainRemoteCalls(self: *Scheduler) void {
+        const mask = self.dirty_mask.load(.acquire);
+        if (mask == 0) return;
+        var bits = mask;
+        while (bits != 0) {
+            const sender_idx = @ctz(bits);
+            bits &= bits - 1;
+            while (true) {
+                const peeked = self.channels[sender_idx].peek() orelse break;
+                if (peeked.tag != .RemoteCall) break; // leave for main loop
+                // It's a RemoteCall — pop and execute
+                _ = self.channels[sender_idx].pop();
+                const func = peeked.rc_func.?;
+                const ctx = peeked.rc_ctx.?;
+                func(ctx);
+            }
+        }
+    }
+
+    /// Full drain: processes ALL message types (Spawn, Resume, RemoteCall).
+    /// Must run on the scheduler's main stack (not from a fiber).
     pub noinline fn drainChannels(self: *Scheduler) void {
         var mask = self.dirty_mask.swap(0, .acquire);
         while (mask != 0) {
@@ -500,9 +527,12 @@ pub const Scheduler = struct {
             // newly spawned tasks so they aren't starved.
             if (self.ready_queue.len() > 0) {
                 self.fast_path_counter +%= 1;
-                // Drain channels on every iteration — remote calls need
-                // fast response. The dirty_mask makes this O(1) when empty.
-                self.drainChannels();
+                // Drain RemoteCalls every iteration (O(1) when empty).
+                // Full drain (Spawn/Resume) every 64th to avoid heavy alloc.
+                self.drainRemoteCalls();
+                if (self.fast_path_counter & 63 == 0) {
+                    self.drainChannels();
+                }
             } else {
                 // ── Slow path: no ready work — check all sources.
                 self.drainChannels();

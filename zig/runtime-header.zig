@@ -1957,9 +1957,10 @@ pub const CheatLib = struct {
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
                 target.event_fd.notify();
-                // Yield to scheduler — it runs drainChannels on its own stack
-                // (g0 pattern), then resumes us. This keeps the fiber's stack
-                // shallow and lets both schedulers make progress.
+                // Yield-poll: yield to scheduler so it can drain channels
+                // (including other fibers' remote results), then resume us.
+                // We re-check done each time we're scheduled.
+                // Cost: ~100ns per yield (register save/restore).
                 while (!done_flag.load(.acquire)) {
                     const task = fp.active_scheduler.getCurrent();
                     task.status = .Ready;

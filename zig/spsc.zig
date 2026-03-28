@@ -77,6 +77,14 @@ pub fn SpscRing(comptime capacity: usize) type {
             return msg;
         }
 
+        /// Consumer: peek at the next message without consuming it.
+        pub fn peek(self: *Self) ?Message {
+            const t = self.tail.load(.monotonic);
+            const h = self.head.load(.acquire);
+            if (t == h) return null;
+            return self.buffer[t & mask];
+        }
+
         /// Consumer: number of pending messages.
         pub fn len(self: *Self) usize {
             const h = self.head.load(.acquire);

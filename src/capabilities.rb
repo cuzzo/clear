@@ -468,9 +468,11 @@ module CapabilityAudit
 
     key = "#{@current_function_name}:#{var_name}"
     line = node.respond_to?(:token) && node.token ? node.token.line : nil
+    ft = final_type.is_a?(Type) ? final_type : (info&.dig(:full_type).is_a?(Type) ? info[:full_type] : nil)
+    is_sharded = ft&.respond_to?(:sharded?) && ft.sharded?
     @capability_audit[key] = {
       fn: @current_function_name, var: var_name, line: line,
-      sync: sync, ownership: own, storage: storage,
+      sync: sync, ownership: own, storage: storage, sharded: is_sharded,
       mutated: false, captured_bg: false, captured_parallel: false
     }
   end
@@ -492,7 +494,7 @@ module CapabilityAudit
       sync = info[:sync]
       own  = info[:ownership]
 
-      if (sync == :locked || sync == :write_locked) && !info[:mutated]
+      if (sync == :locked || sync == :write_locked) && !info[:mutated] && !info[:sharded]
         $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
                      "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
       end

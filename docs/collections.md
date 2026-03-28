@@ -224,7 +224,34 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 
 **Hot path** (shard owned by the current scheduler): Direct access. No locks, no atomics. Cooperative scheduling ensures only one fiber runs at a time per scheduler, so there's no data race.
 
-**Cold path** (shard owned by another scheduler): The operation is transparently routed to the owning scheduler via the runtime's lock-free inbox. The calling fiber yields until the owning scheduler executes the operation inline and signals completion. Correct, but slower — design your workload to minimize cross-shard access.
+**Cold path** (shard owned by another scheduler): The operation is transparently routed to the owning scheduler via SPSC ring buffers. The calling fiber yields until the owning scheduler executes the operation inline and signals completion via an atomic done flag. Correct, but slower — design your workload so each fiber processes ONLY its own partition.
+
+### Planned: `CONCURRENT EACH` for Shared-Nothing Workloads
+
+The ideal shared-nothing pattern: partition the work so each fiber owns its shard exclusively.
+
+```
+-- Planned syntax (not yet implemented):
+MUTABLE map: HashMap<String>@sharded(8) = {};
+
+-- Distribute work by shard — each fiber only touches its own partition
+(0..<8)@sharded s> CONCURRENT EACH |shard| ->
+    -- This fiber is pinned to the scheduler that owns shard `shard`.
+    -- All map operations on keys in this shard are LOCAL (zero routing).
+    FOR i IN (shard * chunk)..<((shard + 1) * chunk) DO
+        map["key:" + toString(i)] = "value";
+    END
+END
+```
+
+**How it works**: `(range)@sharded s> CONCURRENT EACH` tells the compiler to:
+1. Pin each iteration's fiber to the scheduler that owns shard `i % S`
+2. Each fiber gets exclusive access to its partition — no locks, no routing
+3. The result is true DragonflyDB-style shared-nothing: N partitions, N fibers, zero synchronization
+
+**When to use `@sharded(N)` vs `@sharded(N):locked`**:
+- `@sharded(N)` + `CONCURRENT EACH`: each fiber owns its partition. Maximum throughput.
+- `@sharded(N):locked`: any fiber can access any key. RwLock per shard. Use when the workload can't be partitioned (e.g., random key distribution across all fibers).
 
 ### One-Line Optimization
 
@@ -253,9 +280,9 @@ The compiler handles everything:
 
 | Variant | Model | Locking | Use when |
 |---|---|---|---|
-| `@sharded(N)` | Shared-nothing | None (fiber-pinned) | Default — maximum throughput |
-| `@sharded(N):locked` | Lock-striped (RwLock) | Per-shard RwLock | Known cross-scheduler contention |
-| `@sharded(N):writeLocked` | Lock-striped (RwLock) | Per-shard RwLock | Read-heavy cross-scheduler access |
+| `@sharded(N)` | Shared-nothing | None (fiber-pinned) | Partitioned workloads (CONCURRENT EACH) |
+| `@sharded(N):locked` | RwLock per shard | Per-shard RwLock | Cross-shard access from any fiber |
+| `@sharded(N):writeLocked` | RwLock per shard | Per-shard RwLock | Same as :locked (alias) |
 
 ### When You Need Shared Mutable Maps
 

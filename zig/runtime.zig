@@ -21,7 +21,7 @@ comptime {
 // if another fiber is ready. Reset to 0 after each yield, giving each fiber a
 // fresh 4096-iteration slice on resume.
 const YIELD_BUDGET: u32 = 4096;
-const YIELD_MASK:   u32 = YIELD_BUDGET - 1; // 0x0FFF
+const YIELD_MASK:   u32 = YIELD_BUDGET - 1;
 
 pub const Runtime = struct {
     // Control

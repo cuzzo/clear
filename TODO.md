@@ -39,13 +39,24 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 
 **DONE:**
 - [x] PartitionedStringMap — true shared-nothing, zero locks, zero atomics
-- [x] Cross-scheduler routing via RemoteCall + WaitGroup
+- [x] ShardedStringMap — RwLock per shard for cross-shard workloads
+- [x] SPSC ring buffers replace MPSC Treiber stack (zero use-after-free)
+- [x] Cross-scheduler routing via RemoteCall + atomic done flag
 - [x] spawnPinned — round-robin fiber distribution across schedulers
 - [x] Auto-pin BG blocks that capture @sharded maps
 - [x] Unified StringMap API — @sharded is a one-line declaration change
 - [x] Functions accept any HashMap variant via anytype (no @sharded in params)
-- [x] Zig-level scaling test: 1.9x on 2 cores
-- [x] Benchmark: 1.35s (Rust 4.76s = 3.5x slower, Go 14.08s = 10x slower)
+- [x] Slab allocator threadlocal magazine ownership fix
+- [x] Benchmark (@sharded(8):locked): 2.1s (Rust 2.4s = 1.2x slower, Go 5.8s = 2.8x slower)
+
+**TODO — True shared-nothing syntax:**
+- [ ] `(1..<N)@sharded s> CONCURRENT EACH |shard| -> ...` — each fiber owns one partition
+- [ ] Design: range@sharded distributes iterations to pinned schedulers; each iteration
+      gets exclusive access to its shard (no locks, no routing, zero synchronization)
+- [ ] This is the DragonflyDB model: partition the keyspace, pin threads to partitions
+- [ ] Current @sharded(N) (no :locked) + PartitionedStringMap + sendAndWait is correct
+      but has high overhead for cross-shard workloads (fiber yield per remote op)
+- [ ] The right workload for shared-nothing: each fiber processes ONLY its own shard
 
 ### Milestone: FOR Loop
 
