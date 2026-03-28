@@ -1891,14 +1891,6 @@ pub const CheatLib = struct {
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
-                    // Debug: print shard ownership info
-                    const owner_ptr = c.map.owners[c.shard];
-                    const my_ptr = fp.active_scheduler;
-                    if (owner_ptr != my_ptr) {
-                        std.debug.print("SHARD {d}: owner_ptr=0x{x} my_ptr=0x{x} map=0x{x}\n", .{
-                            c.shard, @intFromPtr(owner_ptr), @intFromPtr(my_ptr), @intFromPtr(c.map),
-                        });
-                    }
                     // For slice values (e.g. []const u8), dupe the value too —
                     // the original may point to the caller's stack.
                     const safe_val = if (comptime is_slice_value)
