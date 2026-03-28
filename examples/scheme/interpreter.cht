@@ -1,73 +1,99 @@
 -- Mal (Make-a-Lisp) Level 4 Interpreter in CLEAR
---
--- Features:
---   - Types: Nil, Bool, Number, String, Symbol, List, Vector, HashMap
---   - Functions: Lambdas (fn*), Native Functions
---   - Forms: def!, let*, do, if, fn*
---   - Environment: Nested scoping
---
--- STATUS: Does not yet compile. See TODO.md for the ordered list of
--- compiler features needed. Each blocker is annotated inline below
--- with [P0], [P1], or [P2] priority tags.
+-- All state passed explicitly. No globals.
 
--- [P0:6] @indirect on Body breaks Value -> Lambda -> Value recursion.
--- The compiler must emit a heap-allocated pointer for this field.
--- v0.2+: The compiler should infer @indirect automatically on recursive variants.
 UNION Value {
-    Nil,
-    Bool(Val: Bool),
-    Number(Val: Float64),
-    String(Val: String),
-    Symbol(Val: String),
-    List(Items: Value[]),
-    Vector(Items: Value[]),
-    HashMap(Entries: HashMap<Value>),
-    NativeFn(Name: String),
-    Lambda(Params: Value[], Body: Value @indirect, Env: Env@shared)
+    Nil, TrueVal, FalseVal,
+    Number: Float64, Str: String, Symbol: String,
+    List: Value[], NativeFn: String,
+    Lambda { params: Value[], body: Value @indirect, envId: Int64 }
 }
 
-STRUCT Env {
-    Data: HashMap<Value>,
-    -- [P0:7] @shared? means optional Arc-wrapped Env.
-    -- [P1:12] .? syntax needed to unwrap the optional in envGet.
-    Outer: Env@shared?
-}
+FN mkKey(envId: Int64, key: String) RETURNS String ->
+    RETURN toString(envId) + ":" + key;
+END
 
--- =========================================================================
--- Reader
--- =========================================================================
+FN setEnv!(MUTABLE env: HashMap<Value>, envId: Int64, key: String, val: Value) RETURNS Void ->
+    x = "" + "";
+    env[mkKey(envId, key)] = val;
+END
 
--- [P0:1] String escape sequences: the string literals below use \", \n, \t.
--- The CLEAR lexer must support these before this file can parse.
---
--- v0.2+: Replace this entire function with @regex tokenization.
-FN tokenize(str: String) RETURNS String[] ->
-    MUTABLE tokens: String[] = [];
-    MUTABLE i = 0;
+FN getEnv(env: HashMap<Value>, envId: Int64, key: String) RETURNS ?Value @reentrant ->
+    v = env[mkKey(envId, key)];
+    IF v THEN RETURN v; END
+    parentVal = env[mkKey(envId, "__p")] OR Value.Nil;
+    MATCH parentVal START
+        Value.Number AS pid ->
+            IF pid >= 0.0 THEN RETURN getEnv(env, toInt(pid), key); END,
+        DEFAULT -> PASS;
+    END
+    MUTABLE none: ?Value = NIL;
+    RETURN none;
+END
+
+FN boolVal(b: Bool) RETURNS Value ->
+    IF b THEN RETURN Value.TrueVal; END
+    RETURN Value.FalseVal;
+END
+
+FN isTruthy(v: Value) RETURNS Bool ->
+    MATCH v START
+        Value.Nil -> RETURN FALSE;,
+        Value.FalseVal -> RETURN FALSE;,
+        DEFAULT -> RETURN TRUE;
+    END
+    RETURN TRUE;
+END
+
+FN valEqual(a: Value, b: Value) RETURNS Bool @reentrant ->
+    MATCH a START
+        Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.TrueVal -> MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.FalseVal -> MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.Number AS na -> MATCH b START Value.Number AS nb -> RETURN na == nb;, DEFAULT -> RETURN FALSE; END,
+        Value.Str AS sa -> MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.List AS la ->
+            MATCH b START
+                Value.List AS lb ->
+                    IF la.length() != lb.length() THEN RETURN FALSE; END
+                    MUTABLE ci: Int64 = 0;
+                    WHILE ci < la.length() DO
+                        IF valEqual(la[ci], lb[ci]) == FALSE THEN RETURN FALSE; END
+                        ci += 1;
+                    END
+                    RETURN TRUE;,
+                DEFAULT -> RETURN FALSE;
+            END,
+        DEFAULT -> RETURN FALSE;
+    END
+    RETURN FALSE;
+END
+
+FN tokenize(str: String) RETURNS String[]@list ->
+    MUTABLE tokens: String[]@list = List[];
+    MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
-        -- [P0:2] str[i] — string indexing must return a character.
-        c = str[i];
-        IF c == " " OR c == "," OR c == "\n" OR c == "\t" THEN
+        c = charAt(str, i);
+        IF c == " " || c == "," || c == "\n" || c == "\t" THEN
             i += 1;
-        ELSE IF c == "(" OR c == ")" OR c == "[" OR c == "]" OR c == "{" OR c == "}" OR c == "'" OR c == "`" OR c == "~" OR c == "@" OR c == "^" THEN
-            tokens.append(toString(c));
+        ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
+            tokens.append(c);
             i += 1;
-        ELSE IF c == "\"" THEN
+        ELSE_IF c == ";" THEN
+            WHILE i < str.length() && charAt(str, i) != "\n" DO i += 1; END
+        ELSE_IF c == "\"" THEN
             MUTABLE s = "\"";
             i += 1;
-            WHILE i < str.length() AND str[i] != "\"" DO
-                s += toString(str[i]);
+            WHILE i < str.length() && charAt(str, i) != "\"" DO
+                s = s + charAt(str, i);
                 i += 1;
             END
-            s += "\"";
+            s = s + "\"";
             tokens.append(s);
             i += 1;
-        ELSE IF c == ";" THEN
-            WHILE i < str.length() AND str[i] != "\n" DO i += 1; END
         ELSE
             MUTABLE s = "";
-            WHILE i < str.length() AND str[i] != " " AND str[i] != "," AND str[i] != "\n" AND str[i] != "\t" AND str[i] != "(" AND str[i] != ")" AND str[i] != "[" AND str[i] != "]" AND str[i] != "{" AND str[i] != "}" AND str[i] != "\"" DO
-                s += toString(str[i]);
+            WHILE i < str.length() && charAt(str, i) != " " && charAt(str, i) != "," && charAt(str, i) != "\n" && charAt(str, i) != "\t" && charAt(str, i) != "(" && charAt(str, i) != ")" && charAt(str, i) != "[" && charAt(str, i) != "]" && charAt(str, i) != "\"" DO
+                s = s + charAt(str, i);
                 i += 1;
             END
             tokens.append(s);
@@ -76,263 +102,247 @@ FN tokenize(str: String) RETURNS String[] ->
     RETURN tokens;
 END
 
-STRUCT Reader {
-    Tokens: String[],
-    Pos: Int64
-}
-
+-- Reader: tokens passed as slice, pos tracked via HashMap entry to avoid copy issues
 FN readAtom(token: String) RETURNS Value ->
     IF token == "nil" THEN RETURN Value.Nil; END
-    IF token == "true" THEN RETURN Value.Bool(true); END
-    IF token == "false" THEN RETURN Value.Bool(false); END
-    -- [P0:2] token[0] — string indexing for quote detection.
-    IF token[0] == "\"" THEN
-        -- [P0:3] .substring(start, end) — strip surrounding quotes.
-        RETURN Value.String(token.substring(1, token.length() - 1));
+    IF token == "true" THEN RETURN Value.TrueVal; END
+    IF token == "false" THEN RETURN Value.FalseVal; END
+    IF charAt(token, 0) == "\"" THEN
+        RETURN Value{ Str: substr(token, 1, token.length() - 2) };
     END
-    -- [P0:4] toNumber(string) returning ?Float64. OR provides fallback.
-    -- TODO: Replace -999.999 sentinel with proper optional handling once
-    -- toNumber returns ?Float64 and we can use `toNumber(token) OR NIL`.
-    n = toNumber(token) OR -999.999;
-    IF n != -999.999 THEN RETURN Value.Number(n); END
-    RETURN Value.Symbol(token);
+    n = toNumber(token) OR 0.0 - 999999.0;
+    IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
+    RETURN Value{ Symbol: token };
 END
 
--- [P0:8] Error union propagation: !Value return type means RAISE inside
--- the WHILE body must propagate to the caller.
--- [P1:11] `readForm!(r) OR BREAK` — error-to-break coercion in loops.
-FN readForm(MUTABLE r: Reader) RETURNS !Value ->
-    IF r.Pos >= r.Tokens.length() THEN RAISE "EOF"; END
-    token = r.Tokens[r.Pos];
-    r.Pos += 1;
+-- Use env HashMap to store reader position as "r:pos" -> Value.Number
+-- This avoids struct copy issues with MUTABLE Reader params.
+FN getPos(env: HashMap<Value>) RETURNS Int64 ->
+    v = env["r:pos"] OR Value{ Number: 0.0 };
+    MATCH v START Value.Number AS n -> RETURN toInt(n);, DEFAULT -> RETURN 0; END
+    RETURN 0;
+END
 
-    IF token == "(" THEN
-        MUTABLE items: Value[] = [];
-        WHILE r.Pos < r.Tokens.length() AND r.Tokens[r.Pos] != ")" DO
-            items.append(readForm!(r));
+FN setPos!(MUTABLE env: HashMap<Value>, pos: Int64) RETURNS Void ->
+    x = "" + "";
+    env["r:pos"] = Value{ Number: toFloat(pos) };
+END
+
+FN readForm!(MUTABLE env: HashMap<Value>, tokens: String[]) RETURNS !Value @reentrant ->
+    pos = getPos(env);
+    IF pos >= tokens.length() THEN RAISE "EOF"; END
+    token = tokens[pos];
+    setPos!(env, pos + 1);
+    IF token == "(" || token == "[" THEN
+        MUTABLE closer = ")";
+        IF token == "[" THEN closer = "]"; END
+        MUTABLE items: Value[]@list = List[];
+        MUTABLE rp = getPos(env);
+        WHILE rp < tokens.length() && tokens[rp] != closer DO
+            item = readForm!(env, tokens) OR RAISE;
+            items.append(item);
+            rp = getPos(env);
         END
-        IF r.Pos >= r.Tokens.length() THEN RAISE "Expected )"; END
-        r.Pos += 1;
-        RETURN Value.List(items);
-    ELSE IF token == "[" THEN
-        MUTABLE items: Value[] = [];
-        WHILE r.Pos < r.Tokens.length() AND r.Tokens[r.Pos] != "]" DO
-            items.append(readForm!(r));
-        END
-        IF r.Pos >= r.Tokens.length() THEN RAISE "Expected ]"; END
-        r.Pos += 1;
-        RETURN Value.Vector(items);
+        IF rp >= tokens.length() THEN RAISE "Expected )"; END
+        setPos!(env, rp + 1);
+        RETURN Value{ List: items };
     ELSE
         RETURN readAtom(token);
     END
 END
 
--- =========================================================================
--- Env
--- =========================================================================
-
--- [P1:12] inner.Outer.? — unwrap optional @shared Env.
-FN envGet(e: Env@shared, key: String) RETURNS ?Value ->
-    WITH e AS inner {
-        v = inner.Data[key];
-        IF v THEN RETURN v; END
-        IF inner.Outer THEN
-            RETURN envGet(inner.Outer.?, key);
-        END
-    }
-    RETURN NIL;
-END
-
--- [P0:7] @shared Env — WITH EXCLUSIVE for mutable access.
-FN envSet!(MUTABLE e: Env@shared, key: String, val: Value) RETURNS Void ->
-    WITH EXCLUSIVE e AS inner {
-        inner.Data[key] = val;
-    }
-    RETURN;
-END
-
--- =========================================================================
--- Eval
--- =========================================================================
-
--- [P0:5] MATCH payload extraction is the heart of the evaluator.
--- Every `Value.X(payload) -> expr` pattern depends on it.
-FN eval(v: Value, MUTABLE env: Env@shared) RETURNS !Value ->
+FN eval!(MUTABLE env: HashMap<Value>, MUTABLE nextId: Int64, v: Value, envId: Int64) RETURNS !Value @reentrant ->
     MATCH v START
-        Value.Symbol(s) ->
-            got = envGet(env, s) OR RAISE "Symbol not found: " + s;
-            RETURN got;
-        Value.List(items) ->
-            IF items.length() == 0 THEN RETURN v; END
+        Value.Symbol AS s ->
+            got = getEnv(env, envId, s) OR Value.Nil;
+            MATCH got START Value.Nil -> RAISE "'" + s + "' not found";, DEFAULT -> RETURN got; END,
 
-            -- Special Forms
+        Value.List AS items ->
+            IF items.length() == 0 THEN RETURN v; END
             head = items[0];
             MATCH head START
-                Value.Symbol(s) ->
+                Value.Symbol AS s ->
                     IF s == "def!" THEN
-                        val = eval(items[2], env);
-                        key = MATCH items[1] START Value.Symbol(k) -> k; DEFAULT -> RAISE "def! key must be symbol"; END;
-                        envSet!(env, key, val);
-                        RETURN val;
-                    ELSE IF s == "let*" THEN
-                        -- [P0:7] Env{...} @shared — Arc-wrapped struct construction.
-                        MUTABLE new_env = Env{ Data: {}, Outer: env } @shared;
-                        bindings = MATCH items[1] START Value.List(l) -> l; Value.Vector(v) -> v; DEFAULT -> RAISE "let* bindings must be list/vector"; END;
-                        MUTABLE i = 0;
-                        WHILE i < bindings.length() DO
-                            b_key = MATCH bindings[i] START Value.Symbol(k) -> k; DEFAULT -> RAISE "let* key must be symbol"; END;
-                            b_val = eval(bindings[i+1], new_env);
-                            envSet!(new_env, b_key, b_val);
-                            i += 2;
+                        val = eval!(env, nextId, items[2], envId) OR RAISE;
+                        MATCH items[1] START
+                            Value.Symbol AS k ->
+                                setEnv!(env, envId, k, val);
+                                defR = getEnv(env, envId, k) OR Value.Nil;
+                                RETURN defR;,
+                            DEFAULT -> RAISE "def! key must be symbol";
                         END
-                        RETURN eval(items[2], new_env);
-                    ELSE IF s == "do" THEN
-                        MUTABLE res = Value.Nil;
-                        -- NOTE: Could use FOR i IN (1_i64..<items.length()) DO here once
-                        -- .length() returns Int64 and range bounds work with expressions.
-                        MUTABLE i = 1;
-                        WHILE i < items.length() DO
-                            res = eval(items[i], env);
-                            i += 1;
+                    END
+                    IF s == "let*" THEN
+                        letEnv = nextId;
+                        nextId += 1;
+                        env[mkKey(letEnv, "__p")] = Value{ Number: toFloat(envId) };
+                        MATCH items[1] START
+                            Value.List AS bindings ->
+                                MUTABLE bi: Int64 = 0;
+                                WHILE bi < bindings.length() DO
+                                    MATCH bindings[bi] START
+                                        Value.Symbol AS bk ->
+                                            bv = eval!(env, nextId, bindings[bi + 1], letEnv) OR RAISE;
+                                            setEnv!(env, letEnv, bk, bv);,
+                                        DEFAULT -> RAISE "let* key must be symbol";
+                                    END
+                                    bi += 2;
+                                END,
+                            DEFAULT -> RAISE "let* bindings must be list";
                         END
-                        RETURN res;
-                    ELSE IF s == "if" THEN
-                        cond = eval(items[1], env);
-                        is_truthy = MATCH cond START Value.Nil -> false; Value.Bool(b) -> b; DEFAULT -> true; END;
-                        IF is_truthy THEN
-                            RETURN eval(items[2], env);
+                        RETURN eval!(env, nextId, items[2], letEnv) OR RAISE;
+                    END
+                    IF s == "do" THEN
+                        MUTABLE doRes: Value = Value.Nil;
+                        MUTABLE di: Int64 = 1;
+                        WHILE di < items.length() DO
+                            doRes = eval!(env, nextId, items[di], envId) OR RAISE;
+                            di += 1;
+                        END
+                        RETURN doRes;
+                    END
+                    IF s == "if" THEN
+                        cond = eval!(env, nextId, items[1], envId) OR RAISE;
+                        IF isTruthy(cond) THEN
+                            RETURN eval!(env, nextId, items[2], envId) OR RAISE;
                         ELSE
                             IF items.length() > 3 THEN
-                                RETURN eval(items[3], env);
+                                RETURN eval!(env, nextId, items[3], envId) OR RAISE;
                             ELSE
                                 RETURN Value.Nil;
                             END
                         END
-                    ELSE IF s == "fn*" THEN
-                        params = MATCH items[1] START Value.List(l) -> l; Value.Vector(v) -> v; DEFAULT -> RAISE "fn* params must be list/vector"; END;
-                        RETURN Value.Lambda(params, items[2], env);
                     END
+                    IF s == "fn*" THEN
+                        MATCH items[1] START
+                            Value.List AS fparams ->
+                                RETURN Value.Lambda{ params: fparams, body: items[2], envId: envId };,
+                            DEFAULT -> RAISE "fn* params must be list";
+                        END
+                    END,
                 DEFAULT -> PASS;
             END
 
-            -- Function Application
-            MUTABLE evaluated: Value[] = [];
-            MUTABLE j = 0;
-            WHILE j < items.length() DO
-                evaluated.append(eval(items[j], env));
-                j += 1;
+            MUTABLE evaluated: Value[]@list = List[];
+            MUTABLE ei: Int64 = 0;
+            WHILE ei < items.length() DO
+                ev = eval!(env, nextId, items[ei], envId) OR RAISE;
+                evaluated.append(ev);
+                ei += 1;
             END
-
             f = evaluated[0];
-            -- [P0:3] .substring on array — slice to get args (items 1..end).
-            -- May need a different API: evaluated.slice(1) or evaluated[1..].
-            args = evaluated.substring(1, evaluated.length());
+            MUTABLE args: Value[]@list = List[];
+            MUTABLE ai: Int64 = 1;
+            WHILE ai < evaluated.length() DO
+                args.append(evaluated[ai]);
+                ai += 1;
+            END
 
             MATCH f START
-                Value.NativeFn(name) ->
-                    -- [P1:9] Math operators: only + is implemented.
-                    -- Add -, *, / for step4_tests.mal to pass.
-                    IF name == "+" THEN
-                        a = MATCH args[0] START Value.Number(n) -> n; DEFAULT -> 0.0; END;
-                        b = MATCH args[1] START Value.Number(n) -> n; DEFAULT -> 0.0; END;
-                        RETURN Value.Number(a + b);
-                    ELSE IF name == "list" THEN
-                        RETURN Value.List(args);
-                    ELSE IF name == "list?" THEN
-                        is_l = MATCH args[0] START Value.List -> true; DEFAULT -> false; END;
-                        RETURN Value.Bool(is_l);
-                    ELSE IF name == "empty?" THEN
-                        is_e = MATCH args[0] START Value.List(l) -> l.length() == 0; DEFAULT -> false; END;
-                        RETURN Value.Bool(is_e);
-                    ELSE IF name == "count" THEN
-                        c = MATCH args[0] START Value.List(l) -> l.length(); Value.Nil -> 0; DEFAULT -> 0; END;
-                        RETURN Value.Number(toFloat(c));
+                Value.NativeFn AS name ->
+                    IF name == "+" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN Value{ Number: a + b };, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "-" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN Value{ Number: a - b };, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "*" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN Value{ Number: a * b };, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "/" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN Value{ Number: a / b };, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "=" THEN RETURN boolVal(valEqual(args[0], args[1])); END
+                    IF name == ">" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN boolVal(a > b);, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == ">=" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN boolVal(a >= b);, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "<" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN boolVal(a < b);, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "<=" THEN MATCH args[0] START Value.Number AS a -> MATCH args[1] START Value.Number AS b -> RETURN boolVal(a <= b);, DEFAULT -> PASS; END, DEFAULT -> PASS; END END
+                    IF name == "list" THEN RETURN Value{ List: args }; END
+                    IF name == "list?" THEN MATCH args[0] START Value.List -> RETURN Value.TrueVal;, DEFAULT -> RETURN Value.FalseVal; END END
+                    IF name == "empty?" THEN MATCH args[0] START Value.List AS l -> RETURN boolVal(l.length() == 0);, DEFAULT -> RETURN Value.FalseVal; END END
+                    IF name == "count" THEN
+                        MATCH args[0] START
+                            Value.List AS l -> RETURN Value{ Number: toFloat(l.length()) };,
+                            Value.Nil -> RETURN Value{ Number: 0.0 };,
+                            DEFAULT -> RETURN Value{ Number: 0.0 };
+                        END
                     END
-                    RAISE "Unknown native fn: " + name;
-                Value.Lambda(l_params, l_body, l_env) ->
-                    MUTABLE call_env = Env{ Data: {}, Outer: l_env } @shared;
-                    MUTABLE k = 0;
-                    WHILE k < l_params.length() DO
-                        p_name = MATCH l_params[k] START Value.Symbol(s) -> s; DEFAULT -> ""; END;
-                        envSet!(call_env, p_name, args[k]);
-                        k += 1;
+                    IF name == "not" THEN RETURN boolVal(isTruthy(args[0]) == FALSE); END
+                    IF name == "prn" THEN
+                        MUTABLE prnOut = "";
+                        MUTABLE pi: Int64 = 0;
+                        WHILE pi < args.length() DO
+                            IF pi > 0 THEN prnOut = prnOut + " "; END
+                            prnOut = prnOut + prStr(args[pi], TRUE);
+                            pi += 1;
+                        END
+                        print(prnOut);
+                        RETURN Value.Nil;
                     END
-                    RETURN eval(l_body, call_env);
+                    RAISE "Unknown native fn: " + name;,
+                Value.Lambda AS lam ->
+                    callEnv = nextId;
+                    nextId += 1;
+                    env[mkKey(callEnv, "__p")] = Value{ Number: toFloat(lam.envId) };
+                    MUTABLE ki: Int64 = 0;
+                    WHILE ki < lam.params.length() DO
+                        MATCH lam.params[ki] START
+                            Value.Symbol AS pname -> setEnv!(env, callEnv, pname, args[ki]);,
+                            DEFAULT -> PASS;
+                        END
+                        ki += 1;
+                    END
+                    RETURN eval!(env, nextId, lam.body, callEnv) OR RAISE;,
                 DEFAULT -> RAISE "Not a function";
-            END
-
-        Value.Vector(items) ->
-            -- NOTE: Uses FOR-each loop (just shipped).
-            MUTABLE res: Value[] = [];
-            FOR item IN items DO res.append(eval(item, env)); END
-            RETURN Value.Vector(res);
-
+            END,
         DEFAULT -> RETURN v;
     END
 END
 
--- =========================================================================
--- Printer
--- =========================================================================
-
-FN prStr(v: Value, readably: Bool) RETURNS String ->
+FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
     MATCH v START
-        Value.Nil -> RETURN "nil";
-        Value.Bool(b) -> RETURN IF b THEN "true" ELSE "false";
-        Value.Number(n) -> RETURN toString(n);
-        Value.String(s) ->
-            IF readably THEN RETURN "\"" + s + "\"";
-            ELSE RETURN s;
-        Value.Symbol(s) -> RETURN s;
-        Value.List(items) ->
-            -- NOTE: Could use FOR-each + string join pattern once available.
+        Value.Nil -> RETURN "nil";,
+        Value.TrueVal -> RETURN "true";,
+        Value.FalseVal -> RETURN "false";,
+        Value.Number AS n -> RETURN toString(toInt(n));,
+        Value.Str AS s ->
+            IF readably THEN RETURN "\"" + s + "\""; END
+            RETURN s;,
+        Value.Symbol AS s -> RETURN s;,
+        Value.List AS litems ->
             MUTABLE out = "(";
-            MUTABLE i = 0;
-            WHILE i < items.length() DO
-                out += prStr(items[i], readably);
-                IF i < items.length() - 1 THEN out += " "; END
-                i += 1;
+            MUTABLE li: Int64 = 0;
+            WHILE li < litems.length() DO
+                IF li > 0 THEN out = out + " "; END
+                out = out + prStr(litems[li], readably);
+                li += 1;
             END
-            RETURN out + ")";
-        Value.Vector(items) ->
-            MUTABLE out = "[";
-            MUTABLE i = 0;
-            WHILE i < items.length() DO
-                out += prStr(items[i], readably);
-                IF i < items.length() - 1 THEN out += " "; END
-                i += 1;
-            END
-            RETURN out + "]";
-        -- [P2] HashMap printing: use FOR k IN map DO once map iteration works.
-        Value.HashMap(m) -> RETURN "{...}";
-        Value.NativeFn(name) -> RETURN "#<native " + name + ">";
+            RETURN out + ")";,
+        Value.NativeFn AS name -> RETURN "#<native " + name + ">";,
         Value.Lambda -> RETURN "#<function>";
     END
     RETURN "";
 END
 
--- =========================================================================
--- Main
--- =========================================================================
-
 FN cheatMain() RETURNS Void ->
-    -- [P0:7] @shared struct construction.
-    MUTABLE global_env = Env{ Data: {}, Outer: NIL } @shared;
-    envSet!(global_env, "+", Value.NativeFn("+"));
-    envSet!(global_env, "list", Value.NativeFn("list"));
-    envSet!(global_env, "list?", Value.NativeFn("list?"));
-    envSet!(global_env, "empty?", Value.NativeFn("empty?"));
-    envSet!(global_env, "count", Value.NativeFn("count"));
-    -- [P1:9] Add -, *, /, =, <, >, <=, >= native functions.
+    MUTABLE env: HashMap<Value> = {};
+    MUTABLE nextId: Int64 = 1;
+    env[mkKey(0, "__p")] = Value{ Number: 0.0 - 1.0 };
 
-    -- [P2:13] Replace with stdin REPL for interactive use.
-    tokens = tokenize("(def! a 10) (def! f (fn* [x] (+ x a))) (f 5)");
-    MUTABLE r = Reader{ Tokens: tokens, Pos: 0 };
-    WHILE r.Pos < r.Tokens.length() DO
-        -- [P1:11] OR BREAK — error-to-break coercion for loop control.
-        expr = readForm!(r) OR BREAK;
-        res = eval(expr, global_env) OR BREAK;
-        print(prStr(res, true));
+    setEnv!(env, 0, "+", Value{ NativeFn: "+" });
+    setEnv!(env, 0, "-", Value{ NativeFn: "-" });
+    setEnv!(env, 0, "*", Value{ NativeFn: "*" });
+    setEnv!(env, 0, "/", Value{ NativeFn: "/" });
+    setEnv!(env, 0, "=", Value{ NativeFn: "=" });
+    setEnv!(env, 0, ">", Value{ NativeFn: ">" });
+    setEnv!(env, 0, ">=", Value{ NativeFn: ">=" });
+    setEnv!(env, 0, "<", Value{ NativeFn: "<" });
+    setEnv!(env, 0, "<=", Value{ NativeFn: "<=" });
+    setEnv!(env, 0, "list", Value{ NativeFn: "list" });
+    setEnv!(env, 0, "list?", Value{ NativeFn: "list?" });
+    setEnv!(env, 0, "empty?", Value{ NativeFn: "empty?" });
+    setEnv!(env, 0, "count", Value{ NativeFn: "count" });
+    setEnv!(env, 0, "not", Value{ NativeFn: "not" });
+    setEnv!(env, 0, "prn", Value{ NativeFn: "prn" });
+
+    input = "(def! a 10) (def! f (fn* (x) (+ x a))) (f 5)";
+    MUTABLE tokens = tokenize(input);
+    setPos!(env, 0);
+    WHILE getPos(env) < tokens.length() DO
+        expr = readForm!(env, tokens) OR BREAK;
+        res = eval!(env, nextId, expr, 0) OR BREAK;
+        print(prStr(res, TRUE));
     END
-    RETURN;
 END

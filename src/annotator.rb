@@ -493,10 +493,14 @@ private
     end
 
     # Merge States: If a variable died in ANY branch, it must be considered dead in the parent.
+    # Exception: copyable types (primitives, strings) are never moved — they're copied implicitly.
     if merge_to_parent
       initial_state.each_key do |var|
         if branch_states.any? { |bs| bs[var] != :live }
-          current_scope.set_state(var, :moved)
+          var_type = current_scope.locals.dig(var, :type)
+          type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
+          is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+          current_scope.set_state(var, :moved) unless is_copy
         end
       end
     else
@@ -789,10 +793,16 @@ private
         finalize_scope(node)
 
         # Post-analysis check for loop-specific errors (use of moved value in next iteration)
+        # Copyable types (primitives, strings, slices, unions) are exempt — they're copied implicitly.
         current_scope.var_states.each do |name, new_state|
           old_state = pre_loop_state[name]
           if old_state == :live && new_state == :moved
-            error!(node, "Use of moved value '#{name}' in loop. The variable is moved in the first iteration and not available for the next.")
+            var_type = current_scope.locals.dig(name, :type)
+            type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
+            is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+            unless is_copy
+              error!(node, "Use of moved value '#{name}' in loop. The variable is moved in the first iteration and not available for the next.")
+            end
           end
         end
         node.deferred_drops

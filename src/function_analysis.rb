@@ -467,8 +467,12 @@ module FunctionAnalysis
 
   def verify_returns(node, found_returns, declared_return)
     if found_returns.size > 1
-      uniq_return_types = found_returns.map { |r| r[:type] }.uniq.size
-      if declared_return != :Any &&uniq_return_types > 1
+      # Normalize: all string-like types (Byte[N], String) → String for comparison
+      normalized = found_returns.map { |r|
+        t = r[:type].to_s
+        (t.start_with?("Byte[") || t == "String") ? :String : r[:type]
+      }.uniq.size
+      if declared_return != :Any && normalized > 1
         error!(node, "Ambiguous Return: Function returns multiple types #{found_returns}, specify :Any as type")
       end
     end
@@ -491,6 +495,12 @@ module FunctionAnalysis
   def verify_return(node)
     # Only verify for fields & indexes
     return true if !node.is_a?(AST::GetField) && !node.is_a?(AST::GetIndex)
+
+    # Union variant constructors (Value.Nil, Shape.Point) are new values, not field borrows.
+    if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier)
+      schema = lookup_type_schema(node.target.name.to_sym) rescue nil
+      return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
+    end
 
     # Get the current function's return lifetime annotation
     lifetime_path = @function_context_stack.last&.dig(:lifetime)

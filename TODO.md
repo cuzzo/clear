@@ -21,7 +21,29 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 - [x] `OR BREAK` — error-to-break coercion in loops (`expr OR BREAK`)
 - [x] Error union return: `Byte[N]` auto-wraps to `!String` without `@as`
 - [x] `@indirect` on union variant fields — heap-allocated pointers for recursive types
+- [x] Strings/slices/unions are copyable — no false "Use of moved value" errors
+- [x] Union variant constructors exempt from return ownership check
+- [x] String return type normalization (Byte[N] variants don't trigger ambiguous return)
 - [ ] `String.substring(start, end)` or equivalent slice syntax (have `substr(start, len)`)
+- [ ] MUTABLE struct params passed by pointer (not value copy) — blocks interpreter
+- [ ] HashMap index assignment auto-detects allocation need (inject `rt`)
+- [ ] Frame allocator stability — frame-allocated strings invalidated by later frame growth
+
+### Milestone: Scheme/Mal Interpreter (Pool-based rewrite)
+
+The interpreter should use the **Pool pattern** (idiomatic CLEAR for graph-like structures):
+```
+STRUCT Scope { parent: ?Id<Scope>, vars: HashMap<Value> }
+MUTABLE envPool: Scope[]@pool = Pool[];
+```
+
+This replaces the current flat-HashMap-with-ID-keys approach. Benefits:
+- Zero key mangling (`mkKey(id, name)` → just `scope.vars[name]`)
+- Generational safety (stale `Id<Scope>` returns NIL, not UB)
+- Sharding-ready (`@pool:sharded(8)` makes the interpreter thread-safe)
+- LLM-friendly (maps to "objects" while satisfying ownership rules)
+
+Blocked by: MUTABLE struct params passed by pointer, frame allocator stability.
 
 **P1 — Blocks test suite passing** (compiles but tests fail without these):
 - [x] Math operators: `-`, `*`, `/`, `MOD`, `**` — all working

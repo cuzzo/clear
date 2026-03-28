@@ -651,21 +651,38 @@ class Type
 
   def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
+    return true if string?  # Zig strings ([]const u8) are trivially copyable (pointer + length)
+    return false if array?  # Arrays are not explicitly copyable (use slicing or @list)
     return false if multiowned? || shared? || any_sync?  # Rc/Arc/Locked must not be silently copied
     return false if heap?                   # Heap-allocated types are not copyable
     return false if frame? && struct?       # Frame-allocated struct pointers are not copyable
-    return false if array?   # Arrays are not copyable
-    return false if map?     # Maps are not copyable
+    return false if map?                    # Maps are not copyable
 
-    # Structs: copyable if all fields are copyable
+    # Structs: copyable if all fields are copyable (for explicit COPY keyword)
     if struct?
       resolver = lookup_arg || lookup_block
       return false unless resolver
-      schema = resolver.call(base_type.to_sym)
+      schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
       return false unless schema
       return schema.values.all? { |t| Type.new(t).copyable?(resolver) }
     end
 
+    false
+  end
+
+  # Implicitly copyable: used for branch merge and loop checks.
+  # Same as copyable? but excludes user structs — structs need explicit COPY.
+  # Primitives, strings, slices, enums, and unions are implicitly copyable.
+  def implicitly_copyable?(lookup_arg = nil, &lookup_block)
+    return true if primitive?
+    return true if string?
+    return true if array? && !list_collection? && !pool? && !set_collection?
+    # Unions and enums are value types in Zig — trivially copyable
+    if lookup_arg || lookup_block
+      resolver = lookup_arg || lookup_block
+      schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
+      return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
+    end
     false
   end
 

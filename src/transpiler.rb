@@ -517,11 +517,10 @@ private
         # Set: zero-initialize
         "#{node.full_type.zig_type}{}"
       elsif node.full_type&.list_collection?
-        # @list / ShardedList: if the RHS is a function call that returned a promoted list,
-        # use the call result directly.  Otherwise zero-initialize (empty-list-literal path).
+        # @list / ShardedList: if the RHS is a function call, use the call result.
+        # Otherwise zero-initialize (empty-list-literal path).
         rhs = @current_rhs_is_move ? node.value.value : node.value
-        if (rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)) &&
-           rhs.respond_to?(:list_from_call) && rhs.list_from_call
+        if rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)
           visit(node.value)
         else
           "#{node.full_type.zig_type}{}"

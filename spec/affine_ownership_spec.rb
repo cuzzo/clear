@@ -190,10 +190,10 @@ RSpec.describe SemanticAnnotator do
 
         context "copying a struct with non-copyable field" do
           let(:code) { <<~FLUX
-              STRUCT Container { data: Byte[] }
+              STRUCT Container { data: HashMap<String> }
 
               FN test() ->
-                c = Container{ data: "hello" };
+                MUTABLE c = Container{ data: {} };
                 copy = COPY c;
               END
             FLUX
