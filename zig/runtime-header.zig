@@ -102,6 +102,14 @@ pub const CheatLib = struct {
         }
     }
 
+    // String character access: returns a single-character slice ([]const u8).
+    // Used by CLEAR's str[i] when the target is a String.
+    pub fn charAt(str: []const u8, index: anytype) []const u8 {
+        const i: usize = @intCast(index);
+        if (i >= str.len) return "";
+        return str[i .. i + 1];
+    }
+
     // Works for Lists and Slices because it modifies the memory the slice points to.
     pub fn setAt(container: anytype, index: anytype, value: anytype) void {
         const i: usize = @intCast(index);

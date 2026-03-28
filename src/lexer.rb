@@ -151,11 +151,29 @@ class Lexer
     chunk_start_col = start_col # Track where the *current* text buffer started
 
     loop do
-      # Scan until we hit a quote or the start of interpolation
-      text = @s.scan(/[^"%]+/)
+      # Scan until we hit a quote, backslash, or the start of interpolation
+      text = @s.scan(/[^"\\%]+/)
       if text
         buffer << text
         advance_pos(text)
+      end
+
+      # Handle escape sequences
+      if @s.peek(1) == '\\'
+        @s.getch # consume backslash
+        advance_pos('\\')
+        ch = @s.getch
+        advance_pos(ch) if ch
+        case ch
+        when 'n'  then buffer << '\n'
+        when 't'  then buffer << '\t'
+        when '"'  then buffer << '"'
+        when '\\' then buffer << '\\'
+        when 'r'  then buffer << '\r'
+        when '0'  then buffer << '\0'
+        else buffer << '\\' << (ch || '')
+        end
+        next
       end
 
       # Check what stopped us

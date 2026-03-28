@@ -804,6 +804,9 @@ private
         end
       elsif node.target.type_info&.pool?
         "#{target}.get(#{index})"
+      elsif node.target.type_info&.string?
+        # String indexing: returns a single-char string ([]const u8), not a byte
+        "CheatLib.charAt(#{target}, #{index})"
       else
         "CheatLib.getAt(#{target}, #{index})"
       end
@@ -1554,7 +1557,18 @@ private
     when AST::Literal
       case node.type
       when :STRING
-        "\"#{node.value}\""  # Add quotes!
+        escaped = node.value.bytes.map { |b|
+          case b
+          when 0x5C then '\\\\'  # backslash
+          when 0x22 then '\\"'   # double quote
+          when 0x0A then '\\n'   # newline
+          when 0x0D then '\\r'   # carriage return
+          when 0x09 then '\\t'   # tab
+          when 0x00 then '\\x00' # null
+          else b.chr
+          end
+        }.join
+        "\"#{escaped}\""
       when :NUMBER
         # NUMBER literals are Float64 in CLEAR. Emit as Zig comptime int
         # when coerced to Int64, otherwise preserve float form to avoid
@@ -1630,6 +1644,13 @@ private
         if resolved == :Int64
           return "@mod(#{left}, #{right})"
         end
+      end
+
+      # String comparison: Zig can't use == on slices; use CheatLib.eql
+      if (node.op == :EQ || node.op == :NEQ) &&
+         (Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?)
+        cmp = "CheatLib.eql(#{left}, #{right})"
+        return node.op == :NEQ ? "!#{cmp}" : cmp
       end
 
       # Standard Operators

@@ -9,31 +9,33 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 ### Milestone: Mal Interpreter Compiles and Runs
 
 **P0 — Blocks compilation** (interpreter.cht won't even parse/transpile without these):
-- [ ] String escape sequences in lexer (`\"`, `\n`, `\t`, `\\`)
-- [ ] String indexing `s[i]` returns a single character (String or Byte)
-- [ ] `String.substring(start, end)` or equivalent slice syntax
-- [ ] `toNumber(string) RETURNS ?Float64` — parse string to number
-- [ ] MATCH payload extraction for union variants (`Value.Number(n) -> n`)
-- [ ] Union variant construction with payload from expressions (`Value.Lambda(params, body, env)`)
+- [x] String escape sequences in lexer (`\"`, `\n`, `\t`, `\\`, `\r`, `\0`)
+- [x] String indexing `s[i]` returns a single-char String (via `CheatLib.charAt`)
+- [x] `toNumber(string) RETURNS ?Float64` — safe parse, returns NIL on failure
+- [x] MATCH payload extraction for union variants (`Value.Number(n) -> n`)
+- [x] Union variant construction with payload from expressions (`Value.Lambda(params, body, env)`)
+- [x] `@shared` on struct construction (`Env{...} @shared`)
+- [x] String equality via `==` / `!=` (transpiles to `CheatLib.eql`, not Zig `==`)
+- [ ] `String.substring(start, end)` or equivalent slice syntax (have `substr(start, len)`)
 - [ ] `@indirect` on union variant fields (heap-allocate recursive types)
-- [ ] `@shared` on struct construction (`Env{...} @shared`)
 - [ ] Error union propagation through WHILE loops (`RAISE` inside loop body)
 
 **P1 — Blocks test suite passing** (compiles but tests fail without these):
-- [ ] Additional native math: `-`, `*`, `/` (currently only `+`)
-- [ ] Comparison operators on Value: `=`, `<`, `>`, `<=`, `>=`
+- [x] Math operators: `-`, `*`, `/`, `MOD`, `**` — all working
+- [x] Comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=` — all working
+- [x] HashMap key iteration (`FOR k IN map DO`)
+- [x] FOR range loop (`FOR i IN (start..<end) DO`)
+- [x] `.length()` on dynamic arrays/lists and strings
+- [x] `charAt(str, i)` — explicit single-char access
 - [ ] `ELSE IF` inside MATCH branches (or rewrite interpreter to avoid)
-- [ ] HashMap key iteration (`FOR k IN map DO`) — DONE, just shipped
-- [ ] FOR range loop — DONE, just shipped
 - [ ] `OR BREAK` inside WHILE (error-to-break coercion)
 - [ ] `readForm!(r)` syntax (mutation suffix on fallible call)
-- [ ] `.length()` on dynamic arrays/lists
 - [ ] Optional field access (`inner.Outer.?`)
 
 **P2 — Nice to have for demo** (interpreter works but demo is limited):
 - [ ] stdin REPL (read line from stdin)
-- [ ] More native functions (`-`, `*`, `/`, `=`, `pr-str`, `prn`, `str`)
-- [ ] String concatenation with `+` (operator overloading on String type)
+- [x] String concatenation with `+` — already works
+- [ ] More native functions (`pr-str`, `prn`, `str`)
 
 ### Milestone: @sharded KV Benchmark
 

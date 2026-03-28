@@ -61,6 +61,20 @@ STD_LIB = {
     { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
 
+  # charAt(string, index) → String — single character at index
+  "charAt" => {
+    args: [STRING_TYPE, :Int64],
+    return: STRING_TYPE,
+    zig: "CheatLib.charAt({0}, {1})"
+  },
+
+  # toNumber(string) → ?Float64 — safe parse, returns null on failure
+  "toNumber" => {
+    args: [STRING_TYPE],
+    return: :"?Float64",
+    zig: "(std.fmt.parseFloat(f64, {0}) catch null)"
+  },
+
   # 5. print()
   "print" => {
     args: :Varargs,      # Special marker: Accept any number of arguments
