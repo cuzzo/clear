@@ -167,7 +167,7 @@ pub const RunQueue = struct {
     }
 
     // For stealing (Take half, lock free)
-    pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator, fallback_inbox: *AtomicInbox) usize {
+    pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator) usize {
         const v_len = victim.len();
         if (v_len == 0) return 0;
 
@@ -176,17 +176,7 @@ pub const RunQueue = struct {
 
         while (stolen_count < target) {
             const task = victim.stealOne() orelse break;
-
-            self.push(alloc, task) catch {
-                // FIX: Queue is full, but we already stole the task!
-                // We cannot drop it. We must offload it to the inbox.
-                task.inbox_link.type = .Resume;
-                fallback_inbox.push(&task.inbox_link);
-
-                // We successfully took responsibility for the task, even if we put it in inbox.
-                stolen_count += 1;
-                continue;
-            };
+            self.push(alloc, task) catch break; // queue full — stop stealing
             stolen_count += 1;
         }
 

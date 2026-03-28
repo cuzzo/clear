@@ -91,6 +91,7 @@ pub fn SpscRing(comptime capacity: usize) type {
     };
 }
 
-// Default ring size: 256 entries.  At ~72 bytes each = ~18KB per ring.
-// With 8 schedulers, each has 7 incoming rings = ~128KB total.
-pub const DefaultRing = SpscRing(256);
+// Default ring size: 4096 entries.  At ~72 bytes each = ~288KB per ring.
+// With 64 schedulers, each has 63 incoming rings = ~18MB total.
+// Oversized to minimize backpressure events in normal workloads.
+pub const DefaultRing = SpscRing(4096);
