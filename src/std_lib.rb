@@ -18,6 +18,7 @@ STD_LIB = {
     narrows_collection: true,  # narrows Any[] element type from arg 1
   },
 
+
   # 1. String.length()
   "length" => [
     { args: [STRING_TYPE], return: :Int64, zig: "CheatLib.len({0})" },
@@ -271,6 +272,32 @@ POOL_METHODS = {
   },
   "count" => {
     arity: 0, tag: :pool_method,
+    return_type: ->(_) { Type.new(:Int64) },
+  },
+}.freeze
+
+SET_METHODS = {
+  "insert" => {
+    arity: 1, tag: :set_method,
+    validate: ->(node, args, obj_type, error_fn) {
+      elem = obj_type.element_type
+      arg_type = args[0].resolved_type
+      unless arg_type == :Any || arg_type == elem.resolved || Type.new(elem.resolved).accepts?(Type.new(arg_type))
+        error_fn.call(node, "Set.insert: argument type #{arg_type} does not match set element type #{elem.resolved}")
+      end
+    },
+    return_type: ->(_) { :Void },
+  },
+  "contains" => {
+    arity: 1, tag: :set_method,
+    return_type: ->(_) { :Bool },
+  },
+  "remove" => {
+    arity: 1, tag: :set_method,
+    return_type: ->(_) { :Void },
+  },
+  "count" => {
+    arity: 0, tag: :set_method,
     return_type: ->(_) { Type.new(:Int64) },
   },
 }.freeze

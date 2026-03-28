@@ -465,7 +465,7 @@ private
       # @list and @pool also need `var` because deinit(*Self, alloc) requires a mutable receiver.
       ft = Type.new(node.full_type || :Void)
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
-      is_mutable ||= ft.list_collection? || ft.pool? || ft.map?
+      is_mutable ||= ft.list_collection? || ft.pool? || ft.set_collection? || ft.map?
       # @local pointers are always `const` — mutation goes through the pointer, not the binding.
       # Same as @locked: the pointer itself never changes, only the pointee.
       is_mutable = false if ft.local?
@@ -486,6 +486,9 @@ private
 
       value_code = if node.full_type&.pool?
         # Pool / ShardedPool: zero-initialize via zig_type (handles both sharded and non-sharded)
+        "#{node.full_type.zig_type}{}"
+      elsif node.full_type&.set_collection?
+        # Set: zero-initialize
         "#{node.full_type.zig_type}{}"
       elsif node.full_type&.list_collection?
         # @list / ShardedList: if the RHS is a function call that returned a promoted list,
@@ -1309,6 +1312,11 @@ private
         return transpile_pool_method(node)
       end
 
+      # Set method dispatch: set.insert/contains/remove/count bypass UFCS
+      if node.is_a?(AST::MethodCall) && node.set_method
+        return transpile_set_method(node)
+      end
+
       # HashMap method dispatch: map.delete/contains/count/keys/values bypass UFCS
       if node.is_a?(AST::MethodCall) && node.map_method
         return transpile_map_method(node)
@@ -1860,6 +1868,24 @@ private
     when :remove
       id_code = visit(node.args[0])
       "#{obj_code}.remove(#{id_code})"
+    when :count
+      "#{obj_code}.count()"
+    end
+  end
+
+  def transpile_set_method(node)
+    obj_code = visit(node.object)
+    rt_name  = @do_rt_name || "rt"
+    case node.set_method
+    when :insert
+      val_code = visit(node.args[0])
+      "try #{obj_code}.insert(#{rt_name}.heapAlloc(), #{val_code})"
+    when :contains
+      val_code = visit(node.args[0])
+      "#{obj_code}.contains(#{val_code})"
+    when :remove
+      val_code = visit(node.args[0])
+      "#{obj_code}.remove(#{rt_name}.heapAlloc(), #{val_code})"
     when :count
       "#{obj_code}.count()"
     end

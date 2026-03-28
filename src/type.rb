@@ -468,6 +468,11 @@ class Type
     @collection == :list
   end
 
+  # True when this is an explicit @set (hash set) collection.
+  def set_collection?
+    @collection == :set
+  end
+
   # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.
   # Declared as `MUTABLE futures: ~T[]@list = []`; populated via append(futures, BG { ... }).
   def promise_list?
@@ -634,7 +639,7 @@ class Type
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
     return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
     return false if inf_stream?             # Infinite streams are resources with deinit cleanup, not linear
-    return false if list_collection? || pool?  # @list/@pool are arena/heap-managed via defer deinit — not linearly affine
+    return false if list_collection? || pool? || set_collection?  # @list/@pool/@set are arena/heap-managed via defer deinit — not linearly affine
     return false if map?                       # @map is cleaned up via mapDeinit/numericMapDeinit — not linearly affine
     return true if tense?                   # Single promises are linear — must be consumed exactly once
     return false if multiowned? || shared?  # Rc/Arc use retain/release, not linear move semantics
@@ -965,7 +970,13 @@ class Type
       return sharded? ? "CheatLib.ShardedPool(#{base_zig}, #{shard_count})" : "CheatLib.Pool(#{base_zig})"
     end
 
-    # 3c. Handle @list / ShardedList / SoaList collection
+    # 3c. Handle @set collection
+    if set_collection?
+      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.Set(#{base_zig})"
+    end
+
+    # 3d. Handle @list / ShardedList / SoaList collection
     if list_collection?
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
       if soa?

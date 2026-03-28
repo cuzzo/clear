@@ -1677,9 +1677,9 @@ private
         t = Type.new(:"Any[]", collection: coll)
         t.soa = true if node.instance_variable_get(:@constructor_soa)
         t.shard_count = node.instance_variable_get(:@constructor_shard_count)
-        t.location = :heap if coll == :pool
+        t.location = :heap if coll == :pool || coll == :set
         node.full_type = t
-        node.storage = coll == :pool ? :heap : :stack
+        node.storage = (coll == :pool || coll == :set) ? :heap : :stack
         record_effect(EffectTracker::HEAP)
         return
       end

@@ -38,7 +38,11 @@ module AllocHelper
     is_open_stream = ft_obj&.open_stream?
     is_inf_stream  = ft_obj&.inf_stream?
 
+    is_set = ft_obj&.set_collection?
+
     if is_pool
+      return [true, "{0}.deinit(rt.heapAlloc())"]
+    elsif is_set
       return [true, "{0}.deinit(rt.heapAlloc())"]
     elsif is_open_stream || is_inf_stream
       return [true, "{0}.deinit()"]
@@ -90,6 +94,7 @@ module AllocHelper
       node.args&.any? { |a| node_allocates_frame?(a) } || false
     when AST::MethodCall
       return false if node.respond_to?(:pool_method) && node.pool_method
+      return false if node.respond_to?(:set_method) && node.set_method
       pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
       return true if pat.is_a?(String) && pat.include?("{alloc}")
       fn = @fn_nodes&.[](node.name)

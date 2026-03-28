@@ -12,6 +12,9 @@ module MethodAnalysis
     if obj_type&.pool?
       resolve_typed_method(node, obj_type, POOL_METHODS, :pool_method,
         "Pool<#{obj_type.element_type.resolved}>")
+    elsif obj_type&.set_collection?
+      resolve_typed_method(node, obj_type, SET_METHODS, :set_method,
+        "Set<#{obj_type.element_type.resolved}>")
     elsif obj_type&.map?
       resolve_typed_method(node, obj_type, MAP_METHODS, :map_method,
         "HashMap<#{obj_type.value_type.resolved}>")
@@ -76,6 +79,20 @@ module MethodAnalysis
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
     node.full_type = defn[:return_type].call(obj_type)
+
+    # Narrow Set element type on first insert (Any[] → T[])
+    if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
+      val_type = node.args[0].resolved_type
+      new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
+      new_type.location = obj_type.location
+      scope = lookup_scope_for(node.object.name) if node.object.is_a?(AST::Identifier)
+      if scope
+        entry = scope.locals[node.object.name]
+        entry[:type] = new_type if entry
+        node.object.full_type = new_type
+      end
+    end
+
     true
   end
 end

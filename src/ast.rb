@@ -265,6 +265,7 @@ module AST
   MethodCall   = Struct.new(:token, :object, :name, :args) do
     include Locatable
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
+    attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
     attr_accessor :list_from_call # true when callee has uses_frame=true and returns a @list
     attr_accessor :map_from_call  # true when callee returns a String HashMap (frame-promoted to heap)

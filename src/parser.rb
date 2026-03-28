@@ -1160,10 +1160,10 @@ class Parser
       name = type_token.value
       # Collection constructor: List[] / Pool[] (with optional capabilities)
       # Element type is inferred from first append/insert.
-      if %w[List Pool].include?(name) && match?(:CHAR, '[')
+      if %w[List Pool Set].include?(name) && match?(:CHAR, '[')
         consume(:CHAR, '[')
         consume(:CHAR, ']')
-        collection = name == "List" ? :list : :pool
+        collection = { "List" => :list, "Pool" => :pool, "Set" => :set }.fetch(name)
         is_soa = false
         shard_count = nil
         if match?(:VAR_ID) && current.value == "@soa"
@@ -1398,7 +1398,7 @@ class Parser
     sync       = nil
     collection = nil
     is_soa     = false
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @list @pool].include?(current.value)
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @list @pool @set].include?(current.value)
       unless allow_capabilities
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
@@ -1426,6 +1426,11 @@ class Parser
         mods = parse_collection_modifiers!(cap_tok)
         shard_count = mods[:shard_count]
         is_soa = mods[:soa]
+      when "@set"
+        unless inner.start_with?("[")
+          error!(cap_tok, "Collection capability @set requires an array type (e.g. String[]@set)")
+        end
+        collection = :set
       end
 
       # `:` join: allow combining ownership + sync in a single annotation (order-independent).

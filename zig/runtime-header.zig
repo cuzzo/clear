@@ -1821,6 +1821,55 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------------
+    // Set(T) — hash set of unique values.
+    // Backed by StringHashMapUnmanaged(void) for strings,
+    // AutoHashMapUnmanaged(T, void) for other types.
+    // -----------------------------------------------------------------------
+    pub fn Set(comptime T: type) type {
+        const is_string = T == []const u8;
+        const Map = if (is_string) std.StringHashMapUnmanaged(void) else std.AutoHashMapUnmanaged(T, void);
+        return struct {
+            const Self = @This();
+            inner: Map = .{},
+
+            pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
+                if (is_string) {
+                    if (!self.inner.contains(value)) {
+                        const owned = try alloc.dupe(u8, value);
+                        try self.inner.put(alloc, owned, {});
+                    }
+                } else {
+                    try self.inner.put(alloc, value, {});
+                }
+            }
+
+            pub fn contains(self: *Self, value: T) bool {
+                return self.inner.contains(value);
+            }
+
+            pub fn remove(self: *Self, alloc: std.mem.Allocator, value: T) void {
+                if (is_string) {
+                    if (self.inner.fetchRemove(value)) |kv| alloc.free(kv.key);
+                } else {
+                    _ = self.inner.fetchRemove(value);
+                }
+            }
+
+            pub fn count(self: *Self) i64 {
+                return @intCast(self.inner.count());
+            }
+
+            pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
+                if (is_string) {
+                    var it = self.inner.keyIterator();
+                    while (it.next()) |key_ptr| alloc.free(key_ptr.*);
+                }
+                self.inner.deinit(alloc);
+            }
+        };
+    }
+
+    // -----------------------------------------------------------------------
     // PartitionedStringMap(V, N) — true shared-nothing string hash map.
     //
     // N independent shards with cache-line padding.  Each shard is owned
