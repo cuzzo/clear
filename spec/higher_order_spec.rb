@@ -802,10 +802,10 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "generates ShardedStringMap (RwLock) Zig type from @sharded:locked" do
+      it "generates MutexShardedStringMap (Mutex) Zig type from @sharded:locked" do
         code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
+        expect(zig).to include("CheatLib.MutexShardedStringMap(i64, 4)")
       end
 
       it "emits .put() for index assignment" do

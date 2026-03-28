@@ -2241,8 +2241,101 @@ pub const CheatLib = struct {
         };
     }
 
-    // StripedStringMap — alias for ShardedStringMap (backward compat).
-    // Lock elision removed; @sharded(N) always uses RwLock.
+    // MutexShardedStringMap(V, N) — Mutex-sharded string hash map.
+    // Like ShardedStringMap but uses Mutex (exclusive) instead of RwLock.
+    // Simpler locking, lower per-op overhead, but readers block each other.
+    // Emitted for @sharded(N):locked.
+    pub fn MutexShardedStringMap(comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = std.StringHashMapUnmanaged(V);
+
+            const Shard = struct {
+                map: Map = .{},
+                lock: std.Thread.Mutex = .{},
+            };
+
+            shards: [N]Shard = [_]Shard{.{}} ** N,
+
+            fn shardIndex(key: []const u8) usize {
+                return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
+            }
+
+            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const s = shardIndex(key);
+                self.shards[s].lock.lock();
+                defer self.shards[s].lock.unlock();
+                const owned_key = try key_alloc.dupe(u8, key);
+                try self.shards[s].map.put(bucket_alloc, owned_key, value);
+            }
+
+            pub fn get(self: *Self, key: []const u8) ?V {
+                const s = shardIndex(key);
+                self.shards[s].lock.lock();
+                defer self.shards[s].lock.unlock();
+                return self.shards[s].map.get(key);
+            }
+
+            pub fn contains(self: *Self, key: []const u8) bool {
+                const s = shardIndex(key);
+                self.shards[s].lock.lock();
+                defer self.shards[s].lock.unlock();
+                return self.shards[s].map.contains(key);
+            }
+
+            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                const s = shardIndex(key);
+                self.shards[s].lock.lock();
+                defer self.shards[s].lock.unlock();
+                if (self.shards[s].map.fetchRemove(key)) |kv| {
+                    key_alloc.free(kv.key);
+                }
+            }
+
+            pub fn count(self: *Self) i64 {
+                var n: i64 = 0;
+                for (&self.shards) |*shard| {
+                    shard.lock.lock();
+                    defer shard.lock.unlock();
+                    n += @intCast(shard.map.count());
+                }
+                return n;
+            }
+
+            pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
+                var list = std.ArrayListUnmanaged([]const u8){};
+                for (&self.shards) |*shard| {
+                    shard.lock.lock();
+                    defer shard.lock.unlock();
+                    var it = shard.map.keyIterator();
+                    while (it.next()) |k| try list.append(alloc, k.*);
+                }
+                return list;
+            }
+
+            pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
+                var list = std.ArrayListUnmanaged(V){};
+                for (&self.shards) |*shard| {
+                    shard.lock.lock();
+                    defer shard.lock.unlock();
+                    var it = shard.map.valueIterator();
+                    while (it.next()) |v| try list.append(alloc, v.*);
+                }
+                return list;
+            }
+
+            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                for (&self.shards) |*shard| {
+                    var it = shard.map.iterator();
+                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
+                    shard.map.deinit(bucket_alloc);
+                }
+            }
+        };
+    }
+
+    // StripedStringMap — alias for ShardedStringMap (backward compat / RwLock).
     pub fn StripedStringMap(comptime V: type, comptime N: usize) type {
         return ShardedStringMap(V, N);
     }
