@@ -346,19 +346,16 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
 // LAYER 5: PartitionedStringMap put/get via SPSC routing
 // ========================================================================
 
-// NOTE: L5 passes standalone but crashes in parallel test runner due to Zig's
-// HashMap pointer_stability debug check detecting concurrent access across
-// scheduler threads. This is a test-environment issue — in production, shard
-// ownership prevents concurrent access. Skip in Debug mode; passes in Release.
 test "L5: PartitionedStringMap cross-scheduler put+get" {
-    if (@import("builtin").mode == .Debug) return error.SkipZigTest;
     initGlobals();
     defer deinitGlobals();
 
+    // Start 2 worker schedulers and wait for registration
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
+    // Main scheduler (3rd) — created AFTER workers so ensureOwnership sees all 3
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
     defer sched.deinit();
     fp.active_scheduler = &sched;
@@ -366,7 +363,12 @@ test "L5: PartitionedStringMap cross-scheduler put+get" {
     defer fp.scheduler_running = false;
 
     const Map = CheatLib.PartitionedStringMap(i64, 4);
-    var map: Map = .{};
+    const map = try alloc.create(Map);
+    defer alloc.destroy(map);
+    map.* = .{};
+
+    // Initialize ownership BEFORE any puts — ensures stable shard-to-scheduler mapping
+    map.ensureOwnership();
 
     var rt = try Runtime.init(alloc, 1024 * 1024, &global_ebr);
     defer rt.deinit();
@@ -380,7 +382,7 @@ test "L5: PartitionedStringMap cross-scheduler put+get" {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
             var buf: [32]u8 = undefined;
 
-            // Put 200 keys (some local, some routed)
+            // Put 200 keys (some local, some routed via SPSC to worker schedulers)
             for (0..200) |i| {
                 const key = std.fmt.bufPrint(&buf, "k{d}", .{i}) catch continue;
                 self.map.put(std.heap.c_allocator, std.heap.c_allocator, key, @intCast(i)) catch continue;
@@ -400,15 +402,15 @@ test "L5: PartitionedStringMap cross-scheduler put+get" {
         }
     };
 
-    var runner = MainFn{ .outer_rt = &rt, .map = &map };
+    var runner = MainFn{ .outer_rt = &rt, .map = map };
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Standard },
+        &runner, .{ .stack_size = .Large },
     );
     sched.run();
 
-    map.deinit(alloc, alloc);
+    map.deinit(std.heap.c_allocator, std.heap.c_allocator);
 }
 
 // ========================================================================
