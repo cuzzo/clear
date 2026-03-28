@@ -697,13 +697,25 @@ class Parser
         var_name = consume(:TYPE_ID).value
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
+          # Supports @indirect on fields for recursive types.
+          # NOTE: @indirect is consumed by parse_type_annotation (line ~1425)
+          # but silently discarded. We detect it by checking if the type was
+          # marked as indirect BEFORE parse_type_annotation returns.
+          indirect_fields = Set.new
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
             consume(:CHAR, ':')
+            # Peek: will parse_type_annotation consume @indirect?
             ftype = parse_type_annotation
+            # parse_type_annotation consumed @indirect silently.
+            # We detect it was present by checking @last_indirect_consumed.
+            indirect_fields << fname if @last_indirect_consumed
+            @last_indirect_consumed = false
             [fname, ftype]
           end
-          variants[var_name] = { kind: :inline_struct, fields: field_pairs.to_h }
+          var_data = { kind: :inline_struct, fields: field_pairs.to_h }
+          var_data[:indirect_fields] = indirect_fields unless indirect_fields.empty?
+          variants[var_name] = var_data
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number
           variants[var_name] = parse_type_annotation
@@ -1413,7 +1425,8 @@ class Parser
       when "@locked"      then sync      = :locked
       when "@writeLocked" then sync     = :write_locked
       when "@local"       then sync     = :local
-      when "@indirect"    then nil  # @indirect sets layout, not sync — handled by Type
+      when "@indirect"
+        @last_indirect_consumed = true  # Signal to union field parser
       when "@list"
         unless inner.start_with?("[")
           error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")

@@ -250,12 +250,23 @@ private
       #        const Shape = union(enum) { Circle: Shape_Circle, Point: void };
       @union_schemas ||= {}
       @union_schemas[node.name.to_sym] = node.variants
+      # Track @indirect fields for auto-deref during GetField
+      @indirect_fields ||= {}
+      node.variants.each do |var_name, var_data|
+        next unless var_data.is_a?(Hash) && var_data[:indirect_fields]
+        var_data[:indirect_fields].each do |fname|
+          @indirect_fields["#{node.name}_#{var_name}.#{fname}"] = true
+        end
+      end
 
       # Emit helper structs for inline struct variants before the union declaration.
       helper_structs = node.variants.filter_map do |var_name, var_data|
         next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+        indirect = var_data[:indirect_fields] || Set.new
         fields = var_data[:fields].map do |fname, ftype|
-          "    #{fname}: #{transpile_type(ftype)},"
+          zig_t = transpile_type(ftype)
+          zig_t = "*#{zig_t}" if indirect.include?(fname)
+          "    #{fname}: #{zig_t},"
         end.join("\n")
         "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
       end
@@ -290,8 +301,23 @@ private
       # CHEAT: Shape.Circle{ radius: 5.0 }
       # ZIG:   Shape{ .Circle = Shape_Circle{ .radius = 5.0 } }
       variant_struct_name = "#{node.union_name}_#{node.variant_name}"
-      field_inits = node.fields.map { |k, v| ".#{k} = #{visit(v)}" }.join(", ")
-      "#{node.union_name}{ .#{node.variant_name} = #{variant_struct_name}{ #{field_inits} } }"
+      # Check for @indirect fields in the union schema
+      schema = @union_schemas&.dig(node.union_name.to_sym)
+      var_data = schema&.dig(node.variant_name)
+      indirect = (var_data.is_a?(Hash) && var_data[:indirect_fields]) || Set.new
+      rt_name = @do_rt_name || "rt"
+      field_inits = node.fields.map do |k, v|
+        val = visit(v)
+        if indirect.include?(k)
+          # Heap-allocate indirect field: create pointer, assign value
+          zig_t = transpile_type(var_data[:fields][k])
+          "blk_#{k}: {\n    const __p = try #{rt_name}.heapAlloc().create(#{zig_t});\n    __p.* = #{val};\n    break :blk_#{k} __p;\n}"
+        else
+          val
+        end
+      end
+      field_strs = node.fields.keys.zip(field_inits).map { |k, v| ".#{k} = #{v}" }.join(", ")
+      "#{node.union_name}{ .#{node.variant_name} = #{variant_struct_name}{ #{field_strs} } }"
 
     when AST::StructDef
       # Cache field schemas so VarDecl can generate field-level Rc cleanup
@@ -1466,7 +1492,13 @@ private
         @soa_needed_fields << node.field
         "__soa_#{node.field}[__soa_i]"
       else
-        "#{target_code}.#{node.field}"
+        code = "#{target_code}.#{node.field}"
+        # Auto-dereference @indirect fields on union variant structs
+        target_type = ti&.resolved.to_s
+        if @indirect_fields&.dig("#{target_type}.#{node.field}")
+          code = "#{code}.*"
+        end
+        code
       end
 
     when AST::CapabilityWrap

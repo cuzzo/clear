@@ -20,8 +20,8 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 - [x] BREAK and CONTINUE transpilation
 - [x] `OR BREAK` — error-to-break coercion in loops (`expr OR BREAK`)
 - [x] Error union return: `Byte[N]` auto-wraps to `!String` without `@as`
+- [x] `@indirect` on union variant fields — heap-allocated pointers for recursive types
 - [ ] `String.substring(start, end)` or equivalent slice syntax (have `substr(start, len)`)
-- [ ] `@indirect` on union variant fields (heap-allocate recursive types)
 
 **P1 — Blocks test suite passing** (compiles but tests fail without these):
 - [x] Math operators: `-`, `*`, `/`, `MOD`, `**` — all working
