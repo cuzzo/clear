@@ -147,6 +147,10 @@ pub const Scheduler = struct {
     /// channels[i] is the ring FROM scheduler i TO this scheduler.
     /// Messages are value-copied — no linked lists, no pointer reuse.
     channels: *[64]spsc.DefaultRing = undefined,
+    /// Bitmask: bit i is set when channel[i] has pending messages.
+    /// Producers set bits via atomic OR; consumer clears after draining.
+    /// Makes drainChannels O(1) instead of O(64).
+    dirty_mask: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     stack_pool: *StackPool,    // GLOBAL Stack Cache
     event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
@@ -369,6 +373,7 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
+        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
         self.event_fd.notify();
     }
 
@@ -395,21 +400,16 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
+        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
         self.event_fd.notify();
     }
-
-    // Process all pending spawn/resume requests from the inbox.
-    //
-    // CRITICAL: We must snapshot ALL nodes into an array BEFORE processing
-    // any of them.  Processing a node (especially RemoteCall wg.done())
-    // can trigger submitResume on a DIFFERENT task whose inbox_link is
-    // still in the chain.  submitResume overwrites inbox_link.next,
-    // corrupting the chain if we're still traversing it.
-    /// Drain all SPSC channels (one per sender scheduler).
-    /// Messages are value-copied, so no linked-list corruption is possible.
+    /// Drain SPSC channels using dirty_mask — O(1) when no messages pending.
+    /// Only checks channels whose bits are set in the mask.
     pub fn drainChannels(self: *Scheduler) void {
-        const n = global_registry.count();
-        for (0..n) |sender_idx| {
+        var mask = self.dirty_mask.swap(0, .acquire);
+        while (mask != 0) {
+            const sender_idx = @ctz(mask);
+            mask &= mask - 1; // clear lowest set bit
             while (self.channels[sender_idx].pop()) |msg| {
                 switch (msg.tag) {
                     .Spawn => {
@@ -423,27 +423,34 @@ pub const Scheduler = struct {
                             config.stack_size,
                         );
                         const stack_mem = self.allocStack(effective_size) catch continue;
-                        const fiber_ptr = self.allocator.create(Fiber) catch {
-                            self.freeStack(stack_mem);
-                            continue;
+                        // Try to reuse a pooled Task+Fiber; fall back to alloc
+                        const task = if (self.fiber_pool.items.len > 0) blk: {
+                            const t = self.fiber_pool.pop().?;
+                            t.base.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
+                            break :blk t;
+                        } else blk: {
+                            const fiber_ptr = self.allocator.create(Fiber) catch {
+                                self.freeStack(stack_mem);
+                                continue;
+                            };
+                            fiber_ptr.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
+                            const t = self.allocator.create(Task) catch {
+                                self.freeStack(stack_mem);
+                                self.allocator.destroy(fiber_ptr);
+                                continue;
+                            };
+                            t.base = fiber_ptr;
+                            break :blk t;
                         };
-                        fiber_ptr.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
-                        const task = self.allocator.create(Task) catch {
-                            self.freeStack(stack_mem);
-                            self.allocator.destroy(fiber_ptr);
-                            continue;
-                        };
-                        task.* = .{
-                            .base = fiber_ptr,
-                            .user_fn = msg.user_fn.?,
-                            .context = msg.args,
-                            .status = .Ready,
-                            .config = config,
-                            .inbox_link = .{ .type = .Resume },
-                        };
+                        task.user_fn = msg.user_fn.?;
+                        task.context = msg.args;
+                        task.status = .Ready;
+                        task.config = config;
+                        task.in_inbox = std.atomic.Value(bool).init(false);
                         self.ready_queue.push(self.allocator, task) catch {
                             self.freeStack(stack_mem);
-                            self.allocator.destroy(task);
+                            self.fiber_pool.append(self.allocator, task) catch
+                                self.allocator.destroy(task);
                             continue;
                         };
                         _ = self.active_tasks.fetchAdd(1, .monotonic);
@@ -466,11 +473,7 @@ pub const Scheduler = struct {
     }
 
     fn hasChannelMessages(self: *Scheduler) bool {
-        const n = global_registry.count();
-        for (0..n) |i| {
-            if (!self.channels[i].isEmpty()) return true;
-        }
-        return false;
+        return self.dirty_mask.load(.monotonic) != 0;
     }
 
     pub fn run(self: *Scheduler) void {
@@ -549,19 +552,20 @@ pub const Scheduler = struct {
 
                 switch (task.status) {
                     .Finished => {
-                        // Control plane: check for stack underflow before freeing.
                         const used = cp.measureStackUsage(task.base.stack.memory);
                         cp.recordCompletion(
                             @intFromPtr(task.user_fn),
                             task.base.size_class,
                             used,
                         );
-
-                        // Recycle
                         _ = self.active_tasks.fetchSub(1, .monotonic);
+                        // Recycle: return stack to cache, keep Task+Fiber for reuse
                         self.freeStack(task.base.stack.memory);
-                        self.allocator.destroy(task.base);
-                        self.allocator.destroy(task);
+                        self.fiber_pool.append(self.allocator, task) catch {
+                            // Pool full — destroy instead
+                            self.allocator.destroy(task.base);
+                            self.allocator.destroy(task);
+                        };
                     },
                     .Ready => {
                         // It yielded, but wants to run again. Put back in queue.

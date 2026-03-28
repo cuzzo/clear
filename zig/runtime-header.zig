@@ -1882,6 +1882,8 @@ pub const CheatLib = struct {
             // The `done` atomic flag is set by the target scheduler after
             // completing the operation. The caller drains channels + yields
             // while waiting, preventing deadlock.
+            const is_slice_value = @typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .Slice;
+
             const PutCtx = struct {
                 map: *Self, shard: usize,
                 key: []const u8, value: V,
@@ -1889,8 +1891,20 @@ pub const CheatLib = struct {
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
-                    c.map.shards[c.shard].map.put(remote_alloc, c.key, c.value) catch {
-                        remote_alloc.free(c.key); c.err = true;
+                    // For slice values (e.g. []const u8), dupe the value too —
+                    // the original may point to the caller's stack.
+                    const safe_val = if (comptime is_slice_value)
+                        remote_alloc.dupe(@typeInfo(V).pointer.child, c.value) catch {
+                            remote_alloc.free(c.key); c.err = true;
+                            c.done.store(true, .release);
+                            return;
+                        }
+                    else
+                        c.value;
+                    c.map.shards[c.shard].map.put(remote_alloc, c.key, safe_val) catch {
+                        remote_alloc.free(c.key);
+                        if (comptime is_slice_value) remote_alloc.free(safe_val);
+                        c.err = true;
                     };
                     c.done.store(true, .release);
                 }
@@ -1930,6 +1944,7 @@ pub const CheatLib = struct {
                     fp.active_scheduler.drainChannels();
                     fp.active_scheduler.coopYield();
                 }
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
                 target.event_fd.notify();
                 // Wait for target to complete — drain + yield to avoid deadlock
                 while (!done_flag.load(.acquire)) {
