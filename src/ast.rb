@@ -335,6 +335,7 @@ module AST
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
+  OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked | :local

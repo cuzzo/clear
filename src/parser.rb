@@ -885,6 +885,10 @@ class Parser
     elsif match!(:KEYWORD, 'PRUNE')
       rhs = AST::OrPrune.new(previous)
 
+    # Syntax: ... OR BREAK (error-to-break coercion, valid only inside loops)
+    elsif match!(:KEYWORD, 'BREAK')
+      rhs = AST::OrBreak.new(previous)
+
     # Syntax: ... OR EXIT
     elsif match!(:KEYWORD, 'EXIT')
       exit_token = previous

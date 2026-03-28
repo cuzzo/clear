@@ -16,9 +16,12 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 - [x] Union variant construction with payload from expressions (`Value.Lambda(params, body, env)`)
 - [x] `@shared` on struct construction (`Env{...} @shared`)
 - [x] String equality via `==` / `!=` (transpiles to `CheatLib.eql`, not Zig `==`)
+- [x] RAISE inside WHILE loops — error propagates to caller's return type
+- [x] BREAK and CONTINUE transpilation
+- [x] `OR BREAK` — error-to-break coercion in loops (`expr OR BREAK`)
+- [x] Error union return: `Byte[N]` auto-wraps to `!String` without `@as`
 - [ ] `String.substring(start, end)` or equivalent slice syntax (have `substr(start, len)`)
 - [ ] `@indirect` on union variant fields (heap-allocate recursive types)
-- [ ] Error union propagation through WHILE loops (`RAISE` inside loop body)
 
 **P1 — Blocks test suite passing** (compiles but tests fail without these):
 - [x] Math operators: `-`, `*`, `/`, `MOD`, `**` — all working
@@ -27,8 +30,8 @@ error propagation, string manipulation, and HashMap iteration — all at once.
 - [x] FOR range loop (`FOR i IN (start..<end) DO`)
 - [x] `.length()` on dynamic arrays/lists and strings
 - [x] `charAt(str, i)` — explicit single-char access
+- [x] `OR BREAK` inside WHILE (error-to-break coercion)
 - [ ] `ELSE IF` inside MATCH branches (or rewrite interpreter to avoid)
-- [ ] `OR BREAK` inside WHILE (error-to-break coercion)
 - [ ] `readForm!(r)` syntax (mutation suffix on fallible call)
 - [ ] Optional field access (`inner.Outer.?`)
 

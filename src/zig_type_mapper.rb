@@ -70,9 +70,10 @@ module ZigTypeMapper
     #    No explicit cast needed when returning payload from error union function
     if to_str.start_with?("!")
       payload_type = to_str[1..]
-      if from_str == payload_type || from == to.to_s[1..].to_sym
-        return code  # Zig auto-wraps payload in error union
-      end
+      from_matches = from_str == payload_type || from == to.to_s[1..].to_sym
+      # String literals (Byte[N]) are compatible with String error union
+      from_matches ||= from_str.start_with?("Byte[") && payload_type == "String"
+      return code if from_matches  # Zig auto-wraps payload in error union
     end
 
     # Fallback: Zig's generic cast (often works for simple types)

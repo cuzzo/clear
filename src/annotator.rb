@@ -1847,6 +1847,19 @@ private
       return
     end
 
+    # Handle OR BREAK: error-to-break coercion (valid only inside loops)
+    if node.right.is_a?(AST::OrBreak)
+      if @loop_depth <= 0
+        error!(node, "OR BREAK can only be used inside a WHILE loop")
+      end
+      if t_left_type.error_union?
+        node.full_type = t_left_type.payload_type.resolved
+      else
+        node.full_type = t_left_type.resolved
+      end
+      return
+    end
+
     # Handle OR PRUNE: discard error, skip item (used in CONCURRENT SELECT/WHERE)
     if node.right.is_a?(AST::OrPrune)
       if t_left_type.error_union?
@@ -1891,8 +1904,10 @@ private
   end
 
   def visit_OrRaise(node)
-    # This is a marker node for OR RAISE - no type annotation needed
-    # The actual type handling is done in visit_OrRescue
+    node.full_type = :Void
+  end
+
+  def visit_OrBreak(node)
     node.full_type = :Void
   end
 

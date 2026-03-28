@@ -1668,12 +1668,20 @@ private
 
     when AST::Raise
       # RAISE "message" - return an error in Zig
-      msg = visit(node.message_expr)
+      msg = visit(node.message_expr) if node.message_expr
       "return error.CheatError"
+
+    when AST::BreakNode
+      "break"
+
+    when AST::ContinueNode
+      "continue"
 
     # Marker nodes for OR RAISE / OR PASS / OR PRUNE - handled in transpile_OrRescue
     when AST::OrRaise
       "error.OrRaise"  # Should not be visited directly
+    when AST::OrBreak
+      "break"  # Should not be visited directly
     when AST::OrPass
       "undefined"  # Should not be visited directly
     when AST::OrPrune
@@ -1813,6 +1821,15 @@ private
       if t_left.error_union?
         # Use Zig's catch to ignore error and return undefined
         return "(#{left_raw} catch undefined)"
+      else
+        return left
+      end
+    end
+
+    # Handle OR BREAK: error-to-break coercion (Zig's `catch break`)
+    if node.right.is_a?(AST::OrBreak)
+      if t_left.error_union?
+        return "(#{left_raw} catch break)"
       else
         return left
       end
