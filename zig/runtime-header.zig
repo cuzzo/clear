@@ -1941,7 +1941,10 @@ pub const CheatLib = struct {
                     func_ptr(ctx_ptr);
                     return;
                 }
-                // REMOTE: send via SPSC channel and yield until complete.
+                // REMOTE: send via SPSC channel, spin on done flag.
+                // No fiber yield — spin is ~10ns per iteration, vastly cheaper
+                // than a context switch (~1μs). The remote scheduler processes
+                // the message in its own drainChannels loop independently.
                 const sender_idx = fp.active_scheduler.index;
                 std.debug.assert(sender_idx < target.channels.len);
                 const msg = fp.SpscMessage{
@@ -1950,10 +1953,13 @@ pub const CheatLib = struct {
                     .rc_ctx = ctx_ptr,
                 };
                 while (!target.channels[sender_idx].push(msg)) {
-                    fp.active_scheduler.coopYield();
+                    std.atomic.spinLoopHint();
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
                 target.event_fd.notify();
+                // Yield to scheduler — it runs drainChannels on its own stack
+                // (g0 pattern), then resumes us. This keeps the fiber's stack
+                // shallow and lets both schedulers make progress.
                 while (!done_flag.load(.acquire)) {
                     const task = fp.active_scheduler.getCurrent();
                     task.status = .Ready;

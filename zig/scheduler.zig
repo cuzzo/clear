@@ -500,9 +500,9 @@ pub const Scheduler = struct {
             // newly spawned tasks so they aren't starved.
             if (self.ready_queue.len() > 0) {
                 self.fast_path_counter +%= 1;
-                if (self.fast_path_counter & 63 == 0) {
-                    self.drainChannels();
-                }
+                // Drain channels on every iteration — remote calls need
+                // fast response. The dirty_mask makes this O(1) when empty.
+                self.drainChannels();
             } else {
                 // ── Slow path: no ready work — check all sources.
                 self.drainChannels();
