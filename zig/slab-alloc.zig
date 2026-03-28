@@ -52,6 +52,10 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            // Clear threadlocal magazines completely — prevents stale pointers
+            // from being used by a future SlabAllocator(T) instance on this thread.
+            local_alloc_mag = .{};
+            local_free_mag = .{};
             self.flushThreadCache();
 
             self.lock.lock();

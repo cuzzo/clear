@@ -1948,8 +1948,7 @@ pub const CheatLib = struct {
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
                 target.event_fd.notify();
-                // Wait for target to complete — drain channels, yield fiber,
-                // and yield OS thread to ensure the target gets CPU time.
+                // Wait for target to complete — drain channels + yield.
                 while (!done_flag.load(.acquire)) {
                     fp.active_scheduler.drainChannels();
                     fp.active_scheduler.coopYield();

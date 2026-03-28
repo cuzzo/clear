@@ -148,9 +148,9 @@ pub const Scheduler = struct {
     /// Messages are value-copied — no linked lists, no pointer reuse.
     channels: *[64]spsc.DefaultRing = undefined,
     /// Bitmask: bit i is set when channel[i] has pending messages.
-    /// Producers set bits via atomic OR; consumer clears after draining.
-    /// Makes drainChannels O(1) instead of O(64).
     dirty_mask: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    /// Re-entrancy guard for drainChannels (prevents RemoteCall → map.put → sendAndWait → drainChannels)
+    draining: bool = false,
     stack_pool: *StackPool,    // GLOBAL Stack Cache
     event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
@@ -406,13 +406,11 @@ pub const Scheduler = struct {
         _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
         self.event_fd.notify();
     }
-    /// Drain SPSC channels using dirty_mask — O(1) when no messages pending.
-    /// Only checks channels whose bits are set in the mask.
     pub fn drainChannels(self: *Scheduler) void {
         var mask = self.dirty_mask.swap(0, .acquire);
         while (mask != 0) {
             const sender_idx = @ctz(mask);
-            mask &= mask - 1; // clear lowest set bit
+            mask &= mask - 1;
             while (self.channels[sender_idx].pop()) |msg| {
                 switch (msg.tag) {
                     .Spawn => {
@@ -426,12 +424,7 @@ pub const Scheduler = struct {
                             config.stack_size,
                         );
                         const stack_mem = self.allocStack(effective_size) catch continue;
-                        // Try to reuse a pooled Task+Fiber; fall back to alloc
-                        const task = if (self.fiber_pool.items.len > 0) blk: {
-                            const t = self.fiber_pool.pop().?;
-                            t.base.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
-                            break :blk t;
-                        } else blk: {
+                        const task = blk: {
                             const fiber_ptr = self.allocator.create(Fiber) catch {
                                 self.freeStack(stack_mem);
                                 continue;
@@ -465,10 +458,15 @@ pub const Scheduler = struct {
                         self.ready_queue.push(self.allocator, task) catch unreachable;
                     },
                     .RemoteCall => {
-                        // func sets ctx.done atomically — no WaitGroup needed.
+                        if (self.draining) {
+                            std.debug.print("RE-ENTRANT DRAIN: sched={d}\n", .{self.index});
+                            @panic("re-entrant drainChannels detected in RemoteCall");
+                        }
+                        self.draining = true;
                         const func = msg.rc_func.?;
                         const ctx = msg.rc_ctx.?;
                         func(ctx);
+                        self.draining = false;
                     },
                 }
             }
@@ -554,13 +552,9 @@ pub const Scheduler = struct {
                 switch (task.status) {
                     .Finished => {
                         _ = self.active_tasks.fetchSub(1, .monotonic);
-                        // Recycle: return stack to cache, keep Task+Fiber for reuse
                         self.freeStack(task.base.stack.memory);
-                        task.base.stack.memory = &.{}; // clear to prevent double-free in deinit
-                        self.fiber_pool.append(self.allocator, task) catch {
-                            self.allocator.destroy(task.base);
-                            self.allocator.destroy(task);
-                        };
+                        self.allocator.destroy(task.base);
+                        self.allocator.destroy(task);
                     },
                     .Ready => {
                         // It yielded, but wants to run again. Put back in queue.

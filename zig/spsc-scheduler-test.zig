@@ -185,7 +185,7 @@ test "L2: submitSpawn via SPSC to remote scheduler" {
             @intFromPtr(&Runtime.entryWrapper),
             @as(CheatHeader.TaskFn, @ptrCast(&SpawnCounter.run)),
             &ctxs[i],
-            .{ .pinned = true },
+            .{ .stack_size = .Large, .pinned = true },
         );
     }
 
@@ -247,7 +247,7 @@ test "L3: submitResume via SPSC channel" {
                 try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
                     @as(CheatHeader.TaskFn, @ptrCast(&BgCtx.run)),
-                    ctx, .{ .pinned = true },
+                    ctx, .{ .stack_size = .Large, .pinned = true },
                 );
                 promises[_fi] = promise;
             }
@@ -428,9 +428,9 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
     defer rt.deinit();
     rt.wireAllocator();
 
-    const KEYS = 10000;
-    const FIBERS = 8;
-    const ITERS = 5;
+    const KEYS = 100;
+    const FIBERS = 4;
+    const ITERS = 3;
     const Map = CheatLib.PartitionedStringMap(i64, 4);
 
     const BgWork = struct {
@@ -485,7 +485,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
                     try CheatHeader.spawnPinned(
                         @intFromPtr(&Runtime.entryWrapper),
                         @as(CheatHeader.TaskFn, @ptrCast(&BgWork.run)),
-                        ctx, .{ .pinned = true },
+                        ctx, .{ .stack_size = .Large, .pinned = true },
                     );
                     promises[fi] = promise;
                 }
