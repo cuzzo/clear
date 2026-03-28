@@ -123,7 +123,6 @@ pub fn build(b: *std.Build) void {
         "arena-mode-test.zig",
         "asm-test.zig",
         "bounded-stream-test.zig",
-        "control-plane-hammer-test.zig",
         "control-plane-test.zig",
         "fiber-control-tests.zig",
         "fiber-test.zig",
@@ -143,17 +142,11 @@ pub fn build(b: *std.Build) void {
         "slab-alloc-test.zig",
         "soa-list-test.zig",
         "soa-pool-test.zig",
+        "spsc-test.zig",
+        "spsc-scheduler-test.zig",
         "stream-test.zig",
         "yield-test.zig",
     };
-
-    // TODO(v0.2): Fix these tests — they reference APIs that were removed
-    // during runtime refactoring (SchedulerRegistry.mutex, ReadPool, StackSlab).
-    // - fiber-memory-test.zig (StackSlab removed)
-    // - safety-test.zig (SchedulerRegistry.mutex removed)
-    // - scheduler-test.zig (SchedulerRegistry.mutex removed)
-    // - socket-test.zig (ReadPool removed)
-    // - thread-test.zig (SchedulerRegistry.mutex removed)
 
     for (test_files) |filename| {
         // Create a dedicated test executable for this file
@@ -223,6 +216,65 @@ pub fn build(b: *std.Build) void {
         run_bench.has_side_effects = true;
 
         bench_step.dependOn(&run_bench.step);
+    }
+
+    // -------------------------------------------------------------------------
+    // HAMMER / STRESS TESTS (zig build hammer)
+    // -------------------------------------------------------------------------
+    const hammer_step = b.step("hammer", "Run stress tests and race detectors");
+
+    // Tests with `test` blocks (zig test compatible)
+    const hammer_test_files = [_][]const u8{
+        "arena-fuzz-test.zig",
+        "control-plane-hammer-test.zig",
+    };
+
+    for (hammer_test_files) |filename| {
+        const hammer_tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(filename),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        hammer_tests.root_module.addImport("fiber-core", b.createModule(.{
+            .root_source_file = b.path("fiber-core.zig"),
+        }));
+        hammer_tests.addAssemblyFile(b.path("switch.S"));
+        hammer_tests.addAssemblyFile(b.path("onRoot.S"));
+        hammer_tests.linkLibC();
+        const run_hammer = b.addRunArtifact(hammer_tests);
+        run_hammer.has_side_effects = true;
+        hammer_step.dependOn(&run_hammer.step);
+    }
+
+    // Standalone exe tests (pub fn main — bootstrap their own scheduler)
+    const hammer_exe_files = [_][]const u8{
+        "shared-nothing-test.zig",
+        "routing-crash-test.zig",
+        "scheduler-race-test.zig",
+        "inbox-race-test.zig",
+        "io-pressure-test.zig",
+    };
+
+    for (hammer_exe_files) |filename| {
+        const hammer_exe = b.addExecutable(.{
+            .name = filename[0 .. filename.len - 4], // strip .zig
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(filename),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        hammer_exe.root_module.addImport("fiber-core", b.createModule(.{
+            .root_source_file = b.path("fiber-core.zig"),
+        }));
+        hammer_exe.addAssemblyFile(b.path("switch.S"));
+        hammer_exe.addAssemblyFile(b.path("onRoot.S"));
+        hammer_exe.linkLibC();
+        const run_hammer_exe = b.addRunArtifact(hammer_exe);
+        run_hammer_exe.has_side_effects = true;
+        hammer_step.dependOn(&run_hammer_exe.step);
     }
 
     // -------------------------------------------------------------------------
