@@ -277,7 +277,7 @@ private
         elsif var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
           "#{node.name}_#{var_name}"
         else
-          transpile_type(var_data)
+          transpile_type(var_data, is_field: true)  # Union payloads use slices, not ArrayListUnmanaged
         end
         "    #{var_name}: #{zig_t},"
       end.join("\n")
