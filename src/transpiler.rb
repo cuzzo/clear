@@ -264,7 +264,7 @@ private
         next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
         indirect = var_data[:indirect_fields] || Set.new
         fields = var_data[:fields].map do |fname, ftype|
-          zig_t = transpile_type(ftype)
+          zig_t = transpile_type(ftype, is_field: true)  # Union inline struct fields use slices like variant payloads
           zig_t = "*#{zig_t}" if indirect.include?(fname)
           "    #{fname}: #{zig_t},"
         end.join("\n")

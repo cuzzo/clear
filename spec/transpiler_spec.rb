@@ -464,4 +464,19 @@ RSpec.describe ZigTranspiler do
       expect(fn_body).not_to include("&env")
     end
   end
+
+  describe "union inline struct fields use slice type" do
+    it "emits []T for array fields in union inline structs" do
+      src = <<~CLEAR
+        UNION Expr {
+            Lit: Float64,
+            Call { name: String, args: Expr[] }
+        }
+        FN cheatMain() RETURNS Void -> RETURN; END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("args: []Expr")
+      expect(zig).not_to include("ArrayListUnmanaged(Expr)")
+    end
+  end
 end
