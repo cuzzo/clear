@@ -220,8 +220,7 @@ class Type
   end
 
   def container?
-    s = resolved.to_s
-    s.end_with?("]") || s.start_with?("HashMap")
+    array? || map?
   end
 
   def primitive?

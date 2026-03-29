@@ -1682,12 +1682,10 @@ private
       if node.op == :ADD || node.op == "+"
         # Check if we are operating on Strings
         # Annotator ensures full_type is set (e.g. "String" or "%String")
-        t_left = node.left.full_type.to_s
-        t_right = node.right.full_type.to_s
         rt_ref = @do_rt_name || "rt"
         alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
 
-        if Type.new(t_left).string? || Type.new(t_right).string?
+        if node.left.type_info&.string? || node.right.type_info&.string?
           # Generate call to runtime helper
           # We use heapAlloc to ensure the result survives (safe default)
           return "try CheatLib.concat(#{alloc}, #{left}, #{right})"
@@ -2056,7 +2054,7 @@ private
   def transpile_hash_lit(node)
     # Prefer coerced_type (the declared type) over the inferred HashMap<Any> from empty literals.
     # Use Type objects directly to preserve shard_count (not lost through to_s round-trip).
-    map_ft = if node.coerced_type && node.full_type.to_s.include?("Any")
+    map_ft = if node.coerced_type && node.full_type.map? && node.full_type.value_type.resolved == :Any
       node.coerced_type.is_a?(Type) ? node.coerced_type : Type.new(node.coerced_type)
     else
       node.full_type.is_a?(Type) ? node.full_type : Type.new(node.full_type)

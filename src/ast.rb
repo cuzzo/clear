@@ -186,8 +186,8 @@ module AST
 
       return :void if t.resolved == :Void
       return :die if t.resolved == :NoReturn
-      return :array if t.resolved.to_s.end_with?("]")
-      return :hashmap if t.resolved.to_s.start_with?("HashMap")
+      return :array if t.array?
+      return :hashmap if t.map?
       return :struct if !t.primitive?
       return :primitive
     end

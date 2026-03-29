@@ -66,9 +66,9 @@ module UnionAnalysis
 
       # Parameter type checks
       req[:params].each_with_index do |rp, i|
-        req_t  = to_type(rp[:type]).resolved.to_s
-        sig_t  = to_type(sig[:params][i][:type]).resolved.to_s
-        unless req_t == sig_t || req_t == 'Any' || sig_t == 'Any'
+        req_t  = to_type(rp[:type]).resolved
+        sig_t  = to_type(sig[:params][i][:type]).resolved
+        unless req_t == sig_t || req_t == :Any || sig_t == :Any
           error!(req_tok, :UNION_METHOD_PARAM_TYPE,
                  union_name, fn_name, i + 1, req_t, fn_name, sig_t)
         end
@@ -76,9 +76,9 @@ module UnionAnalysis
 
       # Return type check
       if req[:return_type]
-        req_ret = to_type(req[:return_type]).resolved.to_s
-        sig_ret = to_type(sig[:return][:type]).resolved.to_s
-        unless req_ret == sig_ret || req_ret == 'Any' || sig_ret == 'Any'
+        req_ret = to_type(req[:return_type]).resolved
+        sig_ret = to_type(sig[:return][:type]).resolved
+        unless req_ret == sig_ret || req_ret == :Any || sig_ret == :Any
           error!(req_tok, :UNION_METHOD_RETURN_TYPE,
                  union_name, fn_name, req_ret, fn_name, sig_ret)
         end
