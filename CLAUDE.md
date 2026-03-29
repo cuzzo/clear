@@ -10,7 +10,21 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ```bash
 bundle install              # Install Ruby dependencies
-bundle exec rspec           # Run all Ruby specs (278 examples)
+bundle exec rspec           # Run all Ruby specs (1310 examples)
+
+# Transpile-tests: generate + run Zig integration tests
+ruby transpile-tests/gen.rb                              # Generates zig/all-tests.zig
+cd zig && zig test all-tests.zig -lc switch.S onRoot.S   # Run all tests
+
+# Compile a single CLEAR program
+ruby src/transpiler.rb examples/json_parser/json.cht > zig/interp.zig
+cd zig && zig build-exe interp.zig -lc switch.S onRoot.S && ./interp
+
+# Build with safety checks (recommended for development)
+zig build-exe interp.zig -lc switch.S onRoot.S -OReleaseSafe
+
+# Build optimized (for benchmarks)
+zig build-exe interp.zig -lc switch.S onRoot.S -O ReleaseFast
 
 # Package integration test (requires Zig)
 cd transpile-tests/module-integration && zig build test
@@ -20,6 +34,7 @@ cd transpile-tests/ffi-integration && zig build test
 ```
 
 Run **all three** test suites after making changes to the compiler. The Zig integration tests exercise the full pipeline end-to-end:
+- **transpile-tests**: 100+ .cht files testing language features (gen.rb → all-tests.zig)
 - **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution, `--module` CLI flag
 - **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites (no rt/try), `@import` deduplication
 
