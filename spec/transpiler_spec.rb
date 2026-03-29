@@ -494,4 +494,42 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include(".Items = vals.items")
     end
   end
+
+  describe "@list frame-escape through struct returns" do
+    it "emits promoteList for @list nested in returned struct" do
+      src = <<~CLEAR
+        STRUCT Pair { items: Int64[], count: Int64 }
+        FN build() RETURNS Pair ->
+            MUTABLE vals: Int64[]@list = List[];
+            vals.append(1_i64);
+            vals.append(2_i64);
+            RETURN Pair{ items: vals, count: 2 };
+        END
+        FN cheatMain() RETURNS Void ->
+            p = build();
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("promoteList")
+      promote_pos = zig.index("promoteList")
+      return_pos  = zig.index("return Pair{")
+      expect(promote_pos).to be < return_pos
+    end
+
+    it "suppresses defer deinit for escaped @list in struct return" do
+      src = <<~CLEAR
+        STRUCT Pair { items: Int64[], count: Int64 }
+        FN build() RETURNS Pair ->
+            MUTABLE vals: Int64[]@list = List[];
+            vals.append(1_i64);
+            RETURN Pair{ items: vals, count: 1 };
+        END
+        FN cheatMain() RETURNS Void ->
+            p = build();
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to match(/defer vals\.deinit/)
+    end
+  end
 end

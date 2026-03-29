@@ -919,6 +919,23 @@ private
       decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
     end
 
+    # 3+. List escape through struct/union literals — when a StructLit is returned
+    # and its field values (at any nesting depth) include @list identifiers,
+    # suppress their defer-deinit.  The .items slice would dangle after frame rewind.
+    if node.value.is_a?(AST::StructLit)
+      mark_escaped_lists = ->(fields) {
+        fields.each do |_fname, fval|
+          if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
+            decl_reg = lookup_scope_for(fval.name)&.locals&.dig(fval.name, :reg)
+            decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
+          elsif fval.is_a?(AST::StructLit)
+            mark_escaped_lists.call(fval.fields)
+          end
+        end
+      }
+      mark_escaped_lists.call(node.value.fields)
+    end
+
     # 3a. Map Escape Detection
     # String HashMap keys are frame-allocated (frameAlloc) for speed.  When a map
     # is returned, the caller's frame may rewind and invalidate the keys.  Tag the

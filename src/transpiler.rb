@@ -1449,6 +1449,25 @@ private
         "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
       end
 
+      # 2b. List escape through struct/union literals — promote each @list field.
+      promote_struct_lists = if node.value.is_a?(AST::StructLit)
+        rt_name = @do_rt_name || "rt"
+        collect_nested_lists = ->(fields) {
+          fields.flat_map do |_fname, fval|
+            if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
+              elem_zig = fval.type_info&.element_type&.zig_type || "u8"
+              var_name = zig_safe_name(fval.name)
+              ["try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"]
+            elsif fval.is_a?(AST::StructLit)
+              collect_nested_lists.call(fval.fields)
+            else
+              []
+            end
+          end
+        }
+        collect_nested_lists.call(node.value.fields).join("\n")
+      end
+
       # 2a. Map escape promotion — clone frame-backed bucket array + key strings to heap.
       # Emitted for any RETURN of a String HashMap identifier; numeric maps need no promotion.
       promote_map = if node.map_return && node.value.is_a?(AST::Identifier)
@@ -1469,7 +1488,7 @@ private
         visit(node.value)
       end
 
-      parts = [suppress, promote, promote_map, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
+      parts = [suppress, promote, promote_struct_lists, promote_map, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
 
     when AST::GetField
