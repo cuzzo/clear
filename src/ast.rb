@@ -204,6 +204,7 @@ module AST
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
     attr_accessor :uses_alloc    # true when body calls stdlib fns that use rt.frameAlloc (e.g. append)
+    attr_accessor :returns_promoted  # true when return value contains heap-promoted collection data
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
@@ -257,8 +258,7 @@ module AST
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
-    attr_accessor :list_from_call    # true when callee has uses_frame=true and returns a @list
-    attr_accessor :map_from_call     # true when callee returns a String HashMap (frame-promoted to heap)
+    attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
     def wildcard?; false end
     def name; self[:name].to_s end
   end
@@ -268,8 +268,7 @@ module AST
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
-    attr_accessor :list_from_call # true when callee has uses_frame=true and returns a @list
-    attr_accessor :map_from_call  # true when callee returns a String HashMap (frame-promoted to heap)
+    attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
     def wildcard?; false end
     def name; self[:name].to_s end
   end

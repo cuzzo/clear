@@ -18,7 +18,7 @@ module OwnershipGenerator
     # Promoted lists (returned from frame-using functions) were copied to heap and
     # must be freed with heapAlloc() to avoid leaking the GPA allocation.
     if type_info&.list_collection?
-      alloc = (type_info.sharded? || type_info.heap_list) ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      alloc = (type_info.sharded? || type_info.heap_promoted) ? "rt.heapAlloc()" : "rt.frameAlloc()"
       return "defer #{name}.deinit(#{alloc});\n"
     end
     # @pool backing arrays are heap-allocated; auto-deinit.
@@ -36,11 +36,11 @@ module OwnershipGenerator
     end
 
     # String map:
-    #   Promoted (heap_map): keys + bucket array are on heapAlloc — full mapDeinit.
+    #   Promoted (heap_promoted): keys + bucket array are on heapAlloc — full mapDeinit.
     #   Frame-scoped (default): keys + bucket array are on frameAlloc — deinit is a
     #   no-op (smartFree is a no-op; frame rewind reclaims all memory automatically).
     if type_info&.map? && !type_info&.numeric_map?
-      if type_info.heap_map
+      if type_info.heap_promoted
         return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
       else
         return "defer #{name}.deinit(rt.frameAlloc(), rt.frameAlloc());\n"
@@ -55,16 +55,14 @@ module OwnershipGenerator
 
     # Struct containing promoted collection fields from function returns:
     # emit field-level cleanup so heap-promoted data is freed by caller.
-    if (type_info&.heap_list || type_info&.heap_map) && !type_info&.collection?
+    if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
       schema = (@struct_schemas ||= {})[resolved]
       if schema
         cleanups = schema.filter_map do |fname, fdef|
           ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          if ft.needs_escape_promotion?
-            ft.escape_cleanup_code("#{name}.#{fname}")
-          end
+          ft.escape_cleanup_code("#{name}.#{fname}")
         end
         return cleanups.join unless cleanups.empty?
       end

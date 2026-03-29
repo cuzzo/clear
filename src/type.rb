@@ -9,8 +9,7 @@ class Type
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
   attr_accessor :soa          # true when @pool:soa or @list:soa — Structure of Arrays layout
-  attr_accessor :heap_list     # true when the list was promoted to heap (returned from frame-using fn)
-  attr_accessor :heap_map      # true when the string map was promoted to heap (returned from any fn)
+  attr_accessor :heap_promoted  # true when collection data was promoted to heap (returned from frame-using fn)
   attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
   attr_reader :location  # Use location= setter for cache invalidation
@@ -517,6 +516,9 @@ class Type
 
   # Generate the Zig defer cleanup code for heap-promoted collection data.
   # Used by callers that receive promoted collection fields in returned structs.
+  # Conservative: also handles dynamic slices (T[]) which may have been promoted
+  # from @list — the free is a no-op if data is arena-managed, but prevents leaks
+  # if data was heap-promoted.
   def escape_cleanup_code(var_name)
     if list_collection?
       "defer #{var_name}.deinit(rt.heapAlloc());\n"

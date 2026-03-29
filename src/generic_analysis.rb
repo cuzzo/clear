@@ -274,13 +274,10 @@ module GenericAnalysis
     end
   end
 
-  # Propagate heap_list/heap_map flags from function call return values.
+  # Propagate heap_promoted flag from function call return values.
   def propagate_call_flags!(node)
-    if node.value.respond_to?(:list_from_call) && node.value.list_from_call
-      node.type_info.heap_list = true
-    end
-    if node.value.respond_to?(:map_from_call) && node.value.map_from_call
-      node.type_info.heap_map = true
+    if node.value.respond_to?(:heap_promoted_call) && node.value.heap_promoted_call
+      node.type_info.heap_promoted = true
     end
   end
 end

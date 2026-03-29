@@ -104,7 +104,7 @@ module FunctionAnalysis
   # Resolve a function call: look up the function, dispatch based on type
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
-  # list_from_call, and map_from_call flags.
+  # heap_promoted_call flags.
   def resolve_call(node, args)
     func_name = node.name
 
@@ -169,29 +169,13 @@ module FunctionAnalysis
 
     # Tag calls that return collections (direct or via struct fields) so the
     # caller knows to use heapAlloc for cleanup of promoted data.
-    if node.respond_to?(:list_from_call=)
-      if node.type_info&.list_collection? && !node.type_info.sharded?
-        node.list_from_call = true
-      elsif !node.type_info&.collection?
-        # Struct/union return — check schema for collection fields
-        resolved = node.type_info&.resolved
-        schema = lookup_type_schema(resolved) if resolved
-        if schema.is_a?(Hash) && !schema[:kind]
-          schema.each do |fname, ftype|
-            next if fname.is_a?(Symbol)
-            ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
-            if ft.needs_escape_promotion?
-              node.list_from_call = true if ft.list_collection?
-              node.map_from_call = true if ft.map?
-            end
-          end
-        end
+    if node.respond_to?(:heap_promoted_call=)
+      callee_node = @fn_nodes[func_name]
+      if callee_node&.returns_promoted
+        node.heap_promoted_call = true
+      elsif node.type_info&.needs_escape_promotion?
+        node.heap_promoted_call = true
       end
-    end
-
-    if node.respond_to?(:map_from_call=) &&
-       node.type_info&.map? && !node.type_info&.numeric_map?
-      node.map_from_call = true
     end
   end
 

@@ -914,6 +914,9 @@ private
     # fields (via schema), and arbitrary nesting depth.
     if mark_escaping_collections!(node.value)
       node.collection_return = true
+      # Tag the enclosing function so callers know the return contains promoted data.
+      fn_node = @fn_nodes[current_fn_ctx&.name]
+      fn_node.returns_promoted = true if fn_node
     end
 
     # Promote non-identifier literals to heap when the expected return type requires it.
@@ -1278,7 +1281,6 @@ private
     decl_reg = node.symbol&.reg
     if decl_reg&.respond_to?(:type_info)
       decl_reg.type_info.escaped_return = true
-      decl_reg.type_info.heap_map = true if field_type.map? && !field_type.numeric_map?
     end
   end
 
