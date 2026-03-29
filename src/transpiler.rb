@@ -684,6 +684,9 @@ private
         else
           visit(v)
         end
+        # @list (ArrayListUnmanaged) → slice conversion for struct/union fields expecting []T
+        vt = v.type_info.is_a?(Type) ? v.type_info : nil
+        val_code = "#{val_code}.items" if vt&.list_collection?
         ".#{k} = #{val_code}"
       end.join(", ")
 

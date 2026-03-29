@@ -479,4 +479,19 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("ArrayListUnmanaged(Expr)")
     end
   end
+
+  describe "@list to slice conversion in struct/union literals" do
+    it "appends .items when assigning @list to union slice field" do
+      src = <<~CLEAR
+        UNION Wrapper { Items: Int64[] }
+        FN cheatMain() RETURNS Void ->
+            MUTABLE vals: Int64[]@list = List[];
+            vals.append(1_i64);
+            w = Wrapper{ Items: vals };
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include(".Items = vals.items")
+    end
+  end
 end
