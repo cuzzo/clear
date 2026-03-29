@@ -2312,6 +2312,11 @@ pub const CheatLib = struct {
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
+                // Update in-place if key exists (avoids key re-dupe and leak).
+                if (self.shards[s].map.getPtr(key)) |val_ptr| {
+                    val_ptr.* = value;
+                    return;
+                }
                 const owned_key = try key_alloc.dupe(u8, key);
                 try self.shards[s].map.put(bucket_alloc, owned_key, value);
             }
