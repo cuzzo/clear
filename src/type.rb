@@ -1060,6 +1060,8 @@ class Type
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
       if dynamic? && !is_param && !is_field
         zig = "std.ArrayListUnmanaged(#{base_zig})"
+      elsif fixed?
+        zig = "[#{capacity}]#{base_zig}"
       else
         zig = "[]#{base_zig}"
       end

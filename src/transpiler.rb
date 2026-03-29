@@ -572,12 +572,18 @@ private
       # `const` declarations (immutable OR mutable-but-never-reassigned):
       #   No "never mutated" warning possible. Only suppress "unused variable".
       #   Emit `_ = name;` (no &) when unused — keeps LLVM free to SROA and vectorize.
+      # Collections and streams are forced to `var` for deinit, but Zig never sees the
+      # binding itself mutated (setAt/push/etc. operate through pointers, not reassignment).
+      # Index compound-assignment (arr[i] += v) also doesn't mutate the binding.
+      # Always emit _ = &name; for these so Zig doesn't error on "never mutated".
+      forced_var = ft.collection? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
+      zig_never_mutated = forced_var || (ft.array? && ft.dynamic?)
       suppression = if is_mutable
         actually_mutated = node.respond_to?(:var_mutated) && node.var_mutated == true
-        if actually_mutated && node.respond_to?(:var_used) && node.var_used
+        if actually_mutated && node.respond_to?(:var_used) && node.var_used && !zig_never_mutated
           ""  # used AND mutated — Zig won't warn about either; no _ = &name; needed
         else
-          affine_logic.empty? ? "_ = &#{safe_name};" : ""
+          "_ = &#{safe_name};"
         end
       else
         (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"

@@ -1031,6 +1031,9 @@ private
     node.zig_pattern = method_def[:zig]
     node.full_type   = method_def[:return]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
+    # Built-in static methods whose Zig template starts with `try` are fallible;
+    # propagate this so the enclosing function gets an error-union return type.
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.start_with?("try ")
   end
 
   def visit_FuncCall(node)
