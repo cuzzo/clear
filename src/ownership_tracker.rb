@@ -219,24 +219,17 @@ module OwnershipTracker
 
       next unless current_scope.owned_names.include?(name)
       next unless current_scope.get_state(name) == :live
-      next if info.storage == :multiowned || info.storage == :shared || info.sync
+      classify_ownership!(info) unless info.ownership_kind
 
-      if info.resource
-        # Resources auto-close via Zig `defer` emitted at declaration time.
-        # Mark as dropped here so the ownership tracker knows the resource is spent.
+      case info.ownership_kind
+      when :resource
         drops << { name: name, type: info.type, resource: true }
         current_scope.set_state(name, :dropped)
-
-      elsif Type.new(info.type).requires_move?
-        # Tense (Promise) variables are linear — they cannot be silently dropped.
-        # The programmer must NEXT, COLLECT, RETURN, or GIVE them before scope ends.
+      when :affine
         check_tense_linear!(node, name, info)
-
-        # AUTOMATICALLY INSERT DROP
         drops << { name: name, type: info.type }
-
-        # Mark as consumed so we don't double-free
         current_scope.set_state(name, :dropped)
+      # :value, :collection, :rc, :sync — no drop needed
       end
     end
 
@@ -256,11 +249,10 @@ module OwnershipTracker
         next if name.start_with?('_')           # underscore prefix = intentionally unused
         next if info.read                        # variable was read at least once (same scope)
         next if info.reg&.respond_to?(:var_used) && info.reg.var_used  # read in nested scope
-        next if info.resource                    # resource — implicit use via defer close
-        t = info.type
-        ti = t.is_a?(Type) ? t : Type.new(t.to_s)
-        next if ti.collection?                    # collections — implicit use via defer deinit
-        next if ti.multiowned? || ti.shared?     # Rc/Arc — implicit use via defer release
+        classify_ownership!(info) unless info.ownership_kind
+        next if info.ownership_kind == :resource    # resource — implicit use via defer close
+        next if info.ownership_kind == :collection  # collections — implicit use via defer deinit
+        next if info.ownership_kind == :rc          # Rc/Arc — implicit use via defer release
         reg = info.reg
         next unless reg                          # compiler-internal binding, not user code
 
@@ -274,12 +266,13 @@ module OwnershipTracker
     drops = []
     current_scope.locals.each do |name, info|
       next unless current_scope.get_state(name) == :live
-      next if info.storage == :multiowned || info.storage == :shared || info.sync
+      classify_ownership!(info) unless info.ownership_kind
 
-      if info.resource
+      case info.ownership_kind
+      when :resource
         drops << { name: name, type: info.type, resource: true }
         current_scope.set_state(name, :dropped)
-      elsif Type.new(info.type).requires_move?
+      when :affine
         check_tense_linear!(node, name, info) if node
         drops << { name: name, type: info.type }
         current_scope.set_state(name, :dropped)

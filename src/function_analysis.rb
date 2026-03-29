@@ -411,6 +411,7 @@ module FunctionAnalysis
         param[:name], nil, param[:type], param[:mutable], false, nil, :stack # TODO: param[:storage]
       )
       current_scope.set_state(param[:name], :live)
+      classify_ownership!(current_scope.locals[param[:name]])
       param[:type]
     end
   end

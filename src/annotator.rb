@@ -493,10 +493,9 @@ private
     if merge_to_parent
       initial_state.each_key do |var|
         if branch_states.any? { |bs| bs[var] != :live }
-          var_type = current_scope.locals[var]&.type
-          type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
-          is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
-          current_scope.set_state(var, :moved) unless is_copy
+          entry = current_scope.locals[var]
+          classify_ownership!(entry) if entry && !entry.ownership_kind
+          current_scope.set_state(var, :moved) unless entry&.ownership_kind == :value
         end
       end
     else
@@ -629,10 +628,12 @@ private
                   synthetic_type = :"#{type_name}_#{variant_name}"
                   current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
                   current_scope.set_state(c[:binding], :live)
+                  classify_ownership!(current_scope.locals[c[:binding]])
                 else
                   payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
                   current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
                   current_scope.set_state(c[:binding], :live)
+                  classify_ownership!(current_scope.locals[c[:binding]])
                 end
               end
             end
@@ -711,6 +712,7 @@ private
       proc {
         current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
         node.symbol = current_scope.locals[node.var_name]
+        classify_ownership!(node.symbol)
         node.body.each { |stmt| visit(stmt) }
         finalize_scope(node)
         node.deferred_drops
@@ -745,6 +747,7 @@ private
       proc {
         current_scope.declare(node.var_name, nil, elem_sym, false, false, nil, :stack)
         node.symbol = current_scope.locals[node.var_name]
+        classify_ownership!(node.symbol)
         node.body.each { |stmt| visit(stmt) }
         finalize_scope(node)
         node.deferred_drops
@@ -1142,6 +1145,7 @@ private
     )
     current_scope.set_state(node.name, :live)
     node.symbol = current_scope.locals[node.name]
+    classify_ownership!(node.symbol)
     record_capability_binding(node.name, node, final_type, storage)
   end
 
@@ -1193,6 +1197,7 @@ private
       )
       current_scope.set_state(node.name, :live)
       node.symbol = current_scope.locals[node.name]
+      classify_ownership!(node.symbol)
       record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
@@ -1260,6 +1265,27 @@ private
   # Mark a variable's declaration node as mutated (reassigned after declaration).
   # This allows the transpiler to skip `_ = &name;` for mutable variables that
   # are genuinely reassigned — LLVM can then SROA struct fields to registers.
+  def classify_ownership!(entry)
+    return unless entry
+    t = entry.type
+    return if t.is_a?(Hash) # function signature, not a variable
+    type_obj = t.is_a?(Type) ? t : Type.new(t || :Any)
+    entry.ownership_kind = if entry.resource
+      :resource
+    elsif type_obj.multiowned? || type_obj.shared? ||
+          entry.storage == :multiowned || entry.storage == :shared
+      :rc
+    elsif type_obj.any_sync? || entry.sync
+      :sync
+    elsif type_obj.collection?
+      :collection
+    elsif type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+      :value
+    else
+      :affine
+    end
+  end
+
   def mark_var_mutated(name)
     scope = lookup_scope_for(name)
     return unless scope

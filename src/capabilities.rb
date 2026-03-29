@@ -287,9 +287,9 @@ module CapabilityHelper
       return if locally_bound.include?(name)
       info = scope.locals[name]
       return unless info && scope.owned_names.include?(name)
-      return if info.storage == :multiowned || info.storage == :shared || info.sync
-      if (info.resource || Type.new(info.type).requires_move?) &&
-         scope.get_state(name) == :live
+      classify_ownership!(info) unless info.ownership_kind
+      kind = info.ownership_kind
+      if (kind == :resource || kind == :affine) && info.state == :live
         scope.set_state(name, :moved)
       end
       return
