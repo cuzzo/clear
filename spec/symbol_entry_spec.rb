@@ -30,45 +30,20 @@ RSpec.describe SymbolEntry do
     end
   end
 
-  describe "Hash compatibility: []" do
-    it "reads fields by symbol key" do
-      expect(entry[:type]).to eq(:Int64)
-      expect(entry[:mutable]).to eq(true)
-      expect(entry[:storage]).to eq(:stack)
-      expect(entry[:sync]).to eq(:locked)
+  describe "scope back-reference" do
+    it "starts as nil (set by Scope#declare)" do
+      expect(entry.scope).to be_nil
     end
 
-    it "returns nil for unknown keys" do
-      expect(entry[:nonexistent]).to be_nil
-    end
-  end
-
-  describe "Hash compatibility: []=" do
-    it "writes fields by symbol key" do
-      entry[:storage] = :heap
-      expect(entry.storage).to eq(:heap)
-      expect(entry[:storage]).to eq(:heap)
-    end
-  end
-
-  describe "Hash compatibility: dig" do
-    it "returns field value for single key" do
-      expect(entry.dig(:type)).to eq(:Int64)
+    it "can be set and read" do
+      entry.scope = :mock_scope
+      expect(entry.scope).to eq(:mock_scope)
     end
 
-    it "returns nil for missing key" do
-      expect(entry.dig(:nonexistent)).to be_nil
-    end
-  end
-
-  describe "Hash compatibility: key?" do
-    it "returns true for known fields" do
-      expect(entry.key?(:type)).to eq(true)
-      expect(entry.key?(:storage)).to eq(true)
-    end
-
-    it "returns false for unknown fields" do
-      expect(entry.key?(:nonexistent)).to eq(false)
+    it "is preserved through dup" do
+      entry.scope = :original_scope
+      copy = entry.dup
+      expect(copy.scope).to eq(:original_scope)
     end
   end
 
@@ -99,14 +74,15 @@ RSpec.describe SymbolEntry do
       expect(minimal.invalid_reason).to be_nil
       expect(minimal.resource).to be_nil
       expect(minimal.close_zig).to be_nil
+      expect(minimal.scope).to be_nil
     end
   end
 
   describe "integration with scope locals iteration" do
-    it "works in each { |name, info| info[:type] } pattern" do
+    it "works in each { |name, info| info.type } pattern" do
       locals = { "x" => entry }
       result = nil
-      locals.each { |_name, info| result = info[:type] }
+      locals.each { |_name, info| result = info.type }
       expect(result).to eq(:Int64)
     end
   end

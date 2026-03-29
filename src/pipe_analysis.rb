@@ -515,14 +515,11 @@ module PipeAnalysis
   def collect_sharded_names(node, names)
     return unless node.is_a?(AST::Locatable)
     if node.is_a?(AST::Identifier)
-      scope = lookup_scope_for(node.name) rescue nil
-      if scope
-        entry = scope.locals[node.name]
-        if entry
-          t = entry.type
-          t = Type.new(t) unless t.is_a?(Type)
-          names << node.name if t.sharded? && !t.any_sync?
-        end
+      entry = node.symbol
+      if entry
+        t = entry.type
+        t = Type.new(t) unless t.is_a?(Type)
+        names << node.name if t.sharded? && !t.any_sync?
       end
     end
     return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -539,9 +536,7 @@ module PipeAnalysis
   def pre_scan_node_for_sharded(node)
     return false unless node.is_a?(AST::Locatable)
     if node.is_a?(AST::Identifier)
-      scope = lookup_scope_for(node.name) rescue nil
-      return false unless scope
-      entry = scope.locals[node.name]
+      entry = node.symbol
       return false unless entry
       t = entry.type
       t = Type.new(t) unless t.is_a?(Type)

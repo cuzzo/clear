@@ -80,35 +80,30 @@ module CapabilityHelper
 
     case capability_type
     when :EXCLUSIVE
-      scope = lookup_scope_for(var_node.name)
-      syn = scope&.locals&.[](var_node.name)&.sync
+      syn = var_node.symbol&.sync
       unless syn
-        storage = scope&.locals&.[](var_node.name)&.storage
+        storage = var_node.symbol&.storage
         error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
       end
 
     when :write_locked_read
-      scope = lookup_scope_for(var_node.name)
-      syn = scope&.locals&.[](var_node.name)&.sync
+      syn = var_node.symbol&.sync
       unless syn == :write_locked
         error!(node, "WITH #{var_node.name}: read access requires a @writeLocked variable")
       end
 
     when :RESTRICT
-      scope = lookup_scope_for(var_node.name)
-      if scope && scope.is_immutable?(var_node.name)
+      if var_node.symbol && !var_node.symbol.mutable
         error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
       end
 
     when :multiowned
-      scope = lookup_scope_for(var_node.name)
-      unless scope&.locals&.[](var_node.name)&.storage == :multiowned
+      unless var_node.symbol&.storage == :multiowned
         error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
       end
 
     when :shared
-      scope = lookup_scope_for(var_node.name)
-      unless scope&.locals&.[](var_node.name)&.storage == :shared
+      unless var_node.symbol&.storage == :shared
         error!(node, "WITH #{var_node.name}: expected a @shared variable")
       end
 
@@ -133,9 +128,8 @@ module CapabilityHelper
 
     # Infer capability from the variable's storage when not stated explicitly
     if cap[:capability] == :infer
-      scope = lookup_scope_for(var_node.name)
-      storage = scope&.locals&.[](var_node.name)&.storage
-      syn     = scope&.locals&.[](var_node.name)&.sync
+      storage = var_node.symbol&.storage
+      syn     = var_node.symbol&.sync
       cap[:capability] = case
                          when syn == :locked            then :EXCLUSIVE
                          when syn == :write_locked      then :write_locked_read
@@ -468,7 +462,7 @@ module CapabilityAudit
 
     key = "#{@current_function_name}:#{var_name}"
     line = node.respond_to?(:token) && node.token ? node.token.line : nil
-    ft = final_type.is_a?(Type) ? final_type : (info&.dig(:full_type).is_a?(Type) ? info[:full_type] : nil)
+    ft = final_type.is_a?(Type) ? final_type : nil
     is_sharded = ft&.respond_to?(:sharded?) && ft.sharded?
     @capability_audit[key] = {
       fn: @current_function_name, var: var_name, line: line,

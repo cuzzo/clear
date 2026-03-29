@@ -37,8 +37,7 @@ module MethodAnalysis
     val_arg  = args[1]
     return unless list_arg.is_a?(AST::Identifier)
 
-    scope = lookup_scope_for(list_arg.name)
-    scope_entry = scope&.locals&.[](list_arg.name)
+    scope_entry = list_arg.symbol
     ti = scope_entry&.type
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
@@ -85,11 +84,12 @@ module MethodAnalysis
       val_type = node.args[0].resolved_type
       new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
       new_type.location = obj_type.location
-      scope = lookup_scope_for(node.object.name) if node.object.is_a?(AST::Identifier)
-      if scope
-        entry = scope.locals[node.object.name]
-        entry.type = new_type if entry
-        node.object.full_type = new_type
+      if node.object.is_a?(AST::Identifier)
+        entry = node.object.symbol
+        if entry
+          entry.type = new_type
+          node.object.full_type = new_type
+        end
       end
     end
 

@@ -165,12 +165,15 @@ module OwnershipTracker
     return false unless root.is_a?(AST::Identifier)
 
     var_name = root.name
-    owner_scope = lookup_scope_for(var_name)
+    sym = root.symbol
+    return false unless sym
+
+    owner_scope = sym.scope
     return false unless owner_scope
 
     # Multiowned (Rc), Shared (Arc), and Sync (locked) values manage their own lifetime
-    storage  = owner_scope.locals[var_name]&.storage
-    var_sync = owner_scope.locals[var_name]&.sync
+    storage  = sym.storage
+    var_sync = sym.sync
     return false if storage == :multiowned || storage == :shared || var_sync
 
     type = owner_scope.resolve_type(var_name)

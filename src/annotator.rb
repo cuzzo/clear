@@ -219,7 +219,7 @@ private
 
     # Import function signatures that are visible from this call site.
     mod.global_scope.locals.each do |name, entry|
-      sig = entry[:type]
+      sig = entry.type
       next unless sig.is_a?(Hash) && sig.key?(:params)
 
       # For package imports: skip functions that were themselves imported from
@@ -921,7 +921,7 @@ private
       # Suppress the defer cleanup on the *declaration* node so `emit_cleanup` skips
       # the `defer vals.deinit(...)` — ownership is transferred to the caller and the
       # NRVO alias would corrupt the returned value if deinit ran after `return`.
-      decl_reg = lookup_scope_for(node.value.name)&.locals&.[](node.value.name)&.reg
+      decl_reg = node.value.symbol&.reg
       decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
     end
 
@@ -932,7 +932,7 @@ private
       mark_escaped_lists = ->(fields) {
         fields.each do |_fname, fval|
           if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
-            decl_reg = lookup_scope_for(fval.name)&.locals&.[](fval.name)&.reg
+            decl_reg = fval.symbol&.reg
             decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
           elsif fval.is_a?(AST::StructLit)
             mark_escaped_lists.call(fval.fields)
@@ -1363,8 +1363,7 @@ private
       # 3. Auto-lock: if the target variable is @locked or @writeLocked, mark the
       # assignment for inline guard emission. The borrow cannot escape because
       # field assignments are statements (not expressions).
-      scope = lookup_scope_for(var_name)
-      syn = scope&.locals&.[](var_name)&.sync
+      syn = field_node.target.symbol&.sync
       if syn == :locked || syn == :write_locked
         assignment_node.auto_lock = { var: var_name, sync: syn }
       end
@@ -2001,9 +2000,8 @@ private
     # Check if the identifier is a resource
     is_resource = false
     if node.value.is_a?(AST::Identifier)
-      decl_scope = lookup_scope_for(node.value.name)
-      info = decl_scope&.locals&.[](node.value.name)
-      is_resource = info&.[](:resource)
+      info = node.value.symbol
+      is_resource = info&.resource
     end
 
     unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource
@@ -2246,8 +2244,7 @@ private
     else
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)
-        scope = lookup_scope_for(node.expr.name)
-        scope&.set_state(node.expr.name, :moved)
+        node.expr.symbol&.scope&.set_state(node.expr.name, :moved)
       end
       node.full_type = promise_type.tense_type.to_sym
     end

@@ -16,7 +16,7 @@ class Scope
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
-    @locals[name] = SymbolEntry.new(
+    entry = SymbolEntry.new(
       reg: reg,
       type: type,
       mutable: is_mutable,
@@ -29,6 +29,8 @@ class Scope
       resource: resource,
       close_zig: close_zig,
     )
+    entry.scope = self
+    @locals[name] = entry
   end
 
   def initialize_copy(original)
@@ -42,6 +44,7 @@ class Scope
       # Sets/Arrays inside the entry must be duped too, or they remain shared
       new_entry.capabilities = entry.capabilities.dup
       new_entry.borrowed_paths = entry.borrowed_paths&.map(&:dup)
+      new_entry.scope = self  # Point to the new (copied) scope
       new_entry
     end
 
@@ -327,7 +330,7 @@ class Scope
 
   def is_boxed?(name)
     entry = @locals[name]
-    entry ? entry[:boxed] : false  # :boxed not on SymbolEntry — legacy field
+    false  # :boxed is unused — legacy stub
   end
 
   def narrow_type(name, new_type)
