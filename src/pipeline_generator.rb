@@ -140,7 +140,7 @@ module PipelineGenerator
       ZIG
     else
       # Standard array or @list: use .items if available, otherwise treat as slice
-      "const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else pipe_src_list;"
+      "const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else &pipe_src_list;"
     end
   end
 
@@ -174,7 +174,7 @@ module PipelineGenerator
   end
 
   def transpile_where_filter(list_node, expression_node)
-    element_type_str = list_node.full_type.to_s.gsub(/[\[\]]/, '')
+    element_type_str = list_node.full_type.to_s.gsub(/\[\d*\]/, '')
     expr_code = visit_pipeline_expr(list_node, expression_node)
 
     transpile_pipeline_macro(list_node, expression_node, res_type: element_type_str) do |alloc|
@@ -191,19 +191,19 @@ module PipelineGenerator
   end
 
   def transpile_index_grouping(list_node, expression_node, smooth_node)
-    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/\[\d*\]/, ''))
 
     @placeholder_name = "it"
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
-    init = "var idx_result: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(#{element_zig_type})) = .{};"
+    init = "var idx_result: CheatLib.StringMap(std.ArrayListUnmanaged(#{element_zig_type})) = .{};"
 
     transpile_pipeline_macro(list_node, smooth_node, init: init, force_aos: true) do |alloc|
       <<~ZIG
         for (pipe_items) |it| {
             const idx_key = #{expr_code};
-            const gop = idx_result.getOrPut(#{alloc}, idx_key) catch @panic("INDEX allocation failed");
+            const gop = idx_result.inner.getOrPut(#{alloc}, idx_key) catch @panic("INDEX allocation failed");
             if (!gop.found_existing) {
                 gop.value_ptr.* = std.ArrayListUnmanaged(#{element_zig_type}){};
             }
@@ -237,7 +237,7 @@ module PipelineGenerator
   end
 
   def transpile_order_by(list_node, order_node, smooth_node)
-    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/\[\d*\]/, ''))
 
     @placeholder_name = "a"
     key_expr_a = visit(order_node.expression)
@@ -265,7 +265,7 @@ module PipelineGenerator
   end
 
   def transpile_limit(list_node, limit_node, smooth_node)
-    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/\[\d*\]/, ''))
     count_code = visit(limit_node.count)
 
     transpile_pipeline_macro(list_node, smooth_node, force_aos: true) do |alloc|
@@ -281,7 +281,7 @@ module PipelineGenerator
   end
 
   def transpile_unnest(list_node, unnest_node, smooth_node)
-    inner_element_type = unnest_node.full_type.to_s.gsub(/[\[\]]/, '')
+    inner_element_type = unnest_node.full_type.to_s.gsub(/\[\d*\]/, '')
     inner_zig_type = transpile_type(inner_element_type)
 
     @placeholder_name = "it"
@@ -306,7 +306,7 @@ module PipelineGenerator
   end
 
   def transpile_distinct(list_node, distinct_node, smooth_node)
-    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
+    element_zig_type = transpile_type(list_node.full_type.to_s.gsub(/\[\d*\]/, ''))
 
     @placeholder_name = "it"
     expr_code = visit(distinct_node.expression)
@@ -314,7 +314,7 @@ module PipelineGenerator
     expr_code_inner = visit(distinct_node.expression)
     @placeholder_name = nil
 
-    transpile_pipeline_macro(list_node, smooth_node, res_type: list_node.full_type.to_s.gsub(/[\[\]]/, ''), force_aos: true) do |alloc|
+    transpile_pipeline_macro(list_node, smooth_node, res_type: list_node.full_type.to_s.gsub(/\[\d*\]/, ''), force_aos: true) do |alloc|
       <<~ZIG
         for (pipe_items) |it| {
             const dist_key = #{expr_code};
@@ -547,7 +547,7 @@ module PipelineGenerator
   # =========================================================
 
   def transpile_find(list_node, find_node, smooth_node)
-    elem_zig_type = transpile_type(list_node.full_type.to_s.gsub(/[\[\]]/, ''))
+    elem_zig_type = transpile_type(list_node.full_type.to_s.gsub(/\[\d*\]/, ''))
     expr_code = visit_pipeline_expr(list_node, find_node.expression)
 
     transpile_pipeline_macro(list_node, smooth_node) do
@@ -844,7 +844,7 @@ module PipelineGenerator
   def transpile_concurrent_where(list_node, where_op, id, workers_code, rt_name, options = {})
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
-    item_type_str = list_node.full_type.to_s.gsub(/[\[\]]/, '')
+    item_type_str = list_node.full_type.to_s.gsub(/\[\d*\]/, '')
     item_zig      = transpile_type(item_type_str)
 
     list_code  = visit(list_node)
@@ -933,7 +933,7 @@ module PipelineGenerator
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
     # For EACH workers, the placeholder references the shared items array by index.
-    @placeholder_name = "&ctx.items[__idx]"
+    @placeholder_name = "ctx.items[__idx]"
     body_code = with_fiber_capture_map({}) do
       each_op.body.map { |stmt|
         code = visit(stmt)

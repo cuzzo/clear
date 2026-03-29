@@ -92,13 +92,29 @@ pub const CheatLib = struct {
 
     // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
     // Also handles casting the index to usize automatically.
-    pub fn getAt(container: anytype, index: anytype) @TypeOf(if (@hasField(@TypeOf(container), "items")) container.items[0] else container[0]) {
-        const i: usize = @intCast(index); // Auto-cast i64 -> usize
+    // Unwraps optional containers (e.g. from hashmap.get()) before indexing.
+    pub fn getAt(container: anytype, index: anytype) ElementType(@TypeOf(container)) {
+        const i: usize = @intCast(index);
+        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
 
-        if (@hasField(@TypeOf(container), "items")) {
-            return container.items[i];
+        if (@hasField(@TypeOf(c), "items")) {
+            return c.items[i];
         } else {
-            return container[i];
+            return c[i];
+        }
+    }
+
+    fn ElementType(comptime C: type) type {
+        const Inner = if (@typeInfo(C) == .optional) @typeInfo(C).optional.child else C;
+        if (@hasField(Inner, "items")) {
+            // ArrayList: .items is []T, element type is T
+            for (@typeInfo(Inner).@"struct".fields) |f| {
+                if (std.mem.eql(u8, f.name, "items"))
+                    return std.meta.Elem(f.type);
+            }
+            unreachable;
+        } else {
+            return std.meta.Elem(Inner);
         }
     }
 
@@ -128,12 +144,14 @@ pub const CheatLib = struct {
     }
 
     // Polymorphic Length (Strings or Lists)
+    // Unwraps optional containers (e.g. from hashmap.get()) before measuring.
     pub fn len(container: anytype) i64 {
+        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
         // If it has .items (ArrayList), use that. Otherwise assume it's a Slice.
-        if (@hasField(@TypeOf(container), "items")) {
-            return @intCast(container.items.len);
+        if (@hasField(@TypeOf(c), "items")) {
+            return @intCast(c.items.len);
         } else {
-            return @intCast(container.len);
+            return @intCast(c.len);
         }
     }
 

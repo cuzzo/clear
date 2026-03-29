@@ -2276,6 +2276,10 @@ private
   def transpile_block(statements)
     statements.map do |stmt|
       code = visit(stmt)
+      # Pool/set insert returns a value (u64 id) — discard when used as a standalone statement.
+      if stmt.is_a?(AST::MethodCall) && (stmt.pool_method == :insert || stmt.set_method == :insert)
+        code = "_ = #{code}"
+      end
       # Add ; if it's not a block ending (}) and doesn't have one yet
       code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
       code
