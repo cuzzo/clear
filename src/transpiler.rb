@@ -14,6 +14,7 @@ require_relative "./pipeline_generator"
 require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
 require_relative "./importer"
+require_relative "./transpiler_context"
 
 class ZigTranspiler
   include PipelineGenerator
@@ -28,7 +29,10 @@ class ZigTranspiler
     # SOA field-slice rewrite state (active during pipeline expression visits)
     @soa_rewrite_active = false
     @soa_needed_fields = Set.new
+    @transpiler_context_stack = []
   end
+
+  def current_tp_ctx; @transpiler_context_stack.last; end
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
@@ -413,15 +417,14 @@ private
       vis = node.visibility == :pub ? "pub " : ""
       signature = "#{vis}fn #{zig_safe_name(node.name)}(#{all_params.join(', ')}) #{return_type_str}"
 
-      @current_fn_uses_frame = node.uses_frame
-      # Track whether rt is available in the current function (needed for per-loop frame marks).
-      @current_fn_has_rt = fn_needs_rt
-      # Track HashMap parameter names so call-site arg wrapping can skip `&` for them
-      # (they are already pointers via anytype, so &param would create **Map).
-      @current_fn_collection_params = node.params.select { |p|
-        pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
-        pt.needs_pointer_passing?
-      }.map { |p| p[:name] }.to_set
+      @transpiler_context_stack.push(TranspilerContext.new(
+        uses_frame: node.uses_frame,
+        has_rt: fn_needs_rt,
+        collection_params: node.params.select { |p|
+          pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+          pt.needs_pointer_passing?
+        }.map { |p| p[:name] }.to_set
+      ))
 
       prologue = if fn_needs_rt
         node.uses_frame ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
@@ -457,6 +460,7 @@ private
                         mutable_param_shadows.empty? ? nil : mutable_param_shadows].compact
       prologue = prologue_parts.join("\n    ")
       body = transpile_block(node.body)
+      @transpiler_context_stack.pop
 
       <<~ZIG
         #{signature} {
@@ -554,7 +558,7 @@ private
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
 
       # 2. Cleanup & Move Suppression (must be computed before suppression decision)
-      affine_logic = emit_cleanup(safe_name, node.type_info, node.storage, resource_close: node.resource_close_zig)
+      affine_logic = emit_cleanup(safe_name, node)
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
 
@@ -932,7 +936,7 @@ private
       rt_ref    = @do_rt_name || "rt"
       coll_type = node.collection.full_type
       ct        = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
-      yield_line = @current_fn_has_rt ? "\n#{rt_ref}.checkYield();" : ""
+      yield_line = current_tp_ctx&.has_rt ? "\n#{rt_ref}.checkYield();" : ""
 
       if ct.map?
         # HashMap iteration: while-loop over keyIterator
@@ -953,7 +957,7 @@ private
       cmp       = node.inclusive ? "<=" : "<"
       @for_counter = (@for_counter || 0) + 1
       iter_var  = "__for_#{@for_counter}"
-      if @current_fn_has_rt
+      if current_tp_ctx&.has_rt
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
       else
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var};\n #{body} \n}\n}"
@@ -967,12 +971,12 @@ private
       if node.tight
         # TIGHT: no yield injection, no arena loop marks — pure computation path.
         "while (#{cond}) {\n #{body} \n}"
-      elsif node.mark_per_iter && @current_fn_has_rt
+      elsif node.mark_per_iter && current_tp_ctx&.has_rt
         # Loop-local frame allocs: unwind arena each iteration AND yield at back-edge.
         mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
         "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n #{body} \n#{rt_ref}.checkYield();\n}"
-      elsif @current_fn_has_rt
+      elsif current_tp_ctx&.has_rt
         # Normal loop: inject cooperative yield at back-edge.
         "while (#{cond}) {\n #{body} \n#{rt_ref}.checkYield();\n}"
       else
@@ -1393,7 +1397,7 @@ private
           # BG captures already store as *MapType, so don't double-wrap.
           # Function params that are already pointers (anytype) skip the &.
           is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
-          is_collection_param = a.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(a.name)
+          is_collection_param = a.is_a?(AST::Identifier) && current_tp_ctx&.collection_params&.include?(a.name)
           (is_capture || is_collection_param) ? arg_code : "&#{arg_code}"
         elsif a.type_info&.array?
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"

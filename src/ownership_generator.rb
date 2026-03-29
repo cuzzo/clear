@@ -1,6 +1,9 @@
 module OwnershipGenerator
   # Generates the `_moved` flag and `defer` cleanup block for a variable.
-  def emit_cleanup(name, type_info, storage, resource_close: nil)
+  def emit_cleanup(name, node)
+    type_info = node.type_info
+    storage = node.storage
+    resource_close = node.resource_close_zig
     # Resources use a simple `defer close()` — use moved-flag to prevent double-close.
     if resource_close
       close_stmt = resource_close.gsub("{0}", name)
