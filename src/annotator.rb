@@ -942,6 +942,31 @@ private
       walk_escaped.call(node.value.fields)
     end
 
+    # 3++. Schema-based escape detection — when returning a variable whose type is a
+    # struct/union containing collection fields, promote those fields' backing data.
+    # Catches: `result = Struct{ list: myList }; RETURN result;` where the StructLit
+    # escape detection (above) can't see through the intermediate variable.
+    if node.value.is_a?(AST::Identifier) && !node.value.type_info&.needs_escape_promotion?
+      resolved = node.value.type_info&.resolved
+      schema = lookup_type_schema(resolved) if resolved
+      if schema.is_a?(Hash) && !schema[:kind]  # plain struct schema (not resource/enum/union)
+        schema.each do |fname, ftype|
+          next if fname.is_a?(Symbol)  # skip :type_params, :methods, etc.
+          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
+          if ft.needs_escape_promotion?
+            # The struct variable contains a collection field — mark the variable
+            # for heap promotion so its collection backing data survives frame rewind.
+            decl_reg = node.value.symbol&.reg
+            if decl_reg&.respond_to?(:type_info)
+              decl_reg.type_info.escaped_return = true
+              decl_reg.type_info.heap_map = true if ft.map? && !ft.numeric_map?
+            end
+            node.collection_return = true
+          end
+        end
+      end
+    end
+
     # Promote non-identifier literals to heap when the expected return type requires it.
     # handle_return_escape only handles identifier variables; literals need this explicit check.
     unless was_promoted || node.value.is_a?(AST::Identifier)
