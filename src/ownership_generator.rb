@@ -38,6 +38,7 @@ module OwnershipGenerator
     #   Frame-scoped (default): keys + bucket array are on frameAlloc — deinit is a
     #   no-op (smartFree is a no-op; frame rewind reclaims all memory automatically).
     if type_info&.map? && !type_info&.numeric_map?
+      return "" if type_info.escaped_return  # ownership transferred to caller via return
       if type_info.heap_map
         return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
       else

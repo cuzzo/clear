@@ -925,21 +925,27 @@ private
       decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
     end
 
-    # 3+. List escape through struct/union literals — when a StructLit is returned
-    # and its field values (at any nesting depth) include @list identifiers,
-    # suppress their defer-deinit.  The .items slice would dangle after frame rewind.
+    # 3+. Collection escape through struct/union literals — when a StructLit is returned
+    # and its field values (at any nesting depth) include @list or HashMap identifiers,
+    # suppress their defer-deinit / mark for heap promotion.
     if node.value.is_a?(AST::StructLit)
-      mark_escaped_lists = ->(fields) {
+      mark_escaped_collections = ->(fields) {
         fields.each do |_fname, fval|
           if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
             decl_reg = fval.symbol&.reg
             decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
+          elsif fval.is_a?(AST::Identifier) && fval.type_info&.map? && !fval.type_info&.numeric_map?
+            decl_reg = fval.symbol&.reg
+            if decl_reg&.respond_to?(:type_info)
+              decl_reg.type_info.heap_map = true
+              decl_reg.type_info.escaped_return = true  # suppress defer deinit
+            end
           elsif fval.is_a?(AST::StructLit)
-            mark_escaped_lists.call(fval.fields)
+            mark_escaped_collections.call(fval.fields)
           end
         end
       }
-      mark_escaped_lists.call(node.value.fields)
+      mark_escaped_collections.call(node.value.fields)
     end
 
     # 3a. Map Escape Detection

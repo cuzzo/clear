@@ -1471,23 +1471,27 @@ private
         "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
       end
 
-      # 2b. List escape through struct/union literals — promote each @list field.
-      promote_struct_lists = if node.value.is_a?(AST::StructLit)
+      # 2b. Collection escape through struct/union literals — promote each @list and map field.
+      promote_struct_collections = if node.value.is_a?(AST::StructLit)
         rt_name = @do_rt_name || "rt"
-        collect_nested_lists = ->(fields) {
+        collect_nested = ->(fields) {
           fields.flat_map do |_fname, fval|
             if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
               elem_zig = fval.type_info&.element_type&.zig_type || "u8"
               var_name = zig_safe_name(fval.name)
               ["try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"]
+            elsif fval.is_a?(AST::Identifier) && fval.type_info&.map? && !fval.type_info&.numeric_map?
+              val_zig = fval.type_info&.value_type&.zig_type || "void"
+              var_name = zig_safe_name(fval.name)
+              ["try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);"]
             elsif fval.is_a?(AST::StructLit)
-              collect_nested_lists.call(fval.fields)
+              collect_nested.call(fval.fields)
             else
               []
             end
           end
         }
-        collect_nested_lists.call(node.value.fields).join("\n")
+        collect_nested.call(node.value.fields).join("\n")
       end
 
       # 2a. Map escape promotion — clone frame-backed bucket array + key strings to heap.
@@ -1510,7 +1514,7 @@ private
         visit(node.value)
       end
 
-      parts = [suppress, promote, promote_struct_lists, promote_map, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
+      parts = [suppress, promote, promote_struct_collections, promote_map, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
 
     when AST::GetField

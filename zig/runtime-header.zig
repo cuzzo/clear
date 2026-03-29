@@ -187,11 +187,11 @@ pub const CheatLib = struct {
                 try self.inner.put(bucket_alloc, key_copy, value);
             }
 
-            pub fn get(self: *Self, key: []const u8) ?V {
+            pub fn get(self: anytype, key: []const u8) ?V {
                 return self.inner.get(key);
             }
 
-            pub fn contains(self: *Self, key: []const u8) bool {
+            pub fn contains(self: anytype, key: []const u8) bool {
                 return self.inner.contains(key);
             }
 
