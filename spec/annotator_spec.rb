@@ -3354,5 +3354,31 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
+
+  describe "WHILE loop in MATCH branch with struct bindings" do
+    it "allows WHILE loops when struct MATCH binding is not used inside the loop" do
+      src = <<~CLEAR
+        UNION Data {
+            Pair { x: Int64, y: Int64 }
+        }
+        FN cheatMain() RETURNS Void ->
+            d = Data.Pair{ x: 1, y: 2 };
+            MATCH d START
+                Data.Pair AS p ->
+                    px = p.x;
+                    py = p.y;
+                    MUTABLE sum: Int64 = 0;
+                    MUTABLE i: Int64 = 0;
+                    WHILE i < px DO
+                        sum += py;
+                        i += 1;
+                    END,
+                DEFAULT -> PASS;
+            END
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+  end
 end
 

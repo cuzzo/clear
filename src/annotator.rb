@@ -794,9 +794,13 @@ private
 
         # Post-analysis check for loop-specific errors (use of moved value in next iteration)
         # Copyable types (primitives, strings, slices, unions) are exempt — they're copied implicitly.
+        # Variables not referenced in the loop body are also exempt — they were moved before the
+        # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
+        loop_body_names = collect_body_identifier_names(node.do_branch)
         current_scope.var_states.each do |name, new_state|
           old_state = pre_loop_state[name]
           if old_state == :live && new_state == :moved
+            next unless loop_body_names.include?(name)
             var_type = current_scope.locals.dig(name, :type)
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
             is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
@@ -2255,6 +2259,29 @@ private
       curr = curr.target
     end
     curr
+  end
+
+  # Collect all identifier names referenced (directly) in an AST subtree.
+  # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
+  def collect_body_identifier_names(nodes)
+    names = Set.new
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested function definitions.
+      when AST::Identifier
+        names.add(n.name)
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(nodes)
+    names
   end
 
 
