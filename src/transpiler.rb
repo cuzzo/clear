@@ -409,6 +409,12 @@ private
       @current_fn_uses_frame = node.uses_frame
       # Track whether rt is available in the current function (needed for per-loop frame marks).
       @current_fn_has_rt = fn_needs_rt
+      # Track HashMap parameter names so call-site arg wrapping can skip `&` for them
+      # (they are already pointers via anytype, so &param would create **Map).
+      @current_fn_map_params = node.params.select { |p|
+        pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+        pt.map?
+      }.map { |p| p[:name] }.to_set
 
       prologue = if fn_needs_rt
         node.uses_frame ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
@@ -1375,8 +1381,11 @@ private
         elsif a.type_info&.is_a?(Type) && Type.new(a.type_info).map?
           # HashMap params use anytype — pass by pointer so the callee can mutate.
           # BG captures already store maps as *MapType, so don't double-wrap.
+          # Function params that are HashMap are already pointers (anytype = *Map),
+          # so passing &param would create **Map — skip the & for those.
           is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
-          is_capture ? arg_code : "&#{arg_code}"
+          is_map_param = a.is_a?(AST::Identifier) && @current_fn_map_params&.include?(a.name)
+          (is_capture || is_map_param) ? arg_code : "&#{arg_code}"
         else
           arg_code
         end

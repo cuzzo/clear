@@ -441,4 +441,27 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("_ = &x")
     end
   end
+
+  describe "HashMap param double-& fix" do
+    it "does not double-wrap HashMap params with & in recursive calls" do
+      src = <<~CLEAR
+        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS Int64 @reentrant ->
+            env[key] = depth;
+            IF depth > 0 THEN RETURN update!(key, env, depth - 1); END
+            RETURN depth;
+        END
+        FN cheatMain() RETURNS Void ->
+            MUTABLE env: HashMap<Int64> = {};
+            update!("k", env, 3);
+        END
+      CLEAR
+      zig = transpile(src)
+      # Caller in cheatMain passes &env (local var → pointer)
+      expect(zig).to match(/update\(.*&env/)
+      # Recursive call inside update! passes env without & (already a pointer)
+      fn_body = zig[/fn update\b.*?^}/m]
+      expect(fn_body).to include("return update(")
+      expect(fn_body).not_to include("&env")
+    end
+  end
 end
