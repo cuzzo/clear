@@ -5,7 +5,8 @@ class SymbolEntry
   attr_accessor :reg, :type, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :borrowed_paths, :valid,
                 :invalid_reason, :resource, :close_zig, :read,
-                :scope  # Back-reference to owning Scope (set by Scope#declare)
+                :scope,  # Back-reference to owning Scope (set by Scope#declare)
+                :state   # Ownership state: :uninit, :live, :moved, :dropped
 
   def initialize(reg:, type:, mutable:, storage:, sync: nil, rebindable: false,
                  size: 0, capabilities: Set.new, borrowed_paths: [],

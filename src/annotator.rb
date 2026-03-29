@@ -481,10 +481,10 @@ private
     all_drops = []
 
     branches.each do |branch_logic|
-      current_scope.var_states = initial_state.dup
+      current_scope.restore_states(initial_state)
       with_new_scope(current_scope) do
         all_drops << branch_logic.call
-        branch_states << current_scope.var_states.dup
+        branch_states << current_scope.clone_states
       end
     end
 
@@ -501,7 +501,7 @@ private
       end
     else
       # Just restore the initial state if merging is disabled (e.g. for WHILE loops)
-      current_scope.var_states = initial_state
+      current_scope.restore_states(initial_state)
     end
 
     all_drops
@@ -795,7 +795,8 @@ private
         # Variables not referenced in the loop body are also exempt — they were moved before the
         # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
         loop_body_names = collect_body_identifier_names(node.do_branch)
-        current_scope.var_states.each do |name, new_state|
+        current_scope.locals.each do |name, entry|
+          new_state = entry.state
           old_state = pre_loop_state[name]
           if old_state == :live && new_state == :moved
             next unless loop_body_names.include?(name)

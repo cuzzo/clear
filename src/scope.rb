@@ -2,14 +2,13 @@ require "set"
 require_relative "./symbol_entry"
 
 class Scope
-  attr_accessor :locals, :var_states, :dependencies, :var_states, :moved_paths, :owned_names
+  attr_accessor :locals, :dependencies, :moved_paths, :owned_names
   attr_reader   :types
 
   def initialize
     @locals = {}
     @dependencies = {}
     @types = {}
-    @var_states = {}
     @moved_paths = []  # Track moved sub-paths like [:foo, :child]
     @owned_names = Set.new  # Variables declared in THIS scope (not inherited from parent)
   end
@@ -48,8 +47,7 @@ class Scope
       new_entry
     end
 
-    # 2. Copy State Maps
-    @var_states = original.var_states.dup
+    # 2. Copy State Maps (var state lives on entries, already duped above)
     @dependencies = original.dependencies.dup
     @moved_paths = original.moved_paths.map(&:dup)
     # Child scopes inherit variables but don't own them — start with empty owned_names.
@@ -204,16 +202,14 @@ class Scope
   end
 
   def set_state(name, state)
-    @var_states[name] = state
+    @locals[name].state = state if @locals[name]
   end
 
   def get_state(name)
-    @var_states[name] || :uninit
+    @locals[name]&.state || :uninit
   end
 
   # Mark a variable as read (used as an r-value in user code).
-  # The caller (visit_Identifier via lookup_scope_for) is expected to pass the
-  # scope that owns the declaration, so no parent traversal is needed here.
   def mark_read(name)
     entry = @locals[name]
     return unless entry
@@ -221,9 +217,14 @@ class Scope
     entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
   end
 
-  # Helper for branching
+  # Snapshot all entry states for branch analysis. Returns {name => state_symbol}.
   def clone_states
-    @var_states.dup
+    @locals.transform_values { |entry| entry.state || :uninit }
+  end
+
+  # Restore entry states from a snapshot (produced by clone_states).
+  def restore_states(state_map)
+    state_map.each { |name, state| @locals[name].state = state if @locals[name] }
   end
 
   def mark_escaped(name)
