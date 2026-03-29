@@ -357,6 +357,10 @@ private
     }
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
+    # Register function node BEFORE body analysis so visit_ReturnNode can
+    # set returns_promoted on it and callers in the same pass can read it.
+    @fn_nodes[node.name] = node
+
     # 4. Routine Analysis
     final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
 
@@ -366,7 +370,6 @@ private
     # Record in call graph for the later indirect-cycle post-pass.
     @call_graph[node.name]   = called_names - [node.name]
     @fn_has_fnptr[node.name] = has_fnptr
-    @fn_nodes[node.name]     = node
 
     if directly_recursive
       # TODO(v0.2): Detect tail-recursive calls and either transform to loops
