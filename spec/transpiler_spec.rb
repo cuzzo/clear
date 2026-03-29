@@ -135,9 +135,9 @@ RSpec.describe ZigTranspiler do
       expect(promote_pos).to be < return_pos
     end
 
-    it "uses heapAlloc for mapPut key copies (keys outlive frame)" do
+    it "uses frameAlloc for mapPut keys (mapPromote re-dupes to heap before return)" do
       zig = transpile(map_return_src)
-      expect(zig).to include(".put(rt.heapAlloc(), rt.heapAlloc()")
+      expect(zig).to include(".put(rt.frameAlloc(), rt.frameAlloc()")
     end
 
     it "caller uses mapDeinit with heapAlloc for promoted map" do

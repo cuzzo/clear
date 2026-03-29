@@ -654,12 +654,13 @@ private
              rt_name  = @do_rt_name || "rt"
 
              if map_ft.numeric_map?
+               alloc = (map_ft.escaped_return || map_ft.heap_promoted || map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
                if map_ft.sharded? || map_ft.striped?
-                 return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
+                 return "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
                else
                  key_zig = map_ft.key_type.zig_type
                  val_zig = map_ft.value_type.zig_type
-                 return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{rt_name}.heapAlloc(), &#{map_ref}, #{key_ref}, #{val_ref});"
+                 return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
                end
              else
                # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing
@@ -667,8 +668,16 @@ private
                if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
                  return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
                end
-               # Unified .put() API works for StringMap, PartitionedStringMap, ShardedStringMap
-               return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
+               # Keys and buckets use frameAlloc by default — frame rewind reclaims them.
+               # mapPromote re-dupes to heap before return. Only sharded/striped maps
+               # use heapAlloc directly (shared across fibers, no single frame owner).
+               # Caller-received promoted maps (heap_promoted) also use heapAlloc for
+               # subsequent puts since their data is already heap-backed.
+               target_ti = target_node.respond_to?(:symbol) && target_node.symbol ? target_node.symbol.type : nil
+               target_ti = target_ti.is_a?(Type) ? target_ti : nil
+               is_heap_map = map_ft.sharded? || map_ft.striped? || map_ft.heap_promoted || target_ti&.heap_promoted
+               alloc = is_heap_map ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               return "try #{map_ref}.put(#{alloc}, #{alloc}, #{key_ref}, #{val_ref});"
              end
           end
           arr_ref = visit(target_node)
@@ -2090,10 +2099,15 @@ private
 
     # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
     if !map_ft.numeric_map?
+      # Match allocator to put: sharded/striped/promoted use heap, local use frame.
+      target_ti = node.object.respond_to?(:symbol) && node.object.symbol ? node.object.symbol.type : nil
+      target_ti = target_ti.is_a?(Type) ? target_ti : nil
+      is_heap_map = map_ft.sharded? || map_ft.striped? || map_ft.heap_promoted || target_ti&.heap_promoted
+      map_alloc = is_heap_map ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
       case node.map_method
       when :delete
         key_code = visit(node.args[0])
-        "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
+        "#{obj_code}.remove(#{map_alloc}, #{key_code})"
       when :contains
         key_code = visit(node.args[0])
         "#{obj_code}.contains(#{key_code})"

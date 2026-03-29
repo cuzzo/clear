@@ -2466,8 +2466,13 @@ pub const CheatLib = struct {
                 return n;
             }
 
-            pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-                for (&self.shards) |*shard| shard.map.deinit(alloc);
+            pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                for (&self.shards) |*shard| {
+                    // Free duped key strings before releasing bucket array.
+                    var it = shard.map.keyIterator();
+                    while (it.next()) |k| key_alloc.free(k.*);
+                    shard.map.deinit(bucket_alloc);
+                }
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {

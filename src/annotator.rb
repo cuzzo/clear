@@ -1285,6 +1285,9 @@ private
     if decl_reg&.respond_to?(:type_info)
       decl_reg.type_info.escaped_return = true
     end
+    # Also set on the SymbolEntry's type so the transpiler can read it
+    sym_type = node.symbol&.type
+    sym_type.escaped_return = true if sym_type.is_a?(Type)
   end
 
   # This allows the transpiler to skip `_ = &name;` for mutable variables that

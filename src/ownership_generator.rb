@@ -26,12 +26,12 @@ module OwnershipGenerator
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
 
-    # Sharded/striped maps: each shard/stripe is independently deinited.
+    # Sharded/striped maps: shared across fibers, use heapAlloc for keys and buckets.
     if type_info&.map? && (type_info&.sharded? || type_info&.striped?)
       if type_info.numeric_map?
-        return "defer #{name}.deinit(rt.frameAlloc());\n"
+        return "defer #{name}.deinit(rt.heapAlloc());\n"
       else
-        return "defer #{name}.deinit(rt.frameAlloc(), rt.frameAlloc());\n"
+        return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
       end
     end
 
