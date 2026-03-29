@@ -410,6 +410,7 @@ module FunctionAnalysis
       current_scope.declare(
         param[:name], nil, param[:type], param[:mutable], false, nil, :stack # TODO: param[:storage]
       )
+      current_scope.set_state(param[:name], :live)
       param[:type]
     end
   end
