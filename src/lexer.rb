@@ -165,12 +165,12 @@ class Lexer
         ch = @s.getch
         advance_pos(ch) if ch
         case ch
-        when 'n'  then buffer << '\n'
-        when 't'  then buffer << '\t'
+        when 'n'  then buffer << "\n"   # actual newline byte (0x0A)
+        when 't'  then buffer << "\t"   # actual tab byte (0x09)
         when '"'  then buffer << '"'
         when '\\' then buffer << '\\'
-        when 'r'  then buffer << '\r'
-        when '0'  then buffer << '\0'
+        when 'r'  then buffer << "\r"   # actual CR byte (0x0D)
+        when '0'  then buffer << "\0"   # actual null byte (0x00)
         else buffer << '\\' << (ch || '')
         end
         next
