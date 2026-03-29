@@ -1,0 +1,125 @@
+-- TCP KV Store — Minimal RESP-compatible GET/SET server
+--
+-- A single-binary key-value store that speaks Redis RESP protocol.
+-- Exercises: TCPServer, accept, BG fibers, @sharded HashMap, string parsing.
+--
+-- Protocol: Minimal RESP subset
+--   SET key value → +OK\r\n
+--   GET key       → $N\r\nvalue\r\n  (bulk string) or $-1\r\n (nil)
+--   PING          → +PONG\r\n
+--
+-- Test with: redis-benchmark -p 6380 -t set,get -n 100000 -c 50
+-- Or:        redis-cli -p 6380 SET foo bar / GET foo
+
+-- =========================================================================
+-- RESP Command Handler
+-- =========================================================================
+
+FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>) RETURNS Void ->
+    MUTABLE running: Bool = TRUE;
+    WHILE running DO
+        data = tcpRead(client);
+        IF data.length() == 0 THEN
+            running = FALSE;
+        ELSE
+            MUTABLE first = charAt(data, 0);
+            IF first == "*" THEN
+                -- RESP array: *N\r\n$L\r\nBULK\r\n...
+                MUTABLE pos: Int64 = 1;
+                MUTABLE countStr = "";
+                WHILE pos < data.length() && charAt(data, pos) != "\r" DO
+                    countStr = countStr + charAt(data, pos);
+                    pos += 1;
+                END
+                MUTABLE argCount = toInt(toNumber(countStr) OR 0.0);
+                pos += 2;
+
+                MUTABLE arg0 = "";
+                MUTABLE arg1 = "";
+                MUTABLE arg2 = "";
+                MUTABLE ai: Int64 = 0;
+                WHILE ai < argCount && pos < data.length() DO
+                    IF charAt(data, pos) == "$" THEN
+                        pos += 1;
+                        MUTABLE lenStr = "";
+                        WHILE pos < data.length() && charAt(data, pos) != "\r" DO
+                            lenStr = lenStr + charAt(data, pos);
+                            pos += 1;
+                        END
+                        MUTABLE len = toInt(toNumber(lenStr) OR 0.0);
+                        pos += 2;
+                        MUTABLE val = "";
+                        MUTABLE vi: Int64 = 0;
+                        WHILE vi < len && pos < data.length() DO
+                            val = val + charAt(data, pos);
+                            pos += 1;
+                            vi += 1;
+                        END
+                        pos += 2;
+                        IF ai == 0 THEN arg0 = val;
+                        ELSE_IF ai == 1 THEN arg1 = val;
+                        ELSE_IF ai == 2 THEN arg2 = val;
+                        END
+                    END
+                    ai += 1;
+                END
+
+                IF arg0 == "SET" || arg0 == "set" THEN
+                    store[arg1] = arg2;
+                    tcpWrite(client, "+OK\r\n");
+                ELSE_IF arg0 == "GET" || arg0 == "get" THEN
+                    MUTABLE result = store[arg1] OR "";
+                    IF result.length() > 0 THEN
+                        tcpWrite(client, "$" + toString(result.length()) + "\r\n" + result + "\r\n");
+                    ELSE
+                        tcpWrite(client, "$-1\r\n");
+                    END
+                ELSE_IF arg0 == "PING" || arg0 == "ping" THEN
+                    tcpWrite(client, "+PONG\r\n");
+                ELSE_IF arg0 == "COMMAND" || arg0 == "command" THEN
+                    tcpWrite(client, "*0\r\n");
+                ELSE_IF arg0 == "QUIT" || arg0 == "quit" THEN
+                    tcpWrite(client, "+OK\r\n");
+                    running = FALSE;
+                ELSE
+                    tcpWrite(client, "-ERR unknown command '" + arg0 + "'\r\n");
+                END
+            ELSE
+                -- Inline command
+                MUTABLE cmd = "";
+                MUTABLE pos: Int64 = 0;
+                WHILE pos < data.length() && charAt(data, pos) != "\r" && charAt(data, pos) != "\n" DO
+                    cmd = cmd + charAt(data, pos);
+                    pos += 1;
+                END
+                IF cmd == "PING" || cmd == "ping" THEN
+                    tcpWrite(client, "+PONG\r\n");
+                ELSE_IF cmd == "QUIT" || cmd == "quit" THEN
+                    tcpWrite(client, "+OK\r\n");
+                    running = FALSE;
+                ELSE
+                    tcpWrite(client, "-ERR unknown command '" + cmd + "'\r\n");
+                END
+            END
+        END
+    END
+END
+
+-- =========================================================================
+-- Main — accept loop
+-- =========================================================================
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE store: HashMap<String>@sharded(8):locked = {};
+
+    server = TCPServer::listen(6380);
+    print("CLEAR kvstore listening on port 6380");
+
+    MUTABLE tasks: ~Void[]@list = [];
+    WHILE TRUE DO
+        client = accept(server);
+        tasks.append(BG {
+            handleClient!(client, store);
+        });
+    END
+END

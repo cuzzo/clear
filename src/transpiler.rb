@@ -1191,6 +1191,15 @@ private
           end
         end).join(", ")
 
+      # Resources captured by BG fibers transfer ownership — suppress outer defer close.
+      # Without this, the outer scope's `defer socketClose(fd)` fires immediately,
+      # closing the fd before the fiber reads it.
+      resource_types = Set[:TCPClient, :TCPServer, :File]
+      resource_moves = captured.filter_map do |name, type_obj|
+        resolved = type_obj.is_a?(Type) ? type_obj.resolved : type_obj
+        "#{name}_moved = true;" if resource_types.include?(resolved)
+      end.join("\n")
+
       rt_name = @do_rt_name || "rt"
 
       # Flatten ThenChain nodes in the body into individual steps.
@@ -1267,6 +1276,7 @@ private
             const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
+            #{resource_moves}
             #{bg_spawn_call(node, rt_name, ctx_type, ctx_var)}
             break :#{blk_label} #{promise_var};
         }
