@@ -509,7 +509,7 @@ class Type
       "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
     elsif map? && !numeric_map?
       val_zig = value_type&.zig_type || "void"
-      "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);"
+      "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);\n#{var_name}.alloc = #{rt_name}.heapAlloc();"
     end
   end
 

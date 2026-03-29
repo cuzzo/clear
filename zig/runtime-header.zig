@@ -195,14 +195,19 @@ pub const CheatLib = struct {
         return struct {
             const Self = @This();
             inner: std.StringHashMapUnmanaged(V) = .{},
+            alloc: std.mem.Allocator = std.heap.page_allocator, // overwritten at init
 
+            /// All operations use self.alloc — set at construction by transpiler.
+            /// The key_alloc/bucket_alloc params are kept for backward compat but ignored.
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                _ = key_alloc;
+                _ = bucket_alloc;
                 if (self.inner.getPtr(key)) |val_ptr| {
                     val_ptr.* = value;
                     return;
                 }
-                const key_copy = try key_alloc.dupe(u8, key);
-                try self.inner.put(bucket_alloc, key_copy, value);
+                const key_copy = try self.alloc.dupe(u8, key);
+                try self.inner.put(self.alloc, key_copy, value);
             }
 
             pub fn get(self: anytype, key: []const u8) ?V {
@@ -214,8 +219,9 @@ pub const CheatLib = struct {
             }
 
             pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                _ = key_alloc;
                 if (self.inner.fetchRemove(key)) |kv| {
-                    key_alloc.free(kv.key);
+                    self.alloc.free(kv.key);
                 }
             }
 
@@ -224,9 +230,12 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                _ = key_alloc;
+                _ = bucket_alloc;
+                // Use stored allocator — guarantees consistency with put().
                 var it = self.inner.iterator();
-                while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
-                self.inner.deinit(bucket_alloc);
+                while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+                self.inner.deinit(self.alloc);
             }
 
             // Delegate to inner for code that still uses raw HashMap API
@@ -2201,18 +2210,25 @@ pub const CheatLib = struct {
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
+            alloc: std.mem.Allocator = std.heap.page_allocator,
 
             fn shardIndex(key: []const u8) usize {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                _ = key_alloc;
+                _ = bucket_alloc;
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
                 _ = self.shards[s].ops.fetchAdd(1, .monotonic);
-                const owned_key = try key_alloc.dupe(u8, key);
-                try self.shards[s].map.put(bucket_alloc, owned_key, value);
+                if (self.shards[s].map.getPtr(key)) |val_ptr| {
+                    val_ptr.* = value;
+                    return;
+                }
+                const owned_key = try self.alloc.dupe(u8, key);
+                try self.shards[s].map.put(self.alloc, owned_key, value);
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
@@ -2231,11 +2247,12 @@ pub const CheatLib = struct {
             }
 
             pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                _ = key_alloc;
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
                 if (self.shards[s].map.fetchRemove(key)) |kv| {
-                    key_alloc.free(kv.key);
+                    self.alloc.free(kv.key);
                 }
             }
 
@@ -2272,10 +2289,12 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                _ = key_alloc;
+                _ = bucket_alloc;
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
-                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
-                    shard.map.deinit(bucket_alloc);
+                    while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+                    shard.map.deinit(self.alloc);
                 }
             }
 
@@ -2303,12 +2322,15 @@ pub const CheatLib = struct {
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
+            alloc: std.mem.Allocator = std.heap.page_allocator,
 
             fn shardIndex(key: []const u8) usize {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                _ = key_alloc;
+                _ = bucket_alloc;
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
@@ -2317,8 +2339,8 @@ pub const CheatLib = struct {
                     val_ptr.* = value;
                     return;
                 }
-                const owned_key = try key_alloc.dupe(u8, key);
-                try self.shards[s].map.put(bucket_alloc, owned_key, value);
+                const owned_key = try self.alloc.dupe(u8, key);
+                try self.shards[s].map.put(self.alloc, owned_key, value);
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
@@ -2336,11 +2358,12 @@ pub const CheatLib = struct {
             }
 
             pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+                _ = key_alloc;
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
                 if (self.shards[s].map.fetchRemove(key)) |kv| {
-                    key_alloc.free(kv.key);
+                    self.alloc.free(kv.key);
                 }
             }
 
@@ -2377,10 +2400,12 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                _ = key_alloc;
+                _ = bucket_alloc;
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
-                    while (it.next()) |entry| key_alloc.free(entry.key_ptr.*);
-                    shard.map.deinit(bucket_alloc);
+                    while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+                    shard.map.deinit(self.alloc);
                 }
             }
         };

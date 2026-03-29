@@ -2850,7 +2850,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include('m.remove(rt.frameAlloc(), "x")')
+        expect(out).to include('m.remove(rt.heapAlloc(), "x")')
       end
 
       it "raises when delete receives no arguments" do
@@ -2962,7 +2962,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.StringMap(i64){}")
+        expect(out).to include("CheatLib.StringMap(i64){ .alloc = rt.frameAlloc() }")
         expect(out).not_to include("mapPut")
       end
     end

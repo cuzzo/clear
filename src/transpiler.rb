@@ -528,6 +528,7 @@ private
       rc_map = @rc_unwrap_map || {}
       rhs_is_unwrapped = rhs_ident && rc_map.key?(rhs_ident.name)
       rhs_ti = rhs_ident&.type_info
+      rt_name = @do_rt_name || "rt"
 
       value_code = if node.full_type&.pool?
         # Pool / ShardedPool: zero-initialize via zig_type (handles both sharded and non-sharded)
@@ -544,8 +545,12 @@ private
         else
           "#{node.full_type.zig_type}{}"
         end
-      elsif node.type.is_a?(Type) && node.type.map? && (node.type.sharded? || node.type.striped?)
-        # Sharded/striped map: zero-initialize using the declared type's zig_type.
+      elsif node.type.is_a?(Type) && node.type.map? && node.type.striped?
+        # Striped map (ShardedStringMap/MutexShardedStringMap): store heapAlloc.
+        @used_sharded_map = true
+        "#{node.type.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+      elsif node.type.is_a?(Type) && node.type.map? && node.type.sharded?
+        # PartitionedStringMap (shared-nothing): no alloc field.
         @used_sharded_map = true
         "#{node.type.zig_type}{}"
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
@@ -668,15 +673,11 @@ private
                if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
                  return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
                end
-               # Keys and buckets use frameAlloc by default — frame rewind reclaims them.
-               # mapPromote re-dupes to heap before return. Only sharded/striped maps
-               # use heapAlloc directly (shared across fibers, no single frame owner).
-               # Caller-received promoted maps (heap_promoted) also use heapAlloc for
-               # subsequent puts since their data is already heap-backed.
-               target_ti = target_node.respond_to?(:symbol) && target_node.symbol ? target_node.symbol.type : nil
-               target_ti = target_ti.is_a?(Type) ? target_ti : nil
-               is_heap_map = map_ft.sharded? || map_ft.striped? || map_ft.heap_promoted || target_ti&.heap_promoted
-               alloc = is_heap_map ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               # The map stores its own allocator from the first put — the allocator
+               # passed here is captured by the map and used for all subsequent ops.
+               # Frame-local maps get frameAlloc (arena, zero-cost cleanup).
+               # Sharded/promoted maps get heapAlloc (GPA, tracked cleanup).
+               alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
                return "try #{map_ref}.put(#{alloc}, #{alloc}, #{key_ref}, #{val_ref});"
              end
           end
@@ -2060,7 +2061,15 @@ private
       node.full_type.is_a?(Type) ? node.full_type : Type.new(node.full_type)
     end
     rt_name  = @do_rt_name || "rt"
-    zig_init = "#{map_ft.zig_type}{}"
+    # StringMap, ShardedStringMap, MutexShardedStringMap store their allocator.
+    # Numeric maps and PartitionedStringMap (shared-nothing) don't have alloc.
+    if map_ft.numeric_map? || (map_ft.sharded? && !map_ft.striped?)
+      zig_init = "#{map_ft.zig_type}{}"
+    elsif map_ft.striped?
+      zig_init = "#{map_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+    else
+      zig_init = "#{map_ft.zig_type}{ .alloc = #{rt_name}.frameAlloc() }"
+    end
 
     return zig_init if node.pairs.empty?
 
@@ -2097,15 +2106,11 @@ private
 
     # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
     if !map_ft.numeric_map?
-      # Match allocator to put: sharded/striped/promoted use heap, local use frame.
-      target_ti = node.object.respond_to?(:symbol) && node.object.symbol ? node.object.symbol.type : nil
-      target_ti = target_ti.is_a?(Type) ? target_ti : nil
-      is_heap_map = map_ft.sharded? || map_ft.striped? || map_ft.heap_promoted || target_ti&.heap_promoted
-      map_alloc = is_heap_map ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+      # Always use heapAlloc for string map operations — matches put allocator.
       case node.map_method
       when :delete
         key_code = visit(node.args[0])
-        "#{obj_code}.remove(#{map_alloc}, #{key_code})"
+        "#{obj_code}.remove(#{rt_name}.heapAlloc(), #{key_code})"
       when :contains
         key_code = visit(node.args[0])
         "#{obj_code}.contains(#{key_code})"

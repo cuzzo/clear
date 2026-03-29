@@ -197,7 +197,7 @@ module PipelineGenerator
     expr_code = visit(expression_node)
     @placeholder_name = nil
 
-    init = "var idx_result: CheatLib.StringMap(std.ArrayListUnmanaged(#{element_zig_type})) = .{};"
+    init = "var idx_result: CheatLib.StringMap(std.ArrayListUnmanaged(#{element_zig_type})) = .{ .alloc = rt.frameAlloc() };"
 
     transpile_pipeline_macro(list_node, smooth_node, init: init, force_aos: true) do |alloc|
       <<~ZIG

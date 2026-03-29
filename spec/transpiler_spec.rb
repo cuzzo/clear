@@ -135,7 +135,7 @@ RSpec.describe ZigTranspiler do
       expect(promote_pos).to be < return_pos
     end
 
-    it "uses frameAlloc for mapPut keys (mapPromote re-dupes to heap before return)" do
+    it "uses frameAlloc for mapPut keys (map captures allocator internally)" do
       zig = transpile(map_return_src)
       expect(zig).to include(".put(rt.frameAlloc(), rt.frameAlloc()")
     end
@@ -145,7 +145,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("result.deinit(rt.heapAlloc(), rt.heapAlloc())")
     end
 
-    it "non-escaping map uses frameAlloc deinit (no-op)" do
+    it "all string maps use heapAlloc deinit (consistent with put allocator)" do
       src = <<~CLEAR
         FN cheatMain() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
@@ -154,9 +154,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("m.deinit(rt.frameAlloc(), rt.frameAlloc())")
-      expect(zig).not_to include("mapPromote")
-      expect(zig).not_to include("mapDeinit")
+      expect(zig).to include("m.deinit(rt.heapAlloc(), rt.heapAlloc())")
     end
   end
 

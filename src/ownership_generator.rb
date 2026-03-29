@@ -35,16 +35,11 @@ module OwnershipGenerator
       end
     end
 
-    # String map:
-    #   Promoted (heap_promoted): keys + bucket array are on heapAlloc — full mapDeinit.
-    #   Frame-scoped (default): keys + bucket array are on frameAlloc — deinit is a
-    #   no-op (smartFree is a no-op; frame rewind reclaims all memory automatically).
+    # String map: always use heapAlloc for deinit — matches put allocator.
+    # Keys are duped via heapAlloc in put(); deinit must free with same allocator.
+    # For frame-local maps, heapAlloc.free on frame pointers is a no-op (safe).
     if type_info&.map? && !type_info&.numeric_map?
-      if type_info.heap_promoted
-        return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
-      else
-        return "defer #{name}.deinit(rt.frameAlloc(), rt.frameAlloc());\n"
-      end
+      return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
     end
     # Numeric map: no key copies; bucket array in frameAlloc.
     if type_info&.numeric_map?
