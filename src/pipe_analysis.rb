@@ -497,7 +497,7 @@ module PipeAnalysis
   # This runs BEFORE visiting the body, so we only check unvisited AST.
   def emit_multi_map_warning(conc, sharded_names)
     shard_counts = sharded_names.map do |name|
-      sc = lookup_scope_for(name)&.locals&.dig(name, :type)
+      sc = lookup_scope_for(name)&.locals&.[](name)&.type
       t = sc.is_a?(Type) ? sc : Type.new(sc)
       t.shard_count
     end.compact.uniq
@@ -519,7 +519,7 @@ module PipeAnalysis
       if scope
         entry = scope.locals[node.name]
         if entry
-          t = entry[:type]
+          t = entry.type
           t = Type.new(t) unless t.is_a?(Type)
           names << node.name if t.sharded? && !t.any_sync?
         end
@@ -543,7 +543,7 @@ module PipeAnalysis
       return false unless scope
       entry = scope.locals[node.name]
       return false unless entry
-      t = entry[:type]
+      t = entry.type
       t = Type.new(t) unless t.is_a?(Type)
       return t.sharded? && !t.any_sync?
     end
@@ -610,7 +610,7 @@ module PipeAnalysis
     scope = lookup_scope_for(map_name)
     return unless scope
     entry = scope.locals[map_name]
-    map_type = entry&.dig(:type)
+    map_type = entry&.type
     map_type = Type.new(map_type) unless map_type.is_a?(Type)
     return unless map_type.sharded? && !map_type.any_sync?
 

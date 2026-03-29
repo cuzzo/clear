@@ -40,8 +40,8 @@ class Scope
     @locals = original.locals.transform_values do |entry|
       new_entry = entry.dup
       # Sets/Arrays inside the entry must be duped too, or they remain shared
-      new_entry[:capabilities] = entry[:capabilities].dup
-      new_entry[:borrowed_paths] = entry[:borrowed_paths]&.map(&:dup) # If you implemented the path logic
+      new_entry.capabilities = entry.capabilities.dup
+      new_entry.borrowed_paths = entry.borrowed_paths&.map(&:dup)
       new_entry
     end
 
@@ -75,12 +75,12 @@ class Scope
 
   def get_size(name)
     entry = @locals[name]
-    entry ? entry[:size] : nil
+    entry ? entry.size : nil
   end
 
   def resolve_reg(name)
     entry = @locals[name]
-    entry ? entry[:reg] : nil
+    entry ? entry.reg : nil
   end
 
   # Returns a Type carrying the variable's base type plus storage-derived capabilities.
@@ -88,14 +88,14 @@ class Scope
     entry = @locals[name]
     return Type.new(:Any) if entry.nil?
 
-    stored = entry[:type]
+    stored = entry.type
 
     # If already a Type (e.g. from parse_type_annotation), clone and overlay storage
     # If a non-Symbol (e.g. a function signature Hash), wrap as-is
     base_type = stored.is_a?(Type) ? stored : Type.new(stored)
 
     # Overlay storage-derived capabilities onto the type
-    case entry[:storage]
+    case entry.storage
     when :multiowned
       base_type.ownership = :multiowned
     when :shared
@@ -103,9 +103,9 @@ class Scope
     when :frame
       base_type.location = :frame   # large local var: arena pointer (*T in Zig)
     when :heap
-      if entry[:sync] == :locked
+      if entry.sync == :locked
         base_type.sync = :locked
-      elsif entry[:sync] == :write_locked
+      elsif entry.sync == :write_locked
         base_type.sync = :write_locked
       else
         base_type.location = :heap
@@ -114,19 +114,19 @@ class Scope
 
     # Always propagate sync — it may coexist with an ownership wrapper (e.g. @shared:locked
     # has storage=:shared AND sync=:locked; the case above only sets ownership).
-    base_type.sync = entry[:sync] if entry[:sync] && !base_type.sync
+    base_type.sync = entry.sync if entry.sync && !base_type.sync
 
     base_type
   end
 
   def resolve_type(name)
     entry = @locals[name]
-    entry ? entry[:type] : :Any
+    entry ? entry.type : :Any
   end
 
   def is_mutable?(name)
     entry = @locals[name]
-    entry ? entry[:mutable] : true
+    entry ? entry.mutable : true
   end
 
   def is_immutable?(name)
@@ -139,13 +139,13 @@ class Scope
   end
 
   def is_restricted?(name)
-    @locals.dig(name, :capabilities).include?(:RESTRICT)
+    @locals[name]&.capabilities&.include?(:RESTRICT)
   end
 
   def can_borrow?(name, requested_path, requested_type)
     entry = @locals[name]
 
-    entry[:borrowed_paths].each do |borrow|
+    entry.borrowed_paths.each do |borrow|
       existing_path = borrow[:path]
       existing_type = borrow[:type]
 
@@ -176,7 +176,7 @@ class Scope
   end
 
   def mark_borrowed(name, path, type)
-    @locals.dig(name, :borrowed_paths) << { path: path, type: type }
+    @locals[name]&.borrowed_paths&.push({ path: path, type: type })
   end
 
   # Mark a sub-path as moved (e.g., [:foo, :child] for foo.child)
@@ -197,7 +197,7 @@ class Scope
 
   def is_on_heap?(name)
     entry = @locals[name]
-    entry ? [:heap, :multiowned, :shared].include?(entry[:storage]) : false
+    entry ? [:heap, :multiowned, :shared].include?(entry.storage) : false
   end
 
   def set_state(name, state)
@@ -214,8 +214,8 @@ class Scope
   def mark_read(name)
     entry = @locals[name]
     return unless entry
-    entry[:read] = true
-    entry[:reg]&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
+    entry.read = true
+    entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
   end
 
   # Helper for branching
@@ -230,22 +230,22 @@ class Scope
     # Optimization: Don't promote primitives (Int, Bool, etc).
     # They copy cheaply and don't suffer from "dangling pointer" issues
     # in the same way (unless you support pointers to stack ints).
-    type = entry[:type]
+    type = entry.type
     return if !Type.new(type).requires_move?
 
     # Only promote if currently on Frame or Stack
-    if entry[:storage] == :frame || entry[:storage] == :stack
-      is_frame_decrement = (entry[:storage] == :frame)
-      entry[:storage] = :heap
+    if entry.storage == :frame || entry.storage == :stack
+      is_frame_decrement = (entry.storage == :frame)
+      entry.storage = :heap
 
       # Update AST Node
-      if entry[:reg] && entry[:reg].respond_to?(:storage=)
-         entry[:reg].storage = :heap
+      if entry.reg && entry.reg.respond_to?(:storage=)
+         entry.reg.storage = :heap
 
          # Propagate promotion to the value node (e.g. for Assignment or VarDecl)
          # This ensures that StructLit/ListLit initializers are also marked as :heap
-         if entry[:reg].respond_to?(:value) && entry[:reg].value.respond_to?(:storage=)
-            entry[:reg].value.storage = :heap
+         if entry.reg.respond_to?(:value) && entry.reg.value.respond_to?(:storage=)
+            entry.reg.value.storage = :heap
          end
 
          # Only return true (to decrement counter) if it was actually on the Frame
@@ -264,10 +264,10 @@ class Scope
     if capability[:var_node].is_a?(AST::GetField)
       # This is a field-specific restriction (e.g. WITH RESTRICT foo.child)
       path = get_path_to_root(capability[:var_node])
-      local[:borrowed_paths] << { path: path, type: :mutable }
+      local.borrowed_paths << { path: path, type: :mutable }
     else
       # Whole-variable restriction
-      local[:capabilities] << capability[:capability]
+      local.capabilities << capability[:capability]
     end
     
     @locals[name] = local
@@ -301,8 +301,8 @@ class Scope
     # Mark every view watching this owner as DEAD
     @dependencies[owner_name].each do |view_name|
       if @locals[view_name]
-        @locals[view_name][:valid] = false
-        @locals[view_name][:invalid_reason] = "The owner '#{owner_name}' was modified (resized or rebound), invalidating this view."
+        @locals[view_name].valid = false
+        @locals[view_name].invalid_reason = "The owner '#{owner_name}' was modified (resized or rebound), invalidating this view."
       end
     end
 
@@ -314,27 +314,27 @@ class Scope
     entry = @locals[name]
     return unless entry
 
-    if entry[:valid] == false
-      raise "Compile Error: Cannot use variable '#{name}'. Reason: #{entry[:invalid_reason]}"
+    if entry.valid == false
+      raise "Compile Error: Cannot use variable '#{name}'. Reason: #{entry.invalid_reason}"
     end
   end
 
   def invalidate_size(name)
     if @locals[name]
-      @locals[name][:size] = nil
+      @locals[name].size = nil
     end
   end
 
   def is_boxed?(name)
     entry = @locals[name]
-    entry ? entry[:boxed] : false
+    entry ? entry[:boxed] : false  # :boxed not on SymbolEntry — legacy field
   end
 
   def narrow_type(name, new_type)
     return unless @locals[name]
-    current_type = @locals[name][:type]
+    current_type = @locals[name].type
     if current_type == :Any
-      @locals[name][:type] = new_type
+      @locals[name].type = new_type
       return true
     end
     # Simplified narrowing logic

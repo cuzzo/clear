@@ -432,20 +432,20 @@ module FunctionAnalysis
       # FORCE HEAP PROMOTION for captures:
       # If captured by a closure, it must be on the heap so it outlives its stack frame.
       entry = owner_scope.locals[cap_name]
-      if (entry[:storage] == :frame || entry[:storage] == :stack) && Type.new(entry[:type]).requires_move?
+      if (entry.storage == :frame || entry.storage == :stack) && Type.new(entry.type).requires_move?
         owner_scope.mark_escaped(cap_name)
       end
 
       # SAVE TYPE AND STORAGE (Re-fetch entry after potential promotion)
       entry = owner_scope.locals[cap_name]
 
-      if cap[:mutable] && !entry[:mutable]
+      if cap[:mutable] && !entry.mutable
         error!(node, "Cannot capture immutable variable '#{cap_name}' as MUTABLE")
       end
 
       # Enrich the capture node with the resolved type
-      cap[:type] = entry[:type]
-      cap[:storage] = entry[:storage]
+      cap[:type] = entry.type
+      cap[:storage] = entry.storage
     end
   end
 

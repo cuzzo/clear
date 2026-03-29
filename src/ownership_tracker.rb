@@ -27,12 +27,12 @@ module OwnershipTracker
     rhs_info = current_scope.locals[rhs_name]
 
     # Multiowned (Rc), Shared (Arc), and Sync (locked) vars manage their own lifecycle
-    rhs_storage = rhs_info&.dig(:storage)
-    rhs_sync    = rhs_info&.dig(:sync)
+    rhs_storage = rhs_info&.storage
+    rhs_sync    = rhs_info&.sync
     return if rhs_storage == :multiowned || rhs_storage == :shared || rhs_sync
 
     # Primitives COPY, everything else MOVES (including resources)
-    if Type.new(rhs_type).requires_move? || rhs_info&.dig(:resource)
+    if Type.new(rhs_type).requires_move? || rhs_info&.resource
       current_scope.set_state(rhs_name, :moved)
     end
   end
@@ -169,8 +169,8 @@ module OwnershipTracker
     return false unless owner_scope
 
     # Multiowned (Rc), Shared (Arc), and Sync (locked) values manage their own lifetime
-    storage  = owner_scope.locals[var_name]&.dig(:storage)
-    var_sync = owner_scope.locals[var_name]&.dig(:sync)
+    storage  = owner_scope.locals[var_name]&.storage
+    var_sync = owner_scope.locals[var_name]&.sync
     return false if storage == :multiowned || storage == :shared || var_sync
 
     type = owner_scope.resolve_type(var_name)
@@ -202,7 +202,7 @@ module OwnershipTracker
   end
 
   def check_tense_linear!(node, name, info)
-    if Type.new(info[:type]).tense?
+    if Type.new(info.type).tense?
       error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
     end
   end
@@ -216,21 +216,21 @@ module OwnershipTracker
 
       next unless current_scope.owned_names.include?(name)
       next unless current_scope.get_state(name) == :live
-      next if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
+      next if info.storage == :multiowned || info.storage == :shared || info.sync
 
-      if info[:resource]
+      if info.resource
         # Resources auto-close via Zig `defer` emitted at declaration time.
         # Mark as dropped here so the ownership tracker knows the resource is spent.
-        drops << { name: name, type: info[:type], resource: true }
+        drops << { name: name, type: info.type, resource: true }
         current_scope.set_state(name, :dropped)
 
-      elsif Type.new(info[:type]).requires_move?
+      elsif Type.new(info.type).requires_move?
         # Tense (Promise) variables are linear — they cannot be silently dropped.
         # The programmer must NEXT, COLLECT, RETURN, or GIVE them before scope ends.
         check_tense_linear!(node, name, info)
 
         # AUTOMATICALLY INSERT DROP
-        drops << { name: name, type: info[:type] }
+        drops << { name: name, type: info.type }
 
         # Mark as consumed so we don't double-free
         current_scope.set_state(name, :dropped)
@@ -251,14 +251,14 @@ module OwnershipTracker
       current_scope.locals.each do |name, info|
         next unless current_scope.owned_names.include?(name)
         next if name.start_with?('_')           # underscore prefix = intentionally unused
-        next if info[:read]                      # variable was read at least once (same scope)
-        next if info[:reg]&.respond_to?(:var_used) && info[:reg].var_used  # read in nested scope
-        next if info[:resource]                  # resource — implicit use via defer close
-        t = info[:type]
+        next if info.read                        # variable was read at least once (same scope)
+        next if info.reg&.respond_to?(:var_used) && info.reg.var_used  # read in nested scope
+        next if info.resource                    # resource — implicit use via defer close
+        t = info.type
         ti = t.is_a?(Type) ? t : Type.new(t.to_s)
         next if ti.list_collection? || ti.pool?  # collections — implicit use via defer deinit
         next if ti.multiowned? || ti.shared?     # Rc/Arc — implicit use via defer release
-        reg = info[:reg]
+        reg = info.reg
         next unless reg                          # compiler-internal binding, not user code
 
         loc = reg.respond_to?(:line) ? " (line #{reg.line})" : ""
@@ -271,14 +271,14 @@ module OwnershipTracker
     drops = []
     current_scope.locals.each do |name, info|
       next unless current_scope.get_state(name) == :live
-      next if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
+      next if info.storage == :multiowned || info.storage == :shared || info.sync
 
-      if info[:resource]
-        drops << { name: name, type: info[:type], resource: true }
+      if info.resource
+        drops << { name: name, type: info.type, resource: true }
         current_scope.set_state(name, :dropped)
-      elsif Type.new(info[:type]).requires_move?
+      elsif Type.new(info.type).requires_move?
         check_tense_linear!(node, name, info) if node
-        drops << { name: name, type: info[:type] }
+        drops << { name: name, type: info.type }
         current_scope.set_state(name, :dropped)
       end
     end

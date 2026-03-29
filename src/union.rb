@@ -43,7 +43,7 @@ module UnionAnalysis
         end
       end
 
-      sig = local[:type]
+      sig = local.type
       unless sig.is_a?(Hash) && sig.key?(:params)
         error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
       end

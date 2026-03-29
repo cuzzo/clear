@@ -497,7 +497,7 @@ private
     if merge_to_parent
       initial_state.each_key do |var|
         if branch_states.any? { |bs| bs[var] != :live }
-          var_type = current_scope.locals.dig(var, :type)
+          var_type = current_scope.locals[var]&.type
           type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
           is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
           current_scope.set_state(var, :moved) unless is_copy
@@ -803,7 +803,7 @@ private
           old_state = pre_loop_state[name]
           if old_state == :live && new_state == :moved
             next unless loop_body_names.include?(name)
-            var_type = current_scope.locals.dig(name, :type)
+            var_type = current_scope.locals[name]&.type
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
             is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
             unless is_copy
@@ -921,7 +921,7 @@ private
       # Suppress the defer cleanup on the *declaration* node so `emit_cleanup` skips
       # the `defer vals.deinit(...)` — ownership is transferred to the caller and the
       # NRVO alias would corrupt the returned value if deinit ran after `return`.
-      decl_reg = lookup_scope_for(node.value.name)&.locals&.dig(node.value.name, :reg)
+      decl_reg = lookup_scope_for(node.value.name)&.locals&.[](node.value.name)&.reg
       decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
     end
 
@@ -932,7 +932,7 @@ private
       mark_escaped_lists = ->(fields) {
         fields.each do |_fname, fval|
           if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
-            decl_reg = lookup_scope_for(fval.name)&.locals&.dig(fval.name, :reg)
+            decl_reg = lookup_scope_for(fval.name)&.locals&.[](fval.name)&.reg
             decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
           elsif fval.is_a?(AST::StructLit)
             mark_escaped_lists.call(fval.fields)
@@ -1266,7 +1266,7 @@ private
   def mark_var_mutated(name)
     scope = lookup_scope_for(name)
     return unless scope
-    decl_node = scope.locals.dig(name, :reg)
+    decl_node = scope.locals[name]&.reg
     decl_node.var_mutated = true if decl_node&.respond_to?(:var_mutated=)
   end
 
@@ -1364,7 +1364,7 @@ private
       # assignment for inline guard emission. The borrow cannot escape because
       # field assignments are statements (not expressions).
       scope = lookup_scope_for(var_name)
-      syn = scope&.locals&.dig(var_name, :sync)
+      syn = scope&.locals&.[](var_name)&.sync
       if syn == :locked || syn == :write_locked
         assignment_node.auto_lock = { var: var_name, sync: syn }
       end

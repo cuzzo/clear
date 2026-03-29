@@ -38,8 +38,8 @@ module MethodAnalysis
     return unless list_arg.is_a?(AST::Identifier)
 
     scope = lookup_scope_for(list_arg.name)
-    scope_entry = scope&.locals&.dig(list_arg.name)
-    ti = scope_entry&.dig(:type)
+    scope_entry = scope&.locals&.[](list_arg.name)
+    ti = scope_entry&.type
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
     val_type = val_arg.resolved_type
@@ -47,7 +47,7 @@ module MethodAnalysis
     new_type.soa = ti.soa if ti.respond_to?(:soa) && ti.soa
     new_type.shard_count = ti.shard_count if ti.shard_count
     new_type.location = ti.location
-    scope_entry[:type] = new_type
+    scope_entry.type = new_type
     list_arg.full_type = new_type if list_arg.respond_to?(:full_type=)
   end
 
@@ -88,7 +88,7 @@ module MethodAnalysis
       scope = lookup_scope_for(node.object.name) if node.object.is_a?(AST::Identifier)
       if scope
         entry = scope.locals[node.object.name]
-        entry[:type] = new_type if entry
+        entry.type = new_type if entry
         node.object.full_type = new_type
       end
     end

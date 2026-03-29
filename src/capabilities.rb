@@ -81,15 +81,15 @@ module CapabilityHelper
     case capability_type
     when :EXCLUSIVE
       scope = lookup_scope_for(var_node.name)
-      syn = scope&.locals&.dig(var_node.name, :sync)
+      syn = scope&.locals&.[](var_node.name)&.sync
       unless syn
-        storage = scope&.locals&.dig(var_node.name, :storage)
+        storage = scope&.locals&.[](var_node.name)&.storage
         error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
       end
 
     when :write_locked_read
       scope = lookup_scope_for(var_node.name)
-      syn = scope&.locals&.dig(var_node.name, :sync)
+      syn = scope&.locals&.[](var_node.name)&.sync
       unless syn == :write_locked
         error!(node, "WITH #{var_node.name}: read access requires a @writeLocked variable")
       end
@@ -102,13 +102,13 @@ module CapabilityHelper
 
     when :multiowned
       scope = lookup_scope_for(var_node.name)
-      unless scope&.locals&.dig(var_node.name, :storage) == :multiowned
+      unless scope&.locals&.[](var_node.name)&.storage == :multiowned
         error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
       end
 
     when :shared
       scope = lookup_scope_for(var_node.name)
-      unless scope&.locals&.dig(var_node.name, :storage) == :shared
+      unless scope&.locals&.[](var_node.name)&.storage == :shared
         error!(node, "WITH #{var_node.name}: expected a @shared variable")
       end
 
@@ -134,8 +134,8 @@ module CapabilityHelper
     # Infer capability from the variable's storage when not stated explicitly
     if cap[:capability] == :infer
       scope = lookup_scope_for(var_node.name)
-      storage = scope&.locals&.dig(var_node.name, :storage)
-      syn     = scope&.locals&.dig(var_node.name, :sync)
+      storage = scope&.locals&.[](var_node.name)&.storage
+      syn     = scope&.locals&.[](var_node.name)&.sync
       cap[:capability] = case
                          when syn == :locked            then :EXCLUSIVE
                          when syn == :write_locked      then :write_locked_read
@@ -185,7 +185,7 @@ module CapabilityHelper
   # For all others, delegates to scope.declare_with_new_capability.
   def declare_capability_scope!(cap)
     var_name = cap[:var_node].name
-    syn = cap[:old_scope]&.locals&.dig(var_name, :sync)
+    syn = cap[:old_scope]&.locals&.[](var_name)&.sync
     if syn && !cap[:var_node].is_a?(AST::GetField)
       inner_type = cap[:old_scope].resolve_type(var_name)
       alias_name = cap[:alias] || var_name
@@ -259,7 +259,7 @@ module CapabilityHelper
         next if locally_bound.include?(name)
         info = current_scope.locals[name]
         next unless info
-        ti = info[:type]
+        ti = info.type
         return :sharded if ti.is_a?(Type) && ti.sharded?
       end
       # Recurse into struct members of the node
@@ -293,8 +293,8 @@ module CapabilityHelper
       return if locally_bound.include?(name)
       info = scope.locals[name]
       return unless info && scope.owned_names.include?(name)
-      return if info[:storage] == :multiowned || info[:storage] == :shared || info[:sync]
-      if (info[:resource] || Type.new(info[:type]).requires_move?) &&
+      return if info.storage == :multiowned || info.storage == :shared || info.sync
+      if (info.resource || Type.new(info.type).requires_move?) &&
          scope.get_state(name) == :live
         scope.set_state(name, :moved)
       end
@@ -326,7 +326,7 @@ module CapabilityHelper
         name = node.name
         next if locally_bound.include?(name)
         info = current_scope.locals[name]
-        return true if info && info[:storage] == target_storage
+        return true if info && info.storage == target_storage
         next
       end
       next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -353,7 +353,7 @@ module CapabilityHelper
         next if locally_bound.include?(name)
         info = current_scope.locals[name]
         next unless info
-        return true if info[:sync] == target_sync
+        return true if info.sync == target_sync
         next
       end
       if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
@@ -363,7 +363,7 @@ module CapabilityHelper
           name = var_node.name
           next if locally_bound.include?(name)
           info = current_scope.locals[name]
-          return true if info && info[:sync] == target_sync
+          return true if info && info.sync == target_sync
         end
       end
       next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -390,10 +390,10 @@ module CapabilityHelper
         next if locally_bound.include?(name)
         info = current_scope.locals[name]
         next unless info
-        return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
-        return true if info[:storage] == :shared || info[:storage] == :multiowned
+        return true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+        return true if info.storage == :shared || info.storage == :multiowned
         # @sharded maps require pinning — shared-nothing model needs fiber affinity.
-        ti = info[:type]
+        ti = info.type
         return true if ti.is_a?(Type) && ti.sharded?
         next
       end
@@ -405,8 +405,8 @@ module CapabilityHelper
           next if locally_bound.include?(name)
           info = current_scope.locals[name]
           next unless info
-          return true if info[:sync] == :locked || info[:sync] == :write_locked || info[:sync] == :local
-          return true if info[:storage] == :shared
+          return true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+          return true if info.storage == :shared
         end
       end
       next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -458,7 +458,7 @@ module CapabilityAudit
     return unless var_name.is_a?(String) && @current_function_name
 
     info = current_scope.locals[var_name]
-    sync = info&.dig(:sync)
+    sync = info&.sync
     own  = storage if storage == :multiowned || storage == :shared
     return unless sync || own
 
