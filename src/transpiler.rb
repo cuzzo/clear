@@ -1714,11 +1714,16 @@ private
         end
       end
 
-      # String comparison: Zig can't use == on slices; use CheatLib.eql
-      if (node.op == :EQ || node.op == :NEQ) &&
-         (Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?)
-        cmp = "CheatLib.eql(#{left}, #{right})"
-        return node.op == :NEQ ? "!#{cmp}" : cmp
+      # String comparison: Zig can't use native operators on slices.
+      if Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?
+        case node.op
+        when :EQ  then return "CheatLib.eql(#{left}, #{right})"
+        when :NEQ then return "!CheatLib.eql(#{left}, #{right})"
+        when :LT  then return "(CheatLib.strcmp(#{left}, #{right}) < 0)"
+        when :LTE then return "(CheatLib.strcmp(#{left}, #{right}) <= 0)"
+        when :GT  then return "(CheatLib.strcmp(#{left}, #{right}) > 0)"
+        when :GTE then return "(CheatLib.strcmp(#{left}, #{right}) >= 0)"
+        end
       end
 
       # Standard Operators

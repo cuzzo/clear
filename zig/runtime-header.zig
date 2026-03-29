@@ -532,6 +532,16 @@ pub const CheatLib = struct {
         return std.mem.eql(u8, s1, s2);
     }
 
+    // Lexicographic string comparison. Returns -1, 0, or 1.
+    pub fn strcmp(a: []const u8, b: []const u8) i64 {
+        const order = std.mem.order(u8, a, b);
+        return switch (order) {
+            .lt => @as(i64, -1),
+            .eq => @as(i64, 0),
+            .gt => @as(i64, 1),
+        };
+    }
+
     // Generic Equality (works for primitives and slices)
     pub fn eql(a: anytype, b: @TypeOf(a)) bool {
         const T = @TypeOf(a);
