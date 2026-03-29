@@ -1467,26 +1467,12 @@ private
         end
       end
 
-      # 2. Direct collection promotion — copy arena-backed buffer to heap before frame mark rewinds.
+      # 2. Unified escape promotion — one method handles all cases.
       rt_name = @do_rt_name || "rt"
-      promote_collection = if node.collection_return && node.value.is_a?(AST::Identifier)
-        node.value.type_info.escape_promote_code(zig_safe_name(node.value.name), rt_name)
-      end
-
-      # 2b. Collection escape through struct/union literals — promote each collection field.
-      promote_struct_fields = if node.value.is_a?(AST::StructLit)
-        collect_nested = ->(fields) {
-          fields.flat_map do |_fname, fval|
-            if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
-              [fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)]
-            elsif fval.is_a?(AST::StructLit)
-              collect_nested.call(fval.fields)
-            else
-              []
-            end
-          end
-        }
-        collect_nested.call(node.value.fields).compact.join("\n")
+      promotions = if node.collection_return
+        emit_escape_promotions(node.value, rt_name)
+      else
+        []
       end
 
       # 3. Standard Return with Move Suppression for unique heap
@@ -1494,13 +1480,12 @@ private
       val_code = if node.value.nil?
         ""
       elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
-        # Frame-allocated struct variables are `*T`; deref when returning by value.
         "#{visit(node.value)}.*"
       else
         visit(node.value)
       end
 
-      parts = [suppress, promote_collection, promote_struct_fields, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
+      parts = [suppress, *promotions, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
 
     when AST::GetField
@@ -1980,6 +1965,43 @@ private
     end
 
     pattern
+  end
+
+  # Unified escape promotion: recursively generates ALL promotion calls for a value
+  # about to escape its frame (return, BG capture, etc.). Handles direct collections,
+  # struct literal fields, and struct variables with collection fields via schema.
+  def emit_escape_promotions(node, rt_name)
+    promotions = []
+
+    if node.is_a?(AST::Identifier)
+      ti = node.type_info
+      name = zig_safe_name(node.name)
+      if ti&.needs_escape_promotion?
+        # Direct collection (e.g., RETURN myList)
+        promotions << ti.escape_promote_code(name, rt_name)
+      else
+        # Struct/union variable — promote each collection field via schema
+        resolved = ti&.resolved
+        schema = @struct_schemas&.dig(resolved)
+        if schema
+          schema.each do |fname, fdef|
+            ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
+            ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+            promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name) if ft.needs_escape_promotion?
+          end
+        end
+      end
+    elsif node.is_a?(AST::StructLit)
+      node.fields.each do |_fname, fval|
+        if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
+          promotions << fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)
+        elsif fval.is_a?(AST::StructLit)
+          promotions.concat(emit_escape_promotions(fval, rt_name))
+        end
+      end
+    end
+
+    promotions.compact
   end
 
   # Emits Zig for pool.insert / pool.get / pool.remove method calls.

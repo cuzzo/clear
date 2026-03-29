@@ -167,14 +167,28 @@ module FunctionAnalysis
       error!(node, "Cannot call '#{func_name}' - not a function")
     end
 
-    # Tag calls that return a @list from a frame-using function.
-    if node.respond_to?(:list_from_call=) &&
-       node.type_info&.list_collection? && !node.type_info.sharded? &&
-       @fn_nodes[func_name]&.uses_frame
-      node.list_from_call = true
+    # Tag calls that return collections (direct or via struct fields) so the
+    # caller knows to use heapAlloc for cleanup of promoted data.
+    if node.respond_to?(:list_from_call=)
+      if node.type_info&.list_collection? && !node.type_info.sharded?
+        node.list_from_call = true
+      elsif !node.type_info&.collection?
+        # Struct/union return — check schema for collection fields
+        resolved = node.type_info&.resolved
+        schema = lookup_type_schema(resolved) if resolved
+        if schema.is_a?(Hash) && !schema[:kind]
+          schema.each do |fname, ftype|
+            next if fname.is_a?(Symbol)
+            ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
+            if ft.needs_escape_promotion?
+              node.list_from_call = true if ft.list_collection?
+              node.map_from_call = true if ft.map?
+            end
+          end
+        end
+      end
     end
 
-    # Tag calls that return a String HashMap.
     if node.respond_to?(:map_from_call=) &&
        node.type_info&.map? && !node.type_info&.numeric_map?
       node.map_from_call = true

@@ -908,63 +908,12 @@ private
       record_effect(EffectTracker::HEAP)
     end
 
-    # 3. Collection escape promotion — direct return of collection variable
-    # Lists only need promotion when the function uses the frame arena (frame_count > 0);
-    # maps always need promotion because their keys are frame-allocated.
-    uses_frame = (current_fn_ctx&.frame_count || 0) > 0
-    if node.value.is_a?(AST::Identifier) && node.value.type_info&.needs_escape_promotion? &&
-       (node.value.type_info.map? || uses_frame)
+    # 3. Unified escape promotion — recursively find ALL frame-allocated collections
+    # reachable from the return value and mark them for heap promotion.
+    # Handles: direct collections, struct literal fields, struct variables with collection
+    # fields (via schema), and arbitrary nesting depth.
+    if mark_escaping_collections!(node.value)
       node.collection_return = true
-      decl_reg = node.value.symbol&.reg
-      if decl_reg&.respond_to?(:type_info)
-        decl_reg.type_info.escaped_return = true
-        decl_reg.type_info.heap_map = true if node.value.type_info.map?
-      end
-    end
-
-    # 3+. Collection escape through struct/union literals — when a StructLit is returned
-    # and its field values (at any nesting depth) include collection identifiers,
-    # suppress their defer-deinit / mark for heap promotion.
-    if node.value.is_a?(AST::StructLit)
-      walk_escaped = ->(fields) {
-        fields.each do |_fname, fval|
-          if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
-            decl_reg = fval.symbol&.reg
-            if decl_reg&.respond_to?(:type_info)
-              decl_reg.type_info.escaped_return = true
-              decl_reg.type_info.heap_map = true if fval.type_info.map?
-            end
-          elsif fval.is_a?(AST::StructLit)
-            walk_escaped.call(fval.fields)
-          end
-        end
-      }
-      walk_escaped.call(node.value.fields)
-    end
-
-    # 3++. Schema-based escape detection — when returning a variable whose type is a
-    # struct/union containing collection fields, promote those fields' backing data.
-    # Catches: `result = Struct{ list: myList }; RETURN result;` where the StructLit
-    # escape detection (above) can't see through the intermediate variable.
-    if node.value.is_a?(AST::Identifier) && !node.value.type_info&.needs_escape_promotion?
-      resolved = node.value.type_info&.resolved
-      schema = lookup_type_schema(resolved) if resolved
-      if schema.is_a?(Hash) && !schema[:kind]  # plain struct schema (not resource/enum/union)
-        schema.each do |fname, ftype|
-          next if fname.is_a?(Symbol)  # skip :type_params, :methods, etc.
-          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
-          if ft.needs_escape_promotion?
-            # The struct variable contains a collection field — mark the variable
-            # for heap promotion so its collection backing data survives frame rewind.
-            decl_reg = node.value.symbol&.reg
-            if decl_reg&.respond_to?(:type_info)
-              decl_reg.type_info.escaped_return = true
-              decl_reg.type_info.heap_map = true if ft.map? && !ft.numeric_map?
-            end
-            node.collection_return = true
-          end
-        end
-      end
     end
 
     # Promote non-identifier literals to heap when the expected return type requires it.
@@ -1282,6 +1231,57 @@ private
   end
 
   # Mark a variable's declaration node as mutated (reassigned after declaration).
+  # Recursively find ALL frame-allocated collections reachable from a value node
+  # and mark them for heap promotion. Returns true if any escaping data was found.
+  # Handles: direct collections, struct literal fields, struct/union variables
+  # containing collection fields (via schema lookup), and arbitrary nesting.
+  def mark_escaping_collections!(node)
+    return false unless node
+
+    if node.is_a?(AST::Identifier)
+      ti = node.type_info
+      # Any collection whose backing data is frame-allocated must be promoted to heap
+      # on escape. Lists use frameAlloc for append(); maps use frameAlloc for keys.
+      # Both need promotion regardless of frame_count — the frame allocator is always
+      # used for collection operations even in functions without explicit frame usage.
+      if ti&.needs_escape_promotion?
+        mark_symbol_escaped!(node, ti)
+        return true
+      end
+      # Struct/union variable containing collection fields — walk type schema
+      resolved = ti&.resolved
+      schema = lookup_type_schema(resolved) if resolved
+      if schema.is_a?(Hash) && !schema[:kind]
+        found = false
+        schema.each do |fname, ftype|
+          next if fname.is_a?(Symbol)
+          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
+          if ft.needs_escape_promotion?
+            mark_symbol_escaped!(node, ft)
+            found = true
+          end
+        end
+        return found
+      end
+    elsif node.is_a?(AST::StructLit)
+      found = false
+      node.fields.each do |_fname, fval|
+        found = true if mark_escaping_collections!(fval)
+      end
+      return found
+    end
+    false
+  end
+
+  # Mark a symbol's declaration as escaped — suppress defer-deinit, set heap flags.
+  def mark_symbol_escaped!(node, field_type)
+    decl_reg = node.symbol&.reg
+    if decl_reg&.respond_to?(:type_info)
+      decl_reg.type_info.escaped_return = true
+      decl_reg.type_info.heap_map = true if field_type.map? && !field_type.numeric_map?
+    end
+  end
+
   # This allows the transpiler to skip `_ = &name;` for mutable variables that
   # are genuinely reassigned — LLVM can then SROA struct fields to registers.
   def classify_ownership!(entry)

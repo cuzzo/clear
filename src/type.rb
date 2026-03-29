@@ -515,6 +515,16 @@ class Type
     end
   end
 
+  # Generate the Zig defer cleanup code for heap-promoted collection data.
+  # Used by callers that receive promoted collection fields in returned structs.
+  def escape_cleanup_code(var_name)
+    if list_collection?
+      "defer #{var_name}.deinit(rt.heapAlloc());\n"
+    elsif map? && !numeric_map?
+      "defer #{var_name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
+    end
+  end
+
   RESOURCE_TYPES = Set[:File, :TCPClient, :TCPServer].freeze
 
   # True when this type is a resource (File, TCPClient, TCPServer, etc.)

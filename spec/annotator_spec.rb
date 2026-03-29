@@ -1357,7 +1357,7 @@ RSpec.describe SemanticAnnotator do
         expect(ret.collection_return).to be true
       end
 
-      it "does NOT set collection_return when the function has no frame usage" do
+      it "sets collection_return for list returns even without other frame usage" do
         src = <<~CLEAR
           FN buildList() RETURNS Number[]@list ->
             MUTABLE vals: Number[]@list = [];
@@ -1368,8 +1368,8 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
         ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
-        expect(fn.uses_frame).to be false
-        expect(ret.collection_return).to be_falsey
+        # Lists use frameAlloc for append() — always need promotion on escape
+        expect(ret.collection_return).to be true
       end
     end
 

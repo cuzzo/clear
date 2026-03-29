@@ -53,6 +53,23 @@ module OwnershipGenerator
       return "defer CheatLib.numericMapDeinit(#{key_zig}, #{val_zig}, rt.frameAlloc(), &#{name});\n"
     end
 
+    # Struct containing promoted collection fields from function returns:
+    # emit field-level cleanup so heap-promoted data is freed by caller.
+    if (type_info&.heap_list || type_info&.heap_map) && !type_info&.collection?
+      resolved = type_info&.resolved
+      schema = (@struct_schemas ||= {})[resolved]
+      if schema
+        cleanups = schema.filter_map do |fname, fdef|
+          ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
+          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+          if ft.needs_escape_promotion?
+            ft.escape_cleanup_code("#{name}.#{fname}")
+          end
+        end
+        return cleanups.join unless cleanups.empty?
+      end
+    end
+
     return "" unless type_info&.requires_move? || type_info&.any_rc? || type_info&.any_sync?
 
     is_rc           = type_info&.any_rc?
