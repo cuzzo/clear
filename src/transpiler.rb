@@ -380,6 +380,10 @@ private
           # use anytype so the function accepts any map regardless of @sharded.
           # Maps are always passed by pointer (shared mutable state).
           "#{p_name}: anytype"
+        elsif p_type_obj.pool?
+          # Pools use anytype so they can be passed by pointer (shared mutable state
+          # across recursive call boundaries — value copies diverge on resize).
+          "#{p_name}: anytype"
         else
           p_type = transpile_type(param[:type], is_param: true)
           "#{p_name}: #{p_type}"
@@ -397,9 +401,16 @@ private
       else
         comptime_params + params_zig
       end
-      # Don't add ! if the type is already an error union
+      # Don't add ! if the type is already an error union.
+      # @reentrant functions use anyerror! so Zig can resolve recursive error sets.
       return_type_str = if fn_can_fail
-        final_type.start_with?("!") ? final_type : "!#{final_type}"
+        if final_type.start_with?("!")
+          final_type
+        elsif node.reentrant == :reentrant
+          "anyerror!#{final_type}"
+        else
+          "!#{final_type}"
+        end
       else
         final_type
       end
@@ -413,7 +424,7 @@ private
       # (they are already pointers via anytype, so &param would create **Map).
       @current_fn_map_params = node.params.select { |p|
         pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
-        pt.map?
+        pt.map? || pt.pool?
       }.map { |p| p[:name] }.to_set
 
       prologue = if fn_needs_rt
@@ -437,10 +448,12 @@ private
         .map    { |p| mutable_scalar_params.include?(p[:name]) ? "_ = &_m_#{p[:name]};" : "_ = &#{p[:name]};" }
         .join("\n    ")
 
-      # Emit `var <name> = _m_<name>;` for used mutable scalar params (enables reassignment).
+      # Emit `var <name> = _m_<name>; _ = &<name>;` for used mutable scalar params.
+      # The `_ = &<name>;` suppresses Zig's "never mutated" error for params that
+      # are only forwarded to callees (not locally mutated).
       mutable_param_shadows = mutable_scalar_params
         .select { |name| used_names.include?(name) }
-        .map    { |name| "var #{name} = _m_#{name};" }
+        .map    { |name| "var #{name} = _m_#{name}; _ = &#{name};" }
         .join("\n    ")
 
       prologue_parts = [prologue,
@@ -1379,13 +1392,20 @@ private
         # Struct args: no .* deref needed — functions use `anytype` params which Zig
         # monomorphizes for both T and *T with transparent field access.
         # Array/List args: convert to slice via .items for function params.
-        if a.type_info&.array?
+        if a.type_info&.is_a?(Type) && Type.new(a.type_info).pool?
+          # Pool params: pass by pointer to avoid copy-on-resize divergence.
+          is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
+          is_map_param = a.is_a?(AST::Identifier) && @current_fn_map_params&.include?(a.name)
+          (is_capture || is_map_param) ? arg_code : "&#{arg_code}"
+        elsif a.type_info&.array?
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
         elsif a.type_info&.is_a?(Type) && Type.new(a.type_info).map?
-          # HashMap params use anytype — pass by pointer so the callee can mutate.
+          # HashMap and Pool params use anytype — pass by pointer so the callee
+          # can mutate. Pools must be passed by pointer to avoid copy-on-resize
+          # divergence across recursive call boundaries.
           # BG captures already store maps as *MapType, so don't double-wrap.
-          # Function params that are HashMap are already pointers (anytype = *Map),
-          # so passing &param would create **Map — skip the & for those.
+          # Function params that are HashMap/Pool are already pointers (anytype),
+          # so passing &param would create ** — skip the & for those.
           is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
           is_map_param = a.is_a?(AST::Identifier) && @current_fn_map_params&.include?(a.name)
           (is_capture || is_map_param) ? arg_code : "&#{arg_code}"

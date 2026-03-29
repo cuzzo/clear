@@ -460,8 +460,10 @@ RSpec.describe ZigTranspiler do
       expect(zig).to match(/update\(.*&env/)
       # Recursive call inside update! passes env without & (already a pointer)
       fn_body = zig[/fn update\b.*?^}/m]
-      expect(fn_body).to include("return update(")
-      expect(fn_body).not_to include("&env")
+      expect(fn_body).to match(/return.*update\(/)
+      # The body should not pass &env at recursive call sites (only _ = &env; suppression is OK)
+      recursive_call = fn_body[/return.*update\(.*/]
+      expect(recursive_call).not_to include("&env")
     end
   end
 

@@ -1,19 +1,25 @@
--- Mal (Make-a-Lisp) Interpreter — Proof of Concept in CLEAR
+-- Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
 --
--- STATUS: Transpiles and runs. Evaluates (+ 1 2) = 3.
--- Uses flat HashMap env with ID-keyed scoping (manual pool pattern).
--- Exercises: unions with @indirect, MATCH, string escapes, RAISE/OR BREAK,
--- @reentrant recursion, HashMap environments.
---
--- TODO: Full readForm parser (needs Pool-based Reader state or
--- MUTABLE struct by-pointer params). Full mal test suite.
+-- Uses Env[]@pool for scoped environments instead of a flat HashMap.
+-- Each Env holds a HashMap<Value> for its local bindings.
+-- Parent links stored as Value.EnvRef in vars["__p"].
+-- Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+-- Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
+
+STRUCT Env {
+    vars: HashMap<Value>
+}
 
 UNION Value {
     Nil, TrueVal, FalseVal,
     Number: Float64, Str: String, Symbol: String,
-    List: Value[], NativeFn: String,
-    Lambda { params: Value[], body: Value @indirect, envId: Int64 }
+    List: Value[],
+    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    NativeFn: String,
+    EnvRef: Id<Env>
 }
+
+-- Pure helpers
 
 FN boolVal(b: Bool) RETURNS Value ->
     IF b THEN RETURN Value.TrueVal; END
@@ -25,6 +31,41 @@ FN isTruthy(v: Value) RETURNS Bool ->
     RETURN TRUE;
 END
 
+FN getSymName(v: Value) RETURNS String ->
+    MATCH v START Value.Symbol AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+FN getNum(v: Value) RETURNS Float64 ->
+    MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
+    RETURN 0.0;
+END
+
+FN getStr(v: Value) RETURNS String ->
+    MATCH v START Value.Str AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+FN getNativeName(v: Value) RETURNS String ->
+    MATCH v START Value.NativeFn AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+FN isList(v: Value) RETURNS Bool ->
+    MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN listLen(v: Value) RETURNS Int64 ->
+    MATCH v START Value.List AS items -> RETURN items.length();, DEFAULT -> RETURN 0; END
+    RETURN 0;
+END
+
+FN isLambda(v: Value) RETURNS Bool ->
+    MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
 FN valEqual(a: Value, b: Value) RETURNS Bool @reentrant ->
     MATCH a START
         Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
@@ -32,6 +73,7 @@ FN valEqual(a: Value, b: Value) RETURNS Bool @reentrant ->
         Value.FalseVal -> MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.Number AS na -> MATCH b START Value.Number AS nb -> RETURN na == nb;, DEFAULT -> RETURN FALSE; END,
         Value.Str AS sa -> MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.Symbol AS sa -> MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
         Value.List AS la -> MATCH b START
             Value.List AS lb ->
                 IF la.length() != lb.length() THEN RETURN FALSE; END
@@ -47,31 +89,8 @@ FN valEqual(a: Value, b: Value) RETURNS Bool @reentrant ->
     RETURN FALSE;
 END
 
-FN tokenize(str: String) RETURNS String[]@list ->
-    MUTABLE tokens: String[]@list = List[];
-    MUTABLE i: Int64 = 0;
-    WHILE i < str.length() DO
-        c = charAt(str, i);
-        IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
-        ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN tokens.append(c); i += 1;
-        ELSE_IF c == ";" THEN
-            WHILE i < str.length() && charAt(str, i) != "\n" DO i += 1; END
-        ELSE_IF c == "\"" THEN
-            MUTABLE s = "\""; i += 1;
-            WHILE i < str.length() && charAt(str, i) != "\"" DO s = s + charAt(str, i); i += 1; END
-            s = s + "\""; tokens.append(s); i += 1;
-        ELSE
-            MUTABLE s = "";
-            WHILE i < str.length() && charAt(str, i) != " " && charAt(str, i) != "," && charAt(str, i) != "\n" && charAt(str, i) != "\t" && charAt(str, i) != "(" && charAt(str, i) != ")" && charAt(str, i) != "[" && charAt(str, i) != "]" && charAt(str, i) != "\"" DO
-                s = s + charAt(str, i); i += 1;
-            END
-            tokens.append(s);
-        END
-    END
-    RETURN tokens;
-END
-
 FN readAtom(token: String) RETURNS Value ->
+    IF token.length() == 0 THEN RETURN Value.Nil; END
     IF token == "nil" THEN RETURN Value.Nil; END
     IF token == "true" THEN RETURN Value.TrueVal; END
     IF token == "false" THEN RETURN Value.FalseVal; END
@@ -86,7 +105,9 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
         Value.FalseVal -> RETURN "false";,
-        Value.Number AS n -> RETURN toString(toInt(n));,
+        Value.Number AS n ->
+            IF n == floor(n) THEN RETURN toString(toInt(n)); END
+            RETURN toString(toInt(n));,
         Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
         Value.Symbol AS s -> RETURN s;,
         Value.List AS items ->
@@ -96,90 +117,383 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
                 out = out + prStr(items[li], readably); li += 1;
             END
             RETURN out + ")";,
-        Value.NativeFn AS name -> RETURN "#<native " + name + ">";,
-        Value.Lambda -> RETURN "#<function>";
+        Value.NativeFn -> RETURN "#<function>";,
+        Value.Lambda -> RETURN "#<function>";,
+        Value.EnvRef -> RETURN "#<envref>";
     END
     RETURN "";
 END
 
--- =========================================================================
--- Everything in cheatMain to avoid struct-by-value and rt injection issues.
--- The env is a flat HashMap<Value> keyed by "envId:varName".
--- =========================================================================
+-- Parser: tokenize into HashMap<Value> with numeric position tracking.
+-- Tokens stored as Value.Str at keys "__t0", "__t1", etc.
+-- Position and count stored as Value.Number at "__rp" and "__tc".
+-- This avoids toString() inside WHILE loops for position updates.
 
-FN cheatMain() RETURNS Void ->
-    MUTABLE env: HashMap<Value> = {};
-    MUTABLE nextId: Int64 = 1;
+FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
+    MUTABLE count: Int64 = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < str.length() DO
+        c = charAt(str, i);
+        IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
+        ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
+            penv["__t" + toString(count)] = Value{ Str: c };
+            count += 1;
+            i += 1;
+        ELSE_IF c == ";" THEN
+            WHILE i < str.length() && charAt(str, i) != "\n" DO i += 1; END
+        ELSE_IF c == "\"" THEN
+            MUTABLE s = "\""; i += 1;
+            WHILE i < str.length() && charAt(str, i) != "\"" DO
+                IF charAt(str, i) == "\\" THEN
+                    s = s + charAt(str, i); i += 1;
+                    IF i < str.length() THEN s = s + charAt(str, i); i += 1; END
+                ELSE s = s + charAt(str, i); i += 1;
+                END
+            END
+            s = s + "\"";
+            penv["__t" + toString(count)] = Value{ Str: s };
+            count += 1;
+            i += 1;
+        ELSE
+            MUTABLE s = "";
+            WHILE i < str.length() && charAt(str, i) != " " && charAt(str, i) != "," && charAt(str, i) != "\n" && charAt(str, i) != "\t" && charAt(str, i) != "(" && charAt(str, i) != ")" && charAt(str, i) != "[" && charAt(str, i) != "]" && charAt(str, i) != "\"" && charAt(str, i) != ";" DO
+                s = s + charAt(str, i); i += 1;
+            END
+            IF s.length() > 0 THEN
+                penv["__t" + toString(count)] = Value{ Str: s };
+                count += 1;
+            END
+        END
+    END
+    penv["__tc"] = Value{ Number: toFloat(count) };
+    RETURN;
+END
 
-    -- Helper: make env key
-    -- Helper: env operations (inline since functions can't easily take MUTABLE HashMap)
+FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
+    val = penv["__t" + toString(idx)] OR Value.Nil;
+    RETURN getStr(val);
+END
 
-    -- Set up global env (id=0)
-    env["0:__p"] = Value{ Number: 0.0 - 1.0 };
+FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+    posVal = penv["__rp"] OR Value{ Number: 0.0 };
+    tcVal = penv["__tc"] OR Value{ Number: 0.0 };
+    pos = toInt(getNum(posVal));
+    tc = toInt(getNum(tcVal));
+    tok = getTokenStr!(penv, pos);
 
-    -- Register native functions
-    MUTABLE nativeFns: String[]@list = List[];
-    nativeFns.append("+"); nativeFns.append("-"); nativeFns.append("*"); nativeFns.append("/");
-    nativeFns.append("="); nativeFns.append(">"); nativeFns.append(">=");
-    nativeFns.append("<"); nativeFns.append("<=");
-    nativeFns.append("list"); nativeFns.append("list?"); nativeFns.append("empty?");
-    nativeFns.append("count"); nativeFns.append("not"); nativeFns.append("prn");
-
-    MUTABLE ni: Int64 = 0;
-    WHILE ni < nativeFns.length() DO
-        env["0:" + nativeFns[ni]] = Value{ NativeFn: nativeFns[ni] };
-        ni += 1;
+    IF pos >= tc THEN
+        RETURN Value.Nil;
     END
 
-    -- Tokenize
-    input = "(def! a 10) (def! f (fn* (x) (+ x a))) (f 5)";
-    MUTABLE tokens = tokenize(input);
-    MUTABLE pos: Int64 = 0;
+    IF tok == "(" || tok == "[" THEN
+        penv["__rp"] = Value{ Number: toFloat(pos + 1) };
+        RETURN readListEnv!(penv);
+    END
 
-    -- Main REPL loop
-    -- TODO: Implement readForm with Pool-based Reader state for parsing.
-    -- For now, build AST manually to prove eval pipeline works.
+    penv["__rp"] = Value{ Number: toFloat(pos + 1) };
+    RETURN readAtom(tok);
+END
 
-    -- Hardcoded test: (+ 1 2) = 3
-    -- Build AST manually to prove eval works
-    MUTABLE items1: Value[]@list = List[];
-    items1.append(Value{ Symbol: "+" });
-    items1.append(Value{ Number: 1.0 });
-    items1.append(Value{ Number: 2.0 });
-    expr1 = Value{ List: items1 };
-
-    -- Inline eval for this simple case
-    -- Eval symbol "+" → look up in env
-    MUTABLE result: Value = Value.Nil;
-    MATCH expr1 START
-        Value.List AS items ->
-            -- Evaluate all items
-            MUTABLE evaled: Value[]@list = List[];
-            MUTABLE ei: Int64 = 0;
-            WHILE ei < items.length() DO
-                MATCH items[ei] START
-                    Value.Symbol AS s ->
-                        -- Look up in env 0
-                        v = env["0:" + s] OR Value.Nil;
-                        evaled.append(v);,
-                    DEFAULT -> evaled.append(items[ei]);
-                END
-                ei += 1;
+FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+    MUTABLE items: Value[]@list = List[];
+    MUTABLE listDone = FALSE;
+    WHILE listDone == FALSE DO
+        curPosVal = penv["__rp"] OR Value{ Number: 0.0 };
+        tcVal2 = penv["__tc"] OR Value{ Number: 0.0 };
+        curPos = toInt(getNum(curPosVal));
+        tc2 = toInt(getNum(tcVal2));
+        IF curPos >= tc2 THEN listDone = TRUE;
+        ELSE
+            curTok = getTokenStr!(penv, curPos);
+            IF curTok == ")" || curTok == "]" THEN
+                penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
+                listDone = TRUE;
+            ELSE
+                item = readFormEnv!(penv);
+                items.append(item);
             END
-            f = evaled[0];
-            MATCH f START
-                Value.NativeFn AS name ->
-                    IF name == "+" THEN
-                        MATCH evaled[1] START Value.Number AS a ->
-                            MATCH evaled[2] START Value.Number AS b ->
-                                result = Value{ Number: a + b };, DEFAULT -> PASS; END, DEFAULT -> PASS; END
-                    END,
-                DEFAULT -> PASS;
-            END,
+        END
+    END
+    RETURN Value{ List: items };
+END
+
+-- Native function dispatch
+
+FN applyNative(name: String, evaled: Value[]) RETURNS Value @reentrant ->
+    IF name == "+" THEN RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) }; END
+    IF name == "-" THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
+    IF name == "*" THEN RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) }; END
+    IF name == "/" THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
+    IF name == "=" THEN RETURN boolVal(valEqual(evaled[1], evaled[2])); END
+    IF name == "<" THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
+    IF name == ">" THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
+    IF name == "<=" THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
+    IF name == ">=" THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
+    IF name == "list" THEN
+        MUTABLE litems: Value[]@list = List[];
+        MUTABLE li: Int64 = 1;
+        WHILE li < evaled.length() DO litems.append(evaled[li]); li += 1; END
+        RETURN Value{ List: litems };
+    END
+    IF name == "list?" THEN RETURN boolVal(isList(evaled[1])); END
+    IF name == "empty?" THEN RETURN boolVal(listLen(evaled[1]) == 0); END
+    IF name == "count" THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
+    IF name == "not" THEN RETURN boolVal(isTruthy(evaled[1]) == FALSE); END
+    IF name == "prn" THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
+    RETURN Value.Nil;
+END
+
+-- Environment operations using Pool
+
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+    val = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
+    MATCH val START
+        Value.Number AS n ->
+            IF n == 0.0 - 777777.0 THEN
+                parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
+                MATCH parentVal START
+                    Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
+                    DEFAULT -> RETURN Value.Nil;
+                END
+            END
+            RETURN val;,
+        DEFAULT -> RETURN val;
+    END
+    RETURN Value.Nil;
+END
+
+-- eval: dispatch by AST type (no penv needed — Lambda stores body directly)
+
+FN eval!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+    MATCH ast START
+        Value.Symbol AS sym ->
+            RETURN envGet!(envId, sym, pool);,
+        Value.List AS items ->
+            RETURN evalList!(items, envId, pool);,
+        Value.Nil -> RETURN ast;,
+        Value.TrueVal -> RETURN ast;,
+        Value.FalseVal -> RETURN ast;,
+        Value.Number -> RETURN ast;,
+        Value.Str -> RETURN ast;,
+        Value.NativeFn -> RETURN ast;,
+        Value.Lambda -> RETURN ast;,
+        Value.EnvRef -> RETURN ast;
+    END
+    RETURN ast;
+END
+
+FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+    IF items.length() == 0 THEN RETURN Value{ List: items }; END
+    formName = getSymName(items[0]);
+
+    IF formName == "def!" THEN
+        defName = getSymName(items[1]);
+        val = eval!(items[2], envId, pool);
+        pool[envId]?.vars[defName] = val;
+        result = pool[envId]?.vars[defName] OR Value.Nil;
+        RETURN result;
+
+    ELSE_IF formName == "let*" THEN
+        MUTABLE letResult: Value = Value.Nil;
+        MATCH items[1] START
+            Value.List AS binds ->
+                letId: Id<Env> = pool.insert(Env{ vars: {} });
+                pool[letId]?.vars["__p"] = Value{ EnvRef: envId };
+                MUTABLE bi: Int64 = 0;
+                WHILE bi < binds.length() DO
+                    bName = getSymName(binds[bi]);
+                    bVal = eval!(binds[bi + 1], letId, pool);
+                    pool[letId]?.vars[bName] = bVal;
+                    bi += 2;
+                END
+                letResult = eval!(items[2], letId, pool);,
+            DEFAULT -> PASS;
+        END
+        RETURN letResult;
+
+    ELSE_IF formName == "fn*" THEN
+        MATCH items[1] START
+            Value.List AS pnames ->
+                RETURN Value.Lambda{ params: pnames, body: items[2], envId: envId };,
+            DEFAULT -> RETURN Value.Nil;
+        END
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "do" THEN
+        MUTABLE doResult: Value = Value.Nil;
+        MUTABLE di: Int64 = 1;
+        WHILE di < items.length() DO
+            doResult = eval!(items[di], envId, pool);
+            di += 1;
+        END
+        RETURN doResult;
+
+    ELSE_IF formName == "if" THEN
+        cond = eval!(items[1], envId, pool);
+        truthy = isTruthy(cond);
+        IF truthy THEN
+            RETURN eval!(items[2], envId, pool);
+        ELSE
+            IF items.length() > 3 THEN
+                RETURN eval!(items[3], envId, pool);
+            END
+            RETURN Value.Nil;
+        END
+
+    ELSE
+        MUTABLE evaled: Value[]@list = List[];
+        MUTABLE ei: Int64 = 0;
+        WHILE ei < items.length() DO
+            evaled.append(eval!(items[ei], envId, pool));
+            ei += 1;
+        END
+        f = evaled[0];
+        IF isLambda(f) THEN
+            RETURN evalLambdaCall!(f, evaled, pool);
+        ELSE
+            fname = getNativeName(f);
+            IF fname.length() > 0 THEN
+                RETURN applyNative(fname, evaled);
+            END
+            RETURN Value.Nil;
+        END
+    END
+END
+
+FN evalLambdaCall!(f: Value, evaled: Value[], MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+    MUTABLE result: Value = Value.Nil;
+    MATCH f START
+        Value.Lambda AS lam ->
+            callId: Id<Env> = pool.insert(Env{ vars: {} });
+            pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
+            MUTABLE pi: Int64 = 0;
+            WHILE pi < lam.params.length() DO
+                pname = getSymName(lam.params[pi]);
+                pool[callId]?.vars[pname] = evaled[pi + 1];
+                pi += 1;
+            END
+            result = eval!(lam.body, callId, pool);,
         DEFAULT -> PASS;
     END
+    RETURN result;
+END
 
+-- runTest: tokenize + parse + eval
+
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+    tokenizeToEnv!(penv, input);
+    penv["__rp"] = Value{ Number: 0.0 };
+    ast = readFormEnv!(penv);
+    RETURN eval!(ast, envId, pool);
+END
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE pool: Env[]@pool = [];
+    MUTABLE penv: HashMap<Value> = {};
+
+    -- Create root environment (env 0)
+    rootId: Id<Env> = pool.insert(Env{ vars: {} });
+
+    -- Register native functions
+    pool[rootId]?.vars["+"] = Value{ NativeFn: "+" };
+    pool[rootId]?.vars["-"] = Value{ NativeFn: "-" };
+    pool[rootId]?.vars["*"] = Value{ NativeFn: "*" };
+    pool[rootId]?.vars["/"] = Value{ NativeFn: "/" };
+    pool[rootId]?.vars["="] = Value{ NativeFn: "=" };
+    pool[rootId]?.vars["<"] = Value{ NativeFn: "<" };
+    pool[rootId]?.vars[">"] = Value{ NativeFn: ">" };
+    pool[rootId]?.vars["<="] = Value{ NativeFn: "<=" };
+    pool[rootId]?.vars[">="] = Value{ NativeFn: ">=" };
+    pool[rootId]?.vars["list"] = Value{ NativeFn: "list" };
+    pool[rootId]?.vars["list?"] = Value{ NativeFn: "list?" };
+    pool[rootId]?.vars["empty?"] = Value{ NativeFn: "empty?" };
+    pool[rootId]?.vars["count"] = Value{ NativeFn: "count" };
+    pool[rootId]?.vars["not"] = Value{ NativeFn: "not" };
+    pool[rootId]?.vars["prn"] = Value{ NativeFn: "prn" };
+
+    MUTABLE result = runTest!("(+ 1 2)", rootId, pool, penv);
     print(prStr(result, TRUE));
-    ASSERT prStr(result, TRUE) == "3";
-    print("Mal interpreter proof-of-concept: PASSED");
+    ASSERT prStr(result, TRUE) == "3", "test 1: (+ 1 2) = 3";
+
+    result = runTest!("(def! a 10)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "10", "test 2";
+
+    result = runTest!("(def! f (fn* (x) (+ x a)))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "#<function>", "test 3";
+
+    result = runTest!("(f 5)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "15", "test 4";
+
+    result = runTest!("(let* (b 2 c 3) (+ b c))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "5", "test 5";
+
+    result = runTest!("(if true 7 8)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "7", "test 6";
+
+    result = runTest!("(if false 7 8)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "8", "test 7";
+
+    result = runTest!("(if nil 7 8)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "8", "test 8";
+
+    result = runTest!("(do (def! d 6) 7 (+ d 8))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "14", "test 9";
+
+    result = runTest!("(= 1 1)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "true", "test 10";
+
+    result = runTest!("(= 1 2)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "false", "test 11";
+
+    result = runTest!("(> 2 1)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "true", "test 12";
+
+    result = runTest!("(< 1 2)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "true", "test 13";
+
+    result = runTest!("(list 1 2 3)", rootId, pool, penv);
+    print(prStr(result, FALSE));
+    ASSERT prStr(result, FALSE) == "(1 2 3)", "test 14";
+
+    result = runTest!("(count (list 1 2 3))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "3", "test 15";
+
+    result = runTest!("(empty? (list))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "true", "test 16";
+
+    result = runTest!("(not false)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "true", "test 17";
+
+    result = runTest!("(def! sumdown (fn* (n) (if (> n 0) (+ n (sumdown (- n 1))) 0)))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "#<function>", "test 18";
+
+    result = runTest!("(sumdown 6)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "21", "test 19";
+
+    result = runTest!("(def! fib (fn* (n) (if (<= n 1) 1 (+ (fib (- n 1)) (fib (- n 2))))))", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "#<function>", "test 20";
+
+    result = runTest!("(fib 4)", rootId, pool, penv);
+    print(prStr(result, TRUE));
+    ASSERT prStr(result, TRUE) == "5", "test 21";
+
+    print("All 21 Mal interpreter tests PASSED!");
 END

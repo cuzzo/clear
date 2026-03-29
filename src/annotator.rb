@@ -1343,6 +1343,13 @@ private
     validate_assignment_type(assignment_node, assign_type_resolved, assignment_node.value.resolved_type)
 
     assignment_node.full_type = assign_type_resolved
+
+    # HashMap put requires heap allocation (rt.heapAlloc()) — record so needs_rt propagates.
+    target_type = index_node.target.type_info
+    if target_type&.map?
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      record_effect(EffectTracker::HEAP)
+    end
   end
 
   def visit_assignment_field(field_node, assignment_node)

@@ -152,6 +152,7 @@ module AllocHelper
       target_name = case node.name
                     when AST::Identifier then node.name.name
                     when AST::GetField then node.name.target.is_a?(AST::Identifier) ? node.name.target.name : nil
+                    when AST::GetIndex then node.name.target.is_a?(AST::Identifier) ? node.name.target.name : nil
                     when String then node.name
                     end
       if target_name && outer_vars.include?(target_name)
