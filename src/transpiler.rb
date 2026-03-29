@@ -375,14 +375,10 @@ private
         is_user_struct = @struct_schemas&.key?(p_type_sym)
         if is_user_struct
           "#{p_name}: anytype"
-        elsif p_type_obj.map?
-          # All HashMap variants (StringMap, PartitionedStringMap, ShardedStringMap)
-          # use anytype so the function accepts any map regardless of @sharded.
-          # Maps are always passed by pointer (shared mutable state).
-          "#{p_name}: anytype"
-        elsif p_type_obj.pool?
-          # Pools use anytype so they can be passed by pointer (shared mutable state
-          # across recursive call boundaries — value copies diverge on resize).
+        elsif p_type_obj.collection?
+          # All collection types (map, pool, list, set) use anytype so the function
+          # accepts any variant regardless of @sharded. Maps and pools are passed by
+          # pointer (shared mutable state); lists and sets use slice conversion.
           "#{p_name}: anytype"
         else
           p_type = transpile_type(param[:type], is_param: true)
@@ -422,9 +418,9 @@ private
       @current_fn_has_rt = fn_needs_rt
       # Track HashMap parameter names so call-site arg wrapping can skip `&` for them
       # (they are already pointers via anytype, so &param would create **Map).
-      @current_fn_map_params = node.params.select { |p|
+      @current_fn_collection_params = node.params.select { |p|
         pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
-        pt.map? || pt.pool?
+        pt.needs_pointer_passing?
       }.map { |p| p[:name] }.to_set
 
       prologue = if fn_needs_rt
@@ -510,7 +506,7 @@ private
       # @list and @pool also need `var` because deinit(*Self, alloc) requires a mutable receiver.
       ft = Type.new(node.full_type || :Void)
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
-      is_mutable ||= ft.list_collection? || ft.pool? || ft.set_collection? || ft.map?
+      is_mutable ||= ft.collection?
       # @local pointers are always `const` — mutation goes through the pointer, not the binding.
       # Same as @locked: the pointer itself never changes, only the pointee.
       is_mutable = false if ft.local?
@@ -1174,7 +1170,7 @@ private
         t = type_obj ? Type.new(type_obj) : nil
         zig_t = t ? t.zig_type : "anyopaque"
         # All maps must be captured by pointer (shared mutable state).
-        if t && t.map?
+        if t && t.needs_pointer_passing?
           "#{name}: *#{zig_t},"
         else
           "#{name}: #{zig_t},"
@@ -1184,7 +1180,7 @@ private
       capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
         captured.map do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
-          if t && t.map?
+          if t && t.needs_pointer_passing?
             ".#{name} = &#{name}"
           else
             ".#{name} = #{name}"
@@ -1392,23 +1388,15 @@ private
         # Struct args: no .* deref needed — functions use `anytype` params which Zig
         # monomorphizes for both T and *T with transparent field access.
         # Array/List args: convert to slice via .items for function params.
-        if a.type_info&.is_a?(Type) && Type.new(a.type_info).pool?
-          # Pool params: pass by pointer to avoid copy-on-resize divergence.
+        if a.type_info&.is_a?(Type) && Type.new(a.type_info).needs_pointer_passing?
+          # Map/Pool params use anytype — pass by pointer so the callee can mutate.
+          # BG captures already store as *MapType, so don't double-wrap.
+          # Function params that are already pointers (anytype) skip the &.
           is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
-          is_map_param = a.is_a?(AST::Identifier) && @current_fn_map_params&.include?(a.name)
-          (is_capture || is_map_param) ? arg_code : "&#{arg_code}"
+          is_collection_param = a.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(a.name)
+          (is_capture || is_collection_param) ? arg_code : "&#{arg_code}"
         elsif a.type_info&.array?
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
-        elsif a.type_info&.is_a?(Type) && Type.new(a.type_info).map?
-          # HashMap and Pool params use anytype — pass by pointer so the callee
-          # can mutate. Pools must be passed by pointer to avoid copy-on-resize
-          # divergence across recursive call boundaries.
-          # BG captures already store maps as *MapType, so don't double-wrap.
-          # Function params that are HashMap/Pool are already pointers (anytype),
-          # so passing &param would create ** — skip the & for those.
-          is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
-          is_map_param = a.is_a?(AST::Identifier) && @current_fn_map_params&.include?(a.name)
-          (is_capture || is_map_param) ? arg_code : "&#{arg_code}"
         else
           arg_code
         end

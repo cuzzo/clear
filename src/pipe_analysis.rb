@@ -862,8 +862,7 @@ module PipeAnalysis
   def require_array_input!(node, op_name)
     lhs_type = node.left.type_info
     return if node.left.metatype == :array
-    return if lhs_type&.pool?
-    return if lhs_type&.list_collection?
+    return if lhs_type&.collection?
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")

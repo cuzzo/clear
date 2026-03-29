@@ -266,7 +266,7 @@ STD_LIB = {
 
 POOL_METHODS = {
   "insert" => {
-    arity: 1, tag: :pool_method,
+    arity: 1, tag: :pool_method, allocates: true,
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
@@ -292,7 +292,7 @@ POOL_METHODS = {
 
 SET_METHODS = {
   "insert" => {
-    arity: 1, tag: :set_method,
+    arity: 1, tag: :set_method, allocates: true,
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type

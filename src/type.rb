@@ -473,6 +473,22 @@ class Type
     @collection == :set
   end
 
+  # --- Unified collection predicates ---
+  # Use these instead of individual map?/pool?/list_collection?/set_collection? checks
+  # to ensure new collection types get consistent treatment automatically.
+
+  # True for any collection type (HashMap, @pool, @list, @set).
+  def collection?
+    map? || pool? || list_collection? || set_collection?
+  end
+
+  # Collections that need shared mutable state across call boundaries.
+  # Passed by pointer (&) at call sites, use anytype params, tracked in
+  # @current_fn_collection_params to prevent double-& in recursive calls.
+  def needs_pointer_passing?
+    map? || pool?
+  end
+
   # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.
   # Declared as `MUTABLE futures: ~T[]@list = []`; populated via append(futures, BG { ... }).
   def promise_list?

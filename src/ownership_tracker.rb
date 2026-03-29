@@ -259,7 +259,7 @@ module OwnershipTracker
         next if info.resource                    # resource — implicit use via defer close
         t = info.type
         ti = t.is_a?(Type) ? t : Type.new(t.to_s)
-        next if ti.list_collection? || ti.pool?  # collections — implicit use via defer deinit
+        next if ti.collection?                    # collections — implicit use via defer deinit
         next if ti.multiowned? || ti.shared?     # Rc/Arc — implicit use via defer release
         reg = info.reg
         next unless reg                          # compiler-internal binding, not user code
