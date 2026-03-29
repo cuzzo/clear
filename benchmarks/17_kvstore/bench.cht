@@ -45,15 +45,14 @@ FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFr
         state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
         MUTABLE uBits = state;
         IF uBits < 0 THEN uBits = 0 - uBits; END
-        MUTABLE u = toFloat(uBits MOD 1000000000) / 1000000000.0;
+        MUTABLE u = (uBits MOD 1000000000) / 1000000000.0;
         u = hIntegral + u * (hIntHalf - hIntegral);
         x = hIntInv(u, s);
         MUTABLE k = toInt(x + 0.5);
         IF k < 1 THEN k = 1; END
         IF k > n THEN k = n; END
-        kf = toFloat(k);
-        IF kf - x <= hFraction THEN RETURN k - 1; END
-        IF u >= hInt(kf + 0.5, s) - hFunc(kf, s) THEN RETURN k - 1; END
+        IF k - x <= hFraction THEN RETURN k - 1; END
+        IF u >= hInt(k + 0.5, s) - hFunc(k, s) THEN RETURN k - 1; END
     END
     RETURN 0;
 END
@@ -65,7 +64,7 @@ END
 FN doSet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Void ->
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
-        map["key:" + toString(i)] = "value-" + toString(i);
+        map["key:" + i.toString()] = "value-" + i.toString();
         i += 1;
     END
     RETURN;
@@ -75,7 +74,7 @@ FN doGet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Int6
     MUTABLE hits: Int64 = 0;
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
-        MUTABLE got = map["key:" + toString(i)] OR "";
+        MUTABLE got = map["key:" + i.toString()] OR "";
         IF got.length() > 0 THEN hits += 1; END
         i += 1;
     END
@@ -83,7 +82,7 @@ FN doGet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Int6
 END
 
 FN doZipfGet!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
-    hIntegral = hInt(toFloat(n) + 0.5, s);
+    hIntegral = hInt(n + 0.5, s);
     hFraction = hFunc(1.5, s) - 1.0;
     MUTABLE hits: Int64 = 0;
     MUTABLE state: Int64 = seed;
@@ -91,7 +90,7 @@ FN doZipfGet!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64,
     WHILE i < count DO
         k = zipfNext!(state, n, s, hIntegral, hFraction);
         state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE got = map["key:" + toString(k)] OR "";
+        MUTABLE got = map["key:" + k.toString()] OR "";
         IF got.length() > 0 THEN hits += 1; END
         i += 1;
     END
@@ -99,7 +98,7 @@ FN doZipfGet!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64,
 END
 
 FN doZipfMixed!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
-    hIntegral = hInt(toFloat(n) + 0.5, s);
+    hIntegral = hInt(n + 0.5, s);
     hFraction = hFunc(1.5, s) - 1.0;
     MUTABLE hits: Int64 = 0;
     MUTABLE state: Int64 = seed;
@@ -110,10 +109,10 @@ FN doZipfMixed!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int6
         MUTABLE decision = state MOD 100;
         IF decision < 0 THEN decision = 0 - decision; END
         IF decision < 80 THEN
-            MUTABLE got = map["key:" + toString(k)] OR "";
+            MUTABLE got = map["key:" + k.toString()] OR "";
             IF got.length() > 0 THEN hits += 1; END
         ELSE
-            map["key:" + toString(k)] = "updated-" + toString(i);
+            map["key:" + k.toString()] = "updated-" + i.toString();
         END
         i += 1;
     END

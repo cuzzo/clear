@@ -31,7 +31,7 @@ FN jsonToString(v: JsonValue) RETURNS String @reentrant ->
     MATCH v START
         JsonValue.Null -> RETURN "null";,
         JsonValue.JBool AS b -> IF b THEN RETURN "true"; END RETURN "false";,
-        JsonValue.JNum AS n -> RETURN toString(toInt(n));,
+        JsonValue.JNum AS n -> RETURN toInt(n).toString();,
         JsonValue.JStr AS s -> RETURN "\"" + s + "\"";,
         JsonValue.JArray AS items ->
             MUTABLE out = "[";
@@ -73,7 +73,7 @@ FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS 
     WHILE p < json.length() DO
         c = charAt(json, p);
         IF c == "\"" THEN
-            penv["__jp"] = toInt(toFloat(p + 1));
+            penv["__jp"] = p + 1;
             RETURN result;
         ELSE_IF c == "\\" THEN
             p += 1;
@@ -92,7 +92,7 @@ FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS 
             p += 1;
         END
     END
-    penv["__jp"] = toInt(toFloat(p));
+    penv["__jp"] = p;
     RETURN result;
 END
 
@@ -100,7 +100,7 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
     MUTABLE p = skipWhitespace(json, pos);
 
     IF p >= json.length() THEN
-        penv["__jp"] = toInt(toFloat(p));
+        penv["__jp"] = p;
         RETURN JsonValue.Null;
     END
 
@@ -125,26 +125,26 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
                 inNum = FALSE;
             END
         END
-        penv["__jp"] = toInt(toFloat(p));
+        penv["__jp"] = p;
         n = toNumber(numStr) OR 0.0;
         RETURN JsonValue{ JNum: n };
     END
 
     -- true
     IF c == "t" THEN
-        penv["__jp"] = toInt(toFloat(p + 4));
+        penv["__jp"] = p + 4;
         RETURN JsonValue{ JBool: TRUE };
     END
 
     -- false
     IF c == "f" THEN
-        penv["__jp"] = toInt(toFloat(p + 5));
+        penv["__jp"] = p + 5;
         RETURN JsonValue{ JBool: FALSE };
     END
 
     -- null
     IF c == "n" THEN
-        penv["__jp"] = toInt(toFloat(p + 4));
+        penv["__jp"] = p + 4;
         RETURN JsonValue.Null;
     END
 
@@ -154,7 +154,7 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
         MUTABLE items: JsonValue[]@list = List[];
         p = skipWhitespace(json, p);
         IF p < json.length() && charAt(json, p) == "]" THEN
-            penv["__jp"] = toInt(toFloat(p + 1));
+            penv["__jp"] = p + 1;
             RETURN JsonValue{ JArray: items };
         END
         MUTABLE parsing: Bool = TRUE;
@@ -171,7 +171,7 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
         END
         p = skipWhitespace(json, p);
         IF p < json.length() && charAt(json, p) == "]" THEN p += 1; END
-        penv["__jp"] = toInt(toFloat(p));
+        penv["__jp"] = p;
         RETURN JsonValue{ JArray: items };
     END
 
@@ -181,7 +181,7 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
         MUTABLE obj: HashMap<JsonValue> = {};
         p = skipWhitespace(json, p);
         IF p < json.length() && charAt(json, p) == "}" THEN
-            penv["__jp"] = toInt(toFloat(p + 1));
+            penv["__jp"] = p + 1;
             RETURN JsonValue{ JObj: obj };
         END
         MUTABLE parsing: Bool = TRUE;
@@ -207,12 +207,12 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
         END
         p = skipWhitespace(json, p);
         IF p < json.length() && charAt(json, p) == "}" THEN p += 1; END
-        penv["__jp"] = toInt(toFloat(p));
+        penv["__jp"] = p;
         RETURN JsonValue{ JObj: obj };
     END
 
     -- Unknown
-    penv["__jp"] = toInt(toFloat(p + 1));
+    penv["__jp"] = p + 1;
     RETURN JsonValue.Null;
 END
 
@@ -264,7 +264,7 @@ FN cheatMain() RETURNS Void ->
 
     -- Test 7: string with escapes
     r7 = parseValue!("\"line1\\nline2\"", 0, penv, 0);
-    MATCH r7 START JsonValue.JStr AS s -> IF s.length() == 11 THEN passed += 1; print("PASS: string escapes"); ELSE failed += 1; print("FAIL: string escapes len=" + toString(s.length())); END, DEFAULT -> failed += 1; print("FAIL: string escapes"); END
+    MATCH r7 START JsonValue.JStr AS s -> IF s.length() == 11 THEN passed += 1; print("PASS: string escapes"); ELSE failed += 1; print("FAIL: string escapes len=" + s.length().toString()); END, DEFAULT -> failed += 1; print("FAIL: string escapes"); END
 
     -- Test 8: empty array
     r8 = parseValue!("[]", 0, penv, 0);
@@ -272,7 +272,7 @@ FN cheatMain() RETURNS Void ->
 
     -- Test 9: array of numbers
     r9 = parseValue!("[1, 2, 3]", 0, penv, 0);
-    MATCH r9 START JsonValue.JArray AS items -> IF items.length() == 3 THEN passed += 1; print("PASS: array [1,2,3]"); ELSE failed += 1; print("FAIL: array [1,2,3] len=" + toString(items.length())); END, DEFAULT -> failed += 1; print("FAIL: array [1,2,3]"); END
+    MATCH r9 START JsonValue.JArray AS items -> IF items.length() == 3 THEN passed += 1; print("PASS: array [1,2,3]"); ELSE failed += 1; print("FAIL: array [1,2,3] len=" + items.length().toString()); END, DEFAULT -> failed += 1; print("FAIL: array [1,2,3]"); END
 
     -- Test 10: nested array
     r10 = parseValue!("[[1], [2, 3]]", 0, penv, 0);
@@ -304,6 +304,6 @@ FN cheatMain() RETURNS Void ->
 
     -- Summary
     print("---");
-    print("JSON Parser: " + toString(passed) + " passed, " + toString(failed) + " failed");
+    print("JSON Parser: " + passed.toString() + " passed, " + failed.toString() + " failed");
     ASSERT failed == 0;
 END

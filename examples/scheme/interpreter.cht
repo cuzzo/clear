@@ -106,8 +106,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.TrueVal -> RETURN "true";,
         Value.FalseVal -> RETURN "false";,
         Value.Number AS n ->
-            IF n == floor(n) THEN RETURN toString(toInt(n)); END
-            RETURN toString(toInt(n));,
+            IF n == floor(n) THEN RETURN toInt(n).toString(); END
+            RETURN toInt(n).toString();,
         Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
         Value.Symbol AS s -> RETURN s;,
         Value.List AS items ->
@@ -136,7 +136,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
         c = charAt(str, i);
         IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
         ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
-            penv["__t" + toString(count)] = Value{ Str: c };
+            penv["__t" + count.toString()] = Value{ Str: c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
@@ -151,7 +151,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
                 END
             END
             s = s + "\"";
-            penv["__t" + toString(count)] = Value{ Str: s };
+            penv["__t" + count.toString()] = Value{ Str: s };
             count += 1;
             i += 1;
         ELSE
@@ -160,7 +160,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
                 s = s + charAt(str, i); i += 1;
             END
             IF s.length() > 0 THEN
-                penv["__t" + toString(count)] = Value{ Str: s };
+                penv["__t" + count.toString()] = Value{ Str: s };
                 count += 1;
             END
         END
@@ -170,7 +170,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
 END
 
 FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
-    val = penv["__t" + toString(idx)] OR Value.Nil;
+    val = penv["__t" + idx.toString()] OR Value.Nil;
     RETURN getStr(val);
 END
 
