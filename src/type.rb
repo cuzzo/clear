@@ -73,15 +73,19 @@ class Type
   private
 
   def self.resolve_numeric_op(t_left, t_right)
-    # Integer wins: when either operand is Int64 the result is Int64.
-    # NUMBER whole-number literals emit as Zig comptime_int which is i64-compatible,
-    # so no explicit cast is needed.  Mixing a genuine f64 *variable* with Int64 in
-    # SUB/MUL/DIV/MOD is a type error the user must resolve with an explicit conversion.
-    if t_left == :Int64 || t_right == :Int64
-      BinaryOpResult.new(type: :Int64)
-    else
-      BinaryOpResult.new(type: :Number)
+    # Both Int64: result is Int64 (no promotion needed).
+    if t_left == :Int64 && t_right == :Int64
+      return BinaryOpResult.new(type: :Int64)
     end
+
+    # Mixed Int64/Float64: promote Int64 operand to Float64 (implicit numeric promotion).
+    if t_left == :Int64 || t_right == :Int64
+      left_coercion = (t_left == :Int64 && t_right != :Int64) ? :Number : nil
+      right_coercion = (t_right == :Int64 && t_left != :Int64) ? :Number : nil
+      return BinaryOpResult.new(type: :Number, left_coercion: left_coercion, right_coercion: right_coercion)
+    end
+
+    BinaryOpResult.new(type: :Number)
   end
 
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
@@ -114,6 +118,8 @@ class Type
 
   def self.safe_autocast?(from_type, to_type)
     return false if from_type.nil?
+    # Int64 → Float64 (implicit numeric promotion, always safe)
+    return true if from_type == :Int64 && (to_type == :Number || to_type == :Float64)
     # Numbers and booleans can be auto-cast to strings
     [:Number, :Int64, :Bool, :Byte].include?(from_type)
   end
