@@ -2,6 +2,7 @@ require_relative "./source_error"
 require_relative "./scope"
 require_relative "./parser"
 require_relative "./std_lib"
+require_relative "./function_context"
 require_relative "./function_analysis"
 require_relative "./pipe_analysis"
 require_relative "./ownership_tracker"
@@ -30,20 +31,19 @@ class SemanticAnnotator
 
   attr_reader :scope_stack
 
+  def current_fn_ctx
+    @function_context_stack.last
+  end
+
   def initialize(importer: nil, compiler: nil, source_dir: nil)
     @importer   = importer || compiler  # compiler: kept for one-release backward compat
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
     # We start with a global scope
     @scope_stack = [Scope.new]
     @function_context_stack = [] # Stack of expected return types
-    @return_collection_stack = [] # Track actual returns found in current function/lambda
     @loop_depth = 0 # Track if we are inside a loop
     @smooth_depth = 0
     @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
-    @frame_usage_count = 0
-    @heap_usage_count  = 0
-    @alloc_call_count  = 0
-    @current_fn_type_params = [] # Type params of the function currently being validated
     # Reentrancy analysis
     @call_graph  = {}  # name => Set of directly-called function names (excluding self-calls)
     @fn_has_fnptr = {} # name => true if function calls a fn-type variable or lambda
@@ -51,7 +51,6 @@ class SemanticAnnotator
     # Performance analysis
     @fn_raises_directly = {}  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
     # Capability audit — tracks declarations and usage to detect over-engineering.
-    @current_function_name = nil
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = nil
@@ -320,10 +319,6 @@ private
   end
 
   def visit_FunctionDef(node)
-    @frame_usage_count = 0
-    @heap_usage_count  = 0
-    @alloc_call_count  = 0
-    @current_function_name = node.name
     effects_begin_function(node.name)
 
     # 1. Setup metadata
@@ -331,7 +326,10 @@ private
     declared_return = node.return_type || :Any
     lifetime_path = get_lifetime_path(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
-    @function_context_stack.push({type: declared_return, lifetime: lifetime_path, type_params: fn_type_params})
+    @function_context_stack.push(FunctionContext.new(
+      name: node.name, return_type: declared_return,
+      lifetime: lifetime_path, type_params: fn_type_params
+    ))
 
     # 2. Validation & Lifetime
     has_mutable_param = node.params.any? { |p| p[:mutable] }
@@ -344,10 +342,8 @@ private
     validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
 
     # Make type params visible during type annotation validation
-    @current_fn_type_params = fn_type_params
     node.params.each { |p| validate_type_annotation!(node, p[:type]) if p[:type].is_a?(Type) }
     validate_type_annotation!(node, node.return_type) if node.return_type.is_a?(Type)
-    @current_fn_type_params = []
 
     # 3. Pre-declaration (so the function can be recursive)
     signature = {
@@ -401,9 +397,10 @@ private
 
     signature[:return_strategy] = get_return_strategy(signature[:return][:type])
     node.full_type = signature
-    node.uses_frame = (@frame_usage_count > 0)
-    node.uses_heap  = (@heap_usage_count  > 0)
-    node.uses_alloc = (@alloc_call_count  > 0)
+    ctx = current_fn_ctx
+    node.uses_frame = (ctx.frame_count > 0)
+    node.uses_heap  = (ctx.heap_count > 0)
+    node.uses_alloc = (ctx.alloc_count > 0)
     # Seed for compute_can_fail! post-pass: direct failure sources.
     ret_type_obj = signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil
     heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
@@ -412,7 +409,6 @@ private
       (node.reentrant == :non_reentrant) ||
       scan_for_raises(node.body)
     @function_context_stack.pop
-    @current_function_name = nil
   end
 
   def visit_StructDef(node)
@@ -710,7 +706,7 @@ private
     error!(node, "FOR range end must be Int64, got #{end_type}") unless end_type == :Int64
 
     # 2. Analyze body in new scope with loop variable declared as immutable Int64
-    @loop_depth += 1
+    if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
@@ -720,7 +716,7 @@ private
         node.deferred_drops
       }
     ], merge_to_parent: false)
-    @loop_depth -= 1
+    if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
 
     node.full_type = :Void
   end
@@ -744,7 +740,7 @@ private
     elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
 
     # 2. Analyze body with loop variable
-    @loop_depth += 1
+    if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, elem_sym, false, false, nil, :stack)
@@ -754,7 +750,7 @@ private
         node.deferred_drops
       }
     ], merge_to_parent: false)
-    @loop_depth -= 1
+    if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
 
     node.full_type = :Void
   end
@@ -779,7 +775,7 @@ private
     outer_vars = @scope_stack.flat_map { |s| s.locals.keys }.to_set
 
     # 3. Analyze Body in a New Scope AND increment loop depth
-    @loop_depth += 1
+    if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
 
     # We use analyze_control_flow_branches to handle state merging and drops.
     # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
@@ -815,7 +811,7 @@ private
       }
     ], merge_to_parent: false)
 
-    @loop_depth -= 1
+    if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
 
     # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
     # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.
@@ -841,14 +837,14 @@ private
   # any call to a @reentrant or EXTERN FN function. Stops at FunctionDef
   # boundaries — nested lambdas/closures are separate compilation units.
   def visit_BreakNode(node)
-    if @loop_depth <= 0
+    if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
       error!(node, "BREAK must be used inside a loop")
     end
     node.full_type = :Void
   end
 
   def visit_ContinueNode(node)
-    if @loop_depth <= 0
+    if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
       error!(node, "CONTINUE must be used inside a loop")
     end
     node.full_type = :Void
@@ -881,7 +877,7 @@ private
 
   def visit_ReturnNode(node)
     # Handle optional return node for Void functions.
-    expected = @function_context_stack.last&.dig(:type)
+    expected = current_fn_ctx&.return_type
     if node.value.nil?
       # If the function expects a value but we return nothing -> ERROR
       if expected && expected != :Void && expected != :Any
@@ -898,13 +894,13 @@ private
     verify_return(node.value)
 
     actual = node.value.resolved_type
-    expected = @function_context_stack.last[:type]
+    expected = current_fn_ctx.return_type
 
     # 2. Ownership Tracking
     was_promoted = handle_return_escape(node.value, expected)
     if was_promoted
-      @frame_usage_count -= 1
-      @heap_usage_count  += 1
+      current_fn_ctx.frame_count -= 1
+      current_fn_ctx.heap_count  += 1
       record_effect(EffectTracker::HEAP)
     end
 
@@ -913,7 +909,7 @@ private
     # a @list identifier, the frame mark will rewind after return, invalidating
     # the list's arena-backed buffer.  Tag the node so the transpiler emits
     # CheatLib.promoteList() before the return to copy the buffer to heap.
-    if @frame_usage_count > 0 &&
+    if (current_fn_ctx&.frame_count || 0) > 0 &&
        node.value.is_a?(AST::Identifier) &&
        node.value.type_info&.list_collection? &&
        !node.value.type_info.sharded?
@@ -974,8 +970,8 @@ private
 
     node.full_type = actual
 
-    if @return_collection_stack.any?
-      @return_collection_stack.last << {storage: node.value.storage, type: actual, metatype: node.value.metatype}
+    if current_fn_ctx
+      current_fn_ctx.returns << {storage: node.value.storage, type: actual, metatype: node.value.metatype}
     end
   end
 
@@ -1016,7 +1012,7 @@ private
 
     node.zig_pattern = method_def[:zig]
     node.full_type   = method_def[:return]
-    @alloc_call_count += 1 if node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
   end
 
   def visit_FuncCall(node)
@@ -1090,7 +1086,7 @@ private
 
     # 4. Store Zig pattern for transpiler
     node.zig_pattern = matched_def[:zig]
-    @alloc_call_count += 1 if node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
 
     # 5. Collection type narrowing (e.g., append narrows Any[] → T[])
     narrow_collection_type!(matched_def, args)
@@ -1576,7 +1572,7 @@ private
 
     node.full_type = :"HashMap<#{first_val_type}>"
     node.storage = :heap
-    @heap_usage_count += 1
+    current_fn_ctx.heap_count += 1 if current_fn_ctx
     record_effect(EffectTracker::HEAP)
   end
 
@@ -1884,7 +1880,7 @@ private
 
     # Handle OR BREAK: error-to-break coercion (valid only inside loops)
     if node.right.is_a?(AST::OrBreak)
-      if @loop_depth <= 0
+      if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
         error!(node, "OR BREAK can only be used inside a WHILE loop")
       end
       if t_left_type.error_union?
@@ -1980,7 +1976,7 @@ private
 
     # CapabilityWrap always allocates on the heap.
     if node.ownership || node.sync || node.layout
-      @heap_usage_count += 1
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
       record_effect(EffectTracker::HEAP)
     end
 

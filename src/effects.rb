@@ -38,8 +38,8 @@ module EffectTracker
 
   # Record a direct effect for the function currently being analyzed.
   def record_effect(effect)
-    return unless @current_function_name
-    @fn_direct_effects[@current_function_name]&.add(effect)
+    return unless current_fn_ctx&.name
+    @fn_direct_effects[current_fn_ctx.name]&.add(effect)
   end
 
   # --- Phase 2: Transitive propagation ---

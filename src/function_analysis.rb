@@ -41,7 +41,9 @@ module FunctionAnalysis
   def analyze_routine(node, body, declared_return, is_implicit)
     # 1. Routine Prologue (Before Scope)
     verify_captures!(node)
-    @return_collection_stack.push([])
+    # Save and reset returns on the current FunctionContext (supports nested lambdas).
+    saved_returns = current_fn_ctx&.returns
+    current_fn_ctx.returns = [] if current_fn_ctx
 
     # 2. Body Analysis (Inside Scope)
     with_new_scope do
@@ -58,7 +60,9 @@ module FunctionAnalysis
     end
 
     # 3. Routine Epilogue (Process Returns)
-    found_returns = @return_collection_stack.pop.uniq
+    found_returns = (current_fn_ctx&.returns || []).uniq
+    # Restore saved returns (for enclosing function/lambda).
+    current_fn_ctx.returns = saved_returns if current_fn_ctx && saved_returns
     verify_returns(node, found_returns, is_implicit ? nil : declared_return)
 
     # Resolve return type (infer if implicit or :Any)
@@ -503,7 +507,7 @@ module FunctionAnalysis
     end
 
     # Get the current function's return lifetime annotation
-    lifetime_path = @function_context_stack.last&.dig(:lifetime)
+    lifetime_path = current_fn_ctx&.lifetime
 
     type_info = node.type_object
 
@@ -513,7 +517,7 @@ module FunctionAnalysis
     has_give = false
     # Type params (e.g. T in a generic function) are always returnable —
     # the Zig comptime system handles copies/moves at specialization time.
-    fn_type_params = @function_context_stack.last&.dig(:type_params) || []
+    fn_type_params = current_fn_ctx&.type_params || []
     is_type_param = fn_type_params.include?(type_info&.resolved)
 
     if !has_lifetime && !is_copyable && !has_give && !is_type_param

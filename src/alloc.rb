@@ -10,7 +10,7 @@ module AllocHelper
   # Downgrade :frame to :stack for struct literals inside loop bodies.
   # The OS stack reclaims them each iteration; LLVM can SROA the fields.
   def downgrade_frame_to_stack(node, storage)
-    return storage unless storage == :frame && @loop_depth > 0
+    return storage unless storage == :frame && (current_fn_ctx&.loop_depth || @loop_depth) > 0
     return storage unless node.value.is_a?(AST::StructLit)
 
     node.type_info.location = :stack
@@ -22,9 +22,9 @@ module AllocHelper
   def finalize_decl_storage!(node, final_type)
     storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
     storage = downgrade_frame_to_stack(node, storage)
-    @frame_usage_count += 1 if storage == :frame
+    current_fn_ctx.frame_count += 1 if current_fn_ctx && storage == :frame
     if storage == :heap
-      @heap_usage_count += 1
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
       record_effect(EffectTracker::HEAP)
     end
     storage

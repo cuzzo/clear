@@ -449,7 +449,7 @@ module CapabilityAudit
 
   # Record a capability binding for later audit.
   def record_capability_binding(var_name, node, final_type, storage)
-    return unless var_name.is_a?(String) && @current_function_name
+    return unless var_name.is_a?(String) && current_fn_ctx&.name
 
     info = current_scope.locals[var_name]
     sync = info&.sync
@@ -457,28 +457,28 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_node = @fn_nodes[@current_function_name]
+    fn_node = @fn_nodes[current_fn_ctx&.name]
     return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
 
-    key = "#{@current_function_name}:#{var_name}"
+    key = "#{current_fn_ctx&.name}:#{var_name}"
     line = node.respond_to?(:token) && node.token ? node.token.line : nil
     ft = final_type.is_a?(Type) ? final_type : nil
     is_sharded = ft&.respond_to?(:sharded?) && ft.sharded?
     @capability_audit[key] = {
-      fn: @current_function_name, var: var_name, line: line,
+      fn: current_fn_ctx&.name, var: var_name, line: line,
       sync: sync, ownership: own, storage: storage, sharded: is_sharded,
       mutated: false, captured_bg: false, captured_parallel: false
     }
   end
 
   def audit_mark_mutated(var_name)
-    return unless @current_function_name
-    key = "#{@current_function_name}:#{var_name}"
+    return unless current_fn_ctx&.name
+    key = "#{current_fn_ctx&.name}:#{var_name}"
     @capability_audit[key][:mutated] = true if @capability_audit[key]
   end
 
   def audit_mark_bg_captures(body_exprs, is_parallel)
-    return unless @current_function_name
+    return unless current_fn_ctx&.name
     _audit_walk_captures(body_exprs, Set.new, is_parallel)
   end
 
@@ -516,7 +516,7 @@ module CapabilityAudit
       if node.is_a?(AST::Identifier)
         name = node.name
         next if locally_bound.include?(name)
-        key = "#{@current_function_name}:#{name}"
+        key = "#{current_fn_ctx&.name}:#{name}"
         if @capability_audit[key]
           @capability_audit[key][:captured_bg] = true
           @capability_audit[key][:captured_parallel] = true if is_parallel
@@ -528,7 +528,7 @@ module CapabilityAudit
           vn = cap[:var_node]
           next unless vn.is_a?(AST::Identifier)
           next if locally_bound.include?(vn.name)
-          key = "#{@current_function_name}:#{vn.name}"
+          key = "#{current_fn_ctx&.name}:#{vn.name}"
           if @capability_audit[key]
             @capability_audit[key][:captured_bg] = true
             @capability_audit[key][:captured_parallel] = true if is_parallel

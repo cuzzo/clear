@@ -10,7 +10,7 @@ require_relative "./ast"
 # Requires host class to provide:
 #   error!(node, msg, *args)       — raise CompilerError
 #   lookup_type_schema(name)       — resolve a type name to its schema Hash
-#   @current_fn_type_params        — Array<Symbol> of active fn type params
+#   current_fn_ctx&.type_params        — Array<Symbol> of active fn type params
 #
 module GenericAnalysis
   BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
@@ -56,7 +56,7 @@ module GenericAnalysis
   #   3. Non-generic type with args: Int64<Number> — error
   #   4. Type param used as arg: Cache<T> — skip validation (resolved at monomorphization)
   #
-  # Respects @current_fn_type_params so that Cache<T> in a generic function
+  # Respects current_fn_ctx&.type_params so that Cache<T> in a generic function
   # does not raise "unknown type argument T".
   def validate_type_annotation!(node, type_obj)
     return unless type_obj.is_a?(Type)
@@ -96,7 +96,7 @@ module GenericAnalysis
         error!(node, :GENERIC_WRONG_ARG_COUNT, base_name, expected, actual)
       end
 
-      fn_tps = @current_fn_type_params || []
+      fn_tps = current_fn_ctx&.type_params || []
       inner.generic_args.each do |arg|
         next if BUILTIN_TYPES.include?(arg.resolved)
         next if fn_tps.include?(arg.resolved)  # Cache<T> in a generic fn — T is valid
@@ -113,7 +113,7 @@ module GenericAnalysis
     else
       # Plain type name — check if it's a generic struct/union missing args
       base_name = inner.resolved
-      return if (@current_fn_type_params || []).include?(base_name)  # T itself is valid
+      return if (current_fn_ctx&.type_params || []).include?(base_name)  # T itself is valid
       schema = lookup_type_schema(base_name)
       if schema.is_a?(Hash) && schema[:type_params]&.any?
         params_hint = schema[:type_params].map(&:to_s).join(', ')

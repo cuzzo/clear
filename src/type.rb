@@ -1120,7 +1120,7 @@ module TypeHelper
     storage ||= :stack
 
     # Increment frame after storage finalized
-    @frame_usage_count += 1 if storage == :frame
+    current_fn_ctx.frame_count += 1 if current_fn_ctx && storage == :frame
 
     return storage
   end
