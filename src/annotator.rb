@@ -908,55 +908,38 @@ private
       record_effect(EffectTracker::HEAP)
     end
 
-    # 3. List Escape Detection
-    # If this function uses the frame arena (uses_frame=true) AND we're returning
-    # a @list identifier, the frame mark will rewind after return, invalidating
-    # the list's arena-backed buffer.  Tag the node so the transpiler emits
-    # CheatLib.promoteList() before the return to copy the buffer to heap.
-    if (current_fn_ctx&.frame_count || 0) > 0 &&
-       node.value.is_a?(AST::Identifier) &&
-       node.value.type_info&.list_collection? &&
-       !node.value.type_info.sharded?
-      node.list_return = true
-      # Suppress the defer cleanup on the *declaration* node so `emit_cleanup` skips
-      # the `defer vals.deinit(...)` — ownership is transferred to the caller and the
-      # NRVO alias would corrupt the returned value if deinit ran after `return`.
+    # 3. Collection escape promotion — direct return of collection variable
+    # Lists only need promotion when the function uses the frame arena (frame_count > 0);
+    # maps always need promotion because their keys are frame-allocated.
+    uses_frame = (current_fn_ctx&.frame_count || 0) > 0
+    if node.value.is_a?(AST::Identifier) && node.value.type_info&.needs_escape_promotion? &&
+       (node.value.type_info.map? || uses_frame)
+      node.collection_return = true
       decl_reg = node.value.symbol&.reg
-      decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
+      if decl_reg&.respond_to?(:type_info)
+        decl_reg.type_info.escaped_return = true
+        decl_reg.type_info.heap_map = true if node.value.type_info.map?
+      end
     end
 
     # 3+. Collection escape through struct/union literals — when a StructLit is returned
-    # and its field values (at any nesting depth) include @list or HashMap identifiers,
+    # and its field values (at any nesting depth) include collection identifiers,
     # suppress their defer-deinit / mark for heap promotion.
     if node.value.is_a?(AST::StructLit)
-      mark_escaped_collections = ->(fields) {
+      walk_escaped = ->(fields) {
         fields.each do |_fname, fval|
-          if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
-            decl_reg = fval.symbol&.reg
-            decl_reg.type_info.escaped_return = true if decl_reg&.respond_to?(:type_info)
-          elsif fval.is_a?(AST::Identifier) && fval.type_info&.map? && !fval.type_info&.numeric_map?
+          if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
             decl_reg = fval.symbol&.reg
             if decl_reg&.respond_to?(:type_info)
-              decl_reg.type_info.heap_map = true
-              decl_reg.type_info.escaped_return = true  # suppress defer deinit
+              decl_reg.type_info.escaped_return = true
+              decl_reg.type_info.heap_map = true if fval.type_info.map?
             end
           elsif fval.is_a?(AST::StructLit)
-            mark_escaped_collections.call(fval.fields)
+            walk_escaped.call(fval.fields)
           end
         end
       }
-      mark_escaped_collections.call(node.value.fields)
-    end
-
-    # 3a. Map Escape Detection
-    # String HashMap keys are frame-allocated (frameAlloc) for speed.  When a map
-    # is returned, the caller's frame may rewind and invalidate the keys.  Tag the
-    # return so the transpiler emits CheatLib.mapPromote() — clones bucket array to
-    # heap and re-dupes each key string — before the return statement.
-    if node.value.is_a?(AST::Identifier) &&
-       node.value.type_info&.map? &&
-       !node.value.type_info&.numeric_map?
-      node.map_return = true
+      walk_escaped.call(node.value.fields)
     end
 
     # Promote non-identifier literals to heap when the expected return type requires it.
@@ -1138,6 +1121,7 @@ private
     propagate_call_flags!(node)
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
+    node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
 
     Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 
@@ -1190,6 +1174,7 @@ private
       propagate_call_flags!(node)
       is_resource, resource_close = resolve_resource_close(node, final_type)
       node.resource_close_zig = resource_close
+      node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
 
       Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 

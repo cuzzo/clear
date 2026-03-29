@@ -1320,8 +1320,8 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "ReturnNode list_return flag" do
-      it "sets list_return=true when returning a @list from a frame-using function" do
+    context "ReturnNode collection_return flag" do
+      it "sets collection_return=true when returning a @list from a frame-using function" do
         # BigS is 130 slots (>128 threshold) → local declaration → uses_frame = true.
         # Returning a @list from that function is dangerous: the frame mark rewinds on
         # exit, invalidating the arena buffer.
@@ -1354,10 +1354,10 @@ RSpec.describe SemanticAnnotator do
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
         ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
         expect(fn.uses_frame).to be true
-        expect(ret.list_return).to be true
+        expect(ret.collection_return).to be true
       end
 
-      it "does NOT set list_return when the function has no frame usage" do
+      it "does NOT set collection_return when the function has no frame usage" do
         src = <<~CLEAR
           FN buildList() RETURNS Number[]@list ->
             MUTABLE vals: Number[]@list = [];
@@ -1369,7 +1369,7 @@ RSpec.describe SemanticAnnotator do
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
         ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
         expect(fn.uses_frame).to be false
-        expect(ret.list_return).to be_falsey
+        expect(ret.collection_return).to be_falsey
       end
     end
 

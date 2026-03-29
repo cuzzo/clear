@@ -282,8 +282,7 @@ module AST
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
-    attr_accessor :list_return  # true when returning a @list from a function with uses_frame=true
-    attr_accessor :map_return   # true when returning a String HashMap (frame keys need heap promotion)
+    attr_accessor :collection_return  # true when returning a collection that needs escape promotion
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   Raise        = Struct.new(:token, :message_expr) { include Locatable }

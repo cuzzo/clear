@@ -11,7 +11,8 @@ class Type
   attr_accessor :soa          # true when @pool:soa or @list:soa — Structure of Arrays layout
   attr_accessor :heap_list     # true when the list was promoted to heap (returned from frame-using fn)
   attr_accessor :heap_map      # true when the string map was promoted to heap (returned from any fn)
-  attr_accessor :escaped_return # true when the list/map is returned — ownership transferred, no cleanup
+  attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
+  attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
@@ -487,6 +488,34 @@ class Type
   # @current_fn_collection_params to prevent double-& in recursive calls.
   def needs_pointer_passing?
     map? || pool?
+  end
+
+  # True for collections whose backing data is frame-allocated and needs
+  # promotion to heap before escaping a function return.
+  def needs_escape_promotion?
+    return false if sharded?  # sharded collections are always heap-backed
+    list_collection? || (map? && !numeric_map?)
+  end
+
+  # Generate the Zig promotion code for this collection type.
+  # Returns nil if no promotion is needed.
+  def escape_promote_code(var_name, rt_name)
+    if list_collection?
+      elem_zig = element_type&.zig_type || "u8"
+      "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
+    elsif map? && !numeric_map?
+      val_zig = value_type&.zig_type || "void"
+      "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);"
+    end
+  end
+
+  RESOURCE_TYPES = Set[:File, :TCPClient, :TCPServer].freeze
+
+  # True when this type is a resource (File, TCPClient, TCPServer, etc.)
+  # Checks the explicit flag (set by annotator after resolve_resource_close)
+  # and falls back to checking known resource type names.
+  def resource?
+    @is_resource || RESOURCE_TYPES.include?(resolved)
   end
 
   # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.

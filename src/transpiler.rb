@@ -1194,10 +1194,9 @@ private
       # Resources captured by BG fibers transfer ownership — suppress outer defer close.
       # Without this, the outer scope's `defer socketClose(fd)` fires immediately,
       # closing the fd before the fiber reads it.
-      resource_types = Set[:TCPClient, :TCPServer, :File]
       resource_moves = captured.filter_map do |name, type_obj|
-        resolved = type_obj.is_a?(Type) ? type_obj.resolved : type_obj
-        "#{name}_moved = true;" if resource_types.include?(resolved)
+        t = type_obj.is_a?(Type) ? type_obj : nil
+        "#{name}_moved = true;" if t&.resource?
       end.join("\n")
 
       rt_name = @do_rt_name || "rt"
@@ -1452,7 +1451,7 @@ private
 
       if node.value.is_a?(AST::Identifier) && !rc_map.key?(node.value.name)
         ti = node.value.type_info
-        is_resource = (ti&.resolved == :File || ti&.resolved == :TCPServer || ti&.resolved == :TCPClient)
+        is_resource = ti&.resource?
         if is_resource
           safe_name = zig_safe_name(node.value.name)
           return "#{safe_name}_moved = true;\nreturn #{safe_name};"
@@ -1462,28 +1461,18 @@ private
         end
       end
 
-      # 2. List escape promotion — copy arena-backed buffer to heap before frame mark rewinds.
-      # Only emitted when annotator detected: (a) list identifier returned, (b) uses_frame=true.
-      promote = if node.list_return && node.value.is_a?(AST::Identifier)
-        elem_zig = node.value.type_info&.element_type&.zig_type || "u8"
-        var_name = zig_safe_name(node.value.name)
-        rt_name  = @do_rt_name || "rt"
-        "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
+      # 2. Direct collection promotion — copy arena-backed buffer to heap before frame mark rewinds.
+      rt_name = @do_rt_name || "rt"
+      promote_collection = if node.collection_return && node.value.is_a?(AST::Identifier)
+        node.value.type_info.escape_promote_code(zig_safe_name(node.value.name), rt_name)
       end
 
-      # 2b. Collection escape through struct/union literals — promote each @list and map field.
-      promote_struct_collections = if node.value.is_a?(AST::StructLit)
-        rt_name = @do_rt_name || "rt"
+      # 2b. Collection escape through struct/union literals — promote each collection field.
+      promote_struct_fields = if node.value.is_a?(AST::StructLit)
         collect_nested = ->(fields) {
           fields.flat_map do |_fname, fval|
-            if fval.is_a?(AST::Identifier) && fval.type_info&.list_collection? && !fval.type_info.sharded?
-              elem_zig = fval.type_info&.element_type&.zig_type || "u8"
-              var_name = zig_safe_name(fval.name)
-              ["try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"]
-            elsif fval.is_a?(AST::Identifier) && fval.type_info&.map? && !fval.type_info&.numeric_map?
-              val_zig = fval.type_info&.value_type&.zig_type || "void"
-              var_name = zig_safe_name(fval.name)
-              ["try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);"]
+            if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
+              [fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)]
             elsif fval.is_a?(AST::StructLit)
               collect_nested.call(fval.fields)
             else
@@ -1491,16 +1480,7 @@ private
             end
           end
         }
-        collect_nested.call(node.value.fields).join("\n")
-      end
-
-      # 2a. Map escape promotion — clone frame-backed bucket array + key strings to heap.
-      # Emitted for any RETURN of a String HashMap identifier; numeric maps need no promotion.
-      promote_map = if node.map_return && node.value.is_a?(AST::Identifier)
-        val_zig  = node.value.type_info&.value_type&.zig_type || "f64"
-        var_name = zig_safe_name(node.value.name)
-        rt_name  = @do_rt_name || "rt"
-        "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);"
+        collect_nested.call(node.value.fields).compact.join("\n")
       end
 
       # 3. Standard Return with Move Suppression for unique heap
@@ -1514,7 +1494,7 @@ private
         visit(node.value)
       end
 
-      parts = [suppress, promote, promote_struct_collections, promote_map, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
+      parts = [suppress, promote_collection, promote_struct_fields, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
 
     when AST::GetField

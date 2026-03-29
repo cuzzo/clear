@@ -10,12 +10,14 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{close_stmt};\n"
     end
 
+    # All collection types: skip cleanup if ownership transferred via return
+    return "" if type_info&.collection? && type_info.escaped_return
+
     # @list backing buffer lives in the frame arena — deinit is a no-op but safe.
     # Sharded lists are shared across fibers and must stay heap-backed.
     # Promoted lists (returned from frame-using functions) were copied to heap and
     # must be freed with heapAlloc() to avoid leaking the GPA allocation.
     if type_info&.list_collection?
-      return "" if type_info.escaped_return  # ownership transferred to caller via return
       alloc = (type_info.sharded? || type_info.heap_list) ? "rt.heapAlloc()" : "rt.frameAlloc()"
       return "defer #{name}.deinit(#{alloc});\n"
     end
@@ -38,7 +40,6 @@ module OwnershipGenerator
     #   Frame-scoped (default): keys + bucket array are on frameAlloc — deinit is a
     #   no-op (smartFree is a no-op; frame rewind reclaims all memory automatically).
     if type_info&.map? && !type_info&.numeric_map?
-      return "" if type_info.escaped_return  # ownership transferred to caller via return
       if type_info.heap_map
         return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
       else
@@ -110,7 +111,7 @@ module OwnershipGenerator
       # If we don't have decl_node, it might be a method call result or something;
       # resources are always affine and should be moved.
       ti = rhs_node.type_info
-      is_resource = (ti&.resolved == :File || ti&.resolved == :TCPServer || ti&.resolved == :TCPClient)
+      is_resource = ti&.resource?
 
       should_suppress = (is_rc && @current_rhs_is_move) || 
                         (!is_rc && (rhs_node.type_info&.requires_move? || is_sync || is_resource) && 
