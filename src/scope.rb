@@ -1,4 +1,5 @@
 require "set"
+require_relative "./symbol_entry"
 
 class Scope
   attr_accessor :locals, :var_states, :dependencies, :var_states, :moved_paths, :owned_names
@@ -15,21 +16,19 @@ class Scope
 
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
-    @locals[name] = {
+    @locals[name] = SymbolEntry.new(
       reg: reg,
       type: type,
       mutable: is_mutable,
       storage: storage,
       sync: sync,
       rebindable: is_rebindable,
-      size: size || 0,  # TODO: see if size is ever nil
+      size: size || 0,
       capabilities: capabilities,
       borrowed_paths: borrowed_paths,
-      valid: true,
-      invalid_reason: nil,
       resource: resource,
       close_zig: close_zig,
-    }
+    )
   end
 
   def initialize_copy(original)

@@ -714,6 +714,7 @@ private
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
+        node.symbol = current_scope.locals[node.var_name]
         node.body.each { |stmt| visit(stmt) }
         finalize_scope(node)
         node.deferred_drops
@@ -747,6 +748,7 @@ private
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, elem_sym, false, false, nil, :stack)
+        node.symbol = current_scope.locals[node.var_name]
         node.body.each { |stmt| visit(stmt) }
         finalize_scope(node)
         node.deferred_drops
@@ -1142,6 +1144,7 @@ private
       close_zig: resource_close
     )
     current_scope.set_state(node.name, :live)
+    node.symbol = current_scope.locals[node.name]
     record_capability_binding(node.name, node, final_type, storage)
   end
 
@@ -1192,6 +1195,7 @@ private
         close_zig: resource_close
       )
       current_scope.set_state(node.name, :live)
+      node.symbol = current_scope.locals[node.name]
       record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
@@ -1253,6 +1257,7 @@ private
     # The variable may live in an outer scope; use lookup_scope_for to find it.
     owner = lookup_scope_for(node.name)
     owner&.mark_read(node.name)
+    node.symbol = owner&.locals&.[](node.name)
   end
 
   # Mark a variable's declaration node as mutated (reassigned after declaration).
