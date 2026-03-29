@@ -93,6 +93,11 @@ module MethodAnalysis
       end
     end
 
+    # Pool/Set insert allocates on the heap — record so needs_rt is computed correctly.
+    if (tag_field == :pool_method || tag_field == :set_method) && node.name == "insert"
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+    end
+
     true
   end
 end
