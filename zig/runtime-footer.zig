@@ -32,8 +32,9 @@ pub fn main() !void {
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
 
-    // 3. Init Runtime (4 MB frame arena for the main fiber).
-    var rt = try Runtime.init(allocator, 4 * 1024 * 1024, &global_ctx);
+    // 3. Init Runtime (4 KB frame arena — same as any spawned fiber).
+    //    Grows automatically via CheatArena overflow blocks (4KB → 16KB → 64KB → 256KB).
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
     defer rt.deinit();
     rt.wireAllocator();
 
