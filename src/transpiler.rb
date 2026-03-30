@@ -2350,9 +2350,9 @@ private
   end
 
   # Maps a CLEAR stack_size symbol (or nil) to a Zig TaskConfig struct literal.
-  # nil → Large (64 KB, default for IO-capable fibers); :micro → Micro (4 KB); :standard → Standard (16 KB); :xl → Xl (256 KB)
+  # nil / :standard → Standard (16 KB); :micro → Micro (4 KB); :large → Large (64 KB); :xl → Xl (256 KB)
   STACK_SIZE_ZIG_VARIANT = {
-    nil       => "Large",
+    nil       => "Standard",
     :micro    => "Micro",
     :standard => "Standard",
     :large    => "Large",

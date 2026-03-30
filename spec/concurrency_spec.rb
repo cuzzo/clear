@@ -690,9 +690,9 @@ RSpec.describe SemanticAnnotator do
     context "Zig output: DO no-prefix branch emits .Standard task config" do
       let(:code) { preamble + "DO { work() }" }
 
-      it "emits .stack_size = .Large (the default)" do
+      it "emits .stack_size = .Standard (the default)" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include(".stack_size = .Large")
+        expect(zig).to include(".stack_size = .Standard")
       end
     end
 
@@ -775,9 +775,9 @@ RSpec.describe SemanticAnnotator do
     context "Zig output: BG no prefix emits .Standard task config" do
       let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { work(); }; NEXT p; RETURN; END" }
 
-      it "emits .stack_size = .Large (the default)" do
+      it "emits .stack_size = .Standard (the default)" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include(".stack_size = .Large")
+        expect(zig).to include(".stack_size = .Standard")
       end
     end
   end
@@ -888,9 +888,9 @@ RSpec.describe SemanticAnnotator do
         "r = items s> CONCURRENT SELECT double(_); RETURN; END"
       }
 
-      it "emits .stack_size = .Large (the default)" do
+      it "emits .stack_size = .Standard (the default)" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include(".stack_size = .Large")
+        expect(zig).to include(".stack_size = .Standard")
       end
     end
 
