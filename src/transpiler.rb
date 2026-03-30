@@ -1519,6 +1519,30 @@ private
       # Apply string promotion wrap (dupe to heap) if needed.
       val_code = return_wrap.call(val_code) if return_wrap
 
+      # StructLit returns with string fields: bind to temp var, promote
+      # string fields via schema walk, then return. This handles both
+      # literal and computed string fields uniformly.
+      if node.collection_return && node.value.is_a?(AST::StructLit)
+        ft = node.value.full_type
+        resolved = ft.is_a?(Type) ? ft.resolved : ft
+        schema = @struct_schemas&.dig(resolved)
+        string_fields = schema&.select { |fn, fd|
+          ft = (fd.is_a?(Hash) ? fd[:type] : fd)
+          ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+          ft.string?
+        }&.keys || []
+        if string_fields.any?
+          field_promos = string_fields.map do |fn|
+            "__ret.#{fn} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fn});"
+          end
+          parts = [suppress, *promotions,
+                   "var __ret = #{val_code};",
+                   *field_promos,
+                   "return __ret;"].reject(&:nil?).reject(&:empty?)
+          return parts.join("\n")
+        end
+      end
+
       parts = [suppress, *promotions, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
 
@@ -2031,26 +2055,41 @@ private
           schema.each do |fname, fdef|
             ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
             ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-            # Struct fields: only promote collections (in-place). String fields
-            # are ambiguous (literal vs frame) and can't be safely promoted here.
-            if ft.needs_escape_promotion? && !ft.string?
-              promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name)
+            if ft.needs_escape_promotion?
+              if ft.string?
+                # Struct variable string field: dupe to heap. Safe even for
+                # .rodata strings (dupe is idempotent). The caller frees via
+                # field-level cleanup when heap_promoted is set.
+                promotions << "#{name}.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, #{name}.#{fname});"
+              else
+                promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name)
+              end
             end
           end
         end
       end
     elsif node.is_a?(AST::StructLit)
-      node.fields.each do |_fname, fval|
-        if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
-          if fval.type_info.string?
-            return_wrap = ->(val) { "try #{rt_name}.heapAlloc().dupe(u8, #{val})" } unless return_wrap
-          else
-            promotions << fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)
+      node.fields.each do |fname, fval|
+        fval_type = fval.respond_to?(:type_info) ? fval.type_info : nil
+        fval_type = Type.new(fval_type) if fval_type && !fval_type.is_a?(Type)
+        if fval_type&.needs_escape_promotion?
+          if fval_type.string? && fval.is_a?(AST::Identifier)
+            # String variable field: promote the variable to heap before struct init.
+            name = zig_safe_name(fval.name)
+            promotions << "#{name} = try #{rt_name}.heapAlloc().dupe(u8, #{name});"
+          elsif !fval_type.string?
+            if fval.is_a?(AST::Identifier)
+              promotions << fval_type.escape_promote_code(zig_safe_name(fval.name), rt_name)
+            elsif fval.is_a?(AST::StructLit)
+              sub_promo, sub_wrap = emit_escape_promotions(fval, rt_name)
+              promotions.concat(sub_promo)
+              return_wrap ||= sub_wrap
+            end
           end
-        elsif fval.is_a?(AST::StructLit)
-          sub_promo, sub_wrap = emit_escape_promotions(fval, rt_name)
-          promotions.concat(sub_promo)
-          return_wrap ||= sub_wrap
+          # String literals in struct fields: handled by the struct variable
+          # schema walk below when the return value is bound to a variable,
+          # or by the caller's heap_promoted field-level cleanup matching
+          # the callee's promotion.
         end
       end
     end

@@ -1264,10 +1264,7 @@ private
         schema.each do |fname, ftype|
           next if fname.is_a?(Symbol)
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
-          # For struct fields, only promote collections (always frame-backed).
-          # String fields are ambiguous (could be .rodata literal or frame-allocated)
-          # and don't have mutable backing data that needs in-place promotion.
-          if ft.needs_escape_promotion? && !ft.string?
+          if ft.needs_escape_promotion?
             mark_symbol_escaped!(node, ft)
             found = true
           end

@@ -53,10 +53,10 @@ module OwnershipGenerator
       return "defer CheatLib.numericMapDeinit(#{key_zig}, #{val_zig}, rt.frameAlloc(), &#{name});\n"
     end
 
-    # Struct containing promoted collection fields from function returns:
+    # Struct containing promoted fields from function returns:
     # emit field-level cleanup so heap-promoted data is freed by caller.
-    # String fields are excluded — they may be .rodata literals, and the
-    # caller can't distinguish heap-promoted strings from literals.
+    # All escapable fields (collections + strings) are promoted by the callee,
+    # so the caller must free them all with heapAlloc.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
       schema = (@struct_schemas ||= {})[resolved]
@@ -64,7 +64,7 @@ module OwnershipGenerator
         cleanups = schema.filter_map do |fname, fdef|
           ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          ft.escape_cleanup_code("#{name}.#{fname}") unless ft.string?
+          ft.escape_cleanup_code("#{name}.#{fname}")
         end
         return cleanups.join unless cleanups.empty?
       end
