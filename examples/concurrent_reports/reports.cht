@@ -35,7 +35,7 @@ END
 -- If data is empty, raises an error. Tests error propagation through BG.
 FN buildReportOrFail(name: String, data: String) RETURNS !Report ->
     IF data.length() == 0 THEN
-        RAISE "empty data for report: " + name;
+        RAISE "empty data for report: ${name}";
     END
     parts = split(data, ",");
     MUTABLE sum: Int64 = 0;

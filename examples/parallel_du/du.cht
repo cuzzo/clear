@@ -19,7 +19,7 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
         entry = entries[i];
         prefix = substr(entry, 0, 2);
         name = substr(entry, 2, entry.length() - 2);
-        fullPath = path + "/" + name;
+        fullPath = "${path}/${name}";
 
         IF prefix == "f:" THEN
             size = fileSize(fullPath);
@@ -47,5 +47,5 @@ END
 FN cheatMain() RETURNS Void ->
     path = ".";
     total = scanDir(path);
-    print(total.toString() + "\t" + path);
+    print("${total.toString()}\t${path}");
 END

@@ -75,9 +75,9 @@ FN cheatMain() RETURNS Void ->
     blogPage: Page = NEXT blog;
 
     -- Verify results
-    print("Home: " + homePage.title + " (" + homePage.linkCount.toString() + " links)");
-    print("About: " + aboutPage.title + " (" + aboutPage.linkCount.toString() + " links)");
-    print("Blog: " + blogPage.title + " (" + blogPage.linkCount.toString() + " links)");
+    print("Home: ${homePage.title} (${homePage.linkCount.toString()} links)");
+    print("About: ${aboutPage.title} (${aboutPage.linkCount.toString()} links)");
+    print("Blog: ${blogPage.title} (${blogPage.linkCount.toString()} links)");
 
     ASSERT homePage.title == "Home", "home title";
     ASSERT aboutPage.title == "About", "about title";

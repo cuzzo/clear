@@ -304,6 +304,6 @@ FN cheatMain() RETURNS Void ->
 
     -- Summary
     print("---");
-    print("JSON Parser: " + passed.toString() + " passed, " + failed.toString() + " failed");
+    print("JSON Parser: ${passed.toString()} passed, ${failed.toString()} failed");
     ASSERT failed == 0;
 END

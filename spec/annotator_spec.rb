@@ -3380,5 +3380,34 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
   end
+
+  describe "String interpolation" do
+    it "annotates interpolated string without error and produces String type" do
+      src = 'FN f() RETURNS Void -> name = "World"; greeting: String = "Hello, ${name}!"; RETURN; END'
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "annotates without error when interpolating expressions" do
+      src = <<~CLEAR
+        FN f(x: Int64) RETURNS String ->
+          RETURN "value: \${x.toString()}";
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "emits Zig concat for interpolated string" do
+      src = <<~CLEAR
+        FN f(name: String) RETURNS String ->
+          result = "Hello, \${name}!";
+          RETURN result;
+        END
+        FN cheatMain() RETURNS Void -> RETURN; END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(src)
+      expect(zig).to include("CheatLib.concat")
+      expect(zig).to include("Hello, ")
+    end
+  end
 end
 
