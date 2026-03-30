@@ -1,11 +1,10 @@
--- TCP KV Store — Minimal RESP-compatible GET/SET server
+-- TCP KV Store — Minimal RESP-compatible GET/SET/INCR server
 --
 -- Exercises: TCPServer, accept, BG fibers, @sharded HashMap, RESP parsing.
--- Supports pipelining (multiple commands per TCP read).
+-- Supports pipelining via response batching (one tcpWrite per tcpRead).
 --
--- Test:    redis-cli -p 6380 SET foo bar / GET foo / PING
--- Bench:   redis-benchmark -p 6380 -t set,get -n 100000 -c 50 -P 16
--- Compare: dragonfly --port 6379 & redis-benchmark -p 6379 -t set,get -n 100000 -c 50 -P 16
+-- Test:    redis-cli -p 6380 SET foo bar / GET foo / INCR counter
+-- Bench:   redis-benchmark -p 6380 -t set,get,incr -n 100000 -c 50 -P 16
 
 FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS Void ->
     MUTABLE running: Bool = TRUE;
@@ -14,7 +13,8 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE
-            -- Process all pipelined commands in this buffer
+            -- Batch all responses into one string, write once at the end.
+            MUTABLE resp = "";
             MUTABLE pos: Int64 = 0;
             WHILE pos < data.length() && running DO
                 MUTABLE ch = charAt(data, pos);
@@ -26,7 +26,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                         countStr = countStr + charAt(data, pos);
                         pos += 1;
                     END
-                    MUTABLE argCount = toInt(toNumber(countStr) OR 0.0);
+                    MUTABLE argCount = toInt(toNumber(countStr) OR (0.0 - 1.0));
                     pos += 2;
 
                     MUTABLE arg0 = "";
@@ -41,7 +41,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                                 lenStr = lenStr + charAt(data, pos);
                                 pos += 1;
                             END
-                            MUTABLE len = toInt(toNumber(lenStr) OR 0.0);
+                            MUTABLE len = toInt(toNumber(lenStr) OR (0.0 - 1.0));
                             pos += 2;
                             MUTABLE val = substr(data, pos, len);
                             pos += len;
@@ -54,66 +54,68 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                         ai += 1;
                     END
 
-                    -- Dispatch command
+                    -- Dispatch command — append to response buffer
                     IF arg0 == "SET" || arg0 == "set" THEN
                         store[arg1] = arg2;
-                        tcpWrite(client, "+OK\r\n");
+                        resp = resp + "+OK\r\n";
                     ELSE_IF arg0 == "GET" || arg0 == "get" THEN
                         MUTABLE result = store[arg1] OR "";
                         IF result.length() > 0 THEN
-                            tcpWrite(client, "$" + toString(result.length()) + "\r\n" + result + "\r\n");
+                            resp = resp + "$" + result.length().toString() + "\r\n" + result + "\r\n";
                         ELSE
-                            tcpWrite(client, "$-1\r\n");
+                            resp = resp + "$-1\r\n";
                         END
                     ELSE_IF arg0 == "INCR" || arg0 == "incr" THEN
                         IF arg1.length() > 0 THEN
                             newVal = (counters[arg1] OR 0_i64) + 1;
                             counters[arg1] = newVal;
-                            tcpWrite(client, ":" + newVal.toString() + "\r\n");
+                            resp = resp + ":" + newVal.toString() + "\r\n";
                         ELSE
-                            tcpWrite(client, "-ERR wrong number of arguments for 'INCR'\r\n");
+                            resp = resp + "-ERR wrong number of arguments for 'INCR'\r\n";
                         END
                     ELSE_IF arg0 == "DECR" || arg0 == "decr" THEN
                         IF arg1.length() > 0 THEN
                             newVal = (counters[arg1] OR 0_i64) - 1;
                             counters[arg1] = newVal;
-                            tcpWrite(client, ":" + newVal.toString() + "\r\n");
+                            resp = resp + ":" + newVal.toString() + "\r\n";
                         ELSE
-                            tcpWrite(client, "-ERR wrong number of arguments for 'DECR'\r\n");
+                            resp = resp + "-ERR wrong number of arguments for 'DECR'\r\n";
                         END
                     ELSE_IF arg0 == "PING" || arg0 == "ping" THEN
-                        tcpWrite(client, "+PONG\r\n");
+                        resp = resp + "+PONG\r\n";
                     ELSE_IF arg0 == "COMMAND" || arg0 == "command" THEN
-                        tcpWrite(client, "*0\r\n");
+                        resp = resp + "*0\r\n";
                     ELSE_IF arg0 == "QUIT" || arg0 == "quit" THEN
-                        tcpWrite(client, "+OK\r\n");
+                        resp = resp + "+OK\r\n";
                         running = FALSE;
                     ELSE
-                        tcpWrite(client, "-ERR unknown command '" + arg0 + "'\r\n");
+                        resp = resp + "-ERR unknown command '" + arg0 + "'\r\n";
                     END
                 ELSE_IF ch == "\r" || ch == "\n" THEN
-                    -- Skip stray CR/LF between commands
                     pos += 1;
                 ELSE
-                    -- Inline command: read to \r\n
+                    -- Inline command
                     MUTABLE cmd = "";
                     WHILE pos < data.length() && charAt(data, pos) != "\r" && charAt(data, pos) != "\n" DO
                         cmd = cmd + charAt(data, pos);
                         pos += 1;
                     END
-                    -- Skip trailing \r\n
                     WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
                         pos += 1;
                     END
                     IF cmd == "PING" || cmd == "ping" THEN
-                        tcpWrite(client, "+PONG\r\n");
+                        resp = resp + "+PONG\r\n";
                     ELSE_IF cmd == "QUIT" || cmd == "quit" THEN
-                        tcpWrite(client, "+OK\r\n");
+                        resp = resp + "+OK\r\n";
                         running = FALSE;
                     ELSE
-                        tcpWrite(client, "-ERR unknown command '" + cmd + "'\r\n");
+                        resp = resp + "-ERR unknown command '" + cmd + "'\r\n";
                     END
                 END
+            END
+            -- Single write for ALL responses in this batch
+            IF resp.length() > 0 THEN
+                tcpWrite(client, resp);
             END
         END
     END
