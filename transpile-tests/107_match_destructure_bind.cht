@@ -54,5 +54,24 @@ FN cheatMain() RETURNS Void ->
     END
     ASSERT radius == 3.14, "union AS still works alongside destructure";
 
+    -- Test 5: WHEN guard with field access (alternative to guard patterns)
+    p3 = Point{ x: 15, y: 25 };
+    MUTABLE guarded: Int64 = 0;
+    MATCH p3 START
+        WHEN p3.x >= 10 && p3.y >= 20 -> guarded = p3.x + p3.y;,
+        DEFAULT -> guarded = -1;
+    END
+    ASSERT guarded == 40, "WHEN guard with field access";
+
+    -- Test 6: WHEN guard as fallthrough after struct pattern
+    p4 = Point{ x: 5, y: 99 };
+    MUTABLE result: Int64 = 0;
+    MATCH p4 START
+        { x: 10, y } -> result = y;,
+        WHEN p4.x < 10 -> result = p4.x * 100;,
+        DEFAULT -> result = -1;
+    END
+    ASSERT result == 500, "WHEN guard as fallthrough after struct pattern";
+
     RETURN;
 END
