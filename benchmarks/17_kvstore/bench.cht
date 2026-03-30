@@ -25,17 +25,13 @@ END
 
 FN hInt(x: Float64, s: Float64) RETURNS Float64 ->
     t = 1.0 - s;
-    IF abs(t) > 0.00000001 THEN
-        RETURN (x ** t - 1.0) / t;
-    END
+    IF abs(t) > 0.00000001 -> RETURN (x ** t - 1.0) / t;
     RETURN log(x);
 END
 
 FN hIntInv(x: Float64, s: Float64) RETURNS Float64 ->
     t = 1.0 - s;
-    IF abs(t) > 0.00000001 THEN
-        RETURN (t * x + 1.0) ** (1.0 / t);
-    END
+    IF abs(t) > 0.00000001 -> RETURN (t * x + 1.0) ** (1.0 / t);
     RETURN exp(x);
 END
 

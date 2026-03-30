@@ -11,9 +11,7 @@
 --      cd zig && zig build-exe interp.zig -lc switch.S onRoot.S && ./interp
 
 FN isDigit?(c: String) RETURNS Bool ->
-    IF c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9" THEN
-        RETURN TRUE;
-    END
+    IF c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9" -> RETURN TRUE;
     RETURN FALSE;
 END
 

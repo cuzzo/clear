@@ -22,7 +22,7 @@ UNION Value {
 -- Pure helpers
 
 FN boolVal(b: Bool) RETURNS Value ->
-    IF b THEN RETURN Value.TrueVal; END
+    IF b -> RETURN Value.TrueVal;
     RETURN Value.FalseVal;
 END
 

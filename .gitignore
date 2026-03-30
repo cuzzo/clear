@@ -17,3 +17,4 @@ benchmarks/**/bench_go
 benchmarks/**/bench_rust
 benchmarks/10_concurrent_search/data/
 
+examples/web_crawler/.zig-cache/

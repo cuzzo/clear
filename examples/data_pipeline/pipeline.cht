@@ -12,7 +12,7 @@ FN generateReadings(n: Int64, seed: Int64) RETURNS Float64[]@list ->
         state = (state * 13_i64 + 7_i64) MOD 10007;
         modVal = state MOD 1000;
         MUTABLE raw = toFloat(modVal);
-        IF raw < 0.0 THEN raw = 0.0 - raw; END
+        IF raw < 0.0 -> raw = 0.0 - raw;
         readings.append(raw);
         i += 1;
     END

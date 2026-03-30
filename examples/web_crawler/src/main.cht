@@ -49,7 +49,7 @@ FN fetchPage(baseUrl: String, path: String) RETURNS Page @reentrant ->
     RETURN Page{ url: path, title: title, linkCount: links };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Start the canned test server on port 19876
     startTestServer(19876);
 

@@ -7,7 +7,7 @@
 --
 -- The workload: 1M SET + 1M GET + 200K SET + 800K GET = 3M total ops.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     n = 1000000;
     workers = 8;
     chunk = n / workers;
