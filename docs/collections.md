@@ -64,15 +64,20 @@ MUTABLE enemies: Enemy[]@pool = [];
 id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
 id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 
--- Access via handle (O(1), generation-checked):
-goblin = enemies.get(id1);
+-- Access via handle — returns ?T (optional). Must use OR to unwrap:
+goblin = enemies.get(id1) OR Enemy{ hp: 0, name: "none" };
+
+-- Or via [] syntax (equivalent to .get):
+dragon = enemies[id2] OR Enemy{ hp: 0, name: "none" };
 
 -- Remove: slot is freed, generation increments
 enemies.remove(id1);
 
--- Stale handle returns null (not a crash, not type confusion):
-enemies.get(id1);    -- null (generation mismatch)
+-- Stale handle returns null — OR provides a safe fallback:
+gone = enemies.get(id1) OR Enemy{ hp: 0, name: "removed" };
 ```
+
+**Important: every pool access returns `?T` (optional).** Like `@writeLocked`, using a pool is not a one-line optimization — it changes how you access data. Every `pool.get(id)` or `pool[id]` requires `OR default` to handle the case where the handle is stale or the slot was removed. This is by design: the pool guarantees you never read invalid data, but you must handle the "not found" case explicitly.
 
 ### How Generational Handles Work
 
@@ -107,13 +112,13 @@ No garbage collector. No reference counting. Just a 4-byte integer comparison pe
 
 | Operation | List `T[]@list` | Pool `T[]@pool` |
 |---|---|---|
-| Append | O(1) amortized | O(1) or O(N) scan for free slot |
-| Access by position | `list[i]` — O(1) | Not supported (use handles) |
-| Access by handle | Not supported | `pool.get(id)` — O(1) |
+| Append/Insert | O(1) amortized | O(1) or O(N) scan for free slot |
+| Access | `list[i]` → `T` (direct) | `pool[id]` → `?T` (requires `OR`) |
 | Remove from middle | O(N) shift | O(1) mark-dead |
 | Stable references | No (realloc invalidates) | Yes (handles survive realloc) |
 | Memory after remove | Compacted | Holes (reused on next insert) |
 | Safety after remove | Index may now point to different element | Handle returns null (generational) |
+| Ergonomic cost | Direct access — no unwrapping | Every access needs `OR` fallback |
 
 ## Decision Tree
 
@@ -226,28 +231,26 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 
 **Cold path** (shard owned by another scheduler): The operation is transparently routed to the owning scheduler via SPSC ring buffers. The calling fiber yields until the owning scheduler executes the operation inline and signals completion via an atomic done flag. Correct, but slower — design your workload so each fiber processes ONLY its own partition.
 
-### Planned: `CONCURRENT EACH` for Shared-Nothing Workloads
+### `SHARD` Pipeline — True Shared-Nothing Workloads
 
-The ideal shared-nothing pattern: partition the work so each fiber owns its shard exclusively.
+The `SHARD` pipeline operator partitions work so each fiber owns its shard exclusively:
 
-```
--- Planned syntax (not yet implemented):
+```clear
 MUTABLE map: HashMap<String>@sharded(8) = {};
+n = 1000000;
 
--- Distribute work by shard — each fiber only touches its own partition
-(0..<8)@sharded s> CONCURRENT EACH |shard| ->
-    -- This fiber is pinned to the scheduler that owns shard `shard`.
-    -- All map operations on keys in this shard are LOCAL (zero routing).
-    FOR i IN (shard * chunk)..<((shard + 1) * chunk) DO
-        map["key:" + toString(i)] = "value";
-    END
-END
+-- SHARD routes each key to the scheduler that owns its shard.
+-- CONCURRENT EACH runs one fiber per shard — zero locks, zero routing.
+(0..<n) s> SHARD("key:${toString(_)}", map) s> CONCURRENT EACH {
+    map[_] = "value";
+};
 ```
 
-**How it works**: `(range)@sharded s> CONCURRENT EACH` tells the compiler to:
-1. Pin each iteration's fiber to the scheduler that owns shard `i % S`
-2. Each fiber gets exclusive access to its partition — no locks, no routing
-3. The result is true DragonflyDB-style shared-nothing: N partitions, N fibers, zero synchronization
+**How it works**:
+1. SHARD hashes each key, appends it to the owning shard's queue
+2. One fiber per shard is pinned to the owning scheduler
+3. Each fiber processes only its own queue — no cross-shard access, no locks
+4. The result is true DragonflyDB-style shared-nothing: N partitions, N fibers, zero synchronization
 
 **When to use `@sharded(N)` vs `@sharded(N):locked`**:
 - `@sharded(N)` + `CONCURRENT EACH`: each fiber owns its partition. Maximum throughput.
