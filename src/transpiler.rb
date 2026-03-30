@@ -1335,10 +1335,19 @@ private
       # Defer-free for promoted captures inside the fiber.
       # Strings need explicit free (duped to heap); collections are freed
       # via their own deinit in the fiber's normal cleanup path.
+      # Resources (TCPClient, File) need defer close — ownership transferred from outer scope.
       capture_frees = captured.filter_map do |name, type_obj|
-        t = type_obj ? Type.new(type_obj) : nil
-        "defer ctx.alloc.free(ctx.#{name});" if t && t.string?
-      end.join("\n                    ")
+        t = type_obj.is_a?(Type) ? type_obj : (type_obj ? Type.new(type_obj) : nil)
+        if t&.string?
+          "defer ctx.alloc.free(ctx.#{name});"
+        elsif t&.resource?
+          close = case t.resolved
+                  when :TCPClient, :TCPServer then "CheatLib.socketClose(ctx.#{name})"
+                  when :File then "ctx.#{name}.close()"
+                  end
+          "defer #{close};" if close
+        end
+      end.compact.join("\n                    ")
 
       <<~ZIG.chomp
         #{blk_label}: {
