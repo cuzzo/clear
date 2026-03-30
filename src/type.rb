@@ -541,6 +541,22 @@ class Type
 
   RESOURCE_TYPES = Set[:File, :TCPClient, :TCPServer].freeze
 
+  # Canonical mapping from CLEAR type symbols to Zig type strings.
+  # User-defined types (structs, enums, unions) pass through as-is.
+  ZIG_TYPE_MAP = {
+    Number:    "f64",
+    Int64:     "i64",
+    String:    "[]const u8",
+    Void:      "void",
+    Bool:      "bool",
+    Byte:      "u8",
+    Any:       "f64",
+    Range:     "CheatLib.Range",
+    File:      "std.fs.File",
+    TCPServer: "i32",
+    TCPClient: "i32",
+  }.freeze
+
   # True when this type is a resource (File, TCPClient, TCPServer, etc.)
   # Checks the explicit flag (set by annotator after resolve_resource_close)
   # and falls back to checking known resource type names.
@@ -1141,21 +1157,8 @@ class Type
       return is_pointer && zig != "void" ? "*#{zig}" : zig
     end
 
-    # 6. Map primitives and fallback to struct names
-    zig = case resolved
-    when :Number     then "f64"
-    when :Int64      then "i64"
-    when :String     then "[]const u8"
-    when :Void       then "void"
-    when :Bool       then "bool"
-    when :Byte       then "u8"
-    when :Any        then "f64" # Default to Number for Any in Zig
-    when :Range      then "CheatLib.Range"
-    when :File       then "std.fs.File"
-    when :TCPServer  then "i32"
-    when :TCPClient  then "i32"
-    else resolved.to_s  # Struct names (e.g., "User")
-    end
+    # 6. Map primitives and builtins to Zig types; user types pass through.
+    zig = ZIG_TYPE_MAP[resolved] || resolved.to_s
 
     # 7. Add pointer prefix if heap-allocated and not void
     is_pointer && zig != "void" ? "*#{zig}" : zig
