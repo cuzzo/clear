@@ -148,10 +148,11 @@ pub const Scheduler = struct {
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
 
     // 2. Communication — Pure SPSC (no MPSC linked list)
-    /// SPSC channels: heap-allocated, one per potential sender (max 64).
+    /// SPSC channels: lazily allocated, one per potential sender (max 64).
     /// channels[i] is the ring FROM scheduler i TO this scheduler.
+    /// Null until first message is sent on that channel (~288 KB per ring).
     /// Messages are value-copied — no linked lists, no pointer reuse.
-    channels: *[64]spsc.DefaultRing = undefined,
+    channels: [64]?*spsc.DefaultRing = [_]?*spsc.DefaultRing{null} ** 64,
     /// Bitmask: bit i is set when channel[i] has pending messages.
     dirty_mask: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     /// Re-entrancy guard for drainChannels (prevents RemoteCall → map.put → sendAndWait → drainChannels)
@@ -226,16 +227,12 @@ pub const Scheduler = struct {
         // io_uring ring for async file I/O (256 SQE slots).
         const ring = try IoUring.init(256, 0);
 
-        const ch = try allocator.create([64]spsc.DefaultRing);
-        for (ch) |*ring_slot| ring_slot.* = .{};
-
         var sched = Scheduler{
             .stack_pool = stack_pool,
             .fiber_pool = .{},
             .ready_queue = .{},
             .stack_cache = .{},
             .sleeping_queue = .{},
-            .channels = ch,
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -308,7 +305,9 @@ pub const Scheduler = struct {
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
-        self.allocator.destroy(self.channels);
+        for (&self.channels) |*ch| {
+            if (ch.*) |ring| self.allocator.destroy(ring);
+        }
         self.local_arena.deinit();
         self.ring.deinit();
         self.poller.deinit();
@@ -358,11 +357,26 @@ pub const Scheduler = struct {
     }
 
     // ------------------------------------------------------------
+    // Channel Management — lazy allocation
+    // ------------------------------------------------------------
+
+    /// Lazily allocate an SPSC ring for the given sender index.
+    /// Called on the producer side (first message to this channel).
+    fn ensureChannel(self: *Scheduler, idx: usize) !*spsc.DefaultRing {
+        if (self.channels[idx]) |ring| return ring;
+        const ring = try self.allocator.create(spsc.DefaultRing);
+        ring.* = .{};
+        self.channels[idx] = ring;
+        return ring;
+    }
+
+    // ------------------------------------------------------------
     // 1. THE SPAWN (Producer Side - Thread A)
     // ------------------------------------------------------------
     pub fn submitSpawn(self: *Scheduler, trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: TaskConfig) !void {
         const sender_idx = if (scheduler_running) active_scheduler.index else 0;
         std.debug.assert(sender_idx < self.channels.len);
+        const ring = try self.ensureChannel(sender_idx);
         const msg = SpscMessage{
             .tag = .Spawn,
             .trampoline_addr = trampoline_addr,
@@ -373,7 +387,7 @@ pub const Scheduler = struct {
             .config_timeout_ms = config.timeout_ms,
         };
         // Wait-and-work: if ring is full, drain our own channels + yield
-        while (!self.channels[sender_idx].push(msg)) {
+        while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
                 active_scheduler.coopYield();
@@ -395,12 +409,13 @@ pub const Scheduler = struct {
 
         const sender_idx = if (scheduler_running) active_scheduler.index else 0;
         std.debug.assert(sender_idx < self.channels.len);
+        const ring = self.ensureChannel(sender_idx) catch return;
         const msg = SpscMessage{
             .tag = .Resume,
             .task = @ptrCast(task),
         };
         // Wait-and-work
-        while (!self.channels[sender_idx].push(msg)) {
+        while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
                 active_scheduler.coopYield();
@@ -424,11 +439,12 @@ pub const Scheduler = struct {
         while (bits != 0) {
             const sender_idx = @ctz(bits);
             bits &= bits - 1;
+            const ch = self.channels[sender_idx] orelse continue;
             while (true) {
-                const peeked = self.channels[sender_idx].peek() orelse break;
+                const peeked = ch.peek() orelse break;
                 if (peeked.tag != .RemoteCall) break; // leave for main loop
                 // It's a RemoteCall — pop and execute
-                _ = self.channels[sender_idx].pop();
+                _ = ch.pop();
                 const func = peeked.rc_func.?;
                 const ctx = peeked.rc_ctx.?;
                 func(ctx);
@@ -443,7 +459,8 @@ pub const Scheduler = struct {
         while (mask != 0) {
             const sender_idx = @ctz(mask);
             mask &= mask - 1;
-            while (self.channels[sender_idx].pop()) |msg| {
+            const ch = self.channels[sender_idx] orelse continue;
+            while (ch.pop()) |msg| {
                 switch (msg.tag) {
                     .Spawn => {
                         const config = TaskConfig{

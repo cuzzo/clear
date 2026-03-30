@@ -2185,12 +2185,20 @@ pub const CheatLib = struct {
                 // the message in its own drainChannels loop independently.
                 const sender_idx = fp.active_scheduler.index;
                 std.debug.assert(sender_idx < target.channels.len);
+                // Lazily allocate channel ring on first use
+                if (target.channels[sender_idx] == null) {
+                    target.channels[sender_idx] = target.allocator.create(
+                        @import("spsc.zig").DefaultRing
+                    ) catch @panic("SPSC channel alloc failed");
+                    target.channels[sender_idx].?.* = .{};
+                }
+                const ring = target.channels[sender_idx].?;
                 const msg = fp.SpscMessage{
                     .tag = .RemoteCall,
                     .rc_func = @ptrCast(func_ptr),
                     .rc_ctx = ctx_ptr,
                 };
-                while (!target.channels[sender_idx].push(msg)) {
+                while (!ring.push(msg)) {
                     std.atomic.spinLoopHint();
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
