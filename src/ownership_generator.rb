@@ -10,8 +10,13 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{close_stmt};\n"
     end
 
-    # All collection types: skip cleanup if ownership transferred via return
-    return "" if type_info&.collection? && type_info.escaped_return
+    # Skip cleanup if ownership transferred via return (collections + strings)
+    return "" if type_info&.escaped_return && (type_info.collection? || type_info.string?)
+
+    # Heap-promoted strings from callee returns: free with heapAlloc.
+    if type_info&.string? && type_info.heap_promoted
+      return "defer rt.heapAlloc().free(#{name});\n"
+    end
 
     # @list backing buffer lives in the frame arena — deinit is a no-op but safe.
     # Sharded lists are shared across fibers and must stay heap-backed.
@@ -50,6 +55,8 @@ module OwnershipGenerator
 
     # Struct containing promoted collection fields from function returns:
     # emit field-level cleanup so heap-promoted data is freed by caller.
+    # String fields are excluded — they may be .rodata literals, and the
+    # caller can't distinguish heap-promoted strings from literals.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
       schema = (@struct_schemas ||= {})[resolved]
@@ -57,7 +64,7 @@ module OwnershipGenerator
         cleanups = schema.filter_map do |fname, fdef|
           ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          ft.escape_cleanup_code("#{name}.#{fname}")
+          ft.escape_cleanup_code("#{name}.#{fname}") unless ft.string?
         end
         return cleanups.join unless cleanups.empty?
       end

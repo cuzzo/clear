@@ -1500,10 +1500,10 @@ private
 
       # 2. Unified escape promotion — one method handles all cases.
       rt_name = @do_rt_name || "rt"
-      promotions = if node.collection_return
+      promotions, return_wrap = if node.collection_return
         emit_escape_promotions(node.value, rt_name)
       else
-        []
+        [[], nil]
       end
 
       # 3. Standard Return with Move Suppression for unique heap
@@ -1515,6 +1515,9 @@ private
       else
         visit(node.value)
       end
+
+      # Apply string promotion wrap (dupe to heap) if needed.
+      val_code = return_wrap.call(val_code) if return_wrap
 
       parts = [suppress, *promotions, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
       parts.join("\n")
@@ -2002,24 +2005,34 @@ private
   # Unified escape promotion: recursively generates ALL promotion calls for a value
   # about to escape its frame (return, BG capture, etc.). Handles direct collections,
   # struct literal fields, and struct variables with collection fields via schema.
+  # Returns [promotions, return_wrap].
+  # promotions: array of Zig statements to emit before the return (in-place collection promotions).
+  # return_wrap: a lambda that wraps the return expression for string promotion, or nil.
   def emit_escape_promotions(node, rt_name)
     promotions = []
+    return_wrap = nil
 
     if node.is_a?(AST::Identifier)
       ti = node.type_info
       name = zig_safe_name(node.name)
-      # Return-path promotion: collections only (strings survive the return via
-      # frame arena lifetime; BG captures handle strings separately).
-      if ti&.needs_escape_promotion? && !ti.string?
-        promotions << ti.escape_promote_code(name, rt_name)
+      if ti&.needs_escape_promotion?
+        if ti.string?
+          # Strings: dupe to heap. Unlike collections (in-place), this creates
+          # a new value — wrap the return expression instead of prepending a statement.
+          return_wrap = ->(val) { "try #{rt_name}.heapAlloc().dupe(u8, #{val})" }
+        else
+          promotions << ti.escape_promote_code(name, rt_name)
+        end
       else
-        # Struct/union variable — promote each collection field via schema
+        # Struct/union variable — promote each escapable field via schema
         resolved = ti&.resolved
         schema = @struct_schemas&.dig(resolved)
         if schema
           schema.each do |fname, fdef|
             ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
             ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+            # Struct fields: only promote collections (in-place). String fields
+            # are ambiguous (literal vs frame) and can't be safely promoted here.
             if ft.needs_escape_promotion? && !ft.string?
               promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name)
             end
@@ -2028,15 +2041,21 @@ private
       end
     elsif node.is_a?(AST::StructLit)
       node.fields.each do |_fname, fval|
-        if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion? && !fval.type_info.string?
-          promotions << fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)
+        if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
+          if fval.type_info.string?
+            return_wrap = ->(val) { "try #{rt_name}.heapAlloc().dupe(u8, #{val})" } unless return_wrap
+          else
+            promotions << fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)
+          end
         elsif fval.is_a?(AST::StructLit)
-          promotions.concat(emit_escape_promotions(fval, rt_name))
+          sub_promo, sub_wrap = emit_escape_promotions(fval, rt_name)
+          promotions.concat(sub_promo)
+          return_wrap ||= sub_wrap
         end
       end
     end
 
-    promotions.compact
+    [promotions.compact, return_wrap]
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).

@@ -1247,14 +1247,12 @@ private
 
     if node.is_a?(AST::Identifier)
       ti = node.type_info
-      # Collections whose backing data is frame-allocated must be promoted to heap
-      # on escape. Lists use frameAlloc for append(); maps use frameAlloc for keys.
-      # Both need promotion regardless of frame_count — the frame allocator is always
-      # used for collection operations even in functions without explicit frame usage.
-      # Note: strings also have needs_escape_promotion? = true, but string returns
-      # are handled differently (the callee's frame data survives until the caller's
-      # frame mark restore), so we exclude them from the return-escape path here.
-      if ti&.needs_escape_promotion? && !ti.string?
+      # Frame-allocated data must be promoted to heap on escape. This covers:
+      # - @list (frame-backed buffer), HashMap (frame-backed keys/buckets),
+      # - strings ([]const u8 slices pointing into the frame arena).
+      # Without promotion, the callee's defer restoreFrameMark rewinds the arena,
+      # leaving the caller with a dangling pointer.
+      if ti&.needs_escape_promotion?
         mark_symbol_escaped!(node, ti)
         return true
       end
@@ -1266,6 +1264,9 @@ private
         schema.each do |fname, ftype|
           next if fname.is_a?(Symbol)
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
+          # For struct fields, only promote collections (always frame-backed).
+          # String fields are ambiguous (could be .rodata literal or frame-allocated)
+          # and don't have mutable backing data that needs in-place promotion.
           if ft.needs_escape_promotion? && !ft.string?
             mark_symbol_escaped!(node, ft)
             found = true

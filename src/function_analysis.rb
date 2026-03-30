@@ -169,11 +169,14 @@ module FunctionAnalysis
 
     # Tag calls that return collections (direct or via struct fields) so the
     # caller knows to use heapAlloc for cleanup of promoted data.
+    # String returns only get heap_promoted_call from callee.returns_promoted
+    # (not from type alone) because stdlib string functions like readFile use
+    # frameAlloc internally — the caller shouldn't try to free those.
     if node.respond_to?(:heap_promoted_call=)
       callee_node = @fn_nodes[func_name]
       if callee_node&.returns_promoted
         node.heap_promoted_call = true
-      elsif node.type_info&.needs_escape_promotion?
+      elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
         node.heap_promoted_call = true
       end
     end

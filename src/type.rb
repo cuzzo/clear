@@ -530,6 +530,8 @@ class Type
       "defer #{var_name}.deinit(rt.heapAlloc());\n"
     elsif map? && !numeric_map?
       "defer #{var_name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
+    elsif string?
+      "defer rt.heapAlloc().free(#{var_name});\n"
     elsif array? && !fixed?
       # Dynamic slice from promoted @list — free the heap-allocated buffer.
       # Only called when heap_promoted guard is active (callee confirmed promotion).
