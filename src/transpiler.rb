@@ -182,7 +182,12 @@ private
     case node
     when AST::Program
       @emitted_extern_modules = Set.new
-      node.statements.map { |stmt| visit(stmt) }.compact.join("\n\n")
+      node.statements.map { |stmt|
+        code = visit(stmt)
+        next nil unless code
+        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        line ? "// CLR:#{line}\n#{code}" : code
+      }.compact.join("\n\n")
 
     when AST::ExternFnDecl
       # Emit a Zig @import for the native module (once per unique module name).
@@ -2528,6 +2533,9 @@ private
       # Add ; if it's not a block ending (}) and doesn't have one yet.
       # Exception: `_ = { block }` is a statement expression — always needs ;
       code += ";" unless code.strip.end_with?(";") || (code.strip.end_with?("}") && !discarded)
+      # Source line mapping: CLR:N comment traces Zig output back to CLEAR source.
+      line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+      code = "// CLR:#{line}\n#{code}" if line
       code
     end.join("\n")
   end
