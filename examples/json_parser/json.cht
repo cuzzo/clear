@@ -10,7 +10,7 @@
 -- Run: ruby src/transpiler.rb examples/json_parser/json.cht > zig/interp.zig
 --      cd zig && zig build-exe interp.zig -lc switch.S onRoot.S && ./interp
 
-FN isDigit(c: String) RETURNS Bool ->
+FN isDigit?(c: String) RETURNS Bool ->
     IF c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9" THEN
         RETURN TRUE;
     END
@@ -113,12 +113,12 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
     END
 
     -- Number (simple: digits, optional minus, optional dot)
-    IF c == "-" || isDigit(c) THEN
+    IF c == "-" || isDigit?(c) THEN
         MUTABLE numStr = "";
         MUTABLE inNum: Bool = TRUE;
         WHILE p < json.length() && inNum DO
             nc = charAt(json, p);
-            IF nc == "-" || nc == "." || nc == "+" || nc == "e" || nc == "E" || isDigit(nc) THEN
+            IF nc == "-" || nc == "." || nc == "+" || nc == "e" || nc == "E" || isDigit?(nc) THEN
                 numStr = numStr + nc;
                 p += 1;
             ELSE

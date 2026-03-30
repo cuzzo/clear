@@ -61,6 +61,10 @@ class Parser
     @tokens[@pos + 1] || Token.new(:EOF, "", current.line, current.column)
   end
 
+  def peek_at(n)
+    @tokens[@pos + n]
+  end
+
   # COMMANDS
   stmt(:KEYWORD, 'REQUIRE') { parse_require }
   stmt(:KEYWORD, 'EXTERN')  { parse_extern_decl }
@@ -180,14 +184,21 @@ class Parser
       AST::GetField.new(star_token, lhs, '*')
     else
       name_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+      name = name_token.value
+
+      # Predicate suffix: name? followed by ( → method call with ? suffix
+      if match?(:CHAR, '?') && peek_at(1)&.value == '('
+        consume(:CHAR, '?')
+        name = "#{name}?"
+      end
 
       if match?(:CHAR, '(')
         # Method Call
         _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-        AST::MethodCall.new(name_token, lhs, name_token.value, args)
+        AST::MethodCall.new(name_token, lhs, name, args)
       else
         # Field Access
-        AST::GetField.new(name_token, lhs, name_token.value)
+        AST::GetField.new(name_token, lhs, name)
       end
     end
   end
@@ -742,6 +753,11 @@ class Parser
   def parse_function_def(visibility = :package)
     fn_token = consume(:KEYWORD, 'FN')
     name = consume(:VAR_ID).value
+    # Predicate suffix: FN name?(...) — ? is part of the function name
+    if match?(:CHAR, '?')
+      consume(:CHAR, '?')
+      name = "#{name}?"
+    end
 
     # Parse optional generic type parameters: FN name<T, U>(...)
     type_params = []
@@ -965,8 +981,13 @@ class Parser
     name = var_token.value
     node = AST::Identifier.new(var_token, name)
 
+    # Predicate suffix: name? followed by ( → function call with ? suffix
+    if match?(:CHAR, '?') && peek_at(1)&.value == '('
+      consume(:CHAR, '?')
+      name = "#{name}?"
+    end
+
     # 2. Check for Immediate Function Call: name(...)
-    # We treat this as a special "suffix" of the identifier locally
     if match?(:CHAR, '(')
       _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
       node = AST::FuncCall.new(var_token, name, args)

@@ -26,7 +26,7 @@ FN boolVal(b: Bool) RETURNS Value ->
     RETURN Value.FalseVal;
 END
 
-FN isTruthy(v: Value) RETURNS Bool ->
+FN isTruthy?(v: Value) RETURNS Bool ->
     MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
     RETURN TRUE;
 END
@@ -51,7 +51,7 @@ FN getNativeName(v: Value) RETURNS String ->
     RETURN "";
 END
 
-FN isList(v: Value) RETURNS Bool ->
+FN isList?(v: Value) RETURNS Bool ->
     MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
@@ -61,12 +61,12 @@ FN listLen(v: Value) RETURNS Int64 ->
     RETURN 0;
 END
 
-FN isLambda(v: Value) RETURNS Bool ->
+FN isLambda?(v: Value) RETURNS Bool ->
     MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
-FN valEqual(a: Value, b: Value) RETURNS Bool @reentrant ->
+FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
     MATCH a START
         Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.TrueVal -> MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
@@ -79,7 +79,7 @@ FN valEqual(a: Value, b: Value) RETURNS Bool @reentrant ->
                 IF la.length() != lb.length() THEN RETURN FALSE; END
                 MUTABLE ci: Int64 = 0;
                 WHILE ci < la.length() DO
-                    IF valEqual(la[ci], lb[ci]) == FALSE THEN RETURN FALSE; END
+                    IF valEqual?(la[ci], lb[ci]) == FALSE THEN RETURN FALSE; END
                     ci += 1;
                 END
                 RETURN TRUE;,
@@ -224,7 +224,7 @@ FN applyNative(name: String, evaled: Value[]) RETURNS Value @reentrant ->
     IF name == "-" THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
     IF name == "*" THEN RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) }; END
     IF name == "/" THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
-    IF name == "=" THEN RETURN boolVal(valEqual(evaled[1], evaled[2])); END
+    IF name == "=" THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     IF name == "<" THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
     IF name == ">" THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
     IF name == "<=" THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
@@ -235,10 +235,10 @@ FN applyNative(name: String, evaled: Value[]) RETURNS Value @reentrant ->
         WHILE li < evaled.length() DO litems.append(evaled[li]); li += 1; END
         RETURN Value{ List: litems };
     END
-    IF name == "list?" THEN RETURN boolVal(isList(evaled[1])); END
+    IF name == "list?" THEN RETURN boolVal(isList?(evaled[1])); END
     IF name == "empty?" THEN RETURN boolVal(listLen(evaled[1]) == 0); END
     IF name == "count" THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
-    IF name == "not" THEN RETURN boolVal(isTruthy(evaled[1]) == FALSE); END
+    IF name == "not" THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
     IF name == "prn" THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
     RETURN Value.Nil;
 END
@@ -330,7 +330,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS V
 
     ELSE_IF formName == "if" THEN
         cond = eval!(items[1], envId, pool);
-        truthy = isTruthy(cond);
+        truthy = isTruthy?(cond);
         IF truthy THEN
             RETURN eval!(items[2], envId, pool);
         ELSE
@@ -348,7 +348,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS V
             ei += 1;
         END
         f = evaled[0];
-        IF isLambda(f) THEN
+        IF isLambda?(f) THEN
             RETURN evalLambdaCall!(f, evaled, pool);
         ELSE
             fname = getNativeName(f);

@@ -9,5 +9,5 @@ FN cheatMain() RETURNS Void ->
   read_back = readFile(path);
 
   -- 3. Verify
-  ASSERT eql(read_back, content), "File read should match written content";
+  ASSERT eql?(read_back, content), "File read should match written content";
 END

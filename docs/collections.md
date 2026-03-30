@@ -139,7 +139,7 @@ scores["alice"] = 100_i64;
 scores["bob"] = 200_i64;
 val = scores["alice"];                    -- 100
 scores.delete("bob");
-scores.contains("alice");                 -- TRUE
+scores.contains?("alice");                 -- TRUE
 scores.count();                           -- 1
 ```
 

@@ -2206,7 +2206,7 @@ private
     when :insert
       val_code = visit(node.args[0])
       "try #{obj_code}.insert(#{rt_name}.heapAlloc(), #{val_code})"
-    when :contains
+    when :"contains?"
       val_code = visit(node.args[0])
       "#{obj_code}.contains(#{val_code})"
     when :remove
@@ -2279,7 +2279,7 @@ private
       when :delete
         key_code = visit(node.args[0])
         "#{obj_code}.remove(#{rt_name}.heapAlloc(), #{key_code})"
-      when :contains
+      when :"contains?"
         key_code = visit(node.args[0])
         "#{obj_code}.contains(#{key_code})"
       when :count
@@ -2307,7 +2307,7 @@ private
       when :delete
         key_code = visit(node.args[0])
         "CheatLib.numericMapDelete(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{obj_code}, #{key_code})"
-      when :contains
+      when :"contains?"
         key_code = visit(node.args[0])
         "CheatLib.numericMapContains(#{key_zig}, #{val_zig}, #{obj_code}, #{key_code})"
       when :count
@@ -2323,7 +2323,7 @@ private
       when :delete
         key_code = visit(node.args[0])
         "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
-      when :contains
+      when :"contains?"
         key_code = visit(node.args[0])
         "#{obj_code}.contains(#{key_code})"
       when :count
@@ -2418,11 +2418,11 @@ private
 
   # Escape CLEAR variable names that would shadow Zig primitive types
   # (uN, iN, fN patterns like u8, i32, f64) using Zig's @"name" quoting syntax.
-  # Also strips the trailing `!` from MUTABLE-parameter function names — `!` is a
-  # CLEAR naming convention and is not valid in Zig identifiers.
+  # Strips trailing `!` (mutation) and `?` (predicate) suffixes from CLEAR names —
+  # these are naming conventions not valid in Zig identifiers.
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
   def zig_safe_name(name)
-    cleaned = name.end_with?('!') ? name[0..-2] : name
+    cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
     cleaned =~ ZIG_PRIMITIVE_RE ? "@\"#{cleaned}\"" : cleaned
   end
 

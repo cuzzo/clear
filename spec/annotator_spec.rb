@@ -2779,11 +2779,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     describe "HashMap#contains" do
-      it "resolves contains() return type as Bool" do
+      it "resolves contains?() return type as Bool" do
         tree = run(<<~CLEAR)
           FN f() RETURNS Void ->
             MUTABLE m: HashMap<Int64> = {};
-            found = m.contains("x");
+            found = m.contains?("x");
             RETURN;
           END
         CLEAR
@@ -2796,11 +2796,11 @@ RSpec.describe SemanticAnnotator do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS Void ->
             MUTABLE m: HashMap<Int64> = {};
-            found = m.contains("x");
+            found = m.contains?("x");
             RETURN;
           END
         CLEAR
-        expect(out).to include('m.contains("x")')
+        expect(out).to include('m.contains("x")')  # ? stripped in Zig output
       end
 
       it "raises when contains receives no arguments" do
@@ -2808,11 +2808,11 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS Void ->
               MUTABLE m: HashMap<Int64> = {};
-              m.contains();
+              m.contains?();
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.*\.contains requires exactly 1 argument/)
+        }.to raise_error(CompilerError, /HashMap.*\.contains\? requires exactly 1 argument/)
       end
 
       it "raises when contains key is not a String" do
@@ -2820,11 +2820,11 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS Void ->
               MUTABLE m: HashMap<Int64> = {};
-              m.contains(42);
+              m.contains?(42);
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.contains: key must be a String/)
+        }.to raise_error(CompilerError, /HashMap.contains\?: key must be a String/)
       end
     end
 

@@ -20,8 +20,8 @@ FN cheatMain() RETURNS Void ->
     ASSERT b == 200, "bob should be 200";
 
     -- Contains check.
-    ASSERT scores.contains("alice") == TRUE, "should contain alice";
-    ASSERT scores.contains("nobody") == FALSE, "should not contain nobody";
+    ASSERT scores.contains?("alice") == TRUE, "should contain alice";
+    ASSERT scores.contains?("nobody") == FALSE, "should not contain nobody";
 
     -- Count across all stripes.
     n: Int64 = scores.count();
@@ -30,7 +30,7 @@ FN cheatMain() RETURNS Void ->
     -- Delete.
     scores.delete("bob");
     ASSERT scores.count() == 2, "count should be 2 after delete";
-    ASSERT scores.contains("bob") == FALSE, "bob should be removed";
+    ASSERT scores.contains?("bob") == FALSE, "bob should be removed";
 
     -- Overwrite.
     scores["alice"] = 999;

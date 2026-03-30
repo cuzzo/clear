@@ -19,8 +19,8 @@ FN cheatMain() RETURNS Void ->
     ASSERT b == 20, "bob should be 20";
 
     -- Contains check.
-    ASSERT counts.contains("alice") == TRUE, "should contain alice";
-    ASSERT counts.contains("nobody") == FALSE, "should not contain nobody";
+    ASSERT counts.contains?("alice") == TRUE, "should contain alice";
+    ASSERT counts.contains?("nobody") == FALSE, "should not contain nobody";
 
     -- Count across all shards.
     n: Int64 = counts.count();
@@ -29,7 +29,7 @@ FN cheatMain() RETURNS Void ->
     -- Delete.
     counts.delete("bob");
     ASSERT counts.count() == 2, "count should be 2 after delete";
-    ASSERT counts.contains("bob") == FALSE, "bob should be removed";
+    ASSERT counts.contains?("bob") == FALSE, "bob should be removed";
 
     RETURN;
 END

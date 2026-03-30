@@ -34,7 +34,7 @@ STD_LIB = {
   },
 
   # 3. String Equality
-  "eql" => {
+  "eql?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
     zig: "CheatLib.eql({0}, {1})"
@@ -118,14 +118,14 @@ STD_LIB = {
   },
 
   # startsWith("file.txt", "file") -> true
-  "startsWith" => {
+  "startsWith?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
     zig: "std.mem.startsWith(u8, {0}, {1})"
   },
 
-  # endsWith("image.png", ".png") -> true
-  "endsWith" => {
+  # endsWith?("image.png", ".png") -> true
+  "endsWith?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
     zig: "std.mem.endsWith(u8, {0}, {1})"
@@ -138,8 +138,8 @@ STD_LIB = {
     zig: "CheatLib.indexOf({0}, {1})"
   },
 
-  # contains("hello", "ll") -> true
-  "contains" => {
+  # contains?("hello", "ll") -> true
+  "contains?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
     zig: "(std.mem.indexOf(u8, {0}, {1}) != null)"
@@ -318,7 +318,7 @@ SET_METHODS = {
     },
     return_type: ->(_) { :Void },
   },
-  "contains" => {
+  "contains?" => {
     arity: 1, tag: :set_method,
     return_type: ->(_) { :Bool },
   },
@@ -345,14 +345,14 @@ MAP_METHODS = {
     },
     return_type: ->(_) { :Void },
   },
-  "contains" => {
+  "contains?" => {
     arity: 1, tag: :map_method,
     validate: ->(node, args, obj_type, error_fn) {
       arg_type = Type.new(args[0].resolved_type)
       if obj_type.numeric_map?
-        error_fn.call(node, "HashMap.contains: key must be a numeric type, got #{args[0].resolved_type}") unless arg_type.numeric?
+        error_fn.call(node, "HashMap.contains?: key must be a numeric type, got #{args[0].resolved_type}") unless arg_type.numeric?
       else
-        error_fn.call(node, "HashMap.contains: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
+        error_fn.call(node, "HashMap.contains?: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
       end
     },
     return_type: ->(_) { :Bool },

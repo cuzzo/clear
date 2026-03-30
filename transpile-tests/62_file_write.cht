@@ -12,7 +12,7 @@ FN cheatMain() RETURNS Void ->
 
     -- Verify the write worked by reading back via the existing readFile intrinsic.
     result = readFile("testdata/write_test_output.txt");
-    ASSERT result.eql("hello from CLEAR"), "Written content should match read-back content";
+    ASSERT result.eql?("hello from CLEAR"), "Written content should match read-back content";
 
     RETURN;
 END

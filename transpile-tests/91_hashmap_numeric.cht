@@ -26,10 +26,10 @@ FN cheatMain() RETURNS Void ->
 
     -- count / contains / delete via method API
     ASSERT scores.count() == 3, "should have 3 entries";
-    ASSERT scores.contains(1_i64), "should contain key 1";
-    ASSERT scores.contains(99_i64) == FALSE, "should not contain key 99";
+    ASSERT scores.contains?(1_i64), "should contain key 1";
+    ASSERT scores.contains?(99_i64) == FALSE, "should not contain key 99";
 
     scores.delete(3_i64);
     ASSERT scores.count() == 2, "count should be 2 after delete";
-    ASSERT scores.contains(3_i64) == FALSE, "key 3 should be gone";
+    ASSERT scores.contains?(3_i64) == FALSE, "key 3 should be gone";
 END
