@@ -1788,6 +1788,7 @@ class Parser
     '@standard' => { stack_size: :standard },
     '@large'    => { stack_size: :large    },
     '@xl'       => { stack_size: :xl       },
+    '@service'  => { stack_size: :service  },
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
   }.freeze
@@ -1798,6 +1799,7 @@ class Parser
     '@standard' => { stack_size: :standard },
     '@large'    => { stack_size: :large    },
     '@xl'       => { stack_size: :xl       },
+    '@service'  => { stack_size: :service  },
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
     '@arena'    => { pinned: true, arena: true },  # :arena implies @pinned

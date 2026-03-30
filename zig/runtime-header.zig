@@ -460,23 +460,10 @@ pub const CheatLib = struct {
         const stat = try file.stat();
         const buffer = try allocator.alloc(u8, stat.size);
 
-        // 2. Async path: submit read via io_uring, yield, resume when done.
-        if (fp.scheduler_running) {
-            const sched = fp.active_scheduler;
-            const task = sched.getCurrent();
-
-            var waiter = fp.Scheduler.IoWaiter{ .task = task };
-            try sched.submitRead(&waiter, file.handle, buffer);
-            task.base.yield();
-
-            if (waiter.result < 0) {
-                allocator.free(buffer);
-                return error.IoUringReadFailed;
-            }
-            return buffer[0..@intCast(waiter.result)];
-        }
-
-        // 3. Blocking fallback for test / non-scheduler contexts.
+        // 2. Blocking read — use posix read() directly.
+        // TODO: io_uring async path disabled pending investigation of CQE/fiber
+        // interaction under concurrent load.  Blocking read is safe on all fiber
+        // stacks and still fast for local files (kernel page cache).
         var total: usize = 0;
         while (total < buffer.len) {
             const n = try std.posix.read(file.handle, buffer[total..]);

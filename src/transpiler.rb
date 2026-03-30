@@ -431,8 +431,14 @@ private
         }.map { |p| p[:name] }.to_set
       ))
 
+      # Frame mark save/restore: rewind the frame arena on return so each
+      # function call is a self-cleaning scope. SKIP the mark when the return
+      # type is frame-allocated (any non-primitive) — the returned data must
+      # survive past return; the caller's scope handles cleanup.
+      ret_sym = (node.return_type.is_a?(Type) ? node.return_type.resolved : (node.return_type || :Void)).to_sym
+      returns_primitive = [:Void, :Bool, :Int64, :Float64, :Number].include?(ret_sym)
       prologue = if fn_needs_rt
-        node.uses_frame ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
+        (node.uses_frame && returns_primitive) ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
       else
         nil
       end
@@ -2351,6 +2357,7 @@ private
     :standard => "Standard",
     :large    => "Large",
     :xl       => "Xl",
+    :service  => "Huge",
   }.freeze
 
   # BG spawn call: spawnBest by default, spawnPinned when @pinned.

@@ -43,7 +43,10 @@ CLEAR_THREADS=1 ./benchmarks/21_frame_vs_heap/bench_clear
 CLEAR_THREADS=2 ./benchmarks/21_frame_vs_heap/bench_clear
 ```
 
-Note: The runner uses `-O ReleaseFast` which produces smaller binaries with lower RSS. Development builds (`-OReleaseSafe`) add ~6 MB of safety check metadata.
+**Important: Build mode affects stack usage and memory.**
+- The runner uses `-O ReleaseFast` — smallest binaries, lowest RSS.
+- `-OReleaseSafe` adds bounds/overflow checks that significantly inflate stack frames. Fiber stacks that are sufficient under ReleaseFast may overflow under ReleaseSafe, causing segfaults. If debugging fiber crashes, use `-OReleaseFast` or increase the fiber stack size (`@service` = 2 MB).
+- `-ODebug` disables inlining, so stack frames are smaller individually but function call depth is preserved. Useful for stack traces but not representative of production performance.
 
 ## Benchmark index
 

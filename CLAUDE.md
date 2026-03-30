@@ -26,6 +26,10 @@ zig build-exe interp.zig -lc switch.S onRoot.S -OReleaseSafe
 # Build optimized (for benchmarks)
 zig build-exe interp.zig -lc switch.S onRoot.S -O ReleaseFast
 
+# WARNING: -OReleaseSafe inflates fiber stack frames significantly due to
+# bounds/overflow checks. Programs that work under ReleaseFast may segfault
+# under ReleaseSafe if fiber stacks overflow. Use ReleaseFast for benchmarks.
+
 # Package integration test (requires Zig)
 cd transpile-tests/module-integration && zig build test
 
