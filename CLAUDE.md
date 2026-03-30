@@ -10,11 +10,11 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ```bash
 bundle install              # Install Ruby dependencies
-bundle exec rspec           # Run all Ruby specs (1310 examples)
+bundle exec rspec           # Run all Ruby specs (1326 examples)
 
 # Transpile-tests: generate + run Zig integration tests
 ruby transpile-tests/gen.rb                              # Generates zig/all-tests.zig
-cd zig && zig test all-tests.zig -lc switch.S onRoot.S   # Run all tests
+cd zig && zig test all-tests.zig -lc switch.S onRoot.S   # Run all 119 tests
 
 # Compile a single CLEAR program
 ruby src/transpiler.rb examples/json_parser/json.cht > zig/interp.zig
@@ -34,9 +34,26 @@ cd transpile-tests/ffi-integration && zig build test
 ```
 
 Run **all three** test suites after making changes to the compiler. The Zig integration tests exercise the full pipeline end-to-end:
-- **transpile-tests**: 100+ .cht files testing language features (gen.rb → all-tests.zig)
+- **transpile-tests**: 119 .cht files testing language features (gen.rb → all-tests.zig)
 - **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution, `--module` CLI flag
 - **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites (no rt/try), `@import` deduplication
+
+## Benchmarks
+
+```bash
+# Run a single benchmark (auto-detects C/Go/Rust baselines)
+ruby benchmarks/runner.rb benchmarks/22_pool_vs_multiowned/
+
+# Run all benchmarks (01-09)
+ruby benchmarks/runner.rb
+
+# Run all benchmarks (01-19)
+ruby benchmarks/runner.rb --all
+```
+
+Benchmarks 21-23 include cross-language memory comparisons using `peakMemoryKb()` and `currentMemoryKb()` (reads `/proc/self/status`). Control thread count with `CLEAR_THREADS=1` for single-threaded comparison. The runner builds with `-O ReleaseFast`.
+
+See `benchmarks/README.md` for the full benchmark index and details.
 
 ## Ignored Directories
 
