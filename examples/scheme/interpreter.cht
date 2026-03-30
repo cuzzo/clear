@@ -1,6 +1,6 @@
 -- Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
 --
--- Uses Env[]@pool for scoped environments instead of a flat HashMap.
+-- Uses Env[10000]@pool for scoped environments instead of a flat HashMap.
 -- Each Env holds a HashMap<Value> for its local bindings.
 -- Parent links stored as Value.EnvRef in vars["__p"].
 -- Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
@@ -243,7 +243,7 @@ END
 
 -- Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     val = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
     MATCH val START
         Value.Number AS n ->
@@ -262,7 +262,7 @@ END
 
 -- eval: dispatch by AST type (no penv needed — Lambda stores body directly)
 
-FN eval!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+FN eval!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     MATCH ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -280,7 +280,7 @@ FN eval!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS Value @re
     RETURN ast;
 END
 
-FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     IF items.length() == 0 THEN RETURN Value{ List: items }; END
     formName = getSymName(items[0]);
 
@@ -352,7 +352,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS V
     END
 END
 
-FN evalLambdaCall!(f: Value, evaled: Value[], MUTABLE pool: Env[]@pool) RETURNS Value @reentrant ->
+FN evalLambdaCall!(f: Value, evaled: Value[], MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     MUTABLE result: Value = Value.Nil;
     MATCH f START
         Value.Lambda AS lam ->
@@ -370,7 +370,7 @@ END
 
 -- runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[10000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -378,7 +378,7 @@ FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[]@pool, MUTABLE pen
 END
 
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[]@pool = [];
+    MUTABLE pool: Env[10000]@pool = [];
     MUTABLE penv: HashMap<Value> = {};
 
     -- Create root environment (env 0)

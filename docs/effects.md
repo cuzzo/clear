@@ -12,7 +12,7 @@ The effects system is **not** function coloring. Effects are only required on pu
 
 | Effect | Meaning | Source |
 |---|---|---|
-| `HEAP` | Dynamic allocation (GPA, arena escape) | `@list`, `@pool`, `HashMap`, capability wraps (`@shared`, `@locked`, `@indirect`) |
+| `HEAP` | Dynamic allocation (GPA, arena escape) | `@list`, `HashMap`, capability wraps (`@shared`, `@locked`, `@indirect`) |
 | `BLOCKING` | May yield the fiber waiting for a lock | `WITH EXCLUSIVE` or auto-lock field mutations on `@locked`/`@writeLocked` |
 | `REENTRANT` | Function is directly or indirectly recursive | `@reentrant` annotation, mutual recursion cycles |
 | `LOOP_UNBOUND` | Contains a loop without a provable bound | `WHILE TRUE`, `BG STREAM` generators |
@@ -65,7 +65,7 @@ This is not function coloring because:
 ```
 -- ILLUSTRATIVE
 #HOT
-FN tick(entities: Entity[]@pool:soa) RETURNS Void ->
+FN tick(entities: Entity[10000]@pool:soa) RETURNS Void ->
     entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
     RETURN;
 END
@@ -104,7 +104,7 @@ The power of this system is the upgrade path. You write normal, readable code:
 
 ```
 -- ILLUSTRATIVE
-FN process_orders(orders: Order[]@pool) RETURNS Void ->
+FN process_orders(orders: Order[10000]@pool) RETURNS Void ->
     orders s> EACH { handle_order(_); };
     RETURN;
 END
@@ -115,7 +115,7 @@ When you need performance, add `#HOT`:
 ```
 -- ILLUSTRATIVE
 #HOT
-FN process_orders(orders: Order[]@pool) RETURNS Void ->
+FN process_orders(orders: Order[10000]@pool) RETURNS Void ->
     orders s> EACH { handle_order(_); };
     RETURN;
 END

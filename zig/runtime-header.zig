@@ -1697,15 +1697,20 @@ pub const CheatLib = struct {
     // -----------------------------------------------------------------------
     // Pool(T): A generational pool for ABA-safe handle-based access.
     //
+    // Fixed-capacity pool with generational handles and O(1) insert/remove.
+    //
     // Handles are u64 values encoding [generation: upper 32 bits][index: lower 32 bits].
     // Generation counters prevent use-after-remove (ABA safety).
     //
-    // Usage (mirrors CLEAR `MUTABLE p: User[]@pool = []`):
-    //   var p = CheatLib.Pool(User){};
+    // All slots are pre-allocated upfront — zero allocator calls during operation.
+    // A free stack provides O(1) insert (pop) and O(1) remove (push).
+    //
+    // Usage (mirrors CLEAR `MUTABLE p: Entity[1000]@pool = []`):
+    //   var p = try CheatLib.Pool(Entity).initCapacity(allocator, 1000);
     //   defer p.deinit(allocator);
-    //   const id: u64 = try p.insert(allocator, User{ .name = "Alice" });
-    //   const ptr: ?*User = p.get(id);    // null if stale
-    //   p.remove(id);                     // increments generation
+    //   const id: u64 = p.insert(Entity{ .name = "Alice" });  // O(1), panics if full
+    //   const ptr: ?*Entity = p.get(id);   // null if stale
+    //   p.remove(id);                      // O(1), increments generation
     pub fn Pool(comptime T: type) type {
         return struct {
             const Self = @This();
@@ -1716,68 +1721,76 @@ pub const CheatLib = struct {
                 value: T = undefined,
             };
 
-            slots:      std.ArrayListUnmanaged(Slot) = .{},
-            /// Number of dead (removed) slots available for reuse.
-            /// When zero we can skip the linear scan entirely and just append,
-            /// giving O(1) amortised insert for workloads with no removes.
-            free_count: u32 = 0,
+            slots: []Slot,
+            /// Stack of free slot indices. Top is at free_stack[free_top - 1].
+            free_stack: []u32,
+            free_top: u32,
+            capacity: u32,
+            live_count: u32 = 0,
 
-            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-                self.slots.deinit(allocator);
+            /// Pre-allocate all slots and build the free stack.
+            pub fn initCapacity(allocator: std.mem.Allocator, cap: u32) !Self {
+                const slots = try allocator.alloc(Slot, cap);
+                @memset(slots, Slot{});
+                const free_stack = try allocator.alloc(u32, cap);
+                // Fill free stack so index 0 is popped first (LIFO: push N-1..0)
+                for (0..cap) |i| {
+                    free_stack[i] = @intCast(cap - 1 - i);
+                }
+                return Self{
+                    .slots = slots,
+                    .free_stack = free_stack,
+                    .free_top = cap,
+                    .capacity = cap,
+                };
             }
 
-            /// Insert a value, returning a stable u64 handle.
-            /// The handle encodes: [(generation: u32) << 32 | (index: u32)].
-            /// Reuses dead slots when available (O(N) scan); otherwise O(1) append.
-            /// For insert-only workloads free_count stays 0, so the scan is skipped.
-            pub fn insert(self: *Self, allocator: std.mem.Allocator, value: T) !u64 {
-                // Only scan for a dead slot if we know at least one exists.
-                if (self.free_count > 0) {
-                    for (self.slots.items, 0..) |*slot, i| {
-                        if (!slot.alive) {
-                            self.free_count -= 1;
-                            const gen = slot.generation;
-                            slot.* = .{ .generation = gen, .alive = true, .value = value };
-                            return (@as(u64, gen) << 32) | @as(u64, @intCast(i));
-                        }
-                    }
-                }
-                // No free slot (or free_count was 0): grow
-                const idx = @as(u32, @intCast(self.slots.items.len));
-                try self.slots.append(allocator, .{ .generation = 0, .alive = true, .value = value });
-                return @as(u64, idx); // generation=0, index=idx
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                allocator.free(self.slots);
+                allocator.free(self.free_stack);
+            }
+
+            /// Insert a value, returning a stable u64 handle. O(1).
+            /// Panics if the pool is full.
+            pub fn insert(self: *Self, _: std.mem.Allocator, value: T) !u64 {
+                if (self.free_top == 0) @panic("Pool is full");
+                self.free_top -= 1;
+                const idx = self.free_stack[self.free_top];
+                const slot = &self.slots[idx];
+                const gen = slot.generation;
+                slot.* = .{ .generation = gen, .alive = true, .value = value };
+                self.live_count += 1;
+                return (@as(u64, gen) << 32) | @as(u64, idx);
             }
 
             /// Look up a handle. Returns null if stale or out of range.
             pub fn get(self: *Self, id: u64) ?*T {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
-                if (idx >= self.slots.items.len) return null;
-                const slot = &self.slots.items[idx];
+                if (idx >= self.capacity) return null;
+                const slot = &self.slots[idx];
                 if (!slot.alive or slot.generation != gen) return null;
                 return &slot.value;
             }
 
-            /// Remove a slot. Increments the generation counter (ABA protection).
+            /// Remove a slot. O(1). Increments generation (ABA protection).
             /// No-op if the handle is stale or out of range.
             pub fn remove(self: *Self, id: u64) void {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
-                if (idx >= self.slots.items.len) return;
-                const slot = &self.slots.items[idx];
+                if (idx >= self.capacity) return;
+                const slot = &self.slots[idx];
                 if (!slot.alive or slot.generation != gen) return;
                 slot.alive = false;
-                slot.generation +%= 1; // wrapping increment for ABA safety
-                self.free_count += 1;
+                slot.generation +%= 1;
+                self.free_stack[self.free_top] = idx;
+                self.free_top += 1;
+                self.live_count -= 1;
             }
 
             /// Returns the number of live (non-removed) slots.
             pub fn count(self: *const Self) i64 {
-                var n: i64 = 0;
-                for (self.slots.items) |slot| {
-                    if (slot.alive) n += 1;
-                }
-                return n;
+                return @intCast(self.live_count);
             }
         };
     }
@@ -1850,55 +1863,66 @@ pub const CheatLib = struct {
             const fields = std.meta.fields(T);
 
             data: MAL = .{},
-            generations: std.ArrayListUnmanaged(u32) = .{},
-            alive: std.ArrayListUnmanaged(bool) = .{},
-            free_count: u32 = 0,
+            generations: []u32 = &.{},
+            alive: []bool = &.{},
+            free_stack: []u32 = &.{},
+            free_top: u32 = 0,
+            capacity: u32 = 0,
+            live_count: u32 = 0,
+
+            pub fn initCapacity(allocator: std.mem.Allocator, cap: u32) !Self {
+                var data: MAL = .{};
+                try data.setCapacity(allocator, cap);
+                // Set len to capacity so .set(idx) works for any slot.
+                // Data is uninitialized but alive[] guards all reads.
+                data.len = cap;
+                const generations = try allocator.alloc(u32, cap);
+                @memset(generations, 0);
+                const alive = try allocator.alloc(bool, cap);
+                @memset(alive, false);
+                const free_stack = try allocator.alloc(u32, cap);
+                for (0..cap) |i| free_stack[i] = @intCast(cap - 1 - i);
+                return Self{
+                    .data = data,
+                    .generations = generations,
+                    .alive = alive,
+                    .free_stack = free_stack,
+                    .free_top = cap,
+                    .capacity = cap,
+                };
+            }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
                 self.data.deinit(allocator);
-                self.generations.deinit(allocator);
-                self.alive.deinit(allocator);
+                allocator.free(self.generations);
+                allocator.free(self.alive);
+                allocator.free(self.free_stack);
             }
 
-            pub fn insert(self: *Self, allocator: std.mem.Allocator, value: T) !u64 {
-                // Reuse a dead slot if available.
-                if (self.free_count > 0) {
-                    for (self.alive.items, 0..) |is_alive, i| {
-                        if (!is_alive) {
-                            self.free_count -= 1;
-                            const gen = self.generations.items[i];
-                            self.alive.items[i] = true;
-                            // Write each field into the MultiArrayList.
-                            self.data.set(i, value);
-                            return (@as(u64, gen) << 32) | @as(u64, @intCast(i));
-                        }
-                    }
-                }
-                // Grow: append to all parallel arrays.
-                const idx = @as(u32, @intCast(self.data.len));
-                try self.data.append(allocator, value);
-                try self.generations.append(allocator, 0);
-                try self.alive.append(allocator, true);
-                return @as(u64, idx);
+            pub fn insert(self: *Self, _: std.mem.Allocator, value: T) !u64 {
+                if (self.free_top == 0) @panic("SoaPool is full");
+                self.free_top -= 1;
+                const idx = self.free_stack[self.free_top];
+                const gen = self.generations[idx];
+                self.alive[idx] = true;
+                self.data.set(idx, value);
+                self.live_count += 1;
+                return (@as(u64, gen) << 32) | @as(u64, @intCast(idx));
             }
 
-            /// Look up a handle.  Returns the struct by value (reassembled
-            /// from SOA arrays), or null if the handle is stale.
             pub fn get(self: *const Self, id: u64) ?T {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
-                if (idx >= self.data.len) return null;
-                if (!self.alive.items[idx] or self.generations.items[idx] != gen) return null;
+                if (idx >= self.capacity) return null;
+                if (!self.alive[idx] or self.generations[idx] != gen) return null;
                 return self.data.get(idx);
             }
 
-            /// Get a mutable pointer to a specific field for a given handle.
-            /// Used by EACH pipeline for in-place mutation of individual fields.
             pub fn getFieldPtr(self: *Self, comptime field: std.meta.FieldEnum(T), id: u64) ?*std.meta.fieldInfo(T, field).type {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
-                if (idx >= self.data.len) return null;
-                if (!self.alive.items[idx] or self.generations.items[idx] != gen) return null;
+                if (idx >= self.capacity) return null;
+                if (!self.alive[idx] or self.generations[idx] != gen) return null;
                 const slice = self.data.items(field);
                 return &slice[idx];
             }
@@ -1906,19 +1930,17 @@ pub const CheatLib = struct {
             pub fn remove(self: *Self, id: u64) void {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
-                if (idx >= self.data.len) return;
-                if (!self.alive.items[idx] or self.generations.items[idx] != gen) return;
-                self.alive.items[idx] = false;
-                self.generations.items[idx] +%= 1;
-                self.free_count += 1;
+                if (idx >= self.capacity) return;
+                if (!self.alive[idx] or self.generations[idx] != gen) return;
+                self.alive[idx] = false;
+                self.generations[idx] +%= 1;
+                self.free_stack[self.free_top] = idx;
+                self.free_top += 1;
+                self.live_count -= 1;
             }
 
             pub fn count(self: *const Self) i64 {
-                var n: i64 = 0;
-                for (self.alive.items) |a| {
-                    if (a) n += 1;
-                }
-                return n;
+                return @intCast(self.live_count);
             }
         };
     }
@@ -1934,8 +1956,17 @@ pub const CheatLib = struct {
             const SHARD_SHIFT: u6 = 56;
             const HANDLE_MASK: u64 = (1 << 56) - 1;
 
-            shards: [N]Pool(T) = [_]Pool(T){.{}} ** N,
+            shards: [N]Pool(T),
             round_robin: usize = 0,
+
+            pub fn initCapacity(allocator: std.mem.Allocator, total_cap: u32) !Self {
+                const per_shard: u32 = @intCast(total_cap / N);
+                var self = Self{ .shards = undefined };
+                for (&self.shards) |*s| {
+                    s.* = try Pool(T).initCapacity(allocator, per_shard);
+                }
+                return self;
+            }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
                 for (&self.shards) |*s| s.deinit(allocator);

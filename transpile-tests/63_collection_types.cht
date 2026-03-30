@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
     ASSERT small_pts.length() == 2, "@list WHERE should return 2 items";
 
     -- Pool constructor with handle-based access (lazy inference via insert)
-    MUTABLE pool: Point[]@pool = [];
+    MUTABLE pool: Point[100]@pool = [];
 
     -- insert returns an Id<Point> (u64 handle)
     id_a: Id<Point> = pool.insert(Point{ x: 10.0, y: 20.0 });

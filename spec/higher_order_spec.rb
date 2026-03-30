@@ -458,23 +458,23 @@ RSpec.describe SemanticAnnotator do
     # @pool:sharded(N) type annotation
     # -------------------------------------------------------------------------
     describe "@pool:sharded(N) (sharded generational pool)" do
-      it "accepts Score[]@pool:sharded(4) as a valid type annotation" do
+      it "accepts Score[100]@pool:sharded(4) as a valid type annotation" do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Number }
             FN f() RETURNS Void ->
-              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              MUTABLE sp: Score[100]@pool:sharded(4) = [];
               RETURN;
             END
           CLEAR
         }.not_to raise_error
       end
 
-      it "resolves Score[]@pool:sharded(4) full_type to a sharded pool? Type" do
+      it "resolves Score[100]@pool:sharded(4) full_type to a sharded pool? Type" do
         tree = run(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            MUTABLE sp: Score[100]@pool:sharded(4) = [];
             RETURN;
           END
         CLEAR
@@ -488,18 +488,18 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            MUTABLE sp: Score[100]@pool:sharded(4) = [];
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.ShardedPool(Score, 4){}")
+        expect(out).to include("CheatLib.ShardedPool(Score, 4).initCapacity(rt.heapAlloc(), 100)")
       end
 
       it "emits defer with move-guarded sp.deinit for @pool:sharded cleanup (RAII)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            MUTABLE sp: Score[100]@pool:sharded(4) = [];
             RETURN;
           END
         CLEAR
@@ -508,7 +508,7 @@ RSpec.describe SemanticAnnotator do
 
       it "raises for @pool:sharded(1) — shard count must be >= 2" do
         expect {
-          run('FN f() RETURNS Void -> MUTABLE sp: Number[]@pool:sharded(1) = []; RETURN; END')
+          run('FN f() RETURNS Void -> MUTABLE sp: Number[100]@pool:sharded(1) = []; RETURN; END')
         }.to raise_error(ParserError, /requires N >= 2/)
       end
 
@@ -523,7 +523,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Number }
             FN f() RETURNS Void ->
-              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              MUTABLE sp: Score[100]@pool:sharded(4) = [];
               id = sp.insert(Score{ value: 1.0 });
               result = sp.get(id);
               sp.remove(id);
@@ -538,7 +538,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            MUTABLE sp: Score[100]@pool:sharded(4) = [];
             id = sp.insert(Score{ value: 1.0 });
             result = sp.get(id);
             sp.remove(id);
@@ -642,7 +642,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Number }
             FN f() RETURNS Void ->
-              MUTABLE pool: Score[]@pool = [];
+              MUTABLE pool: Score[100]@pool = [];
               pool s> EACH { _.value = 0.0; };
               RETURN;
             END
@@ -655,7 +655,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Number }
             FN f() RETURNS Void ->
-              MUTABLE sp: Score[]@pool:sharded(4) = [];
+              MUTABLE sp: Score[100]@pool:sharded(4) = [];
               sp s> EACH { _.value = 0.0; };
               RETURN;
             END
@@ -692,12 +692,12 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE pool: Score[]@pool = [];
+            MUTABLE pool: Score[100]@pool = [];
             pool s> EACH { _.value = 0.0; };
             RETURN;
           END
         CLEAR
-        expect(out).to include("slots.items")
+        expect(out).to include("slots)")
         expect(out).to include("__each_slot.alive")
       end
 
@@ -705,7 +705,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE sp: Score[]@pool:sharded(4) = [];
+            MUTABLE sp: Score[100]@pool:sharded(4) = [];
             sp s> EACH { _.value = 0.0; };
             RETURN;
           END
@@ -852,10 +852,10 @@ RSpec.describe SemanticAnnotator do
   # @pool:soa (Structure of Arrays pool)
   # ===========================================================================
   describe "@pool:soa (SOA generational pool)" do
-    it "accepts Entity[]@pool:soa as a valid type annotation" do
+    it "accepts Entity[100]@pool:soa as a valid type annotation" do
       code = <<~CLEAR
         STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       expect { run(code) }.not_to raise_error
     end
@@ -863,7 +863,7 @@ RSpec.describe SemanticAnnotator do
     it "generates SoaPool Zig type" do
       code = <<~CLEAR
         STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.SoaPool(Entity)")
@@ -873,7 +873,7 @@ RSpec.describe SemanticAnnotator do
     it "plain @pool still generates Pool (not SoaPool)" do
       code = <<~CLEAR
         STRUCT Entity { x: Number, y: Number }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool = []; RETURN; END
+        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.Pool(Entity)")
@@ -883,7 +883,7 @@ RSpec.describe SemanticAnnotator do
     it "emits defer deinit for @pool:soa" do
       code = <<~CLEAR
         STRUCT Entity { x: Number, y: Number, vx: Number, vy: Number, health: Number }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[]@pool:soa = []; RETURN; END
+        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("pool.deinit(")
@@ -984,7 +984,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Vec2 { x: Number, y: Number }
         EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
         FN f() RETURNS Void ->
-          MUTABLE pool: Vec2[]@pool:soa = [];
+          MUTABLE pool: Vec2[100]@pool:soa = [];
           process_vecs(pool);
           RETURN;
         END
@@ -2069,7 +2069,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           total = pool s> SUM _.value;
         FLUX
       }
@@ -2087,7 +2087,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           result = pool s> WHERE _.value > 0.0;
         FLUX
       }
@@ -2105,7 +2105,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           n = pool s> COUNT _.value > 0.0;
         FLUX
       }
@@ -2119,7 +2119,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           found = pool s> ANY _.value > 0.0;
         FLUX
       }
@@ -2133,7 +2133,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           all_pos = pool s> ALL _.value > 0.0;
         FLUX
       }
@@ -2147,7 +2147,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           mn = pool s> MIN _.value;
         FLUX
       }
@@ -2161,7 +2161,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           mx = pool s> MAX _.value;
         FLUX
       }
@@ -2175,7 +2175,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           avg = pool s> AVERAGE _.value;
         FLUX
       }
@@ -2189,14 +2189,14 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           total = pool s> SUM _.value;
         FLUX
       }
 
       it "emits slot materialization loop" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("pipe_src_list.slots.items")
+        expect(zig).to include("pipe_src_list.slots)")
         expect(zig).to include("__pslot.alive")
         expect(zig).to include("pipe_mat.append")
         expect(zig).to include("sum_result")
@@ -2212,7 +2212,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           found = pool s> FIND _.value == 10.0;
         FLUX
       }
@@ -2230,7 +2230,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Number }
-          MUTABLE pool: Item[]@pool = [];
+          MUTABLE pool: Item[100]@pool = [];
           found = pool s> FIND _.value == 99.0;
         FLUX
       }
@@ -2245,7 +2245,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Number }
           FN f() RETURNS Void ->
-            MUTABLE pool: Item[]@pool = [];
+            MUTABLE pool: Item[100]@pool = [];
             found = pool s> FIND _.value == 10.0;
             RETURN;
           END

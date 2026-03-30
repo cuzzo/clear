@@ -35,7 +35,7 @@ RSpec.describe "Effect Tracking" do
       effs = effects_of(<<~CLEAR)
         STRUCT Item { value: Float64 }
         FN main() RETURNS Void ->
-          MUTABLE items: Item[]@pool = [];
+          MUTABLE items: Item[100]@pool = [];
           RETURN;
         END
       CLEAR

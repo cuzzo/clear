@@ -86,12 +86,14 @@ module PipelineGenerator
       )
 
       # Replace pipe_items.len references (used by MIN/MAX/AVERAGE).
-      body_code = body_code.gsub("pipe_items.len", "@as(usize, @intCast(__soa_src.data.len))")
+      # Use live_count (not data.len) since fixed-capacity pools have data.len == capacity.
+      len_expr = lhs_type&.pool? ? "@as(usize, @intCast(__soa_src.live_count))" : "@as(usize, @intCast(__soa_src.data.len))"
+      body_code = body_code.gsub("pipe_items.len", len_expr)
 
       # Insert alive check (pools only) + whole-struct reassembly (WHERE/FIND).
       inner_checks = ""
       if lhs_type&.pool?
-        inner_checks = "if (!__soa_src.alive.items[__soa_i]) continue;"
+        inner_checks = "if (!__soa_src.alive[__soa_i]) continue;"
       end
       if body_code.match?(/\bit\b/)
         # Body uses `it` as a whole struct — reassemble (only for matching elements).
@@ -141,7 +143,7 @@ module PipelineGenerator
         var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
         defer pipe_mat.deinit(rt.heapAlloc());
         for (0..#{n}) |__psi| {
-            for (pipe_src_list.shards[__psi].slots.items) |*__pslot| {
+            for (pipe_src_list.shards[__psi].slots) |*__pslot| {
                 if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);
             }
         }
@@ -153,7 +155,7 @@ module PipelineGenerator
         var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
         defer pipe_mat.deinit(rt.heapAlloc());
         for (0..@intCast(pipe_src_list.data.len)) |__psi| {
-            if (pipe_src_list.alive.items[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
+            if (pipe_src_list.alive[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
         }
         const pipe_items = pipe_mat.items;
       ZIG
@@ -172,7 +174,7 @@ module PipelineGenerator
       <<~ZIG.strip
         var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
         defer pipe_mat.deinit(rt.heapAlloc());
-        for (pipe_src_list.slots.items) |*__pslot| {
+        for (pipe_src_list.slots) |*__pslot| {
             if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);
         }
         const pipe_items = pipe_mat.items;
@@ -428,7 +430,7 @@ module PipelineGenerator
     <<~ZIG.chomp
       {
           const __each_src = &#{pool_code};
-          for (__each_src.slots.items) |*__each_slot| {
+          for (__each_src.slots) |*__each_slot| {
               if (!__each_slot.alive) continue;
               const __each_item = &__each_slot.value;
               #{body_code}
@@ -462,7 +464,7 @@ module PipelineGenerator
       {
           const __each_src = &#{pool_code};
           for (0..@intCast(__each_src.data.len)) |__each_i| {
-              if (!__each_src.alive.items[__each_i]) continue;
+              if (!__each_src.alive[__each_i]) continue;
               var __each_item = __each_src.data.get(__each_i);
               _ = &__each_item;
               #{body_code}
@@ -490,7 +492,7 @@ module PipelineGenerator
       # Body is re-emitted per shard inside the fiber; body_code already has _ resolved
       # We capture the whole pool src and use shards[i] inside the fiber
       shard_body = with_fiber_capture_map({}) do
-        "for (ctx.shard.slots.items) |*__each_slot| {\n            if (!__each_slot.alive) continue;\n            const __each_item = &__each_slot.value;\n            #{body_code}\n        }"
+        "for (ctx.shard.slots) |*__each_slot| {\n            if (!__each_slot.alive) continue;\n            const __each_item = &__each_slot.value;\n            #{body_code}\n        }"
       end
 
       <<~ZIG.chomp

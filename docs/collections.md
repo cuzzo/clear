@@ -8,7 +8,7 @@ CLEAR has three collection types, each designed for a different access pattern. 
 |---|---|---|---|---|---|
 | `T[N]` | `[N]T` | Index O(1) | Fixed | Bounds-checked | Size known at compile time |
 | `T[]@list` | `ArrayListUnmanaged(T)` | Index O(1), append O(1)* | Dynamic | Bounds-checked | Size unknown, sequential access |
-| `T[]@pool` | `Pool(T)` | Handle O(1) | Dynamic | **Generational handles** | Frequent insert/remove, stable references |
+| `T[N]@pool` | `Pool(T)` | Handle O(1) | Fixed | **Generational handles** | Frequent insert/remove, stable references |
 
 \* Amortized O(1) — occasional reallocation when capacity is exceeded.
 
@@ -55,12 +55,12 @@ items.append(42.0);  -- type inferred as Float64[]@list
 
 ## Pools — `@pool`
 
-Handle-based, heap-allocated. Backed by `Pool(T)` with **generational handles** for ABA safety.
+Handle-based, pre-allocated with fixed capacity. Backed by `Pool(T)` with **generational handles** for ABA safety. The capacity is specified at declaration time and all slots are allocated up front — no dynamic resizing, no reallocation. Insert and remove are O(1) via an internal free stack.
 
 ```clear
 STRUCT Enemy { hp: Int64, name: String }
 
-MUTABLE enemies: Enemy[]@pool = [];
+MUTABLE enemies: Enemy[1000]@pool = [];
 id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
 id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 
@@ -110,13 +110,14 @@ No garbage collector. No reference counting. Just a 4-byte integer comparison pe
 
 ### Pools vs Lists
 
-| Operation | List `T[]@list` | Pool `T[]@pool` |
+| Operation | List `T[]@list` | Pool `T[N]@pool` |
 |---|---|---|
-| Append/Insert | O(1) amortized | O(1) or O(N) scan for free slot |
+| Append/Insert | O(1) amortized | O(1) via free stack |
 | Access | `list[i]` → `T` (direct) | `pool[id]` → `?T` (requires `OR`) |
 | Remove from middle | O(N) shift | O(1) mark-dead |
 | Stable references | No (realloc invalidates) | Yes (handles survive realloc) |
-| Memory after remove | Compacted | Holes (reused on next insert) |
+| Capacity | Dynamic (grows on demand) | Fixed (pre-allocated at declaration) |
+| Memory after remove | Compacted | Holes (reused on next insert via free stack) |
 | Safety after remove | Index may now point to different element | Handle returns null (generational) |
 | Ergonomic cost | Direct access — no unwrapping | Every access needs `OR` fallback |
 
@@ -128,11 +129,13 @@ Is the size fixed at compile time?
 └── No
     ├── Access pattern?
     │   ├── Sequential / index-based → T[]@list (list)
-    │   └── Handle-based / frequent insert+remove → T[]@pool (pool)
+    │   └── Handle-based / frequent insert+remove → T[N]@pool (pool)
     └── Need stable references across insert/remove?
-        ├── Yes → T[]@pool (generational handles survive mutations)
+        ├── Yes → T[N]@pool (generational handles survive mutations)
         └── No → T[]@list (simpler, more cache-friendly for iteration)
 ```
+
+Note: pools require a compile-time capacity `N`. All slots are pre-allocated up front, giving O(1) insert/remove via an internal free stack with no runtime reallocation. Choose a capacity that covers your expected maximum — the pool will panic if you exceed it.
 
 ## Hash Maps — `HashMap<V>` and `HashMap<K, V>`
 
@@ -161,11 +164,11 @@ STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float6
 
 -- AOS (default): each entity is 8 fields × 8 bytes = 64 bytes per cache line.
 -- SUM _.health loads all 8 fields but uses only 1 — 87.5% wasted bandwidth.
-MUTABLE pool: Entity[]@pool = [];
+MUTABLE pool: Entity[10000]@pool = [];
 
 -- SOA: health values are stored in a contiguous f64 array.
 -- SUM _.health touches only that array — zero waste.
-MUTABLE pool: Entity[]@pool:soa = [];
+MUTABLE pool: Entity[10000]@pool:soa = [];
 ```
 
 The compiler detects when SOA would help and suggests it:
@@ -194,7 +197,7 @@ For operators that produce struct output (WHERE, FIND), structs are reassembled 
 `:soa` works on both `@pool` and `@list`:
 
 ```clear
-MUTABLE pool: Entity[]@pool:soa = [];   -- SOA pool (generational handles)
+MUTABLE pool: Entity[10000]@pool:soa = [];   -- SOA pool (generational handles)
 MUTABLE items: Entity[]@list:soa = [];  -- SOA list (dense, indexed)
 ```
 
@@ -208,7 +211,7 @@ Lists, pools, and hash maps all support sharding for parallel access:
 
 ```clear
 MUTABLE data: Float64[]@list:sharded(4) = [];
-MUTABLE entities: Enemy[]@pool:sharded(4) = [];
+MUTABLE entities: Enemy[10000]@pool:sharded(4) = [];
 MUTABLE counts: HashMap<Int64>@sharded(4) = {};
 ```
 

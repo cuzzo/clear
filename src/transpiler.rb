@@ -567,8 +567,10 @@ private
       rt_name = @do_rt_name || "rt"
 
       value_code = if node.full_type&.pool?
-        # Pool / ShardedPool: zero-initialize via zig_type (handles both sharded and non-sharded)
-        "#{node.full_type.zig_type}{}"
+        # Pool: pre-allocate with fixed capacity via initCapacity.
+        rt_name = @do_rt_name || "rt"
+        cap = node.full_type.capacity
+        "try #{node.full_type.zig_type}.initCapacity(#{rt_name}.heapAlloc(), #{cap})"
       elsif node.full_type&.set_collection?
         # Set: zero-initialize
         "#{node.full_type.zig_type}{}"

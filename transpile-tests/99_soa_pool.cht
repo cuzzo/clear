@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
     ];
 
     -- Same data in a SOA pool.
-    MUTABLE pool: Entity[]@pool:soa = [];
+    MUTABLE pool: Entity[100]@pool:soa = [];
     pool.insert(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
     pool.insert(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
     pool.insert(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });

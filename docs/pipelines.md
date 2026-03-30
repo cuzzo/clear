@@ -136,11 +136,11 @@ MUTABLE data = List[];
 avg = data s> AVERAGE _.value;
 
 -- Pool
-MUTABLE pool: Entity[]@pool = [];
+MUTABLE pool: Entity[1000]@pool = [];
 alive = pool s> WHERE _.health > 0;
 
 -- Pool with SOA (field-slice iteration — cache-optimal)
-MUTABLE soa_pool: Entity[]@pool:soa = [];
+MUTABLE soa_pool: Entity[1000]@pool:soa = [];
 total_hp = soa_pool s> SUM _.health;  -- iterates only the health array
 
 -- List with SOA
@@ -148,7 +148,7 @@ MUTABLE soa_list: Entity[]@list:soa = [];
 avg = soa_list s> AVERAGE _.health;   -- contiguous f64 slice
 
 -- Sharded (parallel EACH via DO blocks)
-MUTABLE sharded: Entity[]@pool:sharded(4) = [];
+MUTABLE sharded: Entity[10000]@pool:sharded(4) = [];
 sharded s> EACH { _.processed = TRUE; };
 ```
 
@@ -158,7 +158,7 @@ When a `@pool:soa` is used in a pipeline, the compiler rewrites field accesses t
 
 ```clear
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-MUTABLE pool: Entity[]@pool:soa = [];
+MUTABLE pool: Entity[10000]@pool:soa = [];
 
 -- SUM _.health iterates only the health array (contiguous f64[]).
 -- Without :soa, it would load all 5 fields per element.
@@ -180,7 +180,7 @@ The `CONCURRENT` modifier parallelizes SELECT, WHERE, and EACH across shards:
 
 ```clear
 -- ILLUSTRATIVE
-MUTABLE data: Score[]@pool:sharded(4) = [];
+MUTABLE data: Score[10000]@pool:sharded(4) = [];
 
 -- Parallel WHERE: one fiber per shard
 results = data s> CONCURRENT WHERE _.value > threshold;

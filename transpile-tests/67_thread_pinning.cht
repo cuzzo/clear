@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
     -- -------------------------
     -- 2. @pool pipeline operators
     -- -------------------------
-    MUTABLE pool: Item[]@pool = [];
+    MUTABLE pool: Item[100]@pool = [];
     id1: Id<Item> = pool.insert(Item{ value: 10.0 });
     id2: Id<Item> = pool.insert(Item{ value: 20.0 });
     id3: Id<Item> = pool.insert(Item{ value: 30.0 });

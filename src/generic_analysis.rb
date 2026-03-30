@@ -64,6 +64,11 @@ module GenericAnalysis
     # when they are parsed. No named-type schema lookup is needed here.
     return if type_obj.fn_type?
 
+    # Pools require a fixed capacity: Entity[1000]@pool, not Entity[]@pool.
+    if type_obj.pool? && !type_obj.fixed?
+      error!(node, "Pool requires a fixed capacity — use #{type_obj.element_type&.resolved}[N]@pool instead of []@pool")
+    end
+
     # Unwrap error-union and optional wrappers to get the inner type
     inner = if type_obj.error_union?
       type_obj.payload_type
