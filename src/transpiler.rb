@@ -916,22 +916,35 @@ private
           cond = "std.meta.activeTag(#{subject}) == .#{variant}"
           # Emit payload binding: `const r = subject.Variant;`
           if c[:binding]
-            binding_decl = "const #{c[:binding]} = #{subject}.#{variant};\n    "
+            binding_decl = "const #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
             body = "#{binding_decl}#{body}"
+          elsif c[:destructure]
+            # Union variant destructuring: extract each named field from the payload.
+            payload_access = "#{subject}.#{variant}"
+            bindings = c[:destructure].fields.filter_map do |f|
+              next if f[:value] == :wildcard
+              if f[:value] == :bind
+                "const #{f[:name]} = #{payload_access}.#{f[:name]}; _ = &#{f[:name]};"
+              end
+            end
+            body = "#{bindings.join("\n    ")}\n    #{body}" if bindings.any?
           end
         else
-          cond = case c[:kind]
-                 when :when           then visit(c[:value])
-                 when :struct_pattern then transpile_struct_pattern(subject, c[:value])
-                 else
-                   val = visit(c[:value])
-                   expr_type = Type.new(node.expr.resolved_type || :Any)
-                   if expr_type.string?
-                     "CheatLib.strEql(#{subject}, #{val})"
-                   else
-                     "#{subject} == #{val}"
-                   end
-                 end
+          case c[:kind]
+          when :when
+            cond = visit(c[:value])
+          when :struct_pattern
+            cond, bindings = transpile_struct_pattern(subject, c[:value])
+            body = "#{bindings}\n    #{body}" unless bindings.empty?
+          else
+            val = visit(c[:value])
+            expr_type = Type.new(node.expr.resolved_type || :Any)
+            cond = if expr_type.string?
+              "CheatLib.strEql(#{subject}, #{val})"
+            else
+              "#{subject} == #{val}"
+            end
+          end
         end
         "if (#{cond}) {\n    #{body}\n    }"
       end
@@ -2442,11 +2455,24 @@ private
   # Builds the Zig boolean condition for a StructPattern case.
   # Non-wildcard fields produce `subject.field == value` joined with ` and `.
   # Returns "true" when all fields are wildcards / only `...` was given.
+  # Returns [condition_string, bindings_string].
+  # condition_string: Zig boolean expression for the if-check.
+  # bindings_string: Zig const declarations for destructured fields (prepended to body).
   def transpile_struct_pattern(subject, pat)
-    conditions = pat.fields
-      .reject { |f| f[:value] == :wildcard }
-      .map { |f| "#{subject}.#{f[:name]} == #{visit(f[:value])}" }
-    conditions.empty? ? "true" : conditions.join(" and ")
+    conditions = []
+    bindings = []
+
+    pat.fields.each do |f|
+      next if f[:value] == :wildcard
+      if f[:value] == :bind
+        bindings << "const #{f[:name]} = #{subject}.#{f[:name]}; _ = &#{f[:name]};"
+      else
+        conditions << "#{subject}.#{f[:name]} == #{visit(f[:value])}"
+      end
+    end
+
+    cond = conditions.empty? ? "true" : conditions.join(" and ")
+    [cond, bindings.join("\n    ")]
   end
 
   # True if the AST node is a statement (declaration, assignment, control flow, block)

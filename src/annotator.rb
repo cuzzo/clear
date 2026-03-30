@@ -550,14 +550,26 @@ private
         end
       end
 
-      visit(f[:value])
+      if f[:value] == :bind
+        # Destructuring bind: declare a local variable with the field's type.
+        if schema && schema.key?(f[:name])
+          field_def = schema[f[:name]]
+          field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
+          field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
+          current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
+          current_scope.set_state(f[:name], :live)
+        end
+      else
+        visit(f[:value])
 
-      if schema
-        field_type = schema[f[:name]]&.resolved
-        val_type   = f[:value].resolved_type
-        is_numeric_promo = (val_type == :Int64 && (field_type == :Number || field_type == :Float64))
-        unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
-          error!(match_node, "MATCH struct pattern: field '#{f[:name]}' has type #{field_type}, but pattern value has type #{val_type}")
+        if schema
+          field_def = schema[f[:name]]
+          field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(Hash) ? field_def[:type]&.resolved : field_def&.resolved)
+          val_type   = f[:value].resolved_type
+          is_numeric_promo = (val_type == :Int64 && (field_type == :Number || field_type == :Float64))
+          unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
+            error!(match_node, "MATCH struct pattern: field '#{f[:name]}' has type #{field_type}, but pattern value has type #{val_type}")
+          end
         end
       end
     end
@@ -627,8 +639,6 @@ private
                 if raw_payload.nil?
                   error!(node, "Cannot bind 'AS #{c[:binding]}': '#{variant_name}' is a unit variant with no payload.")
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
-                  # Inline struct variant: bind to the synthetic struct type (e.g., Shape_Circle).
-                  # Field access (c.radius) is resolved via the synthetic struct schema registered in visit_UnionDef.
                   synthetic_type = :"#{type_name}_#{variant_name}"
                   current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
                   current_scope.set_state(c[:binding], :live)
@@ -638,6 +648,40 @@ private
                   current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
                   current_scope.set_state(c[:binding], :live)
                   classify_ownership!(current_scope.locals[c[:binding]])
+                end
+              end
+            end
+          end
+
+          # Union variant destructuring: `Result.Ok{ value, count } ->`
+          # Declares each named field as a local binding with the correct type.
+          if c[:destructure] && is_union
+            variant_name = case c[:value]
+                           when AST::GetField   then c[:value].field
+                           when AST::MethodCall then c[:value].name
+                           end
+            if variant_name
+              raw_payload = schema[:variants][variant_name]
+              # Resolve the payload's field schema (inline struct or named type)
+              payload_schema = if raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
+                raw_payload[:fields]
+              else
+                payload_type_sym = raw_payload.is_a?(Type) ? raw_payload.resolved : raw_payload
+                payload_type_sym = union_subst[payload_type_sym] if union_subst[payload_type_sym]
+                lookup_type_schema(payload_type_sym)
+              end
+
+              if payload_schema.is_a?(Hash) && !payload_schema[:kind]
+                c[:destructure].fields.each do |f|
+                  next unless f[:value] == :bind
+                  unless payload_schema.key?(f[:name])
+                    error!(node, "MATCH destructure: field '#{f[:name]}' does not exist on variant #{variant_name}")
+                  end
+                  field_def = payload_schema[f[:name]]
+                  field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
+                  field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
+                  current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
+                  current_scope.set_state(f[:name], :live)
                 end
               end
             end

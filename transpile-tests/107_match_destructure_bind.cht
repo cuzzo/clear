@@ -1,0 +1,58 @@
+-- Test: MATCH destructuring with field binding.
+--
+-- { x, y } syntax in struct patterns binds fields to local variables.
+-- Works for both plain struct matching and union variant destructuring.
+
+STRUCT Point { x: Int64, y: Int64 }
+
+UNION Shape {
+    Circle: Float64,
+    Rect: Point
+}
+
+FN makeCircle(r: Float64) RETURNS Shape ->
+    RETURN Shape{ Circle: r };
+END
+
+FN makeRect(x: Int64, y: Int64) RETURNS Shape ->
+    RETURN Shape{ Rect: Point{ x: x, y: y } };
+END
+
+FN cheatMain() RETURNS Void ->
+    -- Test 1: Struct pattern with binding (extract fields by name)
+    p = Point{ x: 3, y: 4 };
+    MUTABLE sum: Int64 = 0;
+    MATCH p START
+        { x, y } -> sum = x + y;
+    END
+    ASSERT sum == 7, "struct destructure binding";
+
+    -- Test 2: Struct pattern mixing bind and match value
+    p2 = Point{ x: 10, y: 20 };
+    MUTABLE matched: Int64 = 0;
+    MATCH p2 START
+        { x: 10, y } -> matched = y;,
+        DEFAULT -> matched = -1;
+    END
+    ASSERT matched == 20, "struct pattern mix bind and match";
+
+    -- Test 3: Union variant destructuring
+    s = makeRect(5, 12);
+    MUTABLE area: Int64 = 0;
+    MATCH s START
+        Shape.Circle AS r -> area = 0;,
+        Shape.Rect{ x, y } -> area = x * y;
+    END
+    ASSERT area == 60, "union variant destructuring";
+
+    -- Test 4: Union variant with AS still works alongside destructure
+    s2 = makeCircle(3.14);
+    MUTABLE radius: Float64 = 0.0;
+    MATCH s2 START
+        Shape.Circle AS r -> radius = r;,
+        Shape.Rect{ x, y } -> radius = 0.0;
+    END
+    ASSERT radius == 3.14, "union AS still works alongside destructure";
+
+    RETURN;
+END

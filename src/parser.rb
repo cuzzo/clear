@@ -258,7 +258,7 @@ class Parser
   # Returns SUFFIX_DECLINE (without consuming '{') for any other lhs, so callers
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
-    if lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
+    if !@suppress_struct_lit && lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
         lhs.target.name[0] =~ /[A-Z]/
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
@@ -1056,15 +1056,23 @@ class Parser
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
         cases << { kind: :struct_pattern, value: pattern, body: body }
       else
+        # Suppress struct literal parsing so TypeName.Variant{ ... } doesn't get
+        # consumed as a constructor — the { starts a destructuring pattern.
+        @suppress_struct_lit = true
         pattern = parse_expression
+        @suppress_struct_lit = false
         binding = nil
+        destructure = nil
         if match?(:KEYWORD, 'AS')
           consume(:KEYWORD, 'AS')
           binding = consume(:VAR_ID).value
+        elsif match?(:CHAR, '{')
+          # Union variant destructuring: Result.Ok{ value, count }
+          destructure = parse_struct_pattern
         end
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :eq, value: pattern, binding: binding, body: body }
+        cases << { kind: :eq, value: pattern, binding: binding, destructure: destructure, body: body }
       end
       match!(:CHAR, ',')  # consume comma separator between cases if present
     end
@@ -1087,14 +1095,20 @@ class Parser
       end
 
       name = consume(:VAR_ID).value
-      consume(:CHAR, ':')
 
-      # `_` as value means wildcard — ignore this field's value
-      if current.type == :VAR_ID && current.value == '_'
-        consume(:VAR_ID)
-        fields << { name: name, value: :wildcard }
+      if match?(:CHAR, ':')
+        consume(:CHAR, ':')
+        # `_` as value means wildcard — ignore this field's value
+        if current.type == :VAR_ID && current.value == '_'
+          consume(:VAR_ID)
+          fields << { name: name, value: :wildcard }
+        else
+          fields << { name: name, value: parse_expression }
+        end
       else
-        fields << { name: name, value: parse_expression }
+        # Bare name: destructuring bind — extract field into a local variable.
+        # { x, y } means bind subject.x to x, subject.y to y.
+        fields << { name: name, value: :bind }
       end
 
       match!(:CHAR, ',')  # optional comma between fields
@@ -1210,7 +1224,7 @@ class Parser
           [k, v]
         end
         return AST::StructLit.new(type_token, name, fields.to_h, storage, type_args)
-      elsif match?(:CHAR, '{')
+      elsif match?(:CHAR, '{') && !@suppress_struct_lit
         # Struct literal: User{ id: 1 }
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
           k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
