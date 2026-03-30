@@ -43,6 +43,12 @@ FN cheatMain() RETURNS Void ->
     ASSERT filtered.length() > 0, "chained SELECT then WHERE";
 
     -- -------------------------------------------------------
+    -- Test 3b: REDUCE — fold to sum
+    -- -------------------------------------------------------
+    total = readings s> REDUCE(0.0) acc + _;
+    ASSERT total > 0.0, "REDUCE sum is positive";
+
+    -- -------------------------------------------------------
     -- Test 4: Aggregation operators
     -- -------------------------------------------------------
     s = readings s> SUM _;

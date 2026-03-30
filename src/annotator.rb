@@ -1255,6 +1255,9 @@ private
   def visit_Identifier(node)
     if @smooth_depth > 0
       scope = lookup_scope_for(node.name)
+      unless scope
+        error!(node, "Undefined variable '#{node.name}' in pipeline expression")
+      end
     else
       scope = resolve_variable_scope(node.name)
       unless scope
