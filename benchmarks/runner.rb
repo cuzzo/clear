@@ -16,7 +16,15 @@ def measure_min(command, runs = 5)
   times.min
 end
 
+# -------------------------------------------------------------------------
+# Standard benchmark: self-contained binary, timed externally
+# -------------------------------------------------------------------------
 def run_bench(dir)
+  # Detect server benchmarks (have client.go + server.cht)
+  if File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
+    return run_server_bench(dir)
+  end
+
   puts "=== BENCHMARK: #{dir} ==="
 
   has_c    = File.exist?("#{dir}/bench.c")
@@ -147,12 +155,164 @@ def run_bench(dir)
   end
 end
 
+# -------------------------------------------------------------------------
+# Server benchmark: start server, run shared client, capture output
+# -------------------------------------------------------------------------
+PORT = 6390
+NUM_GETS = 10_000
+CONCURRENCY = 50
+
+def run_server_bench(dir)
+  puts "=== SERVER BENCHMARK: #{dir} ==="
+
+  has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
+  has_go   = File.exist?("#{dir}/server.go") && system("command -v go > /dev/null 2>&1")
+
+  # 1. Compile everything
+  # Client (shared Go binary)
+  puts "Compiling client..."
+  Dir.chdir(dir) do
+    `go mod init bench 2>/dev/null` unless File.exist?("go.mod")
+    `go build -o client_go client.go 2>&1`
+  end
+  unless File.exist?("#{dir}/client_go")
+    puts "ERROR: client_go failed to build"; return
+  end
+
+  # Go server
+  if has_go
+    puts "Compiling Go server..."
+    Dir.chdir(dir) { `go build -o server_go server.go 2>&1` }
+  end
+
+  # Rust server
+  if has_rust
+    if File.exist?("#{dir}/Cargo.toml")
+      puts "Compiling Rust server (cargo)..."
+      Dir.chdir(dir) { `cargo build --release -q 2>&1` }
+      src = "#{dir}/target/release/bench_rust"
+      FileUtils.cp(src, "#{dir}/bench_rust") if File.exist?(src)
+    end
+  end
+
+  # CLEAR server
+  has_clear = false
+  if File.exist?("#{dir}/server.cht")
+    puts "Transpiling CLEAR server..."
+    `ruby src/transpiler.rb #{dir}/server.cht 2>/dev/null > zig/bench.zig`
+
+    # Detect FFI modules: any .zig files in the benchmark dir
+    ffi_modules = Dir.glob("#{dir}/*.zig").map { |f| File.basename(f, ".zig") }
+
+    Dir.chdir("zig") do
+      ffi_modules.each { |m| FileUtils.cp("../#{dir}/#{m}.zig", "#{m}.zig") }
+
+      if ffi_modules.any?
+        # Build with --dep/-M flags for each FFI module.
+        # Flag order matters: --dep before -Mroot, -lc/asm after root, -Mffi last.
+        dep_flags = ffi_modules.map { |m| "--dep #{m}" }.join(" ")
+        mod_flags = ffi_modules.map { |m| "-M#{m}=#{m}.zig" }.join(" ")
+        cmd = "#{ZIG} build-exe #{dep_flags} -Mroot=bench.zig -lc switch.S onRoot.S #{mod_flags} -O ReleaseFast --name bench_clear"
+        `#{cmd} 2>&1`
+      else
+        `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc 2>&1`
+      end
+
+      ffi_modules.each { |m| FileUtils.rm("#{m}.zig") if File.exist?("#{m}.zig") }
+    end
+
+    if File.exist?("zig/bench_clear")
+      FileUtils.mv("zig/bench_clear", "#{dir}/server_clear")
+      has_clear = true
+    else
+      puts "WARNING: CLEAR server failed to compile."
+    end
+    FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+  end
+
+  threads = ENV['CLEAR_THREADS'] || "1"
+  # No jemalloc for server benchmarks — memory comparison is the focus,
+  # and jemalloc can conflict with io_uring/epoll in long-running servers.
+
+  # 2. Run each server with the shared client
+  results = {}
+
+  servers = []
+  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: "" } if has_rust && File.exist?("#{dir}/bench_rust")
+  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: "" } if has_go && File.exist?("#{dir}/server_go")
+  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: "CLEAR_THREADS=#{threads} " } if has_clear
+
+  servers.each do |srv|
+    # Clean data directory
+    FileUtils.rm_rf("data")
+    FileUtils.mkdir_p("data")
+
+    # Start server
+    puts "\nRunning #{srv[:label]}..."
+    pid = spawn("#{srv[:env]}./#{srv[:bin]}", [:out, :err] => "/dev/null")
+    sleep 1
+
+    # Run client
+    output = `./#{dir}/client_go #{pid} #{PORT} #{NUM_GETS} #{CONCURRENCY} 2>&1`
+    puts output
+
+    # Kill server
+    Process.kill("TERM", pid) rescue nil
+    Process.wait(pid) rescue nil
+
+    # Parse results from client output
+    if output =~ /SET phase:\s+(\d+) ms/
+      results[srv[:key]] = { set_ms: $1.to_i }
+    end
+    if output =~ /GET phase:\s+(\d+) ms/
+      results[srv[:key]][:get_ms] = $1.to_i if results[srv[:key]]
+    end
+    if output =~ /Peak RSS \(VmHWM\):\s+(\d+) KB/
+      results[srv[:key]][:peak_rss_kb] = $1.to_i if results[srv[:key]]
+    end
+    if output =~ /RSS after GETs:\s+(\d+) KB/
+      results[srv[:key]][:rss_after_kb] = $1.to_i if results[srv[:key]]
+    end
+    if output =~ /Verified:\s+(\d+)\s*\/\s*(\d+)/
+      results[srv[:key]][:verified] = $1.to_i if results[srv[:key]]
+      results[srv[:key]][:total] = $2.to_i if results[srv[:key]]
+    end
+  end
+
+  FileUtils.rm_rf("data")
+
+  # 3. Report
+  puts "\n#{'=' * 60}"
+  puts "RESULTS for #{dir}:"
+  puts "#{'=' * 60}"
+  puts "#{'%-22s' % 'Server'} #{'%8s' % 'SET(ms)'} #{'%8s' % 'GET(ms)'} #{'%10s' % 'Peak RSS'} #{'%10s' % 'RSS After'} #{'%10s' % 'Verified'}"
+  puts "-" * 70
+
+  results.each do |key, r|
+    label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
+    verified = r[:verified] && r[:total] ? "#{r[:verified]}/#{r[:total]}" : "?"
+    peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
+    rss  = r[:rss_after_kb] ? "#{r[:rss_after_kb]} KB" : "?"
+    puts "#{'%-22s' % label} #{'%8s' % (r[:set_ms] || '?')} #{'%8s' % (r[:get_ms] || '?')} #{'%10s' % peak} #{'%10s' % rss} #{'%10s' % verified}"
+  end
+
+  # Memory comparison
+  if results[:clear] && results[:go] && results[:clear][:peak_rss_kb] && results[:go][:peak_rss_kb]
+    ratio = ((results[:clear][:peak_rss_kb].to_f / results[:go][:peak_rss_kb]) * 100).round(1)
+    puts "\nCLEAR peak RSS: #{ratio}% of Go"
+  end
+  if results[:clear] && results[:rust] && results[:clear][:peak_rss_kb] && results[:rust][:peak_rss_kb]
+    ratio = ((results[:clear][:peak_rss_kb].to_f / results[:rust][:peak_rss_kb]) * 100).round(1)
+    puts "CLEAR peak RSS: #{ratio}% of Rust"
+  end
+end
+
 if ARGV.empty?
   # Run all benchmark directories
   dirs = Dir.glob("benchmarks/0*").sort
   dirs.each { |d| run_bench(d); puts }
 elsif ARGV[0] == "--all"
-  dirs = Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort
+  dirs = Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort + Dir.glob("benchmarks/2*").sort
   dirs.each { |d| run_bench(d); puts }
 else
   run_bench(ARGV[0])
