@@ -17,10 +17,13 @@
 
 pub fn main() !void {
     // 1. Setup Allocator
-    // Compile-time flag: USE_C_ALLOCATOR = true uses libc malloc (thread-safe,
-    // per-thread arenas in glibc/musl). Otherwise uses GPA for leak detection.
-    // Multi-threaded builds should always set USE_C_ALLOCATOR.
-    const use_c_alloc = if (@hasDecl(@import("root"), "USE_C_ALLOCATOR")) @import("root").USE_C_ALLOCATOR else false;
+    // ReleaseFast defaults to c_allocator (libc malloc — jemalloc compatible,
+    // per-thread arenas, zero contention). Debug/ReleaseSafe defaults to GPA
+    // for leak detection. Override with USE_C_ALLOCATOR declaration.
+    const use_c_alloc = if (@hasDecl(@import("root"), "USE_C_ALLOCATOR"))
+        @import("root").USE_C_ALLOCATOR
+    else
+        (@import("builtin").mode == .ReleaseFast or @import("builtin").mode == .ReleaseSmall);
 
     var gpa = if (use_c_alloc) {} else std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
     defer if (!use_c_alloc) {
