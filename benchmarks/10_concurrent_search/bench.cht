@@ -23,6 +23,7 @@
 STRUCT SearchResult { filename: String, count: Int64 }
 
 FN cheatMain() RETURNS Void ->
+    t0 = timestampMs();
     needle = "the";
     data_dir = "benchmarks/10_concurrent_search/data";
 
@@ -85,5 +86,7 @@ FN cheatMain() RETURNS Void ->
         p += 1;
     END
 
+    elapsed = timestampMs() - t0;
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

@@ -11,6 +11,7 @@
 -- reduce per-spawn cost to ~2-5μs, closing the gap with Go (~2.4μs/goroutine).
 
 FN cheatMain() RETURNS Void ->
+    t0 = timestampMs();
     MUTABLE futures: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 10000 DO
@@ -25,9 +26,10 @@ FN cheatMain() RETURNS Void ->
         total += result;
         j += 1;
     END
+    elapsed = timestampMs() - t0;
 
-    print("Total:", total);
+    print("Total: ${total.toString()}");
     print("Tasks: 10000");
-
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

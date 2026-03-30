@@ -17,6 +17,7 @@ STRUCT Counter { value: Int64 }
 FN cheatMain() RETURNS Void ->
     MUTABLE c = Counter{ value: 0 } @local;
 
+    t0 = timestampMs();
     MUTABLE futures: ~Void[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 1024 DO
@@ -35,8 +36,9 @@ FN cheatMain() RETURNS Void ->
         NEXT futures[k];
         k += 1;
     END
+    elapsed = timestampMs() - t0;
 
-    print("Counter:", c.value);
-
+    print("Counter: ${c.value.toString()}");
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

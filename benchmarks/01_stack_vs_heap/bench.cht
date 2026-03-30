@@ -9,8 +9,11 @@ FN fib(n: Int64) RETURNS Int64 @reentrant ->
 END
 
 FN cheatMain() RETURNS Void ->
-    -- Fib(35) results in ~18M calls
+    t0 = timestampMs();
     r = fib(35);
+    elapsed = timestampMs() - t0;
     ASSERT r == 9227465, "Fib(35) calculation error";
+    print("Fib(35) = ${r.toString()}");
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

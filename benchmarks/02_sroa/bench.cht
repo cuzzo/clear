@@ -71,6 +71,7 @@ FN sum3(v: BigVec) RETURNS Float64 ->
 END
 
 FN cheatMain() RETURNS Void ->
+    t0 = timestampMs();
     MUTABLE i = 0;
     MUTABLE acc: Float64 = 1.0;
 
@@ -116,5 +117,7 @@ FN cheatMain() RETURNS Void ->
     END
 
     ASSERT acc > 0.0, "acc must be positive";
+    elapsed = timestampMs() - t0;
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

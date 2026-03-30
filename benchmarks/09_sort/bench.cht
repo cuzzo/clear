@@ -123,12 +123,13 @@ FN cheatMain() RETURNS Void ->
   END
 
   -- Quicksort
+  t0 = timestampMs();
   qsort!(arr, n);
+  qsortMs = timestampMs() - t0;
   ASSERT arr[0] <= arr[1], "qsort: not sorted at start";
   ASSERT arr[n - 2] <= arr[n - 1], "qsort: not sorted at end";
 
   -- Refill for mergesort
-  -- TIGHT: pure write loop, no allocation.
   seed_i = 0;
   TIGHT WHILE seed_i < n DO
     v = seed_i * 2654435761_i64 MOD n + 0.0;
@@ -143,9 +144,14 @@ FN cheatMain() RETURNS Void ->
     tmp_arr.append(0.0);
     ti += 1;
   END
+  t1 = timestampMs();
   msort!(arr, tmp_arr, n);
+  msortMs = timestampMs() - t1;
   ASSERT arr[0] <= arr[1], "msort: not sorted at start";
   ASSERT arr[n - 2] <= arr[n - 1], "msort: not sorted at end";
 
+  print("Sort 1M floats");
+  print("  Quicksort:  ${qsortMs.toString()} ms");
+  print("  Mergesort:  ${msortMs.toString()} ms");
   RETURN;
 END

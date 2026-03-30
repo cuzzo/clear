@@ -131,6 +131,7 @@ FN cheatMain() RETURNS Void ->
     zipfSkew = 1.0;
 
     -- Workload 1: Uniform SET
+    t0 = timestampMs();
     MUTABLE set_futures: ~Void[]@list = [];
     MUTABLE wi: Int64 = 0;
     WHILE wi < workers DO
@@ -140,8 +141,10 @@ FN cheatMain() RETURNS Void ->
     END
     MUTABLE si: Int64 = 0;
     WHILE si < workers DO NEXT set_futures[si]; si += 1; END
+    setMs = timestampMs() - t0;
 
     -- Workload 2: Uniform GET
+    t1 = timestampMs();
     MUTABLE get_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
@@ -152,8 +155,10 @@ FN cheatMain() RETURNS Void ->
     MUTABLE total_hits: Int64 = 0;
     MUTABLE gi: Int64 = 0;
     WHILE gi < workers DO total_hits += NEXT get_futures[gi]; gi += 1; END
+    getMs = timestampMs() - t1;
 
     -- Workload 3: Zipfian GET
+    t2 = timestampMs();
     MUTABLE zipf_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
@@ -163,8 +168,10 @@ FN cheatMain() RETURNS Void ->
     MUTABLE zipf_hits: Int64 = 0;
     MUTABLE zi: Int64 = 0;
     WHILE zi < workers DO zipf_hits += NEXT zipf_futures[zi]; zi += 1; END
+    zipfMs = timestampMs() - t2;
 
     -- Workload 4: Mixed 80/20 (Zipfian)
+    t3 = timestampMs();
     MUTABLE mix_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
@@ -174,15 +181,17 @@ FN cheatMain() RETURNS Void ->
     MUTABLE mix_hits: Int64 = 0;
     MUTABLE mi: Int64 = 0;
     WHILE mi < workers DO mix_hits += NEXT mix_futures[mi]; mi += 1; END
+    mixMs = timestampMs() - t3;
 
-    -- Correctness validation: if any of these fail, the benchmark died early
-    -- or has a data race / heap corruption.
-    ASSERT total_hits == n, "GET hits must equal key count — data corruption detected";
-    ASSERT zipf_hits > 0, "Zipf hits must be > 0 — workload 3 failed";
-    ASSERT mix_hits > 0, "Mixed hits must be > 0 — workload 4 failed";
+    ASSERT total_hits == n, "GET hits must equal key count";
+    ASSERT zipf_hits > 0, "Zipf hits must be > 0";
+    ASSERT mix_hits > 0, "Mixed hits must be > 0";
 
-    print("Keys:", n, "Workers:", workers);
-    print("GET hits:", total_hits, "Zipf hits:", zipf_hits, "Mixed hits:", mix_hits);
+    print("Keys: ${n.toString()} Workers: ${workers.toString()}");
+    print("  SET:   ${setMs.toString()} ms");
+    print("  GET:   ${getMs.toString()} ms  hits: ${total_hits.toString()}");
+    print("  Zipf:  ${zipfMs.toString()} ms  hits: ${zipf_hits.toString()}");
+    print("  Mixed: ${mixMs.toString()} ms  hits: ${mix_hits.toString()}");
     print("VERIFIED: all workloads completed correctly");
     RETURN;
 END

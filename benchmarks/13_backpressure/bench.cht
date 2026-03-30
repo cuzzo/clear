@@ -25,6 +25,7 @@ FN processItem(val: Int64) RETURNS Int64 ->
 END
 
 FN cheatMain() RETURNS Void ->
+    t0 = timestampMs();
     -- Build work items
     MUTABLE items: Item[] = [];
     MUTABLE i: Int64 = 0;
@@ -47,5 +48,7 @@ FN cheatMain() RETURNS Void ->
     print("Total:", total);
     print("Items: 100000, Consumers: 8, Pool: 8");
 
+    elapsed = timestampMs() - t0;
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

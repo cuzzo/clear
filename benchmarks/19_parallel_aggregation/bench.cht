@@ -38,25 +38,28 @@ FN cheatMain() RETURNS Void ->
     END
 
     -- Phase 1: Build histogram via SHARD (shared-nothing counting)
-    -- Each key is routed to the shard that owns it. putDirect — no double hash.
+    t0 = timestampMs();
     MUTABLE counts: HashMap<Int64>@sharded(8) = {};
     (0..<n) s> SHARD(keys[_], counts) s> CONCURRENT EACH {
         cur = counts[_] OR 0;
         counts[_] = cur + 1;
     };
+    shardMs = timestampMs() - t0;
 
     -- Phase 2: Stats over histogram values (partial aggregation)
+    t1 = timestampMs();
     vals = counts.values();
-
     total    = vals s> CONCURRENT SUM toFloat(_);
     highest  = vals s> CONCURRENT MAX toFloat(_);
     lowest   = vals s> CONCURRENT MIN toFloat(_);
     average  = vals s> CONCURRENT AVERAGE toFloat(_);
+    statsMs = timestampMs() - t1;
 
-    -- Verify: total should equal N (every event was counted exactly once)
     ASSERT total == toFloat(n), "total mismatch";
 
-    print("Events:", n, "Buckets:", buckets);
-    print("Total:", total, "Max:", highest, "Min:", lowest, "Avg:", average);
+    print("Events: ${n.toString()} Buckets: ${buckets.toString()}");
+    print("  SHARD histogram: ${shardMs.toString()} ms");
+    print("  Aggregation:     ${statsMs.toString()} ms");
+    print("Total: ${total.toString()} Max: ${highest.toString()} Min: ${lowest.toString()} Avg: ${average.toString()}");
     print("VERIFIED");
 END

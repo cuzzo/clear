@@ -54,6 +54,7 @@
 STRUCT Node { val: Int64, next: ?Id<Node> }
 
 FN cheatMain() RETURNS Void ->
+    t0 = timestampMs();
     n_nodes = 2000000_i64;
     step    = 999983_i64;
 
@@ -90,5 +91,7 @@ FN cheatMain() RETURNS Void ->
     END
 
     ASSERT sum > 0, "sum must be positive";
+    elapsed = timestampMs() - t0;
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

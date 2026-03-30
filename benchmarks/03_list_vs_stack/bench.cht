@@ -30,6 +30,7 @@
 -- CLEAR: frame arena + per-loop rewind — 0 GPA calls in the hot path.
 
 FN cheatMain() RETURNS Void ->
+    t0 = timestampMs();
     MUTABLE total: Float64 = 0.0;
     MUTABLE outer = 0;
     WHILE outer < 1000 DO
@@ -44,5 +45,7 @@ FN cheatMain() RETURNS Void ->
         outer += 1;
     END
     ASSERT total > 0.0, "total must be positive";
+    elapsed = timestampMs() - t0;
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

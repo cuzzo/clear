@@ -48,7 +48,7 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
 END
 
 FN cheatMain() RETURNS Void ->
-    -- Spawn 64 subscribers, each processing 100K messages
+    t0 = timestampMs();
     MUTABLE futures: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 64 DO
@@ -56,7 +56,6 @@ FN cheatMain() RETURNS Void ->
         i += 1;
     END
 
-    -- Collect results from all subscribers
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < 64 DO
@@ -64,9 +63,9 @@ FN cheatMain() RETURNS Void ->
         total += result;
         j += 1;
     END
+    elapsed = timestampMs() - t0;
 
-    print("Total:", total);
     print("Messages: 100000, Subscribers: 64, Work/msg: 200");
-
+    print("Time: ${elapsed.toString()} ms");
     RETURN;
 END
