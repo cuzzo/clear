@@ -467,8 +467,9 @@ module AST
     :BITWISE_NOT => :~,
   }
 
-  NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD]
-  BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
+  # Canonical definitions are in Type class. These aliases maintain backward compat.
+  NUMBER_RESULT_OPS = Type::NUMBER_RESULT_OPS
+  BOOL_RESULT_OPS = Type::BOOL_RESULT_OPS
 
   # TODO: Make these symbols
   OP_TO_OP_CODE = {
