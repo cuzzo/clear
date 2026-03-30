@@ -874,9 +874,13 @@ pub const CheatLib = struct {
     //
     // Usage: data = tcpRead(client)
     pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
-        var buf: [4096]u8 = undefined;
-        const n = try CheatLib.read(fd, &buf);
-        return allocator.dupe(u8, buf[0..n]);
+        // Allocate read buffer on the frame arena (not the fiber stack)
+        // to avoid consuming 4 KB of the fiber's limited stack space.
+        const buf = try allocator.alloc(u8, 4096);
+        const n = try CheatLib.read(fd, buf);
+        // Shrink to actual read size. The excess is wasted on the frame
+        // but reclaimed at the next loop mark rewind.
+        return buf[0..n];
     }
 
     // Write all bytes from `data` to a connected client socket, discarding the byte count.
