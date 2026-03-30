@@ -1,6 +1,6 @@
 STRUCT Point { x: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Standard Frame allocation
     p = Point{ x: 10 };
 

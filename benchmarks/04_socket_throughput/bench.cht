@@ -15,7 +15,7 @@
 --
 --   TCPClient::connect("127.0.0.1", port) → try CheatLib.socketConnect(host, port)
 --   BG { ... } spawns the writer as a background fiber
---   NEXT w waits for the writer to finish before cheatMain returns
+--   NEXT w waits for the writer to finish before main returns
 --
 -- NOTE: TCP coalesces multiple writes into larger reads, so the number of
 --       tcpRead calls < 100 000. We count bytes to know when we're done.
@@ -23,9 +23,9 @@
 -- MEMORY SAFETY:
 --   `conn` (writer fd) is an i32 captured by value into the BG fiber.
 --   `defer socketClose(conn)` fires after NEXT w completes — no double-close.
---   `client` (reader fd) is owned by cheatMain; its defer fires on RETURN.
+--   `client` (reader fd) is owned by main; its defer fires on RETURN.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     server = TCPServer::listen(14537);
     conn = TCPClient::connect("127.0.0.1", 14537);
     client = accept(server);

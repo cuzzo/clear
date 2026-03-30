@@ -1,6 +1,6 @@
 STRUCT Counter { value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- A mutex-protected counter shared across concurrent branches.
     counter = Counter{ value: 0 } @locked;
 

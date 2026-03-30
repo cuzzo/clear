@@ -3,7 +3,7 @@
 -- Previously broken: the second operator's expression consumed s> as part
 -- of the first expression, losing the array type context.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
     -- Chained: SELECT then WHERE

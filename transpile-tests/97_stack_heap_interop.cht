@@ -12,7 +12,7 @@ FN scale(p: Point, factor: Float64) RETURNS Point ->
     RETURN Point{ x: p.x * factor, y: p.y * factor };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- 1. Stack-allocated (default) — value on the OS stack, no pointer.
     a = Point{ x: 1.0, y: 2.0 };
     r1 = sum(a);

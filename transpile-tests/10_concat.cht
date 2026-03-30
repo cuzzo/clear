@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   s1 = "Hello";
   s2 = " ";
   s3 = "World";

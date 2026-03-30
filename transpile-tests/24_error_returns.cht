@@ -34,7 +34,7 @@ END
 -- Tests
 -- ==========================================
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Test 1: Successful division
   print("Test 1: divide(10, 2) OR -1");
   r1 = divide(10, 2) OR -1;

@@ -26,7 +26,7 @@ FN direction_code(d: Direction) RETURNS Float64 ->
   RETURN code;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- MATCH IFF: exhaustive, no DEFAULT needed
   ASSERT color_name(Color.Red)   == 1, "MATCH IFF: Red = 1";
   ASSERT color_name(Color.Green) == 2, "MATCH IFF: Green = 2";

@@ -6,7 +6,7 @@ FN build() RETURNS Big ->
     RETURN Big{ x: [1.0, 2.0, 3.0] };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     b = build();
     ASSERT b.x[0] == 1.0;
     RETURN;

@@ -3,7 +3,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- @locked variable
     MUTABLE c = Counter{ value: 0 } @locked;
 

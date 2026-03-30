@@ -3,13 +3,13 @@
 -- The compiler must auto-inject defer CheatLib.socketClose(...) for each resource.
 -- Runs inside the fiber scheduler (socketClose → unregisterFd requires active_scheduler).
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- TCPServer::listen returns a linear TCPServer resource (Zig: i32).
     -- Port 0 lets the OS assign an ephemeral port — avoids hard-coded conflicts.
     -- Compiler emits: `defer CheatLib.socketClose(server);`
     server = TCPServer::listen(0);
 
-    -- The resource is auto-closed by the defer when cheatMain exits.
+    -- The resource is auto-closed by the defer when main exits.
     -- No explicit close needed — that's the whole point of RAII.
     RETURN;
 END

@@ -77,13 +77,13 @@ module EffectTracker
 
   # Post-pass: compute needs_rt for every function.
   # A function needs rt if it uses the frame arena, calls a fn pointer, or any
-  # transitive callee needs rt. cheatMain always needs rt (entry point).
+  # transitive callee needs rt. main always needs rt (entry point).
   def compute_needs_rt!
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
       ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || name == "cheatMain"
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || name == "main"
     end
 
     changed = true
@@ -106,12 +106,12 @@ module EffectTracker
   # Post-pass: compute can_fail for every function.
   # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
   # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
-  # cheatMain always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
+  # main always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
   # are excluded from propagation — they don't use CLEAR's error union convention.
   def compute_can_fail!
     can_fail = {}
     @fn_nodes.each do |name, _|
-      can_fail[name] = @fn_raises_directly[name] == true || name == "cheatMain"
+      can_fail[name] = @fn_raises_directly[name] == true || name == "main"
     end
 
     changed = true

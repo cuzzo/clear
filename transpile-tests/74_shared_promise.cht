@@ -6,7 +6,7 @@ FN expensive(x: Float64) RETURNS Float64 ->
     RETURN x * x;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Single holder, NEXT called twice (idempotent).
     -- -------------------------------------------------------

@@ -10,7 +10,7 @@ FN add(a: Float64, b: Float64) RETURNS Float64 ->
     RETURN a + b;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Three concurrent BG fibers, NEXT'd in reverse.
     -- -------------------------------------------------------

@@ -3,7 +3,7 @@ require_relative "../src/transpiler"
 # doc_spec.rb — Verify all ```clear code blocks in docs/ transpile successfully.
 #
 # Extracts fenced code blocks (```clear ... ```) from every .md file
-# in docs/, wraps standalone snippets in a cheatMain function if needed,
+# in docs/, wraps standalone snippets in a main function if needed,
 # prepends common struct definitions, and checks that the transpiler
 # doesn't raise.
 #
@@ -57,12 +57,12 @@ def extract_clear_blocks(md_path)
 end
 
 def wrap_if_needed(code)
-  return code if code.include?("FN cheatMain") || code.include?("FN f(")
+  return code if code.include?("FN main") || code.include?("FN f(")
 
   lines = code.strip.lines.map(&:strip).reject { |l| l.start_with?("--") || l.empty? }
   return code if lines.all? { |l| l.start_with?("STRUCT", "ENUM", "UNION", "EXTERN", "FN ", "PUB ") }
 
-  "FN cheatMain() RETURNS Void ->\n#{code}\nRETURN;\nEND"
+  "FN main() RETURNS Void ->\n#{code}\nRETURN;\nEND"
 end
 
 def illustrative?(code)

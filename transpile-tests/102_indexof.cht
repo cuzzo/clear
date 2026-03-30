@@ -1,6 +1,6 @@
 -- Test: indexOf — returns ?Int64 position of substring, nil if not found.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Basic: found at position
     pos = indexOf("hello world", "world") OR -1;
     ASSERT pos == 6, "indexOf should find 'world' at position 6";

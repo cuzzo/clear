@@ -60,7 +60,7 @@ FN dot4(a: Vec4, b: Vec4) RETURNS Float64 @reentrant ->
     RETURN a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE sum: Float64 = 0.0;
     MUTABLE i = 0;
     WHILE i < 100000000 DO

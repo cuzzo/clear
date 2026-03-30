@@ -44,7 +44,7 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
     RETURN total;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     path = ".";
     total = scanDir(path);
     print("${total.toString()}\t${path}");

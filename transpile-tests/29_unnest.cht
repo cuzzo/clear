@@ -8,7 +8,7 @@ FN makeItem(id: Int64, TAKES tags: Int64[]) RETURNS Item ->
   RETURN Item{ id: id, tags: tags };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Build items with nested arrays
   tags1: Int64[] = [10_i64, 20_i64];
   tags2: Int64[] = [30_i64, 40_i64, 50_i64];

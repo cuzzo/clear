@@ -121,7 +121,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
     END
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE store: HashMap<String>@sharded(8):locked = {};
     MUTABLE counters: HashMap<Int64>@sharded(8):locked = {};
 

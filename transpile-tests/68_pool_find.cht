@@ -4,7 +4,7 @@
 
 STRUCT Item { value: Float64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE pool: Item[]@pool = [];
     id1: Id<Item> = pool.insert(Item{ value: 10.0 });
     id2: Id<Item> = pool.insert(Item{ value: 20.0 });

@@ -20,7 +20,7 @@ FN dot2(a: Vec2, b: Vec2) RETURNS Float64 @nonReentrant ->
   RETURN a.x * b.x + a.y * b.y;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Mutable scalar: read AND reassigned (should have no _ = &sum suppression)
   MUTABLE sum: Float64 = 0.0;
   MUTABLE i = 0_i64;

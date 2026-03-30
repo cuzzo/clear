@@ -3,7 +3,7 @@
 -- Exercises the [] operator for both read and write on a numeric map.
 -- map[key] returns ?V — use OR to provide a fallback for missing keys.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- HashMap<Int64, Float64> uses AutoHashMapUnmanaged (no key copies)
     MUTABLE scores: HashMap<Int64, Float64> = {};
 

@@ -14,7 +14,7 @@
 -- SETUP:
 --   BigS has 130 slots (>128 threshold) → allocated in frame arena → uses_frame=true.
 --   buildList creates a local BigS (triggering uses_frame=true) and also builds a list.
---   cheatMain calls buildList() and verifies the returned list contains correct values.
+--   main calls buildList() and verifies the returned list contains correct values.
 
 STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
 STRUCT BigS {
@@ -47,7 +47,7 @@ FN buildList() RETURNS Float64[]@list ->
   RETURN vals;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Caller receives a heap-promoted list; deinit uses heapAlloc (no leak).
   result = buildList();
   ASSERT length(result) == 3_i64, "returned list has 3 elements";

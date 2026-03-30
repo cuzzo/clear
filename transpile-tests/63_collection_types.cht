@@ -4,7 +4,7 @@
 
 STRUCT Point { x: Float64, y: Float64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- @list with UFCS append
     MUTABLE pts: Point[]@list = [];
     pts.append(Point{ x: 1.0, y: 2.0 });

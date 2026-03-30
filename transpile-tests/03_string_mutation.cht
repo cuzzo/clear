@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Strings are currently Heap objects in your runtime
     s1 = "Hello";
     s2 = " World";

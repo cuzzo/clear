@@ -3,7 +3,7 @@
 
 REQUIRE "require_helper.cht";
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- PUB FN: importable from any file
   sum = addPub(3, 4);
   ASSERT sum == 7, "addPub: 3 + 4 should equal 7";

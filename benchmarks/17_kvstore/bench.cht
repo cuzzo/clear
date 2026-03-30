@@ -123,7 +123,7 @@ END
 -- Main
 -- =========================================================================
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE map: HashMap<String>@sharded(8):locked = {};
     n = 1000000;
     workers = 8;

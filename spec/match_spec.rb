@@ -257,7 +257,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South, East, West }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
               MATCH d START
@@ -273,7 +273,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number, Err: Number, Empty }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
               MATCH r START
@@ -288,7 +288,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Color { Red, Green, Blue }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Color = Color.Red;
               MUTABLE n = 0_i64;
               MATCH c START
@@ -304,7 +304,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Bit { Zero, One }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               b: Bit = Bit.Zero;
               MUTABLE n = 0_i64;
               MATCH b START
@@ -325,7 +325,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South, East, West }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
               MATCH IFF d START
@@ -343,7 +343,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South, East, West }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
               MATCH IFF d START
@@ -359,7 +359,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Color { Red, Green, Blue }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Color = Color.Red;
               MUTABLE n = 0_i64;
               MATCH IFF c START
@@ -377,7 +377,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Bit { Zero, One }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               b: Bit = Bit.Zero;
               MUTABLE n = 0_i64;
               MATCH IFF b START
@@ -392,7 +392,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when MATCH IFF subject is not an enum or union" do
         expect {
           run(<<~CLEAR)
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               x = 42_i64;
               MUTABLE n = 0_i64;
               MATCH IFF x START
@@ -410,7 +410,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Shape { Circle: Number, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
               MATCH IFF s START
@@ -426,7 +426,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number, Err: Number, Empty }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
               MATCH IFF r START
@@ -441,7 +441,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number, Err: Number }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
               MATCH r START
@@ -457,7 +457,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               opt = Option<Number>{ Some: 1.0 };
               MUTABLE n = 0.0;
               MATCH IFF opt START
@@ -473,7 +473,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               opt = Option<Number>{ Some: 1.0 };
               MUTABLE n = 0.0;
               MATCH IFF opt START
@@ -493,7 +493,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Shape { Circle: Number, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               s: Shape = Shape{ Circle: 5.0 };
               MUTABLE a = 0.0;
               MATCH s START
@@ -508,7 +508,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves the captured binding to the variant's payload type" do
         ast = run(<<~CLEAR)
           UNION Result { Ok: Number, Err: Number, Empty }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             r: Result = Result{ Ok: 42.0 };
             MUTABLE got = 0.0;
             MATCH r START
@@ -527,7 +527,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Maybe { Some: Number, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               m: Maybe = Maybe.None;
               MUTABLE n = 0.0;
               MATCH m START
@@ -543,7 +543,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
               MATCH d START
@@ -559,7 +559,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               opt = Option<Number>{ Some: 3.14 };
               MUTABLE got = 0.0;
               MATCH opt START
@@ -577,7 +577,7 @@ RSpec.describe SemanticAnnotator do
             UNION Result { Ok: Number, Err: Number }
             FN need_str(s: String) RETURNS Void ->
             END
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1.0 };
               MUTABLE n = 0.0;
               MATCH r START
@@ -601,7 +601,7 @@ RSpec.describe SemanticAnnotator do
       it "emits 'const r = subject.Circle;' for payload capture" do
         out = transpile(<<~CLEAR)
           UNION Shape { Circle: Number, Point }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             s: Shape = Shape{ Circle: 2.0 };
             MUTABLE a = 0.0;
             MATCH IFF s START
@@ -617,7 +617,7 @@ RSpec.describe SemanticAnnotator do
       it "emits == comparison (not activeTag) for enum MATCH IFF" do
         out = transpile(<<~CLEAR)
           ENUM Dir { North, South }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             d: Dir = Dir.North;
             MUTABLE n = 0_i64;
             MATCH IFF d START
@@ -634,7 +634,7 @@ RSpec.describe SemanticAnnotator do
       it "emits payload capture for generic union MATCH IFF" do
         out = transpile(<<~CLEAR)
           UNION Option<T> { Some: T, None }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             opt = Option<Number>{ Some: 7.0 };
             MUTABLE got = 0.0;
             MATCH IFF opt START
@@ -650,7 +650,7 @@ RSpec.describe SemanticAnnotator do
       it "MATCH IFF and MATCH produce identical Zig output for the same exhaustive case" do
         src_iff = <<~CLEAR
           UNION Shape { Circle: Number, Point }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             s: Shape = Shape.Point;
             MUTABLE n = 0_i64;
             MATCH IFF s START

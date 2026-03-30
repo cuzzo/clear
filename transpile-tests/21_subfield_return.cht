@@ -7,7 +7,7 @@ FN extractInner(TAKES o: Outer) RETURNS Inner ->
     RETURN result;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     outer = Outer{ inner: Inner{ value: 99 }, count: 5 };
 
     -- Move entire outer into function, get inner back

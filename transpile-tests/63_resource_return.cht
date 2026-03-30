@@ -6,7 +6,7 @@ FN openFile(path: String) RETURNS File ->
     RETURN f;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     f = openFile("testdata/fruits.csv");
     -- If f was closed by the defer in openFile, this readAll will fail.
     contents = fileReadAll(f);

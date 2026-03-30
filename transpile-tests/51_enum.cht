@@ -5,7 +5,7 @@ FN mirror(d: Direction) RETURNS Direction ->
   RETURN d;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Basic variant assignment
   d: Direction = Direction.North;
 

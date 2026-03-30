@@ -2,7 +2,7 @@
 -- Without frame marks, 1000 iterations x ~16KB each would accumulate 16MB.
 -- With frame marks, the arena stays constant across iterations.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE total: Float64 = 0.0;
     MUTABLE outer = 0_i64;
     WHILE outer < 100 DO

@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   raw = "apple,banana,cherry";
 
   -- PROJECT: get length of each word after split

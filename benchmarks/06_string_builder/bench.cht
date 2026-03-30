@@ -33,7 +33,7 @@
 --   Neither binary self-times; the runner measures whole-process time.
 --   At 10 000 runs the scheduler startup (~10 ms) is < 5% of total work.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE total = 0;
 

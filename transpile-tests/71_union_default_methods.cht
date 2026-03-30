@@ -31,7 +31,7 @@ END
 
 -- 'label' has no concrete override — the default body is used.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Concrete 'area' override is in effect.
   ASSERT area(Shape.Point) == 0.0,                            "Point area";
   ASSERT area(Shape.Circle{ radius: 1.0 }) == 3.14159,        "Circle area";

@@ -5,7 +5,7 @@ FN makeWriteLockedNode(n: Node) RETURNS Node @writeLocked ->
     RETURN locked;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     ln = makeWriteLockedNode(Node{ v: 99 });
 
     WITH EXCLUSIVE ln AS inner {

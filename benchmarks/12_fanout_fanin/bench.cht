@@ -22,7 +22,7 @@ FN doWork(seed: Int64) RETURNS Int64 ->
     RETURN x;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     -- Build work items
     MUTABLE items: Work[] = [];

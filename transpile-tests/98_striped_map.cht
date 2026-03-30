@@ -3,7 +3,7 @@
 -- Any thread can access any shard.  Trades ~20ns/op lock overhead for resilience
 -- to hot-key skew.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- String-keyed sharded+locked map with 4 stripes.
     MUTABLE scores: HashMap<Int64>@sharded(4):locked = {};
 

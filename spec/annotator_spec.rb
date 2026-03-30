@@ -2408,7 +2408,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math";
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             x = native_add(1, 2);
           END
         CLEAR
@@ -2425,7 +2425,7 @@ RSpec.describe SemanticAnnotator do
       it "emits the native call without rt and without try" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             x = native_add(3.0, 4.0);
           END
         CLEAR
@@ -2438,7 +2438,7 @@ RSpec.describe SemanticAnnotator do
       it "emits a type alias for EXTERN STRUCT" do
         code = <<~CLEAR
           EXTERN STRUCT Vec2 { x: Number, y: Number } FROM "native_math";
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
@@ -2526,7 +2526,7 @@ RSpec.describe SemanticAnnotator do
           FN mirror(d: Dir) RETURNS Dir ->
             RETURN d;
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             result = mirror(Dir.North);
           END
         CLEAR
@@ -2548,7 +2548,7 @@ RSpec.describe SemanticAnnotator do
             ENUM Dir { North, South }
             FN use(d: Dir) RETURNS Void ->
             END
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               use(42);
             END
           CLEAR
@@ -2589,7 +2589,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
               MATCH d START
@@ -2606,7 +2606,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             ENUM Dir { North, South }
             ENUM Color { Red, Blue }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
               MATCH d START
@@ -2635,7 +2635,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               d: Dir = Dir.North;
               bad = d.name;
             END
@@ -2664,7 +2664,7 @@ RSpec.describe SemanticAnnotator do
       it "emits a Zig enum type declaration with all variants" do
         out = transpile(<<~CLEAR)
           ENUM Planet { Mercury, Venus, Earth }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).to include("const Planet = enum {")
@@ -2676,7 +2676,7 @@ RSpec.describe SemanticAnnotator do
       it "emits enum variant access as TypeName.Variant" do
         out = transpile(<<~CLEAR)
           ENUM Color { Red, Green }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             c: Color = Color.Red;
           END
         CLEAR
@@ -2686,7 +2686,7 @@ RSpec.describe SemanticAnnotator do
       it "emits the enum type annotation on a const declaration" do
         out = transpile(<<~CLEAR)
           ENUM Dir { North, South }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             d: Dir = Dir.North;
           END
         CLEAR
@@ -2700,7 +2700,7 @@ RSpec.describe SemanticAnnotator do
           FN turn(d: Dir) RETURNS Dir ->
             RETURN d;
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).to include("d: Dir")
@@ -2710,7 +2710,7 @@ RSpec.describe SemanticAnnotator do
       it "includes PUB ENUM in transpile_module output" do
         out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
           PUB ENUM Status { Active, Inactive }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).to include("const Status = enum {")
@@ -2719,7 +2719,7 @@ RSpec.describe SemanticAnnotator do
       it "excludes PRIVATE ENUM from transpile_module output" do
         out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
           PRIVATE ENUM Internal { A, B }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).not_to include("const Internal = enum {")
@@ -3361,7 +3361,7 @@ RSpec.describe SemanticAnnotator do
         UNION Data {
             Pair { x: Int64, y: Int64 }
         }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
             d = Data.Pair{ x: 1, y: 2 };
             MATCH d START
                 Data.Pair AS p ->
@@ -3402,7 +3402,7 @@ RSpec.describe SemanticAnnotator do
           result = "Hello, \${name}!";
           RETURN result;
         END
-        FN cheatMain() RETURNS Void -> RETURN; END
+        FN main() RETURNS Void -> RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(src)
       expect(zig).to include("CheatLib.concat")

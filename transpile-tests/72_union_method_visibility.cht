@@ -28,7 +28,7 @@ FN code(c: Color) RETURNS Float64 ->
   RETURN result;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Default PUB method used for all variants.
   ASSERT name(Color.Red)   == -1.0, "default name Red";
   ASSERT name(Color.Green) == -1.0, "default name Green";

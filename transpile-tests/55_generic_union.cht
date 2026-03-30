@@ -8,7 +8,7 @@ FN safeDivide(a: Float64, b: Float64) RETURNS Result<Float64, Bool> ->
   RETURN Result<Float64, Bool>{ Ok: a };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Option<Float64> with a payload variant
   opt = Option<Float64>{ Some: 42.0 };
   MUTABLE got = 0.0;

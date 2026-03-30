@@ -3,7 +3,7 @@ STRUCT Node { id: Int64 }
 -- Test: MOVE transfers the Rc handle without incrementing the ref count.
 -- After MOVE, the source variable is consumed (cannot be used again).
 -- The testing allocator verifies no leaks and no double-frees.
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     a = Node{ id: 42 } @multiowned;
 
     -- Default clone: both a and b own the Node (ref count = 2).

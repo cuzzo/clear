@@ -5,7 +5,7 @@ FN getVal(c: Counter) RETURNS Int64 ->
     RETURN c.value;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Create a heap-allocated RwLock-protected Counter.
     c = Counter{ value: 10 } @writeLocked;
 

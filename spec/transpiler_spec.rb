@@ -15,7 +15,7 @@ RSpec.describe ZigTranspiler do
   describe "@list uses frame allocator" do
     it "uses frameAlloc for append" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE vals: Number[]@list = [];
           append(vals, 1.0);
           RETURN;
@@ -28,7 +28,7 @@ RSpec.describe ZigTranspiler do
 
     it "uses frameAlloc for deinit" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE vals: Number[]@list = [];
           append(vals, 1.0);
           RETURN;
@@ -40,7 +40,7 @@ RSpec.describe ZigTranspiler do
 
     it "sharded list still uses heapAlloc" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE vals: Number[]@list:sharded(4) = [];
           RETURN;
         END
@@ -81,7 +81,7 @@ RSpec.describe ZigTranspiler do
         append(vals, big.c1.a);
         RETURN vals;
       END
-      FN cheatMain() RETURNS Void ->
+      FN main() RETURNS Void ->
         RETURN;
       END
     CLEAR
@@ -117,7 +117,7 @@ RSpec.describe ZigTranspiler do
         m["y"] = 2_i64;
         RETURN m;
       END
-      FN cheatMain() RETURNS Void ->
+      FN main() RETURNS Void ->
         result = buildMap();
         RETURN;
       END
@@ -147,7 +147,7 @@ RSpec.describe ZigTranspiler do
 
     it "all string maps use heapAlloc deinit (consistent with put allocator)" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
           m["k"] = 42_i64;
           RETURN;
@@ -164,7 +164,7 @@ RSpec.describe ZigTranspiler do
   describe "WhileLoop per-iteration frame marks" do
     it "emits saveLoopMark/restoreLoopMark when loop-local list is appended" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             MUTABLE vals: Number[]@list = [];
@@ -181,7 +181,7 @@ RSpec.describe ZigTranspiler do
 
     it "does NOT emit loop marks when loop body has no frame allocations" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE all: Number[]@list = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
@@ -202,7 +202,7 @@ RSpec.describe ZigTranspiler do
   describe "cooperative yield injection" do
     it "emits checkYield at the back-edge of a normal while loop with rt" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 1000 DO
             i = i + 1_i64;
@@ -216,7 +216,7 @@ RSpec.describe ZigTranspiler do
 
     it "emits checkYield alongside saveLoopMark for frame-allocating loops" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             MUTABLE vals: Number[]@list = [];
@@ -238,7 +238,7 @@ RSpec.describe ZigTranspiler do
         FN addTwo(a: Number, b: Number) RETURNS Number ->
           RETURN a + b;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = addTwo(1.0, 2.0);
           RETURN;
         END
@@ -256,7 +256,7 @@ RSpec.describe ZigTranspiler do
   describe "TIGHT loops" do
     it "does NOT emit checkYield for a TIGHT loop" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 1000 DO
             i = i + 1_i64;
@@ -270,7 +270,7 @@ RSpec.describe ZigTranspiler do
 
     it "does NOT emit saveLoopMark for a TIGHT loop even with frame allocs" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 10 DO
             MUTABLE vals: Number[]@list = [];
@@ -288,7 +288,7 @@ RSpec.describe ZigTranspiler do
     it "raises a compile error when TIGHT loop calls an EXTERN FN directly" do
       src = <<~CLEAR
         EXTERN FN native_sqrt(x: Number) RETURNS Number FROM "math";
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 100 DO
             x = native_sqrt(i + 0.0);
@@ -306,7 +306,7 @@ RSpec.describe ZigTranspiler do
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 100 DO
             x = fib(i);
@@ -324,7 +324,7 @@ RSpec.describe ZigTranspiler do
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 100 DO
             IF i > 50_i64 THEN
@@ -343,7 +343,7 @@ RSpec.describe ZigTranspiler do
         FN square(x: Number) RETURNS Number ->
           RETURN x * x;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 100 DO
             x = square(i + 0.0);
@@ -364,7 +364,7 @@ RSpec.describe ZigTranspiler do
   describe "var_mutated SROA suppression" do
     it "omits _ = &name for a mutable scalar that is read AND reassigned" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE sum: Number = 0.0;
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
@@ -384,7 +384,7 @@ RSpec.describe ZigTranspiler do
     it "omits _ = &name for a mutable struct that is reassigned" do
       src = <<~CLEAR
         STRUCT Vec2 { x: Number, y: Number }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE v: Vec2 = Vec2{ x: 0.0, y: 0.0 };
           MUTABLE i = 0_i64;
           WHILE i < 3 DO
@@ -403,7 +403,7 @@ RSpec.describe ZigTranspiler do
     it "omits _ = &name for a mutable struct with field mutation" do
       src = <<~CLEAR
         STRUCT Point { x: Number, y: Number }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE p: Point = Point{ x: 1.0, y: 2.0 };
           p.x = 99.0;
           ASSERT p.x > 0.0, "positive";
@@ -417,7 +417,7 @@ RSpec.describe ZigTranspiler do
 
     it "downgrades MUTABLE to const when never reassigned (SROA-safe)" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE x = 5_i64;
           ASSERT x == 5_i64, "should be 5";
           RETURN;
@@ -431,7 +431,7 @@ RSpec.describe ZigTranspiler do
 
     it "downgrades completely unused MUTABLE to const" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE x = 5_i64;
           RETURN;
         END
@@ -443,7 +443,7 @@ RSpec.describe ZigTranspiler do
 
     it "warns about MUTABLE that is used but never reassigned" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE x = 5_i64;
           ASSERT x == 5_i64, "used";
           RETURN;
@@ -457,7 +457,7 @@ RSpec.describe ZigTranspiler do
 
     it "warns about completely unused MUTABLE variable" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE x = 5_i64;
           RETURN;
         END
@@ -470,7 +470,7 @@ RSpec.describe ZigTranspiler do
 
     it "does NOT warn about MUTABLE that is actually reassigned" do
       src = <<~CLEAR
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE x = 5_i64;
           x = 10_i64;
           ASSERT x == 10_i64, "reassigned";
@@ -493,13 +493,13 @@ RSpec.describe ZigTranspiler do
             IF depth > 0 THEN RETURN update!(key, env, depth - 1); END
             RETURN depth;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
             MUTABLE env: HashMap<Int64> = {};
             update!("k", env, 3);
         END
       CLEAR
       zig = transpile(src)
-      # Caller in cheatMain passes &env (local var → pointer)
+      # Caller in main passes &env (local var → pointer)
       expect(zig).to match(/update\(.*&env/)
       # Recursive call inside update! passes env without & (already a pointer)
       fn_body = zig[/fn update\b.*?^}/m]
@@ -517,7 +517,7 @@ RSpec.describe ZigTranspiler do
             Lit: Float64,
             Call { name: String, args: Expr[] }
         }
-        FN cheatMain() RETURNS Void -> RETURN; END
+        FN main() RETURNS Void -> RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).to include("args: []Expr")
@@ -529,7 +529,7 @@ RSpec.describe ZigTranspiler do
     it "appends .items when assigning @list to union slice field" do
       src = <<~CLEAR
         UNION Wrapper { Items: Int64[] }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
             MUTABLE vals: Int64[]@list = List[];
             vals.append(1_i64);
             w = Wrapper{ Items: vals };
@@ -550,7 +550,7 @@ RSpec.describe ZigTranspiler do
             vals.append(2_i64);
             RETURN Pair{ items: vals, count: 2 };
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
             p = build();
         END
       CLEAR
@@ -569,7 +569,7 @@ RSpec.describe ZigTranspiler do
             vals.append(1_i64);
             RETURN Pair{ items: vals, count: 1 };
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
             p = build();
         END
       CLEAR

@@ -5,7 +5,7 @@ FN isPositive(x: Float64) RETURNS Bool ->
     RETURN x > 0.0;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     items = [Item{value: -1.0}, Item{value: 2.0}, Item{value: -3.0}, Item{value: 4.0}, Item{value: 5.0}, Item{value: 6.0}];
 
     -- CONCURRENT WHERE: filter to positive values (workers: 4)

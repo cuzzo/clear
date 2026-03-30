@@ -93,7 +93,7 @@ RSpec.describe SemanticAnnotator do
           FN use(p: #{param_annotation}) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
       end
 
@@ -105,7 +105,7 @@ RSpec.describe SemanticAnnotator do
           FN bad(p: #{param_annotation}) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
       end
 
@@ -142,7 +142,7 @@ RSpec.describe SemanticAnnotator do
           FN use(p: Pair<User>) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
@@ -159,7 +159,7 @@ RSpec.describe SemanticAnnotator do
           FN make() RETURNS Pair<Number> ->
             PASS
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
@@ -171,7 +171,7 @@ RSpec.describe SemanticAnnotator do
           FN make() RETURNS Pair<Number> ->
             PASS
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             p: Pair<Number> = make();
           END
         CLEAR
@@ -191,7 +191,7 @@ RSpec.describe SemanticAnnotator do
             FN bad() RETURNS Pair ->
               PASS
             END
-            FN cheatMain() RETURNS Void -> PASS END
+            FN main() RETURNS Void -> PASS END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError, /Type Error: 'Pair' is a generic type — type arguments are required/)
         end
@@ -199,7 +199,7 @@ RSpec.describe SemanticAnnotator do
         it "raises 'missing type args' in a variable declaration" do
           src = <<~CLEAR
             STRUCT Pair<T> { first: T, second: T }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               x: Pair = 0.0;
             END
           CLEAR
@@ -245,7 +245,7 @@ RSpec.describe SemanticAnnotator do
             FN bad(p: Pair<Pair>) RETURNS Number ->
               RETURN 0.0;
             END
-            FN cheatMain() RETURNS Void -> PASS END
+            FN main() RETURNS Void -> PASS END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError, /Type Error: 'Pair' is a generic type — type arguments are required/)
         end
@@ -259,7 +259,7 @@ RSpec.describe SemanticAnnotator do
           FN use(p: Pair<Number>) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Pair(f64)")
@@ -271,7 +271,7 @@ RSpec.describe SemanticAnnotator do
           FN use(m: Map<String, Number>) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Map([]const u8, f64)")
@@ -283,7 +283,7 @@ RSpec.describe SemanticAnnotator do
           FN make() RETURNS Pair<Number> ->
             PASS
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Pair(f64)")
@@ -295,7 +295,7 @@ RSpec.describe SemanticAnnotator do
           FN use(p: Pair<Bool>) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Pair(bool)")
@@ -308,7 +308,7 @@ RSpec.describe SemanticAnnotator do
           FN use(p: Pair<User>) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Pair(User)")
@@ -320,7 +320,7 @@ RSpec.describe SemanticAnnotator do
           FN use(p: ?Pair<Number>) RETURNS Number ->
             RETURN 0.0;
           END
-          FN cheatMain() RETURNS Void -> PASS END
+          FN main() RETURNS Void -> PASS END
         CLEAR
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("?Pair(f64)")
@@ -329,30 +329,30 @@ RSpec.describe SemanticAnnotator do
 
     describe "Zig code generation" do
       it "emits a comptime function for a single-param generic struct" do
-        out = ZigTranspiler.new.transpile("STRUCT Pair<T> { first: T, second: T }\nFN cheatMain() RETURNS Void -> PASS END")
+        out = ZigTranspiler.new.transpile("STRUCT Pair<T> { first: T, second: T }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("fn Pair(comptime T: type) type")
         expect(out).to include("first: T")
         expect(out).to include("second: T")
       end
 
       it "emits multiple comptime params for a multi-param generic struct" do
-        out = ZigTranspiler.new.transpile("STRUCT Map<K, V> { key: K, value: V }\nFN cheatMain() RETURNS Void -> PASS END")
+        out = ZigTranspiler.new.transpile("STRUCT Map<K, V> { key: K, value: V }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("fn Map(comptime K: type, comptime V: type) type")
       end
 
       it "emits a plain const struct for a non-generic struct" do
-        out = ZigTranspiler.new.transpile("STRUCT User { id: Number }\nFN cheatMain() RETURNS Void -> PASS END")
+        out = ZigTranspiler.new.transpile("STRUCT User { id: Number }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("const User = struct")
         expect(out).not_to include("comptime")
       end
 
       it "correctly emits field types that are type parameters" do
-        out = ZigTranspiler.new.transpile("STRUCT Wrapper<T> { value: T }\nFN cheatMain() RETURNS Void -> PASS END")
+        out = ZigTranspiler.new.transpile("STRUCT Wrapper<T> { value: T }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("value: T")
       end
 
       it "emits three comptime params for a triple-param struct" do
-        out = ZigTranspiler.new.transpile("STRUCT Triple<A, B, C> { a: A, b: B, c: C }\nFN cheatMain() RETURNS Void -> PASS END")
+        out = ZigTranspiler.new.transpile("STRUCT Triple<A, B, C> { a: A, b: B, c: C }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("fn Triple(comptime A: type, comptime B: type, comptime C: type) type")
       end
     end
@@ -365,7 +365,7 @@ RSpec.describe SemanticAnnotator do
         "STRUCT Pair<T> { first: T, second: T }\n" \
         "STRUCT Box<T> { value: T }\n" \
         "#{fn_code}\n" \
-        "FN cheatMain() RETURNS Void -> PASS END"
+        "FN main() RETURNS Void -> PASS END"
       end
 
       it "parses FN identity<T>(x: T) RETURNS T without error" do
@@ -391,7 +391,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "stores type_params in the registered function signature" do
-        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> PASS END"))
+        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN main() RETURNS Void -> PASS END"))
         # Verify it doesn't raise — the signature is checked at call site
         expect(ast).not_to be_nil
       end
@@ -402,7 +402,7 @@ RSpec.describe SemanticAnnotator do
         "STRUCT Pair<T> { first: T, second: T }\n" \
         "STRUCT Box<T> { value: T }\n" \
         "#{fn_code}\n" \
-        "FN cheatMain() RETURNS Void ->\n#{call_code}\nEND"
+        "FN main() RETURNS Void ->\n#{call_code}\nEND"
       end
 
       it "infers T=Number when calling identity(42.0)" do
@@ -469,7 +469,7 @@ RSpec.describe SemanticAnnotator do
       def fn_err_src(fn_code, call_code = "PASS")
         "STRUCT Pair<T> { first: T, second: T }\n" \
         "#{fn_code}\n" \
-        "FN cheatMain() RETURNS Void ->\n#{call_code}\nEND"
+        "FN main() RETURNS Void ->\n#{call_code}\nEND"
       end
 
       it "raises GENERIC_FN_DUPLICATE_PARAM for duplicate type params" do
@@ -520,33 +520,33 @@ RSpec.describe SemanticAnnotator do
 
     describe "Phase 4 Zig code generation" do
       it "emits 'comptime T: type' in function signature for FN identity<T>" do
-        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> PASS END"
+        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN main() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("fn identity(comptime T: type, x: T)")
       end
 
       it "emits two comptime params for a two-type-param function" do
-        src = "FN first<A, B>(a: A, b: B) RETURNS A -> RETURN a; END\nFN cheatMain() RETURNS Void -> PASS END"
+        src = "FN first<A, B>(a: A, b: B) RETURNS A -> RETURN a; END\nFN main() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("fn first(comptime A: type, comptime B: type, a: A")
       end
 
       it "emits inferred type arg at call site without rt when callee is pure" do
-        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> n = identity(42.0); END"
+        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN main() RETURNS Void -> n = identity(42.0); END"
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("identity(f64,")
         expect(out).not_to include("identity(f64, rt,")
       end
 
       it "emits bool type arg at call site for identity(TRUE)" do
-        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN cheatMain() RETURNS Void -> b = identity(TRUE); END"
+        src = "FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN main() RETURNS Void -> b = identity(TRUE); END"
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("identity(bool,")
         expect(out).not_to include("identity(bool, rt,")
       end
 
       it "emits Pair(T) as return type when RETURNS Pair<T>" do
-        src = "STRUCT Pair<T> { first: T, second: T }\nFN makePair<T>(v: T) RETURNS Pair<T> -> RETURN Pair<T>{ first: v, second: v }; END\nFN cheatMain() RETURNS Void -> PASS END"
+        src = "STRUCT Pair<T> { first: T, second: T }\nFN makePair<T>(v: T) RETURNS Pair<T> -> RETURN Pair<T>{ first: v, second: v }; END\nFN main() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Pair(T)")
       end
@@ -560,7 +560,7 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
           STRUCT KeyValue<K, V> { key: K, value: V }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             #{extra}
           END
         CLEAR
@@ -598,7 +598,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves field access on a generic struct literal" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             p = Pair<Number>{ first: 1.0, second: 2.0 };
             x = p.first;
           END
@@ -609,7 +609,7 @@ RSpec.describe SemanticAnnotator do
       it "infers field type as Number when accessing .first on Pair<Number>" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             p = Pair<Number>{ first: 1.0, second: 2.0 };
             x = p.first;
           END
@@ -638,7 +638,7 @@ RSpec.describe SemanticAnnotator do
         it "raises a type error when a non-generic struct gets type args in literal" do
           src = <<~CLEAR
             STRUCT User { id: Number }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               u = User<Number>{ id: 1.0 };
             END
           CLEAR
@@ -660,7 +660,7 @@ RSpec.describe SemanticAnnotator do
           <<~CLEAR
             UNION Option<T> { Some: T, None }
             UNION Result<T, E> { Ok: T, Err: E }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               #{extra}
             END
           CLEAR
@@ -677,7 +677,7 @@ RSpec.describe SemanticAnnotator do
         it "raises on duplicate type parameter in union" do
           src = <<~CLEAR
             UNION Bad<T, T> { A: T, B: T }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError,
             /Duplicate type parameter 'T' in generic union 'Bad'/)
@@ -686,7 +686,7 @@ RSpec.describe SemanticAnnotator do
         it "raises when type parameter shadows a builtin" do
           src = <<~CLEAR
             UNION Bad<Number> { A: Number }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError,
             /Type parameter 'Number' shadows built-in type 'Number'/)
@@ -716,7 +716,7 @@ RSpec.describe SemanticAnnotator do
         it "raises when instantiating a generic union without type args" do
           src = <<~CLEAR
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               bad = Option{ Some: 1.0 };
             END
           CLEAR
@@ -727,7 +727,7 @@ RSpec.describe SemanticAnnotator do
         it "raises when a union variant value type is wrong" do
           src = <<~CLEAR
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               bad = Option<Number>{ Some: TRUE };
             END
           CLEAR
@@ -755,7 +755,7 @@ RSpec.describe SemanticAnnotator do
         it "emits a comptime function for Option<T>" do
           src = <<~CLEAR
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           out = union_zig(src)
           expect(out).to include("fn Option(comptime T: type)")
@@ -767,7 +767,7 @@ RSpec.describe SemanticAnnotator do
         it "emits a comptime function for Result<T, E>" do
           src = <<~CLEAR
             UNION Result<T, E> { Ok: T, Err: E }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           out = union_zig(src)
           expect(out).to include("fn Result(comptime T: type, comptime E: type)")
@@ -778,7 +778,7 @@ RSpec.describe SemanticAnnotator do
         it "emits Option(f64){ .Some = 42 } for Option<Number>{ Some: 42.0 }" do
           src = <<~CLEAR
             UNION Option<T> { Some: T, None }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               opt = Option<Number>{ Some: 42.0 };
             END
           CLEAR
@@ -790,7 +790,7 @@ RSpec.describe SemanticAnnotator do
         it "emits Result(f64, bool){ .Err = true } for generic Result literal" do
           src = <<~CLEAR
             UNION Result<T, E> { Ok: T, Err: E }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               r = Result<Number, Bool>{ Err: TRUE };
             END
           CLEAR
@@ -804,7 +804,7 @@ RSpec.describe SemanticAnnotator do
         it "emits Pair(f64){ .first = ..., .second = ... } for Pair<Number>" do
           src = <<~CLEAR
             STRUCT Pair<T> { first: T, second: T }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               p = Pair<Number>{ first: 1.0, second: 2.0 };
             END
           CLEAR
@@ -817,7 +817,7 @@ RSpec.describe SemanticAnnotator do
         it "emits KeyValue([]const u8, f64){ ... } for KeyValue<String, Number>" do
           src = <<~CLEAR
             STRUCT KeyValue<K, V> { key: K, value: V }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               kv = KeyValue<String, Number>{ key: "x", value: 42.0 };
             END
           CLEAR

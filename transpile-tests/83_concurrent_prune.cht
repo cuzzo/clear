@@ -6,7 +6,7 @@ FN safeDouble(x: Float64) RETURNS !Float64 ->
     RETURN x * 2.0;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
     -- item 3.0 will error and be pruned
     results = nums s> CONCURRENT(workers: 3) SELECT safeDouble(_) OR PRUNE;

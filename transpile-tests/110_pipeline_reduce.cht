@@ -3,7 +3,7 @@
 -- Previously: using undefined variables in pipeline expressions caused
 -- a NoMethodError crash instead of a proper compiler error.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
     -- Basic REDUCE

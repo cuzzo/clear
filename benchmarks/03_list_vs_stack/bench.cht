@@ -29,7 +29,7 @@
 -- Rust:  Vec::with_capacity(1000) — 1 alloc per outer, 0 reallocs, no try.
 -- CLEAR: frame arena + per-loop rewind — 0 GPA calls in the hot path.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE total: Float64 = 0.0;
     MUTABLE outer = 0;

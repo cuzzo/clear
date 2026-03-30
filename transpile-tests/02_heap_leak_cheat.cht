@@ -1,6 +1,6 @@
 STRUCT User { id: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Heap allocation (type annotation forces heap via declared pointer type)
     u: %User = User{ id: 99 };
 

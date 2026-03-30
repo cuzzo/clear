@@ -233,7 +233,7 @@ END
 -- Tests
 -- =========================================================================
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE penv: HashMap<Int64> = {};
     MUTABLE passed: Int64 = 0;
     MUTABLE failed: Int64 = 0;

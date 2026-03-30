@@ -8,7 +8,7 @@ FN makeNode(id_val: Int64) RETURNS Node @multiowned ->
     RETURN MOVE n;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     n = makeNode(99);
     ASSERT n.id == 99, "id should be 99 after MOVE return";
 

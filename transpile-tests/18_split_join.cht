@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   raw_data = readFile("testdata/fruits.csv").trim();
 
   -- 1. Split into List

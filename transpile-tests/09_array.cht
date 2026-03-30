@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   MUTABLE list : Int64[] = [];
   list.append(10);
   list.append(20);

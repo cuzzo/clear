@@ -16,7 +16,7 @@ PRIVATE FN privateImpl(x: Float64) RETURNS Float64 ->
   RETURN x + 99;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   result = publicAdd(3, 4);
   ASSERT result == 7, "PUB FN: 3 + 4 should equal 7";
 

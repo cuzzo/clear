@@ -123,7 +123,7 @@ RSpec.describe SemanticAnnotator do
           FN mirror(r: Result) RETURNS Result ->
             RETURN r;
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             out = mirror(Result{ Ok: 1 });
           END
         CLEAR
@@ -145,7 +145,7 @@ RSpec.describe SemanticAnnotator do
             UNION Result { Ok: Number }
             FN use(r: Result) RETURNS Void ->
             END
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               use(42);
             END
           CLEAR
@@ -193,7 +193,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Shape { Circle: Number, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
               MATCH s START
@@ -210,7 +210,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Shape { Circle: Number, Point }
             UNION Color  { Red, Blue }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
               MATCH s START
@@ -239,7 +239,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               x: Result = Result{ Nope: 1 };
             END
           CLEAR
@@ -250,7 +250,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Number }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               x: Result = Result{ Ok: TRUE };
             END
           CLEAR
@@ -261,7 +261,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             UNION Shape { Circle: Number }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               s: Shape = Shape{ Circle: 1.0 };
               bad = s.Circle;
             END
@@ -281,7 +281,7 @@ RSpec.describe SemanticAnnotator do
       it "emits a Zig tagged union declaration" do
         out = transpile(<<~CLEAR)
           UNION Shape { Circle: Number, Point }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).to include("const Shape = union(enum) {")
@@ -292,7 +292,7 @@ RSpec.describe SemanticAnnotator do
       it "emits payload variant constructor as UnionType{ .Variant = payload }" do
         out = transpile(<<~CLEAR)
           UNION Result { Ok: Number }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             r: Result = Result{ Ok: 42 };
           END
         CLEAR
@@ -302,7 +302,7 @@ RSpec.describe SemanticAnnotator do
       it "emits unit variant constructor as UnionType{ .Variant = {} }" do
         out = transpile(<<~CLEAR)
           UNION Maybe { Some: Number, None }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             x: Maybe = Maybe.None;
           END
         CLEAR
@@ -312,7 +312,7 @@ RSpec.describe SemanticAnnotator do
       it "emits MATCH on union using std.meta.activeTag" do
         out = transpile(<<~CLEAR)
           UNION Shape { Circle: Number, Point }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             s: Shape = Shape.Point;
             MUTABLE n = 0_i64;
             MATCH s START
@@ -328,7 +328,7 @@ RSpec.describe SemanticAnnotator do
       it "includes PUB UNION in transpile_module output" do
         out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
           PUB UNION Result { Ok: Number, Err: Number }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).to include("const Result = union(enum) {")
@@ -337,7 +337,7 @@ RSpec.describe SemanticAnnotator do
       it "excludes PRIVATE UNION from transpile_module output" do
         out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
           PRIVATE UNION Internal { A: Number, B }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         expect(out).not_to include("const Internal = union(enum) {")
@@ -395,7 +395,7 @@ RSpec.describe SemanticAnnotator do
         it "resolves an inline variant constructor to the union type" do
           ast = run(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
             END
           CLEAR
@@ -406,7 +406,7 @@ RSpec.describe SemanticAnnotator do
         it "resolves the declared variable to the union type" do
           ast = run(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
             END
           CLEAR
@@ -418,7 +418,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Rectangle { width: Number, height: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 r: Shape = Shape.Rectangle{ width: 3.0, height: 4.0 };
               END
             CLEAR
@@ -429,7 +429,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0, color: 1.0 };
               END
             CLEAR
@@ -440,7 +440,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Rectangle { width: Number, height: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 r: Shape = Shape.Rectangle{ width: 3.0 };
               END
             CLEAR
@@ -451,7 +451,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: TRUE };
               END
             CLEAR
@@ -462,7 +462,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 p: Shape = Shape.Point{ radius: 5.0 };
               END
             CLEAR
@@ -473,7 +473,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Data: Number, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 d: Shape = Shape.Data{ value: 5.0 };
               END
             CLEAR
@@ -484,7 +484,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle;
               END
             CLEAR
@@ -495,7 +495,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape{ Circle: 5.0 };
               END
             CLEAR
@@ -509,7 +509,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
                 MATCH IFF c START
                   Shape.Circle -> 1;,
@@ -524,7 +524,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
                 MATCH IFF c START
                   Shape.Circle -> 1;
@@ -537,7 +537,7 @@ RSpec.describe SemanticAnnotator do
         it "AS binding on inline struct variant resolves to the synthetic struct type" do
           ast = run(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
               MUTABLE got = 0.0;
               MATCH c START
@@ -553,7 +553,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
                 MUTABLE got = 0.0;
                 MATCH c START
@@ -569,7 +569,7 @@ RSpec.describe SemanticAnnotator do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, Point }
-              FN cheatMain() RETURNS Void ->
+              FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
                 MUTABLE got = 0.0;
                 MATCH c START
@@ -587,7 +587,7 @@ RSpec.describe SemanticAnnotator do
         it "emits a helper struct before the union declaration" do
           out = transpile(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
             END
           CLEAR
           expect(out).to include("const Shape_Circle = struct {")
@@ -597,7 +597,7 @@ RSpec.describe SemanticAnnotator do
         it "emits the union with the helper struct type for inline variants" do
           out = transpile(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
             END
           CLEAR
           expect(out).to include("const Shape = union(enum) {")
@@ -608,7 +608,7 @@ RSpec.describe SemanticAnnotator do
         it "emits helper structs for multiple inline struct variants" do
           out = transpile(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Rectangle { width: Number, height: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
             END
           CLEAR
           expect(out).to include("const Shape_Circle = struct {")
@@ -620,7 +620,7 @@ RSpec.describe SemanticAnnotator do
         it "emits UnionVariantLit as Shape{ .Circle = Shape_Circle{ .radius = val } }" do
           out = transpile(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
             END
           CLEAR
@@ -631,7 +631,7 @@ RSpec.describe SemanticAnnotator do
         it "emits multi-field inline variant constructor correctly" do
           out = transpile(<<~CLEAR)
             UNION Shape { Rectangle { width: Number, height: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               r: Shape = Shape.Rectangle{ width: 3.0, height: 4.0 };
             END
           CLEAR
@@ -641,7 +641,7 @@ RSpec.describe SemanticAnnotator do
         it "emits const binding = subject.Variant for AS capture" do
           out = transpile(<<~CLEAR)
             UNION Shape { Circle { radius: Number }, Point }
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
               MUTABLE got = 0.0;
               MATCH c START
@@ -667,7 +667,7 @@ RSpec.describe SemanticAnnotator do
               FN area(s: Shape) RETURNS Number ->
                 RETURN 0.0;
               END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -683,7 +683,7 @@ RSpec.describe SemanticAnnotator do
               }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
               FN describe(s: Shape) RETURNS String -> RETURN ""; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -695,7 +695,7 @@ RSpec.describe SemanticAnnotator do
               FN area(s: Shape) RETURNS Number
             }
             FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           union_node = ast.statements.first
           expect(union_node).to be_a(AST::UnionDef)
@@ -711,7 +711,7 @@ RSpec.describe SemanticAnnotator do
                 Circle { radius: Number },
                 FN area(s: Shape) RETURNS Number
               }
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /Union 'Shape' requires method 'area'/)
         end
@@ -724,7 +724,7 @@ RSpec.describe SemanticAnnotator do
                 FN area(s: Shape) RETURNS Number
               }
               FN area(s: Shape, n: Number) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /Union 'Shape' method 'area' requires 1 parameter.*has 2/)
         end
@@ -737,7 +737,7 @@ RSpec.describe SemanticAnnotator do
                 FN area(s: Number) RETURNS Number
               }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /Union 'Shape' method 'area' parameter 1 expects 'Number'/)
         end
@@ -750,7 +750,7 @@ RSpec.describe SemanticAnnotator do
                 FN area(s: Shape) RETURNS String
               }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /Union 'Shape' method 'area' requires return type 'String'.*returns 'Number'/)
         end
@@ -765,7 +765,7 @@ RSpec.describe SemanticAnnotator do
             FN area(s: Shape) RETURNS Number ->
               RETURN 0.0;
             END
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           # There should be exactly one Zig function definition named 'area'
           expect(out.scan(/fn area\b/).length).to eq(1)
@@ -776,7 +776,7 @@ RSpec.describe SemanticAnnotator do
             run(<<~CLEAR)
               UNION Color { Red, Green, Blue, FN label(c: Color) RETURNS String }
               FN label(c: Color) RETURNS String -> RETURN ""; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -793,7 +793,7 @@ RSpec.describe SemanticAnnotator do
                   RETURN 0.0;
                 END
               }
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -808,7 +808,7 @@ RSpec.describe SemanticAnnotator do
                   RETURN 0.0;
                 END
               }
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -820,7 +820,7 @@ RSpec.describe SemanticAnnotator do
                 Circle { radius: Number },
                 FN area(s: Shape) RETURNS Number
               }
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /requires method 'area'/)
         end
@@ -834,7 +834,7 @@ RSpec.describe SemanticAnnotator do
                 RETURN 0.0;
               END
             }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           expect(out).to include("fn area(")
         end
@@ -850,7 +850,7 @@ RSpec.describe SemanticAnnotator do
             FN area(s: Shape) RETURNS Number ->
               RETURN 0.0;
             END
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           # Concrete override wins; only one fn area definition should appear.
           expect(out.scan(/fn area\b/).length).to eq(1)
@@ -868,7 +868,7 @@ RSpec.describe SemanticAnnotator do
               FN area(s: Shape) RETURNS Number ->
                 RETURN 0.0;
               END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /return type 'String'/)
         end
@@ -884,7 +884,7 @@ RSpec.describe SemanticAnnotator do
                 RETURN 0.0;
               END
             }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           expect(out).to include("fn area(")
           expect(out).to include("fn perimeter(")
@@ -897,7 +897,7 @@ RSpec.describe SemanticAnnotator do
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, PUB FN area(s: Shape) RETURNS Number }
               PUB FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -907,7 +907,7 @@ RSpec.describe SemanticAnnotator do
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, PUB FN area(s: Shape) RETURNS Number }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /method 'area' is declared PUB but function 'area' is package/)
         end
@@ -917,7 +917,7 @@ RSpec.describe SemanticAnnotator do
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Number }, PRIVATE FN area(s: Shape) RETURNS Number }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /method 'area' is declared PRIVATE but function 'area' is package/)
         end
@@ -930,7 +930,7 @@ RSpec.describe SemanticAnnotator do
                 RETURN 0.0;
               END
             }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           expect(out).to include("pub fn area(")
         end
@@ -943,7 +943,7 @@ RSpec.describe SemanticAnnotator do
                 RETURN 0.0;
               END
             }
-            FN cheatMain() RETURNS Void -> END
+            FN main() RETURNS Void -> END
           CLEAR
           expect(out).to include("fn area(")
           expect(out).not_to include("pub fn area(")
@@ -955,7 +955,7 @@ RSpec.describe SemanticAnnotator do
             run(<<~CLEAR)
               UNION Shape { Point, FN area(s: Shape) RETURNS Number }
               PUB FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -971,7 +971,7 @@ RSpec.describe SemanticAnnotator do
                 FN area(s: Shape) RETURNS Number
               }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /Union 'Shape' declares method 'area' more than once/)
         end
@@ -986,7 +986,7 @@ RSpec.describe SemanticAnnotator do
               }
               FN area(s: Shape) RETURNS Number -> RETURN 0.0; END
               FN perimeter(s: Shape) RETURNS Number -> RETURN 0.0; END
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.not_to raise_error
         end
@@ -1000,7 +1000,7 @@ RSpec.describe SemanticAnnotator do
                 FN area(s: Shape) RETURNS Number,
                 FN area(s: Shape) RETURNS Number
               }
-              FN cheatMain() RETURNS Void -> END
+              FN main() RETURNS Void -> END
             CLEAR
           }.to raise_error(CompilerError, /declares method 'area' more than once/)
         end

@@ -48,7 +48,7 @@ FN buildReportOrFail(name: String, data: String) RETURNS !Report ->
     RETURN Report{ name: name, itemCount: parts.length(), total: sum };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Concurrent struct returns with string fields
     -- -------------------------------------------------------

@@ -12,7 +12,7 @@ FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
   RETURN cb(n);
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Phase 1: declare fn-type variables with lambda literals.
   cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
   add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;

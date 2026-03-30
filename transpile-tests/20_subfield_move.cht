@@ -1,7 +1,7 @@
 STRUCT Inner { value: Int64 }
 STRUCT Outer { inner: Inner, count: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Create nested struct
     outer = Outer{ inner: Inner{ value: 42 }, count: 10 };
 

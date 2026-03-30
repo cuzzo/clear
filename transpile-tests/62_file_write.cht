@@ -2,7 +2,7 @@
 -- Opens a file for writing, writes content, auto-closes via RAII.
 -- The compiler emits defer f.close() for the writable File resource.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- File::create is a static constructor that opens/truncates a file for writing.
     -- Compiler emits: `defer f.close();` at this declaration site.
     f = File::create("testdata/write_test_output.txt");

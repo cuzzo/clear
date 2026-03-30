@@ -1,6 +1,6 @@
 STRUCT Item { category: String, value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   items = [
     Item{ category: "fruit", value: 10_i64 },
     Item{ category: "veggie", value: 20_i64 },

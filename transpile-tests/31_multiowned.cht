@@ -2,7 +2,7 @@ STRUCT Counter { value: Int64 }
 
 -- Test: basic multiowned creation and field access.
 -- The testing allocator verifies no leaks (cleanup happens correctly).
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     a = Counter{ value: 42 } @multiowned;
     ASSERT a.value == 42, "a.value should be 42";
 

@@ -19,7 +19,7 @@ FN generateReadings(n: Int64, seed: Int64) RETURNS Float64[]@list ->
     RETURN readings;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     readings = generateReadings(1000, 42);
     ASSERT readings.length() == 1000, "generated 1000 readings";
 

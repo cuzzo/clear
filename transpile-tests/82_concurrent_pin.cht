@@ -5,7 +5,7 @@ FN compute(w: Work) RETURNS Float64 ->
     RETURN w.value * 3.0;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     items = [Work{value: 1.0}, Work{value: 2.0}, Work{value: 3.0}];
     results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT compute(_);
     total = results s> SUM _;

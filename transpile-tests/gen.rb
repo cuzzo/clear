@@ -41,10 +41,10 @@ class TestGenerator < ZigTranspiler
                       transpiled_body.include?("WaitGroup")
 
     # 4. Wrap in a standard Zig Test Block.
-    #    We wrap the code in a struct so 'fn cheatMain' doesn't collide
+    #    We wrap the code in a struct so 'fn main' doesn't collide
     #    between different tests.
     execution_block = if needs_scheduler
-      # DO block tests: run cheatMain inside the fiber scheduler so that
+      # DO block tests: run main inside the fiber scheduler so that
       # WaitGroup.wait() can yield and submitSpawn() can enqueue fibers.
       <<~ZIG
           // ---------------------------------------------------------
@@ -69,12 +69,12 @@ class TestGenerator < ZigTranspiler
           // ---------------------------------------------------------
           // Execution (inside a fiber so WaitGroup.wait() can yield)
           // ---------------------------------------------------------
-          if (@hasDecl(S, "cheatMain")) {
+          if (@hasDecl(S, "main")) {
               const MainRunner = struct {
                   fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                       _ = raw_args;
                       const rt_ptr = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                      try S.cheatMain(rt_ptr);
+                      try S.main(rt_ptr);
                   }
               };
               try sched.submitSpawn(
@@ -87,14 +87,14 @@ class TestGenerator < ZigTranspiler
           }
       ZIG
     else
-      # Standard tests: call cheatMain directly (no scheduler needed).
+      # Standard tests: call main directly (no scheduler needed).
       <<~ZIG
           // ---------------------------------------------------------
           // Execution
           // ---------------------------------------------------------
-          // We assume every test script defines 'cheatMain'
-          if (@hasDecl(S, "cheatMain")) {
-             const result = try S.cheatMain(&rt);
+          // We assume every test script defines 'main'
+          if (@hasDecl(S, "main")) {
+             const result = try S.main(&rt);
 
              // If result is an object pointer, we must simulate the
              // "Caller owns the return" rule to prevent false-positive leaks.

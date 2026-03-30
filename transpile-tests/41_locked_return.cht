@@ -5,7 +5,7 @@ FN makeLockedNode(n: Node) RETURNS Node @locked ->
     RETURN locked;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     ln = makeLockedNode(Node{ v: 99 });
 
     WITH EXCLUSIVE ln AS inner {

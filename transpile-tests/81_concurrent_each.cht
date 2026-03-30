@@ -1,7 +1,7 @@
 -- Test: CONCURRENT EACH — parallel side-effect iteration
 STRUCT Counter { value: Float64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE items: Counter[]@list = [];
     append(items, Counter{value: 0.0});
     append(items, Counter{value: 0.0});

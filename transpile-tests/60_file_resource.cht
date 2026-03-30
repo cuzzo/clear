@@ -2,7 +2,7 @@
 -- Opens a file, reads its contents, asserts the expected value.
 -- The compiler must auto-inject `defer f.close()` — no manual close needed.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- File::open is a static constructor that returns a linear File resource.
     -- The compiler will emit: `defer f.close();` at this declaration site.
     f = File::open("testdata/fruits.csv");

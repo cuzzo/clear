@@ -6,7 +6,7 @@ FN generate_squares(n: Float64) RETURNS Float64 ->
     RETURN n * n;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Simple number stream with three YIELD statements.
     -- -------------------------------------------------------

@@ -60,7 +60,7 @@ FN test_stack_arrays() RETURNS Void ->
   ASSERT small[2] == 3.5, "stack array Float64[3]: element 2 is 3.5";
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   test_frame_struct();
   test_stack_arrays();
 END

@@ -25,7 +25,7 @@
 -- The frame arena holds the entire 1M-entry bucket array (~30 MB).
 -- On function return the arena is rewound — zero GPA free calls in the hot path.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE m: HashMap<Int64, Float64> = {};
 
     -- Insert phase: 1M numeric key-value pairs

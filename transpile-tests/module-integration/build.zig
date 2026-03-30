@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
     // main: transpile src/main.cht → Zig module (with embedded test block)
     //
     // The transpiler emits a `test "cheat main" { ... }` block when it detects
-    // FN cheatMain() in the source. This lets main_mod be used directly as
+    // FN main() in the source. This lets main_mod be used directly as
     // the test root without a separate test_runner file.
     // -----------------------------------------------------------------------
     const transpile_main = b.addSystemCommand(&.{

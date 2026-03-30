@@ -14,7 +14,7 @@ FN makeLabel(prefix: String, value: Int64) RETURNS String ->
     RETURN result;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Test 1: basic string return + overwrite
     greeting = makeGreeting("World");
 

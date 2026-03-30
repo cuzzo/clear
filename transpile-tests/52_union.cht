@@ -11,7 +11,7 @@ FN area(s: Shape) RETURNS Float64 ->
   RETURN a;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Unit variant (GetField syntax — no payload)
   p: Shape = Shape.Point;
   a = area(p);

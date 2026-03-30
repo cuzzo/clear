@@ -2,7 +2,7 @@
 -- Exercises: declaring a ~T[]@list, appending BG { } blocks,
 -- indexing with futures[i] to get a ~T, and NEXT-ing each promise.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Declare a promise list: std.ArrayListUnmanaged(CheatLib.Promise(i64))
     MUTABLE futures: ~Int64[]@list = [];
 

@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Basic shell echo test
   greeting = shell("echo 'Hello from Shell'");
   clean = greeting.trim();

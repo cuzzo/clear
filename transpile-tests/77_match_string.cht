@@ -8,7 +8,7 @@ FN classify(cmd: String) RETURNS Int64 ->
   RETURN result;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Static string literals: should hit matching case
   r1 = classify("hello");
   ASSERT r1 == 1, "MATCH string: should hit 'hello' case";

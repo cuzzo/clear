@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Optional with value
     maybe_num: ?Int64 = 42;
     ASSERT maybe_num? == 42, "Optional should unwrap to 42";

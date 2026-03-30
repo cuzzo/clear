@@ -225,7 +225,7 @@ RSpec.describe SemanticAnnotator do
       context "lambda assigned to FN(Int64) -> Bool variable" do
         let(:source) {
           <<~CLEAR
-            FN cheatMain() RETURNS Void ->
+            FN main() RETURNS Void ->
               cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
             END
           CLEAR
@@ -322,7 +322,7 @@ RSpec.describe SemanticAnnotator do
       context "cb(5) where cb: FN(Int64) -> Bool" do
         let(:source) {
           <<~CLEAR
-            FN cheatMain() RETURNS Void @nonReentrant ->
+            FN main() RETURNS Void @nonReentrant ->
               cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
               result: Bool = cb(5);
             END
@@ -337,7 +337,7 @@ RSpec.describe SemanticAnnotator do
       context "add(3, 4) where add: FN(Int64, Int64) -> Int64" do
         let(:source) {
           <<~CLEAR
-            FN cheatMain() RETURNS Void @nonReentrant ->
+            FN main() RETURNS Void @nonReentrant ->
               add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
               sum: Int64 = add(3, 4);
             END
@@ -439,7 +439,7 @@ RSpec.describe SemanticAnnotator do
           FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool @nonReentrant ->
             RETURN cb(n);
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             result: Bool = apply(isPositive, 5);
           END
         CLEAR

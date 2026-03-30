@@ -22,7 +22,7 @@
 
 STRUCT SearchResult { filename: String, count: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     needle = "the";
     data_dir = "benchmarks/10_concurrent_search/data";

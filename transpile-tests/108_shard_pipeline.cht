@@ -3,7 +3,7 @@
 -- Exercises: SHARD routing, CONCURRENT EACH with @sharded HashMap,
 -- multiple SHARD blocks in sequence (caught a codegen semicolon bug).
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE map: HashMap<String>@sharded(2) = {};
     n = 100_i64;
 

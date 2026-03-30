@@ -1,6 +1,6 @@
 STRUCT Item { name: String, value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Test 1: Sort structs by field
   items = [
     Item{ name: "c", value: 30_i64 },

@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   MUTABLE score = 10;
   is_valid = score > 5;
 

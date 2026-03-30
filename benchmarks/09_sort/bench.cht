@@ -110,7 +110,7 @@ FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void
   RETURN;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   n = 1000000_i64;
 
   -- Build data: permutation of [0, N-1] via Knuth multiplicative hash

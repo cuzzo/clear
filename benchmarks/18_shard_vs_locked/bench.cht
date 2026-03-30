@@ -16,7 +16,7 @@
 --
 -- Compare to Go (sync.Map) and Rust (dashmap).
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE map: HashMap<String>@sharded(8) = {};
     n = 1000000;
 

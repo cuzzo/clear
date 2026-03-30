@@ -3,7 +3,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Simple variable compound assignment
     MUTABLE x = 10;
     x += 5;

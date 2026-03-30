@@ -1158,7 +1158,7 @@ RSpec.describe SemanticAnnotator do
     context "CONCURRENT option validation" do
       it "rejects workers of 0" do
         code = <<~CLEAR
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0, 2.0];
             result = nums s> CONCURRENT(workers: 0) SELECT _ * 2.0;
             RETURN;
@@ -1169,7 +1169,7 @@ RSpec.describe SemanticAnnotator do
 
       it "rejects negative workers" do
         code = <<~CLEAR
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0];
             result = nums s> CONCURRENT(workers: -1) SELECT _ * 2.0;
             RETURN;
@@ -1180,7 +1180,7 @@ RSpec.describe SemanticAnnotator do
 
       it "rejects unknown options" do
         code = <<~CLEAR
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0];
             result = nums s> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
             RETURN;
@@ -1191,7 +1191,7 @@ RSpec.describe SemanticAnnotator do
 
       it "rejects non-Bool pin value" do
         code = <<~CLEAR
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0];
             result = nums s> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
             RETURN;
@@ -1210,7 +1210,7 @@ RSpec.describe SemanticAnnotator do
           FN double(x: Number) RETURNS Number ->
             RETURN x * 2.0;
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0, 2.0];
             result = nums s> CONCURRENT SELECT double(_) OR PRUNE;
             RETURN;
@@ -1224,7 +1224,7 @@ RSpec.describe SemanticAnnotator do
           FN double(x: Number) RETURNS Number ->
             RETURN x * 2.0;
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0, 2.0];
             result = nums s> CONCURRENT SELECT double(_) OR RAISE;
             RETURN;
@@ -1238,7 +1238,7 @@ RSpec.describe SemanticAnnotator do
           FN mayFail(x: Number) RETURNS !Number ->
             RETURN x * 2.0;
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             nums: Number[] = [1.0, 2.0];
             result = nums s> CONCURRENT SELECT mayFail(_) OR PRUNE;
             RETURN;
@@ -1258,14 +1258,14 @@ RSpec.describe SemanticAnnotator do
         FN double(x: Number) RETURNS Number ->
           RETURN x * 2.0;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG { 5.0 AS n THEN double(n) };
           v = NEXT h;
           RETURN;
         END
       CLEAR
       tree = run(code)
-      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
       expect(bg.full_type.to_s).to eq("~Number")
     end
@@ -1278,14 +1278,14 @@ RSpec.describe SemanticAnnotator do
         FN double(x: Number) RETURNS Number ->
           RETURN x * 2.0;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
           v = NEXT h;
           RETURN;
         END
       CLEAR
       tree = run(code)
-      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
       expect(bg.full_type.to_s).to eq("~Number")
     end
@@ -1295,14 +1295,14 @@ RSpec.describe SemanticAnnotator do
         FN double(x: Number) RETURNS Number ->
           RETURN x * 2.0;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG { double(1.0) THEN double(2.0) };
           v = NEXT h;
           RETURN;
         END
       CLEAR
       tree = run(code)
-      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
       expect(bg.full_type.to_s).to eq("~Number")
     end
@@ -1312,7 +1312,7 @@ RSpec.describe SemanticAnnotator do
         FN add(a: Number, b: Number) RETURNS Number ->
           RETURN a + b;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG { 3.0 AS x THEN add(x, x) };
           v = NEXT h;
           RETURN;
@@ -1326,7 +1326,7 @@ RSpec.describe SemanticAnnotator do
         FN foo() RETURNS Number ->
           RETURN 1.0;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG { foo() AS f; };
           RETURN;
         END
@@ -1339,14 +1339,14 @@ RSpec.describe SemanticAnnotator do
         FN double(x: Number) RETURNS Number ->
           RETURN x * 2.0;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG { double(1.0) AS r THEN double(r) };
           v = NEXT h;
           RETURN;
         END
       CLEAR
       tree = run(code)
-      bg_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+      bg_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
                   .body.first.value
       expect(bg_node.body.first).to be_a(AST::ThenChain)
     end
@@ -1356,7 +1356,7 @@ RSpec.describe SemanticAnnotator do
         FN double(x: Number) RETURNS Number ->
           RETURN x * 2.0;
         END
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           h = BG {
             n = double(1.0);
             n AS x THEN double(x)
@@ -1366,7 +1366,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       tree = run(code)
-      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "cheatMain" }
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
       expect(bg.full_type.to_s).to eq("~Number")
     end

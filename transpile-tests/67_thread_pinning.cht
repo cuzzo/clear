@@ -7,7 +7,7 @@ FN noop() RETURNS Void ->
     RETURN;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------
     -- 1. @pinned DO branch
     -- -------------------------

@@ -387,7 +387,7 @@ FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[]@pool, MUTABLE pen
     RETURN eval!(ast, envId, pool);
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE pool: Env[]@pool = [];
     MUTABLE penv: HashMap<Value> = {};
 

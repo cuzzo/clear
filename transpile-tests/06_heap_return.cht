@@ -5,7 +5,7 @@ FN makeUser() RETURNS %User ->
     RETURN u; -- Should disable local free
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     us2 = makeUser();
     -- u2 should be freed here
     RETURN;

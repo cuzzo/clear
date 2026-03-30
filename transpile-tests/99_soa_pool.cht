@@ -4,7 +4,7 @@
 
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Regular array (AOS baseline) for comparison.
     entities = [
         Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 },

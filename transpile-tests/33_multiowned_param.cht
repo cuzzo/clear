@@ -10,7 +10,7 @@ FN sumFields(p: Point) RETURNS Int64 ->
     RETURN p.x + p.y;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     pt = Point{ x: 3, y: 4 } @multiowned;
 
     -- WITH pt { } unwraps the Rc into a plain Point for this block.

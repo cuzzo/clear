@@ -12,7 +12,7 @@ RSpec.describe "Effect Tracking" do
     ast
   end
 
-  def effects_of(source, fn_name = "cheatMain")
+  def effects_of(source, fn_name = "main")
     ast = run(source)
     fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
     fn&.effects || Set.new
@@ -23,7 +23,7 @@ RSpec.describe "Effect Tracking" do
   describe "HEAP effect" do
     it "detects HashMap creation" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE counts: HashMap<Int64> = {"alice": 1_i64, "bob": 2_i64};
           RETURN;
         END
@@ -34,7 +34,7 @@ RSpec.describe "Effect Tracking" do
     it "detects @pool collection" do
       effs = effects_of(<<~CLEAR)
         STRUCT Item { value: Float64 }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE items: Item[]@pool = [];
           RETURN;
         END
@@ -44,7 +44,7 @@ RSpec.describe "Effect Tracking" do
 
     it "detects List[] constructor" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE items = List[];
           RETURN;
         END
@@ -55,7 +55,7 @@ RSpec.describe "Effect Tracking" do
     it "detects capability wrap (@shared)" do
       effs = effects_of(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           c = Counter{ value: 0 } @shared;
           RETURN;
         END
@@ -65,7 +65,7 @@ RSpec.describe "Effect Tracking" do
 
     it "is absent for pure stack code" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = 42;
           y = x + 1;
           RETURN;
@@ -81,7 +81,7 @@ RSpec.describe "Effect Tracking" do
     it "detects WITH EXCLUSIVE" do
       effs = effects_of(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           c = Counter{ value: 0 } @locked;
           WITH EXCLUSIVE c AS inner { inner.value; }
           RETURN;
@@ -92,7 +92,7 @@ RSpec.describe "Effect Tracking" do
 
     it "is absent without WITH EXCLUSIVE" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = 42;
           RETURN;
         END
@@ -106,7 +106,7 @@ RSpec.describe "Effect Tracking" do
   describe "LOOP_UNBOUND effect" do
     it "detects WHILE TRUE" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           WHILE TRUE DO
             BREAK;
           END
@@ -118,7 +118,7 @@ RSpec.describe "Effect Tracking" do
 
     it "is absent for bounded WHILE" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE x = 10;
           WHILE x > 0 DO
             x = x - 1;
@@ -140,7 +140,7 @@ RSpec.describe "Effect Tracking" do
           RETURN n * factorial(n - 1);
         END
 
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = factorial(5);
           RETURN;
         END
@@ -154,7 +154,7 @@ RSpec.describe "Effect Tracking" do
           RETURN n * 2;
         END
 
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = double(5);
           RETURN;
         END
@@ -173,7 +173,7 @@ RSpec.describe "Effect Tracking" do
           RETURN;
         END
 
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           allocates();
           RETURN;
         END
@@ -191,7 +191,7 @@ RSpec.describe "Effect Tracking" do
           RETURN;
         END
 
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           c = Counter{ value: 0 };
           lock_it(c);
           RETURN;
@@ -207,7 +207,7 @@ RSpec.describe "Effect Tracking" do
           RETURN recurse(n - 1);
         END
 
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = recurse(5);
           RETURN;
         END
@@ -217,7 +217,7 @@ RSpec.describe "Effect Tracking" do
 
     it "accumulates multiple effects" do
       effs = effects_of(<<~CLEAR)
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           MUTABLE items = List[];
           WHILE TRUE DO
             BREAK;
@@ -239,7 +239,7 @@ RSpec.describe "Effect Tracking" do
           RETURN a + b;
         END
 
-        FN cheatMain() RETURNS Void ->
+        FN main() RETURNS Void ->
           x = add(1, 2);
           RETURN;
         END

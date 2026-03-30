@@ -242,7 +242,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Int64 }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE c = Counter{ value: 0 } @locked;
             c.value = c.value + 1;
             RETURN;
@@ -251,7 +251,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "succeeds and sets auto_lock on the assignment" do
-        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
         assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
         expect(assign).not_to be_nil
         expect(assign.auto_lock).to eq({ var: "c", sync: :locked })
@@ -262,7 +262,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Int64 }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE c = Counter{ value: 0 } @writeLocked;
             c.value = c.value + 1;
             RETURN;
@@ -271,7 +271,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "succeeds and sets auto_lock with write_locked sync" do
-        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
         assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
         expect(assign).not_to be_nil
         expect(assign.auto_lock).to eq({ var: "c", sync: :write_locked })
@@ -282,7 +282,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Int64 }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE c = Counter{ value: 0 };
             c.value = c.value + 1;
             RETURN;
@@ -291,7 +291,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "does not set auto_lock" do
-        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
         assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
         expect(assign).not_to be_nil
         expect(assign.auto_lock).to be_nil
@@ -301,7 +301,7 @@ RSpec.describe SemanticAnnotator do
     context "compound assignment += desugars to x = x + expr" do
       let(:code) {
         <<~FLUX
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE x = 10;
             x += 5;
             RETURN;
@@ -318,7 +318,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Int64 }
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE c = Counter{ value: 0 };
             c.value += 10;
             RETURN;
@@ -951,7 +951,7 @@ RSpec.describe SemanticAnnotator do
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             ASSERT fib(5) == 5;
           END
         CLEAR
@@ -1001,7 +1001,7 @@ RSpec.describe SemanticAnnotator do
           FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
             RETURN cb(x);
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
             result: Int64 = apply(double, 3);
           END
         CLEAR
@@ -1016,7 +1016,7 @@ RSpec.describe SemanticAnnotator do
           FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
             RETURN cb(x);
           END
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         zig = transpile(code)
@@ -1025,7 +1025,7 @@ RSpec.describe SemanticAnnotator do
 
       it "does not emit safety import when no @nonReentrant functions exist" do
         code = <<~CLEAR
-          FN cheatMain() RETURNS Void ->
+          FN main() RETURNS Void ->
           END
         CLEAR
         zig = transpile(code)

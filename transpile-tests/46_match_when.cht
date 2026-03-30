@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   MUTABLE result = 0_i64;
   n = 7_i64;
 

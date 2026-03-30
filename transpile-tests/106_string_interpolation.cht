@@ -1,6 +1,6 @@
 -- Test: string interpolation with ${expr} syntax.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     name = "World";
     greeting = "Hello, ${name}!";
     ASSERT greeting == "Hello, World!", "basic interpolation";

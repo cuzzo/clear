@@ -14,7 +14,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     MUTABLE c = Counter{ value: 0 } @local;
 
     t0 = timestampMs();

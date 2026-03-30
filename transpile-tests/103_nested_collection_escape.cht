@@ -23,7 +23,7 @@ FN buildMapDirect() RETURNS MapHolder ->
     RETURN MapHolder{ data: m, label: "direct" };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Test 1: List in struct survives function return
     h1 = buildListDirect();
     ASSERT h1.items.length() == 3;

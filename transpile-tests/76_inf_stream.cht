@@ -2,7 +2,7 @@
 -- BG STREAM { WHILE TRUE DO YIELD x; END } creates a generator that rendezvous with
 -- each NEXT call. The generator blocks after each YIELD until NEXT is called.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Infinite counter stream — consume first 3 values.
     -- -------------------------------------------------------

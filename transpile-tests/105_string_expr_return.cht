@@ -15,7 +15,7 @@ FN formatNum(label: String, n: Int64) RETURNS String ->
     RETURN label + ": " + num;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Test 1: expression return (BinaryOp on frame string)
     g = greet("John", "Doe");
     MUTABLE i: Int64 = 0;

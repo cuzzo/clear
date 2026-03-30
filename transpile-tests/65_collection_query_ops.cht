@@ -3,7 +3,7 @@
 
 STRUCT Item { value: Float64, active: Bool }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
     -- COUNT: how many elements are greater than 3?

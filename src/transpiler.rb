@@ -129,9 +129,9 @@ class ZigTranspiler
     body = transpile_module(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
 
-    # If the module defines cheatMain, emit a Zig test block so the module
+    # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
-    has_cheat_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "cheatMain" }
+    has_cheat_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
     test_block = if has_cheat_main
       <<~ZIG_TEST
 
@@ -144,7 +144,7 @@ class ZigTranspiler
             var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
             defer rt.deinit();
             rt.wireAllocator();
-            try cheatMain(&rt);
+            try main(&rt);
         }
       ZIG_TEST
     else

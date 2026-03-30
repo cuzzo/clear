@@ -10,7 +10,7 @@ END
 
 -- Test: data created inside a function is still accessible after the function returns.
 -- Proves that the Rc prevents premature deallocation of the inner heap Node.
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     n = makeNode(7);
     ASSERT n.id == 7, "id should be 7 after function return";
 

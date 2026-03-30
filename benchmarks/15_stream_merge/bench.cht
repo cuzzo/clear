@@ -8,7 +8,7 @@
 -- Each YIELD suspends the producer fiber; NEXT resumes it.
 -- Zero channel overhead, zero lock contention.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     -- Create 8 producer streams (infinite — consumer controls iteration count)
     s0: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 1; WHILE TRUE DO x = x * 6364136223846793005_i64 + 1442695040888963407_i64; YIELD x; END };

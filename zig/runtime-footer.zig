@@ -1,7 +1,7 @@
 // Multi-threaded bootstrapper.
 //
 // Spawns N schedulers (N = CPU count), each with its own io_uring ring and
-// epoll instance.  The main thread runs Scheduler 0 (which owns cheatMain);
+// epoll instance.  The main thread runs Scheduler 0 (which owns main);
 // N-1 worker threads run idle schedulers that steal work via the existing
 // Chase-Lev work-stealing deque in RunQueue.
 //
@@ -9,7 +9,7 @@
 //   - GPA allocator
 //   - EbrContext  (thread-safe — has its own registry_lock)
 //   - StackPool   (thread-safe — slab allocator with atomic free lists)
-//   - shutdown    (atomic bool — signals workers to exit after cheatMain)
+//   - shutdown    (atomic bool — signals workers to exit after main)
 //
 // Per-thread:
 //   - Scheduler   (owns io_uring ring + epoll + ready_queue + inbox)
@@ -113,12 +113,12 @@ pub fn main() !void {
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
 
-    // 8. Submit cheatMain as a fiber on the main scheduler.
+    // 8. Submit main as a fiber on the main scheduler.
     const MainRunner = struct {
         outer_rt: *Runtime,
         fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(raw_args.?));
-            const result = try cheatMain(self.outer_rt);
+            const result = try main(self.outer_rt);
             const RType = @TypeOf(result);
             if (@typeInfo(RType) == .pointer) {
                 CheatLib.free(self.outer_rt, result);

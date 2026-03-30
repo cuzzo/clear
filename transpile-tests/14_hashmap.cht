@@ -1,4 +1,4 @@
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   MUTABLE counts = {"dummy": 0_i64}; -- Init Map
 
   word_str = "apple banana apple";

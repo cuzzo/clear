@@ -1,6 +1,6 @@
 STRUCT Item { name: String, value: Int64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Test 1: Basic LIMIT
   nums: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
   first_three = nums s> LIMIT 3;

@@ -10,7 +10,7 @@
 -- Known issue: v0.1 uses GPA for task creation. Object pooling (v0.2) will
 -- reduce per-spawn cost to ~2-5μs, closing the gap with Go (~2.4μs/goroutine).
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE futures: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;

@@ -27,7 +27,7 @@ FN firstOf<T>(p: Pair<T>) RETURNS T ->
   RETURN p.first;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- identity with Float64
   n = identity(42.0);
   ASSERT n == 42.0;

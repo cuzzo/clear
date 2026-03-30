@@ -1,6 +1,6 @@
 -- Test: FOR range loop — inclusive (..=) and exclusive (..<) ranges.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Inclusive range: 1 + 2 + 3 + 4 + 5 = 15
     MUTABLE sum_incl: Int64 = 0;
     FOR i IN (1_i64..=5_i64) DO

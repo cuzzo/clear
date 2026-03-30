@@ -1,6 +1,6 @@
 -- Test: timestampMs(), sleep(), random(), randomInt() standard library.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- timestampMs: returns positive Int64
     t1 = timestampMs();
     ASSERT t1 > 0, "timestampMs should be positive";

@@ -8,7 +8,7 @@ FN makeContainer(v: Int64) RETURNS Container ->
     RETURN c;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Container owns a heap-allocated Node
     container = makeContainer(777);
 

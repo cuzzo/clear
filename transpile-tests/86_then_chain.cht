@@ -9,7 +9,7 @@ FN add_one(x: Float64) RETURNS Float64 ->
     RETURN x + 1.0;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Simple two-step THEN chain with AS binding.
     -- add_one(5) = 6, double(6) = 12

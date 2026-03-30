@@ -1,6 +1,6 @@
 STRUCT Point { x: Float64, y: Float64, z: Float64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- PASS no-op test
   MUTABLE tag = 0;
   MATCH tag START

@@ -5,7 +5,7 @@ FN triple(item: Item) RETURNS Float64 ->
     RETURN item.value * 3.0;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Edge case 1: empty collection produces empty result
     empty: Item[] = [];
     empty_results = empty s> CONCURRENT(workers: 4) SELECT triple(_);

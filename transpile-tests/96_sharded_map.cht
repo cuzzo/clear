@@ -2,7 +2,7 @@
 -- Each shard is an independent StringHashMapUnmanaged, routed by key hash.
 -- No locks, no atomic ops — sharding IS the concurrency strategy.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- String-keyed sharded map with 2 shards.
     MUTABLE counts: HashMap<Int64>@sharded(2) = {};
 

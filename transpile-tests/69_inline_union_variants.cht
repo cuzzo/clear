@@ -46,7 +46,7 @@ FN extract_event_x(ev: Event) RETURNS Float64 ->
   RETURN x;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Unit variant is unchanged
   ASSERT classify(Shape.Point) == 0.0, "Unit variant Point";
 

@@ -8,7 +8,7 @@ FN fib(n: Int64) RETURNS Int64 @reentrant ->
     RETURN fib(n - 1) + fib(n - 2);
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     r = fib(35);
     elapsed = timestampMs() - t0;

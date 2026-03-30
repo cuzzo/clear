@@ -13,7 +13,7 @@ FN makePoint(x: Int64, y: Int64) RETURNS Point ->
     RETURN p;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- 4. Receive Stack Object
     p1 = makePoint(10, 20);
 

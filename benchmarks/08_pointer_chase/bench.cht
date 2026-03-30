@@ -53,7 +53,7 @@
 
 STRUCT Node { val: Int64, next: ?Id<Node> }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     t0 = timestampMs();
     n_nodes = 2000000_i64;
     step    = 999983_i64;

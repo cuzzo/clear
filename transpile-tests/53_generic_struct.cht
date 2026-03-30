@@ -14,7 +14,7 @@ FN wrapNumber(n: Float64) RETURNS Wrapper<Float64> ->
   RETURN Wrapper<Float64>{ value: n };
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Phase 3: generic struct literals with type args.
   p = Pair<Float64>{ first: 1.0, second: 2.0 };
   ASSERT p.first == 1.0;

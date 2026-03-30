@@ -28,7 +28,7 @@ FN double(x: Int64) RETURNS Int64 ->
   RETURN x * 2;
 END
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   ASSERT fib(10) == 55;
   result: Int64 = apply(double, 7);
   ASSERT result == 14;

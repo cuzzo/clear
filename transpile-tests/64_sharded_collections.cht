@@ -4,7 +4,7 @@
 
 STRUCT Score { value: Float64 }
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- @pool:sharded(4): 4 independent Pool(Score) shards behind a single interface
     MUTABLE sp: Score[]@pool:sharded(4) = [];
 

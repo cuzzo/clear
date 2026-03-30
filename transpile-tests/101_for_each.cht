@@ -1,6 +1,6 @@
 -- Test: FOR ... IN collection — iterate over arrays, lists, and maps.
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
     -- Fixed array iteration
     items: Int64[4] = [10_i64, 20_i64, 30_i64, 40_i64];
     MUTABLE arr_sum: Int64 = 0;
