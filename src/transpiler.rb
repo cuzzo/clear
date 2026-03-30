@@ -1177,7 +1177,7 @@ private
               #{capture_fields}
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                  _ = &__rt;
+                  #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
                   #{body_code}
@@ -1335,7 +1335,7 @@ private
                 #{capture_fields}
                 fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                     const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                    _ = &__rt;
+                    #{(stmt_code + result_line + capture_frees + arena_init).include?("__rt") ? "" : "_ = &__rt;"}
                     #{arena_init}
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
@@ -1414,7 +1414,7 @@ private
                 #{capture_fields}
                 fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                     const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                    _ = &__rt;
+                    #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
                     #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
