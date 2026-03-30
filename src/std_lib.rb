@@ -269,6 +269,46 @@ STD_LIB = {
     return: :Void,
     zig: "try CheatLib.socketWriteVoid({0}, {1})"
   },
+
+  # -------------------------------------------------------------------------
+  # Clock & Timing
+  # -------------------------------------------------------------------------
+
+  # Wall clock milliseconds since Unix epoch.
+  # Usage: start = timestampMs(); ... elapsed = timestampMs() - start;
+  "timestampMs" => {
+    args: [],
+    return: :Int64,
+    zig: "CheatLib.timestampMs()"
+  },
+
+  # Sleep the current fiber for N milliseconds. Cooperative — other fibers run.
+  # Usage: sleep(100);
+  "sleep" => {
+    args: [:Int64],
+    return: :Void,
+    zig: "rt.sleep(@intCast(@as(u64, @bitCast({0}))))"
+  },
+
+  # -------------------------------------------------------------------------
+  # Random
+  # -------------------------------------------------------------------------
+
+  # Random float in [0.0, 1.0). Cryptographically secure.
+  # Usage: val = random();
+  "random" => {
+    args: [],
+    return: :Float64,
+    zig: "CheatLib.random()"
+  },
+
+  # Random integer in [0, max). Cryptographically secure.
+  # Usage: idx = randomInt(100);
+  "randomInt" => {
+    args: [:Int64],
+    return: :Int64,
+    zig: "CheatLib.randomInt({0})"
+  },
 }
 
 # ============================================================================

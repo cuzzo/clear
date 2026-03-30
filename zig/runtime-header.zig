@@ -630,6 +630,41 @@ pub const CheatLib = struct {
         return std.fmt.parseInt(i64, s, 10);
     }
 
+    // -----------------------------------------------------------------
+    // Clock & Timing
+    // -----------------------------------------------------------------
+
+    /// Wall clock milliseconds since Unix epoch.
+    pub fn timestampMs() i64 {
+        return std.time.milliTimestamp();
+    }
+
+    // sleep is called directly on rt: rt.sleep(ms) — see Runtime.sleep in runtime.zig
+
+    // -----------------------------------------------------------------
+    // Random
+    // -----------------------------------------------------------------
+
+    /// Random float in [0.0, 1.0). Uses OS CSPRNG.
+    pub fn random() f64 {
+        var bytes: [8]u8 = undefined;
+        std.crypto.random.bytes(&bytes);
+        // Use top 52 bits as mantissa of a double in [1.0, 2.0), then subtract 1.0
+        const bits = std.mem.readInt(u64, &bytes, .little);
+        const mantissa = (bits >> 12) | (0x3FF << 52); // exponent = 1023 = 1.0
+        return @as(f64, @bitCast(mantissa)) - 1.0;
+    }
+
+    /// Random integer in [0, max). Uses OS CSPRNG.
+    pub fn randomInt(max: i64) i64 {
+        if (max <= 0) return 0;
+        const umax: u64 = @intCast(max);
+        var bytes: [8]u8 = undefined;
+        std.crypto.random.bytes(&bytes);
+        const val = std.mem.readInt(u64, &bytes, .little);
+        return @intCast(val % umax);
+    }
+
     pub fn intToString(allocator: std.mem.Allocator, value: i64) ![]const u8 {
         // Max i64 is 19 digits + sign + null = 21 bytes; allocate 21
         var buf: [21]u8 = undefined;
