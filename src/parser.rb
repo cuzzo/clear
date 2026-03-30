@@ -76,7 +76,7 @@ class Parser
   stmt(:KEYWORD, 'STRUCT') { parse_struct_def }
   stmt(:KEYWORD, 'ENUM')   { parse_enum_def }
   stmt(:KEYWORD, 'UNION')  { parse_union_def }
-  stmt(:KEYWORD, 'WHILE', AST::WhileLoop, ['WHILE', :expression, 'DO', :stmts_until_end, 'END'])
+  stmt(:KEYWORD, 'WHILE') { parse_while_loop }
   stmt(:KEYWORD, 'FOR') { parse_for_range }
   stmt(:KEYWORD, 'TIGHT') { parse_tight_stmt }
   stmt(:KEYWORD, 'RETURN') { parse_return }
@@ -486,9 +486,17 @@ class Parser
     # Reuse the standard WHILE pattern; then annotate as tight
     consume(:KEYWORD, 'WHILE')
     cond  = parse_expression
-    consume(:KEYWORD, 'DO')
-    body  = parse_block_body(['END'])
-    consume(:KEYWORD, 'END')
+
+    if match?(:ARROW, '->')
+      consume(:ARROW, '->')
+      stmt = parse_statement
+      body = [stmt].compact
+    else
+      consume(:KEYWORD, 'DO')
+      body  = parse_block_body(['END'])
+      consume(:KEYWORD, 'END')
+    end
+
     node = AST::WhileLoop.new(tight_token, cond, body, nil)
     node.tight = true
     node
@@ -1004,6 +1012,14 @@ class Parser
 
   def parse_if_chain(if_token)
     condition = parse_expression
+
+    # Shorthand: IF condition -> single_statement;
+    if match?(:ARROW, '->')
+      consume(:ARROW, '->')
+      stmt = parse_statement
+      return AST::IfStatement.new(if_token, condition, [stmt].compact, [])
+    end
+
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
 
@@ -1044,9 +1060,16 @@ class Parser
       expr = parse_expression
     end
 
-    consume(:KEYWORD, 'DO')
-    body = parse_stmts_until_end
-    consume(:KEYWORD, 'END')
+    # Shorthand: FOR var IN range -> single_statement;
+    if match?(:ARROW, '->')
+      consume(:ARROW, '->')
+      stmt = parse_statement
+      body = [stmt].compact
+    else
+      consume(:KEYWORD, 'DO')
+      body = parse_stmts_until_end
+      consume(:KEYWORD, 'END')
+    end
 
     if expr.is_a?(AST::RangeLit)
       AST::ForRange.new(tok, var_name, expr.start, expr.finish, expr.inclusive, body, nil)
@@ -1149,6 +1172,23 @@ class Parser
   def parse_raise_msg
     return nil if match?(:CHAR, ';')
     parse_expression
+  end
+
+  def parse_while_loop
+    tok = consume(:KEYWORD, 'WHILE')
+    condition = parse_expression
+
+    # Shorthand: WHILE condition -> single_statement;
+    if match?(:ARROW, '->')
+      consume(:ARROW, '->')
+      stmt = parse_statement
+      return AST::WhileLoop.new(tok, condition, [stmt].compact)
+    end
+
+    consume(:KEYWORD, 'DO')
+    body = parse_stmts_until_end
+    consume(:KEYWORD, 'END')
+    AST::WhileLoop.new(tok, condition, body)
   end
 
   def parse_stmts_until_end
