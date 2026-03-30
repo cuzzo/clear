@@ -6,6 +6,47 @@ module PipelineGenerator
     "__pblk#{@pipe_label_counter}"
   end
 
+  # Save and restore all pipeline state around a block. Ensures that nested
+  # pipeline visits (chained pipelines, SHARD bodies, etc.) don't leak state.
+  # Any keyword argument overrides the corresponding state for the block's duration.
+  def with_pipeline_context(placeholder: nil, acc: nil, soa: :inherit, shard_map: nil, shard_idx: nil, shard_key: nil)
+    prev_placeholder = @placeholder_name
+    prev_acc         = @acc_placeholder
+    prev_shard_map   = @shard_direct_map
+    prev_shard_idx   = @shard_direct_idx
+    prev_shard_key   = @shard_direct_key
+
+    @placeholder_name  = placeholder
+    @acc_placeholder   = acc
+    @shard_direct_map  = shard_map
+    @shard_direct_idx  = shard_idx
+    @shard_direct_key  = shard_key
+
+    # SOA state: only save/restore when explicitly set (soa: true/false).
+    # :inherit means "don't touch SOA" — lets inner visit_pipeline_expr's
+    # SOA fields accumulate and be read by the outer macro.
+    managing_soa = soa != :inherit
+    if managing_soa
+      prev_soa_active = @soa_rewrite_active
+      prev_soa_fields = @soa_needed_fields
+      @soa_rewrite_active = soa
+      @soa_needed_fields = Set.new if soa
+    end
+
+    result = yield
+  ensure
+    @placeholder_name   = prev_placeholder
+    @acc_placeholder    = prev_acc
+    @shard_direct_map   = prev_shard_map
+    @shard_direct_idx   = prev_shard_idx
+    @shard_direct_key   = prev_shard_key
+    if managing_soa
+      @soa_rewrite_active = prev_soa_active
+      @soa_needed_fields  = prev_soa_fields
+    end
+    result
+  end
+
   # Consolidates boilerplate for collection operators (SELECT, WHERE, etc.)
   # Handles source list extraction, allocator selection, and Zig block wrapping.
   #
@@ -157,15 +198,16 @@ module PipelineGenerator
   # When the collection is @pool:soa, _.field accesses in the expression
   # are rewritten to __soa_field[__soa_i] (field-slice access).
   def visit_pipeline_expr(list_node, expr_node, placeholder = "it")
-    @placeholder_name = placeholder
     lhs_t = list_node.type_info
     is_soa = (lhs_t&.pool? || lhs_t&.list_collection?) && lhs_t&.soa?
+    # SOA state is set directly (not via with_pipeline_context) because
+    # @soa_needed_fields must survive beyond the visit — the caller
+    # (transpile_pipeline_macro) reads it after this returns.
     @soa_rewrite_active = is_soa
     @soa_needed_fields = Set.new if is_soa
-    code = visit(expr_node)
-    @placeholder_name = nil
-    @soa_rewrite_active = false
-    code
+    with_pipeline_context(placeholder: placeholder) do
+      visit(expr_node)
+    end
   end
 
   def transpile_select_projection(list_node, expression_node)
@@ -202,9 +244,7 @@ module PipelineGenerator
   def transpile_index_grouping(list_node, expression_node, smooth_node)
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 
-    @placeholder_name = "it"
-    expr_code = visit(expression_node)
-    @placeholder_name = nil
+    expr_code = with_pipeline_context(placeholder: "it") { visit(expression_node) }
 
     init = "var idx_result: CheatLib.StringMap(std.ArrayListUnmanaged(#{element_zig_type})) = .{ .alloc = rt.frameAlloc() };"
 
@@ -227,11 +267,7 @@ module PipelineGenerator
     acc_type = transpile_type(reduce_node.full_type)
     initial_code = visit(reduce_node.initial_value)
 
-    @placeholder_name = "it"
-    @acc_placeholder = "acc"
-    expr_code = visit(reduce_node.expression)
-    @placeholder_name = nil
-    @acc_placeholder = nil
+    expr_code = with_pipeline_context(placeholder: "it", acc: "acc") { visit(reduce_node.expression) }
 
     init = "var acc: #{acc_type} = #{initial_code};"
 
@@ -248,11 +284,8 @@ module PipelineGenerator
   def transpile_order_by(list_node, order_node, smooth_node)
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 
-    @placeholder_name = "a"
-    key_expr_a = visit(order_node.expression)
-    @placeholder_name = "b"
-    key_expr_b = visit(order_node.expression)
-    @placeholder_name = nil
+    key_expr_a = with_pipeline_context(placeholder: "a") { visit(order_node.expression) }
+    key_expr_b = with_pipeline_context(placeholder: "b") { visit(order_node.expression) }
 
     init = <<~ZIG
       var ord_result = try CheatLib.makeList(#{element_zig_type}, {alloc}, pipe_items);
@@ -293,9 +326,7 @@ module PipelineGenerator
     inner_element_type = unnest_node.full_type.element_type.resolved.to_s
     inner_zig_type = transpile_type(inner_element_type)
 
-    @placeholder_name = "it"
-    expr_code = visit(unnest_node.expression)
-    @placeholder_name = nil
+    expr_code = with_pipeline_context(placeholder: "it") { visit(unnest_node.expression) }
 
     transpile_pipeline_macro(list_node, smooth_node, res_type: inner_element_type, force_aos: true) do |alloc|
       <<~ZIG
@@ -317,11 +348,8 @@ module PipelineGenerator
   def transpile_distinct(list_node, distinct_node, smooth_node)
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 
-    @placeholder_name = "it"
-    expr_code = visit(distinct_node.expression)
-    @placeholder_name = "it2"
-    expr_code_inner = visit(distinct_node.expression)
-    @placeholder_name = nil
+    expr_code = with_pipeline_context(placeholder: "it") { visit(distinct_node.expression) }
+    expr_code_inner = with_pipeline_context(placeholder: "it2") { visit(distinct_node.expression) }
 
     transpile_pipeline_macro(list_node, smooth_node, res_type: list_node.full_type.element_type.resolved.to_s, force_aos: true) do |alloc|
       <<~ZIG
@@ -357,12 +385,12 @@ module PipelineGenerator
     each_op  = smooth_node.right
     lhs_type = lhs.type_info
 
-    @placeholder_name = "__each_item"
-    body_code = each_op.body.map { |stmt|
-      code = visit(stmt)
-      code.strip.end_with?(";") ? code : "#{code};"
-    }.join("\n        ")
-    @placeholder_name = nil
+    body_code = with_pipeline_context(placeholder: "__each_item") do
+      each_op.body.map { |stmt|
+        code = visit(stmt)
+        code.strip.end_with?(";") ? code : "#{code};"
+      }.join("\n        ")
+    end
 
     if lhs_type&.pool?
       if lhs_type.sharded?
@@ -775,9 +803,9 @@ module PipelineGenerator
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
     # For the worker body, items accessed via ctx.items (the context struct).
-    @placeholder_name = "ctx.items[__idx]"
-    inner_code = with_fiber_capture_map({}) { visit(inner_expr) }
-    @placeholder_name = nil
+    inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
+      with_fiber_capture_map({}) { visit(inner_expr) }
+    end
     bare_code = inner_code.sub(/^try /, '')
 
     err_field   = policy == :raise ? "\n              err:    *std.atomic.Value(u16)," : ""
@@ -862,9 +890,9 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
-    @placeholder_name = "ctx.items[__idx]"
-    inner_code = with_fiber_capture_map({}) { visit(inner_expr) }
-    @placeholder_name = nil
+    inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
+      with_fiber_capture_map({}) { visit(inner_expr) }
+    end
     bare_code = inner_code.sub(/^try /, '')
 
     err_field    = policy == :raise ? "\n              err:    *std.atomic.Value(u16)," : ""
@@ -944,14 +972,14 @@ module PipelineGenerator
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
     # For EACH workers, the placeholder references the shared items array by index.
-    @placeholder_name = "ctx.items[__idx]"
-    body_code = with_fiber_capture_map({}) do
-      each_op.body.map { |stmt|
-        code = visit(stmt)
-        code.strip.end_with?(";") ? code : "#{code};"
-      }.join("\n                      ")
+    body_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
+      with_fiber_capture_map({}) do
+        each_op.body.map { |stmt|
+          code = visit(stmt)
+          code.strip.end_with?(";") ? code : "#{code};"
+        }.join("\n                      ")
+      end
     end
-    @placeholder_name = nil
 
     spawn_call = concurrent_spawn_call(options, "__cce#{id}_wg", "__CceWorker#{id}", "__cce#{id}_workers[__w]")
 
@@ -1018,9 +1046,9 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
-    @placeholder_name = "ctx.items[__idx]"
-    expr_code = with_fiber_capture_map({}) { visit(op_node.expression) }
-    @placeholder_name = nil
+    expr_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
+      with_fiber_capture_map({}) { visit(op_node.expression) }
+    end
 
     spawn_call = concurrent_spawn_call(options, "__ccr#{id}_wg", "__CcrWorker#{id}", "__ccr#{id}_workers[__w]")
 
@@ -1169,28 +1197,23 @@ module PipelineGenerator
     exclusive   = !range_node.inclusive
 
     # Build the key expression with `_` bound to the routing loop variable.
-    @placeholder_name = "__sh#{id}_i"
-    key_code = visit(key_expr_node)
-    @placeholder_name = nil
+    key_code = with_pipeline_context(placeholder: "__sh#{id}_i") { visit(key_expr_node) }
 
     # Build the EACH body. Map accesses use putDirect/getDirect (no double hash).
-    # The map is redirected to ctx.map_ptr. For auto-detected, we also set a flag
-    # so the transpiler emits Direct methods and passes shard_idx.
     captures = map_var_name ? { map_var_name => "ctx.map_ptr" } : {}
-    @placeholder_name = "__sh#{id}_keys[__sh#{id}_ki]"
-    @shard_direct_map = map_var_name  # flag: emit putDirect/getDirect for this map
-    @shard_direct_idx = "ctx.shard_idx"
-    @shard_direct_key = "__sh#{id}_keys[__sh#{id}_ki]"  # pre-routed key from queue
-    body_code = with_fiber_capture_map(captures) do
-      each_op.body.map { |stmt|
-        code = visit(stmt)
-        code.strip.end_with?(";") ? code : "#{code};"
-      }.join("\n                          ")
+    body_code = with_pipeline_context(
+      placeholder: "__sh#{id}_keys[__sh#{id}_ki]",
+      shard_map: map_var_name,
+      shard_idx: "ctx.shard_idx",
+      shard_key: "__sh#{id}_keys[__sh#{id}_ki]"
+    ) do
+      with_fiber_capture_map(captures) do
+        each_op.body.map { |stmt|
+          code = visit(stmt)
+          code.strip.end_with?(";") ? code : "#{code};"
+        }.join("\n                          ")
+      end
     end
-    @shard_direct_map = nil
-    @shard_direct_idx = nil
-    @shard_direct_key = nil
-    @placeholder_name = nil
 
     range_op = exclusive ? "<" : "<="
 
