@@ -118,7 +118,7 @@ pub fn main() !void {
         outer_rt: *Runtime,
         fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(raw_args.?));
-            const result = try main(self.outer_rt);
+            const result = try clearMain(self.outer_rt);
             const RType = @TypeOf(result);
             if (@typeInfo(RType) == .pointer) {
                 CheatLib.free(self.outer_rt, result);

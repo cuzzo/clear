@@ -1,0 +1,69 @@
+-- Benchmark 21: Frame vs Heap Escape — The Memory Boundary Tax
+--
+-- Measures the cost of frame allocation (CLEAR's fast path) vs heap
+-- promotion (the escape path). Both variants build millions of short-lived
+-- strings in a loop. Variant A keeps data on the frame (rewound each
+-- iteration). Variant B forces heap promotion by returning strings from
+-- a helper function.
+--
+-- Expected: Frame path is significantly faster — no GPA lock, no free
+-- list traversal, just a bump pointer reset per iteration.
+
+-- Variant A: Frame-local strings. Built and discarded each iteration.
+-- The frame mark rewinds at the end of each loop iteration, so all
+-- string data is freed in O(1) — zero GPA calls.
+FN benchFrame(n: Int64) RETURNS Int64 ->
+    MUTABLE total: Int64 = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < n DO
+        s = "item-${i.toString()}-value";
+        total += s.length();
+        i += 1;
+    END
+    RETURN total;
+END
+
+-- Helper that returns a heap-promoted string (escape path).
+FN makeString(i: Int64) RETURNS String ->
+    result = "item-${i.toString()}-value";
+    RETURN result;
+END
+
+-- Variant B: Heap-promoted strings. Each iteration calls makeString
+-- which promotes the string to heap on return. The caller frees it
+-- via defer. Every iteration pays GPA alloc + free.
+FN benchHeap(n: Int64) RETURNS Int64 ->
+    MUTABLE total: Int64 = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < n DO
+        s = makeString(i);
+        total += s.length();
+        i += 1;
+    END
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    n = 1000000;
+
+    -- Warm up
+    benchFrame(1000);
+    benchHeap(1000);
+
+    -- Benchmark Frame (fast path)
+    t0 = timestampMs();
+    frameTotal = benchFrame(n);
+    frameMs = timestampMs() - t0;
+
+    -- Benchmark Heap (escape path)
+    t1 = timestampMs();
+    heapTotal = benchHeap(n);
+    heapMs = timestampMs() - t1;
+
+    ASSERT frameTotal == heapTotal, "both variants must produce same result";
+
+    print("Frame vs Heap Escape (${n.toString()} iterations)");
+    print("  Frame (no escape):  ${frameMs.toString()} ms");
+    print("  Heap  (promoted):   ${heapMs.toString()} ms");
+    RETURN;
+END

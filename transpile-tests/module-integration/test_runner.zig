@@ -16,5 +16,5 @@ test "module integration" {
     defer rt.deinit();
     rt.wireAllocator();
 
-    try main_module.main(&rt);
+    try main_module.clearMain(&rt);
 }

@@ -144,7 +144,7 @@ class ZigTranspiler
             var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
             defer rt.deinit();
             rt.wireAllocator();
-            try main(&rt);
+            try clearMain(&rt);
         }
       ZIG_TEST
     else
@@ -2428,6 +2428,8 @@ private
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
   def zig_safe_name(name)
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
+    # CLEAR's main() must not collide with Zig's pub fn main() entry point.
+    cleaned = "clearMain" if cleaned == "main"
     cleaned =~ ZIG_PRIMITIVE_RE ? "@\"#{cleaned}\"" : cleaned
   end
 

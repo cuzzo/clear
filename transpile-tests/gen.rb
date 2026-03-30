@@ -69,12 +69,12 @@ class TestGenerator < ZigTranspiler
           // ---------------------------------------------------------
           // Execution (inside a fiber so WaitGroup.wait() can yield)
           // ---------------------------------------------------------
-          if (@hasDecl(S, "main")) {
+          if (@hasDecl(S, "clearMain")) {
               const MainRunner = struct {
                   fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                       _ = raw_args;
                       const rt_ptr = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                      try S.main(rt_ptr);
+                      try S.clearMain(rt_ptr);
                   }
               };
               try sched.submitSpawn(
@@ -93,8 +93,8 @@ class TestGenerator < ZigTranspiler
           // Execution
           // ---------------------------------------------------------
           // We assume every test script defines 'main'
-          if (@hasDecl(S, "main")) {
-             const result = try S.main(&rt);
+          if (@hasDecl(S, "clearMain")) {
+             const result = try S.clearMain(&rt);
 
              // If result is an object pointer, we must simulate the
              // "Caller owns the return" rule to prevent false-positive leaks.
