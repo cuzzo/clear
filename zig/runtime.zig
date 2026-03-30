@@ -368,9 +368,11 @@ pub const Runtime = struct {
         task.is_on_root_stack = true;
         defer task.is_on_root_stack = false;
 
-        // Use g0_top: the top of the OS thread stack, captured at scheduler
-        // startup. Safe distance above main_ctx.sp (the scheduler's saved frames).
-        fc.callOnStack(sched.g0_top, user_fn, arg);
+        // Use the scheduler's saved SP (main_ctx.sp). Stacks grow downward:
+        // the trampoline pushes frames BELOW main_ctx.sp into unused thread
+        // stack space. The scheduler's own frames are ABOVE main_ctx.sp and
+        // are frozen while the fiber runs (cooperative scheduling).
+        fc.callOnStack(sched.main_ctx.sp, user_fn, arg);
     }
 };
 

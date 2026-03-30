@@ -226,7 +226,6 @@ pub const Scheduler = struct {
 
         // io_uring ring for async file I/O (256 SQE slots).
         const ring = try IoUring.init(256, 0);
-
         var sched = Scheduler{
             .stack_pool = stack_pool,
             .fiber_pool = .{},

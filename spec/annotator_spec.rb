@@ -2422,7 +2422,7 @@ RSpec.describe SemanticAnnotator do
         expect(imports.length).to eq(1)
       end
 
-      it "emits the native call without rt and without try" do
+      it "emits the native call trampolined via onRootStack (no rt, no try)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           FN main() RETURNS Void ->
@@ -2430,7 +2430,8 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).to include("native_math.native_add(3.0, 4.0)")
+        expect(output).to include("native_math.native_add(")
+        expect(output).to include("onRootStack")
         expect(output).not_to match(/try native_math\.native_add/)
         expect(output).not_to match(/native_math\.native_add\(rt,/)
       end

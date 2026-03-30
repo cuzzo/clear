@@ -1521,8 +1521,38 @@ private
       mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias}." : ""
 
       if node.respond_to?(:extern_call) && node.extern_call
-        # Native FFI call: no rt injection, no try (native Zig/C return convention)
-        "#{mod_prefix}#{node.name}(#{args_zig.join(', ')})"
+        # Native FFI call: trampoline to g0 stack via onRootStack.
+        # EXTERN functions may use arbitrary stack depth (std.json, C libs).
+        rt_name = @do_rt_name || "rt"
+        @extern_trampoline_counter = (@extern_trampoline_counter || 0) + 1
+        tid = @extern_trampoline_counter
+
+        ret_type = node.full_type
+        ret_zig = ret_type.is_a?(Type) ? ret_type.zig_type : (ret_type == :Void ? "void" : "i64")
+        is_void = (ret_zig == "void")
+
+        arg_fields = args_zig.each_with_index.map { |_, i| "a#{i}: @TypeOf(__ext#{tid}_args[#{i}])" }.join(", ")
+        arg_pass = args_zig.each_with_index.map { |_, i| "f.a#{i}" }.join(", ")
+        arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
+
+        if is_void
+          "{ const __ext#{tid}_args = #{arg_tuple}; " \
+          "const __Ext#{tid} = struct { #{arg_fields}, " \
+          "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
+          "_ = #{mod_prefix}#{node.name}(#{arg_pass}); } }; " \
+          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')} }; " \
+          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); }"
+        else
+          "blk_ext#{tid}: { const __ext#{tid}_args = #{arg_tuple}; " \
+          "const __Ext#{tid} = struct { #{arg_fields}, ret: #{ret_zig} = undefined, " \
+          "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
+          "f.ret = #{mod_prefix}#{node.name}(#{arg_pass}); } }; " \
+          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')} }; " \
+          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); " \
+          "break :blk_ext#{tid} __ext#{tid}_frame.ret; }"
+        end
       elsif node.respond_to?(:fn_var_call) && node.fn_var_call
         # Calling a fn-type variable: always inject rt, always try (unknown callee)
         rt_name = @do_rt_name || "rt"
