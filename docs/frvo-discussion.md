@@ -119,6 +119,7 @@ fn makeString(rt: *Runtime) ![]const u8 {
 Only apply FRVO to "leaf" string/collection operations — functions that do one allocation and return it. These are the common case:
 
 ```clear
+-- ILLUSTRATIVE
 FN greet(name: String) RETURNS String ->
     RETURN "Hello " + name;     -- single concat → FRVO candidate
 END

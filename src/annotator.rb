@@ -2155,14 +2155,12 @@ private
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
 
-      validate_fiber_captures!(node, branch[:body], branch[:parallel], branch[:pinned])
+      analysis = validate_fiber_captures!(node, branch[:body], branch[:parallel], branch[:pinned])
 
-      if !branch[:pinned] && !branch[:parallel] && branch_captures_shared_state?(branch[:body])
+      if analysis && !branch[:pinned]
         branch[:pinned] = true
         note!(node, "DO branch auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
       end
-
-      audit_mark_bg_captures(branch[:body], branch[:parallel])
     end
     node.full_type = :Void
   end
@@ -2232,7 +2230,8 @@ private
       end
     end
 
-    validate_fiber_captures!(node, node.body, node.parallel, node.pinned)
+    # Single walk: validate captures, detect shared state, audit capabilities.
+    analysis = validate_fiber_captures!(node, node.body, node.parallel, node.pinned)
 
     # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
     if @current_bg_pinned && !node.pinned && captures_outer_variables?(node.body, locally_bound)
@@ -2241,18 +2240,16 @@ private
                    "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
     end
 
-    # Auto-pin when shared state is captured.
-    if !node.pinned && !node.parallel && branch_captures_shared_state?(node.body)
+    # Auto-pin when shared state is captured (uses result from validate_fiber_captures!).
+    if analysis && !node.pinned
       node.pinned = true
-      reason = auto_pin_reason(node.body)
-      if reason == :sharded
+      if analysis.has_sharded
         note!(node, "BG block auto-pinned — captures @sharded map (scheduler affinity for shard locality).")
       else
         note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to override.")
       end
     end
 
-    audit_mark_bg_captures(node.body, node.parallel)
     walk_bg_capture_moves(node.body, outer_scope, locally_bound)
     @current_bg_pinned = prev_bg_pinned
   end

@@ -191,92 +191,150 @@ module CapabilityHelper
     end
   end
 
-  # --- Fiber capture validation (shared by BG and DO blocks) ---
+  # --- Fiber capture analysis (shared by BG and DO blocks) ---
 
-  # Validate capture safety for a fiber body: reject @local/@multiowned in
-  # @parallel blocks, auto-pin when shared state is captured.
-  # Returns true if the block was auto-pinned.
+  # Result of analyzing a fiber body's captured variables.
+  # Computed once per body by analyze_fiber_captures, queried by multiple consumers.
+  CaptureAnalysis = Struct.new(
+    :has_local,        # captures @local var (sync == :local)
+    :has_rc,           # captures @multiowned (Rc) var
+    :has_shared,       # captures any shared/locked/write_locked/local/multiowned/sharded var
+    :has_sharded,      # specifically captures @sharded (for auto-pin reason)
+    :has_outer_ref,    # references any outer-scope variable
+    keyword_init: true
+  ) do
+    def pin_reason; has_sharded ? :sharded : :shared; end
+  end
+
+  # Single walk over a fiber body that computes ALL capture properties at once.
+  # Replaces 6 separate walks (_captures_with_storage?, _captures_with_sync?,
+  # _captures_shared?, _auto_pin_reason, _has_outer_ref?, _audit_walk_captures).
+  def analyze_fiber_captures(body_exprs, is_parallel: false)
+    result = CaptureAnalysis.new(
+      has_local: false, has_rc: false, has_shared: false,
+      has_sharded: false, has_outer_ref: false
+    )
+    _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
+    result
+  end
+
+  # Validate capture safety using pre-computed analysis.
   def validate_fiber_captures!(node, body, is_parallel, is_pinned)
+    analysis = analyze_fiber_captures(body, is_parallel: is_parallel)
+
     if is_parallel
-      if branch_captures_local_state?(body)
+      if analysis.has_local
         error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
       end
-      if branch_captures_rc_state?(body)
+      if analysis.has_rc
         error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.")
       end
     end
 
-    if !is_pinned && !is_parallel && branch_captures_shared_state?(body)
-      return true  # caller should set pinned = true
+    if !is_pinned && !is_parallel && analysis.has_shared
+      return analysis  # caller should set pinned = true; return analysis for pin_reason
     end
-    false
+    nil
   end
 
-  # Walk a BG block's body AST and mark any outer-scope resource or affine
-  # variables as :moved. Stops at nested BgBlock boundaries.
+  # Walk a BG block's body AST and mark any outer-scope resource, affine, or
+  # frame-allocated variables as :moved. Stops at nested BgBlock boundaries.
   def walk_bg_capture_moves(stmts, scope, locally_bound)
     stmts.each { |expr| _bg_walk(expr, scope, locally_bound) }
   end
 
-  # --- Capture analysis for auto-pinning BG/DO blocks ---
-
-  # Returns true if any captured variable has @local sync.
-  def branch_captures_local_state?(body_exprs)
-    _captures_with_sync?(body_exprs, Set.new, :local)
-  end
-
-  # Returns true if any captured variable is @multiowned (Rc — non-atomic, NOT thread-safe).
-  def branch_captures_rc_state?(body_exprs)
-    _captures_with_storage?(body_exprs, Set.new, :multiowned)
-  end
-
-  # Returns true if any captured variable has shared/locked/write_locked/local/multiowned/sharded.
-  # Used for auto-pinning BG/DO blocks that capture shared mutable state.
-  def branch_captures_shared_state?(body_exprs)
-    _captures_shared?(body_exprs, Set.new)
-  end
-
-  # Returns :sharded if auto-pin is due to a @sharded map, :shared otherwise.
-  # Uses the same recursive walk as _captures_shared? but checks for sharded first.
-  def auto_pin_reason(body_exprs)
-    _auto_pin_reason(body_exprs, Set.new)
-  end
-
-  def _auto_pin_reason(nodes, locally_bound)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        info = current_scope.locals[name]
-        next unless info
-        ti = info.type
-        return :sharded if ti.is_a?(Type) && ti.sharded?
-      end
-      # Recurse into struct members of the node
-      node.class.members.each do |member|
-        val = node.send(member) rescue next
-        if val.is_a?(Array)
-          sub = _auto_pin_reason(val.select { |v| v.is_a?(AST::Locatable) }, locally_bound)
-          return sub if sub == :sharded
-        elsif val.is_a?(AST::Locatable)
-          sub = _auto_pin_reason([val], locally_bound)
-          return sub if sub == :sharded
-        end
-      end
-    end
-    :shared
-  end
-
   # Returns true if body references any outer-scope variable not in locally_bound.
   def captures_outer_variables?(body, locally_bound)
-    body.any? { |expr| _has_outer_ref?(expr, locally_bound) }
+    result = CaptureAnalysis.new(
+      has_local: false, has_rc: false, has_shared: false,
+      has_sharded: false, has_outer_ref: false
+    )
+    _unified_capture_walk(body, locally_bound, result, false)
+    result.has_outer_ref
   end
 
   private
+
+  # One recursive walk that checks each outer-scope identifier for ALL properties.
+  def _unified_capture_walk(nodes, locally_bound, result, is_parallel)
+    nodes.each do |node|
+      next unless node.is_a?(AST::Locatable)
+
+      # Track locally-declared names so we don't treat them as outer captures.
+      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
+        locally_bound = locally_bound | Set[node.name]
+      end
+
+      if node.is_a?(AST::Identifier)
+        name = node.name
+        next if locally_bound.include?(name)
+        next if %w[TRUE FALSE VOID _].include?(name)
+
+        info = current_scope.locals[name]
+        if info
+          result.has_outer_ref = true
+
+          result.has_local   = true if info.sync == :local
+          result.has_rc      = true if info.storage == :multiowned
+          result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+          result.has_shared  = true if info.storage == :shared || info.storage == :multiowned
+          ti = info.type
+          if ti.is_a?(Type) && ti.sharded?
+            result.has_sharded = true
+            result.has_shared  = true
+          end
+
+          # Audit: mark capability usage for over-engineering warnings
+          if current_fn_ctx&.name
+            key = "#{current_fn_ctx.name}:#{name}"
+            if @capability_audit&.dig(key)
+              @capability_audit[key][:captured_bg] = true
+              @capability_audit[key][:captured_parallel] = true if is_parallel
+            end
+          end
+        elsif lookup_scope_for(name)
+          result.has_outer_ref = true
+        end
+        next
+      end
+
+      # WithBlock: check var_nodes for sync/shared captures
+      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
+        node.capabilities.each do |cap|
+          var_node = cap[:var_node]
+          next unless var_node.is_a?(AST::Identifier)
+          name = var_node.name
+          next if locally_bound.include?(name)
+          info = current_scope.locals[name]
+          next unless info
+          result.has_outer_ref = true
+          result.has_local  = true if info.sync == :local
+          result.has_shared = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+          result.has_shared = true if info.storage == :shared
+
+          if current_fn_ctx&.name
+            key = "#{current_fn_ctx.name}:#{name}"
+            if @capability_audit&.dig(key)
+              @capability_audit[key][:captured_bg] = true
+              @capability_audit[key][:captured_parallel] = true if is_parallel
+            end
+          end
+        end
+      end
+
+      # Don't recurse into nested BG/DO blocks — they have their own capture scope.
+      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+
+      node.class.members.each do |member|
+        val = node[member]
+        if val.is_a?(Array)
+          _unified_capture_walk(val, locally_bound, result, is_parallel)
+        elsif val.is_a?(AST::Locatable)
+          _unified_capture_walk([val], locally_bound, result, is_parallel)
+        end
+      end
+    end
+  end
 
   def _bg_walk(node, scope, locally_bound)
     return unless node.is_a?(AST::Locatable)
@@ -294,8 +352,6 @@ module CapabilityHelper
         if kind == :resource || kind == :affine
           scope.set_state(name, :moved)
         elsif ti.is_a?(Type) && ti.needs_escape_promotion?
-          # Frame-allocated data (strings, collections) is affine-moved into BG fibers.
-          # The fiber receives promoted (heap-backed) data; the outer scope loses access.
           scope.set_state(name, :moved)
         end
       end
@@ -315,132 +371,6 @@ module CapabilityHelper
         _bg_walk(val, scope, lb)
       end
     end
-  end
-
-  def _captures_with_storage?(nodes, locally_bound, target_storage)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        info = current_scope.locals[name]
-        return true if info && info.storage == target_storage
-        next
-      end
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          return true if _captures_with_storage?(val, locally_bound, target_storage)
-        elsif val.is_a?(AST::Locatable)
-          return true if _captures_with_storage?([val], locally_bound, target_storage)
-        end
-      end
-    end
-    false
-  end
-
-  def _captures_with_sync?(nodes, locally_bound, target_sync)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        info = current_scope.locals[name]
-        next unless info
-        return true if info.sync == target_sync
-        next
-      end
-      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
-        node.capabilities.each do |cap|
-          var_node = cap[:var_node]
-          next unless var_node.is_a?(AST::Identifier)
-          name = var_node.name
-          next if locally_bound.include?(name)
-          info = current_scope.locals[name]
-          return true if info && info.sync == target_sync
-        end
-      end
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          return true if _captures_with_sync?(val, locally_bound, target_sync)
-        elsif val.is_a?(AST::Locatable)
-          return true if _captures_with_sync?([val], locally_bound, target_sync)
-        end
-      end
-    end
-    false
-  end
-
-  def _captures_shared?(nodes, locally_bound)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        info = current_scope.locals[name]
-        next unless info
-        return true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
-        return true if info.storage == :shared || info.storage == :multiowned
-        # @sharded maps require pinning — shared-nothing model needs fiber affinity.
-        ti = info.type
-        return true if ti.is_a?(Type) && ti.sharded?
-        next
-      end
-      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
-        node.capabilities.each do |cap|
-          var_node = cap[:var_node]
-          next unless var_node.is_a?(AST::Identifier)
-          name = var_node.name
-          next if locally_bound.include?(name)
-          info = current_scope.locals[name]
-          next unless info
-          return true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
-          return true if info.storage == :shared
-        end
-      end
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          return true if _captures_shared?(val, locally_bound)
-        elsif val.is_a?(AST::Locatable)
-          return true if _captures_shared?([val], locally_bound)
-        end
-      end
-    end
-    false
-  end
-
-  def _has_outer_ref?(node, locally_bound)
-    return false if node.nil?
-    if node.is_a?(AST::Identifier) && !locally_bound.include?(node.name) &&
-       !%w[TRUE FALSE VOID _].include?(node.name) &&
-       current_scope.lookup(node.name)
-      return true
-    end
-    if node.respond_to?(:members)
-      node.members.each do |m|
-        child = node.send(m) rescue next
-        if child.is_a?(Array)
-          return true if child.any? { |c| _has_outer_ref?(c, locally_bound) }
-        elsif child.respond_to?(:members)
-          return true if _has_outer_ref?(child, locally_bound)
-        end
-      end
-    end
-    false
   end
 end
 
@@ -484,9 +414,9 @@ module CapabilityAudit
     @capability_audit[key][:mutated] = true if @capability_audit[key]
   end
 
+  # No longer needed — audit marking is handled by _unified_capture_walk.
+  # Kept as a no-op for call-site compatibility.
   def audit_mark_bg_captures(body_exprs, is_parallel)
-    return unless current_fn_ctx&.name
-    _audit_walk_captures(body_exprs, Set.new, is_parallel)
   end
 
   def finalize_capability_audit!
@@ -512,45 +442,4 @@ module CapabilityAudit
     end
   end
 
-  private
-
-  def _audit_walk_captures(nodes, locally_bound, is_parallel)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        key = "#{current_fn_ctx&.name}:#{name}"
-        if @capability_audit[key]
-          @capability_audit[key][:captured_bg] = true
-          @capability_audit[key][:captured_parallel] = true if is_parallel
-        end
-        next
-      end
-      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
-        node.capabilities.each do |cap|
-          vn = cap[:var_node]
-          next unless vn.is_a?(AST::Identifier)
-          next if locally_bound.include?(vn.name)
-          key = "#{current_fn_ctx&.name}:#{vn.name}"
-          if @capability_audit[key]
-            @capability_audit[key][:captured_bg] = true
-            @capability_audit[key][:captured_parallel] = true if is_parallel
-          end
-        end
-      end
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          _audit_walk_captures(val, locally_bound, is_parallel)
-        elsif val.is_a?(AST::Locatable)
-          _audit_walk_captures([val], locally_bound, is_parallel)
-        end
-      end
-    end
-  end
 end
