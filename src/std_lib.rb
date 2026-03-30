@@ -214,6 +214,22 @@ STD_LIB = {
     zig: "try CheatLib.listDir({alloc}, {0})"
   },
 
+  # List ALL entries (files + directories) with type prefix ("f:" or "d:").
+  # Usage: entries = listAll("/some/dir")
+  "listAll" => {
+    args: [STRING_TYPE],
+    return: :"String[]",
+    zig: "try CheatLib.listAll({alloc}, {0})"
+  },
+
+  # Get file size in bytes. Returns -1 on error.
+  # Usage: size = fileSize("/some/file.txt")
+  "fileSize" => {
+    args: [STRING_TYPE],
+    return: :Int64,
+    zig: "CheatLib.fileSize({0})"
+  },
+
   # Count non-overlapping occurrences of needle in haystack.
   # Usage: n = countOccurrences(content, "the")
   "countOccurrences" => {

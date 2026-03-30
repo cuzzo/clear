@@ -509,6 +509,39 @@ pub const CheatLib = struct {
         return list;
     }
 
+    // List ALL entries (files AND directories) in a directory.
+    // Returns entries prefixed with "f:" for files or "d:" for directories.
+    // Usage: entries = listAll(allocator, "/some/dir")
+    pub fn listAll(allocator: std.mem.Allocator, path: []const u8) !std.ArrayListUnmanaged([]const u8) {
+        var list = std.ArrayListUnmanaged([]const u8){};
+        errdefer {
+            for (list.items) |s| allocator.free(s);
+            list.deinit(allocator);
+        }
+        var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+        defer dir.close();
+        var it = dir.iterate();
+        while (try it.next()) |entry| {
+            const prefix: []const u8 = switch (entry.kind) {
+                .file => "f:",
+                .directory => "d:",
+                else => continue,
+            };
+            const full = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, entry.name });
+            try list.append(allocator, full);
+        }
+        return list;
+    }
+
+    // Get file size in bytes. Returns -1 on error.
+    // Usage: size = fileSize("/some/file.txt")
+    pub fn fileSize(path: []const u8) i64 {
+        const file = std.fs.cwd().openFile(path, .{}) catch return -1;
+        defer file.close();
+        const stat = file.stat() catch return -1;
+        return @intCast(stat.size);
+    }
+
     // Count non-overlapping occurrences of needle in haystack.
     // Returns 0 if needle is empty or not found.
     // Usage: n = countOccurrences("hello world", "o")  → 2
