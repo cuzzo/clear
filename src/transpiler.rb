@@ -246,6 +246,8 @@ private
     when AST::EnumDef
       # CHEAT: ENUM Direction { North, South }
       # ZIG:   const Direction = enum { North, South };
+      @enum_schemas ||= {}
+      @enum_schemas[node.name.to_sym] = node.variants
       variants = node.variants.map { |v| "    #{v}," }.join("\n")
       "const #{node.name} = enum {\n#{variants}\n};"
 
@@ -434,13 +436,16 @@ private
       # Frame mark save/restore: rewind the frame arena on return so each
       # function call is a self-cleaning scope. Triggered by direct frame
       # allocations (uses_frame) OR stdlib calls that use {alloc} (uses_alloc).
-      # SKIP for functions returning non-primitive types — returned data lives
-      # on the caller's frame and must survive past return.
+      # SKIP for functions returning reference types — returned data lives
+      # on the caller's frame and must survive past return. Safe for value
+      # types: primitives, Void, enums, unions (returned by copy, not pointer).
       uses_frame_or_alloc = node.uses_frame || node.uses_alloc
-      ret_sym = (node.return_type.is_a?(Type) ? node.return_type.resolved : (node.return_type || :Void)).to_sym
-      returns_primitive = [:Void, :Bool, :Int64, :Float64, :Number].include?(ret_sym)
+      ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
+      returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? ||
+                           @enum_schemas&.key?(ret_type_obj.resolved) ||
+                           @union_schemas&.key?(ret_type_obj.resolved)
       prologue = if fn_needs_rt
-        (uses_frame_or_alloc && returns_primitive) ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
+        (uses_frame_or_alloc && returns_value_type) ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
       else
         nil
       end
@@ -1337,17 +1342,16 @@ private
       # Defer-free for promoted captures inside the fiber.
       # Strings need explicit free (duped to heap); collections are freed
       # via their own deinit in the fiber's normal cleanup path.
-      # Resources (TCPClient, File) need defer close — ownership transferred from outer scope.
+      # Resources use the schema-driven close_zig pattern from the symbol entry.
+      capture_close_zig = @_capture_close_zig || {}
       capture_frees = captured.filter_map do |name, type_obj|
         t = type_obj.is_a?(Type) ? type_obj : (type_obj ? Type.new(type_obj) : nil)
         if t&.string?
           "defer ctx.alloc.free(ctx.#{name});"
-        elsif t&.resource?
-          close = case t.resolved
-                  when :TCPClient, :TCPServer then "CheatLib.socketClose(ctx.#{name})"
-                  when :File then "ctx.#{name}.close()"
-                  end
-          "defer #{close};" if close
+        elsif capture_close_zig[name]
+          # Resource: use the close_zig pattern from the type schema.
+          # {0} is replaced with the context field access.
+          "defer #{capture_close_zig[name].gsub('{0}', "ctx.#{name}")};"
         end
       end.compact.join("\n                    ")
 
@@ -2455,6 +2459,7 @@ private
   # so they are not incorrectly added as outer captures.
   def collect_do_identifiers(exprs)
     result = {}
+    @_capture_close_zig = {}  # name → close_zig pattern (for resource captures)
     locally_bound = Set.new
     exprs.each do |e|
       walk_do_identifiers(e, result, locally_bound)
@@ -2486,7 +2491,13 @@ private
   def walk_do_identifiers(node, result, locally_bound = Set.new)
     return unless node.is_a?(AST::Locatable)
     if node.is_a?(AST::Identifier)
-      result[node.name] ||= node.type_info unless locally_bound.include?(node.name)
+      unless locally_bound.include?(node.name)
+        result[node.name] ||= node.type_info
+        # Capture the resource close pattern from the symbol entry if available.
+        if node.symbol.respond_to?(:close_zig) && node.symbol.close_zig && !@_capture_close_zig.key?(node.name)
+          @_capture_close_zig[node.name] = node.symbol.close_zig
+        end
+      end
       return
     end
     # ThenChain: process steps in order, accumulating bindings into locally_bound

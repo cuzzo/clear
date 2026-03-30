@@ -2445,6 +2445,46 @@ RSpec.describe SemanticAnnotator do
         output = ZigTranspiler.new.transpile_as_module(code)
         expect(output).to include("const Vec2 = native_math.Vec2;")
       end
+
+      it "emits onRootStack and blk_ext label for non-void EXTERN FN call" do
+        code = <<~CLEAR
+          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          FN main() RETURNS Void ->
+            x = native_add(3.0, 4.0);
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("onRootStack")
+        expect(output).to match(/blk_ext\d+/)
+        expect(output).to match(/__ext\d+_frame\.ret/)
+      end
+
+      it "emits onRootStack without a break label for void EXTERN FN call" do
+        code = <<~CLEAR
+          EXTERN FN native_log(val: Number) RETURNS Void FROM "native_io";
+          FN main() RETURNS Void ->
+            native_log(42.0);
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("onRootStack")
+        expect(output).not_to match(/blk_ext\d+/)
+        expect(output).not_to match(/break :blk_ext/)
+      end
+
+      it "passes arguments through the trampoline struct" do
+        code = <<~CLEAR
+          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          FN main() RETURNS Void ->
+            x = native_add(3.0, 4.0);
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        # Arguments are packed into a tuple and forwarded via the trampoline frame
+        expect(output).to match(/__ext\d+_args/)
+        expect(output).to match(/\.a0\b/)
+        expect(output).to match(/\.a1\b/)
+      end
     end
   end
 

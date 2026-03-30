@@ -1718,6 +1718,60 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===================================================================
+  # BG resource capture close — defer close in fiber run function
+  # ===================================================================
+  describe "BG resource capture close" do
+    def transpile_fn(clear_src)
+      tokens    = Lexer.new(clear_src).tokenize
+      ast       = Parser.new(tokens, clear_src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      t = ZigTranspiler.new
+      t.send(:visit, ast)
+    end
+
+    it "emits defer socketClose for TCPClient captured by BG" do
+      out = transpile_fn(<<~CLEAR)
+        FN f(server: TCPServer) RETURNS Void ->
+          client = accept(server);
+          p: ~Void = BG { tcpWrite(client, "hi"); };
+          r: Void = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("socketClose(ctx.client)")
+      expect(out).to include("client_moved = true")
+    end
+
+    it "emits defer file.close() for File captured by BG" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS Void ->
+          file = File::open("data.txt");
+          p: ~Void = BG { fileWrite(file, "hello"); };
+          r: Void = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("ctx.file.close()")
+    end
+
+    it "emits client_moved = true in the outer scope for TCPClient captured by BG" do
+      out = transpile_fn(<<~CLEAR)
+        FN f(server: TCPServer) RETURNS Void ->
+          client = accept(server);
+          p: ~Void = BG { tcpWrite(client, "hi"); };
+          r: Void = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      # The outer scope must suppress its own defer close
+      expect(out).to include("client_moved = true")
+      # The fiber takes ownership — the outer defer must be guarded
+      expect(out).to include("defer if (!client_moved)")
+    end
+  end
+
   describe "DO block" do
 
     context "three concurrent branches accessing the same @locked counter" do

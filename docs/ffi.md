@@ -4,7 +4,7 @@ CLEAR can call native Zig and C functions via `EXTERN FN` declarations. This ena
 
 ## Syntax
 
-```clear
+```clear-example
 -- Declare a native function from a Zig module
 EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
 
@@ -22,7 +22,7 @@ The `FROM "module_name"` maps to `@import("module_name")` in the generated Zig. 
 ### Simple function calls
 Functions that take primitives (`Int64`, `Float64`, `String`) and return primitives:
 
-```clear
+```clear-example
 EXTERN FN parseJsonArraySum(content: String) RETURNS Int64 FROM "json_native";
 EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
 ```
@@ -55,7 +55,7 @@ pub fn parseJsonArraySum(content: []const u8) i64 {
 ### EXTERN STRUCT
 Import native struct layouts for type-safe field access:
 
-```clear
+```clear-example
 EXTERN STRUCT Vec2 { x: Number, y: Number } FROM "native_math";
 v = native_create_vec(1.0, 2.0);  -- returns Vec2
 print(v.x);
@@ -96,7 +96,7 @@ The trampoline is automatic — no annotation needed. The transpiler emits a wra
 
 CLEAR cannot represent Zig's `std.json.Parsed(T)` return type — it's a generic struct with a `deinit` method and internal allocator state. The workaround: perform the full operation (parse + compute) in a single EXTERN function, returning only a primitive result.
 
-```clear
+```clear-example
 -- This works: parse + sum in one native call
 EXTERN FN parseJsonArraySum(content: String) RETURNS Int64 FROM "json_native";
 sum = parseJsonArraySum(content);
@@ -123,7 +123,7 @@ Allow EXTERN functions to return `[]T` slices that CLEAR can iterate. Requires s
 Proposed approach: EXTERN functions that return arrays accept a CLEAR allocator parameter, allocating on the caller's frame. This enables zero-copy returns with automatic cleanup via frame rewind.
 
 ### EXTERN methods on types
-```clear
+```clear-example
 -- v0.2: methods on extern types
 EXTERN STRUCT JsonDoc FROM "json_native";
 EXTERN FN parse(content: String) RETURNS JsonDoc FROM "json_native";
@@ -136,7 +136,7 @@ Allow native code to call CLEAR functions (callbacks). Required for event-driven
 
 ### C library integration
 Direct `@cImport` support without manual Zig wrappers:
-```clear
+```clear-example
 -- v0.2 (aspirational)
 EXTERN FN compress(data: String) RETURNS String FROM C "zlib";
 ```

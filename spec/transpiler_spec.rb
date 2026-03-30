@@ -577,4 +577,59 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to match(/defer vals\.deinit/)
     end
   end
+
+  # ===========================================================================
+  # Function-level frame mark (saveFrameMark / restoreFrameMark)
+  # ===========================================================================
+  describe "function-level frame mark" do
+    it "emits saveFrameMark for uses_alloc function returning Void" do
+      src = <<~CLEAR
+        FN f(s: String) RETURNS Void ->
+          parts = split(s, ",");
+          RETURN;
+        END
+        FN main() RETURNS Void ->
+          f("a,b");
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveFrameMark")
+    end
+
+    it "does NOT emit saveFrameMark for uses_alloc function returning String" do
+      src = <<~CLEAR
+        FN f(s: String) RETURNS String ->
+          parts = split(s, ",");
+          RETURN s;
+        END
+        FN main() RETURNS Void ->
+          r = f("a,b");
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The function f returns a reference type (String) — frame mark would
+      # invalidate the returned data, so it must NOT be emitted.
+      f_fn = zig[/fn clearF\b.*?^}/m] || zig
+      expect(f_fn).not_to include("saveFrameMark")
+    end
+
+    it "emits saveFrameMark for function returning an ENUM value (value type)" do
+      src = <<~CLEAR
+        ENUM Status { Ok, Err }
+        FN check(s: String) RETURNS Status ->
+          parts = split(s, ",");
+          RETURN Status.Ok;
+        END
+        FN main() RETURNS Void ->
+          r = check("a,b");
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Enums are value types (returned by copy), so frame mark is safe.
+      expect(zig).to include("saveFrameMark")
+    end
+  end
 end
