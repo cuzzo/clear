@@ -2041,8 +2041,9 @@ private
     pre_promos = []   # Before struct init (operate on source variables)
     post_promos = []  # After struct init (operate on __ret fields)
 
-    # Source 1: StructLit field values — promote source variables BEFORE struct init
-    # so the struct captures the promoted (heap) data, not the frame data.
+    # Source 1: StructLit field values — promote source variables.
+    # Collections: pre-promo (before struct init) so .items captures heap data.
+    # Strings: post-promo (after struct init) via __ret.field = dupe(...).
     promoted_fields = Set.new
     if node&.is_a?(AST::StructLit)
       node.fields.each do |fname, fval|
@@ -2050,7 +2051,13 @@ private
         fval_type = Type.new(fval_type) if fval_type && !fval_type.is_a?(Type)
         next unless fval_type&.needs_escape_promotion? && fval.is_a?(AST::Identifier)
         promoted_fields << fname.to_s
-        pre_promos << fval_type.escape_promote_code("#{zig_safe_name(fval.name)}", rt_name)
+        if fval_type.string?
+          # String: dupe to heap after struct init (can't reassign const source var).
+          post_promos << "__ret.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fname});"
+        else
+          # Collection: promote in-place before struct init so .items is heap-backed.
+          pre_promos << fval_type.escape_promote_code("#{zig_safe_name(fval.name)}", rt_name)
+        end
       end
     end
 

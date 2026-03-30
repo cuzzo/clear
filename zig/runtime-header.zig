@@ -625,6 +625,11 @@ pub const CheatLib = struct {
     }
 
     // toString: Int64 -> String (heap-allocated decimal representation)
+    /// Parse a string to i64. Returns error on invalid input.
+    pub fn toInt(s: []const u8) !i64 {
+        return std.fmt.parseInt(i64, s, 10);
+    }
+
     pub fn intToString(allocator: std.mem.Allocator, value: i64) ![]const u8 {
         // Max i64 is 19 digits + sign + null = 21 bytes; allocate 21
         var buf: [21]u8 = undefined;
