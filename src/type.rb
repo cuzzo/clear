@@ -854,8 +854,10 @@ class Type
     # Parsed first so ~!T = "promise of failable T", ~?T = "promise of optional T".
     # When tense, we bail early — tense_type handles its own inner parsing.
     if str.start_with?("~")
+      inner = str[1..]
+      raise "Invalid type '#{str}': double tense (~~) is not allowed — ~T is already a promise" if inner.start_with?("~")
       @is_tense       = true
-      @tense_type_raw = str[1..].to_sym
+      @tense_type_raw = inner.to_sym
       @is_error_union = false; @payload_type_raw = nil
       @is_optional    = false; @wrapped_type_raw  = nil
       @is_array       = false; @capacity = nil; @element_type_raw = nil
@@ -874,9 +876,11 @@ class Type
 
     # A. Detect Error Union prefix: !Type (Zig-style error returns)
     if str.start_with?("!")
+      raise "Invalid type '#{str}': double error union (!!) is not allowed" if str[1..].start_with?("!")
+      raise "Invalid type '#{str}': !~T (error union of tense) is not allowed — use ~!T instead" if str[1..].start_with?("~")
       @is_error_union = true
-      @payload_type_raw = str[1..].to_sym  # Store the inner type
-      str = str[1..]  # Strip the ! for further parsing of inner type
+      @payload_type_raw = str[1..].to_sym
+      str = str[1..]
     else
       @is_error_union = false
       @payload_type_raw = nil
@@ -884,9 +888,11 @@ class Type
 
     # B. Detect Optional prefix: ?Type
     if str.start_with?("?")
+      raise "Invalid type '#{str}': double optional (??) is not allowed" if str[1..].start_with?("?")
+      raise "Invalid type '#{str}': ?~T (optional of tense) is not allowed — use ~?T instead" if str[1..].start_with?("~")
       @is_optional = true
-      @wrapped_type_raw = str[1..].to_sym  # Store the inner type
-      str = str[1..]  # Strip the ? for further parsing of inner type
+      @wrapped_type_raw = str[1..].to_sym
+      str = str[1..]
     else
       @is_optional = false
       @wrapped_type_raw = nil
