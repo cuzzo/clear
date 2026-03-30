@@ -1498,15 +1498,8 @@ private
         end
       end
 
-      # 2. Unified escape promotion — one method handles all cases.
+      # 2. Standard Return with Move Suppression for unique heap
       rt_name = @do_rt_name || "rt"
-      promotions, return_wrap = if node.collection_return
-        emit_escape_promotions(node.value, rt_name)
-      else
-        [[], nil]
-      end
-
-      # 3. Standard Return with Move Suppression for unique heap
       suppress = emit_move_suppression(node.value)
       val_code = if node.value.nil?
         ""
@@ -1516,35 +1509,14 @@ private
         visit(node.value)
       end
 
-      # Apply string promotion wrap (dupe to heap) if needed.
-      val_code = return_wrap.call(val_code) if return_wrap
-
-      # StructLit returns with string fields: bind to temp var, promote
-      # string fields via schema walk, then return. This handles both
-      # literal and computed string fields uniformly.
-      if node.collection_return && node.value.is_a?(AST::StructLit)
-        ft = node.value.full_type
-        resolved = ft.is_a?(Type) ? ft.resolved : ft
-        schema = @struct_schemas&.dig(resolved)
-        string_fields = schema&.select { |fn, fd|
-          ft = (fd.is_a?(Hash) ? fd[:type] : fd)
-          ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-          ft.string?
-        }&.keys || []
-        if string_fields.any?
-          field_promos = string_fields.map do |fn|
-            "__ret.#{fn} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fn});"
-          end
-          parts = [suppress, *promotions,
-                   "var __ret = #{val_code};",
-                   *field_promos,
-                   "return __ret;"].reject(&:nil?).reject(&:empty?)
-          return parts.join("\n")
-        end
+      # 3. Unified escape promotion — one path for all return shapes.
+      # Driven by return TYPE, not AST node kind.
+      if node.collection_return
+        ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
+        emit_return_with_promotion(val_code, ret_type, rt_name, suppress, node: node.value)
+      else
+        [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       end
-
-      parts = [suppress, *promotions, "return #{val_code};"].reject(&:nil?).reject(&:empty?)
-      parts.join("\n")
 
     when AST::GetField
       # Union unit-variant constructor: Result{ .Empty = {} }
@@ -2026,75 +1998,74 @@ private
     pattern
   end
 
-  # Unified escape promotion: recursively generates ALL promotion calls for a value
-  # about to escape its frame (return, BG capture, etc.). Handles direct collections,
-  # struct literal fields, and struct variables with collection fields via schema.
-  # Returns [promotions, return_wrap].
-  # promotions: array of Zig statements to emit before the return (in-place collection promotions).
-  # return_wrap: a lambda that wraps the return expression for string promotion, or nil.
-  def emit_escape_promotions(node, rt_name)
-    promotions = []
-    return_wrap = nil
+  # Unified return escape promotion.
+  #
+  # ONE code path for ALL return value shapes. Promotion is driven by TYPE,
+  # not by AST node kind. The return expression is bound to a temp var (__ret),
+  # frame-allocated fields are promoted to heap, and __ret is returned.
+  #
+  # For direct types (string, list, map): promotes the value itself.
+  # For struct types: walks schema + field values, promotes each escapable field.
+  # +node+ is the return value AST node (used to inspect StructLit field values).
+  def emit_return_with_promotion(val_code, ret_type, rt_name, suppress = "", node: nil)
+    ret_type = Type.new(ret_type) if ret_type && !ret_type.is_a?(Type)
 
-    if node.is_a?(AST::Identifier)
-      ti = node.type_info
-      name = zig_safe_name(node.name)
-      if ti&.needs_escape_promotion?
-        if ti.string?
-          # Strings: dupe to heap. Unlike collections (in-place), this creates
-          # a new value — wrap the return expression instead of prepending a statement.
-          return_wrap = ->(val) { "try #{rt_name}.heapAlloc().dupe(u8, #{val})" }
-        else
-          promotions << ti.escape_promote_code(name, rt_name)
-        end
+    # Direct escapable type (string, list, map)
+    if ret_type&.needs_escape_promotion?
+      if ret_type.string?
+        promoted = "try #{rt_name}.heapAlloc().dupe(u8, #{val_code})"
+        return [suppress, "return #{promoted};"].reject(&:empty?).join("\n")
       else
-        # Struct/union variable — promote each escapable field via schema
-        resolved = ti&.resolved
-        schema = @struct_schemas&.dig(resolved)
-        if schema
-          schema.each do |fname, fdef|
-            ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
-            ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-            if ft.needs_escape_promotion?
-              if ft.string?
-                # Struct variable string field: dupe to heap. Safe even for
-                # .rodata strings (dupe is idempotent). The caller frees via
-                # field-level cleanup when heap_promoted is set.
-                promotions << "#{name}.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, #{name}.#{fname});"
-              else
-                promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name)
-              end
-            end
-          end
-        end
+        promo = ret_type.escape_promote_code("__ret", rt_name)
+        return [suppress, "var __ret = #{val_code};", promo, "return __ret;"].compact.reject(&:empty?).join("\n")
       end
-    elsif node.is_a?(AST::StructLit)
+    end
+
+    # Struct/union: collect promotions from two sources:
+    #   1. StructLit field values: promotes source VARIABLES before struct init
+    #      (e.g., promoteList on @list before .items is captured in the struct)
+    #   2. Schema field types: promotes __ret FIELDS after struct init
+    #      (e.g., dupe string fields that are already in the struct)
+    pre_promos = []   # Before struct init (operate on source variables)
+    post_promos = []  # After struct init (operate on __ret fields)
+
+    # Source 1: StructLit field values — promote source variables BEFORE struct init
+    # so the struct captures the promoted (heap) data, not the frame data.
+    promoted_fields = Set.new
+    if node&.is_a?(AST::StructLit)
       node.fields.each do |fname, fval|
         fval_type = fval.respond_to?(:type_info) ? fval.type_info : nil
         fval_type = Type.new(fval_type) if fval_type && !fval_type.is_a?(Type)
-        if fval_type&.needs_escape_promotion?
-          if fval_type.string? && fval.is_a?(AST::Identifier)
-            # String variable field: promote the variable to heap before struct init.
-            name = zig_safe_name(fval.name)
-            promotions << "#{name} = try #{rt_name}.heapAlloc().dupe(u8, #{name});"
-          elsif !fval_type.string?
-            if fval.is_a?(AST::Identifier)
-              promotions << fval_type.escape_promote_code(zig_safe_name(fval.name), rt_name)
-            elsif fval.is_a?(AST::StructLit)
-              sub_promo, sub_wrap = emit_escape_promotions(fval, rt_name)
-              promotions.concat(sub_promo)
-              return_wrap ||= sub_wrap
-            end
-          end
-          # String literals in struct fields: handled by the struct variable
-          # schema walk below when the return value is bound to a variable,
-          # or by the caller's heap_promoted field-level cleanup matching
-          # the callee's promotion.
+        next unless fval_type&.needs_escape_promotion? && fval.is_a?(AST::Identifier)
+        promoted_fields << fname.to_s
+        pre_promos << fval_type.escape_promote_code("#{zig_safe_name(fval.name)}", rt_name)
+      end
+    end
+
+    # Source 2: schema walk — promote __ret fields AFTER struct init
+    # (covers string fields where the actual value may be a literal or expression)
+    resolved = ret_type&.resolved
+    schema = @struct_schemas&.dig(resolved)
+    if schema
+      schema.each do |fname, fdef|
+        next if fname.is_a?(Symbol) || promoted_fields.include?(fname.to_s)
+        ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
+        ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+        next unless ft.needs_escape_promotion?
+        if ft.string?
+          post_promos << "__ret.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fname});"
+        else
+          post_promos << ft.escape_promote_code("__ret.#{fname}", rt_name)
         end
       end
     end
 
-    [promotions.compact, return_wrap]
+    if pre_promos.any? || post_promos.any?
+      return [suppress, *pre_promos.compact, "var __ret = #{val_code};", *post_promos.compact, "return __ret;"].reject(&:empty?).join("\n")
+    end
+
+    # No promotion needed.
+    [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).

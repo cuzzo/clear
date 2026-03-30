@@ -912,15 +912,28 @@ private
       record_effect(EffectTracker::HEAP)
     end
 
-    # 3. Unified escape promotion — recursively find ALL frame-allocated collections
-    # reachable from the return value and mark them for heap promotion.
-    # Handles: direct collections, struct literal fields, struct variables with collection
-    # fields (via schema), and arbitrary nesting depth.
+    # 3. Unified escape promotion — recursively find ALL frame-allocated data
+    # reachable from the return value and mark for heap promotion.
+    # Two paths:
+    #   a) mark_escaping_collections! handles Identifiers/StructLits (can set
+    #      escaped_return to suppress callee cleanup, promote fields in-place)
+    #   b) Return type check handles expression returns (BinaryOp, FuncCall, etc.)
+    #      where the result is frame-allocated but not bound to a named variable.
     if mark_escaping_collections!(node.value)
       node.collection_return = true
-      # Tag the enclosing function so callers know the return contains promoted data.
       fn_node = @fn_nodes[current_fn_ctx&.name]
       fn_node.returns_promoted = true if fn_node
+    elsif !node.collection_return
+      # Expression return: if the return type needs escape promotion and the
+      # function uses frame, mark for promotion. The transpiler will wrap the
+      # return expression (e.g., dupe for strings, bind+promote for collections).
+      ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
+      ret_type = Type.new(ret_type) if ret_type && !ret_type.is_a?(Type)
+      if ret_type&.needs_escape_promotion? && current_fn_ctx&.frame_count&.positive?
+        node.collection_return = true
+        fn_node = @fn_nodes[current_fn_ctx&.name]
+        fn_node.returns_promoted = true if fn_node
+      end
     end
 
     # Promote non-identifier literals to heap when the expected return type requires it.

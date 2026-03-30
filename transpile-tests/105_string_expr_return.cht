@@ -1,0 +1,38 @@
+-- Test: string EXPRESSION returns (not variable returns) survive frame rewind.
+--
+-- Functions that return a string expression directly (not via a named variable)
+-- must also promote the frame-allocated result to heap.
+
+FN greet(first: String, last: String) RETURNS String ->
+    -- Build strings that force frame allocation, then return an expression.
+    full = first + " " + last;
+    RETURN "Hello " + full;
+END
+
+FN formatNum(label: String, n: Int64) RETURNS String ->
+    -- toString() forces frame usage; return expression uses concat.
+    num = n.toString();
+    RETURN label + ": " + num;
+END
+
+FN cheatMain() RETURNS Void ->
+    -- Test 1: expression return (BinaryOp on frame string)
+    g = greet("John", "Doe");
+    MUTABLE i: Int64 = 0;
+    WHILE i < 5 DO
+        junk = "XXXXXXXXXX" + i.toString();
+        i += 1;
+    END
+    ASSERT g == "Hello John Doe", "expression return string survives frame rewind";
+
+    -- Test 2: multi-operand expression return with toString
+    p = formatNum("count", 42);
+    MUTABLE j: Int64 = 0;
+    WHILE j < 5 DO
+        junk2 = "YYYYYYYYYY" + j.toString();
+        j += 1;
+    END
+    ASSERT p == "count: 42", "expression return with toString survives";
+
+    RETURN;
+END

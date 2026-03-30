@@ -88,13 +88,13 @@ RSpec.describe ZigTranspiler do
 
     it "emits CheatLib.promoteList before returning a @list from a frame-using function" do
       zig = transpile(frame_list_src)
-      expect(zig).to include("CheatLib.promoteList(f64, rt, &vals)")
+      expect(zig).to include("CheatLib.promoteList(f64, rt, &__ret)")
     end
 
     it "emits promoteList before the return statement" do
       zig = transpile(frame_list_src)
       promote_pos = zig.index("CheatLib.promoteList")
-      return_pos  = zig.index("return vals")
+      return_pos  = zig.index("return __ret")
       expect(promote_pos).to be < return_pos
     end
 
@@ -125,13 +125,13 @@ RSpec.describe ZigTranspiler do
 
     it "emits CheatLib.mapPromote before returning a String HashMap" do
       zig = transpile(map_return_src)
-      expect(zig).to include("CheatLib.mapPromote(i64, rt.heapAlloc(), &m.inner)")
+      expect(zig).to include("CheatLib.mapPromote(i64, rt.heapAlloc(), &__ret.inner)")
     end
 
     it "emits mapPromote before the return statement" do
       zig = transpile(map_return_src)
       promote_pos = zig.index("CheatLib.mapPromote")
-      return_pos  = zig.index("return m")
+      return_pos  = zig.index("return __ret")
       expect(promote_pos).to be < return_pos
     end
 
@@ -512,7 +512,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       expect(zig).to include("promoteList")
       promote_pos = zig.index("promoteList")
-      return_pos  = zig.index("return Pair{")
+      return_pos  = zig.index("return __ret")
       expect(promote_pos).to be < return_pos
     end
 
