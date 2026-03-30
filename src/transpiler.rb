@@ -514,7 +514,34 @@ private
       # @local pointers are always `const` — mutation goes through the pointer, not the binding.
       # Same as @locked: the pointer itself never changes, only the pointee.
       is_mutable = false if ft.local?
-      keyword = is_mutable ? "var" : "const"
+      actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
+      # Downgrade unnecessary MUTABLE to const for better Zig codegen (SROA, vectorization).
+      # Collections/streams are forced to var for deinit even if never reassigned.
+      # Types that require `var` in Zig even if the binding itself is never reassigned:
+      # collections (deinit mutates), streams, dynamic arrays, and structs with
+      # heap-promoted collection fields (field-level deinit needs mutable access).
+      # Check if struct schema contains collection/string fields needing mutable deinit.
+      struct_has_cleanup = if ft&.struct? && !ft&.any_rc? && !ft&.any_sync?
+        schema = @struct_schemas&.dig(ft.resolved)
+        schema&.any? { |fn, fd|
+          next if fn.is_a?(Symbol)
+          ftype = fd.is_a?(Hash) ? fd[:type] : fd
+          ftype_t = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+          ftype_t.collection? || ftype_t.map? || ftype_t.string?
+        }
+      end
+      has_mutable_cleanup = ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
+                            ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
+                            ft&.heap_promoted || ft&.resource? || struct_has_cleanup
+      forced_var = is_mutable && has_mutable_cleanup
+      keyword = if !is_mutable
+        "const"
+      elsif actually_mutated || forced_var
+        "var"
+      else
+        $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{node.name}' (line #{node.token.line})" if !node.var_used
+        "const"  # MUTABLE but never reassigned → emit const for SROA
+      end
       zig_type = transpile_type(node.full_type)
       # Always emit explicit type annotation for fn_type (Zig can't always infer *const fn(...)).
       annotation = (ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type?) ? ": #{zig_type}" : ""
@@ -567,26 +594,13 @@ private
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
 
-      # Suppression logic:
-      #
-      # `var` declarations (actually mutated):
-      #   - If var_used: Zig won't warn (it's read AND mutated) → no suppression needed.
-      #   - If !var_used: emit `_ = &name;` to suppress "unused variable".
-      #   Taking &struct forces the struct to memory and kills SROA; skip when safe.
-      #
-      # `const` declarations (immutable OR mutable-but-never-reassigned):
-      #   No "never mutated" warning possible. Only suppress "unused variable".
-      #   Emit `_ = name;` (no &) when unused — keeps LLVM free to SROA and vectorize.
-      # Collections and streams are forced to `var` for deinit, but Zig never sees the
-      # binding itself mutated (setAt/push/etc. operate through pointers, not reassignment).
-      # Index compound-assignment (arr[i] += v) also doesn't mutate the binding.
-      # Always emit _ = &name; for these so Zig doesn't error on "never mutated".
-      forced_var = ft.collection? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
-      zig_never_mutated = forced_var || (ft.array? && ft.dynamic?)
-      suppression = if is_mutable
-        actually_mutated = node.respond_to?(:var_mutated) && node.var_mutated == true
-        if actually_mutated && node.respond_to?(:var_used) && node.var_used && !zig_never_mutated
-          ""  # used AND mutated — Zig won't warn about either; no _ = &name; needed
+      # Suppression: Zig warns on unused variables and never-mutated vars.
+      # - `var` (actually mutated + used): no suppression needed
+      # - `var` (forced for collections/streams): always `_ = &name;`
+      # - `const` (unused): `_ = name;` (no & — preserves SROA)
+      suppression = if keyword == "var"
+        if actually_mutated && node.var_used && !forced_var
+          ""  # used AND mutated — Zig won't warn
         else
           "_ = &#{safe_name};"
         end

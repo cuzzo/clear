@@ -415,7 +415,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("_ = &p")
     end
 
-    it "keeps _ = &name for a mutable var that is used but never reassigned" do
+    it "downgrades MUTABLE to const when never reassigned (SROA-safe)" do
       src = <<~CLEAR
         FN cheatMain() RETURNS Void ->
           MUTABLE x = 5_i64;
@@ -424,11 +424,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # x is read but never reassigned — keep _ = &x to suppress Zig "never mutated" warning
-      expect(zig).to include("_ = &x")
+      # x is MUTABLE but never reassigned — downgraded to const for SROA
+      expect(zig).to include("const x")
+      expect(zig).not_to include("var x")
     end
 
-    it "keeps _ = &name for a completely unused mutable var" do
+    it "downgrades completely unused MUTABLE to const" do
       src = <<~CLEAR
         FN cheatMain() RETURNS Void ->
           MUTABLE x = 5_i64;
@@ -436,7 +437,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("_ = &x")
+      expect(zig).to include("const x")
+      expect(zig).not_to include("var x")
     end
   end
 
