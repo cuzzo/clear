@@ -555,7 +555,8 @@ private
       if schema
         field_type = schema[f[:name]]&.resolved
         val_type   = f[:value].resolved_type
-        unless val_type == field_type || val_type == :Any || field_type == :Any
+        is_numeric_promo = (val_type == :Int64 && (field_type == :Number || field_type == :Float64))
+        unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
           error!(match_node, "MATCH struct pattern: field '#{f[:name]}' has type #{field_type}, but pattern value has type #{val_type}")
         end
       end

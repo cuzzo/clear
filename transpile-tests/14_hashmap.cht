@@ -8,12 +8,12 @@ FN cheatMain() RETURNS Void ->
   MUTABLE i = 0_i64;
   WHILE i < words.length() DO
     w = words[i];
-    current = counts[w]; -- mapGet (defaults to 0)
-    counts[w] = current + 1_i64; -- mapPut
+    current = counts[w] OR 0_i64;
+    counts[w] = current + 1_i64;
     i = i + 1_i64;
   END
 
   -- Verify counts
-  ASSERT counts["apple"] == 2, "Apple count should be 2";
-  ASSERT counts["banana"] == 1, "Banana count should be 1";
+  ASSERT (counts["apple"] OR 0_i64) == 2, "Apple count should be 2";
+  ASSERT (counts["banana"] OR 0_i64) == 1, "Banana count should be 1";
 END

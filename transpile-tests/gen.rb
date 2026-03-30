@@ -180,10 +180,18 @@ File.open(OUTPUT_FILE, "w") do |f|
       f.puts "\n// --- TEST: #{filename} ---"
       f.puts block
     rescue => e
-      puts "    [ERROR] Failed to transpile #{filename}: #{e.message}"
-      puts e.backtrace.join("\n")
+      $stderr.puts "    [ERROR] Failed to transpile #{filename}: #{e.message}"
+      $stderr.puts e.backtrace.first(3).join("\n")
+      @failed_tests ||= []
+      @failed_tests << filename
     end
   end
+end
+
+if @failed_tests&.any?
+  $stderr.puts "\n#{@failed_tests.size} test(s) FAILED to transpile:"
+  @failed_tests.each { |f| $stderr.puts "  - #{f}" }
+  exit 1
 end
 
 `zig fmt zig/all-tests.zig`
