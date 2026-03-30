@@ -40,7 +40,7 @@ FN cheatMain() RETURNS Void ->
     WHILE run < 10000 DO
         -- `parts` declared inside the loop → compiler emits saveLoopMark/restoreLoopMark,
         -- rewinding the frame arena each iteration.
-        MUTABLE parts = List[];
+        MUTABLE parts: String[]@list = List[];
 
         MUTABLE i = 0;
         WHILE i < 1000 DO

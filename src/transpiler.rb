@@ -1916,7 +1916,7 @@ private
 
     # Standard OR behavior (non-error types)
     right = visit(node.right)
-    return "(#{left}) orelse #{right}"
+    return "((#{left}) orelse #{right})"
   end
 
   def transpile_Intrinsic(node)

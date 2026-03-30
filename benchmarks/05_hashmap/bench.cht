@@ -39,7 +39,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE total = 0.0;
     MUTABLE j = 0;
     WHILE j < 1000000 DO
-        total = total + m[j];
+        total = total + (m[j] OR 0.0);
         j += 1;
     END
 
