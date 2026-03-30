@@ -1,0 +1,6 @@
+.{
+    .name = .web_crawler,
+    .fingerprint = 0x3c81f03c297a50f5,
+    .version = "0.1.0",
+    .paths = .{""},
+}
