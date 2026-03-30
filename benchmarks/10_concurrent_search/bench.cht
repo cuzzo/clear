@@ -36,14 +36,12 @@ FN main() RETURNS Void ->
     -- loop_appends_outer_list? ensures mark_per_iter = false (no frame rewind
     -- per iteration, so captured 'filepath' slices stay valid until NEXT).
     MUTABLE futures: ~Int64[]@list = [];
-    MUTABLE i: Int64 = 0;
-    WHILE i < n DO
+    FOR i IN (0_i64 ..< n) DO
         filepath = "${data_dir}/${files[i]}";
         futures.append(BG {
             content = readFile(filepath);
             countOccurrences(content, needle);
         });
-        i += 1;
     END
 
     -- Collect results by NEXTing each promise in order.
@@ -51,39 +49,31 @@ FN main() RETURNS Void ->
     -- NEXT calls .next() which blocks until the fiber completes.
     -- files[j] gives the actual filename for future j, regardless of listDir order.
     MUTABLE results: SearchResult[]@list = [];
-    MUTABLE j: Int64 = 0;
-    WHILE j < n DO
+    FOR j IN (0_i64 ..< n) DO
         c: Int64 = NEXT futures[j];
         results.append(SearchResult{ filename: files[j], count: c });
-        j += 1;
     END
 
     -- Selection sort: find top-10 by swapping into the first 10 positions.
-    MUTABLE k: Int64 = 0;
-    WHILE k < 10 DO
+    FOR k IN (0_i64 ..< 10) DO
         MUTABLE best: Int64 = k;
-        MUTABLE m: Int64 = k + 1;
-        WHILE m < n DO
+        FOR m IN (k + 1 ..< n) DO
             IF results[m].count > results[best].count THEN
                 best = m;
             END
-            m += 1;
         END
         IF best != k THEN
             tmp = results[k];
             results[k] = results[best];
             results[best] = tmp;
         END
-        k += 1;
     END
 
     -- Print top 10.
     print("Top 10 files by '", needle, "' count:");
-    MUTABLE p: Int64 = 0;
-    WHILE p < 10 DO
+    FOR p IN (0_i64 ..< 10) DO
         r = results[p];
         print("  ", r.filename, "  ", r.count);
-        p += 1;
     END
 
     elapsed = timestampMs() - t0;

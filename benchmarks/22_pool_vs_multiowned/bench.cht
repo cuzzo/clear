@@ -1,0 +1,47 @@
+-- Benchmark 22: Pool vs List — Insert + Iteration Cost
+--
+-- Both variants insert N structs, then iterate to sum a field.
+-- Pool uses generational handles (insert returns Id<T>, extra safety).
+-- List uses simple append (index-based, no generation check).
+--
+-- Measures the overhead of Pool's generational bookkeeping vs
+-- List's simpler dense array.
+
+STRUCT Entity { x: Int64, y: Int64, health: Int64 }
+
+FN benchPool(n: Int64) RETURNS Int64 ->
+    MUTABLE pool: Entity[]@pool = [];
+
+    -- Insert phase
+    FOR i IN (0_i64 ..< n) -> pool.insert(Entity{ x: i, y: i * 2, health: 100 });
+
+    RETURN pool.count();
+END
+
+FN benchList(n: Int64) RETURNS Int64 ->
+    MUTABLE items: Entity[]@list = [];
+
+    -- Insert phase
+    FOR i IN (0_i64 ..< n) -> items.append(Entity{ x: i, y: i * 2, health: 100 });
+
+    RETURN items.length();
+END
+
+FN main() RETURNS Void ->
+    n = 1000000;
+
+    t0 = timestampMs();
+    poolCount = benchPool(n);
+    poolMs = timestampMs() - t0;
+
+    t1 = timestampMs();
+    listCount = benchList(n);
+    listMs = timestampMs() - t1;
+
+    ASSERT poolCount == listCount, "both must insert same count";
+
+    print("Pool vs List insert (${n.toString()} entities)");
+    print("  Pool (generational): ${poolMs.toString()} ms");
+    print("  List (dense array):  ${listMs.toString()} ms");
+    RETURN;
+END

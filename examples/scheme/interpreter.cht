@@ -77,10 +77,8 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
         Value.List AS la -> MATCH b START
             Value.List AS lb ->
                 IF la.length() != lb.length() THEN RETURN FALSE; END
-                MUTABLE ci: Int64 = 0;
-                WHILE ci < la.length() DO
+                FOR ci IN (0_i64 ..< la.length()) DO
                     IF valEqual?(la[ci], lb[ci]) == FALSE THEN RETURN FALSE; END
-                    ci += 1;
                 END
                 RETURN TRUE;,
             DEFAULT -> RETURN FALSE; END,
@@ -111,10 +109,10 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
         Value.Symbol AS s -> RETURN s;,
         Value.List AS items ->
-            MUTABLE out = "("; MUTABLE li: Int64 = 0;
-            WHILE li < items.length() DO
+            MUTABLE out = "(";
+            FOR li IN (0_i64 ..< items.length()) DO
                 IF li > 0 THEN out = out + " "; END
-                out = out + prStr(items[li], readably); li += 1;
+                out = out + prStr(items[li], readably);
             END
             RETURN out + ")";,
         Value.NativeFn -> RETURN "#<function>";,
@@ -231,8 +229,8 @@ FN applyNative(name: String, evaled: Value[]) RETURNS Value @reentrant ->
     IF name == ">=" THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
     IF name == "list" THEN
         MUTABLE litems: Value[]@list = List[];
-        MUTABLE li: Int64 = 1;
-        WHILE li < evaled.length() DO litems.append(evaled[li]); li += 1; END
+        FOR li IN (1_i64 ..< evaled.length()) ->
+            litems.append(evaled[li]);
         RETURN Value{ List: litems };
     END
     IF name == "list?" THEN RETURN boolVal(isList?(evaled[1])); END
@@ -321,11 +319,8 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS V
 
     ELSE_IF formName == "do" THEN
         MUTABLE doResult: Value = Value.Nil;
-        MUTABLE di: Int64 = 1;
-        WHILE di < items.length() DO
+        FOR di IN (1_i64 ..< items.length()) ->
             doResult = eval!(items[di], envId, pool);
-            di += 1;
-        END
         RETURN doResult;
 
     ELSE_IF formName == "if" THEN
@@ -342,11 +337,8 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[]@pool) RETURNS V
 
     ELSE
         MUTABLE evaled: Value[]@list = List[];
-        MUTABLE ei: Int64 = 0;
-        WHILE ei < items.length() DO
+        FOR ei IN (0_i64 ..< items.length()) ->
             evaled.append(eval!(items[ei], envId, pool));
-            ei += 1;
-        END
         f = evaled[0];
         IF isLambda?(f) THEN
             RETURN evalLambdaCall!(f, evaled, pool);
@@ -366,11 +358,9 @@ FN evalLambdaCall!(f: Value, evaled: Value[], MUTABLE pool: Env[]@pool) RETURNS 
         Value.Lambda AS lam ->
             callId: Id<Env> = pool.insert(Env{ vars: {} });
             pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
-            MUTABLE pi: Int64 = 0;
-            WHILE pi < lam.params.length() DO
+            FOR pi IN (0_i64 ..< lam.params.length()) DO
                 pname = getSymName(lam.params[pi]);
                 pool[callId]?.vars[pname] = evaled[pi + 1];
-                pi += 1;
             END
             result = eval!(lam.body, callId, pool);,
         DEFAULT -> PASS;

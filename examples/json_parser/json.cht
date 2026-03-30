@@ -33,11 +33,9 @@ FN jsonToString(v: JsonValue) RETURNS String @reentrant ->
         JsonValue.JStr AS s -> RETURN "\"" + s + "\"";,
         JsonValue.JArray AS items ->
             MUTABLE out = "[";
-            MUTABLE i: Int64 = 0;
-            WHILE i < items.length() DO
+            FOR i IN (0_i64 ..< items.length()) DO
                 IF i > 0 THEN out = out + ","; END
                 out = out + jsonToString(items[i]);
-                i += 1;
             END
             RETURN out + "]";,
         JsonValue.JObj ->

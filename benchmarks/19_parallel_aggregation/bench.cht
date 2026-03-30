@@ -30,11 +30,9 @@ FN main() RETURNS Void ->
     -- This is the "dataset construction" — excluded from meaningful timing in other langs too.
     MUTABLE keys: String[]@list = List[];
     MUTABLE seed: Int64 = 42;
-    MUTABLE i: Int64 = 0;
-    WHILE i < n DO
+    FOR i IN (0_i64 ..< n) DO
         seed = lcg(seed);
         keys.append("b:${toString(absInt(seed) MOD buckets)}");
-        i += 1;
     END
 
     -- Phase 1: Build histogram via SHARD (shared-nothing counting)

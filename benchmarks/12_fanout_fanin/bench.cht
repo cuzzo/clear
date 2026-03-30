@@ -14,11 +14,7 @@ STRUCT Work { seed: Int64 }
 
 FN doWork(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
-    MUTABLE i: Int64 = 0;
-    WHILE i < 1000 DO
-        x = x * 6364136223846793005 + 1442695040888963407;
-        i += 1;
-    END
+    FOR i IN (0_i64 ..< 1000) -> x = x * 6364136223846793005 + 1442695040888963407;
     RETURN x;
 END
 
@@ -26,22 +22,14 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
     -- Build work items
     MUTABLE items: Work[] = [];
-    MUTABLE i: Int64 = 0;
-    WHILE i < 10000 DO
-        items.append(Work{ seed: i });
-        i += 1;
-    END
+    FOR i IN (0_i64 ..< 10000) -> items.append(Work{ seed: i });
 
     -- Fan-out: 8 persistent workers, distributed across schedulers
     results = items s> CONCURRENT(workers: 8, parallel: TRUE) SELECT doWork(_.seed);
 
     -- Fan-in: sum results
     MUTABLE total: Int64 = 0;
-    MUTABLE j: Int64 = 0;
-    WHILE j < 10000 DO
-        total += results[j];
-        j += 1;
-    END
+    FOR j IN (0_i64 ..< 10000) -> total += results[j];
 
     print("Total:", total);
     print("Workers: 10000, Iterations: 1000");

@@ -37,21 +37,15 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE total = 0;
 
-    MUTABLE run = 0;
-    WHILE run < 10000 DO
+    FOR run IN (0_i64 ..< 10000) DO
         -- `parts` declared inside the loop → compiler emits saveLoopMark/restoreLoopMark,
         -- rewinding the frame arena each iteration.
         MUTABLE parts: String[]@list = List[];
 
-        MUTABLE i = 0;
-        WHILE i < 1000 DO
-            parts.append("hello");
-            i += 1;
-        END
+        FOR i IN (0_i64 ..< 1000) -> parts.append("hello");
 
         result = join(parts, "");
         total = total + result.length();
-        run += 1;
     END
 
     ASSERT total > 0, "total must be positive";

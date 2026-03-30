@@ -24,16 +24,11 @@ FN main() RETURNS Void ->
     WHILE wi < workers DO
         start = wi * chunk;
         set_futures.append(BG {
-            MUTABLE i: Int64 = start;
-            WHILE i < start + chunk DO
-                locked_map["key:" + toString(i)] = "value";
-                i += 1;
-            END
+            FOR i IN (start ..< start + chunk) -> locked_map["key:" + toString(i)] = "value";
         });
         wi += 1;
     END
-    MUTABLE si: Int64 = 0;
-    WHILE si < workers DO NEXT set_futures[si]; si += 1; END
+    FOR si IN (0_i64 ..< workers) -> NEXT set_futures[si];
 
     -- GET 1M
     MUTABLE get_futures: ~Void[]@list = [];
@@ -41,16 +36,11 @@ FN main() RETURNS Void ->
     WHILE wi < workers DO
         start = wi * chunk;
         get_futures.append(BG {
-            MUTABLE i: Int64 = start;
-            WHILE i < start + chunk DO
-                MUTABLE got = locked_map["key:" + toString(i)] OR "";
-                i += 1;
-            END
+            FOR i IN (start ..< start + chunk) -> MUTABLE got = locked_map["key:" + toString(i)] OR "";
         });
         wi += 1;
     END
-    MUTABLE gi: Int64 = 0;
-    WHILE gi < workers DO NEXT get_futures[gi]; gi += 1; END
+    FOR gi IN (0_i64 ..< workers) -> NEXT get_futures[gi];
 
     -- Mixed: 200K SET + 800K GET
     MUTABLE mix_set_futures: ~Void[]@list = [];
@@ -59,16 +49,11 @@ FN main() RETURNS Void ->
     WHILE wi < workers DO
         start = wi * mix_chunk;
         mix_set_futures.append(BG {
-            MUTABLE i: Int64 = start;
-            WHILE i < start + mix_chunk DO
-                locked_map["key:" + toString(i)] = "updated";
-                i += 1;
-            END
+            FOR i IN (start ..< start + mix_chunk) -> locked_map["key:" + toString(i)] = "updated";
         });
         wi += 1;
     END
-    MUTABLE msi: Int64 = 0;
-    WHILE msi < workers DO NEXT mix_set_futures[msi]; msi += 1; END
+    FOR msi IN (0_i64 ..< workers) -> NEXT mix_set_futures[msi];
 
     MUTABLE mix_get_futures: ~Void[]@list = [];
     wi = 0;
@@ -76,16 +61,11 @@ FN main() RETURNS Void ->
     WHILE wi < workers DO
         start = wi * mix_get_chunk;
         mix_get_futures.append(BG {
-            MUTABLE i: Int64 = start;
-            WHILE i < start + mix_get_chunk DO
-                MUTABLE got = locked_map["key:" + toString(i)] OR "";
-                i += 1;
-            END
+            FOR i IN (start ..< start + mix_get_chunk) -> MUTABLE got = locked_map["key:" + toString(i)] OR "";
         });
         wi += 1;
     END
-    MUTABLE mgi: Int64 = 0;
-    WHILE mgi < workers DO NEXT mix_get_futures[mgi]; mgi += 1; END
+    FOR mgi IN (0_i64 ..< workers) -> NEXT mix_get_futures[mgi];
 
     ASSERT locked_map.count() == n;
     print("locked: OK");

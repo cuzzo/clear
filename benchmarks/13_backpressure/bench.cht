@@ -16,11 +16,7 @@ STRUCT Item { seed: Int64, result: Int64 }
 
 FN processItem(val: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = val;
-    MUTABLE i: Int64 = 0;
-    WHILE i < 500 DO
-        x = x * 6364136223846793005 + 1442695040888963407;
-        i += 1;
-    END
+    FOR i IN (0_i64 ..< 500) -> x = x * 6364136223846793005 + 1442695040888963407;
     RETURN x;
 END
 
@@ -28,22 +24,14 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
     -- Build work items
     MUTABLE items: Item[] = [];
-    MUTABLE i: Int64 = 0;
-    WHILE i < 100000 DO
-        items.append(Item{ seed: i, result: 0 });
-        i += 1;
-    END
+    FOR i IN (0_i64 ..< 100000) -> items.append(Item{ seed: i, result: 0 });
 
     -- Process with backpressure (workers: 8 = max 8 concurrent fibers)
     processed = items s> CONCURRENT(workers: 8, parallel: TRUE) SELECT processItem(_.seed);
 
     -- Sum results (SUM returns Float64, so we accumulate as Float64)
     MUTABLE total: Int64 = 0;
-    MUTABLE j: Int64 = 0;
-    WHILE j < 100000 DO
-        total += processed[j];
-        j += 1;
-    END
+    FOR j IN (0_i64 ..< 100000) -> total += processed[j];
 
     print("Total:", total);
     print("Items: 100000, Consumers: 8, Pool: 8");

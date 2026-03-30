@@ -14,8 +14,7 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
     -- Collect subdirectory scan promises for parallel execution.
     MUTABLE futures: ~Int64[]@list = [];
 
-    MUTABLE i: Int64 = 0;
-    WHILE i < entries.length() DO
+    FOR i IN (0_i64 ..< entries.length()) DO
         entry = entries[i];
         prefix = substr(entry, 0, 2);
         name = substr(entry, 2, entry.length() - 2);
@@ -29,15 +28,11 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
                 scanDir(fullPath);
             });
         END
-        i += 1;
     END
 
     -- Wait for all subdirectory scans and sum their results.
-    MUTABLE j: Int64 = 0;
-    WHILE j < futures.length() DO
+    FOR j IN (0_i64 ..< futures.length()) ->
         total += NEXT futures[j];
-        j += 1;
-    END
 
     RETURN total;
 END

@@ -22,12 +22,10 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS Void ->
   -- Using @list so both stacks live in the frame arena; trivially freed on exit.
   MUTABLE lo_stk: Int64[]@list = [];
   MUTABLE hi_stk: Int64[]@list = [];
-  MUTABLE fill_i = 0;
   -- Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
-  WHILE fill_i < 48 DO
+  FOR fill_i IN (0_i64 ..< 48) DO
     lo_stk.append(0);
     hi_stk.append(0);
-    fill_i += 1;
   END
   lo_stk[0] = 0;
   hi_stk[0] = n - 1;
@@ -139,11 +137,7 @@ FN main() RETURNS Void ->
 
   -- Mergesort (needs a temp buffer of the same size)
   MUTABLE tmp_arr: Float64[]@list = [];
-  MUTABLE ti = 0;
-  WHILE ti < n DO
-    tmp_arr.append(0.0);
-    ti += 1;
-  END
+  FOR ti IN (0_i64 ..< n) -> tmp_arr.append(0.0);
   t1 = timestampMs();
   msort!(arr, tmp_arr, n);
   msortMs = timestampMs() - t1;

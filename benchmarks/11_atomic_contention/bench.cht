@@ -19,23 +19,13 @@ FN main() RETURNS Void ->
 
     t0 = timestampMs();
     MUTABLE futures: ~Void[]@list = [];
-    MUTABLE i: Int64 = 0;
-    WHILE i < 1024 DO
+    FOR i IN (0_i64 ..< 1024) DO
         futures.append(BG {
-            MUTABLE j: Int64 = 0;
-            WHILE j < 10000 DO
-                c.value += 1;
-                j += 1;
-            END
+            FOR j IN (0_i64 ..< 10000) -> c.value += 1;
         });
-        i += 1;
     END
 
-    MUTABLE k: Int64 = 0;
-    WHILE k < 1024 DO
-        NEXT futures[k];
-        k += 1;
-    END
+    FOR k IN (0_i64 ..< 1024) -> NEXT futures[k];
     elapsed = timestampMs() - t0;
 
     print("Counter: ${c.value.toString()}");

@@ -7,14 +7,12 @@
 FN generateReadings(n: Int64, seed: Int64) RETURNS Float64[]@list ->
     MUTABLE readings: Float64[]@list = [];
     MUTABLE state: Int64 = seed;
-    MUTABLE i: Int64 = 0;
-    WHILE i < n DO
+    FOR i IN (0_i64 ..< n) DO
         state = (state * 13_i64 + 7_i64) MOD 10007;
         modVal = state MOD 1000;
         MUTABLE raw = toFloat(modVal);
         IF raw < 0.0 -> raw = 0.0 - raw;
         readings.append(raw);
-        i += 1;
     END
     RETURN readings;
 END

@@ -22,11 +22,9 @@ STRUCT Report {
 FN buildReport(name: String, data: String) RETURNS Report ->
     parts = split(data, ",");
     MUTABLE sum: Int64 = 0;
-    MUTABLE i: Int64 = 0;
-    WHILE i < parts.length() DO
+    FOR i IN (0_i64 ..< parts.length()) DO
         val = toInt(parts[i]);
         sum += val;
-        i += 1;
     END
     RETURN Report{ name: name, itemCount: parts.length(), total: sum };
 END
@@ -37,11 +35,9 @@ FN buildReportOrFail(name: String, data: String) RETURNS !Report ->
     IF data.length() == 0 -> RAISE "empty data for report: ${name}";
     parts = split(data, ",");
     MUTABLE sum: Int64 = 0;
-    MUTABLE i: Int64 = 0;
-    WHILE i < parts.length() DO
+    FOR i IN (0_i64 ..< parts.length()) DO
         val = toInt(parts[i]);
         sum += val;
-        i += 1;
     END
     RETURN Report{ name: name, itemCount: parts.length(), total: sum };
 END
