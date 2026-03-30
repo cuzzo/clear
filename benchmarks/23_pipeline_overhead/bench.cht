@@ -1,0 +1,105 @@
+-- Benchmark 23: Pipeline Overhead — s> operators vs Handwritten Loops
+--
+-- Measures the transpiler abstraction tax of pipeline operators.
+--
+-- Test 1 (zero-alloc): SUM-only pipeline vs handwritten sum loop.
+--   Both iterate the same data with no intermediate allocations.
+--   If within ~5%, proves pipeline compiles to equivalent code.
+--
+-- Test 2 (multi-pass): WHERE + SELECT + SUM pipeline vs fused loop.
+--   Pipeline creates 2 intermediate lists (WHERE result, SELECT result).
+--   Handwritten loop fuses filter+map+reduce into a single pass.
+--   Shows the cost of intermediate allocations, not abstraction tax.
+
+FN buildData(n: Int64) RETURNS Float64[]@list ->
+    MUTABLE data: Float64[]@list = [];
+    MUTABLE state: Int64 = 42;
+    FOR i IN (0_i64 ..< n) DO
+        state = (state * 6364136223846793005_i64 + (i + 1442695040888963407_i64));
+        MUTABLE val = toFloat(state MOD 1000);
+        IF val < 0.0 -> val = 0.0 - val;
+        data.append(val);
+    END
+    RETURN data;
+END
+
+-- ============================================================
+-- Test 1: Zero-alloc — SUM pipeline vs handwritten sum loop
+-- ============================================================
+
+FN sumLoop(data: Float64[]) RETURNS Float64 ->
+    MUTABLE sum: Float64 = 0.0;
+    FOR i IN (0_i64 ..< data.length()) -> sum += data[i];
+    RETURN sum;
+END
+
+FN sumPipeline(data: Float64[]) RETURNS Float64 ->
+    RETURN data s> SUM _;
+END
+
+-- ============================================================
+-- Test 2: Multi-pass — fused loop vs chained pipeline
+-- ============================================================
+
+FN fusedLoop(data: Float64[]) RETURNS Float64 ->
+    MUTABLE sum: Float64 = 0.0;
+    FOR i IN (0_i64 ..< data.length()) DO
+        v = data[i];
+        IF v > 500.0 -> sum += v * v;
+    END
+    RETURN sum;
+END
+
+FN chainedPipeline(data: Float64[]) RETURNS Float64 ->
+    RETURN data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
+END
+
+FN main() RETURNS Void ->
+    n = 10000000;
+    iters = 20;
+    data = buildData(n);
+
+    -- ---- Test 1: SUM only (run multiple iters to accumulate measurable time) ----
+    warmS1 = sumLoop(data);
+    warmS2 = sumPipeline(data);
+    ASSERT warmS1 == warmS2, "sum results must match";
+
+    MUTABLE accum: Float64 = 0.0;
+
+    t0 = timestampMs();
+    FOR r IN (0_i64 ..< iters) -> accum += sumLoop(data);
+    sumLoopMs = timestampMs() - t0;
+
+    t1 = timestampMs();
+    FOR r IN (0_i64 ..< iters) -> accum += sumPipeline(data);
+    sumPipeMs = timestampMs() - t1;
+
+    -- ---- Test 2: WHERE + SELECT + SUM ----
+    warmF1 = fusedLoop(data);
+    warmF2 = chainedPipeline(data);
+    ASSERT warmF1 == warmF2, "fused results must match";
+
+    t2 = timestampMs();
+    FOR r IN (0_i64 ..< iters) -> accum += fusedLoop(data);
+    fusedMs = timestampMs() - t2;
+
+    t3 = timestampMs();
+    FOR r IN (0_i64 ..< iters) -> accum += chainedPipeline(data);
+    chainMs = timestampMs() - t3;
+
+    ASSERT accum != 0.0, "prevent dead code elimination";
+
+    -- ---- Report ----
+    print("Pipeline Overhead (${n.toString()} Float64 elements)");
+    print("");
+    print("Test 1: SUM only (zero-alloc, single pass)");
+    print("  Handwritten loop:  ${sumLoopMs.toString()} ms");
+    print("  s> SUM pipeline:   ${sumPipeMs.toString()} ms");
+
+    print("");
+    print("Test 2: WHERE + SELECT + SUM (multi-pass)");
+    print("  Fused loop:        ${fusedMs.toString()} ms");
+    print("  s> pipeline:       ${chainMs.toString()} ms");
+
+    RETURN;
+END

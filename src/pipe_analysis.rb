@@ -128,6 +128,11 @@ module PipeAnalysis
     end
 
     node.storage = :frame
+
+    # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
+    # transpiler level via rt.frameAlloc(). Signal this so compute_needs_rt!
+    # propagates the Runtime dependency correctly.
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
 
   def analyze_reduce_op(node)

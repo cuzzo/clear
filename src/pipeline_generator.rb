@@ -189,8 +189,9 @@ module PipelineGenerator
         const pipe_items = pipe_mat.items;
       ZIG
     else
-      # Standard array or @list: use .items if available, otherwise treat as slice
-      "const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else &pipe_src_list;"
+      # Standard array or @list: use .items if available, otherwise treat as slice.
+      # [0..] works for both fixed-size arrays ([N]T → []T) and slices (no-op).
+      "const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else pipe_src_list[0..];"
     end
   end
 
