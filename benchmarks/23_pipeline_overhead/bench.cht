@@ -74,6 +74,9 @@ FN main() RETURNS Void ->
     FOR r IN (0_i64 ..< iters) -> accum += sumPipeline(data);
     sumPipeMs = timestampMs() - t1;
 
+    -- Memory snapshot after SUM tests (no intermediate allocs expected)
+    sumRssKb = currentMemoryKb();
+
     -- ---- Test 2: WHERE + SELECT + SUM ----
     warmF1 = fusedLoop(data);
     warmF2 = chainedPipeline(data);
@@ -82,24 +85,30 @@ FN main() RETURNS Void ->
     t2 = timestampMs();
     FOR r IN (0_i64 ..< iters) -> accum += fusedLoop(data);
     fusedMs = timestampMs() - t2;
+    fusedRssKb = currentMemoryKb();
 
     t3 = timestampMs();
     FOR r IN (0_i64 ..< iters) -> accum += chainedPipeline(data);
     chainMs = timestampMs() - t3;
+    chainRssKb = currentMemoryKb();
 
     ASSERT accum != 0.0, "prevent dead code elimination";
 
     -- ---- Report ----
-    print("Pipeline Overhead (${n.toString()} Float64 elements)");
+    print("Pipeline Overhead (${n.toString()} Float64 elements, ${iters.toString()} iters)");
     print("");
     print("Test 1: SUM only (zero-alloc, single pass)");
     print("  Handwritten loop:  ${sumLoopMs.toString()} ms");
     print("  s> SUM pipeline:   ${sumPipeMs.toString()} ms");
+    print("  RSS after:         ${sumRssKb.toString()} KB");
 
     print("");
     print("Test 2: WHERE + SELECT + SUM (multi-pass)");
-    print("  Fused loop:        ${fusedMs.toString()} ms");
-    print("  s> pipeline:       ${chainMs.toString()} ms");
+    print("  Fused loop:        ${fusedMs.toString()} ms  RSS ${fusedRssKb.toString()} KB");
+    print("  s> pipeline:       ${chainMs.toString()} ms  RSS ${chainRssKb.toString()} KB");
+
+    print("");
+    print("  Peak RSS (VmHWM):  ${peakMemoryKb().toString()} KB");
 
     RETURN;
 END

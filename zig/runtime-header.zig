@@ -641,6 +641,47 @@ pub const CheatLib = struct {
 
     // sleep is called directly on rt: rt.sleep(ms) — see Runtime.sleep in runtime.zig
 
+    /// Peak resident set size (VmHWM) in KB, from /proc/self/status.
+    /// Returns the high-water mark of physical memory used by this process.
+    /// Cross-language comparable — works identically in C, Go, Zig, etc.
+    pub fn peakMemoryKb() i64 {
+        const file = std.fs.openFileAbsolute("/proc/self/status", .{}) catch return -1;
+        defer file.close();
+        var buf: [4096]u8 = undefined;
+        const n = file.readAll(&buf) catch return -1;
+        const content = buf[0..n];
+        // Find "VmHWM:" line and parse the KB value
+        if (std.mem.indexOf(u8, content, "VmHWM:")) |pos| {
+            var i = pos + 6; // skip "VmHWM:"
+            while (i < content.len and (content[i] == ' ' or content[i] == '\t')) : (i += 1) {}
+            var val: i64 = 0;
+            while (i < content.len and content[i] >= '0' and content[i] <= '9') : (i += 1) {
+                val = val * 10 + @as(i64, content[i] - '0');
+            }
+            return val;
+        }
+        return -1;
+    }
+
+    /// Current resident set size (VmRSS) in KB, from /proc/self/status.
+    pub fn currentMemoryKb() i64 {
+        const file = std.fs.openFileAbsolute("/proc/self/status", .{}) catch return -1;
+        defer file.close();
+        var buf: [4096]u8 = undefined;
+        const n = file.readAll(&buf) catch return -1;
+        const content = buf[0..n];
+        if (std.mem.indexOf(u8, content, "VmRSS:")) |pos| {
+            var i = pos + 6; // skip "VmRSS:"
+            while (i < content.len and (content[i] == ' ' or content[i] == '\t')) : (i += 1) {}
+            var val: i64 = 0;
+            while (i < content.len and content[i] >= '0' and content[i] <= '9') : (i += 1) {
+                val = val * 10 + @as(i64, content[i] - '0');
+            }
+            return val;
+        }
+        return -1;
+    }
+
     // -----------------------------------------------------------------
     // Random
     // -----------------------------------------------------------------

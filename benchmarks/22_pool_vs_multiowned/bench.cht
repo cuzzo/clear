@@ -33,15 +33,18 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
     poolCount = benchPool(n);
     poolMs = timestampMs() - t0;
+    poolRssKb = currentMemoryKb();
 
     t1 = timestampMs();
     listCount = benchList(n);
     listMs = timestampMs() - t1;
+    listRssKb = currentMemoryKb();
 
     ASSERT poolCount == listCount, "both must insert same count";
 
     print("Pool vs List insert (${n.toString()} entities)");
-    print("  Pool (generational): ${poolMs.toString()} ms");
-    print("  List (dense array):  ${listMs.toString()} ms");
+    print("  Pool (generational): ${poolMs.toString()} ms  RSS ${poolRssKb.toString()} KB");
+    print("  List (dense array):  ${listMs.toString()} ms  RSS ${listRssKb.toString()} KB");
+    print("  Peak RSS (VmHWM):    ${peakMemoryKb().toString()} KB");
     RETURN;
 END

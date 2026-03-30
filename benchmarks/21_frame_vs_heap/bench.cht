@@ -40,7 +40,7 @@ FN benchHeap(n: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    n = 1000000;
+    n = 100000;
 
     -- Warm up
     benchFrame(1000);
@@ -50,16 +50,19 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
     frameTotal = benchFrame(n);
     frameMs = timestampMs() - t0;
+    frameRssKb = currentMemoryKb();
 
     -- Benchmark Heap (escape path)
     t1 = timestampMs();
     heapTotal = benchHeap(n);
     heapMs = timestampMs() - t1;
+    heapRssKb = currentMemoryKb();
 
     ASSERT frameTotal == heapTotal, "both variants must produce same result";
 
     print("Frame vs Heap Escape (${n.toString()} iterations)");
-    print("  Frame (no escape):  ${frameMs.toString()} ms");
-    print("  Heap  (promoted):   ${heapMs.toString()} ms");
+    print("  Frame (no escape):  ${frameMs.toString()} ms  RSS ${frameRssKb.toString()} KB");
+    print("  Heap  (promoted):   ${heapMs.toString()} ms  RSS ${heapRssKb.toString()} KB");
+    print("  Peak RSS (VmHWM):   ${peakMemoryKb().toString()} KB");
     RETURN;
 END

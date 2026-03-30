@@ -282,6 +282,21 @@ STD_LIB = {
     zig: "CheatLib.timestampMs()"
   },
 
+  # Peak resident set size (VmHWM) in KB — high-water mark of physical memory.
+  # Cross-language comparable (reads /proc/self/status).
+  "peakMemoryKb" => {
+    args: [],
+    return: :Int64,
+    zig: "CheatLib.peakMemoryKb()"
+  },
+
+  # Current resident set size (VmRSS) in KB — physical memory in use right now.
+  "currentMemoryKb" => {
+    args: [],
+    return: :Int64,
+    zig: "CheatLib.currentMemoryKb()"
+  },
+
   # Sleep the current fiber for N milliseconds. Cooperative — other fibers run.
   # Usage: sleep(100);
   "sleep" => {
