@@ -1916,6 +1916,9 @@ private
 
     # Standard OR behavior (non-error types)
     right = visit(node.right)
+    # Wrap in parens so `orelse` binds correctly when used as a sub-expression.
+    # Zig's `orelse` has very low precedence — without parens, `a + b orelse c`
+    # parses as `(a + b) orelse c` instead of `a + (b orelse c)`.
     return "((#{left}) orelse #{right})"
   end
 

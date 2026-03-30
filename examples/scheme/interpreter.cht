@@ -95,7 +95,7 @@ FN readAtom(token: String) RETURNS Value ->
     IF token == "true" THEN RETURN Value.TrueVal; END
     IF token == "false" THEN RETURN Value.FalseVal; END
     IF charAt(token, 0) == "\"" THEN RETURN Value{ Str: substr(token, 1, token.length() - 2) }; END
-    n = toNumber(token) OR 0.0 - 999999.0;
+    n = toNumber(token) OR (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
     RETURN Value{ Symbol: token };
 END
