@@ -1,0 +1,84 @@
+-- Data Pipeline — Multi-stage concurrent data processing
+--
+-- Generates sensor readings, processes through pipeline stages.
+-- Tests: Pipeline chains, CONCURRENT operators, SHARD pipeline,
+-- aggregation operators on real data.
+
+FN generateReadings(n: Int64, seed: Int64) RETURNS Float64[]@list ->
+    MUTABLE readings: Float64[]@list = [];
+    MUTABLE state: Int64 = seed;
+    MUTABLE i: Int64 = 0;
+    WHILE i < n DO
+        state = (state * 13_i64 + 7_i64) MOD 10007;
+        modVal = state MOD 1000;
+        MUTABLE raw = toFloat(modVal);
+        IF raw < 0.0 THEN raw = 0.0 - raw; END
+        readings.append(raw);
+        i += 1;
+    END
+    RETURN readings;
+END
+
+FN cheatMain() RETURNS Void ->
+    readings = generateReadings(1000, 42);
+    ASSERT readings.length() == 1000, "generated 1000 readings";
+
+    -- -------------------------------------------------------
+    -- Test 1: SELECT — scale all readings by 0.1
+    -- -------------------------------------------------------
+    scaled = readings s> SELECT _ * 0.1;
+    ASSERT scaled.length() == 1000, "SELECT preserves length";
+
+    -- -------------------------------------------------------
+    -- Test 2: WHERE — filter readings above threshold
+    -- -------------------------------------------------------
+    high = readings s> WHERE _ > 500.0;
+    low = readings s> WHERE _ <= 500.0;
+    ASSERT high.length() + low.length() == 1000, "WHERE partitions correctly";
+
+    -- -------------------------------------------------------
+    -- Test 3: Pipeline stages composed via intermediate variable
+    -- -------------------------------------------------------
+    transformed = readings s> SELECT _ * 2.0;
+    filtered = transformed s> WHERE _ > 500.0;
+    ASSERT filtered.length() > 0, "SELECT then WHERE via variable works";
+
+    -- -------------------------------------------------------
+    -- Test 4: Aggregation operators
+    -- -------------------------------------------------------
+    s = readings s> SUM _;
+    ASSERT s > 0.0, "SUM is positive";
+    avg = readings s> AVERAGE _;
+    ASSERT avg > 0.0, "AVERAGE is positive";
+    mn = readings s> MIN _;
+    mx = readings s> MAX _;
+    ASSERT mn <= avg, "MIN <= AVERAGE";
+    ASSERT mx >= avg, "MAX >= AVERAGE";
+
+    -- -------------------------------------------------------
+    -- Test 5: CONCURRENT SELECT — parallel transform
+    -- -------------------------------------------------------
+    small = generateReadings(100, 7);
+    doubled = small s> CONCURRENT(workers: 4) SELECT _ * 2.0;
+    ASSERT doubled.length() == 100, "CONCURRENT SELECT preserves length";
+
+    -- -------------------------------------------------------
+    -- Test 6: CONCURRENT WHERE — parallel filter
+    -- -------------------------------------------------------
+    filtered2 = small s> CONCURRENT(workers: 4) WHERE _ > 300.0;
+    ASSERT filtered2.length() > 0, "CONCURRENT WHERE produces results";
+    ASSERT filtered2.length() < 100, "CONCURRENT WHERE filters some items";
+
+    -- -------------------------------------------------------
+    -- Test 7: SHARD pipeline — partitioned map operations
+    -- -------------------------------------------------------
+    MUTABLE buckets: HashMap<Int64>@sharded(4) = {};
+    n = 200_i64;
+    (0..<n) s> SHARD("b:${toString(_ MOD 10)}", buckets) s> CONCURRENT EACH {
+        cur = buckets[_] OR 0_i64;
+        buckets[_] = cur + 1;
+    };
+    ASSERT buckets.count() == 10, "SHARD created 10 buckets";
+
+    print("All data pipeline tests passed!");
+END
