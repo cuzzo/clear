@@ -1731,8 +1731,8 @@ pub const CheatLib = struct {
             }
 
             /// Returns the number of live (non-removed) slots.
-            pub fn count(self: *const Self) usize {
-                var n: usize = 0;
+            pub fn count(self: *const Self) i64 {
+                var n: i64 = 0;
                 for (self.slots.items) |slot| {
                     if (slot.alive) n += 1;
                 }
@@ -1777,12 +1777,12 @@ pub const CheatLib = struct {
                 self.data.set(index, value);
             }
 
-            pub fn length(self: *const Self) usize {
-                return self.data.len;
+            pub fn length(self: *const Self) i64 {
+                return @intCast(self.data.len);
             }
 
-            pub fn count(self: *const Self) usize {
-                return self.data.len;
+            pub fn count(self: *const Self) i64 {
+                return @intCast(self.data.len);
             }
         };
     }
@@ -1872,8 +1872,8 @@ pub const CheatLib = struct {
                 self.free_count += 1;
             }
 
-            pub fn count(self: *const Self) usize {
-                var n: usize = 0;
+            pub fn count(self: *const Self) i64 {
+                var n: i64 = 0;
                 for (self.alive.items) |a| {
                     if (a) n += 1;
                 }
@@ -1925,8 +1925,8 @@ pub const CheatLib = struct {
             }
 
             /// Returns the total number of live slots across all shards.
-            pub fn count(self: *const Self) usize {
-                var n: usize = 0;
+            pub fn count(self: *const Self) i64 {
+                var n: i64 = 0;
                 for (&self.shards) |*s| n += s.count();
                 return n;
             }

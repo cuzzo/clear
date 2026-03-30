@@ -6,7 +6,7 @@ EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math
 EXTERN FN native_clamp(val: Number, min: Number, max: Number) RETURNS Number FROM "native_math";
 EXTERN FN native_abs(val: Number) RETURNS Number FROM "native_math";
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   -- Basic arithmetic via native Zig
   sum = native_add(3, 4);
   ASSERT sum == 7;

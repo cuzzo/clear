@@ -1,7 +1,7 @@
 REQUIRE "pkg:math";
 REQUIRE "pkg:geometry";
 
-FN cheatMain() RETURNS Void ->
+FN main() RETURNS Void ->
   sum = add(3, 4);
   ASSERT sum == 7;
 
