@@ -7,7 +7,7 @@
 -- Bench:   redis-benchmark -p 6380 -t set,get -n 100000 -c 50 -P 16
 -- Compare: dragonfly --port 6379 & redis-benchmark -p 6379 -t set,get -n 100000 -c 50 -P 16
 
-FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>) RETURNS Void ->
+FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
         data = tcpRead(client);
@@ -65,6 +65,22 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>) RETURNS Void
                         ELSE
                             tcpWrite(client, "$-1\r\n");
                         END
+                    ELSE_IF arg0 == "INCR" || arg0 == "incr" THEN
+                        IF arg1.length() > 0 THEN
+                            newVal = (counters[arg1] OR 0_i64) + 1;
+                            counters[arg1] = newVal;
+                            tcpWrite(client, ":" + newVal.toString() + "\r\n");
+                        ELSE
+                            tcpWrite(client, "-ERR wrong number of arguments for 'INCR'\r\n");
+                        END
+                    ELSE_IF arg0 == "DECR" || arg0 == "decr" THEN
+                        IF arg1.length() > 0 THEN
+                            newVal = (counters[arg1] OR 0_i64) - 1;
+                            counters[arg1] = newVal;
+                            tcpWrite(client, ":" + newVal.toString() + "\r\n");
+                        ELSE
+                            tcpWrite(client, "-ERR wrong number of arguments for 'DECR'\r\n");
+                        END
                     ELSE_IF arg0 == "PING" || arg0 == "ping" THEN
                         tcpWrite(client, "+PONG\r\n");
                     ELSE_IF arg0 == "COMMAND" || arg0 == "command" THEN
@@ -105,6 +121,7 @@ END
 
 FN cheatMain() RETURNS Void ->
     MUTABLE store: HashMap<String>@sharded(8):locked = {};
+    MUTABLE counters: HashMap<Int64>@sharded(8):locked = {};
 
     server = TCPServer::listen(6380);
     print("CLEAR kvstore listening on port 6380");
@@ -113,7 +130,7 @@ FN cheatMain() RETURNS Void ->
     WHILE TRUE DO
         client = accept(server);
         tasks.append(BG {
-            handleClient!(client, store);
+            handleClient!(client, store, counters);
         });
     END
 END
