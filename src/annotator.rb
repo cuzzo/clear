@@ -1867,17 +1867,17 @@ private
     start_type = node.start.resolved_type
     finish_type = node.finish.resolved_type
 
-    unless [:Number, :Int64, :Byte].include?(start_type)
+    unless Type.new(start_type).numeric?
       error!(node, "Range start must be a numeric type, got #{start_type}")
     end
 
-    unless [:Number, :Int64, :Byte].include?(finish_type)
+    unless Type.new(finish_type).numeric?
       error!(node, "Range end must be a numeric type, got #{finish_type}")
     end
 
     # Coerce integer types to Number (f64) for uniform Range representation
-    node.start.coerced_type = :Number if [:Int64, :Byte].include?(start_type)
-    node.finish.coerced_type = :Number if [:Int64, :Byte].include?(finish_type)
+    node.start.coerced_type = :Number if start_type != :Number && Type.new(start_type).numeric?
+    node.finish.coerced_type = :Number if finish_type != :Number && Type.new(finish_type).numeric?
 
     node.full_type = :Range
   end
