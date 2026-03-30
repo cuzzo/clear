@@ -494,22 +494,29 @@ class Type
     map? || pool?
   end
 
-  # True for collections whose backing data is frame-allocated and needs
-  # promotion to heap before escaping a function return.
+  # True when backing data is frame-allocated and must be promoted to heap
+  # before escaping its scope (return, BG capture, etc.).
+  # Covers: @list (frame-backed buffer), string HashMap (frame-backed keys/buckets),
+  # and strings ([]const u8 slices pointing into the frame arena).
   def needs_escape_promotion?
     return false if sharded?  # sharded collections are always heap-backed
-    list_collection? || (map? && !numeric_map?)
+    list_collection? || (map? && !numeric_map?) || string?
   end
 
-  # Generate the Zig promotion code for this collection type.
+  # Generate the Zig promotion code for this type.
+  # Collections are promoted in-place; strings are duped to a new binding.
+  # +alloc_expr+ is used for string dupe (e.g., "rt.heapAlloc()" or "__bg0_alloc").
   # Returns nil if no promotion is needed.
-  def escape_promote_code(var_name, rt_name)
+  def escape_promote_code(var_name, rt_name, alloc_expr: nil)
     if list_collection?
       elem_zig = element_type&.zig_type || "u8"
       "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
     elsif map? && !numeric_map?
       val_zig = value_type&.zig_type || "void"
       "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);\n#{var_name}.alloc = #{rt_name}.heapAlloc();"
+    elsif string?
+      alloc = alloc_expr || "#{rt_name}.heapAlloc()"
+      "try #{alloc}.dupe(u8, #{var_name})"
     end
   end
 

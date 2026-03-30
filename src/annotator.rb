@@ -1247,11 +1247,14 @@ private
 
     if node.is_a?(AST::Identifier)
       ti = node.type_info
-      # Any collection whose backing data is frame-allocated must be promoted to heap
+      # Collections whose backing data is frame-allocated must be promoted to heap
       # on escape. Lists use frameAlloc for append(); maps use frameAlloc for keys.
       # Both need promotion regardless of frame_count — the frame allocator is always
       # used for collection operations even in functions without explicit frame usage.
-      if ti&.needs_escape_promotion?
+      # Note: strings also have needs_escape_promotion? = true, but string returns
+      # are handled differently (the callee's frame data survives until the caller's
+      # frame mark restore), so we exclude them from the return-escape path here.
+      if ti&.needs_escape_promotion? && !ti.string?
         mark_symbol_escaped!(node, ti)
         return true
       end
@@ -1263,7 +1266,7 @@ private
         schema.each do |fname, ftype|
           next if fname.is_a?(Symbol)
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
-          if ft.needs_escape_promotion?
+          if ft.needs_escape_promotion? && !ft.string?
             mark_symbol_escaped!(node, ft)
             found = true
           end

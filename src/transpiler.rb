@@ -1197,15 +1197,22 @@ private
         end
       end.join("\n        ")
 
+      # Escape promotions: frame-allocated data captured by BG fibers must be
+      # promoted to heap before the fiber spawns. Uses the same escape system
+      # as return values — needs_escape_promotion? / escape_promote_code.
+      # Strings produce a new binding (dupe returns new slice); collections
+      # are promoted in-place (promoteList/mapPromote mutate the original).
+      escape_promotions, promoted_names = emit_capture_escape_promotions(
+        captured, "#{alloc_var}", rt_name, "__bgp_#{id}"
+      )
+
       capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
         captured.map do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
           if t && t.needs_pointer_passing?
             ".#{name} = &#{name}"
-          elsif t && t.string?
-            # String slices point to frame memory — dupe to the scheduler allocator
-            # so the data outlives the parent's frame arena.
-            ".#{name} = #{alloc_var}.dupe(u8, #{name}) catch &.{}"
+          elsif promoted_names[name]
+            ".#{name} = #{promoted_names[name]}"
           else
             ".#{name} = #{name}"
           end
@@ -1274,8 +1281,10 @@ private
 
       arena_init = node.arena_mode ? "__rt.arena_mode = true;" : ""
 
-      # Generate defer-free lines for duped string captures.
-      string_frees = captured.filter_map do |name, type_obj|
+      # Defer-free for promoted captures inside the fiber.
+      # Strings need explicit free (duped to heap); collections are freed
+      # via their own deinit in the fiber's normal cleanup path.
+      capture_frees = captured.filter_map do |name, type_obj|
         t = type_obj ? Type.new(type_obj) : nil
         "defer ctx.alloc.free(ctx.#{name});" if t && t.string?
       end.join("\n                    ")
@@ -1293,13 +1302,14 @@ private
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
                     defer ctx.inner.wg.done();
-                    #{string_frees}
+                    #{capture_frees}
                     #{stmt_code}
                     #{result_line}
                 }
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
             const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
+            #{escape_promotions.join("\n            ")}
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
             #{resource_moves}
@@ -1998,8 +2008,9 @@ private
     if node.is_a?(AST::Identifier)
       ti = node.type_info
       name = zig_safe_name(node.name)
-      if ti&.needs_escape_promotion?
-        # Direct collection (e.g., RETURN myList)
+      # Return-path promotion: collections only (strings survive the return via
+      # frame arena lifetime; BG captures handle strings separately).
+      if ti&.needs_escape_promotion? && !ti.string?
         promotions << ti.escape_promote_code(name, rt_name)
       else
         # Struct/union variable — promote each collection field via schema
@@ -2009,13 +2020,15 @@ private
           schema.each do |fname, fdef|
             ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
             ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-            promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name) if ft.needs_escape_promotion?
+            if ft.needs_escape_promotion? && !ft.string?
+              promotions << ft.escape_promote_code("#{name}.#{fname}", rt_name)
+            end
           end
         end
       end
     elsif node.is_a?(AST::StructLit)
       node.fields.each do |_fname, fval|
-        if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion?
+        if fval.is_a?(AST::Identifier) && fval.type_info&.needs_escape_promotion? && !fval.type_info.string?
           promotions << fval.type_info.escape_promote_code(zig_safe_name(fval.name), rt_name)
         elsif fval.is_a?(AST::StructLit)
           promotions.concat(emit_escape_promotions(fval, rt_name))
@@ -2024,6 +2037,37 @@ private
     end
 
     promotions.compact
+  end
+
+  # Emit escape promotions for a set of captured variables (used by BG/DO blocks).
+  # Same logic as emit_escape_promotions but works from a {name => type_info} hash
+  # instead of AST nodes. Returns [promotions_array, promoted_names_hash].
+  # promoted_names maps original names to new bindings for types that produce a new
+  # value (strings); collections are promoted in-place and don't need renaming.
+  def emit_capture_escape_promotions(captured, alloc_expr, rt_name, prefix)
+    promotions = []
+    promoted_names = {}
+
+    captured.each do |name, type_obj|
+      t = type_obj ? Type.new(type_obj) : nil
+      next unless t && t.needs_escape_promotion?
+      next if t.needs_pointer_passing?  # pointer captures (maps/pools) are shared, not moved
+
+      code = t.escape_promote_code(name, rt_name, alloc_expr: alloc_expr)
+      next unless code
+
+      if t.string?
+        # String promotion returns a new slice — bind to a new name.
+        promoted = "#{prefix}_#{name}"
+        promotions << "const #{promoted} = #{code};"
+        promoted_names[name] = promoted
+      else
+        # Collection promotion is in-place — no new binding needed.
+        promotions << code
+      end
+    end
+
+    [promotions, promoted_names]
   end
 
   # Emits Zig for pool.insert / pool.get / pool.remove method calls.

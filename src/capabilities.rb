@@ -289,8 +289,15 @@ module CapabilityHelper
       return unless info && scope.owned_names.include?(name)
       classify_ownership!(info) unless info.ownership_kind
       kind = info.ownership_kind
-      if (kind == :resource || kind == :affine) && info.state == :live
-        scope.set_state(name, :moved)
+      ti = info.type
+      if info.state == :live
+        if kind == :resource || kind == :affine
+          scope.set_state(name, :moved)
+        elsif ti.is_a?(Type) && ti.needs_escape_promotion?
+          # Frame-allocated data (strings, collections) is affine-moved into BG fibers.
+          # The fiber receives promoted (heap-backed) data; the outer scope loses access.
+          scope.set_state(name, :moved)
+        end
       end
       return
     end
