@@ -527,6 +527,7 @@ pub const Scheduler = struct {
     }
 
     pub fn run(self: *Scheduler) void {
+
         const my_id = std.Thread.getCurrentId();
 
         global_registry.register(self.allocator, std.Thread.getCurrentId(), self) catch |err| {

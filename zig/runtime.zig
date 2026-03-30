@@ -344,19 +344,33 @@ pub const Runtime = struct {
         task.base.yield();
     }
 
+    /// Run a function on the scheduler's root OS stack (like Go's g0).
+    /// Use for FFI calls to C libraries with unknown stack requirements.
+    /// If we're already on the main thread (no scheduler running) or already
+    /// on the root stack, calls the function directly — no trampoline overhead.
+    /// NOTE: The trampolined function must NOT yield (no io_uring, no fiber sleep).
     pub fn onRootStack(_: *Runtime, user_fn: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
+        // Fast path: not in a fiber — already on the OS stack.
+        if (!fp.scheduler_running) {
+            user_fn(arg);
+            return;
+        }
+
         const sched = fp.active_scheduler;
         const task = sched.getCurrent();
+
+        // Fast path: already on the root stack (nested onRootStack call).
+        if (task.is_on_root_stack) {
+            user_fn(arg);
+            return;
+        }
+
         task.is_on_root_stack = true;
         defer task.is_on_root_stack = false;
 
-        // We want to use the Scheduler's stack, but we need to make sure we don't
-        // overwrite the Scheduler's actual active frames.
-        // We use the scheduler's current main_ctx.sp as the base.
-        const root_stack_sp = sched.main_ctx.sp;
-
-        // Execute the function on the OS stack
-        fc.callOnStack(root_stack_sp, user_fn, arg);
+        // Use g0_top: the top of the OS thread stack, captured at scheduler
+        // startup. Safe distance above main_ctx.sp (the scheduler's saved frames).
+        fc.callOnStack(sched.g0_top, user_fn, arg);
     }
 };
 

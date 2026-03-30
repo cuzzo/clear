@@ -465,11 +465,9 @@ pub const CheatLib = struct {
             const sched = fp.active_scheduler;
             const task = sched.getCurrent();
 
-            // IoWaiter lives on the fiber's stack — safe because the fiber is
-            // .Blocked until the CQE arrives and the scheduler writes .result.
             var waiter = fp.Scheduler.IoWaiter{ .task = task };
             try sched.submitRead(&waiter, file.handle, buffer);
-            task.base.yield(); // park until CQE
+            task.base.yield();
 
             if (waiter.result < 0) {
                 allocator.free(buffer);
@@ -559,10 +557,8 @@ pub const CheatLib = struct {
     // Write File
     pub fn writeFile(path: []const u8, content: []const u8) !void {
         var dir = std.fs.cwd();
-        // Create or Overwrite
         var file = try dir.createFile(path, .{});
         defer file.close();
-
         try file.writeAll(content);
     }
 
