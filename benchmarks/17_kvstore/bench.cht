@@ -64,7 +64,7 @@ END
 FN doSet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Void ->
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
-        map["key:" + i.toString()] = "value-" + i.toString();
+        map["key:${i.toString()}"] = "value-${i.toString()}";
         i += 1;
     END
     RETURN;
@@ -74,7 +74,7 @@ FN doGet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Int6
     MUTABLE hits: Int64 = 0;
     MUTABLE i: Int64 = start;
     WHILE i < start + count DO
-        MUTABLE got = map["key:" + i.toString()] OR "";
+        MUTABLE got = map["key:${i.toString()}"] OR "";
         IF got.length() > 0 THEN hits += 1; END
         i += 1;
     END
@@ -90,7 +90,7 @@ FN doZipfGet!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64,
     WHILE i < count DO
         k = zipfNext!(state, n, s, hIntegral, hFraction);
         state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE got = map["key:" + k.toString()] OR "";
+        MUTABLE got = map["key:${k.toString()}"] OR "";
         IF got.length() > 0 THEN hits += 1; END
         i += 1;
     END
@@ -109,10 +109,10 @@ FN doZipfMixed!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int6
         MUTABLE decision = state MOD 100;
         IF decision < 0 THEN decision = 0 - decision; END
         IF decision < 80 THEN
-            MUTABLE got = map["key:" + k.toString()] OR "";
+            MUTABLE got = map["key:${k.toString()}"] OR "";
             IF got.length() > 0 THEN hits += 1; END
         ELSE
-            map["key:" + k.toString()] = "updated-" + i.toString();
+            map["key:${k.toString()}"] = "updated-${i.toString()}";
         END
         i += 1;
     END

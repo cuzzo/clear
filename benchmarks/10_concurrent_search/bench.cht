@@ -37,7 +37,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE futures: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < n DO
-        filepath = data_dir + "/" + files[i];
+        filepath = "${data_dir}/${files[i]}";
         futures.append(BG {
             content = readFile(filepath);
             countOccurrences(content, needle);

@@ -33,7 +33,7 @@ FN cheatMain() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < n DO
         seed = lcg(seed);
-        keys.append("b:" + toString(absInt(seed) MOD buckets));
+        keys.append("b:${toString(absInt(seed) MOD buckets)}");
         i += 1;
     END
 
