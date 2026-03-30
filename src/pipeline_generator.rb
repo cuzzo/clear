@@ -1,4 +1,11 @@
 module PipelineGenerator
+  # Unique label for each pipeline block — prevents Zig label collisions
+  # when pipelines are chained (e.g., a s> SELECT s> WHERE).
+  def next_pipe_label
+    @pipe_label_counter = (@pipe_label_counter || 0) + 1
+    "__pblk#{@pipe_label_counter}"
+  end
+
   # Consolidates boilerplate for collection operators (SELECT, WHERE, etc.)
   # Handles source list extraction, allocator selection, and Zig block wrapping.
   #
@@ -6,7 +13,9 @@ module PipelineGenerator
   # buffer before iteration so all pipeline ops work correctly.
   # For @list:sharded(N): flattens all shard slices into a frame buffer.
   def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil, force_aos: false)
-    list_code = visit(list_node)
+    my_label = next_pipe_label
+    list_code = visit(list_node)  # may recurse for chained pipelines
+    @current_pipe_label = my_label  # restore after inner pipeline may have changed it
     alloc = storage_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
     lhs_type = list_node.type_info
     is_soa = !force_aos && (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
@@ -54,7 +63,7 @@ module PipelineGenerator
       @soa_needed_fields.clear
 
       <<~ZIG
-        blk: {
+        #{@current_pipe_label}: {
             const __soa_src = &#{list_code};
             #{field_slices}
             #{res_init}
@@ -66,7 +75,7 @@ module PipelineGenerator
       # Standard AOS path: materialize pipe_items then iterate.
       items_block = build_pipe_items_block(lhs_type, alloc)
       <<~ZIG
-        blk: {
+        #{@current_pipe_label}: {
             const pipe_src_list = #{list_code};
             #{items_block}
             #{res_init}
@@ -168,7 +177,7 @@ module PipelineGenerator
             const val = #{expr_code};
             try res_list.append(#{alloc}, val);
         }
-        break :blk res_list;
+        break :#{@current_pipe_label} res_list;
       ZIG
     end
   end
@@ -185,7 +194,7 @@ module PipelineGenerator
                 try res_list.append(#{alloc}, it);
             }
         }
-        break :blk res_list;
+        break :#{@current_pipe_label} res_list;
       ZIG
     end
   end
@@ -209,7 +218,7 @@ module PipelineGenerator
             }
             gop.value_ptr.append(#{alloc}, it) catch @panic("INDEX append failed");
         }
-        break :blk idx_result;
+        break :#{@current_pipe_label} idx_result;
       ZIG
     end
   end
@@ -231,7 +240,7 @@ module PipelineGenerator
         for (pipe_items) |it| {
             acc = #{expr_code};
         }
-        break :blk acc;
+        break :#{@current_pipe_label} acc;
       ZIG
     end
   end
@@ -259,7 +268,7 @@ module PipelineGenerator
             }
         }.lessThan);
 
-        break :blk ord_result;
+        break :#{@current_pipe_label} ord_result;
       ZIG
     end
   end
@@ -275,7 +284,7 @@ module PipelineGenerator
         const lim_actual = @min(lim_requested, pipe_items.len);
 
         // Create new list with limited items
-        break :blk try CheatLib.makeList(#{element_zig_type}, #{alloc}, pipe_items[0..lim_actual]);
+        break :#{@current_pipe_label} try CheatLib.makeList(#{element_zig_type}, #{alloc}, pipe_items[0..lim_actual]);
       ZIG
     end
   end
@@ -300,7 +309,7 @@ module PipelineGenerator
                 try res_list.append(#{alloc}, inner_it);
             }
         }
-        break :blk res_list;
+        break :#{@current_pipe_label} res_list;
       ZIG
     end
   end
@@ -333,7 +342,7 @@ module PipelineGenerator
                 try res_list.append(#{alloc}, it);
             }
         }
-        break :blk res_list;
+        break :#{@current_pipe_label} res_list;
       ZIG
     end
   end
@@ -562,7 +571,7 @@ module PipelineGenerator
                 break;
             }
         }
-        break :blk if (find_found) @as(?#{elem_zig_type}, find_result) else null;
+        break :#{@current_pipe_label} if (find_found) @as(?#{elem_zig_type}, find_result) else null;
       ZIG
     end
   end
@@ -579,7 +588,7 @@ module PipelineGenerator
                 break;
             }
         }
-        break :blk any_result;
+        break :#{@current_pipe_label} any_result;
       ZIG
     end
   end
@@ -596,7 +605,7 @@ module PipelineGenerator
                 break;
             }
         }
-        break :blk all_result;
+        break :#{@current_pipe_label} all_result;
       ZIG
     end
   end
@@ -612,7 +621,7 @@ module PipelineGenerator
                 count_result += 1;
             }
         }
-        break :blk count_result;
+        break :#{@current_pipe_label} count_result;
       ZIG
     end
   end
@@ -630,7 +639,7 @@ module PipelineGenerator
         for (pipe_items) |it| {
             sum_result += #{expr_code};
         }
-        break :blk sum_result;
+        break :#{@current_pipe_label} sum_result;
       ZIG
     end
   end
@@ -645,7 +654,7 @@ module PipelineGenerator
         for (pipe_items) |it| {
             avg_sum += #{expr_code};
         }
-        break :blk if (avg_count == 0) @as(f64, 0) else avg_sum / @as(f64, @floatFromInt(avg_count));
+        break :#{@current_pipe_label} if (avg_count == 0) @as(f64, 0) else avg_sum / @as(f64, @floatFromInt(avg_count));
       ZIG
     end
   end
@@ -661,7 +670,7 @@ module PipelineGenerator
             const min_val = #{expr_code};
             if (min_val < min_result) min_result = min_val;
         }
-        break :blk min_result;
+        break :#{@current_pipe_label} min_result;
       ZIG
     end
   end
@@ -677,7 +686,7 @@ module PipelineGenerator
             const max_val = #{expr_code};
             if (max_val > max_result) max_result = max_val;
         }
-        break :blk max_result;
+        break :#{@current_pipe_label} max_result;
       ZIG
     end
   end
@@ -754,6 +763,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_select(list_node, select_op, id, workers_code, rt_name, options = {})
+    @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
     result_type_sym = select_op.expression.full_type
@@ -789,7 +799,7 @@ module PipelineGenerator
     spawn_call = concurrent_spawn_call(options, "__ccs#{id}_wg", "__CcsWorker#{id}", "__ccs#{id}_workers[__w]")
 
     <<~ZIG.chomp
-      blk: {
+      #{@current_pipe_label}: {
           const pipe_src_list = #{list_code};
           _ = &pipe_src_list;
           #{items_block}
@@ -836,12 +846,13 @@ module PipelineGenerator
           for (__ccs#{id}_results) |__ccs#{id}_slot| {
               if (__ccs#{id}_slot) |__v| try __ccs#{id}_final.append(#{rt_name}.heapAlloc(), __v);
           }
-          break :blk __ccs#{id}_final;
+          break :#{@current_pipe_label} __ccs#{id}_final;
       }
     ZIG
   end
 
   def transpile_concurrent_where(list_node, where_op, id, workers_code, rt_name, options = {})
+    @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
     item_type_str = list_node.full_type.element_type.resolved.to_s
@@ -873,7 +884,7 @@ module PipelineGenerator
     spawn_call = concurrent_spawn_call(options, "__ccw#{id}_wg", "__CcwWorker#{id}", "__ccw#{id}_workers[__w]")
 
     <<~ZIG.chomp
-      blk: {
+      #{@current_pipe_label}: {
           const pipe_src_list = #{list_code};
           _ = &pipe_src_list;
           #{items_block}
@@ -920,7 +931,7 @@ module PipelineGenerator
           for (__ccw#{id}_results) |__ccw#{id}_slot| {
               if (__ccw#{id}_slot) |__v| try __ccw#{id}_final.append(#{rt_name}.heapAlloc(), __v);
           }
-          break :blk __ccw#{id}_final;
+          break :#{@current_pipe_label} __ccw#{id}_final;
       }
     ZIG
   end
@@ -1000,6 +1011,7 @@ module PipelineGenerator
   # combine after WaitGroup.wait().
   #
   def transpile_concurrent_reduce(list_node, op_node, id, workers_code, rt_name, options, kind)
+    @current_pipe_label = next_pipe_label
     item_zig = transpile_type(list_node.type_info.element_type.resolved)
 
     list_code  = visit(list_node)
@@ -1049,20 +1061,20 @@ module PipelineGenerator
     # AVERAGE needs the total count for the final division
     average_suffix = if kind == :average
       "\n          const __ccr#{id}_len_f: f64 = @floatFromInt(__ccr#{id}_len);\n" \
-      "          break :blk if (__ccr#{id}_len == 0) @as(f64, 0) else __ccr#{id}_result / __ccr#{id}_len_f;"
+      "          break :#{@current_pipe_label} if (__ccr#{id}_len == 0) @as(f64, 0) else __ccr#{id}_result / __ccr#{id}_len_f;"
     else
-      "\n          break :blk __ccr#{id}_result;"
+      "\n          break :#{@current_pipe_label} __ccr#{id}_result;"
     end
 
     <<~ZIG.chomp
-      blk: {
+      #{@current_pipe_label}: {
           var pipe_src_list = #{list_code};
           _ = &pipe_src_list;
           #{items_block}
           const __ccr#{id}_items = pipe_items;
           const __ccr#{id}_len = __ccr#{id}_items.len;
           if (__ccr#{id}_len == 0) {
-              break :blk @as(#{result_type}, #{result_init});
+              break :#{@current_pipe_label} @as(#{result_type}, #{result_init});
           }
           var __ccr#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
           const __ccr#{id}_n_workers: usize = @intCast(#{workers_code});

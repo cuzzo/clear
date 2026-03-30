@@ -113,21 +113,24 @@ class Parser
   primary(:PERCENT, '%') { parse_sigil_construct }
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
 
-  primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :expression])
-  primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :expression])
-  primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :expression])
+  # Pipeline operators use :pipe_expression (min precedence 2) so their
+  # body expression stops before `s>` (precedence 1), enabling chaining:
+  #   list s> SELECT _ * 2.0 s> WHERE _ > 5.0
+  primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :pipe_expression])
+  primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :pipe_expression])
+  primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :pipe_expression])
   primary(:KEYWORD, 'REDUCE') { parse_reduce_op }
-  primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :expression])
-  primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :expression])
-  primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :expression])
-  primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :expression])
+  primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :pipe_expression])
+  primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :pipe_expression])
+  primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :pipe_expression])
+  primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :pipe_expression])
   primary(:KEYWORD, 'EACH')  { parse_each_op }
-  primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :expression])
-  primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :expression])
-  primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :expression])
-  primary(:KEYWORD, 'COUNT',   AST::CountOp,   ['COUNT',   :expression])
-  primary(:KEYWORD, 'SUM',     AST::SumOp,     ['SUM',     :expression])
-  primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :expression])
+  primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :pipe_expression])
+  primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :pipe_expression])
+  primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :pipe_expression])
+  primary(:KEYWORD, 'COUNT',   AST::CountOp,   ['COUNT',   :pipe_expression])
+  primary(:KEYWORD, 'SUM',     AST::SumOp,     ['SUM',     :pipe_expression])
+  primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :pipe_expression])
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :expression])
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
@@ -313,6 +316,9 @@ class Parser
   def run_action(item)
     # Convention: :UPPER_CASE is a Token Type to eat
     return consume(item).value if item == item.upcase
+    # :pipe_expression → parse_expression with min precedence = s> (1)
+    # Excludes s> (prec 1, since 1 > 1 is false) but includes OR (prec 2).
+    return parse_expression(1) if item == :pipe_expression
     # :down_case => parse function to run
     return send("parse_#{item}")
   end
@@ -826,14 +832,15 @@ class Parser
 
     # Precedence levels (higher = tighter binding)
     case token.value
-    when 'OR', 's>', 'AS' then 1
-    when '..<', '..<=', '..=' then 2
-    when '||'             then 3
-    when '&&'             then 4
-    when '==', '!=', '<', '>', '<=', '>=' then 5
-    when '+', '-'         then 6
-    when '*', '/', 'MOD'  then 7
-    when '**'             then 8
+    when 's>'             then 1
+    when 'OR', 'AS'       then 2
+    when '..<', '..<=', '..=' then 3
+    when '||'             then 4
+    when '&&'             then 5
+    when '==', '!=', '<', '>', '<=', '>=' then 6
+    when '+', '-'         then 7
+    when '*', '/', 'MOD'  then 8
+    when '**'             then 9
     else nil
     end
   end
@@ -1551,33 +1558,33 @@ class Parser
   def parse_concurrent_inner_op(parent_token)
     if match?(:KEYWORD, 'SELECT')
       consume(:KEYWORD, 'SELECT')
-      expr = parse_expression
+      expr = parse_expression(1)  # stop before s> for chaining
       AST::SelectOp.new(previous, expr)
     elsif match?(:KEYWORD, 'WHERE')
       consume(:KEYWORD, 'WHERE')
-      expr = parse_expression
+      expr = parse_expression(1)
       AST::WhereOp.new(previous, expr)
     elsif match?(:KEYWORD, 'EACH')
       parse_each_op
     elsif match?(:KEYWORD, 'SUM')
       consume(:KEYWORD, 'SUM')
-      expr = parse_expression
+      expr = parse_expression(1)
       AST::SumOp.new(previous, expr)
     elsif match?(:KEYWORD, 'COUNT')
       consume(:KEYWORD, 'COUNT')
-      expr = parse_expression
+      expr = parse_expression(1)
       AST::CountOp.new(previous, expr)
     elsif match?(:KEYWORD, 'MIN')
       consume(:KEYWORD, 'MIN')
-      expr = parse_expression
+      expr = parse_expression(1)
       AST::MinOp.new(previous, expr)
     elsif match?(:KEYWORD, 'MAX')
       consume(:KEYWORD, 'MAX')
-      expr = parse_expression
+      expr = parse_expression(1)
       AST::MaxOp.new(previous, expr)
     elsif match?(:KEYWORD, 'AVERAGE')
       consume(:KEYWORD, 'AVERAGE')
-      expr = parse_expression
+      expr = parse_expression(1)
       AST::AverageOp.new(previous, expr)
     else
       error!(current, "Expected SELECT, WHERE, EACH, SUM, COUNT, MIN, MAX, or AVERAGE after CONCURRENT, got #{current.value.inspect}")

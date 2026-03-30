@@ -37,11 +37,10 @@ FN cheatMain() RETURNS Void ->
     ASSERT high.length() + low.length() == 1000, "WHERE partitions correctly";
 
     -- -------------------------------------------------------
-    -- Test 3: Pipeline stages composed via intermediate variable
+    -- Test 3: Chained pipeline — SELECT then WHERE in one expression
     -- -------------------------------------------------------
-    transformed = readings s> SELECT _ * 2.0;
-    filtered = transformed s> WHERE _ > 500.0;
-    ASSERT filtered.length() > 0, "SELECT then WHERE via variable works";
+    filtered = readings s> SELECT _ * 2.0 s> WHERE _ > 500.0;
+    ASSERT filtered.length() > 0, "chained SELECT then WHERE";
 
     -- -------------------------------------------------------
     -- Test 4: Aggregation operators
