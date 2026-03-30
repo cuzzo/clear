@@ -440,6 +440,49 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("const x")
       expect(zig).not_to include("var x")
     end
+
+    it "warns about MUTABLE that is used but never reassigned" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE x = 5_i64;
+          ASSERT x == 5_i64, "used";
+          RETURN;
+        END
+      CLEAR
+      warnings = []
+      allow($stderr).to receive(:puts) { |msg| warnings << msg }
+      transpile(src)
+      expect(warnings.any? { |w| w.include?("MUTABLE 'x' is never reassigned") }).to be true
+    end
+
+    it "warns about completely unused MUTABLE variable" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE x = 5_i64;
+          RETURN;
+        END
+      CLEAR
+      warnings = []
+      allow($stderr).to receive(:puts) { |msg| warnings << msg }
+      transpile(src)
+      expect(warnings.any? { |w| w.include?("Unused variable 'x'") }).to be true
+    end
+
+    it "does NOT warn about MUTABLE that is actually reassigned" do
+      src = <<~CLEAR
+        FN cheatMain() RETURNS Void ->
+          MUTABLE x = 5_i64;
+          x = 10_i64;
+          ASSERT x == 10_i64, "reassigned";
+          RETURN;
+        END
+      CLEAR
+      warnings = []
+      allow($stderr).to receive(:puts) { |msg| warnings << msg }
+      transpile(src)
+      mutable_warnings = warnings.select { |w| w.include?("MUTABLE 'x'") || w.include?("Unused variable 'x'") }
+      expect(mutable_warnings).to be_empty
+    end
   end
 
   describe "HashMap param double-& fix" do

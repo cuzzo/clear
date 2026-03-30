@@ -539,7 +539,11 @@ private
       elsif actually_mutated || forced_var
         "var"
       else
-        $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{node.name}' (line #{node.token.line})" if !node.var_used
+        if node.var_used
+          $stderr.puts "\e[33m[Warning]\e[0m MUTABLE '#{node.name}' is never reassigned — consider removing MUTABLE (line #{node.token.line})"
+        else
+          $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{node.name}' (line #{node.token.line})"
+        end
         "const"  # MUTABLE but never reassigned → emit const for SROA
       end
       zig_type = transpile_type(node.full_type)
