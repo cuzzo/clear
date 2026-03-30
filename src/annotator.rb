@@ -1253,20 +1253,13 @@ private
   end
 
   def visit_Identifier(node)
-    if @smooth_depth > 0
-      scope = lookup_scope_for(node.name)
-      unless scope
-        error!(node, "Undefined variable '#{node.name}' in pipeline expression")
-      end
-    else
-      scope = resolve_variable_scope(node.name)
-      unless scope
-        error!(node, "Undefined variable '#{node.name}'")
-      end
-    end
+    # Pipeline expressions (inside s>) are closures over the enclosing scope —
+    # lookup_scope_for searches all scopes. Normal code uses resolve_variable_scope
+    # which restricts to local scope + function-as-value references.
+    scope = @smooth_depth > 0 ? lookup_scope_for(node.name) : resolve_variable_scope(node.name)
+    error!(node, "Undefined variable '#{node.name}'") unless scope
 
     # 1. Check Validity (View Invalidation Logic)
-    # If this is a view/slice that was invalidated by a resize, this raises.
     scope.check_validity!(node.name)
 
     # 2. Resolve Type
