@@ -152,9 +152,9 @@ RSpec.describe Lexer do
 
   describe "String Interpolation" do
     it "interpolates a variable in the middle of a string" do
-      # Source: "Hello %{name}!"
+      # Source: "Hello ${name}!"
       # Logic:  "Hello " + (name) + "!"
-      lexer = Lexer.new('"Hello %{name}!"')
+      lexer = Lexer.new('"Hello ${name}!"')
       tokens = lexer.tokenize
 
       # 1. First String Part
@@ -178,10 +178,10 @@ RSpec.describe Lexer do
     end
 
     it "handles interpolation at the start (forces empty string prefix)" do
-      # Source: "%{x}"
+      # Source: "${x}"
       # Logic:  "" + (x) + ""
       # We need that initial "" so the VM treats it as String Concatenation, not Math.
-      lexer = Lexer.new('"%{x}"')
+      lexer = Lexer.new('"${x}"')
       tokens = lexer.tokenize
 
       # 1. Empty String Prefix
@@ -200,9 +200,9 @@ RSpec.describe Lexer do
     end
 
     it "handles complex expressions inside interpolation" do
-      # Source: "Result: %{x + 10}"
+      # Source: "Result: ${x + 10}"
       # Logic:  "Result: " + (x + 10) + ""
-      lexer = Lexer.new('"Result: %{x + 10}"')
+      lexer = Lexer.new('"Result: ${x + 10}"')
       tokens = lexer.tokenize
 
       # Validate the stream structure
@@ -220,9 +220,9 @@ RSpec.describe Lexer do
     end
 
     it "handles multiple interpolations" do
-      # Source: "A %{x} B %{y}"
+      # Source: "A ${x} B ${y}"
       # Logic:  "A " + (x) + " B " + (y) + ""
-      lexer = Lexer.new('"A %{x} B %{y}"')
+      lexer = Lexer.new('"A ${x} B ${y}"')
       tokens = lexer.tokenize
 
       # Filter to just the strings and vars to verify order
@@ -233,19 +233,23 @@ RSpec.describe Lexer do
     end
 
     it "ignores literal percent signs" do
-      # Source: "100% Correct"
       lexer = Lexer.new('"100% Correct"')
       tokens = lexer.tokenize
-
       expect(tokens.size).to eq(2) # STRING + EOF
-      expect(tokens[0].type).to eq(:STRING)
       expect(tokens[0].value).to eq("100% Correct")
     end
 
+    it "ignores bare dollar signs not followed by {" do
+      lexer = Lexer.new('"costs $5"')
+      tokens = lexer.tokenize
+      expect(tokens.size).to eq(2) # STRING + EOF
+      expect(tokens[0].value).to eq("costs $5")
+    end
+
     it "handles nested braces (hashes) inside interpolation" do
-      # Source: "Map: %{ {a:1} }"
+      # Source: "Map: ${ {a:1} }"
       # The lexer must be smart enough to match the OUTER closing brace
-      lexer = Lexer.new('"Map: %{ {a:1} }"')
+      lexer = Lexer.new('"Map: ${ {a:1} }"')
       tokens = lexer.tokenize
 
       # Just check that it parsed the whole thing without erroring on the first '}'

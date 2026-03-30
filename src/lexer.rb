@@ -151,8 +151,8 @@ class Lexer
     chunk_start_col = start_col # Track where the *current* text buffer started
 
     loop do
-      # Scan until we hit a quote, backslash, or the start of interpolation
-      text = @s.scan(/[^"\\%]+/)
+      # Scan until we hit a quote, backslash, or interpolation start ($)
+      text = @s.scan(/[^"\\$]+/)
       if text
         buffer << text
         advance_pos(text)
@@ -181,45 +181,42 @@ class Lexer
         # End of String
         @s.getch # Consume "
         advance_pos('"')
-        # Use chunk_start_col, not start_col
         @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
         break
 
-      elsif @s.peek(2) == '%{'
-        # Interpolation Start
-        # 1. Emit current buffer using the current chunk start
+      elsif @s.peek(2) == '${'
+        # String interpolation: ${expr}
+        # Desugared to concatenation: "..." + (expr) + "..."
+
+        # 1. Emit current buffer
         @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
         buffer = ""
 
-        # 2. Consume %{
+        # 2. Consume ${
         @s.getch; @s.getch
-        advance_pos('%{')
+        advance_pos('${')
 
-        # 3. Inject Connector
+        # 3. Inject connector tokens: + (
         @tokens << Token.new(:CHAR, '+', @line, @column)
         @tokens << Token.new(:CHAR, '(', @line, @column)
 
-        # 4. Extract Expression
+        # 4. Sub-lex the expression inside braces
         expr_source = extract_balanced_brace_content
-
-        # Sub-lexer for the expression
         sub_lexer = Lexer.new(expr_source)
         sub_tokens = sub_lexer.tokenize
         sub_tokens.pop if sub_tokens.last.type == :EOF
         @tokens.concat(sub_tokens)
 
-        # 5. Inject Closer
+        # 5. Inject closer tokens: ) +
         @tokens << Token.new(:CHAR, ')', @line, @column)
         @tokens << Token.new(:CHAR, '+', @line, @column)
 
-        # CRITICAL FIX:
-        # We just finished an interpolation. The next char is the start
-        # of the next string segment. Update our tracker to the CURRENT column.
         chunk_start_col = @column
 
-      elsif @s.peek(1) == '%'
+      elsif @s.peek(1) == '$'
+        # Bare $ (not followed by {) — literal character
         buffer << @s.getch
-        advance_pos('%')
+        advance_pos('$')
       else
         if @s.eos?
           raise "Lexer Error: Unclosed string starting at line #{start_col}"
