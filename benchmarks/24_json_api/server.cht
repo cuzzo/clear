@@ -15,13 +15,9 @@ END
 
 FN generateJson(id: Int64) RETURNS String ->
     sz = sizeForId(id);
-    MUTABLE out = "{\"id\":${id.toString()},\"data\":[";
-    FOR i IN (1_i64 ..= sz) DO
-        IF i > 1 -> out = out + ",";
-        out = out + i.toString();
-    END
-    out = out + "]}";
-    RETURN out;
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END
 
 FN parseAndSum(content: String) RETURNS Int64 ->
@@ -102,7 +98,7 @@ FN main() RETURNS Void ->
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
-        tasks.append(BG { @service ->
+        tasks.append(BG {
             handleClient!(client);
         });
     END
