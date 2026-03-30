@@ -275,9 +275,27 @@ module GenericAnalysis
   end
 
   # Propagate heap_promoted flag from function call return values.
+  # Looks through OR expressions (BinaryOp :OR) to find the underlying
+  # call — `x = failableFunc() OR default` should still propagate
+  # heap_promoted from failableFunc's returns_promoted flag.
   def propagate_call_flags!(node)
-    if node.value.respond_to?(:heap_promoted_call) && node.value.heap_promoted_call
+    if has_heap_promoted_call?(node.value)
       node.type_info.heap_promoted = true
     end
+  end
+
+  # Check if an expression carries heap_promoted_call, looking through
+  # OR/OR_RESCUE wrappers. Used by propagate_call_flags! and visit_BgBlock.
+  # Both OR (orelse) and OR_RESCUE (catch) propagate because the transpiler
+  # ensures fallback struct values also have their string fields duped to heap.
+  def has_heap_promoted_call?(expr)
+    return false unless expr
+    # Direct call with heap_promoted_call flag
+    return true if expr.respond_to?(:heap_promoted_call) && expr.heap_promoted_call
+    # OR/OR_RESCUE expression: check the left side
+    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
+      return has_heap_promoted_call?(expr.left)
+    end
+    false
   end
 end

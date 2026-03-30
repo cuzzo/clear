@@ -2222,6 +2222,14 @@ private
     end
     node.full_type = :"~#{last_type}"
 
+    # Propagate returns_promoted through BG blocks: if the last expression
+    # calls a function with returns_promoted, the BG block's promise carries
+    # heap-promoted data that the NEXT caller must clean up.
+    last_expr = node.body.last
+    if has_heap_promoted_call?(last_expr)
+      node.returns_promoted = true
+    end
+
     # @arena implies @pinned — thread-local arena memory can't be stolen.
     if node.arena_mode
       node.pinned = true
@@ -2316,6 +2324,17 @@ private
         node.expr.symbol&.scope&.set_state(node.expr.name, :moved)
       end
       node.full_type = promise_type.tense_type.to_sym
+    end
+
+    # Propagate heap_promoted through NEXT: if the BG block's body called a
+    # function with returns_promoted, the NEXT caller must free promoted fields.
+    if node.expr.is_a?(AST::Identifier)
+      sym = node.expr.symbol
+      decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
+      bg_value = decl_node.respond_to?(:value) ? decl_node.value : nil
+      if bg_value.is_a?(AST::BgBlock) && bg_value.returns_promoted
+        node.heap_promoted_call = true
+      end
     end
   end
 

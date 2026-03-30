@@ -1898,6 +1898,16 @@ private
   end
 
   # --- ERROR HANDLING (OR RESCUE) ---
+  # Check if an expression carries heap_promoted_call, looking through OR wrappers.
+  def has_heap_promoted_call?(expr)
+    return false unless expr
+    return true if expr.respond_to?(:heap_promoted_call) && expr.heap_promoted_call
+    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
+      return has_heap_promoted_call?(expr.left)
+    end
+    false
+  end
+
   def transpile_OrRescue(node)
     t_left = Type.new(node.left.full_type)
 
@@ -1941,9 +1951,30 @@ private
 
     # Handle error union with default value: !T OR default -> T
     if t_left.error_union?
-      right = visit(node.right)
-      # Use Zig's catch to provide fallback value
-      return "(#{left_raw} catch #{right})"
+      right_code = visit(node.right)
+
+      # When the success path returns heap-promoted data (e.g., struct with duped
+      # string fields), the fallback must ALSO have its string fields duped to heap
+      # so the caller's cleanup is always valid regardless of which path was taken.
+      if has_heap_promoted_call?(node.left) && node.right.is_a?(AST::StructLit)
+        ret_type = node.right.full_type
+        ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
+        resolved = ret_type&.resolved
+        schema = @struct_schemas&.dig(resolved)
+        string_fields = schema&.filter_map do |fname, fdef|
+          next if fname.is_a?(Symbol)
+          ft = (fdef.is_a?(Hash) ? fdef[:type] : fdef)
+          ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+          fname if ft.string?
+        end || []
+        if string_fields.any?
+          rt_name = @do_rt_name || "rt"
+          promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch __fb.#{f};" }.join(" ")
+          return "(#{left_raw} catch __fb: { var __fb = #{right_code}; #{promos} break :__fb __fb; })"
+        end
+      end
+
+      return "(#{left_raw} catch #{right_code})"
     end
 
     # Standard OR behavior (non-error types)

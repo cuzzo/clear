@@ -393,7 +393,10 @@ module AST
   # body: Array of expression nodes. The last expression's type determines T.
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
-  BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode) { include Locatable }
+  BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode) do
+    include Locatable
+    attr_accessor :returns_promoted  # true when BG body's result calls a function with returns_promoted
+  end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
   # steps: Array of { expr: ASTNode, binding: String | nil }
@@ -412,7 +415,10 @@ module AST
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
-  NextExpr          = Struct.new(:token, :expr) { include Locatable }
+  NextExpr          = Struct.new(:token, :expr) do
+    include Locatable
+    attr_accessor :heap_promoted_call
+  end
 
   # MatchStatement: pattern-matching on a value.
   # cases: Array of { value: ASTNode, body: [ASTNode] }
