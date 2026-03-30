@@ -1,0 +1,23 @@
+-- Test: SHARD pipeline operator — shared-nothing concurrent map operations.
+--
+-- Exercises: SHARD routing, CONCURRENT EACH with @sharded HashMap,
+-- multiple SHARD blocks in sequence (caught a codegen semicolon bug).
+
+FN cheatMain() RETURNS Void ->
+    MUTABLE map: HashMap<String>@sharded(2) = {};
+    n = 100_i64;
+
+    -- SHARD SET: route keys to owning shards, set values
+    (0..<n) s> SHARD("k:${toString(_)}", map) s> CONCURRENT EACH {
+        map[_] = "v";
+    };
+
+    -- SHARD OVERWRITE: second sequential SHARD block (tests semicolon codegen)
+    (0..<n) s> SHARD("k:${toString(_)}", map) s> CONCURRENT EACH {
+        map[_] = "updated";
+    };
+
+    ASSERT map.count() == 100, "shard pipeline count after two sequential blocks";
+
+    RETURN;
+END

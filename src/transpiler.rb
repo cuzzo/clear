@@ -2498,13 +2498,18 @@ private
       # Zig requires non-void expression results to be consumed. Any AST node
       # that is an expression (not a declaration, assignment, or control flow)
       # with a non-void return type needs `_ = ` when used as a statement.
+      discarded = false
       unless statement_node?(stmt)
         if stmt.respond_to?(:resolved_type) && stmt.resolved_type && stmt.resolved_type != :Void
-          code = "_ = #{code}" unless code.strip.start_with?("_ = ")
+          unless code.strip.start_with?("_ = ")
+            code = "_ = #{code}"
+            discarded = true
+          end
         end
       end
-      # Add ; if it's not a block ending (}) and doesn't have one yet
-      code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+      # Add ; if it's not a block ending (}) and doesn't have one yet.
+      # Exception: `_ = { block }` is a statement expression — always needs ;
+      code += ";" unless code.strip.end_with?(";") || (code.strip.end_with?("}") && !discarded)
       code
     end.join("\n")
   end
