@@ -1055,7 +1055,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include(".push(")
       end
 
-      it "does NOT emit defer close() for infinite stream generators" do
+      it "emits defer close() for infinite stream generators (signals WaitGroup on error)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
@@ -1063,8 +1063,10 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        # InfStream.close() is a no-op and should NOT be emitted for infinite generators
-        expect(out).not_to include(".close()")
+        # All stream generators now emit defer close() so the WaitGroup is
+        # signaled even if the generator errors. InfStream.close() is a no-op
+        # in the normal case, but the defer ensures proper cleanup on error paths.
+        expect(out).to include(".close()")
       end
 
       it "emits .next() for NEXT on infinite stream" do

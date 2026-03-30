@@ -1246,8 +1246,9 @@ pub const CheatLib = struct {
 
             /// Heap-resident result cell shared between producer (BG fiber) and
             /// consumer (NEXT caller). Allocated at spawn, freed by next().
+            /// Stores `anyerror!T` so fiber errors propagate to the caller.
             pub const Inner = struct {
-                result: T = undefined,
+                result: anyerror!T = error.BgNotReady,
                 wg: WaitGroup,
             };
 
@@ -1261,20 +1262,19 @@ pub const CheatLib = struct {
             pub fn spawn(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
                 inner.* = .{
-                    .result = undefined,
+                    .result = error.BgNotReady,
                     .wg = WaitGroup.init(sched),
                 };
                 inner.wg.add(1);
                 return Self{ .inner = inner, .alloc = alloc };
             }
 
-            /// Block the current fiber until the BG fiber has written its result
-            /// (via `inner.result = val` before calling `inner.wg.done()`), then
-            /// return that result and free the heap-allocated Inner.
+            /// Block the current fiber until the BG fiber has written its result,
+            /// then return the result (or propagate the error) and free Inner.
             ///
-            /// Safe ordering: the BG fiber's store to `inner.result` happens-before
-            /// the seq_cst `wg.done()`, which happens-before this function returns.
-            pub fn next(self: Self) T {
+            /// If the BG fiber errored, the error is stored in `inner.result`
+            /// and re-raised here. The caller handles it with OR or OR RAISE.
+            pub fn next(self: Self) anyerror!T {
                 self.inner.wg.wait();
                 const val = self.inner.result;
                 self.alloc.destroy(self.inner);
@@ -1311,7 +1311,7 @@ pub const CheatLib = struct {
             /// Heap-resident result cell.  Outlives all handles: freed only when
             /// ref_count reaches 0 (i.e. all handles have called next() once).
             pub const Inner = struct {
-                result: T = undefined,
+                result: anyerror!T = error.BgNotReady,
                 wg: WaitGroup,
                 ref_count: std.atomic.Value(usize),
             };
@@ -1325,7 +1325,7 @@ pub const CheatLib = struct {
             pub fn spawn(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
                 inner.* = .{
-                    .result = undefined,
+                    .result = error.BgNotReady,
                     .wg = WaitGroup.init(sched),
                     .ref_count = std.atomic.Value(usize).init(1),
                 };
@@ -1337,10 +1337,10 @@ pub const CheatLib = struct {
             /// Idempotent: once resolved, subsequent calls return the cached value
             /// without touching the Inner (which may already have been freed).
             /// Decrements the ref_count on the first call; frees Inner at zero.
-            pub fn next(self: *Self) T {
+            pub fn next(self: *Self) anyerror!T {
                 if (self.resolved) |val| return val;
                 self.inner.wg.wait();
-                const val = self.inner.result;
+                const val = try self.inner.result;
                 self.resolved = val;
                 const prev = self.inner.ref_count.fetchSub(1, .release);
                 if (prev == 1) {
@@ -1380,12 +1380,10 @@ pub const CheatLib = struct {
             head: usize = 0,
 
             /// Block on the next unconsumed BG fiber and return its result.
-            /// Advances the internal head pointer so subsequent calls yield
-            /// successive items. Panics if the stream has already been fully
-            /// consumed (all N items retrieved).
-            pub fn next(self: *Self) T {
+            /// Propagates errors from the underlying Promise.
+            pub fn next(self: *Self) anyerror!T {
                 if (self.head >= N) @panic("BoundedStream exhausted: all items consumed");
-                const val = self.items[self.head].next();
+                const val = try self.items[self.head].next();
                 self.head += 1;
                 return val;
             }
@@ -1418,6 +1416,7 @@ pub const CheatLib = struct {
             pub const Inner = struct {
                 items: std.ArrayListUnmanaged(T) = .{},
                 wg: WaitGroup = undefined,
+                err: ?anyerror = null, // terminal error from generator fiber
             };
 
             inner: *Inner,
@@ -1443,11 +1442,18 @@ pub const CheatLib = struct {
                 self.inner.wg.done();
             }
 
+            /// Record a terminal error from the generator fiber.
+            /// Called when the generator's run() catches an error before close().
+            pub fn setError(self: *Self, err: anyerror) void {
+                self.inner.err = err;
+            }
+
             /// Consume the next buffered value.
             /// Blocks on the first call until the generator fiber has finished.
-            /// Returns null when all yielded values have been consumed.
-            pub fn next(self: *Self) ?T {
+            /// Returns error if the generator fiber failed, null if exhausted.
+            pub fn next(self: *Self) anyerror!?T {
                 self.inner.wg.wait();
+                if (self.inner.err) |err| return err;
                 if (self.head >= self.inner.items.items.len) return null;
                 const val = self.inner.items.items[self.head];
                 self.head += 1;
@@ -1493,6 +1499,8 @@ pub const CheatLib = struct {
                 sched: *fp.Scheduler,
                 // Set by deinit() to signal the generator fiber to stop.
                 closed: bool = false,
+                // Terminal error from generator fiber (set before close).
+                err: ?anyerror = null,
             };
 
             inner: *Inner,
@@ -1542,11 +1550,18 @@ pub const CheatLib = struct {
 
             /// Consumer calls this to receive the next yielded value.
             /// Blocks until the generator calls push().
-            pub fn next(self: *Self) T {
+            /// Returns error if the generator fiber failed.
+            pub fn next(self: *Self) anyerror!T {
                 const inner = self.inner;
 
                 while (true) {
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    if (inner.closed) {
+                        if (inner.err) |err| {
+                            inner.lock.store(0, .release);
+                            return err;
+                        }
+                    }
                     if (inner.state.load(.acquire) == 1) {
                         const val = inner.slot;
                         inner.state.store(0, .release);

@@ -1274,7 +1274,14 @@ private
             ""
           end
         else
-          "ctx.inner.result = #{visit(last_step[:expr])};"
+          # BG result: store the error union directly (no try unwrap).
+          # If the expression errors, the error is captured in inner.result
+          # and propagated to the caller on NEXT.
+          result_code = visit(last_step[:expr])
+          # Strip leading 'try ' so the error union flows through to inner.result.
+          # The inner.result type is anyerror!T, matching the callee's return type.
+          result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
+          "ctx.inner.result = #{result_code};"
         end
         [stmts, result]
       end
@@ -1302,9 +1309,11 @@ private
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
                     defer ctx.inner.wg.done();
+                    errdefer |fiber_err| ctx.inner.result = fiber_err;
                     #{capture_frees}
                     #{stmt_code}
                     #{result_line}
+                    #{is_void ? "ctx.inner.result = {};" : ""}
                 }
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
@@ -1379,7 +1388,8 @@ private
                     defer ctx.alloc.destroy(ctx);
                     #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
                     var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
-                    #{is_inf ? "" : "defer #{local_stream}.close();"}
+                    defer #{local_stream}.close();
+                    errdefer |gen_err| #{local_stream}.inner.err = gen_err;
                     #{body_code}
                 }
             };
@@ -1404,7 +1414,9 @@ private
       "try #{@current_stream_local}.push(#{visit(node.expr)})"
 
     when AST::NextExpr
-      "#{visit(node.expr)}.next()"
+      # All fiber types (Promise, SharedPromise, Stream, InfStream) now return
+      # anyerror!T from next() — errors propagate from fiber to caller.
+      "try #{visit(node.expr)}.next()"
 
     when AST::StaticCall
       pattern  = node.zig_pattern
