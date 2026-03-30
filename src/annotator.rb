@@ -84,8 +84,8 @@ private
       kind: :resource,
       close_zig: "{0}.close()",
       static_methods: {
-        "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})" },
-        "create" => { args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})" }
+        "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})", can_fail: true },
+        "create" => { args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})", can_fail: true }
       }
     })
 
@@ -95,7 +95,7 @@ private
       kind: :resource,
       close_zig: "CheatLib.socketClose({0})",
       static_methods: {
-        "listen" => { args: [:Int64], return: :TCPServer, zig: "try CheatLib.socketListen(@intCast({0}))" }
+        "listen" => { args: [:Int64], return: :TCPServer, zig: "try CheatLib.socketListen(@intCast({0}))", can_fail: true }
       }
     })
 
@@ -107,7 +107,7 @@ private
       close_zig: "CheatLib.socketClose({0})",
       static_methods: {
         "connect" => { args: [:String, :Int64], return: :TCPClient,
-                       zig: "try CheatLib.socketConnect({0}, @intCast({1}))" }
+                       zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true }
       }
     })
   end
@@ -1043,10 +1043,8 @@ private
 
     node.zig_pattern = method_def[:zig]
     node.full_type   = method_def[:return]
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
-    # Built-in static methods whose Zig template starts with `try` are fallible;
-    # propagate this so the enclosing function gets an error-union return type.
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.start_with?("try ")
+    node.stdlib_allocates = true if method_def[:allocates]
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (method_def[:allocates] || method_def[:can_fail])
   end
 
   def visit_FuncCall(node)
@@ -1120,7 +1118,8 @@ private
 
     # 4. Store Zig pattern for transpiler
     node.zig_pattern = matched_def[:zig]
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && node.zig_pattern.is_a?(String) && node.zig_pattern.include?("{alloc}")
+    node.stdlib_allocates = true if matched_def[:allocates]
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail])
 
     # 5. Collection type narrowing (e.g., append narrows Any[] → T[])
     narrow_collection_type!(matched_def, args)

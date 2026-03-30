@@ -86,8 +86,7 @@ module AllocHelper
       return true if node.storage == :frame
       node_allocates_frame?(node.value)
     when AST::FuncCall
-      pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-      return true if pat.is_a?(String) && pat.include?("{alloc}")
+      return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
       return false if node.respond_to?(:extern_call) && node.extern_call
       fn = @fn_nodes&.[](node.name)
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
@@ -95,8 +94,7 @@ module AllocHelper
     when AST::MethodCall
       return false if node.respond_to?(:pool_method) && node.pool_method
       return false if node.respond_to?(:set_method) && node.set_method
-      pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-      return true if pat.is_a?(String) && pat.include?("{alloc}")
+      return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
       fn = @fn_nodes&.[](node.name)
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       ([node.object] + (node.args || [])).any? { |a| node_allocates_frame?(a) }
@@ -133,17 +131,15 @@ module AllocHelper
     case node
     when AST::FuncCall
       if node.args&.first.is_a?(AST::Identifier) && outer_vars.include?(node.args.first.name)
-        pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
         return true if node.name == "append"
-        return true if pat.is_a?(String) && pat.include?("{alloc}")
+        return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
         fn = @fn_nodes&.[](node.name)
         return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       end
       false
     when AST::MethodCall
       if node.respond_to?(:object) && node.object.is_a?(AST::Identifier) && outer_vars.include?(node.object.name)
-        pat = node.respond_to?(:zig_pattern) ? node.zig_pattern : nil
-        return true if pat.is_a?(String) && pat.include?("{alloc}")
+        return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
         fn = @fn_nodes&.[](node.name)
         return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       end

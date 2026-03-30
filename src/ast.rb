@@ -12,6 +12,7 @@ module AST
     attr_reader :coerced_type_object
     attr_reader :type_object
     attr_accessor :zig_pattern
+    attr_accessor :stdlib_allocates  # true when matched stdlib entry has allocates: true
     attr_accessor :was_moved
     attr_accessor :slot_size
     attr_accessor :resource_close_zig   # set by annotator on resource declarations

@@ -16,6 +16,7 @@ STD_LIB = {
     return: :Void,
     zig: "try {0}.append({alloc}, {1})",
     narrows_collection: true,  # narrows Any[] element type from arg 1
+    allocates: true,
   },
 
 
@@ -30,7 +31,8 @@ STD_LIB = {
     args: [STRING_TYPE, :Int64, :Int64],
     return: STRING_TYPE, # Returns new string on heap
     # Call runtime helper: rt.substr(allocator, str, start, len)
-    zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})"
+    zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})",
+    allocates: true,
   },
 
   # 3. String Equality
@@ -42,21 +44,21 @@ STD_LIB = {
 
   # toInt() (Overloaded)
   "toInt" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})" },
+    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})", can_fail: true },
     { args: [:Float64], return: :Int64, zig: "@intFromFloat({0})" },
     { args: [:Int64], return: :Int64, zig: "{0}" }
   ],
 
   # toString() (Overloaded)
   "toString" => [
-    { args: [:Int64],   return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, {0})" },
-    { args: [:Float64], return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))" },
+    { args: [:Int64],   return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, {0})", allocates: true },
+    { args: [:Float64], return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", allocates: true },
     { args: [STRING_TYPE], return: STRING_TYPE, zig: "{0}" }
   ],
 
   # toFloat() (Overloaded)
   "toFloat" => [
-    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})" },
+    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})", can_fail: true },
     { args: [:Int64],      return: :Float64, zig: "@as(f64, @floatFromInt({0}))" },
     { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
@@ -86,28 +88,32 @@ STD_LIB = {
   "readFile" => {
     args: [STRING_TYPE],
     return: STRING_TYPE,
-    zig: "try CheatLib.readFile({alloc}, {0})"
+    zig: "try CheatLib.readFile({alloc}, {0})",
+    allocates: true,
   },
 
   # 5. Write File
   "writeFile" => {
     args: [STRING_TYPE, STRING_TYPE],     # Path, Content
     return: :Void,
-    zig: "try CheatLib.writeFile({0}, {1})"
+    zig: "try CheatLib.writeFile({0}, {1})",
+    can_fail: true,
   },
 
   # 6. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE], # str, delimiter
     return: :"String[]",         # Returns a Heap List of Strings
-    zig: "try CheatLib.split({alloc}, {0}, {1})"
+    zig: "try CheatLib.split({alloc}, {0}, {1})",
+    allocates: true,
   },
 
   # 7. Join (String[] -> String)
   "join" => {
     args: [:"String[]", STRING_TYPE], # list, delimiter
     return: STRING_TYPE,
-    zig: "try CheatLib.join({alloc}, {0}, {1})"
+    zig: "try CheatLib.join({alloc}, {0}, {1})",
+    allocates: true,
   },
 
   "trim" => {
@@ -187,7 +193,8 @@ STD_LIB = {
   "shell" => {
     args: [STRING_TYPE],
     return: STRING_TYPE, # Returns %String (Heap String)
-    zig: "try CheatLib.shell({alloc}, {0})"
+    zig: "try CheatLib.shell({alloc}, {0})",
+    allocates: true,
   },
 
   # Read all bytes from an open File resource into a heap-allocated String.
@@ -195,7 +202,8 @@ STD_LIB = {
   "fileReadAll" => {
     args: [:File],
     return: STRING_TYPE,
-    zig: "try CheatLib.fileReadAll({alloc}, {0})"
+    zig: "try CheatLib.fileReadAll({alloc}, {0})",
+    allocates: true,
   },
 
   # Write a String to an open writable File resource (created via File::create).
@@ -203,7 +211,8 @@ STD_LIB = {
   "fileWrite" => {
     args: [:File, STRING_TYPE],
     return: :Void,
-    zig: "try CheatLib.fileWrite({0}, {1})"
+    zig: "try CheatLib.fileWrite({0}, {1})",
+    can_fail: true,
   },
 
   # List all files in a directory. Returns a list of filenames (not full paths).
@@ -211,7 +220,8 @@ STD_LIB = {
   "listDir" => {
     args: [STRING_TYPE],
     return: :"String[]",
-    zig: "try CheatLib.listDir({alloc}, {0})"
+    zig: "try CheatLib.listDir({alloc}, {0})",
+    allocates: true,
   },
 
   # List ALL entries (files + directories) with type prefix ("f:" or "d:").
@@ -219,7 +229,8 @@ STD_LIB = {
   "listAll" => {
     args: [STRING_TYPE],
     return: :"String[]",
-    zig: "try CheatLib.listAll({alloc}, {0})"
+    zig: "try CheatLib.listAll({alloc}, {0})",
+    allocates: true,
   },
 
   # Get file size in bytes. Returns -1 on error.
@@ -249,7 +260,8 @@ STD_LIB = {
   "accept" => {
     args: [:TCPServer],
     return: :TCPClient,
-    zig: "try CheatLib.socketAccept({0})"
+    zig: "try CheatLib.socketAccept({0})",
+    can_fail: true,
   },
 
   # Read up to 4096 bytes from a connected TCP client into a heap String.
@@ -258,7 +270,8 @@ STD_LIB = {
   "tcpRead" => {
     args: [:TCPClient],
     return: STRING_TYPE,
-    zig: "try CheatLib.socketRead({alloc}, {0})"
+    zig: "try CheatLib.socketRead({alloc}, {0})",
+    allocates: true,
   },
 
   # Write a String to a connected TCP client.
@@ -267,7 +280,8 @@ STD_LIB = {
   "tcpWrite" => {
     args: [:TCPClient, STRING_TYPE],
     return: :Void,
-    zig: "try CheatLib.socketWriteVoid({0}, {1})"
+    zig: "try CheatLib.socketWriteVoid({0}, {1})",
+    can_fail: true,
   },
 
   # -------------------------------------------------------------------------
