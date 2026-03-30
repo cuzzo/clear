@@ -10,6 +10,7 @@
 -- Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
 
 EXTERN FN parseJsonArraySum(content: String) RETURNS Int64 FROM "json_native";
+EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
 
 FN sizeForId(id: Int64) RETURNS Int64 ->
     RETURN ((id * 7 + 13) MOD 997) + 10;
@@ -17,12 +18,9 @@ END
 
 FN generateJson(id: Int64) RETURNS String ->
     sz = sizeForId(id);
-    MUTABLE out = "{\"id\":${id.toString()},\"data\":[";
-    FOR i IN (1_i64 ..= sz) DO
-        IF i > 1 -> out = out + ",";
-        out = out + i.toString();
-    END
-    RETURN out + "]}";
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END
 
 FN handleClient!(client: TCPClient) RETURNS Void ->
@@ -77,14 +75,14 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-    shell("mkdir -p data");
+    ensureDir("data");
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
-        tasks.append(BG {
+        tasks.append(BG { @service ->
             handleClient!(client);
         });
     END
