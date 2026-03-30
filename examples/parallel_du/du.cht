@@ -1,7 +1,8 @@
 -- Parallel du — recursive directory size calculator
 --
 -- Scans a directory tree, summing file sizes.
--- Exercises: File I/O (fileSize, listAll), string parsing, recursion.
+-- Spawns BG fibers for subdirectories to scan in parallel.
+-- Exercises: File I/O (fileSize, listAll), string parsing, BG fibers, promise lists.
 --
 -- Usage: ./du
 -- Compare: du -sb .
@@ -9,6 +10,9 @@
 FN scanDir(path: String) RETURNS Int64 @reentrant ->
     entries = listAll(path);
     MUTABLE total: Int64 = 0;
+
+    -- Collect subdirectory scan promises for parallel execution.
+    MUTABLE futures: ~Int64[]@list = [];
 
     MUTABLE i: Int64 = 0;
     WHILE i < entries.length() DO
@@ -23,9 +27,18 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
                 total += size;
             END
         ELSE_IF prefix == "d:" THEN
-            total += scanDir(fullPath);
+            append(futures, BG { @large ->
+                scanDir(fullPath);
+            });
         END
         i += 1;
+    END
+
+    -- Wait for all subdirectory scans and sum their results.
+    MUTABLE j: Int64 = 0;
+    WHILE j < futures.length() DO
+        total += NEXT futures[j];
+        j += 1;
     END
 
     RETURN total;

@@ -1202,6 +1202,10 @@ private
           t = type_obj ? Type.new(type_obj) : nil
           if t && t.needs_pointer_passing?
             ".#{name} = &#{name}"
+          elsif t && t.string?
+            # String slices point to frame memory — dupe to the scheduler allocator
+            # so the data outlives the parent's frame arena.
+            ".#{name} = #{alloc_var}.dupe(u8, #{name}) catch &.{}"
           else
             ".#{name} = #{name}"
           end
@@ -1270,6 +1274,12 @@ private
 
       arena_init = node.arena_mode ? "__rt.arena_mode = true;" : ""
 
+      # Generate defer-free lines for duped string captures.
+      string_frees = captured.filter_map do |name, type_obj|
+        t = type_obj ? Type.new(type_obj) : nil
+        "defer ctx.alloc.free(ctx.#{name});" if t && t.string?
+      end.join("\n                    ")
+
       <<~ZIG.chomp
         #{blk_label}: {
             const #{ctx_type} = struct {
@@ -1283,6 +1293,7 @@ private
                     const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                     defer ctx.alloc.destroy(ctx);
                     defer ctx.inner.wg.done();
+                    #{string_frees}
                     #{stmt_code}
                     #{result_line}
                 }
@@ -2315,12 +2326,33 @@ private
     conditions.empty? ? "true" : conditions.join(" and ")
   end
 
+  # True if the AST node is a statement (declaration, assignment, control flow, block)
+  # rather than an expression. Expressions used as statements need `_ = ` in Zig
+  # to discard their non-void return values.
+  def statement_node?(node)
+    node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) ||
+    node.is_a?(AST::Assignment) ||
+    node.is_a?(AST::IfStatement) || node.is_a?(AST::WhileLoop) ||
+    node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach) ||
+    node.is_a?(AST::MatchStatement) || node.is_a?(AST::ReturnNode) ||
+    node.is_a?(AST::BreakNode) || node.is_a?(AST::ContinueNode) ||
+    node.is_a?(AST::WithBlock) || node.is_a?(AST::BgBlock) ||
+    node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::DoBlock) ||
+    node.is_a?(AST::FunctionDef) || node.is_a?(AST::StructDef) ||
+    node.is_a?(AST::UnionDef) || node.is_a?(AST::EnumDef) ||
+    node.is_a?(AST::RequireNode) || node.is_a?(AST::PassStmt)
+  end
+
   def transpile_block(statements)
     statements.map do |stmt|
       code = visit(stmt)
-      # Pool/set insert returns a value (u64 id) — discard when used as a standalone statement.
-      if stmt.is_a?(AST::MethodCall) && (stmt.pool_method == :insert || stmt.set_method == :insert)
-        code = "_ = #{code}"
+      # Zig requires non-void expression results to be consumed. Any AST node
+      # that is an expression (not a declaration, assignment, or control flow)
+      # with a non-void return type needs `_ = ` when used as a statement.
+      unless statement_node?(stmt)
+        if stmt.respond_to?(:resolved_type) && stmt.resolved_type && stmt.resolved_type != :Void
+          code = "_ = #{code}" unless code.strip.start_with?("_ = ")
+        end
       end
       # Add ; if it's not a block ending (}) and doesn't have one yet
       code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
