@@ -400,7 +400,8 @@ module PipeAnalysis
   # Phase 4: Numeric Aggregation Operators (SUM, AVERAGE, MIN, MAX)
   # =========================================================
 
-  NUMERIC_TYPES = [:Number, :Int64].freeze
+  # Use Type#numeric? for consistency with the type system.
+  # Covers :Number, :Int64, :Byte, :Float64.
 
   def analyze_sum_op(node)
     # SUM: list s> SUM _.field  → Number (sum of numeric projection; 0 for empty list)
@@ -413,7 +414,7 @@ module PipeAnalysis
     end
 
     expr_type = node.right.expression.resolved_type
-    unless NUMERIC_TYPES.include?(expr_type)
+    unless Type.new(expr_type).numeric?
       error!(node.right, "SUM requires a numeric expression, got #{expr_type}")
     end
 
@@ -432,7 +433,7 @@ module PipeAnalysis
     end
 
     expr_type = node.right.expression.resolved_type
-    unless NUMERIC_TYPES.include?(expr_type)
+    unless Type.new(expr_type).numeric?
       error!(node.right, "AVERAGE requires a numeric expression, got #{expr_type}")
     end
 
@@ -451,7 +452,7 @@ module PipeAnalysis
     end
 
     expr_type = node.right.expression.resolved_type
-    unless NUMERIC_TYPES.include?(expr_type)
+    unless Type.new(expr_type).numeric?
       error!(node.right, "MIN requires a numeric expression, got #{expr_type}")
     end
 
@@ -470,7 +471,7 @@ module PipeAnalysis
     end
 
     expr_type = node.right.expression.resolved_type
-    unless NUMERIC_TYPES.include?(expr_type)
+    unless Type.new(expr_type).numeric?
       error!(node.right, "MAX requires a numeric expression, got #{expr_type}")
     end
 
