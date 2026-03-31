@@ -47,7 +47,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'ReleaseFast', module_mode: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -101,7 +101,7 @@ def do_build(source, output: nil, opt_level: 'ReleaseFast', module_mode: false)
     else
       cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
     end
-    cmd_parts += ['-O', opt_level, '--name', File.basename(output)]
+    cmd_parts += ['-O', opt_level] + extra_flags + ['--name', File.basename(output)]
   end
 
   cmd = cmd_parts.join(' ')
@@ -137,6 +137,7 @@ when 'build'
   args = ARGV[1..] || []
   output = nil
   opt_level = 'Debug'
+  extra_flags = ['-fno-llvm', '-fno-lld']
 
   # Parse build flags
   remaining = []
@@ -147,14 +148,17 @@ when 'build'
       output = args[i + 1]
       error "-o requires an output path" unless output
       i += 2
-    when '--release'
-      opt_level = 'ReleaseFast'
+    when '--debug'
+      opt_level = 'Debug'
+      extra_flags = ['-fno-llvm', '-fno-lld']
       i += 1
     when '--safe'
       opt_level = 'ReleaseSafe'
+      extra_flags = []
       i += 1
-    when '--fast'
+    when '--optimized', '--release', '--fast'
       opt_level = 'ReleaseFast'
+      extra_flags = []
       i += 1
     else
       remaining << args[i]
@@ -165,7 +169,7 @@ when 'build'
   source = remaining.first
   error "Usage: clear build <file.cht> [-o output] [--release|--safe]" unless source
 
-  do_build(source, output: output, opt_level: opt_level)
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   puts "Built: #{output_path}"
 
@@ -213,7 +217,7 @@ when 'help', '--help', '-h', nil
     CLEAR Language Compiler
 
     Usage:
-      clear build <file.cht> [-o output] [--release|--fast|--safe]
+      clear build <file.cht> [-o output] [--optimized|--safe|--debug]
       clear run <file.cht> [-- args...]
       clear test <file.cht>
 
@@ -224,10 +228,10 @@ when 'help', '--help', '-h', nil
 
     Build flags:
       -o PATH       Output binary path (default: same dir as source)
-      (default)     Debug mode (~2s build, no optimization)
-      --release     Optimize for speed (-O ReleaseFast, ~22s build)
-      --fast        Alias for --release
-      --safe        Include safety checks (-O ReleaseSafe, ~28s build)
+      (default)     Fast build, Zig backend, no LLVM (~2s)
+      --debug       Same as default (explicit)
+      --optimized   Full LLVM optimization (-O ReleaseFast, ~22s)
+      --safe        LLVM + safety checks (-O ReleaseSafe, ~28s)
 
     Environment:
       CLEAR_THREADS  Number of scheduler threads (0 = auto, 1 = single)
