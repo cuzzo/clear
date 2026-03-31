@@ -16,15 +16,17 @@ def extract_clear_blocks(file)
   in_block = false
   current = []
   lang = nil
+  is_illustrative = false
 
   content.each_line.with_index(1) do |line, lineno|
-    if !in_block && line =~ /^```clear\s*$/
+    if !in_block && line =~ /^```(?:ruby )?clear(\s+illustrative)?\s*$/
       in_block = true
       lang = 'clear'
+      is_illustrative = !!$1
       current = []
     elsif in_block && line =~ /^```\s*$/
       in_block = false
-      blocks << { code: current.join, start_line: lineno - current.size, file: file }
+      blocks << { code: current.join, start_line: lineno - current.size, file: file, illustrative: is_illustrative }
     elsif in_block
       current << line
     end
@@ -69,8 +71,8 @@ RSpec.describe "Documentation code examples" do
         code = block[:code]
         line = block[:start_line]
 
-        # Skip illustrative blocks
-        next if code.include?("-- ILLUSTRATIVE") || code.include?("-- SKIP-DOC-TEST")
+        # Skip illustrative blocks (marked via fence: ```ruby clear illustrative)
+        next if block[:illustrative]
 
         # Skip blocks that are clearly not CLEAR code (bash commands, etc.)
         next if code.strip.start_with?("$") || code.strip.start_with?("#")

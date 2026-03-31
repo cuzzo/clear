@@ -6,7 +6,7 @@ This guide showcases CLEAR: a memory-safe language that combines the ergonomics 
 
 Bindings are immutable by default. Reassignment requires the `MUTABLE` keyword.
 
-```clear
+```ruby clear
 x = 5;                        -- OKAY: Immutable binding (default)
 name = "Alice";               -- OKAY: Immutable string
 pi = 3.14159;                 -- OKAY: Immutable float
@@ -51,8 +51,7 @@ Capabilities are applied at the **declaration site** with `@` suffixes:
 
 In Rust, changing `Rc<User>` to `Arc<User>` means rewriting every function signature in the call chain. In CLEAR, functions take the plain type:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 STRUCT User { name: String }
 
 FN process(u: User) RETURNS Void ->
@@ -74,7 +73,7 @@ If you change `@shared` to `@multiowned`, the `process` function remains untouch
 
 For multi-statement access, use `WITH` blocks:
 
-```clear
+```ruby clear
 MUTABLE counter: Int64@shared:locked = 0;
 
 WITH EXCLUSIVE counter AS c {
@@ -87,7 +86,7 @@ WITH EXCLUSIVE counter AS c {
 
 CLEAR uses **affine types** by default. Every value has exactly one owner. When you assign a value, ownership is **moved**, not copied.
 
-```clear
+```ruby clear
 FN process(TAKES s: String) RETURNS Void ->
     print(s);
     -- s is destroyed here (end of scope)
@@ -109,7 +108,7 @@ Explicit `GIVE` at the call site ensures that "data disappearance" is always vis
 
 The `@sharded` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
 
-```clear
+```ruby clear
 -- A sharded map distributes keys across independent thread-local heaps
 MUTABLE registry: HashMap<Int64>@sharded(8) = {};
 
@@ -130,17 +129,11 @@ MUTABLE logs: String[]@list:sharded(2) = [];
 
 Functions support explicit types, failable returns (`!T`), and optional types (`?T`).
 
-```clear
+```ruby clear
 STRUCT Point { x: Float64, y: Float64 }
 
 FN sum(p: Point) RETURNS Float64 ->
     RETURN p.x + p.y;
-END
-
--- ILLUSTRATIVE
-FN findUser(id: Int64) RETURNS !?User ->
-    IF id < 0 -> RAISE "Invalid ID";
-    RETURN result;
 END
 
 FN main() RETURNS Void ->
@@ -150,11 +143,20 @@ FN main() RETURNS Void ->
 END
 ```
 
+Failable and optional returns:
+
+```ruby clear illustrative
+FN findUser(id: Int64) RETURNS !?User ->
+    IF id < 0 -> RAISE "Invalid ID";
+    RETURN result;
+END
+```
+
 ### Recursion
 
 Recursive functions must be explicitly annotated with `@reentrant`:
 
-```clear
+```ruby clear
 FN fib(n: Int64) RETURNS Int64 @reentrant ->
     IF n <= 1 THEN RETURN n; END
     RETURN fib(n - 1) + fib(n - 2);
@@ -165,7 +167,7 @@ END
 
 CLEAR provides standard control flow constructs with support for one-line shorthands.
 
-```clear
+```ruby clear
 -- 1. IF / ELSE_IF / ELSE
 x = 75;
 IF x > 100 THEN
@@ -193,7 +195,7 @@ FOR j IN (1_i64 ..= 5) DO print(j.toString()); END     -- OKAY: Inclusive range
 
 Simple enumerations for discrete states:
 
-```clear
+```ruby clear
 ENUM Direction { North, South, East, West }
 
 FN describe(d: Direction) RETURNS String ->
@@ -210,7 +212,7 @@ END
 
 Unions carry a payload per variant. Unit variants (no payload) are also supported:
 
-```clear
+```ruby clear
 UNION Result { Ok: Float64, Err: String, Empty }
 
 FN main() RETURNS Void ->
@@ -233,7 +235,7 @@ END
 
 Structs and unions support type parameters:
 
-```clear
+```ruby clear
 STRUCT Pair<T> { first: T, second: T }
 
 p = Pair<Int64>{ first: 1, second: 2 };
@@ -243,8 +245,7 @@ p = Pair<Int64>{ first: 1, second: 2 };
 
 CLEAR supports powerful functional pipelines via the Smooth operator `s>`.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- 1. Pipelines: Filter, Aggregate, Transform
 alive = entities s> WHERE _.health > 0;
 total = scores s> SUM _.value;
@@ -279,8 +280,7 @@ Tense represents a value that will exist in the future. CLEAR eliminates the com
 - `~User[]` is read as **"Future Users"**.
 - A **STREAM** of users is simply one way to produce "Future Users".
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- 1. Promise (~T): A single future value
 p: ~String = BG { sleep(100); RETURN "Data"; };
 val = NEXT p;                                       -- OKAY: Blocks until ready
@@ -310,7 +310,7 @@ All collections are **automatically monomorphized** -- the compiler generates ze
 | `T[]@list` | `List` | Dynamic-size, heap-backed |
 | `T[N]@pool` | `Pool` | Fixed-capacity, generational handles |
 
-```clear
+```ruby clear
 STRUCT User { name: String }
 
 -- 1. Fixed Array
@@ -333,7 +333,7 @@ user = users.get(id) OR RAISE;                      -- Returns ?T (checks stale 
 
 Strings in CLEAR are affine (Rust-like move semantics). Assignment moves ownership.
 
-```clear
+```ruby clear
 x = "hello";
 y = x;                         -- x is moved
 z = x;                         -- COMPILER ERROR: Use of moved value 'x'
@@ -352,8 +352,7 @@ full = "foo" + "bar";          -- "foobar" (single allocation, no intermediate)
 
 For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combined with `@reentrant` for recursive traversal:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Recursive tree node using @indirect for child pointers
 STRUCT Node {
     value: Int64,
@@ -376,8 +375,7 @@ END
 
 CLEAR makes background tasks and fork-join parallelism trivial.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- BG: Background execution
 p: ~Int64 = BG { RETURN slowComputation(); };
 
@@ -406,8 +404,7 @@ results = items s> CONCURRENT(workers: 8) SELECT transform(_);
 
 CLEAR uses a simple namespace-based module system via `REQUIRE`.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 REQUIRE "math_utils.cht" AS m;                      -- Local file alias
 REQUIRE "pkg:geometry";                             -- Package import
 
@@ -426,8 +423,7 @@ CLEAR integrates directly with Zig and C libraries via `EXTERN` declarations. Al
 
 ### Importing Functions and Types
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Import a struct type from a Zig module
 EXTERN STRUCT Vec2 { x: Float64, y: Float64 } FROM "math_native";
 
@@ -443,8 +439,7 @@ EXTERN FN parseJson(data: String) RETURNS !JsonDoc
 
 For passing default options or defining Zig-compatible layouts:
 
-```clear
--- SKIP-DOC-TEST
+```ruby clear illustrative
 -- Local struct (no external module)
 EXTERN STRUCT ParseOptions {};
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
@@ -456,8 +451,7 @@ EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOpt
 
 ### Method Calls on EXTERN Structs
 
-```clear
--- SKIP-DOC-TEST
+```ruby clear illustrative
 EXTERN STRUCT Dir {} FROM "std.fs";
 EXTERN FN cwd() RETURNS Dir FROM "std.fs";
 EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
@@ -468,8 +462,7 @@ cwd().makePath("data");
 
 ### EXTERN STRUCT CLOSE (RAII)
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 EXTERN STRUCT Buffer { data: String }
     CLOSE "deinit" FROM "native_resource";
 
