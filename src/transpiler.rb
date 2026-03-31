@@ -1702,8 +1702,9 @@ private
         # Skip temp hoisting when:
         # - Direct bind value (VarDecl/BindExpr handles cleanup via emit_cleanup)
         # - TAKES parameter (callee takes ownership, no caller cleanup needed)
+        # - Inside GIVE (ownership transfers to callee)
         if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call &&
-           !node.equal?(@bind_value_node) && !node.was_moved
+           !node.equal?(@bind_value_node) && !node.was_moved && !@inside_give
           @heap_temp_counter = (@heap_temp_counter || 0) + 1
           tmp = "__hpt_#{@heap_temp_counter}"
           @pending_heap_temps ||= []
@@ -1841,7 +1842,13 @@ private
         safe_name = zig_safe_name(node.value.name)
         "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
       else
-        visit(node.value)
+        # GIVE expr (non-identifier): ownership transfers to callee.
+        # Suppress heap-promoted temp hoisting — callee owns the result.
+        saved = @inside_give
+        @inside_give = true
+        result = visit(node.value)
+        @inside_give = saved
+        result
       end
 
     when AST::Copy

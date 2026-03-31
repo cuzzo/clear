@@ -1,0 +1,51 @@
+-- Comprehensive test: heap-promoted temporaries with ownership transfer.
+-- Covers strings (which get heap-duped on return) in various contexts.
+-- GPA leak detection catches any missed cleanup.
+
+FN buildGreeting(name: String) RETURNS String ->
+    RETURN "Hello, " + name + "!";
+END
+
+FN getLength(s: String) RETURNS Int64 ->
+    RETURN s.length();
+END
+
+FN main() RETURNS Void ->
+    -- 1. String temp assigned to variable (emit_cleanup handles it)
+    a = buildGreeting("Alice");
+    ASSERT a == "Hello, Alice!", "string temp assigned";
+
+    -- 2. String temp as inline comparison (hoisted with defer free)
+    ASSERT buildGreeting("Bob") == "Hello, Bob!", "string temp inline compare";
+
+    -- 3. String temp passed as function argument (hoisted with defer free)
+    len = getLength(buildGreeting("C"));
+    ASSERT len == 9_i64, "string temp as arg";
+
+    -- 4. Multiple temps in one statement (both get cleanup)
+    ASSERT buildGreeting("X") == buildGreeting("X"), "two temps in one statement";
+
+    -- 5. Nested function calls with temps
+    len2 = getLength(buildGreeting("Hi"));
+    ASSERT len2 == 10_i64, "nested temp calls";
+
+    -- 6. String temp in IF condition
+    IF buildGreeting("Z") == "wrong" THEN
+        ASSERT FALSE, "should not match";
+    ELSE_IF buildGreeting("Z") == "Hello, Z!" THEN
+        ASSERT TRUE, "matched in else_if";
+    ELSE
+        ASSERT FALSE, "should have matched";
+    END
+
+    -- 7. String temp in loop (verify per-iteration cleanup)
+    MUTABLE count: Int64 = 0;
+    FOR i IN (1_i64 ..= 3_i64) DO
+        IF buildGreeting("loop") == "Hello, loop!" THEN
+            count += 1;
+        END
+    END
+    ASSERT count == 3_i64, "temp cleanup in loop iterations";
+
+    RETURN;
+END

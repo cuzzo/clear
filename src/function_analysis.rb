@@ -285,8 +285,15 @@ module FunctionAnalysis
       end
 
       # C. Handle ownership (Affine / Linear):
-      if param[:takes]
-        current_scope.set_state(arg_node.name, :moved)
+      # TAKES (callee declares ownership) or GIVE (caller relinquishes ownership)
+      # Both suppress caller-side cleanup. Unwrap MoveNode to get the identifier.
+      is_give = arg_node.is_a?(AST::MoveNode)
+      inner_node = is_give ? arg_node.value : arg_node
+      if param[:takes] || is_give
+        if inner_node.is_a?(AST::Identifier)
+          current_scope.set_state(inner_node.name, :moved)
+        end
+        inner_node.was_moved = true
         arg_node.was_moved = true
       end
 

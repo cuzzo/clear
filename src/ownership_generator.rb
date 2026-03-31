@@ -14,8 +14,9 @@ module OwnershipGenerator
     return "" if type_info&.escaped_return && (type_info.collection? || type_info.string?)
 
     # Heap-promoted strings from callee returns: free with heapAlloc.
+    # Uses moved-flag guard so GIVE can suppress the defer.
     if type_info&.string? && type_info.heap_promoted
-      return "defer rt.heapAlloc().free(#{name});\n"
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
     end
 
     # @list backing buffer lives in the frame arena — deinit is a no-op but safe.
@@ -55,8 +56,7 @@ module OwnershipGenerator
 
     # Struct containing promoted fields from function returns:
     # emit field-level cleanup so heap-promoted data is freed by caller.
-    # All escapable fields (collections + strings) are promoted by the callee,
-    # so the caller must free them all with heapAlloc.
+    # Uses moved-flag guard so GIVE can suppress the defer.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
       schema = (@struct_schemas ||= {})[resolved]
@@ -66,7 +66,11 @@ module OwnershipGenerator
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
           ft.escape_cleanup_code("#{name}.#{fname}")
         end
-        return cleanups.join unless cleanups.empty?
+        unless cleanups.empty?
+          moved_guard = "var #{name}_moved = false; _ = &#{name}_moved;\n"
+          defers = cleanups.map { |c| c.sub("defer ", "defer if (!#{name}_moved) ") }.join
+          return moved_guard + defers
+        end
       end
     end
 
