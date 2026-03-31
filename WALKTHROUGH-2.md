@@ -172,19 +172,21 @@ v1 = NEXT counter;                                  -- OKAY: Returns Int64 (neve
 
 ## 8. Capabilities: Shared & Synchronized
 
-Capabilities define *how* data is accessed. Functions take Types; call sites provide Capabilities. This minimizes "function coloring" and refactoring cost.
+Capabilities define *how* data is accessed. Functions take Types; call sites provide Capabilities. Joined capabilities use the `:` sigil.
 
 ```clear
--- @shared: Multi-threaded shared ownership (Arc)
--- @locked: Internal mutability (Mutex)
-MUTABLE counter: Int64 @shared @locked = 0;         -- OKAY
+-- @shared:locked — Atomic refcount + Mutex
+MUTABLE counter: Int64@shared:locked = 0;           -- OKAY: Combined capabilities
 
 -- Thread-safe mutation via WITH block
 BG {
-    WITH EXCLUSIVE counter AS !c {                  -- OKAY: Acquire lock
-        c += 1;
+    WITH EXCLUSIVE counter AS c {                   -- OKAY: Acquire lock
+        c += 1;                                     -- Mutate the alias
     }
 }
+
+-- Note: Functions still take the plain Type (Int64), making business 
+-- logic decoupled from the synchronization strategy.
 ```
 
 ## 9. Sharded Shared-Nothing Architecture
@@ -193,7 +195,7 @@ The `@shard` capability partitions data across threads, enabling massive paralle
 
 ```clear
 -- A sharded map distributes keys across thread-local heaps
-MUTABLE registry: String{Int64} @shard = {};        -- OKAY
+MUTABLE registry: String{Int64}@shard = {};         -- OKAY
 
 -- CLEAR automatically pins this fiber to the correct shard
 BG {
@@ -206,23 +208,29 @@ BG {
 
 ## 10. Collections: Array, List, and Pool
 
+CLEAR provides three core collection types with distinct memory and performance profiles.
+
 | Sigil | Collection | Purpose |
 | :--- | :--- | :--- |
 | `T[N]` | `Array` | Fixed-size, stack-allocated (if small) |
-| `T[] @list` | `List` | Dynamic-size, heap-backed |
-| `T[] @pool` | `Pool` | Fixed-capacity, pre-allocated handles |
+| `T[]@list` | `List` | Dynamic-size, heap-backed |
+| `T[N]@pool` | `Pool` | Fixed-capacity, pre-allocated handles |
 
 ```clear
--- Fixed Array
+-- 1. Fixed Array
 arr: Int64[3] = [1, 2, 3];                          -- OKAY
+vals = [10, 20, 30];                                -- OKAY: Type inference
 
--- Dynamic List
-MUTABLE items: Int64[] @list = [];                  -- OKAY
-items.append(1);                                    -- OKAY
+-- 2. Dynamic List
+MUTABLE items: Int64[]@list = [];                   -- OKAY: Empty list literal
+MUTABLE names: String[] = List[];                   -- OKAY: Explicit List initializer
 
--- Pre-allocated Pool (generational handles)
-MUTABLE users: User[] @pool = [];                   -- OKAY
-id = users.insert(User{ name: "Alice" });           -- OKAY
+-- 3. Generational Pool
+-- Pools require a fixed capacity for their backing storage
+MUTABLE users: User[100]@pool = [];                 -- OKAY: Empty pool literal
+MUTABLE entities: Entity[50] = Pool[];              -- OKAY: Explicit Pool initializer
+
+id = users.insert(User{ name: "Alice" });           -- OKAY: Returns generational handle
 ```
 
 ## 11. Strings, Buffers, and RingBuffers
@@ -232,12 +240,12 @@ Strings in CLEAR are affine by default and can be specialized for specific perfo
 ```clear
 s = "Standard String";                              -- OKAY
 
--- String @raw: A mutable byte buffer
-MUTABLE buf: String @raw = Buffer::new(1024);       -- OKAY
+-- String@raw: A mutable byte buffer
+MUTABLE buf: String@raw = Buffer::new(1024);        -- OKAY
 buf.appendBytes(0x41);                              -- OKAY
 
--- String @ring: A circular buffer for streaming
-MUTABLE ring: String @ring = RingBuffer::new(256);  -- OKAY
+-- String@ring: A circular buffer for streaming
+MUTABLE ring: String@ring = RingBuffer::new(256);   -- OKAY
 ```
 
 ## 12. Concurrency: BG & DO
@@ -287,13 +295,13 @@ For shared data, use `@multiowned` (single-threaded Rc). For recursive or cyclic
 
 ```clear
 -- Reference counted data (Rc)
-x: String @multiowned = "Shared";                   -- OKAY
+x: String@multiowned = "Shared";                    -- OKAY
 
 -- Cyclic structure using @indirect
 -- See: examples/scheme/ for a full Lisp AST implementation
 STRUCT Node {                                       -- OKAY
     value: Int64,
-    next: Node @indirect?
+    next: Node@indirect?
 }
 ```
 
