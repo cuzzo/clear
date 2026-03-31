@@ -7,224 +7,274 @@ This guide showcases CLEAR: a memory-safe language that combines the ergonomics 
 Bindings are immutable by default. Reassignment requires the `MUTABLE` keyword.
 
 ```clear
--- OKAY: Immutable binding
-x = 10
--- COMPILER ERROR: Cannot reassign immutable binding
-x = 20
+x = 5;                        -- OKAY: Immutable binding (default)
+name = "Alice";               -- OKAY: Immutable string
+pi = 3.14159;                 -- OKAY: Immutable float
 
--- OKAY: Explicit mutability
-MUTABLE y = 10
-y = 20
+x = 6;                        -- COMPILER ERROR: x is immutable
+
+MUTABLE counter = 0;          -- OKAY: Explicit mutability
+counter = 1;                  -- OKAY: can reassign mutable binding
 ```
 
 ## 2. Primitive Types
 
-CLEAR provides a robust set of primitives. `Number` is an alias for `Float64`.
+CLEAR provides a comprehensive set of primitives for precise control over memory and performance.
 
 | Type | Description | Example |
 | :--- | :--- | :--- |
-| `Int64` | 64-bit signed integer | `42_i64` |
-| `Float64` | 64-bit float | `3.14` |
-| `Number` | Alias for Float64 | `1.0` |
-| `Bool` | Boolean | `TRUE`, `FALSE` |
-| `Char` | Unicode character | `'a'` |
-| `String` | UTF-8 string (affine) | `"hello"` |
-| `Void` | Empty return type | `RETURN` |
+| `Int8` .. `Int64` | Signed integers (8, 16, 32, 64-bit) | `42_i64`, `-1_i8` |
+| `Uint8` .. `Uint64` | Unsigned integers (8, 16, 32, 64-bit) | `255_u8`, `100_u32` |
+| `Float32`, `Float64` | IEEE-754 floating point | `3.14159_f64`, `1.0_f32` |
+| `Bool` | Boolean logic | `TRUE`, `FALSE` |
+| `Char` | Unicode scalar value | `'a'`, `'Ω'`, `'🚀'` |
+| `Byte` | Raw 8-bit data | `0x41_b` |
+| `String` | UTF-8 encoded text (affine) | `"hello"` |
+| `Void` | Absence of a value | `RETURN;` |
 
-## 3. Higher-Order Functions & Error Handling
+## 3. Function Signatures
 
-CLEAR supports functional primitives and elegant error propagation.
+Functions are defined with the `FN` keyword and use an arrow `->` to start the body.
 
 ```clear
-numbers = [1, 2, 3, 4, 5]
-
--- Map and Filter
-evens = numbers.filter(FN(n) -> n % 2 == 0)
-doubled = numbers.map(FN(n) -> n * 2)
-
--- Inline Error Handling
--- OKAY: Provide a default value
-val = parseInt("abc") OR ELSE 0
-
--- OKAY: Propagate error up the stack
-FN loadConfig(path: String) RETURNS !String ->
-    content = readFile(path) OR RAISE
-    RETURN content
+-- Simple function with explicit types
+FN add(a: Int64, b: Int64) RETURNS Int64 ->
+    RETURN a + b;                                   -- OKAY
 END
 
--- OKAY: Handle errors at the bottom of a block
+-- Failable function (!) and optional types (?)
+FN findUser(id: Int64) RETURNS !?User ->
+    IF id < 0 THEN RAISE "Invalid ID"; END          -- OKAY: RAISE for errors
+    -- logic to return optional User
+    RETURN result;                                  -- OKAY
+END
+```
+
+## 4. Structs & Uniform Function Call Syntax (UFCS)
+
+Structs define data layouts. Functions defined with a type prefix can be called using method syntax.
+
+```clear
+STRUCT Point {
+    x: Float64,
+    y: Float64
+}
+
+-- UFCS: Method-style call for functions
+FN Point::distance(p: Point) RETURNS Float64 ->
+    RETURN sqrt(p.x * p.x + p.y * p.y);             -- OKAY
+END
+
 FN main() RETURNS Void ->
-    result = loadConfig("config.json")
-    CATCH err ->
-        print("Failed to load: ${err}")
-        RETURN
+    p = Point{ x: 3.0, y: 4.0 };                    -- OKAY: Struct literal
+    d = p.distance();                               -- OKAY: UFCS method call
+    d2 = Point::distance(p);                        -- OKAY: Equivalent static call
+    RETURN;
+END
+```
+
+## 5. Higher-Order Functions & Error Handling
+
+CLEAR supports functional pipelines and elegant error propagation. Anonymous functions use the `%` sigil.
+
+```clear
+numbers: Int64[] = [1, 2, 3, 4, 5];
+
+-- Pipelines using |> (standard) or s> (safe/failable)
+evens = numbers |> WHERE _ % 2 == 0;                -- OKAY
+doubled = numbers |> SELECT _ * 2;                  -- OKAY
+
+-- Anonymous function (lambda) syntax: %(args) -> body
+callback: FN(Int64) -> Int64 = %(n: Int64) -> n * 2; -- OKAY
+
+-- Inline Error Handling: Provide a default or propagate
+val = parseInt("abc") OR ELSE 0;                    -- OKAY
+content = readFile("config.json") OR RAISE;         -- OKAY
+
+-- Handle errors at the bottom of a function
+FN main() RETURNS Void ->
+    result = loadConfig("config.json") OR RAISE;
+    print("Config: ${result}");
+    RETURN;
+CATCH e                                             -- OKAY: Error handler
+    print("Failed to load: ${e}");
+    RETURN;
+END
+```
+
+## 6. Time as Tense (~T)
+
+Tense represents a value that will exist in the future. It allows composition of asynchronous logic and streams before deciding on a concurrency capability.
+
+```clear
+-- 1. Promise (~T): A single value in the future
+p: ~String = BG { sleep(100); RETURN "Data"; };
+val = NEXT p;                                       -- OKAY: Blocks until ready
+
+-- 2. Bounded Stream (~T[N]): N concurrent parallel fibers
+stream: ~Int64[3] = [
+    BG { compute(1); },
+    BG { compute(2); },
+    BG { compute(3); }
+];
+v1 = NEXT stream;                                   -- OKAY: Popped in spawn order
+
+-- 3. Open Stream (~T[?]): Asynchronous generator
+gen: ~Int64[?] = BG STREAM {
+    YIELD 10;
+    YIELD 20;
+};
+val = NEXT gen;                                     -- OKAY: Returns ?Int64 (NIL when exhausted)
+
+-- 4. Infinite Stream (~T[INF]): Lazy rendezvous generator
+counter: ~Int64[INF] = BG STREAM {
+    MUTABLE i = 0;
+    WHILE TRUE DO
+        YIELD i;
+        i += 1;
     END
-    print("Config: ${result}")
-END
+};
+v1 = NEXT counter;                                  -- OKAY: Returns Int64 (never NIL)
 ```
 
-## 4. Time as Tense (~T)
+## 7. Capabilities: Shared & Synchronized
 
-Tense represents a value that will exist in the future (a promise). It allows composition without worrying about the underlying concurrency capability yet.
-
-```clear
--- ~String is a promise of a String
-FN fetchRemote() RETURNS ~String ->
-    RETURN BG {
-        sleep(100)
-        RETURN "Data"
-    }
-END
-
--- Tense types compose naturally
-p1 = fetchRemote()
-p2 = fetchRemote()
-
--- Execution happens in parallel; we wait only when needed
-val1 = NEXT p1
-val2 = NEXT p2
-```
-
-## 5. Concurrency & Parallelism
-
-CLEAR makes fan-out architectures and background tasks trivial.
+Capabilities define *how* data is accessed. Functions take Types; call sites provide Capabilities. This minimizes "function coloring" and refactoring cost.
 
 ```clear
--- Background execution
-p: ~Int64 = BG {
-    RETURN slowComputation()
-}
+-- @shared: Multi-threaded shared ownership (Arc)
+-- @locked: Internal mutability (Mutex)
+MUTABLE counter: Int64 @shared @locked = 0;         -- OKAY
 
--- Parallel branches
-DO {
-    :branch1 -> step1()
-    :branch2 -> step2()
-}
-
--- Fan-out: processing a list in parallel
-results = urls.map(FN(url) -> BG { fetch(url) })
-data = results.map(FN(p) -> NEXT p)
-```
-
-## 6. Capabilities: Shared & Synchronized
-
-Capabilities define *how* data is accessed. Functions take Types; call sites provide Capabilities.
-
-```clear
--- @shared: Atomic Reference Counting (Arc)
--- @locked: Internal mutability / Mutex
-MUTABLE counter: Int64@shared@locked = 0
-
-DO {
-    :increment ->
-        WITH counter AS !c ->
-            c = c + 1
-        END
-    :read ->
-        print(counter)
-END
-```
-
-## 7. Sharded Shared-Nothing Architecture
-
-The `@shard` capability partitions data across threads. This allows for massive parallelism without lock contention.
-
-```clear
--- A sharded map automatically distributes keys across thread-local heaps
-MUTABLE registry: String{Int64}@shard = {}
-
--- OKAY: CLEAR automatically pins threads to shards to avoid contention
+-- Thread-safe mutation via WITH block
 BG {
-    registry["key"] = 42
+    WITH EXCLUSIVE counter AS !c {                  -- OKAY: Acquire lock
+        c += 1;
+    }
 }
-
--- Note: Sharding provides high throughput but can risk data skew 
--- if keys are not uniformly distributed.
 ```
 
-## 8. Collections: Array, List, and Pool
+## 8. Sharded Shared-Nothing Architecture
+
+The `@shard` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
+
+```clear
+-- A sharded map distributes keys across thread-local heaps
+MUTABLE registry: String{Int64} @shard = {};        -- OKAY
+
+-- CLEAR automatically pins this fiber to the correct shard
+BG {
+    registry["key"] = 42;                           -- OKAY
+}
+
+-- Note: Sharding provides peak throughput but carries a risk of 
+-- data skew if keys are not uniformly distributed.
+```
+
+## 9. Collections: Array, List, and Pool
 
 | Sigil | Collection | Purpose |
 | :--- | :--- | :--- |
 | `T[N]` | `Array` | Fixed-size, stack-allocated (if small) |
-| `T[]@list` | `List` | Dynamic-size, heap-backed |
-| `T[]@pool` | `Pool` | Fixed-capacity, pre-allocated |
+| `T[] @list` | `List` | Dynamic-size, heap-backed |
+| `T[] @pool` | `Pool` | Fixed-capacity, pre-allocated handles |
 
 ```clear
 -- Fixed Array
-arr: Int64[3] = [1, 2, 3]
+arr: Int64[3] = [1, 2, 3];                          -- OKAY
 
 -- Dynamic List
-MUTABLE items: Int64[]@list = []
-items.append(1)
+MUTABLE items: Int64[] @list = [];                  -- OKAY
+items.append(1);                                    -- OKAY
 
--- Pre-allocated Pool
-MUTABLE users: User[]@pool = []
+-- Pre-allocated Pool (generational handles)
+MUTABLE users: User[] @pool = [];                   -- OKAY
+id = users.insert(User{ name: "Alice" });           -- OKAY
 ```
 
-## 9. Strings, Buffers, and RingBuffers
+## 10. Strings, Buffers, and RingBuffers
 
-Strings in CLEAR are affine and can be specialized for performance.
+Strings in CLEAR are affine by default and can be specialized for specific performance profiles.
 
 ```clear
-s = "Standard String"
+s = "Standard String";                              -- OKAY
 
--- String@raw: A mutable byte buffer
-MUTABLE buf: String@raw = Buffer::new(1024)
-buf.appendBytes(0x41)
+-- String @raw: A mutable byte buffer
+MUTABLE buf: String @raw = Buffer::new(1024)        -- OKAY
+buf.appendBytes(0x41);                              -- OKAY
 
--- String@ring: A circular buffer for streaming
-MUTABLE ring: String@ring = RingBuffer::new(256)
+-- String @ring: A circular buffer for streaming
+MUTABLE ring: String @ring = RingBuffer::new(256)   -- OKAY
 ```
 
-## 10. Affine Ownership: GIVE & TAKES
+## 11. Concurrency: BG & DO
 
-CLEAR uses affine types to ensure memory safety without a garbage collector.
+CLEAR makes both background tasks and fork-join parallelism trivial.
+
+```clear
+-- BG: Background execution
+p: ~Int64 = BG {                                    -- OKAY
+    RETURN slowComputation();
+};
+
+-- DO: Fork-Join parallel execution
+DO {                                                -- OKAY
+    :branch1 -> step1();
+    :branch2 -> step2();
+}
+
+-- Fan-out: processing a list in parallel
+results = urls |> SELECT BG { fetch(_) };
+data = results |> SELECT NEXT _;                    -- OKAY
+```
+
+## 12. Affine Ownership: GIVE & TAKES
+
+CLEAR uses affine types to ensure memory safety without a garbage collector. Values have exactly one owner.
 
 ```clear
 FN process(TAKES s: String) RETURNS Void ->
-    print(s)
-    -- s is destroyed here
+    print(s);                                       -- OKAY
+    -- s is destroyed here (end of scope)
 END
 
 FN main() RETURNS Void ->
-    msg = "Hello"
+    msg = "Hello";                                  -- OKAY
     
-    -- OKAY: Transfer ownership to the function
-    process(GIVE msg)
+    process(GIVE msg);                              -- OKAY: Transfer ownership
     
-    -- COMPILER ERROR: Use after move
-    print(msg)
+    print(msg);                                     -- COMPILER ERROR: Use after move
+    RETURN;
 END
 ```
 
-## 11. Refcounting & Cyclic Structures
+## 13. Refcounting & Cyclic Structures
 
-For data that must be shared by multiple owners, use `@multiowned` (Rc). For recursive or cyclic structures, use `@indirect` (Box).
+For shared data, use `@multiowned` (single-threaded Rc). For recursive or cyclic structures, use `@indirect` (Box).
 
 ```clear
--- Reference counted data
-x: String@multiowned = "Shared"
+-- Reference counted data (Rc)
+x: String @multiowned = "Shared";                   -- OKAY
 
--- Cyclic structure using @indirect (Box)
--- See: examples/scheme/ for a full implementation of a Lisp AST
-STRUCT Node {
+-- Cyclic structure using @indirect
+-- See: examples/scheme/ for a full Lisp AST implementation
+STRUCT Node {                                       -- OKAY
     value: Int64,
-    next: Node@indirect?
+    next: Node @indirect?
 }
 ```
 
-## 12. FFI: Native Integration
+## 14. FFI: Native Integration
 
-CLEAR integrates directly with Zig and C.
+CLEAR integrates directly with Zig and C with zero-overhead.
 
 ```clear
 -- Define a native struct layout
-EXTERN STRUCT Vec2 { x: Float64, y: Float64 }
+EXTERN STRUCT Vec2 { x: Float64, y: Float64 };      -- OKAY
 
 -- Call a native function from a Zig module
-EXTERN FN computeDistance(v: Vec2) RETURNS Float64 FROM "math_native"
+EXTERN FN computeDistance(v: Vec2) RETURNS Float64 FROM "math_native"; -- OKAY
 
 -- Showcase: See benchmarks/24_json_api/ for high-performance 
--- direct std.json FFI integration.
+-- direct std.json FFI integration via EXTERN FN.
 ```
