@@ -99,6 +99,12 @@ module AllocHelper
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       ([node.object] + (node.args || [])).any? { |a| node_allocates_frame?(a) }
     when AST::BinaryOp
+      # String concat (+) allocates from the frame arena (transpiles to CheatLib.concat).
+      if node.op == :ADD
+        lt = node.left.type_info rescue nil
+        rt = node.right.type_info rescue nil
+        return true if (lt.is_a?(Type) ? lt.string? : lt == :String) || (rt.is_a?(Type) ? rt.string? : rt == :String)
+      end
       node_allocates_frame?(node.left) || node_allocates_frame?(node.right)
     when AST::UnaryOp
       node_allocates_frame?(node.right)
