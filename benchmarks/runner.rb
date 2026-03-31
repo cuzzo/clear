@@ -11,6 +11,22 @@ ZIG = [
   `which zig 2>/dev/null`.strip
 ].find { |p| !p.empty? && File.exist?(p) } || "zig"
 
+# -------------------------------------------------------------------------
+# Mode configuration: controls runs, server load, and language selection.
+#   --smoke:   pre-commit sanity check (CLEAR only, minimal load)
+#   --fast:    quick comparison (3 runs, reduced server load)
+#   --normal:  default (5 runs, full server load)
+#   --release: exhaustive (5 runs, 5x server load)
+# -------------------------------------------------------------------------
+MODES = {
+  "smoke"   => { runs: 1, num_gets: 100,   concurrency: 5,  clear_only: true },
+  "fast"    => { runs: 3, num_gets: 2500,  concurrency: 25, clear_only: false },
+  "normal"  => { runs: 5, num_gets: 10000, concurrency: 50, clear_only: false },
+  "release" => { runs: 5, num_gets: 50000, concurrency: 50, clear_only: false },
+}.freeze
+
+PORT = 6390
+
 def measure_min(command, runs = 5)
   times = runs.times.map { Benchmark.measure { `#{command}` }.real }
   times.min
@@ -19,17 +35,20 @@ end
 # -------------------------------------------------------------------------
 # Standard benchmark: self-contained binary, timed externally
 # -------------------------------------------------------------------------
-def run_bench(dir)
+def run_bench(dir, mode_cfg, cores)
   # Detect server benchmarks (have client.go + server.cht)
   if File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
-    return run_server_bench(dir)
+    return run_server_bench(dir, mode_cfg, cores)
   end
 
-  puts "=== BENCHMARK: #{dir} ==="
+  clear_only = mode_cfg[:clear_only]
+  runs = mode_cfg[:runs]
 
-  has_c    = File.exist?("#{dir}/bench.c")
-  has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
-  has_go   = File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
+  puts "=== BENCHMARK: #{dir} (#{$mode}, #{runs} runs#{clear_only ? ', CLEAR only' : ''}) ==="
+
+  has_c    = !clear_only && File.exist?("#{dir}/bench.c")
+  has_rust = !clear_only && File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
+  has_go   = !clear_only && File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
 
   # 1. Compile C Baseline
   if has_c
@@ -76,7 +95,6 @@ def run_bench(dir)
     FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
   elsif File.exist?("#{dir}/bench.cht")
     puts "Transpiling CLEAR..."
-    # Run from root to ensure relative requires in src/ work
     `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
     puts "Compiling CLEAR (Zig output)..."
   else
@@ -97,42 +115,37 @@ def run_bench(dir)
     FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
   end
 
-  # 5. Execution & Timing
+# 5. Execution & Timing
   results = {}
 
   if has_c && File.exist?("#{dir}/bench_c")
-    puts "Running C baseline (best of 5)..."
-    results[:c] = measure_min("./#{dir}/bench_c")
+    puts "Running C baseline (best of #{runs})..."
+    results[:c] = measure_min("./#{dir}/bench_c", runs)
   end
 
   if has_rust && File.exist?("#{dir}/bench_rust")
-    puts "Running Rust baseline (best of 5)..."
-    results[:rust] = measure_min("./#{dir}/bench_rust")
+    puts "Running Rust baseline (best of #{runs})..."
+    results[:rust] = measure_min("TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs)
   end
 
   if has_go && File.exist?("#{dir}/bench_go")
-    puts "Running Go baseline (best of 5)..."
-    results[:go] = measure_min("./#{dir}/bench_go")
+    puts "Running Go baseline (best of #{runs})..."
+    results[:go] = measure_min("GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs)
   end
 
   if has_clear
-    # Match Go/Rust behavior: use all available cores by default.
-    # Go defaults to GOMAXPROCS=num_cpu; Tokio defaults to num_cpu threads.
-    # CLEAR defaults to 1 thread unless CLEAR_THREADS is set.
-    threads = ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+    threads = cores
     threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
 
-    # Use jemalloc for CLEAR benchmarks if available. CLEAR's runtime uses
-    # std.heap.c_allocator (libc malloc); jemalloc provides per-thread arenas
-    # with less fragmentation and better multi-threaded scaling.
+    # Use jemalloc for CLEAR benchmarks if available.
     jemalloc_lib = Dir.glob("/lib/x86_64-linux-gnu/libjemalloc.so*").first ||
                    Dir.glob("/usr/lib/libjemalloc.so*").first ||
                    Dir.glob("/usr/local/lib/libjemalloc.so*").first
     jemalloc_preload = jemalloc_lib ? "LD_PRELOAD=#{jemalloc_lib} " : ""
     jemalloc_note = jemalloc_lib ? ", jemalloc" : ""
 
-    puts "Running CLEAR (best of 5, CLEAR_THREADS=#{threads}#{jemalloc_note})..."
-    results[:clear] = measure_min("#{jemalloc_preload}CLEAR_THREADS=#{threads} ./#{dir}/bench_clear")
+    puts "Running CLEAR (best of #{runs}, CLEAR_THREADS=#{threads}#{jemalloc_note})..."
+    results[:clear] = measure_min("#{jemalloc_preload}CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs)
   end
 
   # 6. Reporting
@@ -158,18 +171,18 @@ end
 # -------------------------------------------------------------------------
 # Server benchmark: start server, run shared client, capture output
 # -------------------------------------------------------------------------
-PORT = 6390
-NUM_GETS = 10_000
-CONCURRENCY = 50
+def run_server_bench(dir, mode_cfg, cores)
+  clear_only  = mode_cfg[:clear_only]
+  num_gets    = mode_cfg[:num_gets]
+  concurrency = mode_cfg[:concurrency]
 
-def run_server_bench(dir)
-  puts "=== SERVER BENCHMARK: #{dir} ==="
+  puts "=== SERVER BENCHMARK: #{dir} (#{$mode}, #{num_gets} GETs, #{concurrency} concurrent#{clear_only ? ', CLEAR only' : ''}) ==="
 
-  has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
-  has_go   = File.exist?("#{dir}/server.go") && system("command -v go > /dev/null 2>&1")
+  has_rust = !clear_only && File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
+  has_go   = !clear_only && File.exist?("#{dir}/server.go") && system("command -v go > /dev/null 2>&1")
 
   # 1. Compile everything
-  # Client (shared Go binary)
+  # Client (always needed)
   puts "Compiling client..."
   Dir.chdir(dir) do
     `go mod init bench 2>/dev/null` unless File.exist?("go.mod")
@@ -208,8 +221,6 @@ def run_server_bench(dir)
       ffi_modules.each { |m| FileUtils.cp("../#{dir}/#{m}.zig", "#{m}.zig") }
 
       if ffi_modules.any?
-        # Build with --dep/-M flags for each FFI module.
-        # Flag order matters: --dep before -Mroot, -lc/asm after root, -Mffi last.
         dep_flags = ffi_modules.map { |m| "--dep #{m}" }.join(" ")
         mod_flags = ffi_modules.map { |m| "-M#{m}=#{m}.zig" }.join(" ")
         cmd = "#{ZIG} build-exe #{dep_flags} -Mroot=bench.zig -lc switch.S onRoot.S #{mod_flags} -O ReleaseFast --name bench_clear"
@@ -231,15 +242,13 @@ def run_server_bench(dir)
   end
 
   threads = ENV['CLEAR_THREADS'] || "1"
-  # No jemalloc for server benchmarks — memory comparison is the focus,
-  # and jemalloc can conflict with io_uring/epoll in long-running servers.
 
   # 2. Run each server with the shared client
   results = {}
 
   servers = []
-  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: "" } if has_rust && File.exist?("#{dir}/bench_rust")
-  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: "" } if has_go && File.exist?("#{dir}/server_go")
+  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: "TOKIO_WORKER_THREADS=#{cores} " } if has_rust && File.exist?("#{dir}/bench_rust")
+  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: "GOMAXPROCS=#{cores} " } if has_go && File.exist?("#{dir}/server_go")
   servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: "CLEAR_THREADS=#{threads} " } if has_clear
 
   servers.each do |srv|
@@ -253,7 +262,7 @@ def run_server_bench(dir)
     sleep 1
 
     # Run client
-    output = `./#{dir}/client_go #{pid} #{PORT} #{NUM_GETS} #{CONCURRENCY} 2>&1`
+    output = `./#{dir}/client_go #{pid} #{PORT} #{num_gets} #{concurrency} 2>&1`
     puts output
 
     # Kill server
@@ -307,13 +316,32 @@ def run_server_bench(dir)
   end
 end
 
-if ARGV.empty?
-  # Run all benchmark directories
-  dirs = Dir.glob("benchmarks/0*").sort
-  dirs.each { |d| run_bench(d); puts }
-elsif ARGV[0] == "--all"
-  dirs = Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort + Dir.glob("benchmarks/2*").sort
-  dirs.each { |d| run_bench(d); puts }
-else
-  run_bench(ARGV[0])
+if __FILE__ == $0
+  dirs = []
+  $mode = "normal"
+  cores = `nproc 2>/dev/null`.strip
+
+  args = ARGV.dup
+  while (arg = args.shift)
+    case arg
+    when "--smoke"   then $mode = "smoke"
+    when "--fast"    then $mode = "fast"
+    when "--release" then $mode = "release"
+    when "--normal"  then $mode = "normal"
+    when /^--cores=(\d+)$/
+      cores = $1
+    when "--all"
+      dirs += Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort + Dir.glob("benchmarks/2*").sort
+    else
+      dirs << arg
+    end
+  end
+
+  if dirs.empty?
+    dirs = Dir.glob("benchmarks/0*").sort
+  end
+
+  mode_cfg = MODES[$mode]
+
+  dirs.each { |d| run_bench(d, mode_cfg, cores); puts }
 end
