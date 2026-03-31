@@ -290,7 +290,10 @@ private
 
     if node.close_method
       schema[:kind] = :resource
-      schema[:close_zig] = "{0}.#{node.close_method}()"
+      # Generate the close pattern: module-level function call with pointer to self.
+      # Dotted paths: "std.json" → "std_json" (sanitized alias)
+      mod_alias = node.from_module.gsub(".", "_")
+      schema[:close_zig] = "#{mod_alias}.#{node.close_method}(&{0})"
     end
 
     current_scope.declare_type(node.name.to_sym, schema)

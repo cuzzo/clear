@@ -1,10 +1,8 @@
 # FFI — Foreign Function Interface
 
-CLEAR interfaces directly with Zig and C libraries via `EXTERN FN` and `EXTERN STRUCT` declarations. No wrapper files needed for simple cases — declare the types and functions in CLEAR, and the transpiler generates the correct `@import` and call code.
+CLEAR interfaces directly with Zig and C libraries via `EXTERN FN` and `EXTERN STRUCT` declarations. Declare the types and functions in CLEAR, and the transpiler generates the correct `@import` and call code.
 
-## What Works (v0.1)
-
-### EXTERN STRUCT — declare native types
+## EXTERN STRUCT — declare native types
 
 ```clear-example
 EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_module";
@@ -14,9 +12,24 @@ EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_module";
 - Supports all CLEAR types including slices (`Int64[]`, `String`)
 - Field access works: `doc.id`, `doc.data[0]`, `doc.data.length()`
 - FOR loop iteration over slice fields works
-- Structs are passed by value (same as CLEAR's normal convention)
+- Structs are passed by value
 
-### EXTERN FN — call native functions
+### CLOSE — auto-cleanup via RAII
+
+```clear-example
+EXTERN STRUCT Buffer { data: String } CLOSE "deinit" FROM "native_resource";
+```
+
+`CLOSE "method"` registers the EXTERN STRUCT as a resource type. When a variable goes out of scope, CLEAR auto-emits `defer obj.deinit()`. The full RAII system works:
+
+- **Scope exit:** `defer buf.deinit()` emitted automatically
+- **Move tracking:** `buf_moved = true` suppresses defer when ownership transfers
+- **BG capture:** fiber inherits cleanup responsibility when resource is captured
+- **Return:** `RETURN buf` transfers ownership to caller, skips local defer
+
+No manual cleanup needed — same behavior as built-in `File` and `TCPClient`.
+
+## EXTERN FN — call native functions
 
 ```clear-example
 EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_module";
@@ -25,32 +38,7 @@ EXTERN FN freeDoc(doc: JsonDoc) RETURNS Void FROM "json_module";
 
 - Parameters and return types use CLEAR type syntax
 - Maps directly to `module.functionName(args)` in Zig
-- All EXTERN FN calls are automatically **trampolined to g0** (the OS thread stack), so native libraries with deep recursion or large stack frames work safely on fiber stacks
-
-### EFFECTS — declare native function side effects
-
-```clear-example
--- :alloc — inject CLEAR's frame allocator as the first native argument
-EXTERN FN zigDupe(src: String) RETURNS !String EFFECTS :alloc FROM "native_utils";
-```
-
-The CLEAR declaration omits the allocator parameter — the transpiler injects `rt.frameAlloc()` automatically. The native function receives it as its first argument:
-
-```zig
-// Zig side: first param is the allocator, injected by CLEAR
-pub fn zigDupe(allocator: std.mem.Allocator, src: []const u8) ![]const u8 {
-    return try allocator.dupe(u8, src);
-}
-```
-
-Data allocated via the injected allocator lives on the caller's frame arena and is freed automatically by arena rewind. No manual free needed in CLEAR.
-
-**Available effects:**
-| Effect | Behavior |
-|--------|----------|
-| `:alloc` | Inject `rt.frameAlloc()` as first argument to native function |
-
-More effects (`:heap`, `:io`) planned for v0.2.
+- All EXTERN FN calls are **trampolined to g0** (the OS thread stack) automatically
 
 ### Error union returns (`!T`)
 
@@ -58,19 +46,31 @@ More effects (`:heap`, `:io`) planned for v0.2.
 EXTERN FN safeDivide(a: Int64, b: Int64) RETURNS !Int64 FROM "math_utils";
 ```
 
-When the return type is `!T`, the transpiler:
-1. Catches the native error inside the g0 trampoline
-2. Propagates it to the CLEAR caller via the normal error-handling path
-3. The CLEAR function's return type automatically becomes failable
+When the return type is `!T`, the transpiler catches the native error inside the g0 trampoline and propagates it to the CLEAR caller.
 
-Combine with `EFFECTS :alloc` for native functions that both allocate and fail:
+### EFFECTS — automatic allocator injection
+
+```clear-example
+EXTERN FN zigDupe(src: String) RETURNS !String EFFECTS :alloc FROM "utils";
+EXTERN FN zigDupe(src: String) RETURNS !String EFFECTS :alloc:frame FROM "utils";
+EXTERN FN heapDupe(src: String) RETURNS !String EFFECTS :alloc:heap FROM "utils";
+```
+
+The CLEAR declaration omits the allocator parameter — the transpiler injects `rt.frameAlloc()` or `rt.heapAlloc()` as the first argument to the native function automatically.
+
+| Effect | Behavior |
+|--------|----------|
+| `:alloc` or `:alloc:frame` | Inject `rt.frameAlloc()` — data freed by arena rewind |
+| `:alloc:heap` | Inject `rt.heapAlloc()` — data persists until explicitly freed |
+
+Combine with `!T` for native functions that both allocate and fail:
 ```clear-example
 EXTERN FN zigConcat(a: String, sep: String, b: String) RETURNS !String EFFECTS :alloc FROM "utils";
 ```
 
-### Complete example: JSON parsing in CLEAR
+## Complete example: JSON parsing with RAII
 
-Native module (`json_module.zig`):
+Native module (`json_native.zig`):
 ```zig
 const std = @import("std");
 
@@ -80,19 +80,19 @@ pub const JsonDoc = struct {
 };
 
 pub fn parseJson(content: []const u8) JsonDoc {
-    // ... parse with std.json, return by value
+    // parse with std.json, dupe data, return by value
 }
 
 pub fn freeDoc(doc: JsonDoc) void {
-    // ... free the data slice
+    // free the data slice
 }
 ```
 
-CLEAR code:
+CLEAR code — iteration and summing in CLEAR, cleanup is automatic:
 ```clear-example
-EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_module";
-EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_module";
-EXTERN FN freeDoc(doc: JsonDoc) RETURNS Void FROM "json_module";
+EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_native";
+EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_native";
+EXTERN FN freeDoc(doc: JsonDoc) RETURNS Void FROM "json_native";
 
 FN processJson(content: String) RETURNS Int64 ->
     doc = parseJson(content);
@@ -103,52 +103,61 @@ FN processJson(content: String) RETURNS Int64 ->
 END
 ```
 
-The parsing happens in native Zig (fast), the iteration and summing happen in CLEAR (readable), and cleanup is explicit.
+With `CLOSE`, the `freeDoc` call becomes unnecessary:
+```clear-example
+EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } CLOSE "freeDoc" FROM "json_native";
+EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_native";
 
-### Compilation
-
-EXTERN modules require Zig's `-M` flag for module resolution:
-```bash
-# With FFI module
-zig build-exe --dep json_module -Mroot=program.zig -lc switch.S onRoot.S \
-    -Mjson_module=json_module.zig -O ReleaseFast
+FN processJson(content: String) RETURNS Int64 ->
+    doc = parseJson(content);     -- auto: defer doc.freeDoc()
+    MUTABLE sum: Int64 = 0;
+    FOR i IN (0_i64 ..< doc.data.length()) -> sum += doc.data[i];
+    RETURN sum;                   -- cleanup runs automatically
+END
 ```
 
-The benchmark runner handles this automatically — any `.zig` files in the benchmark directory are detected as FFI modules.
+## What You Can Import
 
-## What You Can Import Today
-
-| Native pattern | CLEAR declaration | Works? |
-|---------------|-------------------|--------|
+| Pattern | CLEAR declaration | Works? |
+|---------|-------------------|--------|
 | Simple function (primitives) | `EXTERN FN add(a: Int64, b: Int64) RETURNS Int64 FROM "mod"` | Yes |
 | Function returning struct | `EXTERN FN parse(s: String) RETURNS MyStruct FROM "mod"` | Yes |
 | Function taking struct | `EXTERN FN free(doc: MyStruct) RETURNS Void FROM "mod"` | Yes |
 | Function with allocator param | `EXTERN FN dupe(s: String) RETURNS !String EFFECTS :alloc FROM "mod"` | Yes |
 | Function returning error union | `EXTERN FN div(a: Int64, b: Int64) RETURNS !Int64 FROM "mod"` | Yes |
+| Struct with RAII cleanup | `EXTERN STRUCT Buf { data: String } CLOSE "deinit" FROM "mod"` | Yes |
 | Struct with slice fields | `EXTERN STRUCT Doc { data: Int64[] } FROM "mod"` | Yes |
 | Struct field access | `doc.field`, `doc.data[i]`, `doc.data.length()` | Yes |
 | Slice iteration | `FOR i IN (0 ..< doc.data.length()) -> doc.data[i]` | Yes |
 
 ## What You Can't Import Yet
 
-| Native pattern | Why not | Planned |
-|---------------|---------|---------|
-| Generic types (`Parsed<T>`) | CLEAR has no generic EXTERN STRUCT | v0.2 |
-| Method calls (`doc.deinit()`) | No EXTERN method syntax | v0.2 |
+| Pattern | Why not | Planned |
+|---------|---------|---------|
+| Generic types (`Parsed<T>`) | CLEAR has no generic EXTERN STRUCT yet | v0.1 |
+| Method calls (`doc.method()`) | No EXTERN method dispatch yet | v0.1 |
 | Callbacks (fn pointers to CLEAR) | One-way FFI only | v0.3 |
 | C header auto-parsing | Must write Zig wrapper | v0.2 |
 | Functions taking `*T` (pointer) | CLEAR passes by value | v0.2 |
-| Opaque types (no field layout) | EXTERN STRUCT requires fields | v0.2 |
 
 ## g0 Trampoline
 
-All EXTERN FN calls run on the scheduler's OS thread stack (g0), not the fiber stack. This is automatic — no annotation needed. Native libraries like `std.json` (recursive descent) or C libraries calling `malloc` work safely regardless of fiber stack size.
+All EXTERN FN calls run on the scheduler's OS thread stack (g0), not the fiber stack. This is automatic — no annotation needed. The trampoline is a no-op when already on the OS stack.
 
-The trampoline is a no-op when already on the OS stack (e.g., `main()` before fibers are spawned, or nested EXTERN calls).
+## Compilation
+
+EXTERN modules require Zig's `-M` flag:
+```bash
+zig build-exe --dep json_native -Mroot=program.zig -lc switch.S onRoot.S \
+    -Mjson_native=json_native.zig -O ReleaseFast
+```
+
+The benchmark runner detects `.zig` files in the benchmark directory automatically.
 
 ## See Also
 
-- `benchmarks/24_json_api/` — TCP JSON server using FFI for parsing
-- `transpile-tests/ffi-integration/` — basic EXTERN FN arithmetic
-- `transpile-tests/ffi-struct-test/` — EXTERN STRUCT with slice fields
+- `benchmarks/24_json_api/` — TCP JSON server using FFI
+- `transpile-tests/ffi-integration/` — EXTERN FN arithmetic
+- `transpile-tests/ffi-struct-test/` — EXTERN STRUCT with slices
 - `transpile-tests/ffi-effects-test/` — EFFECTS :alloc and !T returns
+- `transpile-tests/ffi-close-test/` — EXTERN STRUCT CLOSE (RAII)
