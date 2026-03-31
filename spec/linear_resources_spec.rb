@@ -567,6 +567,31 @@ RSpec.describe SemanticAnnotator do
     end
 
     # ------------------------------------------------------------------
+    # String UTF-8 / String@raw
+    # ------------------------------------------------------------------
+    describe "String UTF-8 vs @raw" do
+      it "rejects integer indexing on String" do
+        src = 'FN f() RETURNS Void -> s = "hello"; c = s[0]; RETURN; END'
+        expect { run(src) }.to raise_error(/Cannot index String by integer/)
+      end
+
+      it "allows integer indexing on String@raw" do
+        src = 'FN f() RETURNS Void -> buf: String@raw = "hello"; c = buf[0]; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "codepointCount compiles on String" do
+        src = 'FN f() RETURNS Void -> s = "hello"; n = s.codepointCount(); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "bytes compiles on String" do
+        src = 'FN f() RETURNS Void -> s = "hello"; n = s.bytes(); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # ------------------------------------------------------------------
     # String affine move semantics (Rust-like)
     # ------------------------------------------------------------------
     describe "String move semantics" do

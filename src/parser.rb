@@ -1619,10 +1619,10 @@ class Parser
     sync       = nil
     collection = nil
     is_soa     = false
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @list @pool @set].include?(current.value)
-      # Collection types (@list, @pool, @set) and @link (weak reference) are structural
-      # types, not ownership capabilities — they must be allowed on function parameters.
-      is_structural = %w[@list @pool @set @link].include?(current.value)
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @raw @list @pool @set].include?(current.value)
+      # Collection types (@list, @pool, @set), @link (weak reference), and @raw (byte buffer)
+      # are structural types — they must be allowed on function parameters.
+      is_structural = %w[@list @pool @set @link @raw].include?(current.value)
       unless allow_capabilities || is_structural
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
@@ -1634,6 +1634,7 @@ class Parser
       when "@locked"      then sync      = :locked
       when "@writeLocked" then sync     = :write_locked
       when "@local"       then sync     = :local
+      when "@raw"         then sync     = :raw
       when "@indirect"
         @last_indirect_consumed = true  # Signal to union field parser
       when "@list"

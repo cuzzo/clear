@@ -441,9 +441,13 @@ class Type
     @sync == :local
   end
 
-  # True for any sync capability
+  def raw?
+    @sync == :raw
+  end
+
+  # True for any sync capability (excludes @raw which is a data-access mode, not a lock)
   def any_sync?
-    !@sync.nil?
+    !@sync.nil? && @sync != :raw
   end
 
   # Backwards compat alias used in a few places

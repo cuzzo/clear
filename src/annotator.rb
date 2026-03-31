@@ -1654,6 +1654,14 @@ private
       elem_t = target_type_info.tense_type.element_type
       node.full_type = Type.new(:"~#{elem_t.resolved}")
 
+    # Case 2c: String indexing — only allowed on String@raw
+    elsif target_type_info.string? && !target_type_info.raw?
+      error!(node, "Cannot index String by integer. Use String@raw for byte access, or .codepoints() for iteration.")
+
+    # Case 2d: String@raw byte indexing -> returns String (single byte as 1-char slice)
+    elsif target_type_info.string? && target_type_info.raw?
+      node.full_type = :String
+
     # Case 3: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
     elsif target_type_info.array? || node.target.metatype == :struct
       node.full_type = target_type_info.element_type

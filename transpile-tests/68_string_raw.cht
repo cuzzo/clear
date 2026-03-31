@@ -1,0 +1,34 @@
+-- Test: String@raw byte buffer semantics
+-- String@raw allows byte indexing and treats data as raw bytes.
+
+FN test_byte_indexing() RETURNS Void ->
+    buf: String@raw = "hello";
+    ASSERT buf[0] == "h", "byte 0";
+    ASSERT buf[4] == "o", "byte 4";
+    ASSERT buf.length() == 5, "byte length";
+    RETURN;
+END
+
+FN test_raw_methods() RETURNS Void ->
+    buf: String@raw = "hello world";
+    ASSERT buf.length() == 11, "raw length";
+    ASSERT buf.bytes() == 11, "raw bytes";
+    ASSERT buf.codepointCount() == 11, "raw codepointCount on ASCII";
+    RETURN;
+END
+
+FN test_raw_operations() RETURNS Void ->
+    buf: String@raw = "abc";
+    ASSERT indexOf(buf, "b") == 1_i64, "indexOf on raw";
+
+    parts = split(buf, "b");
+    ASSERT parts.length() == 2, "split on raw";
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    test_byte_indexing();
+    test_raw_methods();
+    test_raw_operations();
+    RETURN;
+END

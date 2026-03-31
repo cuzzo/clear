@@ -142,12 +142,35 @@ pub const CheatLib = struct {
         }
     }
 
-    // String character access: returns a single-character slice ([]const u8).
-    // Used by CLEAR's str[i] when the target is a String.
+    // Byte-level character access: returns a single-byte slice ([]const u8).
+    // Used by CLEAR's String@raw buf[i] indexing.
     pub fn charAt(str: []const u8, index: anytype) []const u8 {
         const i: usize = @intCast(index);
         if (i >= str.len) return "";
         return str[i .. i + 1];
+    }
+
+    // UTF-8 codepoint count. Returns the number of Unicode codepoints in the string.
+    // Falls back to byte count on invalid UTF-8.
+    pub fn codepointCount(str: []const u8) i64 {
+        return @intCast(std.unicode.utf8CountCodepoints(str) catch str.len);
+    }
+
+    // UTF-8 codepoint access: returns the i-th codepoint as a multi-byte slice.
+    // O(n) per call — iterates from the start. Returns "" on out-of-bounds or invalid UTF-8.
+    pub fn charAtCodepoint(alloc: std.mem.Allocator, str: []const u8, index: anytype) ![]const u8 {
+        const target: usize = @intCast(index);
+        const view = std.unicode.Utf8View.initUnchecked(str);
+        var it = view.iterator();
+        var i: usize = 0;
+        while (it.nextCodepointSlice()) |cp_slice| {
+            if (i == target) {
+                const result = try alloc.dupe(u8, cp_slice);
+                return result;
+            }
+            i += 1;
+        }
+        return "";
     }
 
     // Works for Lists and Slices because it modifies the memory the slice points to.

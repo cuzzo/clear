@@ -1,0 +1,37 @@
+-- Test: String UTF-8 semantics (Rust model)
+-- String is UTF-8, no integer indexing. Use codepointCount/charAt for codepoints.
+
+FN test_ascii() RETURNS Void ->
+    s = "hello";
+    ASSERT s.length() == 5, "ASCII byte length";
+    ASSERT s.codepointCount() == 5, "ASCII codepoint count";
+    ASSERT s.bytes() == 5, "ASCII bytes()";
+    ASSERT charAt(s, 0_i64) == "h", "charAt 0";
+    ASSERT charAt(s, 4_i64) == "o", "charAt 4";
+    RETURN;
+END
+
+FN test_multibyte() RETURNS Void ->
+    cafe = "café";
+    ASSERT cafe.length() == 5, "cafe byte length: c(1) a(1) f(1) e-acute(2) = 5";
+    ASSERT cafe.codepointCount() == 4, "cafe codepoint count: c a f e-acute = 4";
+    ASSERT charAt(cafe, 0_i64) == "c", "charAt 0 = c";
+    ASSERT charAt(cafe, 2_i64) == "f", "charAt 2 = f";
+    ASSERT charAt(cafe, 3_i64) == "é", "charAt 3 = e-acute";
+    RETURN;
+END
+
+FN test_empty() RETURNS Void ->
+    e = "";
+    ASSERT e.length() == 0, "empty byte length";
+    ASSERT e.codepointCount() == 0, "empty codepoint count";
+    ASSERT charAt(e, 0_i64) == "", "charAt on empty returns empty";
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    test_ascii();
+    test_multibyte();
+    test_empty();
+    RETURN;
+END
