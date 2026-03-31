@@ -85,6 +85,14 @@ class ZigTranspiler
   # declarations that are importable (non-private). Used by ModuleImporter.
   def transpile_module(ast)
     @emitted_extern_modules = Set.new
+    # Pre-populate needs_rt/can_fail so call sites emit correct signatures.
+    @fn_needs_rt ||= {}
+    @fn_can_fail ||= {}
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
+      @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
+    end
     parts = []
     ast.statements.each do |stmt|
       case stmt
