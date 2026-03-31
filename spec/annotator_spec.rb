@@ -3483,7 +3483,7 @@ RSpec.describe SemanticAnnotator do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(src)
-      expect(zig).to include("CheatLib.concat")
+      expect(zig).to include("std.mem.concat")
       expect(zig).to include("Hello, ")
     end
   end

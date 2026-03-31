@@ -1913,21 +1913,20 @@ private
       return transpile_Smooth(node) if node.op == :SMOOTH
       return transpile_OrRescue(node) if node.op == :OR_RESCUE
 
-      left = visit(node.left)
-      right = visit(node.right)
-
-      if node.op == :ADD || node.op == "+"
-        # Check if we are operating on Strings
-        # Annotator ensures full_type is set (e.g. "String" or "%String")
+      if (node.op == :ADD || node.op == "+") &&
+         (node.left.type_info&.string? || node.right.type_info&.string?)
+        # Flatten chained string + into a single std.mem.concat call.
+        # "a" + "b" + "c" → std.mem.concat(alloc, u8, &.{ "a", "b", "c" })
+        # instead of concat(concat("a", "b"), "c") which wastes intermediate buffers.
         rt_ref = @do_rt_name || "rt"
         alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
-
-        if node.left.type_info&.string? || node.right.type_info&.string?
-          # Generate call to runtime helper
-          # We use heapAlloc to ensure the result survives (safe default)
-          return "try CheatLib.concat(#{alloc}, #{left}, #{right})"
-        end
+        parts = collect_string_concat_parts(node)
+        parts_zig = parts.map { |p| visit(p) }
+        return "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
       end
+
+      left = visit(node.left)
+      right = visit(node.right)
 
       if node.op == :POW
         left_type = node.left.full_type
@@ -2605,6 +2604,20 @@ private
   # Escape CLEAR variable names that would shadow Zig primitive types
   # (uN, iN, fN patterns like u8, i32, f64) using Zig's @"name" quoting syntax.
   # Strips trailing `!` (mutation) and `?` (predicate) suffixes from CLEAR names —
+  # Flatten a chain of string + operations into a list of leaf operands.
+  # "a" + "b" + "c" is parsed as ADD(ADD("a", "b"), "c"), flattened to ["a", "b", "c"].
+  def collect_string_concat_parts(node)
+    parts = []
+    if node.is_a?(AST::BinaryOp) && (node.op == :ADD || node.op == "+") &&
+       (node.left.type_info&.string? || node.right.type_info&.string?)
+      parts.concat(collect_string_concat_parts(node.left))
+      parts.concat(collect_string_concat_parts(node.right))
+    else
+      parts << node
+    end
+    parts
+  end
+
   # these are naming conventions not valid in Zig identifiers.
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
   def zig_safe_name(name)
