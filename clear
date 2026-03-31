@@ -136,7 +136,7 @@ case ARGV[0]
 when 'build'
   args = ARGV[1..] || []
   output = nil
-  opt_level = 'ReleaseFast'
+  opt_level = 'Debug'
 
   # Parse build flags
   remaining = []
@@ -152,6 +152,9 @@ when 'build'
       i += 1
     when '--safe'
       opt_level = 'ReleaseSafe'
+      i += 1
+    when '--fast'
+      opt_level = 'ReleaseFast'
       i += 1
     else
       remaining << args[i]
@@ -210,19 +213,21 @@ when 'help', '--help', '-h', nil
     CLEAR Language Compiler
 
     Usage:
-      clear build <file.cht> [-o output] [--release|--safe]
+      clear build <file.cht> [-o output] [--release|--fast|--safe]
       clear run <file.cht> [-- args...]
       clear test <file.cht>
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
       run      Build and execute a CLEAR program
-      test     Build and run tests (uses module test harness)
+      test     Build and run tests (uses test harness with leak detection)
 
     Build flags:
       -o PATH       Output binary path (default: same dir as source)
-      --release     Optimize for speed (default, -O ReleaseFast)
-      --safe        Include safety checks (-O ReleaseSafe)
+      (default)     Debug mode (~2s build, no optimization)
+      --release     Optimize for speed (-O ReleaseFast, ~22s build)
+      --fast        Alias for --release
+      --safe        Include safety checks (-O ReleaseSafe, ~28s build)
 
     Environment:
       CLEAR_THREADS  Number of scheduler threads (0 = auto, 1 = single)
