@@ -125,6 +125,15 @@ module FunctionAnalysis
         node.extern_call = true
         node.extern_effects = func_type[:extern_effects] if func_type[:extern_effects]
         record_effect(EffectTracker::EXTERN)
+        # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
+        alloc_kind = func_type[:extern_effects]&.dig(:alloc)
+        if alloc_kind && current_fn_ctx
+          if alloc_kind == :heap
+            current_fn_ctx.heap_count += 1
+          else
+            current_fn_ctx.frame_count += 1
+          end
+        end
       end
 
       if func_type[:extern]
@@ -151,7 +160,15 @@ module FunctionAnalysis
 
       type_params = func_type[:type_params]
       if type_params&.any?
-        subst = infer_generic_type_args!(node, func_type, args, type_params)
+        # For EXTERN FN with comptime params, the type bindings come directly from
+        # the comptime arguments (e.g. T=JsonRecord), not from inference on resolved_type.
+        comptime_type_args ||= []
+        if func_type[:extern] && comptime_type_args.any?
+          subst = {}
+          type_params.each_with_index { |tp, i| subst[tp] = comptime_type_args[i] if comptime_type_args[i] }
+        else
+          subst = infer_generic_type_args!(node, func_type, args, type_params)
+        end
         node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
         substituted = substitute_type_params(func_type, subst)
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
@@ -162,6 +179,7 @@ module FunctionAnalysis
         verify_function_signature!(call_node, func_type)
         node.full_type = func_type[:return][:type]
       end
+
 
     elsif func_type.is_a?(Type) && func_type.fn_type?
       node.fn_var_call = true if node.respond_to?(:fn_var_call=)

@@ -733,8 +733,10 @@ class Parser
       close_method = consume(:STRING).value
     end
 
-    consume(:KEYWORD, 'FROM')
-    from_module = consume(:STRING).value
+    from_module = nil
+    if match!(:KEYWORD, 'FROM')
+      from_module = consume(:STRING).value
+    end
     match!(:CHAR, ';')
     node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
     node.type_params = type_params if type_params.any?

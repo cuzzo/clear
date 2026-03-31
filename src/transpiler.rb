@@ -204,17 +204,36 @@ private
       end
 
     when AST::ExternStructDecl
-      # Emit @import (once) and a type alias: const TypeName = module.TypeName;
-      # Dotted paths: FROM "std.json" → @import("std").json, alias __std_json
-      @emitted_extern_modules ||= Set.new
-      mod = node.from_module
-      mod_parts = mod.split(".")
-      import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
-      mod_alias = mod.gsub(".", "_")
-      parts = []
-      parts << "const #{mod_alias} = #{import_expr};" if @emitted_extern_modules.add?(mod)
-      parts << "const #{node.name} = #{mod_alias}.#{node.name};"
-      parts.join("\n")
+      if node.from_module
+        # Emit @import (once) and a type alias: const TypeName = module.TypeName;
+        # Dotted paths: FROM "std.json" → @import("std").json, alias __std_json
+        @emitted_extern_modules ||= Set.new
+        mod = node.from_module
+        mod_parts = mod.split(".")
+        import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
+        mod_alias = mod.gsub(".", "_")
+        parts = []
+        parts << "const #{mod_alias} = #{import_expr};" if @emitted_extern_modules.add?(mod)
+        parts << "const #{node.name} = #{mod_alias}.#{node.name};"
+        parts.join("\n")
+      else
+        # No FROM clause — emit a local Zig struct definition.
+        # CLEAR: EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
+        # ZIG:   const JsonRecord = struct { id: i64, data: []const i64 };
+        @local_extern_structs ||= Set.new
+        @local_extern_structs << node.name
+        if node.fields.empty?
+          # Empty local extern struct (e.g. ParseOptions) — no Zig definition needed.
+          # Its literal ParseOptions{} emits .{} for Zig type inference.
+          nil
+        else
+          fields_zig = node.fields.map do |name, field_def|
+            zig_type = transpile_type(field_def[:type], is_field: true)
+            "    #{name}: #{zig_type},"
+          end.join("\n")
+          "const #{node.name} = struct {\n#{fields_zig}\n};"
+        end
+      end
 
     when AST::RequireNode
       if node.kind == :package
@@ -775,7 +794,14 @@ private
         node.name
       end
 
-      struct_init = "#{struct_name}{ #{field_inits} }"
+      # Local EXTERN STRUCT with no fields (e.g. ParseOptions{}) → emit .{}
+      # so Zig infers the expected type (e.g. std.json.ParseOptions(T)).
+      @local_extern_structs ||= Set.new
+      struct_init = if node.fields.empty? && @local_extern_structs.include?(node.name)
+        ".{}"
+      else
+        "#{struct_name}{ #{field_inits} }"
+      end
       move_logic = move_statements.reject(&:empty?).join("\n")
 
       if node.storage == :heap # You set this in the Annotator!
@@ -1559,16 +1585,24 @@ private
         inner_zig = is_error_union ? ret_type_obj.payload_type.zig_type : ret_type_obj.zig_type
         is_void = (inner_zig == "void")
 
-        # Separate comptime (type) args from runtime args.
+        # Separate comptime (type) args and default-struct args from runtime args.
         # Comptime args go directly into the native call as type names.
+        # Default-struct args (empty local EXTERN STRUCT literals) go as .{}.
         # Runtime args go through the trampoline struct.
+        @local_extern_structs ||= Set.new
         comptime_type_args = node.respond_to?(:generic_type_args) ? (node.generic_type_args || []) : []
         runtime_indices = []
+        default_struct_indices = Set.new
         args_zig.each_with_index do |_, i|
           arg = node.args[i]
           arg_name = arg.is_a?(AST::Identifier) ? arg.name.to_sym : nil
           is_comptime = arg_name && comptime_type_args.include?(arg_name)
-          runtime_indices << i unless is_comptime
+          is_default_struct = arg.is_a?(AST::StructLit) && arg.fields.empty? && @local_extern_structs.include?(arg.name)
+          if is_comptime || is_default_struct
+            default_struct_indices << i if is_default_struct
+          else
+            runtime_indices << i
+          end
         end
 
         # Build native call args in declaration order
@@ -1580,6 +1614,9 @@ private
           if arg_name && comptime_type_args.include?(arg_name)
             # Comptime type arg — emit as bare type name
             native_args << Type.new(node.args[i].name.to_sym).zig_type
+          elsif default_struct_indices.include?(i)
+            # Empty local extern struct — pass .{} directly (Zig infers the type)
+            native_args << ".{}"
           elsif has_alloc && native_args.empty? && !comptime_type_args.any? { |t| native_args.include?(Type.new(t).zig_type) }
             # This shouldn't happen in the normal flow; alloc is injected separately
             native_args << "f.a#{field_idx}"
@@ -2089,6 +2126,11 @@ private
     # Handle OR RAISE: bubble up error (Zig's `try`)
     if node.right.is_a?(AST::OrRaise)
       if t_left.error_union?
+        # EXTERN FN trampoline already handles errors (catch + return e).
+        # The block produces the payload type, not an error union.
+        if node.left.respond_to?(:extern_call) && node.left.extern_call
+          return left
+        end
         # Use Zig's try to propagate error
         return "try #{left_raw}"
       else
@@ -2100,7 +2142,7 @@ private
     # Handle OR PASS: ignore error, use undefined (Zig's `catch |_| undefined`)
     if node.right.is_a?(AST::OrPass)
       if t_left.error_union?
-        # Use Zig's catch to ignore error and return undefined
+        return left if node.left.respond_to?(:extern_call) && node.left.extern_call
         return "(#{left_raw} catch undefined)"
       else
         return left
@@ -2110,6 +2152,7 @@ private
     # Handle OR BREAK: error-to-break coercion (Zig's `catch break`)
     if node.right.is_a?(AST::OrBreak)
       if t_left.error_union?
+        return left if node.left.respond_to?(:extern_call) && node.left.extern_call
         return "(#{left_raw} catch break)"
       else
         return left
@@ -2117,6 +2160,11 @@ private
     end
 
     # Handle error union with default value: !T OR default -> T
+    # EXTERN FN trampoline already handles errors; passthrough.
+    if t_left.error_union? && node.left.respond_to?(:extern_call) && node.left.extern_call
+      return left
+    end
+
     if t_left.error_union?
       right_code = visit(node.right)
 

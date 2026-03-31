@@ -191,7 +191,19 @@ module GenericAnalysis
       new_args = t.generic_args.map { |arg| apply_type_subst(arg, subst).resolved }
       Type.new(:"#{t.generic_base}<#{new_args.join(',')}>")
     else
-      t
+      # Handle prefixed types: !T, ?T, ~T — substitute the inner type.
+      str = resolved.to_s
+      prefix = str.match(/\A([!?~]+)/)&.[](1)
+      if prefix
+        inner = str[prefix.length..].to_sym
+        if subst.key?(inner)
+          Type.new(:"#{prefix}#{subst[inner]}")
+        else
+          t
+        end
+      else
+        t
+      end
     end
   end
 

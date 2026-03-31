@@ -2392,6 +2392,43 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "EXTERN STRUCT without FROM (local Zig struct)" do
+      let(:code) {
+        <<~CLEAR
+          EXTERN STRUCT ParseOptions {};
+          EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
+          FN use_record() RETURNS Int64 ->
+            r = JsonRecord{ id: 1_i64, data: [] };
+            RETURN r.id;
+          END
+        CLEAR
+      }
+
+      it "registers the struct type without a module" do
+        expect { annotate_extern(code) }.not_to raise_error
+      end
+
+      it "makes fields accessible via dot access" do
+        ast = annotate_extern(code)
+        fn  = ast.statements.last
+        ret = fn.body.last
+        expect(ret.value.resolved_type).to eq(:Int64)
+      end
+
+      it "emits a local struct definition (not @import)" do
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("const JsonRecord = struct {")
+        expect(output).to include("id: i64,")
+        expect(output).not_to include("JsonRecord = native")
+        expect(output).not_to include("JsonRecord = @import")
+      end
+
+      it "does not emit a definition for empty local extern struct" do
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).not_to include("const ParseOptions")
+      end
+    end
+
     context "calling an undefined extern function" do
       it "raises an Undefined function error" do
         code = <<~CLEAR

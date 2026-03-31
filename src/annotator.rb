@@ -260,6 +260,7 @@ private
       module_alias: node.from_module,
       extern_effects: node.effects || {},
       fn_type_params: node.fn_type_params || [],
+      type_params: (node.fn_type_params || []).any? ? (node.fn_type_params || []) : nil,
       owner_type: node.owner_type,
       owner_type_params: node.owner_type_params || []
     }
@@ -288,7 +289,7 @@ private
     schema[:type_params] = type_params if type_params&.any?
     schema[:extern_module] = node.from_module
 
-    if node.close_method
+    if node.close_method && node.from_module
       schema[:kind] = :resource
       # Generate the close pattern: module-level function call with pointer to self.
       # Dotted paths: "std.json" → "std_json" (sanitized alias)
