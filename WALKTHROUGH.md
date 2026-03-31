@@ -158,7 +158,7 @@ Recursive functions must be explicitly annotated with `@reentrant`:
 
 ```ruby clear
 FN fib(n: Int64) RETURNS Int64 @reentrant ->
-    IF n <= 1 THEN RETURN n; END
+    IF n <= 1 -> RETURN n;
     RETURN fib(n - 1) + fib(n - 2);
 END
 ```
