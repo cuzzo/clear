@@ -1,0 +1,13 @@
+FN doWrite(name: String, content: String) RETURNS Void ->
+    writeFile(name, content);
+END
+
+FN main() RETURNS Void ->
+    -- writeFile from a BG fiber
+    p: ~Void = BG { doWrite("testdata/write_test_output.txt", "hello from BG fiber"); };
+    NEXT p;
+
+    content = readFile("testdata/write_test_output.txt");
+    ASSERT content == "hello from BG fiber", "writeFile from BG failed";
+    RETURN;
+END

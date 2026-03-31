@@ -1,0 +1,6 @@
+FN main() RETURNS Void ->
+    writeFile("testdata/write_test_output.txt", "hello from CLEAR");
+    content = readFile("testdata/write_test_output.txt");
+    ASSERT content == "hello from CLEAR", "writeFile round-trip failed";
+    RETURN;
+END
