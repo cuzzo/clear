@@ -319,6 +319,7 @@ pub const Runtime = struct {
         rt.wireAllocator();
 
         const rt_ptr = @as(*anyopaque, @ptrCast(&rt));
+        task.runtime_ptr = rt_ptr;
 
         // 4. EXECUTE USER CODE
         if (task.user_fn(rt_ptr, task.context)) {

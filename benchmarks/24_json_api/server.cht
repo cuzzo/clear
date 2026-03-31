@@ -95,7 +95,7 @@ FN main() RETURNS Void ->
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
-        tasks.append(BG { @large ->
+        tasks.append(BG {
             handleClient!(client);
         });
     END

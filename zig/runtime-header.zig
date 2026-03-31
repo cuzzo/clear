@@ -15,6 +15,26 @@ pub const TaskFn = @import("queues.zig").TaskFn;
 
 
 // Helper Functions
+// Cached cwd file descriptor — resolved once, used by readFile/writeFile
+// so they can use openat() (a single syscall) instead of std.fs.cwd()
+// which needs deep stack frames.
+var __cwd_fd: ?std.posix.fd_t = null;
+fn getCwdFd() std.posix.fd_t {
+    if (__cwd_fd) |fd| return fd;
+    __cwd_fd = std.fs.cwd().fd;
+    return __cwd_fd.?;
+}
+
+// Open a file relative to cwd using direct openat syscall.
+// Null-terminates the path inline — zero heap alloc, minimal stack.
+noinline fn openPathFd(path: []const u8, flags: std.posix.O, mode: std.posix.mode_t) !std.posix.fd_t {
+    if (path.len > 255) return error.NameTooLong;
+    var buf: [256]u8 = undefined;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return std.posix.openatZ(getCwdFd(), buf[0..path.len :0], flags, mode);
+}
+
 pub const CheatLib = struct {
     // -----------------------------------------------------------------------
     // Range: a contiguous numeric range [start, end) (end is always exclusive)
@@ -451,26 +471,38 @@ pub const CheatLib = struct {
     //
     // Fallback: Outside a scheduler context (unit tests), a plain blocking
     // readAll is used — no io_uring, no yield.
-    pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-        // 1. Open + stat are fast (no data transfer, just metadata).
-        var dir = std.fs.cwd();
-        var file = try dir.openFile(path, .{});
-        defer file.close();
-
-        const stat = try file.stat();
-        const buffer = try allocator.alloc(u8, stat.size);
-
-        // 2. Blocking read — use posix read() directly.
-        // TODO: io_uring async path disabled pending investigation of CQE/fiber
-        // interaction under concurrent load.  Blocking read is safe on all fiber
-        // stacks and still fast for local files (kernel page cache).
-        var total: usize = 0;
-        while (total < buffer.len) {
-            const n = try std.posix.read(file.handle, buffer[total..]);
-            if (n == 0) break;
-            total += n;
+    const ReadFileCtx = struct {
+        allocator: std.mem.Allocator,
+        path: []const u8,
+        result: []const u8 = &.{},
+        err: ?anyerror = null,
+        fn run(ptr: ?*anyopaque) callconv(.c) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            const fd = openPathFd(self.path, .{ .ACCMODE = .RDONLY }, 0) catch |e| { self.err = e; return; };
+            defer std.posix.close(fd);
+            const stat = std.posix.fstat(fd) catch |e| { self.err = e; return; };
+            const size: usize = @intCast(stat.size);
+            const buffer = self.allocator.alloc(u8, size) catch |e| { self.err = e; return; };
+            var total: usize = 0;
+            while (total < buffer.len) {
+                const n = std.posix.read(fd, buffer[total..]) catch |e| { self.err = e; return; };
+                if (n == 0) break;
+                total += n;
+            }
+            self.result = buffer[0..total];
         }
-        return buffer[0..total];
+    };
+
+    pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+        var ctx = ReadFileCtx{ .allocator = allocator, .path = path };
+        if (fp.scheduler_running) {
+            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
+            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &ReadFileCtx.run), @ptrCast(&ctx));
+        } else {
+            ReadFileCtx.run(@ptrCast(&ctx));
+        }
+        if (ctx.err) |e| return e;
+        return ctx.result;
     }
 
     // List all files in a directory. Returns an ArrayListUnmanaged of heap-allocated
@@ -542,11 +574,30 @@ pub const CheatLib = struct {
     }
 
     // Write File
+    const WriteFileCtx = struct {
+        path: []const u8,
+        content: []const u8,
+        err: ?anyerror = null,
+        fn run(ptr: ?*anyopaque) callconv(.c) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            const fd = openPathFd(self.path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644) catch |e| { self.err = e; return; };
+            defer std.posix.close(fd);
+            var written: usize = 0;
+            while (written < self.content.len) {
+                written += std.posix.write(fd, self.content[written..]) catch |e| { self.err = e; return; };
+            }
+        }
+    };
+
     pub fn writeFile(path: []const u8, content: []const u8) !void {
-        var dir = std.fs.cwd();
-        var file = try dir.createFile(path, .{});
-        defer file.close();
-        try file.writeAll(content);
+        var ctx = WriteFileCtx{ .path = path, .content = content };
+        if (fp.scheduler_running) {
+            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
+            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &WriteFileCtx.run), @ptrCast(&ctx));
+        } else {
+            WriteFileCtx.run(@ptrCast(&ctx));
+        }
+        if (ctx.err) |e| return e;
     }
 
     // String Lib
@@ -874,13 +925,9 @@ pub const CheatLib = struct {
     //
     // Usage: data = tcpRead(client)
     pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
-        // Allocate read buffer on the frame arena (not the fiber stack)
-        // to avoid consuming 4 KB of the fiber's limited stack space.
-        const buf = try allocator.alloc(u8, 4096);
-        const n = try CheatLib.read(fd, buf);
-        // Shrink to actual read size. The excess is wasted on the frame
-        // but reclaimed at the next loop mark rewind.
-        return buf[0..n];
+        var buf: [4096]u8 = undefined;
+        const n = try CheatLib.read(fd, &buf);
+        return allocator.dupe(u8, buf[0..n]);
     }
 
     // Write all bytes from `data` to a connected client socket, discarding the byte count.

@@ -1,4 +1,6 @@
--- Reproducer: build a string list, write to file, in a loop (no BG fiber).
+-- Test: buildList + writeFile in a loop inside a BG fiber.
+-- Verifies file I/O works on standard (16KB) fiber stacks
+-- after posix-based writeFile/readFile rewrite.
 
 FN buildList(n: Int64) RETURNS String ->
     MUTABLE parts: String[]@list = [];
@@ -6,12 +8,19 @@ FN buildList(n: Int64) RETURNS String ->
     RETURN join(parts, ",");
 END
 
-FN main() RETURNS Void ->
+FN doWork() RETURNS Void ->
     MUTABLE i: Int64 = 1;
     WHILE i <= 10 DO
-        result = buildList(i * 10_i64);
+        result = buildList(i * 5_i64);
         writeFile("testdata/write_test_output.txt", result);
         i += 1;
     END
+END
+
+FN main() RETURNS Void ->
+    p: ~Void = BG { doWork(); };
+    NEXT p;
+    content = readFile("testdata/write_test_output.txt");
+    ASSERT content.length() > 0_i64, "file written from fiber";
     RETURN;
 END
