@@ -1549,6 +1549,21 @@ class Parser
       base = "#{base}<#{type_args.join(',')}>"
     end
 
+    # Element-level capability: T@shared[] means Array<Arc<T>>.
+    # Parsed BEFORE the [] suffix so it attaches to the element type, not the collection.
+    elem_ownership = nil
+    elem_sync = nil
+    if match?(:VAR_ID) && %w[@shared @multiowned @locked @writeLocked @link].include?(current.value) && peek_at(1)&.type == :CHAR && peek_at(1)&.value == '['
+      cap_tok = consume(:VAR_ID)
+      case cap_tok.value
+      when "@shared"     then elem_ownership = :shared
+      when "@multiowned" then elem_ownership = :multiowned
+      when "@locked"     then elem_sync = :locked
+      when "@writeLocked" then elem_sync = :write_locked
+      when "@link"       then elem_ownership = :link
+      end
+    end
+
     if match!(:CHAR, '[')
       # Case 1: Dynamic "Number[]"
       if match!(:CHAR, ']')
@@ -1699,6 +1714,8 @@ class Parser
 
     t = Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
     t.soa = true if is_soa
+    t.elem_ownership = elem_ownership if elem_ownership
+    t.elem_sync = elem_sync if elem_sync
     t
   end
 

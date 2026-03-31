@@ -329,6 +329,23 @@ id = users.insert(User{ name: "Alice" });           -- Returns stable handle
 user = users.get(id) OR RAISE;                      -- Returns ?T (checks stale handles)
 ```
 
+### Element-Level Capabilities (v0.2)
+
+Capabilities normally apply to the **collection** (`T[]@shared` = one shared list). For rare cases where each **element** needs its own capability, place the capability before the array suffix:
+
+```ruby clear illustrative
+-- Collection-level (common): one Arc wrapping the whole list
+MUTABLE shared_list: User[]@list:shared = [];
+
+-- Element-level (rare): each element is individually Arc'd
+MUTABLE arc_users: User@shared[]@list = [];
+
+-- Element-level with pool: each slot holds an Arc'd user
+MUTABLE arc_pool: User@shared[100]@pool = [];
+```
+
+Element-level capabilities are primarily useful in struct fields where individual elements need independent lifetime management (e.g., a graph where each node is shared across multiple edges).
+
 ## 12. Strings and Buffers
 
 Strings in CLEAR are affine (Rust-like move semantics). Assignment moves ownership.
