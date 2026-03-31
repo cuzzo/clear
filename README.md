@@ -87,67 +87,83 @@ CLEAR is designed such that you can override default compiler behviors if you kn
 
 ### Prerequisites
 
-- **Ruby** (for the compiler)
+- **Ruby 3.x** (for the compiler)
 - **Bundler** (`gem install bundler`)
-- **Zig 0.15.x** (for the Zig integration test and runtime)
+- **Zig 0.15.x** (for runtime compilation)
+- **Go 1.21+** (for benchmark baselines, optional)
+- **Rust/Cargo** (for benchmark baselines, optional)
 
-### Ruby Compiler Tests and Benchmarks
+### Quick Start
 
 ```bash
-bundle install
+bundle install                       # Install Ruby dependencies (one time)
+
+./clear build hello.cht              # Compile a CLEAR program
+./clear run hello.cht                # Build + execute
+./clear test hello.cht               # Test with leak detection
+```
+
+### The `clear` CLI
+
+```bash
+# Build
+./clear build foo.cht                # Produces ./foo binary
+./clear build foo.cht -o bin/app     # Custom output path
+./clear build foo.cht --safe         # With bounds/overflow checks (-O ReleaseSafe)
+
+# Run
+./clear run foo.cht                  # Build + execute
+./clear run foo.cht -- --port 8080   # Pass arguments to the program
+CLEAR_THREADS=0 ./clear run app.cht  # Multi-threaded fiber runtime
+
+# Test
+./clear test foo.cht                 # Test with GPA leak detection + scheduler
+```
+
+FFI modules (`.zig` files referenced via `EXTERN ... FROM`) are auto-detected and linked.
+
+### Test Suites
+
+```bash
+# Ruby compiler specs (1343 examples)
 bundle exec rspec
+
+# Transpile integration tests - two ways:
+./clear test transpile-tests/58_bg.cht           # One at a time (129 tests)
+ruby transpile-tests/gen.rb && \
+  cd zig && zig test all-tests.zig -lc switch.S onRoot.S  # All at once (130 tests, faster)
+
+# Package integration
+cd transpile-tests/module-integration && zig build test
+
+# FFI integration
+cd transpile-tests/ffi-integration && zig build test
 ```
-
-This runs all Ruby specs covering the lexer, parser, annotator, and transpiler.
-
-```bash
-clear test ...
-```
-
-This runs the transpile-tests/
-
-### Running / Building individual code
-
-```bash
-clear run benchmarks/.../bench.cht
-```
-
-This will run an individual benchmark.
-
-```bash
-clear run my_script.cht
-```
-
-This will run `my_script.cht` (for example).
 
 ### Benchmarks
 
 ```bash
-ruby benchmarks/runner.rb --cores=N
-```
-
-This will run all the benchmarks on `N` cores on your machine.
-
-### Zig Package Integration Test
-
-The integration test exercises multi-package compilation using Zig's build system. It transpiles two CLEAR packages (`math` and `geometry`) and a main program, wires them as Zig modules, and runs assertions end-to-end.
-
-```bash
-cd transpile-tests/module-integration
-zig build test
+ruby benchmarks/runner.rb --smoke benchmarks/24_json_api/   # CLEAR only, fast (~5s)
+ruby benchmarks/runner.rb --fast benchmarks/05_hashmap/     # All langs, quick (~30s)
+ruby benchmarks/runner.rb benchmarks/05_hashmap/            # Normal (5 runs)
+ruby benchmarks/runner.rb --release benchmarks/05_hashmap/  # Exhaustive (5x load)
+ruby benchmarks/runner.rb --all                             # All benchmarks
+ruby benchmarks/runner.rb --smoke --all                     # Smoke test everything
+ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
 ```
 
 ### Performance
 
-There's an extensive performance suite in benchmarks/
+Idiomatic CLEAR single-core performance vs *perfect* C code is typically 0-30% slower (in a fraction of the code).
 
-Idiomatic CLEAR single core performance vs *perfect* C code is typically between 0-30% slower (in a fraction of the code).
+Idiomatic CLEAR multi-core performance is typically 0-10% slower than Rust/Tokio for non-pathological workloads. It typically outperforms Go, often significantly, using ~1/2 the peak memory (no garbage collector).
 
-Idiomatic CLEAR multi-core performance is typically 0-10% slower than perfect Rust/Tokio for non-pathological workloads.  It typically outperforms Go, often signficantly, typically using 1/2 the peak memory (no Garbage Collector in CLEAR).
+In typical server workloads (benchmark 24: TCP JSON API), CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5%.
 
-In typical *non-pathological* server workloads (primarily waiting) - idiomatic CLEAR, Rust/Tokio, and Go have similar throughput within ~10% differences.  Though CLEAR and Rust/Tokio both use about half as much memory.
-
-Go's runtime is *extradinarly* optimized to achieve world-class throughput in even adversarial and pathological workloads.  It can substantially outperform Rust/Tokio and CLEAR at the p99 level.
-
-For v0.2, CLEAR aims to close this gap.
+```
+Benchmark 24 (10K GETs, 50 concurrent):
+  Rust/Tokio:  SET 1292ms  GET 20830ms
+  Go:          SET 1252ms  GET 20393ms
+  CLEAR:       SET 1089ms  GET 21080ms
+```
 

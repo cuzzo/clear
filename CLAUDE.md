@@ -15,7 +15,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 ./clear build foo.cht --safe         # With bounds/overflow checks
 ./clear run foo.cht                  # Build + execute
 ./clear run foo.cht -- --port 8080   # Pass args to program
-./clear test foo.cht                 # Test with leak detection (non-BG tests)
+./clear test foo.cht                 # Test with leak detection (all 129 tests pass)
 
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
