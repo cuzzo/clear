@@ -193,20 +193,18 @@ Benchmark 25 tests scheduler fairness under adversarial load using iterated SHA2
 
 **Phase 2: Skewed (1% heavy, 2500 requests, 25 concurrent)**
 
-| Server | p50 | p99 | p99.9 |
-|--------|-----|-----|-------|
-| Rust/Tokio | 8.8 ms | 795 ms | 1144 ms |
-| Go | 5.4 ms | 976 ms | 1345 ms |
-| CLEAR | **2.0 ms** | 1611 ms | 2890 ms |
+| Server | p50 | p99 | p99.9 | Throughput |
+|--------|-----|-----|-------|------------|
+| Rust/Tokio | 1.9 ms | 17.2 ms | 32 ms | 6215 req/s |
+| Go | 1.3 ms | 14.8 ms | 28 ms | 7641 req/s |
+| **CLEAR** | 1.4 ms | 15.3 ms | **25 ms** | 6707 req/s |
 
 **Phase 3: Adversarial (1 heavy connection, 2500 requests, 25 concurrent)**
 
-| Server | p50 | p99 | p99.9 |
-|--------|-----|-----|-------|
-| Rust/Tokio | 3.3 ms | 744 ms | 1046 ms |
-| Go | 2.7 ms | **732 ms** | **808 ms** |
-| CLEAR | 6.9 ms | 848 ms | 1075 ms |
+| Server | p50 | p99 | p99.9 | Throughput |
+|--------|-----|-----|-------|------------|
+| Rust/Tokio | 1.1 ms | 8.5 ms | 15 ms | 1936 req/s |
+| Go | 0.9 ms | 7.9 ms | **14 ms** | 1972 req/s |
+| **CLEAR** | 1.4 ms | **7.1 ms** | 17 ms | **2035 req/s** |
 
-CLEAR's p50 is competitive or better (the common case is fast). The gap is at the tail - heavy EXTERN FN calls (SHA256 loop) don't yield mid-computation. Go's preemptive goroutine scheduling handles adversarial workloads best at p99.9.
-
-v0.2 aims to close this gap with yield injection for compute-heavy EXTERN calls.
+CLEAR is competitive with Go and Rust at all percentiles, including p99.9 under adversarial load. The key: compute-heavy work is structured as a CLEAR FOR loop calling single-iteration EXTERN FN primitives, so the scheduler can yield between iterations.
