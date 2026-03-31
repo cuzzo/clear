@@ -421,6 +421,10 @@ class Type
     @ownership == :shared
   end
 
+  def link?
+    @ownership == :link
+  end
+
   def locked?
     @sync == :locked
   end

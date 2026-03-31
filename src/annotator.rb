@@ -2204,6 +2204,36 @@ private
     current_scope.set_state(node.value.name, :moved)
   end
 
+  def visit_LinkNode(node)
+    visit(node.value)
+    ti = node.value.type_info
+
+    unless ti&.any_rc?
+      error!(node, "LINK can only be applied to @shared or @multiowned variables, got '#{node.value.resolved_type}'")
+    end
+
+    # Result is the same base type with :link ownership
+    link_type = Type.new(ti.resolved)
+    link_type.ownership = :link
+    # Track which strong ownership kind the link was created from
+    link_type.instance_variable_set(:@link_source, ti.shared? ? :shared : :multiowned)
+    node.full_type = link_type
+  end
+
+  def visit_ResolveNode(node)
+    visit(node.value)
+    ti = node.value.type_info
+
+    unless ti&.link?
+      error!(node, "RESOLVE can only be applied to @link variables, got '#{node.value.resolved_type}'")
+    end
+
+    # Result is optional of the strong type: ?T@shared or ?T@multiowned
+    source = ti.instance_variable_get(:@link_source) || :shared
+    resolved_type = Type.new(:"?#{ti.resolved}")
+    node.full_type = resolved_type
+  end
+
   def visit_Give(node)
     visit(node.value)
 

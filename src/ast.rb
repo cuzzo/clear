@@ -121,11 +121,19 @@ module AST
         new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
         new_t
       end
+      # Propagate @link ownership from the value's LinkNode
+      val_ti = respond_to?(:value) && value.respond_to?(:type_info) ? value.type_info : nil
+      if val_ti&.link?
+        storage = :link
+      end
+
       case storage
       when :multiowned
-        t.ownership = :multiowned   # also sets t.location = :multiowned via setter
+        t.ownership = :multiowned
       when :shared
-        t.ownership = :shared       # also sets t.location = :shared via setter
+        t.ownership = :shared
+      when :link
+        t.ownership = :link
       when :frame
         t.location = :frame         # marks variable as frame-arena pointer (*T in Zig)
       when :heap
@@ -346,6 +354,8 @@ module AST
   # layout:    nil | :indirect
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
+  LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
+  ResolveNode       = Struct.new(:token, :value) { include Locatable }  # RESOLVE expr            -> upgrade WeakRc/WeakArc to ?Rc/?Arc
   # PassStmt: no-op statement (like Python's `pass`).
   PassStmt          = Struct.new(:token) { include Locatable }
   # StructPattern: destructuring pattern for MATCH.

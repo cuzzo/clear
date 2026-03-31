@@ -112,6 +112,8 @@ class Parser
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
   primary(:KEYWORD, 'GIVE', AST::MoveNode, ['GIVE', :expression])
+  primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
+  primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
   primary(:KEYWORD, 'BG')   { parse_bg_block }
   primary(:KEYWORD, 'NEXT') { parse_next_expr }
   primary(:PERCENT, '%') { parse_sigil_construct }
@@ -1617,7 +1619,7 @@ class Parser
     sync       = nil
     collection = nil
     is_soa     = false
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @list @pool @set].include?(current.value)
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @list @pool @set].include?(current.value)
       # Collection types (@list, @pool, @set) are data structure types, not ownership
       # capabilities — they must be allowed on function parameters.
       is_collection = %w[@list @pool @set].include?(current.value)
@@ -1628,6 +1630,7 @@ class Parser
       case cap_tok.value
       when "@multiowned" then ownership = :multiowned
       when "@shared"     then ownership = :shared
+      when "@link"       then ownership = :link
       when "@locked"      then sync      = :locked
       when "@writeLocked" then sync     = :write_locked
       when "@local"       then sync     = :local

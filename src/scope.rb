@@ -101,6 +101,8 @@ class Scope
       base_type.ownership = :multiowned
     when :shared
       base_type.ownership = :shared
+    when :link
+      base_type.ownership = :link
     when :frame
       base_type.location = :frame   # large local var: arena pointer (*T in Zig)
     when :heap

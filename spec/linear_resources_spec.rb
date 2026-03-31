@@ -425,6 +425,41 @@ RSpec.describe SemanticAnnotator do
     end
 
     # ------------------------------------------------------------------
+    # LINK / RESOLVE (weak references)
+    # ------------------------------------------------------------------
+    describe "LINK / RESOLVE" do
+      it "LINK on @shared compiles" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "LINK on @multiowned compiles" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "LINK on non-RC raises error" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 }; w = LINK x; RETURN; END'
+        expect { run(src) }.to raise_error(/LINK can only be applied to @shared or @multiowned/)
+      end
+
+      it "RESOLVE on @link compiles" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; r = RESOLVE w; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "RESOLVE on non-link raises error" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @shared; r = RESOLVE x; RETURN; END'
+        expect { run(src) }.to raise_error(/RESOLVE can only be applied to @link/)
+      end
+    end
+
+    # ------------------------------------------------------------------
     # String affine move semantics (Rust-like)
     # ------------------------------------------------------------------
     describe "String move semantics" do
