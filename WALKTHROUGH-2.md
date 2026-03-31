@@ -44,7 +44,7 @@ END
 
 -- Failable function (!) and optional types (?)
 FN findUser(id: Int64) RETURNS !?User ->
-    IF id < 0 THEN RAISE "Invalid ID"; END          -- OKAY: RAISE for errors
+    IF id < 0 -> RAISE "Invalid ID";                -- OKAY: One-line shorthand
     -- logic to return optional User
     RETURN result;                                  -- OKAY
 END
@@ -73,19 +73,52 @@ FN main() RETURNS Void ->
 END
 ```
 
-## 5. Higher-Order Functions & Error Handling
+## 5. Basic Control Flow
 
-CLEAR supports functional pipelines and elegant error propagation. Anonymous functions use the `%` sigil.
+CLEAR provides standard control flow constructs with support for one-line shorthands.
 
 ```clear
-numbers: Int64[] = [1, 2, 3, 4, 5];
+-- 1. IF / ELSE_IF / ELSE
+IF x > 100 THEN
+    print("Large");
+ELSE_IF x > 50 THEN
+    print("Medium");
+ELSE
+    print("Small");
+END
 
--- Pipelines using |> (standard) or s> (safe/failable)
-evens = numbers |> WHERE _ % 2 == 0;                -- OKAY
-doubled = numbers |> SELECT _ * 2;                  -- OKAY
+-- 2. WHILE loops
+MUTABLE i = 0;
+WHILE i < 10 DO
+    print(i.toString());
+    i += 1;
+END
 
--- Anonymous function (lambda) syntax: %(args) -> body
-callback: FN(Int64) -> Int64 = %(n: Int64) -> n * 2; -- OKAY
+-- 3. FOR loops (Collection iteration)
+items = [1, 2, 3];
+FOR item IN items -> print(item.toString());        -- OKAY: One-line shorthand
+
+-- 4. FOR loops (Range iteration)
+FOR j IN (1 ..= 5) DO                               -- OKAY: Inclusive range
+    print(j.toString());
+END
+```
+
+## 6. Higher-Order Functions & Error Handling
+
+CLEAR excels at high-throughput data processing via functional pipelines. Anonymous functions use the `%` sigil.
+
+```clear
+-- Pipelines using s> (Smooth / safe) or |> (Standard)
+alive = entities s> WHERE _.health > 0;             -- OKAY: Filter
+total = scores s> SUM _.value;                      -- OKAY: Aggregate
+names = users s> SELECT _.name;                     -- OKAY: Transform
+
+-- In-place mutation
+entities s> EACH { _.x = _.x + _.vx; };             -- OKAY: Side effects
+
+-- Explicit anonymous function (lambda): %(args) -> body
+doubled = numbers |> SELECT %(n) -> n * 2;          -- OKAY
 
 -- Inline Error Handling: Provide a default or propagate
 val = parseInt("abc") OR ELSE 0;                    -- OKAY
@@ -102,7 +135,7 @@ CATCH e                                             -- OKAY: Error handler
 END
 ```
 
-## 6. Time as Tense (~T)
+## 7. Time as Tense (~T)
 
 Tense represents a value that will exist in the future. It allows composition of asynchronous logic and streams before deciding on a concurrency capability.
 
@@ -137,7 +170,7 @@ counter: ~Int64[INF] = BG STREAM {
 v1 = NEXT counter;                                  -- OKAY: Returns Int64 (never NIL)
 ```
 
-## 7. Capabilities: Shared & Synchronized
+## 8. Capabilities: Shared & Synchronized
 
 Capabilities define *how* data is accessed. Functions take Types; call sites provide Capabilities. This minimizes "function coloring" and refactoring cost.
 
@@ -154,7 +187,7 @@ BG {
 }
 ```
 
-## 8. Sharded Shared-Nothing Architecture
+## 9. Sharded Shared-Nothing Architecture
 
 The `@shard` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
 
@@ -171,7 +204,7 @@ BG {
 -- data skew if keys are not uniformly distributed.
 ```
 
-## 9. Collections: Array, List, and Pool
+## 10. Collections: Array, List, and Pool
 
 | Sigil | Collection | Purpose |
 | :--- | :--- | :--- |
@@ -192,7 +225,7 @@ MUTABLE users: User[] @pool = [];                   -- OKAY
 id = users.insert(User{ name: "Alice" });           -- OKAY
 ```
 
-## 10. Strings, Buffers, and RingBuffers
+## 11. Strings, Buffers, and RingBuffers
 
 Strings in CLEAR are affine by default and can be specialized for specific performance profiles.
 
@@ -200,14 +233,14 @@ Strings in CLEAR are affine by default and can be specialized for specific perfo
 s = "Standard String";                              -- OKAY
 
 -- String @raw: A mutable byte buffer
-MUTABLE buf: String @raw = Buffer::new(1024)        -- OKAY
+MUTABLE buf: String @raw = Buffer::new(1024);       -- OKAY
 buf.appendBytes(0x41);                              -- OKAY
 
 -- String @ring: A circular buffer for streaming
-MUTABLE ring: String @ring = RingBuffer::new(256)   -- OKAY
+MUTABLE ring: String @ring = RingBuffer::new(256);  -- OKAY
 ```
 
-## 11. Concurrency: BG & DO
+## 12. Concurrency: BG & DO
 
 CLEAR makes both background tasks and fork-join parallelism trivial.
 
@@ -228,7 +261,7 @@ results = urls |> SELECT BG { fetch(_) };
 data = results |> SELECT NEXT _;                    -- OKAY
 ```
 
-## 12. Affine Ownership: GIVE & TAKES
+## 13. Affine Ownership: GIVE & TAKES
 
 CLEAR uses affine types to ensure memory safety without a garbage collector. Values have exactly one owner.
 
@@ -248,7 +281,7 @@ FN main() RETURNS Void ->
 END
 ```
 
-## 13. Refcounting & Cyclic Structures
+## 14. Refcounting & Cyclic Structures
 
 For shared data, use `@multiowned` (single-threaded Rc). For recursive or cyclic structures, use `@indirect` (Box).
 
@@ -264,7 +297,7 @@ STRUCT Node {                                       -- OKAY
 }
 ```
 
-## 14. FFI: Native Integration
+## 15. FFI: Native Integration
 
 CLEAR integrates directly with Zig and C with zero-overhead.
 
