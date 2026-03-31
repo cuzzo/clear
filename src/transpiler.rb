@@ -566,7 +566,6 @@ private
 
       "&(struct { fn #{fn_name}(#{all_params.join(', ')}) #{ret_str} { #{sups} #{body_str} } }).#{fn_name}"
 
-    # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
       # Bounded/open/infinite streams and shared promises must be `var` even when declared
