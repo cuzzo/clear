@@ -1001,10 +1001,12 @@ private
     elsif !node.collection_return
       # Expression return: if the return type needs escape promotion and the
       # function uses frame, mark for promotion. The transpiler will wrap the
-      # return expression (e.g., dupe for strings, bind+promote for collections).
+      # return expression (bind+promote for collections).
+      # Strings are excluded: they live in the caller's frame arena (no frame
+      # mark restore for string-returning functions), so no heap dupe is needed.
       ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
       ret_type = Type.new(ret_type) if ret_type && !ret_type.is_a?(Type)
-      if ret_type&.needs_escape_promotion? && current_fn_ctx&.frame_count&.positive?
+      if ret_type&.needs_escape_promotion? && !ret_type&.string? && current_fn_ctx&.frame_count&.positive?
         node.collection_return = true
         fn_node = @fn_nodes[current_fn_ctx&.name]
         fn_node.returns_promoted = true if fn_node
@@ -1361,7 +1363,7 @@ private
       # - strings ([]const u8 slices pointing into the frame arena).
       # Without promotion, the callee's defer restoreFrameMark rewinds the arena,
       # leaving the caller with a dangling pointer.
-      if ti&.needs_escape_promotion?
+      if ti&.needs_escape_promotion? && !ti&.string?
         mark_symbol_escaped!(node, ti)
         return true
       end

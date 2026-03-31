@@ -2315,8 +2315,9 @@ private
     # Direct escapable type (string, list, map)
     if ret_type&.needs_escape_promotion?
       if ret_type.string?
-        promoted = "try #{rt_name}.heapAlloc().dupe(u8, #{val_code})"
-        return [suppress, "return #{promoted};"].reject(&:empty?).join("\n")
+        # Strings live in the caller's frame arena (no frame mark restore for
+        # string-returning functions). No heap dupe needed.
+        return [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       else
         promo = ret_type.escape_promote_code("__ret", rt_name)
         return [suppress, "var __ret = #{val_code};", promo, "return __ret;"].compact.reject(&:empty?).join("\n")
