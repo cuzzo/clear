@@ -38,7 +38,14 @@ PORT = 6390
 def parse_bench_output(output)
   metrics = {}
   output.each_line do |line|
-    if line =~ /^\s*(\w[\w\s]*\w|\w+)\s*:\s+(.+)$/
+    # Handle pipe-separated multi-metric lines: "Insert: 1.2 ms | Lookup: 3.4 ms"
+    if line.include?("|") && line =~ /:/
+      line.split("|").each do |part|
+        if part =~ /^\s*(?:\[[\w-]*\]\s*)?(\w[\w\s]*\w|\w+)\s*:\s+(.+)$/
+          metrics[$1.strip.downcase] = $2.strip
+        end
+      end
+    elsif line =~ /^\s*(?:\[[\w-]*\]\s*)?(\w[\w\s]*\w|\w+)\s*:\s+(.+)$/
       key = $1.strip.downcase
       metrics[key] = $2.strip
     end
@@ -46,10 +53,17 @@ def parse_bench_output(output)
   metrics
 end
 
+# Normalize time unit aliases: "seconds" -> "s", "milliseconds" -> "ms"
+UNIT_ALIASES = { "seconds" => "s", "second" => "s", "milliseconds" => "ms", "microseconds" => "us", "nanoseconds" => "ns" }.freeze
+TIME_UNITS = %w[ms s us ns].freeze
+
 def parse_metric_value(s)
   return nil unless s
-  if s =~ /^([\d.]+)\s*(ms|s|us|ns|KB|MB)?$/i
-    [$1.to_f, $2]
+  if s =~ /^([\d.]+)\s*(\w+)?$/
+    val = $1.to_f
+    unit = $2
+    unit = UNIT_ALIASES[unit.downcase] if unit && UNIT_ALIASES[unit.downcase]
+    [val, unit]
   elsif s =~ /^(\d+)$/
     [$1.to_i, nil]
   else
@@ -57,14 +71,30 @@ def parse_metric_value(s)
   end
 end
 
+# Normalize a timing value to milliseconds for comparison.
+def to_ms(val, unit)
+  case unit&.downcase
+  when "s"  then val * 1000.0
+  when "ms" then val
+  when "us" then val / 1000.0
+  when "ns" then val / 1_000_000.0
+  else val
+  end
+end
+
 def format_metric(s)
   parsed = parse_metric_value(s)
   return s unless parsed
   val, unit = parsed
+  # Normalize time to ms for display
+  if unit && TIME_UNITS.include?(unit.downcase)
+    ms = to_ms(val, unit)
+    return ms == ms.to_i ? "#{ms.to_i} ms" : "#{'%.1f' % ms} ms"
+  end
   if unit
     val == val.to_i ? "#{val.to_i} #{unit}" : "#{'%.1f' % val} #{unit}"
   else
-    val.is_a?(Float) ? "#{'%.1f' % val}" : val.to_s
+    val.is_a?(Float) && val == val.to_i ? val.to_i.to_s : (val.is_a?(Float) ? "#{'%.1f' % val}" : val.to_s)
   end
 end
 
@@ -145,7 +175,9 @@ def report_table(dir, results)
       bv = parse_metric_value(all_metrics[baseline_lang][key])
       cv = parse_metric_value(all_metrics[:clear]&.dig(key))
       if bv && cv && bv[0] > 0
-        pct = (cv[0] / bv[0]) * 100 - 100
+        b_ms = to_ms(bv[0], bv[1])
+        c_ms = to_ms(cv[0], cv[1])
+        pct = (c_ms / b_ms) * 100 - 100
         sign = pct >= 0 ? "+" : ""
         row += "%*s" % [delta_w, "#{sign}#{'%.1f' % pct}%"]
       else
