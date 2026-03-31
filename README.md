@@ -95,63 +95,35 @@ It runs on a Go-like Runtime (the CHEAT runtime) that makes concurrent code as e
 ## Architecture
 
 **1. Arena-Based Memory & Isolation**
-  * CLEAR uses Arena-based memory instead of a global Garbage Collector.
-  * The "Handoff" Trick: When a function returns a large object (like a String or List), CLEAR does not copy the data.
-     * Instead, it performs Return-Value Optimization via Destination Passing.
-       * The compiler instructs the function to write the data directly into the Caller's memory.
-     * For dynamic data, it uses Page Handoffs: The memory page containing your data is detached from the dying function and stapled to the living Caller.
-  * *The Result:* You can return a 1GB video file from a function instantly `O(1)` *without* a generic Heap or "Stop-the-World" jitter of Java or Go.
+  * CLEAR leverages affine types and Arena-based memory to give you near High-Frequency Trading standards of allocation with zero thought.
+  * Due to optimizing broadly for a fiber-runtime, there are cases when the stack could be better leveraged, but CLEAR chooses not to for large stack objects.
 
-**2. Implicit "Railway" Error Handling**
+**2. Deterministic Shared-Memory and a Declarative Concurrency Model**
+  * Parallelism is achieved via `BG/DO/CONCURRENT`, which creates isolated execution contexts.
+    * Rather than telling the code *how* to achieve fast speeds, you simply tell write the code that expresses your intent - the *what*.
+    * CLEAR provides one-line capability optimizations. Changing your app from an Arc/RwLock strategy suffering from syncronization bottle-necks to a shared-nothing architecture which can compete with Dragonfly DB can be a one-line change.
+  * Spawning a process creates a lightweight, isolated fiber / memory arena.
+
+**3. Implicit "Railway" Error Handling**
   * CLEAR treats errors as data, but handles them via control flow.
   * The `SMOOTH` operator `s>` (aka the `PIPE` or `||> ` in Elixir, etc) acts as a guard.
     * It automatically bubbles errors down the chain, to be handled elsewhere, or allows them to be handled inline elegantly.
   * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- making it always clear what's desired vs what's the fallback.
   * *The Result:* No if [err != nil]() boilerplate. No [Pyramid of Doom](). No [checkOk]() clutter. No `if .nil?` everywhere.
 
-**3. Register-Based Virtual Machine**
-  * CLEAR runs on a custom Register-Based VM *OR* transpiles to Zig and runs natively.
-  * This reduces instruction churn compared to traditional stack machines (Java/Python/Ruby/etc) which maps efficiently to hardware.
-  * *The Result:* Rapid development, with real-time debugging as easy as Ruby, with guarantees your code won't crash in run-time.
 
-**4. Bi-Modal Type System**
-  * CLEAR is dynamic by default (using NaN-boxed values for ease of use) but supports optional "Systems Types" (`u8`, `u64`) and Struct definitions.
-  * *The Result:* You can write scripts fast, then optimize hot paths into raw machine instructions, bridging the gap between Python/Ruby and Zig/C.
-
-**5. Deterministic Shared-Memory for Concurrency**
-  * Parallelism is achieved via `SPAWN`, which creates isolated execution contexts.
-  * `SPAWN`ing a process creates a lightweight, isolated memory arena.
-  * Because memory is not shared between threads execpt `shared:atomic` capabilities, CLEAR code is lock-free and thread-safe by default.
-    * CLEAR avoids the latency spikes of a "Stop-the-World" Garbage Collector by using Reference Counting for `shared` objects.
-       * A `shared` object dies the microsecond the last thread stops using it.
-    * The Law of Cycles: To make this work without leaks, CLEAR enforces a strict topology: A `shared` object cannot hold a reference to another `shared` object.
-       * This guarantees a Directed Acyclic Graph (DAG) of memory.
-       * *The Result:* You get the safety of Java/Go concurrency with the predictable latency of C++.
-
-**6. A Type system that *just works***
+**4. A Type system that *just works***
   * CLEAR is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference.
   * The compiler takes care of the confusing parts of the type system for you.
   * *The Result:* If you can write code in JavaScript, Lua, Python, or Ruby - you can write blazing fast CLEAR code.
 
-**7. True parallelism**
-  * CLEAR can Auto-Squish your structs (Structure-of-Arrays transformation).
-  * This allows efficient processing on GPUs in parallel (if compiling to a target).
-  * If your struct can't be auto-squished given the code as currently written, you get a compiler error.
-  * *The Result:* Either decorate it with @SLOW, or re-write so the data can be squished and screaming fast.
-
-**8. Fortress Architecture**
+**5. Fortress Architecture**
   * All `PUBLIC` functions must return a single type with a suitable default - or explicitly error
   * All `PUBLIC` structs must have a suitable default - or explicitly an error
     * A `PUBLIC` function obviously cannot take a non-`PUBLIC` struct as an input.
   * *The Result:* Guarantees that only *YOUR* code can cause run-time errors (or none if in `STRICT` mode).
     * You can auto-gen tests for PUBLIC functions for all permutations of POSSIBLE unexpected inputs.
       * This allows you to spot problems easily and arrive at robust, working code quickly.
-
-**9. Scoped Inlining (INSIDE) for Graphs**
-  * Traditional Arena languages struggle with recursive structures (Trees/Graphs) because children die when the function returns.
-  * CLEAR solves this with the INSIDE keyword (e.g., `x = INSIDE buildTree()`).
-  * This allows a child function to borrow the *Parent's Arena* for allocation.
-  * *The Result:* You can build complex, pointer-heavy recursive data structures that exist contiguously in memory and are freed instantly when the root owner exits.
 
 ## WHO IS CLEAR *NOT* FOR
 
