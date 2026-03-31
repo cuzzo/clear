@@ -626,7 +626,7 @@ private
       rhs_ti = rhs_ident&.type_info
       rt_name = @do_rt_name || "rt"
 
-      @bind_value_node = node.value
+      current_tp_ctx&.bind_value_node = node.value
       value_code = if node.full_type&.pool?
         # Pool: pre-allocate with fixed capacity via initCapacity.
         rt_name = @do_rt_name || "rt"
@@ -658,7 +658,7 @@ private
         visit(node.value)
       end
 
-      @bind_value_node = nil
+      current_tp_ctx&.bind_value_node = nil
 
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
@@ -697,9 +697,9 @@ private
         visit(proxy)
       else
         # Transpile as simple assignment
-        @bind_value_node = node.value
+        current_tp_ctx&.bind_value_node = node.value
         value_str = visit(node.value)
-        @bind_value_node = nil
+        current_tp_ctx&.bind_value_node = nil
         move_logic = emit_move_suppression(node.value)
         "#{zig_safe_name(node.name)} = #{value_str}; #{move_logic}"
       end
@@ -1781,11 +1781,11 @@ private
         # - TAKES parameter (callee takes ownership, no caller cleanup needed)
         # - Inside GIVE (ownership transfers to callee)
         if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call &&
-           !node.equal?(@bind_value_node) && !node.was_moved && !@inside_give
-          @heap_temp_counter = (@heap_temp_counter || 0) + 1
-          tmp = "__hpt_#{@heap_temp_counter}"
-          @pending_heap_temps ||= []
-          @pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info }
+           !node.equal?(current_tp_ctx&.bind_value_node) && !node.was_moved && !current_tp_ctx&.inside_give
+          ctx = current_tp_ctx
+          ctx.heap_temp_counter += 1
+          tmp = "__hpt_#{ctx.heap_temp_counter}"
+          ctx.pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info }
           tmp
         else
           call_code
@@ -1921,10 +1921,10 @@ private
       else
         # GIVE expr (non-identifier): ownership transfers to callee.
         # Suppress heap-promoted temp hoisting — callee owns the result.
-        saved = @inside_give
-        @inside_give = true
+        saved = current_tp_ctx&.inside_give
+        current_tp_ctx.inside_give = true if current_tp_ctx
         result = visit(node.value)
-        @inside_give = saved
+        current_tp_ctx.inside_give = saved if current_tp_ctx
         result
       end
 
@@ -2825,13 +2825,14 @@ private
 
   def transpile_block(statements)
     statements.map do |stmt|
-      saved_temps = @pending_heap_temps
-      @pending_heap_temps = []
+      ctx = current_tp_ctx
+      saved_temps = ctx&.pending_heap_temps
+      ctx.pending_heap_temps = [] if ctx
       code = visit(stmt)
       # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
       # Uses the same emit_cleanup logic as VarDecl for correct type-specific cleanup.
       # Resource types get their CLOSE method via the type schema.
-      temps = @pending_heap_temps || []
+      temps = ctx&.pending_heap_temps || []
       if temps.any?
         preamble = temps.map { |t|
           ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
@@ -2850,7 +2851,7 @@ private
         }.join("\n")
         code = "#{preamble}\n#{code}"
       end
-      @pending_heap_temps = saved_temps
+      ctx.pending_heap_temps = saved_temps if ctx
       # Zig requires non-void expression results to be consumed. Any AST node
       # that is an expression (not a declaration, assignment, or control flow)
       # with a non-void return type needs `_ = ` when used as a statement.
