@@ -356,8 +356,8 @@ For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer
 -- Recursive tree node using @indirect for child pointers
 STRUCT Node {
     value: Int64,
-    left: Node@indirect?,     -- Optional heap-allocated child
-    right: Node@indirect?
+    left: ?Node@indirect,     -- Optional heap-allocated child
+    right: ?Node@indirect
 }
 
 -- Recursive traversal must be @reentrant
@@ -369,7 +369,7 @@ FN sumTree(n: Node) RETURNS Int64 @reentrant ->
 END
 ```
 
-`@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, weak references are planned for v0.2.
+`@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, weak references (WeakRef in Rust) are planned for the final v0.1 release as `@link`.
 
 ## 14. Concurrency: BG & DO
 
@@ -381,8 +381,8 @@ p: ~Int64 = BG { RETURN slowComputation(); };
 
 -- DO: Fork-Join parallel execution
 DO {
-    :branch1 -> step1();
-    :branch2 -> step2();
+    step1(),
+    step2()
 }
 
 -- CONCURRENT: Parallel pipelines
@@ -524,6 +524,7 @@ See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages
 | `@writeLocked` | RwLock (single-scheduler) |
 | `@local` | Thread-local heap pointer |
 | `@indirect` | Explicit heap allocation (Box) |
+| `@link` | To create cyclic graphs (WeakRef/Ref) |
 | `@sharded(N)` | Shared-nothing partitioned across N shards |
 
 ## Quick Reference: Sigils
