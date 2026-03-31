@@ -862,7 +862,6 @@ private
       end
 
 
-    # TODO: Need overflow logic for frame to overflow to heap / malloc
     when AST::ListLit
       # 1. Determine the Zig Type (T)
       ti = node.coerced_type_info || node.type_info

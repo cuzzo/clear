@@ -1188,8 +1188,6 @@ module TypeHelper
     end
   end
 
-  # TODO: If over 64kb => automatic heap
-  # TODO: SROA & SIMD analysis -> if possible -> stack
   def finalize_storage(node, final_type, type_size)
     if (node.value.storage.nil? || node.value.storage == :stack) && node.value.type_object.requires_move?
       if type_size > 128
