@@ -457,6 +457,93 @@ RSpec.describe SemanticAnnotator do
               FN f() RETURNS Void -> x = N{ v: 1 } @shared; r = RESOLVE x; RETURN; END'
         expect { run(src) }.to raise_error(/RESOLVE can only be applied to @link/)
       end
+
+      it "emits rcDowngrade for @multiowned LINK" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.rcDowngrade(N, x)")
+      end
+
+      it "emits arcDowngrade for @shared LINK" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.arcDowngrade(N, x)")
+      end
+
+      it "emits weakRcUpgrade for @multiowned RESOLVE" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.weakRcUpgrade(N, w)")
+      end
+
+      it "emits weakArcUpgrade for @shared RESOLVE" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; r = RESOLVE w; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.weakArcUpgrade(N, w)")
+      end
+
+      it "emits weakRcRelease cleanup for @multiowned link" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.weakRcRelease(N, w)")
+      end
+
+      it "emits weakArcRelease cleanup for @shared link" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.weakArcRelease(N, w)")
+      end
+
+      it "emits optional-unwrap cleanup for RESOLVE result" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("if (r) |_strong_ref| CheatLib.rcRelease(N, rt.heapAlloc(), _strong_ref)")
+      end
+
+      it "@link type annotation preserves link_source" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w: N@link = LINK x; r = RESOLVE w; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.weakRcUpgrade(N, w)")
+      end
+
+      it "@link is allowed on function parameters" do
+        src = 'STRUCT N { v: Int64 }
+              FN check(w: N@link) RETURNS Void -> PASS END
+              FN f() RETURNS Void -> PASS END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "@link struct field emits WeakRc type" do
+        src = 'STRUCT N { v: Int64 }
+              STRUCT Edge { target: N@link }
+              FN f() RETURNS Void -> PASS END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("target: CheatLib.WeakRc(N)")
+      end
+
+      it "struct with @link field emits releaseFields cleanup" do
+        src = 'STRUCT N { v: Int64 }
+              STRUCT Edge { target: N@link }
+              FN f() RETURNS Void -> n = N{ v: 1 } @multiowned; e = Edge{ target: LINK n }; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.releaseFields(Edge, rt.heapAlloc(), e)")
+      end
+
+      it "struct with @multiowned field emits releaseFields cleanup" do
+        src = 'STRUCT N { v: Int64 }
+              STRUCT W { inner: N@multiowned }
+              FN f() RETURNS Void -> n = N{ v: 1 } @multiowned; w = W{ inner: n }; RETURN; END'
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.releaseFields(W, rt.heapAlloc(), w)")
+      end
     end
 
     # ------------------------------------------------------------------

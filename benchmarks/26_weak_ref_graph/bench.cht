@@ -1,0 +1,77 @@
+-- Weak-Reference Graph Benchmark -- CLEAR (@multiowned + @link)
+--
+-- Mirrors bench.c: builds a binary tree of N nodes (BFS order).
+-- Each child has a @link (WeakRc) back-pointer to its parent node.
+--
+-- Two timed phases:
+--   1. BUILD: Allocate N @multiowned nodes in a list, create N-1 @link
+--      back-pointers (one rcDowngrade per non-root node).
+--   2. WALK:  Linear scan that resolves every parent @link via RESOLVE
+--      (one weakRcUpgrade per non-root node) and accumulates a checksum.
+--
+-- The benchmark isolates the cost of:
+--   - rcCreate:       per-node heap allocation + control block
+--   - rcDowngrade:    LINK (increment weak count)
+--   - weakRcUpgrade:  RESOLVE (check strong > 0, increment strong)
+--   - weakRcRelease:  element cleanup on list deinit
+--   - rcRelease:      strong ref cleanup on list deinit
+--
+-- N = 2,000,000 nodes.
+
+STRUCT Node {
+    id: Int64
+}
+
+FN main() RETURNS Void ->
+    n_nodes = 2000000_i64;
+
+    -- Phase 1: BUILD
+    t0 = timestampMs();
+
+    -- Allocate N nodes as @multiowned (Rc) in a list
+    MUTABLE nodes: Node@multiowned[]@list = [];
+    FOR i IN (0_i64 ..< n_nodes) DO
+        nodes.append(Node{ id: i } @multiowned);
+    END
+
+    -- Create @link (WeakRc) back-pointers: one per node
+    -- parents[0] = dummy link to self (root has no parent)
+    -- parents[i] = LINK to nodes[(i-1)/2] for i > 0
+    MUTABLE parents: Node@link[]@list = [];
+    parents.append(LINK nodes[0]);
+    FOR i IN (1_i64 ..< n_nodes) DO
+        parent_idx = (i - 1_i64) / 2_i64;
+        parents.append(LINK nodes[parent_idx]);
+    END
+
+    t1 = timestampMs();
+
+    -- Phase 2: WALK -- resolve every parent back-pointer
+    MUTABLE checksum = 0_i64;
+    FOR i IN (0_i64 ..< n_nodes) DO
+        checksum = checksum + nodes[i].id;
+
+        IF i > 0_i64 THEN
+            resolved = RESOLVE parents[i];
+            IF resolved != NIL THEN
+                checksum = checksum + resolved?.id;
+            END
+        END
+    END
+
+    t2 = timestampMs();
+
+    build_ms = t1 - t0;
+    walk_ms  = t2 - t1;
+    total_ms = t2 - t0;
+
+    ASSERT checksum > 0_i64, "checksum must be positive";
+
+    print("nodes:    ${n_nodes.toString()}");
+    print("checksum: ${checksum.toString()}");
+    print("build:    ${build_ms.toString()} ms");
+    print("walk:     ${walk_ms.toString()} ms");
+    print("total:    ${total_ms.toString()} ms");
+
+    RETURN;
+END

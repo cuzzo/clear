@@ -1235,6 +1235,12 @@ private
     )
     current_scope.set_state(node.name, :live)
     node.symbol = current_scope.locals[node.name]
+    # Propagate @link_source from the value type to the scope entry
+    val_ti = node.value&.type_info
+    if val_ti&.link?
+      link_src = val_ti.link_source
+      node.symbol.link_source = link_src if link_src
+    end
     classify_ownership!(node.symbol)
     record_capability_binding(node.name, node, final_type, storage)
   end
@@ -1288,6 +1294,12 @@ private
       )
       current_scope.set_state(node.name, :live)
       node.symbol = current_scope.locals[node.name]
+      # Propagate @link_source from the value type to the scope entry
+      val_ti = node.value&.type_info
+      if val_ti&.link?
+        link_src = val_ti.link_source
+        node.symbol.link_source = link_src if link_src
+      end
       classify_ownership!(node.symbol)
       record_capability_binding(node.name, node, final_type, storage)
 
@@ -2216,7 +2228,7 @@ private
     link_type = Type.new(ti.resolved)
     link_type.ownership = :link
     # Track which strong ownership kind the link was created from
-    link_type.instance_variable_set(:@link_source, ti.shared? ? :shared : :multiowned)
+    link_type.link_source = ti.shared? ? :shared : :multiowned
     node.full_type = link_type
   end
 
@@ -2229,8 +2241,10 @@ private
     end
 
     # Result is optional of the strong type: ?T@shared or ?T@multiowned
-    source = ti.instance_variable_get(:@link_source) || :shared
+    source = ti.link_source || :multiowned
     resolved_type = Type.new(:"?#{ti.resolved}")
+    resolved_type.ownership = source == :shared ? :shared : :multiowned
+    resolved_type.link_source = source
     node.full_type = resolved_type
   end
 
@@ -2276,7 +2290,13 @@ private
     end
 
     # The result type is the wrapped type (without the ?)
-    node.full_type = type.wrapped_type.resolved
+    # Preserve ownership/sync so Rc/Arc auto-deref works on the unwrapped value.
+    unwrapped = type.wrapped_type
+    result = Type.new(unwrapped.resolved)
+    result.ownership = type.ownership if type.ownership
+    result.sync = type.sync if type.sync
+    result.link_source = type.link_source if type.link_source
+    node.full_type = result
   end
 
   def visit_WithBlock(node)

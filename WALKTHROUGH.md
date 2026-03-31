@@ -386,7 +386,50 @@ FN sumTree(n: Node) RETURNS Int64 @reentrant ->
 END
 ```
 
-`@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, weak references (WeakRef in Rust) are planned for the final v0.1 release as `@link`.
+`@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, use `@link` -- CLEAR's weak reference.
+
+### Weak References with @link
+
+`@link` creates a weak reference that does not keep the target alive. It works with both `@multiowned` (WeakRc) and `@shared` (WeakArc).
+
+- `LINK expr` -- downgrade a strong reference to a weak reference
+- `RESOLVE expr` -- upgrade a weak reference back to an optional strong reference (`?T`)
+
+```ruby clear illustrative
+-- Parent-child with back-pointer cycle
+STRUCT Parent {
+    name: String,
+    child: ?Child@multiowned@indirect
+}
+
+STRUCT Child {
+    name: String,
+    parent: ?Parent@link          -- weak back-pointer, breaks the cycle
+}
+
+FN main() RETURNS Void ->
+    p = Parent{ name: "Alice", child: NIL } @multiowned;
+
+    -- LINK downgrades the strong Rc to a WeakRc
+    weak_p = LINK p;
+
+    -- RESOLVE upgrades back to ?Parent@multiowned (optional)
+    IF RESOLVE weak_p -> |strong|
+        ASSERT strong.name == "Alice", "resolved";
+    ELSE ->
+        ASSERT FALSE, "should have resolved";
+    END
+
+    RETURN;
+END
+```
+
+Key rules:
+- `LINK` only works on `@multiowned` or `@shared` values (compile-time error otherwise)
+- `RESOLVE` only works on `@link` values (compile-time error otherwise)
+- `RESOLVE` returns `?T` -- the target may have been dropped, so you must handle NIL
+- Cleanup is automatic: weak references are released when they go out of scope
+- No runtime cost when the strong reference is still alive; RESOLVE is a simple count check
 
 ## 14. Concurrency: BG & DO
 

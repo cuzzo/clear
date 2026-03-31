@@ -25,6 +25,11 @@ module OwnershipGenerator
     # must be freed with heapAlloc() to avoid leaking the GPA allocation.
     if type_info&.list_collection?
       alloc = (type_info.sharded? || type_info.heap_promoted) ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      if type_info.elem_ownership
+        # List with ref-counted elements: comptime deinitList releases each element.
+        elem_zig = type_info.element_type.zig_type
+        return "defer CheatLib.deinitList(#{elem_zig}, #{alloc}, rt.heapAlloc(), &#{name});\n"
+      end
       return "defer #{name}.deinit(#{alloc});\n"
     end
     # @pool backing arrays are heap-allocated; auto-deinit.
@@ -74,21 +79,55 @@ module OwnershipGenerator
       end
     end
 
-    return "" unless type_info&.requires_move? || type_info&.any_rc? || type_info&.any_sync?
+    # Structs containing @link or @multiowned/@shared fields need field-level cleanup
+    # even when the struct itself is a plain stack value. Uses comptime releaseFields
+    # to walk struct fields and release any Rc/Arc/WeakRc/WeakArc values.
+    if !type_info&.any_rc? && !type_info&.link? && !type_info&.any_sync?
+      resolved = type_info&.resolved
+      schema = (@struct_schemas ||= {})[resolved]
+      if schema
+        has_rc_fields = schema.any? do |fname, fdef|
+          next if fname.is_a?(Symbol)
+          ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
+          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+          ft.link? || ft.any_rc?
+        end
+        if has_rc_fields
+          zig_type = transpile_type(resolved.to_s)
+          moved_guard = "var #{name}_moved = false; _ = &#{name}_moved;\n"
+          moved_guard += "defer if (!#{name}_moved) CheatLib.releaseFields(#{zig_type}, rt.heapAlloc(), #{name});\n"
+          return moved_guard
+        end
+      end
+    end
 
+    return "" unless type_info&.requires_move? || type_info&.any_rc? || type_info&.any_sync? || type_info&.link?
+
+    is_link         = type_info&.link?
     is_rc           = type_info&.any_rc?
     is_shared       = type_info&.shared?
     is_locked       = type_info&.locked?
     is_write_locked = type_info&.write_locked?
     is_any_sync     = is_locked || is_write_locked
-    is_heap         = storage == :heap && !is_rc && !is_any_sync
+    is_heap         = storage == :heap && !is_rc && !is_any_sync && !is_link
 
     base_logic = "var #{name}_moved = false; _ = &#{name}_moved;\n"
-    
-    cleanup_stmt = if is_rc
+
+    cleanup_stmt = if is_link
       base_type = type_info.resolved.to_s
+      source = type_info.link_source || :multiowned
+      release_func = source == :shared ? "weakArcRelease" : "weakRcRelease"
+      "CheatLib.#{release_func}(#{transpile_type(base_type)}, #{name})"
+    elsif is_rc
+      base_type = type_info.resolved.to_s
+      is_optional_rc = type_info.optional?
+      base_type = base_type.sub(/^\?/, '') if is_optional_rc
       release_func = is_shared ? "arcRelease" : "rcRelease"
-      "CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), #{name})"
+      if is_optional_rc
+        "{ if (#{name}) |_strong_ref| CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), _strong_ref); }"
+      else
+        "CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), #{name})"
+      end
     elsif is_locked
       zig_inner_t = transpile_type(type_info.resolved.to_s)
       "CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{name})"
@@ -103,17 +142,18 @@ module OwnershipGenerator
 
     base_logic += "defer if (!#{name}_moved) #{cleanup_stmt};\n"
 
-    # Handle recursive field cleanup for RC structs
+    # Handle recursive field cleanup for RC structs via comptime releaseFields
     if is_rc
       schema = (@struct_schemas ||= {})[type_info.resolved]
       if schema
-        schema.each do |fname, fdef|
-          field_type = Type.new(fdef[:type])
-          if field_type.any_rc?
-            inner = field_type.resolved.to_s
-            func = field_type.shared? ? "arcRelease" : "rcRelease"
-            base_logic += "defer if (!#{name}_moved) CheatLib.#{func}(#{transpile_type(inner)}, rt.heapAlloc(), #{name}.ctrl.data.#{fname});\n"
-          end
+        has_rc_fields = schema.any? do |fname, fdef|
+          next if fname.is_a?(Symbol)
+          ft = Type.new(fdef[:type])
+          ft.any_rc? || ft.link?
+        end
+        if has_rc_fields
+          zig_type = transpile_type(type_info.resolved.to_s)
+          base_logic += "defer if (!#{name}_moved) CheatLib.releaseFields(#{zig_type}, rt.heapAlloc(), #{name}.ctrl.data.*);\n"
         end
       end
     end

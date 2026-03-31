@@ -1310,6 +1310,147 @@ pub const CheatLib = struct {
     }
 
     // -------------------------------------------------------------------------
+    // Comptime Structural Helpers
+    // -------------------------------------------------------------------------
+
+    /// Extracts the inner type T from Rc(T), Arc(T), WeakRc(T), or WeakArc(T).
+    /// Returns null if the type is not a recognized ref-counted wrapper.
+    fn refInnerType(comptime FT: type) ?type {
+        const info = @typeInfo(FT);
+        if (info != .@"struct") return null;
+        const fields = info.@"struct".fields;
+        if (fields.len < 1) return null;
+        if (!std.mem.eql(u8, fields[0].name, "ctrl")) return null;
+        const ctrl_ptr_info = @typeInfo(fields[0].type);
+        if (ctrl_ptr_info != .pointer) return null;
+        const ctrl_info = @typeInfo(ctrl_ptr_info.pointer.child);
+        if (ctrl_info != .@"struct") return null;
+        inline for (ctrl_info.@"struct".fields) |cf| {
+            if (comptime std.mem.eql(u8, cf.name, "data")) {
+                const data_info = @typeInfo(cf.type);
+                if (data_info == .pointer) return data_info.pointer.child;
+            }
+        }
+        return null;
+    }
+
+    /// Returns true if FT is an Arc(T) or WeakArc(T) — the control block
+    /// uses atomic ref counts (strong field is not a plain integer).
+    fn isAtomicRef(comptime FT: type) bool {
+        const info = @typeInfo(FT);
+        if (info != .@"struct") return false;
+        const fields = info.@"struct".fields;
+        if (fields.len < 1) return false;
+        if (!comptime std.mem.eql(u8, fields[0].name, "ctrl")) return false;
+        const ctrl_ptr_info = @typeInfo(fields[0].type);
+        if (ctrl_ptr_info != .pointer) return false;
+        const ctrl_info = @typeInfo(ctrl_ptr_info.pointer.child);
+        if (ctrl_info != .@"struct") return false;
+        inline for (ctrl_info.@"struct".fields) |cf| {
+            if (comptime std.mem.eql(u8, cf.name, "strong")) {
+                return @typeInfo(cf.type) != .int;
+            }
+        }
+        return false;
+    }
+
+    /// Returns true if FT is a WeakRc(T) or WeakArc(T).
+    /// Weak types have no `getData` decl (only strong Rc/Arc do).
+    fn isWeakRef(comptime FT: type) bool {
+        if (refInnerType(FT) == null) return false;
+        return !@hasDecl(FT, "getData");
+    }
+
+    /// Release a single ref-counted value. Dispatches to the correct release
+    /// function based on the comptime type (Rc/Arc/WeakRc/WeakArc).
+    pub fn releaseOne(comptime FT: type, alloc: std.mem.Allocator, value: FT) void {
+        const T = comptime refInnerType(FT) orelse return;
+        const is_weak = comptime isWeakRef(FT);
+        const is_atomic = comptime isAtomicRef(FT);
+        if (is_weak) {
+            if (is_atomic) {
+                weakArcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
+            } else {
+                weakRcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
+            }
+        } else {
+            if (is_atomic) {
+                arcRelease(T, alloc, .{ .ctrl = @ptrCast(value.ctrl) });
+            } else {
+                rcRelease(T, alloc, .{ .ctrl = @ptrCast(value.ctrl) });
+            }
+        }
+    }
+
+    /// Walk all fields of struct T and release any that are ref-counted
+    /// (Rc, Arc, WeakRc, WeakArc). Zero-cost: fields without ref-counted
+    /// types emit no code thanks to comptime dead-code elimination.
+    pub fn releaseFields(comptime T: type, alloc: std.mem.Allocator, value: T) void {
+        inline for (@typeInfo(T).@"struct".fields) |field| {
+            if (comptime refInnerType(field.type) != null) {
+                releaseOne(field.type, alloc, @field(value, field.name));
+            }
+        }
+    }
+
+    /// Promote all escapable fields of a struct from frame arena to heap.
+    /// Handles strings (dupe), lists (promoteList), and maps (mapPromote).
+    /// Fields that don't need promotion emit no code at comptime.
+    pub fn promoteFields(comptime T: type, rt: *Runtime, value: *T) !void {
+        inline for (@typeInfo(T).@"struct".fields) |field| {
+            const FT = field.type;
+            if (FT == []const u8 or FT == []u8) {
+                // String field: dupe to heap
+                @field(value, field.name) = try rt.heapAlloc().dupe(u8, @field(value, field.name));
+            } else if (comptime isArrayList(FT)) {
+                // List field: promote backing buffer to heap
+                const ElemT = comptime arrayListElemType(FT).?;
+                try promoteList(ElemT, rt, &@field(value, field.name));
+            }
+            // Maps use a wrapper struct (StringMap) — can't detect generically
+            // without name inspection. Handled by pre-promotion in Ruby.
+        }
+    }
+
+    fn isArrayList(comptime T: type) bool {
+        return arrayListElemType(T) != null;
+    }
+
+    fn arrayListElemType(comptime T: type) ?type {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return null;
+        const fields = info.@"struct".fields;
+        // ArrayListUnmanaged has `items` (slice) and `capacity` (usize)
+        var has_items = false;
+        var has_capacity = false;
+        var elem_type: ?type = null;
+        inline for (fields) |f| {
+            if (comptime std.mem.eql(u8, f.name, "items")) {
+                has_items = true;
+                const slice_info = @typeInfo(f.type);
+                if (slice_info == .pointer and slice_info.pointer.size == .slice) {
+                    elem_type = slice_info.pointer.child;
+                }
+            }
+            if (comptime std.mem.eql(u8, f.name, "capacity")) has_capacity = true;
+        }
+        if (has_items and has_capacity) return elem_type;
+        return null;
+    }
+
+    /// Deinit a list whose elements may be ref-counted. Releases each element
+    /// before freeing the backing buffer. If elements are not ref-counted,
+    /// comptime eliminates the release loop entirely.
+    pub fn deinitList(comptime ElemT: type, alloc: std.mem.Allocator, heapAlloc: std.mem.Allocator, list: *std.ArrayListUnmanaged(ElemT)) void {
+        if (comptime refInnerType(ElemT) != null) {
+            for (list.items) |item| {
+                releaseOne(ElemT, heapAlloc, item);
+            }
+        }
+        list.deinit(alloc);
+    }
+
+    // -------------------------------------------------------------------------
     // Mutex-Protected (locked / Locked)
     // -------------------------------------------------------------------------
 

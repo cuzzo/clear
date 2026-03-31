@@ -46,6 +46,8 @@ module MethodAnalysis
     new_type.soa = ti.soa if ti.respond_to?(:soa) && ti.soa
     new_type.shard_count = ti.shard_count if ti.shard_count
     new_type.location = ti.location
+    new_type.elem_ownership = ti.elem_ownership if ti.elem_ownership
+    new_type.elem_sync = ti.elem_sync if ti.elem_sync
     scope_entry.type = new_type
     list_arg.full_type = new_type if list_arg.respond_to?(:full_type=)
   end

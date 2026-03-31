@@ -119,6 +119,15 @@ module AST
         new_t.soa = final_type.soa if final_type.is_a?(Type) && final_type.soa
         new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
         new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
+        new_t.elem_ownership = final_type.elem_ownership if final_type.is_a?(Type) && final_type.elem_ownership
+        new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
+        new_t.elem_sync = final_type.elem_sync if final_type.is_a?(Type) && final_type.elem_sync
+        new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
+        # Propagate @link_source from value's type
+        if val_ti&.link?
+          link_src = val_ti.link_source
+          new_t.link_source = link_src if link_src
+        end
         new_t
       end
       # Propagate @link ownership from the value's LinkNode

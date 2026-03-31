@@ -2026,6 +2026,23 @@ private
         result
       end
 
+    when AST::LinkNode
+      # LINK expr — downgrade Rc/Arc to WeakRc/WeakArc
+      inner = visit(node.value)
+      ti = node.value.type_info
+      base = transpile_type(ti.resolved.to_s)
+      func = ti.shared? ? "arcDowngrade" : "rcDowngrade"
+      "CheatLib.#{func}(#{base}, #{inner})"
+
+    when AST::ResolveNode
+      # RESOLVE expr — upgrade WeakRc/WeakArc to ?Rc/?Arc
+      inner = visit(node.value)
+      ti = node.value.type_info
+      base = transpile_type(ti.resolved.to_s)
+      source = ti.link_source || :multiowned
+      func = source == :shared ? "weakArcUpgrade" : "weakRcUpgrade"
+      "CheatLib.#{func}(#{base}, #{inner})"
+
     when AST::Copy
       # Zig copies structs by value on assignment, so just return the inner expression
       visit(node.value)
@@ -2148,6 +2165,16 @@ private
         resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
         if resolved == :Int64
           return "@mod(#{left}, #{right})"
+        end
+      end
+
+      if node.op == :DIV
+        # Zig's `/` only works on unsigned integers; signed i64 requires @divTrunc.
+        # Number (f64) can still use `/` directly.
+        left_type = node.left.full_type
+        resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
+        if resolved == :Int64
+          return "@divTrunc(#{left}, #{right})"
         end
       end
 
@@ -2510,21 +2537,20 @@ private
       end
     end
 
-    # Source 2: schema walk — promote __ret fields AFTER struct init
-    # (covers string fields where the actual value may be a literal or expression)
+    # Source 2: comptime promoteFields handles string/list fields after struct init.
+    # Only emit if there are promotable fields not already handled by Source 1.
     resolved = ret_type&.resolved
     schema = @struct_schemas&.dig(resolved)
     if schema
-      schema.each do |fname, fdef|
+      has_unhandled_promotable = schema.any? do |fname, fdef|
         next if fname.is_a?(Symbol) || promoted_fields.include?(fname.to_s)
         ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
         ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-        next unless ft.needs_escape_promotion?
-        if ft.string?
-          post_promos << "__ret.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fname});"
-        else
-          post_promos << ft.escape_promote_code("__ret.#{fname}", rt_name)
-        end
+        ft.needs_escape_promotion?
+      end
+      if has_unhandled_promotable
+        zig_type = transpile_type(resolved.to_s)
+        post_promos << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
       end
     end
 

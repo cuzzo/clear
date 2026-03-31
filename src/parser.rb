@@ -1620,10 +1620,10 @@ class Parser
     collection = nil
     is_soa     = false
     if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @list @pool @set].include?(current.value)
-      # Collection types (@list, @pool, @set) are data structure types, not ownership
-      # capabilities — they must be allowed on function parameters.
-      is_collection = %w[@list @pool @set].include?(current.value)
-      unless allow_capabilities || is_collection
+      # Collection types (@list, @pool, @set) and @link (weak reference) are structural
+      # types, not ownership capabilities — they must be allowed on function parameters.
+      is_structural = %w[@list @pool @set @link].include?(current.value)
+      unless allow_capabilities || is_structural
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
       cap_tok = consume(:VAR_ID)

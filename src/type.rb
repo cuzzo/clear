@@ -11,6 +11,7 @@ class Type
   attr_accessor :soa          # true when @pool:soa or @list:soa — Structure of Arrays layout
   attr_accessor :elem_ownership # Element-level ownership: T@shared[] = Array<Arc<T>>
   attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
+  attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
   attr_accessor :heap_promoted  # true when collection data was promoted to heap (returned from frame-using fn)
   attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
@@ -156,6 +157,9 @@ class Type
       @generic_args_raw      = other.instance_variable_get(:@generic_args_raw)
       @is_tense              = other.instance_variable_get(:@is_tense)
       @tense_type_raw        = other.instance_variable_get(:@tense_type_raw)
+      @elem_ownership        = other.elem_ownership
+      @elem_sync             = other.elem_sync
+      @link_source           = other.link_source
     else
       @raw = raw_input
       parse_raw_input
@@ -700,7 +704,12 @@ class Type
   def element_type
     return nil unless array?
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Number"
-    @element_type_obj ||= Type.new(@element_type_raw || :Any)
+    @element_type_obj ||= begin
+      t = Type.new(@element_type_raw || :Any)
+      t.ownership = @elem_ownership if @elem_ownership
+      t.sync = @elem_sync if @elem_sync
+      t
+    end
   end
 
   def slot_size(lookup_arg = nil, &lookup_block)
@@ -826,6 +835,9 @@ class Type
 
     # Shared (Arc) always stays shared
     return :shared if shared? || current_storage == :shared
+
+    # Link (WeakRc/WeakArc) always stays link
+    return :link if link? || current_storage == :link
 
     # Sync (locked) types need a stable heap address
     return :heap if any_sync? || current_storage == :heap && any_sync?
@@ -1064,6 +1076,10 @@ class Type
         return "CheatLib.Rc(#{inner_zig})"
       when :shared
         return "CheatLib.Arc(#{inner_zig})"
+      when :link
+        # Weak ref type — infer from link_source if available, default to WeakRc
+        source = link_source
+        return source == :shared ? "CheatLib.WeakArc(#{inner_zig})" : "CheatLib.WeakRc(#{inner_zig})"
       else
         # affine + sync: needs pointer (stable heap address)
         return "*#{inner_zig}"
