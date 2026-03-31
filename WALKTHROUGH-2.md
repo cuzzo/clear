@@ -218,7 +218,7 @@ MUTABLE logs: String[]@list:sharded(2) = [];        -- OKAY
 
 ## 10. Collections: Array, List, and Pool
 
-CLEAR provides three core collection types with distinct memory and performance profiles.
+CLEAR provides three core collection types with distinct memory and performance profiles. All collections are **automatically monomorphized** — the compiler generates optimized, type-specific native code for every unique `T`, ensuring zero-overhead generics.
 
 | Sigil | Collection | Purpose |
 | :--- | :--- | :--- |
@@ -236,11 +236,18 @@ MUTABLE items: Int64[]@list = [];                   -- OKAY: Empty list literal
 MUTABLE names: String[] = List[];                   -- OKAY: Explicit List initializer
 
 -- 3. Generational Pool
--- Pools require a fixed capacity for their backing storage
+-- Pools provide peak cache locality and stable handles. Switching from 
+-- List to @pool:soa (Structure of Arrays) is a one-line refactor for 
+-- massive performance gains.
+-- See: [benchmarks/22_pool_vs_multiowned/](benchmarks/22_pool_vs_multiowned/)
 MUTABLE users: User[100]@pool = [];                 -- OKAY: Empty pool literal
 MUTABLE entities: Entity[50] = Pool[];              -- OKAY: Explicit Pool initializer
 
 id = users.insert(User{ name: "Alice" });           -- OKAY: Returns generational handle
+
+-- Note: Unlike Arrays/Lists, Pools require access handling because 
+-- .get(id) returns an optional (?T) to account for stale handles.
+user = users.get(id) OR RAISE;                      -- OKAY
 ```
 
 ## 11. Strings, Buffers, and RingBuffers
