@@ -219,7 +219,7 @@ Benchmark 25 tests scheduler fairness under adversarial load using iterated SHA2
 
 CLEAR wins on throughput and p99.9 in the adversarial phase. Go's preemptive scheduler gives it the best p99 under adversarial load, but CLEAR's cooperative scheduling with per-iteration yields is competitive across all percentiles.
 
-#### REALITY: SHARED-NOTHING KV Store (Benchmark 20: RESP protocol, vs Dragonfly)
+#### Reality: Shared-Nothing KV Store (Benchmark 20: RESP protocol, vs Dragonfly)
 
 A RESP-compatible TCP KV store tested with `redis-benchmark`. Single thread, 100K operations, 50 concurrent connections. CLEAR uses `@sharded(8):locked` HashMap with fiber-per-connection.
 
