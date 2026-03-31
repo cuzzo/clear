@@ -1,0 +1,76 @@
+-- Benchmark 25: Pathological Workloads -- CLEAR
+--
+-- Protocol (text, \r\n terminated):
+--   WORK:ID:N  -> compute SHA256 iterated N times on "seed:ID", respond :HEX\r\n
+--   QUIT       -> close connection
+--   READY?     -> respond +READY\r\n
+--
+-- Three phases test scheduler fairness:
+--   1. Uniform:     all requests do equal work
+--   2. Skewed:      1% of requests do 1000x more work
+--   3. Adversarial: one connection does all heavy work
+
+EXTERN FN hashN(content: String, n: Int64) RETURNS !String EFFECTS :alloc:heap FROM "sha_native";
+
+FN handleClient!(client: TCPClient) RETURNS Void ->
+    MUTABLE running: Bool = TRUE;
+    WHILE running DO
+        data = tcpRead(client);
+        IF data.length() == 0 THEN
+            running = FALSE;
+        ELSE
+            MUTABLE resp = "";
+            MUTABLE pos: Int64 = 0;
+            WHILE pos < data.length() DO
+                MUTABLE eol = pos;
+                WHILE eol < data.length() && charAt(data, eol) != "\r" && charAt(data, eol) != "\n" DO
+                    eol += 1;
+                END
+                line = substr(data, pos, eol - pos);
+                pos = eol;
+                WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
+                    pos += 1;
+                END
+
+                IF line.length() == 0 THEN
+                    -- skip
+                ELSE_IF startsWith?(line, "WORK:") THEN
+                    rest = substr(line, 5_i64, line.length() - 5);
+                    -- Parse "ID:N" from rest
+                    MUTABLE colonPos: Int64 = 0;
+                    WHILE colonPos < rest.length() && charAt(rest, colonPos) != ":" DO
+                        colonPos += 1;
+                    END
+                    id = substr(rest, 0_i64, colonPos);
+                    nStr = substr(rest, colonPos + 1, rest.length() - colonPos - 1);
+                    MUTABLE n = toInt(toNumber(nStr) OR 1.0);
+                    IF n < 1 THEN n = 1; END
+                    seed = "seed:" + id;
+                    result = hashN(seed, n) OR RAISE;
+                    resp = resp + ":${result}\r\n";
+                ELSE_IF line == "QUIT" THEN
+                    resp = resp + "+OK\r\n";
+                    running = FALSE;
+                ELSE_IF line == "READY?" THEN
+                    resp = resp + "+READY\r\n";
+                ELSE
+                    resp = resp + "-ERR unknown command\r\n";
+                END
+            END
+            IF resp.length() > 0 -> tcpWrite(client, resp);
+        END
+    END
+END
+
+FN main() RETURNS Void ->
+    server = TCPServer::listen(6390);
+    print("CLEAR pathological server listening on port 6390");
+
+    MUTABLE tasks: ~Void[]@list = [];
+    WHILE TRUE DO
+        client = accept(server);
+        tasks.append(BG {
+            handleClient!(client);
+        });
+    END
+END

@@ -1,0 +1,12 @@
+[package]
+name = "bench_rust"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bench_rust"
+path = "bench.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+sha2 = "0.10"
