@@ -1,0 +1,30 @@
+-- FFI effects test: EFFECTS Alloc injects frame allocator, !T returns errors.
+--
+-- Tests:
+-- 1. EFFECTS Alloc → native fn receives allocator as first arg
+-- 2. !T return → native fn returns error union, CLEAR handles with try
+-- 3. Combined: EFFECTS Alloc + !T return
+
+-- Allocator-injected functions: native fn signature has allocator as first param
+EXTERN FN zigDupe(src: String) RETURNS !String EFFECTS :alloc FROM "native_utils";
+EXTERN FN zigConcat(a: String, sep: String, b: String) RETURNS !String EFFECTS :alloc FROM "native_utils";
+
+-- Error union return without allocator
+EXTERN FN safeDivide(a: Int64, b: Int64) RETURNS !Int64 FROM "native_utils";
+
+FN main() RETURNS Void ->
+    -- Test 1: EFFECTS Alloc — dupe a string via native allocator
+    duped = zigDupe("hello");
+    ASSERT duped == "hello", "zigDupe should return 'hello'";
+
+    -- Test 2: EFFECTS Alloc — concat two strings
+    joined = zigConcat("foo", "-", "bar");
+    ASSERT joined == "foo-bar", "zigConcat should return 'foo-bar'";
+
+    -- Test 3: !T return — successful division
+    result = safeDivide(100_i64, 4_i64);
+    ASSERT result == 25, "100/4 should be 25";
+
+    print("FFI effects test passed");
+    RETURN;
+END

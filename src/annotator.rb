@@ -256,7 +256,8 @@ private
       return:     { type: node.return_type || :Any, lifetime: nil },
       visibility: :pub,
       extern:     true,
-      module_alias: node.from_module
+      module_alias: node.from_module,
+      extern_effects: node.effects || Set.new
     }
     node.full_type = :Void
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)

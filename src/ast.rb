@@ -257,6 +257,7 @@ module AST
     include Locatable
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
+    attr_accessor :extern_effects    # Set of effect symbols (:Alloc, etc.) from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
@@ -351,9 +352,9 @@ module AST
   # RangeLit: a range expression (start..<end) or (start..<=end).
   # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
   RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
-  # ExternFnDecl: EXTERN FN name(params) RETURNS type FROM "module"
+  # ExternFnDecl: EXTERN FN name(params) RETURNS type [EFFECTS ALLOC] FROM "module"
   # Declares a native Zig/C function importable via @import("module").
-  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module) { include Locatable }
+  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) { include Locatable }
   # ExternStructDecl: EXTERN STRUCT Name { fields } FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) { include Locatable }

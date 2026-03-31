@@ -123,6 +123,7 @@ module FunctionAnalysis
       node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
       if node.respond_to?(:extern_call=) && func_type[:extern]
         node.extern_call = true
+        node.extern_effects = func_type[:extern_effects] if func_type[:extern_effects]
         record_effect(EffectTracker::EXTERN)
       end
 

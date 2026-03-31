@@ -441,7 +441,7 @@ private
       # types: primitives, Void, enums, unions (returned by copy, not pointer).
       uses_frame_or_alloc = node.uses_frame || node.uses_alloc
       ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
-      returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? ||
+      returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
                            @enum_schemas&.key?(ret_type_obj.resolved) ||
                            @union_schemas&.key?(ret_type_obj.resolved)
       prologue = if fn_needs_rt
@@ -1526,36 +1526,66 @@ private
 
       if node.respond_to?(:extern_call) && node.extern_call
         # Native FFI call: trampoline to g0 stack via onRootStack.
-        # EXTERN functions may use arbitrary stack depth (std.json, C libs).
         rt_name = @do_rt_name || "rt"
         @extern_trampoline_counter = (@extern_trampoline_counter || 0) + 1
         tid = @extern_trampoline_counter
 
+        effects = node.extern_effects || Set.new
+        has_alloc = effects.include?(:alloc)
         ret_type = node.full_type
-        ret_zig = ret_type.is_a?(Type) ? ret_type.zig_type : (ret_type == :Void ? "void" : "i64")
-        is_void = (ret_zig == "void")
+        ret_type_obj = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type || :Void)
+        is_error_union = ret_type_obj.error_union?
+        inner_zig = is_error_union ? ret_type_obj.payload_type.zig_type : ret_type_obj.zig_type
+        is_void = (inner_zig == "void")
 
-        arg_fields = args_zig.each_with_index.map { |_, i| "a#{i}: @TypeOf(__ext#{tid}_args[#{i}])" }.join(", ")
-        arg_pass = args_zig.each_with_index.map { |_, i| "f.a#{i}" }.join(", ")
+        # Build native call args: optionally inject allocator as first arg
+        native_args = []
+        native_args << "#{rt_name}.frameAlloc()" if has_alloc
+        native_args += args_zig.each_with_index.map { |_, i| "f.a#{i}" }
+        native_call = "#{mod_prefix}#{node.name}(#{native_args.join(', ')})"
+        # If native returns error union, catch and store
+        native_call = "(#{native_call} catch |err| { f.err = err; return; })" if is_error_union
+
+        # Build trampoline struct fields with explicit types from EXTERN FN params.
+        # Using @TypeOf on comptime literals (e.g., 100) makes the struct comptime-only.
+        arg_fields = args_zig.each_with_index.map { |_, i|
+          arg_type = node.args[i]&.type_info
+          zig_t = arg_type.is_a?(Type) ? arg_type.zig_type : (arg_type ? Type.new(arg_type).zig_type : "@TypeOf(__ext#{tid}_args[#{i}])")
+          "a#{i}: #{zig_t}"
+        }.join(", ")
+        # Allocator field for EFFECTS Alloc (captured from rt before trampoline)
+        alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
         arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
 
-        if is_void
+        # For EFFECTS Alloc, the trampoline needs rt.frameAlloc() passed as a field
+        # (rt isn't available inside the callconv(.c) wrapper)
+        if has_alloc
+          native_args_in_wrapper = ["f.alloc"] + args_zig.each_with_index.map { |_, i| "f.a#{i}" }
+          native_call = "#{mod_prefix}#{node.name}(#{native_args_in_wrapper.join(', ')})"
+          native_call = "(#{native_call} catch |err| { f.err = err; return; })" if is_error_union
+        end
+
+        alloc_init = has_alloc ? ", .alloc = #{rt_name}.frameAlloc()" : ""
+        err_field = is_error_union ? "err: ?anyerror = null, " : ""
+        err_check = is_error_union ? "if (__ext#{tid}_frame.err) |e| return e; " : ""
+
+        if is_void && !is_error_union
           "{ const __ext#{tid}_args = #{arg_tuple}; " \
-          "const __Ext#{tid} = struct { #{arg_fields}, " \
+          "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
-          "_ = #{mod_prefix}#{node.name}(#{arg_pass}); } }; " \
-          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')} }; " \
+          "_ = #{native_call}; } }; " \
+          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')}#{alloc_init} }; " \
           "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); }"
         else
           "blk_ext#{tid}: { const __ext#{tid}_args = #{arg_tuple}; " \
-          "const __Ext#{tid} = struct { #{arg_fields}, ret: #{ret_zig} = undefined, " \
+          "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
-          "f.ret = #{mod_prefix}#{node.name}(#{arg_pass}); } }; " \
-          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')} }; " \
+          "f.ret = #{native_call}; } }; " \
+          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')}#{alloc_init} }; " \
           "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); " \
-          "break :blk_ext#{tid} __ext#{tid}_frame.ret; }"
+          "#{err_check}break :blk_ext#{tid} __ext#{tid}_frame.ret; }"
         end
       elsif node.respond_to?(:fn_var_call) && node.fn_var_call
         # Calling a fn-type variable: always inject rt, always try (unknown callee)

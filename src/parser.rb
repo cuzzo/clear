@@ -622,10 +622,27 @@ class Parser
     name = consume(:VAR_ID).value
     params = parse_argument_list
     return_type = match!(:KEYWORD, 'RETURNS') ? parse_type_annotation : nil
+
+    # Optional: EFFECTS :alloc, :other — declare side effects of the native fn.
+    # Accepted effects: :alloc (inject frame allocator as first native arg)
+    effects = Set.new
+    if match!(:KEYWORD, 'EFFECTS')
+      valid_effects = Set[:alloc]
+      loop do
+        consume(:CHAR, ':')
+        eff_name = consume(:VAR_ID).value.to_sym
+        unless valid_effects.include?(eff_name)
+          error!(current, "Unknown effect ':#{eff_name}'. Valid effects: #{valid_effects.map { |e| ":#{e}" }.join(', ')}")
+        end
+        effects << eff_name
+        break unless match!(:CHAR, ',')
+      end
+    end
+
     consume(:KEYWORD, 'FROM')
     from_module = consume(:STRING).value
     match!(:CHAR, ';')
-    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module)
+    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
   end
 
   def parse_extern_struct(extern_tok)
