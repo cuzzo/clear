@@ -1,0 +1,230 @@
+#!/usr/bin/env ruby
+# clear - CLEAR language compiler CLI
+#
+# Usage:
+#   clear build foo.cht [-o output] [--release|--safe]
+#   clear run foo.cht [-- args...]
+#   clear test foo.cht
+#
+# See docs/clear-man.md for full documentation.
+
+require 'fileutils'
+require 'optparse'
+
+# Resolve paths relative to this script (works from any directory)
+CLEAR_ROOT = File.expand_path('..', __FILE__)
+ZIG_DIR    = File.join(CLEAR_ROOT, 'zig')
+SRC_DIR    = File.join(CLEAR_ROOT, 'src')
+TRANSPILER = File.join(SRC_DIR, 'transpiler.rb')
+
+# Find Zig compiler
+ZIG = [
+  File.join(ZIG_DIR, 'zig-new', 'zig'),
+  File.join(ZIG_DIR, 'zig', 'zig'),
+  `which zig 2>/dev/null`.strip
+].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+
+# Runtime files needed for linking
+RUNTIME_FILES = %w[switch.S onRoot.S].map { |f| File.join(ZIG_DIR, f) }
+
+# Detect jemalloc/tcmalloc
+def find_alloc_preload
+  Dir.glob('/lib/x86_64-linux-gnu/libjemalloc.so*').first ||
+    Dir.glob('/usr/lib/libjemalloc.so*').first ||
+    Dir.glob('/usr/local/lib/libjemalloc.so*').first ||
+    Dir.glob('/lib/x86_64-linux-gnu/libtcmalloc.so*').first
+end
+
+def hint(msg)
+  $stderr.puts "\e[33mhint:\e[0m #{msg}"
+end
+
+def error(msg)
+  $stderr.puts "\e[31merror:\e[0m #{msg}"
+  exit 1
+end
+
+# -------------------------------------------------------------------------
+# Build: transpile + compile
+# -------------------------------------------------------------------------
+def do_build(source, output: nil, opt_level: 'ReleaseFast', module_mode: false)
+  error "File not found: #{source}" unless File.exist?(source)
+  source = File.expand_path(source)
+  source_dir = File.dirname(source)
+  base_name = File.basename(source, '.cht')
+
+  # Output binary path
+  output ||= File.join(source_dir, base_name)
+
+  # Transpile
+  transpile_flag = module_mode ? '--module' : ''
+  tmp_name = "._clear_tmp_#{base_name}.zig"
+  tmp_zig = File.join(ZIG_DIR, tmp_name)
+
+  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source} 2>&1`
+  unless $?.success?
+    $stderr.puts zig_code
+    error "Transpilation failed"
+  end
+  File.write(tmp_zig, zig_code)
+
+  # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
+  # and check if a matching .zig file exists in the source directory.
+  source_text = File.read(source)
+  extern_modules = source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+  ffi_modules = extern_modules.select { |m|
+    # Skip standard library modules (std.json, std.fs, etc.)
+    !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
+  }
+
+  # Copy FFI modules to zig/ for compilation
+  ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(ZIG_DIR, "#{m}.zig")) }
+
+  # Build Zig command (runs from zig/ directory where runtime files live)
+  if module_mode
+    # Module mode needs cheat_runtime resolved
+    deps = ['--dep', 'cheat_runtime']
+    mods = ['-Mcheat_runtime=runtime-header.zig']
+    ffi_modules.each { |m| deps += ['--dep', m]; mods += ["-M#{m}=#{m}.zig"] }
+    cmd_parts = [ZIG, 'test'] + deps + ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S'] + mods
+  else
+    cmd_parts = [ZIG, 'build-exe']
+    if ffi_modules.any?
+      ffi_modules.each { |m| cmd_parts += ['--dep', m] }
+      cmd_parts += ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S']
+      ffi_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
+    else
+      cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
+    end
+    cmd_parts += ['-O', opt_level, '--name', File.basename(output)]
+  end
+
+  cmd = cmd_parts.join(' ')
+  compile_output = `cd #{ZIG_DIR} && #{cmd} 2>&1`
+  success = $?.success?
+
+  # Move binary to output location (zig puts it in zig/)
+  if success && !module_mode
+    zig_binary = File.join(ZIG_DIR, File.basename(output))
+    if File.exist?(zig_binary)
+      FileUtils.mv(zig_binary, output)
+    end
+  end
+
+  # Cleanup temp files
+  FileUtils.rm_f(tmp_zig)
+  ffi_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
+
+  unless success
+    $stderr.puts compile_output
+    error "Compilation failed"
+  end
+
+  # Return compile output for test mode
+  compile_output
+end
+
+# -------------------------------------------------------------------------
+# Commands
+# -------------------------------------------------------------------------
+case ARGV[0]
+when 'build'
+  args = ARGV[1..] || []
+  output = nil
+  opt_level = 'ReleaseFast'
+
+  # Parse build flags
+  remaining = []
+  i = 0
+  while i < args.length
+    case args[i]
+    when '-o'
+      output = args[i + 1]
+      error "-o requires an output path" unless output
+      i += 2
+    when '--release'
+      opt_level = 'ReleaseFast'
+      i += 1
+    when '--safe'
+      opt_level = 'ReleaseSafe'
+      i += 1
+    else
+      remaining << args[i]
+      i += 1
+    end
+  end
+
+  source = remaining.first
+  error "Usage: clear build <file.cht> [-o output] [--release|--safe]" unless source
+
+  do_build(source, output: output, opt_level: opt_level)
+  output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
+  puts "Built: #{output_path}"
+
+when 'run'
+  # Split on -- for pass-through args
+  idx = ARGV.index('--')
+  if idx
+    clear_args = ARGV[1...idx]
+    run_args = ARGV[(idx + 1)..]
+  else
+    clear_args = ARGV[1..] || []
+    run_args = []
+  end
+
+  source = clear_args.first
+  error "Usage: clear run <file.cht> [-- args...]" unless source
+
+  source = File.expand_path(source)
+  output = File.join(File.dirname(source), File.basename(source, '.cht'))
+  do_build(source, output: output)
+
+  # Hints
+  unless ENV['CLEAR_THREADS']
+    hint "set CLEAR_THREADS=0 for multi-threaded fiber runtime"
+  end
+  unless find_alloc_preload
+    hint "install libjemalloc-dev for better allocator performance"
+  end
+
+  # Run
+  preload = find_alloc_preload
+  env = preload ? "LD_PRELOAD=#{preload} " : ""
+  cmd = "#{env}#{output} #{run_args.join(' ')}".strip
+  exec(cmd)
+
+when 'test'
+  source = ARGV[1]
+  error "Usage: clear test <file.cht>" unless source
+
+  output = do_build(source, module_mode: true)
+  puts output unless output.strip.empty?
+
+when 'help', '--help', '-h', nil
+  puts <<~HELP
+    CLEAR Language Compiler
+
+    Usage:
+      clear build <file.cht> [-o output] [--release|--safe]
+      clear run <file.cht> [-- args...]
+      clear test <file.cht>
+
+    Commands:
+      build    Transpile and compile a CLEAR program to a native binary
+      run      Build and execute a CLEAR program
+      test     Build and run tests (uses module test harness)
+
+    Build flags:
+      -o PATH       Output binary path (default: same dir as source)
+      --release     Optimize for speed (default, -O ReleaseFast)
+      --safe        Include safety checks (-O ReleaseSafe)
+
+    Environment:
+      CLEAR_THREADS  Number of scheduler threads (0 = auto, 1 = single)
+
+    See docs/clear-man.md for full documentation.
+  HELP
+
+else
+  error "Unknown command: #{ARGV[0]}. Run 'clear help' for usage."
+end
