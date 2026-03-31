@@ -36,6 +36,10 @@ module OwnershipGenerator
     if type_info&.pool?
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
+    # @set backing hashmap is heap-allocated; auto-deinit.
+    if type_info&.set_collection?
+      return "defer #{name}.deinit(rt.heapAlloc());\n"
+    end
 
     # Sharded/striped maps: shared across fibers, use heapAlloc for keys and buckets.
     if type_info&.map? && (type_info&.sharded? || type_info&.striped?)

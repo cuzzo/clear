@@ -1,0 +1,74 @@
+-- Test: @set collection type
+
+-- Test 1: basic string set
+FN test_string_set() RETURNS Void ->
+    MUTABLE s: String[]@set = Set[];
+
+    s.insert("hello");
+    s.insert("world");
+    s.insert("hello");
+
+    ASSERT s.count() == 2_i64, "set should have 2 unique items";
+    ASSERT s.contains?("hello"), "set should contain hello";
+    ASSERT s.contains?("world"), "set should contain world";
+
+    s.remove("hello");
+    ASSERT s.count() == 1_i64, "set should have 1 item after remove";
+    ASSERT s.contains?("hello") == FALSE, "hello should be removed";
+    ASSERT s.contains?("world"), "world should still be present";
+
+    RETURN;
+END
+
+-- Test 2: numeric set (Int64)
+FN test_numeric_set() RETURNS Void ->
+    MUTABLE ids: Int64[]@set = Set[];
+
+    ids.insert(10_i64);
+    ids.insert(20_i64);
+    ids.insert(30_i64);
+    ids.insert(10_i64);
+
+    ASSERT ids.count() == 3_i64, "numeric set should have 3 unique items";
+    ASSERT ids.contains?(20_i64), "set should contain 20";
+    ASSERT ids.contains?(99_i64) == FALSE, "set should not contain 99";
+
+    ids.remove(20_i64);
+    ASSERT ids.count() == 2_i64, "set should have 2 items after remove";
+
+    RETURN;
+END
+
+-- Test 3: empty set operations
+FN test_empty_set() RETURNS Void ->
+    MUTABLE s: String[]@set = Set[];
+
+    ASSERT s.count() == 0_i64, "empty set should have count 0";
+    ASSERT s.contains?("anything") == FALSE, "empty set contains nothing";
+
+    s.remove("nonexistent");
+    ASSERT s.count() == 0_i64, "remove from empty set is a no-op";
+
+    RETURN;
+END
+
+-- Test 4: set in a loop
+FN test_set_in_loop() RETURNS Void ->
+    MUTABLE s: Int64[]@set = Set[];
+
+    FOR i IN (0_i64 ..< 100_i64) DO
+        s.insert(i MOD 10_i64);
+    END
+
+    ASSERT s.count() == 10_i64, "set should have 10 unique values (0-9)";
+
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    test_string_set();
+    test_numeric_set();
+    test_empty_set();
+    test_set_in_loop();
+    RETURN;
+END
