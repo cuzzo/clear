@@ -2761,7 +2761,8 @@ private
   end
 
   def task_config_zig(stack_size, pinned: false)
-    variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")
+    default = @default_stack_size || "Standard"
+    variant = stack_size ? STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default) : default
     if pinned
       ".{ .stack_size = .#{variant}, .pinned = true }"
     else
@@ -3083,6 +3084,9 @@ if __FILE__ == $0
     opts.on('--use-c-allocator', 'Use the C allocator (jemalloc/mimalloc) instead of GPA') do
       options[:use_c_allocator] = true
     end
+    opts.on('--default-stack SIZE', 'Default fiber stack size (Standard, Large, Xl)') do |s|
+      options[:default_stack_size] = s
+    end
   end.parse!
 
   script_file = ARGV.first
@@ -3090,6 +3094,7 @@ if __FILE__ == $0
     code       = File.read(script_file)
     source_dir = File.dirname(File.expand_path(script_file))
     transpiler = ZigTranspiler.new
+    transpiler.instance_variable_set(:@default_stack_size, options[:default_stack_size]) if options[:default_stack_size]
 
     case options[:mode]
     when :module

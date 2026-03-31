@@ -47,7 +47,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -58,6 +58,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Transpile
   transpile_flag = module_mode ? '--test' : ''
+  transpile_flag += " --default-stack #{default_stack}" if default_stack
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(ZIG_DIR, tmp_name)
 
@@ -169,7 +170,8 @@ when 'build'
   source = remaining.first
   error "Usage: clear build <file.cht> [-o output] [--release|--safe]" unless source
 
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags)
+  default_stack = (opt_level == 'Debug') ? 'Large' : nil
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   puts "Built: #{output_path}"
 
