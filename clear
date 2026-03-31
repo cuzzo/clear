@@ -209,10 +209,20 @@ when 'run'
 
 when 'test'
   source = ARGV[1]
-  error "Usage: clear test <file.cht>" unless source
+  error "Usage: clear test <file.cht|directory>" unless source
 
-  output = do_build(source, module_mode: true)
-  puts output unless output.strip.empty?
+  if File.directory?(source)
+    # Directory mode: generate all-tests.zig and run via zig test (like gen.rb)
+    gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
+    puts "Generating tests..."
+    system("ruby #{gen_script}")
+    puts "Running tests..."
+    success = system("cd #{ZIG_DIR} && #{ZIG} test all-tests.zig -lc switch.S onRoot.S")
+    exit(success ? 0 : 1)
+  else
+    output = do_build(source, module_mode: true)
+    puts output unless output.strip.empty?
+  end
 
 when 'help', '--help', '-h', nil
   puts <<~HELP
@@ -221,7 +231,8 @@ when 'help', '--help', '-h', nil
     Usage:
       clear build <file.cht> [-o output] [--optimized|--safe|--debug]
       clear run <file.cht> [-- args...]
-      clear test <file.cht>
+      clear test <file.cht>         Test a single file
+      clear test <directory>        Test all .cht files in directory
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
