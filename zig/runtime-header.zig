@@ -2165,7 +2165,12 @@ pub const CheatLib = struct {
             ownership_init: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
             pub fn shardIndex(key: []const u8) usize {
-                return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
+                return @as(usize, std.hash_map.hashString(key)) % N;
+            }
+
+            pub fn shardIndexWithHash(key: []const u8) struct { shard: usize, hash: u64 } {
+                const h = std.hash_map.hashString(key);
+                return .{ .shard = @as(usize, h) % N, .hash = h };
             }
 
             /// Initialize shard-to-scheduler ownership mapping.
@@ -2346,6 +2351,37 @@ pub const CheatLib = struct {
                     if (comptime is_slice_value) alloc.free(safe_val);
                     return e;
                 };
+            }
+
+            /// Insert using a pre-computed hash. The hash MUST have been computed
+            /// by shardIndexWithHash (Wyhash) — the same function StringHashMap uses.
+            /// Skips rehashing the key, saving ~50% of hash work in SHARD pipelines.
+            pub fn putPrehashed(self: *Self, shard: usize, precomputed_hash: u64, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const owned_key = try alloc.dupe(u8, key);
+                const safe_val = if (comptime is_slice_value)
+                    try alloc.dupe(@typeInfo(V).pointer.child, value)
+                else
+                    value;
+                const PrehashedCtx = struct {
+                    h: u64,
+                    pub fn hash(self_ctx: @This(), _: []const u8) u64 { return self_ctx.h; }
+                    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool { return std.mem.eql(u8, a, b); }
+                };
+                const gop = self.shards[shard].map.getOrPutAdapted(alloc, owned_key, PrehashedCtx{ .h = precomputed_hash }) catch |e| {
+                    alloc.free(owned_key);
+                    if (comptime is_slice_value) alloc.free(safe_val);
+                    return e;
+                };
+                if (gop.found_existing) {
+                    alloc.free(owned_key);
+                    if (comptime is_slice_value) {
+                        const old = gop.value_ptr.*;
+                        alloc.free(old);
+                    }
+                } else {
+                    gop.key_ptr.* = owned_key;
+                }
+                gop.value_ptr.* = safe_val;
             }
 
             pub fn getDirect(self: *Self, shard: usize, key: []const u8) ?V {

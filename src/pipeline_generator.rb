@@ -9,18 +9,20 @@ module PipelineGenerator
   # Save and restore all pipeline state around a block. Ensures that nested
   # pipeline visits (chained pipelines, SHARD bodies, etc.) don't leak state.
   # Any keyword argument overrides the corresponding state for the block's duration.
-  def with_pipeline_context(placeholder: nil, acc: nil, soa: :inherit, shard_map: nil, shard_idx: nil, shard_key: nil)
+  def with_pipeline_context(placeholder: nil, acc: nil, soa: :inherit, shard_map: nil, shard_idx: nil, shard_key: nil, shard_hash: nil)
     prev_placeholder = @placeholder_name
     prev_acc         = @acc_placeholder
     prev_shard_map   = @shard_direct_map
     prev_shard_idx   = @shard_direct_idx
     prev_shard_key   = @shard_direct_key
+    prev_shard_hash  = @shard_direct_hash
 
     @placeholder_name  = placeholder
     @acc_placeholder   = acc
     @shard_direct_map  = shard_map
     @shard_direct_idx  = shard_idx
     @shard_direct_key  = shard_key
+    @shard_direct_hash = shard_hash
 
     # SOA state: only save/restore when explicitly set (soa: true/false).
     # :inherit means "don't touch SOA" — lets inner visit_pipeline_expr's
@@ -40,6 +42,7 @@ module PipelineGenerator
     @shard_direct_map   = prev_shard_map
     @shard_direct_idx   = prev_shard_idx
     @shard_direct_key   = prev_shard_key
+    @shard_direct_hash  = prev_shard_hash
     if managing_soa
       @soa_rewrite_active = prev_soa_active
       @soa_needed_fields  = prev_soa_fields
@@ -1208,7 +1211,8 @@ module PipelineGenerator
       placeholder: "__sh#{id}_keys[__sh#{id}_ki]",
       shard_map: map_var_name,
       shard_idx: "ctx.shard_idx",
-      shard_key: "__sh#{id}_keys[__sh#{id}_ki]"
+      shard_key: "__sh#{id}_keys[__sh#{id}_ki]",
+      shard_hash: "ctx.hashes[__sh#{id}_ki]"
     ) do
       with_fiber_capture_map(captures) do
         each_op.body.map { |stmt|
@@ -1233,20 +1237,24 @@ module PipelineGenerator
           defer __sh#{id}_arena.deinit();
           const __sh#{id}_alloc = __sh#{id}_arena.allocator();
 
-          // Per-shard key queues (queue metadata uses c_allocator, keys use arena)
+          // Per-shard key + hash queues (route once, hash once)
           var __sh#{id}_queues: [__sh#{id}_N]std.ArrayListUnmanaged([]const u8) = undefined;
+          var __sh#{id}_hashes: [__sh#{id}_N]std.ArrayListUnmanaged(u64) = undefined;
           for (&__sh#{id}_queues) |*q| q.* = .{};
+          for (&__sh#{id}_hashes) |*h| h.* = .{};
           defer for (&__sh#{id}_queues) |*q| q.deinit(std.heap.c_allocator);
+          defer for (&__sh#{id}_hashes) |*h| h.deinit(std.heap.c_allocator);
 
-          // Route phase: hash each key, append to owning shard's queue.
+          // Route phase: hash each key ONCE, store hash + key for the owning shard.
           {
               var __sh#{id}_i: i64 = #{range_start};
               const __sh#{id}_end: i64 = #{range_end};
               while (__sh#{id}_i #{range_op} __sh#{id}_end) : (__sh#{id}_i += 1) {
                   const __sh#{id}_tmp_key = #{key_code};
                   const __sh#{id}_key = try __sh#{id}_alloc.dupe(u8, __sh#{id}_tmp_key);
-                  const __sh#{id}_sidx = @TypeOf(__sh#{id}_map.*).shardIndex(__sh#{id}_key);
-                  try __sh#{id}_queues[__sh#{id}_sidx].append(std.heap.c_allocator, __sh#{id}_key);
+                  const __sh#{id}_sh = @TypeOf(__sh#{id}_map.*).shardIndexWithHash(__sh#{id}_key);
+                  try __sh#{id}_queues[__sh#{id}_sh.shard].append(std.heap.c_allocator, __sh#{id}_key);
+                  try __sh#{id}_hashes[__sh#{id}_sh.shard].append(std.heap.c_allocator, __sh#{id}_sh.hash);
               }
           }
 
@@ -1255,6 +1263,7 @@ module PipelineGenerator
               wg: *CheatHeader.WaitGroup,
               map_ptr: *@TypeOf(__sh#{id}_map.*),
               keys: []const []const u8,
+              hashes: []const u64,
               shard_idx: usize,
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
@@ -1283,6 +1292,7 @@ module PipelineGenerator
                       .wg = &__sh#{id}_wg,
                       .map_ptr = __sh#{id}_map,
                       .keys = __sh#{id}_queues[__sh#{id}_si].items,
+                      .hashes = __sh#{id}_hashes[__sh#{id}_si].items,
                       .shard_idx = __sh#{id}_si,
                   };
                   // Submit to the scheduler that OWNS this shard

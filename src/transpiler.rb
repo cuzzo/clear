@@ -757,10 +757,10 @@ private
                  return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
                end
              else
-               # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing
-               # Key comes from the pre-routed queue, not recomputed from the body expression.
+               # Shard-direct: putPrehashed(shard_idx, hash, alloc, key, val) — zero rehash.
+               # Key + hash come from the pre-routed queue, computed once during routing.
                if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
-                 return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
+                 return "try #{map_ref}.putPrehashed(#{@shard_direct_idx}, #{@shard_direct_hash}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
                end
                # The map stores its own allocator from the first put — the allocator
                # passed here is captured by the map and used for all subsequent ops.
