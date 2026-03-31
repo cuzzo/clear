@@ -1247,6 +1247,69 @@ pub const CheatLib = struct {
     }
 
     // -------------------------------------------------------------------------
+    // Weak References (link / WeakRc / WeakArc)
+    // -------------------------------------------------------------------------
+
+    pub fn WeakRc(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            ctrl: *RcControlBlock(T),
+        };
+    }
+
+    pub fn rcDowngrade(comptime T: type, rc: Rc(T)) WeakRc(T) {
+        rc.ctrl.weak += 1;
+        return WeakRc(T){ .ctrl = rc.ctrl };
+    }
+
+    pub fn weakRcUpgrade(comptime T: type, weak: WeakRc(T)) ?Rc(T) {
+        if (weak.ctrl.strong == 0) return null;
+        weak.ctrl.strong += 1;
+        return Rc(T){ .ctrl = weak.ctrl };
+    }
+
+    pub fn weakRcRelease(comptime T: type, weak: WeakRc(T)) void {
+        weak.ctrl.weak -= 1;
+        if (weak.ctrl.weak == 0 and weak.ctrl.strong == 0) {
+            weak.ctrl.alloc.destroy(weak.ctrl);
+        }
+    }
+
+    pub fn WeakArc(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            ctrl: *ArcControlBlock(T),
+        };
+    }
+
+    pub fn arcDowngrade(comptime T: type, arc: Arc(T)) WeakArc(T) {
+        _ = arc.ctrl.weak.fetchAdd(1, .acquire);
+        return WeakArc(T){ .ctrl = arc.ctrl };
+    }
+
+    pub fn weakArcUpgrade(comptime T: type, weak: WeakArc(T)) ?Arc(T) {
+        // CAS loop: atomically increment strong if > 0
+        while (true) {
+            const strong = weak.ctrl.strong.load(.acquire);
+            if (strong == 0) return null;
+            if (weak.ctrl.strong.cmpxchgWeak(strong, strong + 1, .acquire, .monotonic)) |_| {
+                continue; // CAS failed, retry
+            } else {
+                return Arc(T){ .ctrl = weak.ctrl };
+            }
+        }
+    }
+
+    pub fn weakArcRelease(comptime T: type, weak: WeakArc(T)) void {
+        const prev = weak.ctrl.weak.fetchSub(1, .release);
+        if (prev == 1) {
+            if (weak.ctrl.strong.load(.acquire) == 0) {
+                weak.ctrl.alloc.destroy(weak.ctrl);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Mutex-Protected (locked / Locked)
     // -------------------------------------------------------------------------
 
