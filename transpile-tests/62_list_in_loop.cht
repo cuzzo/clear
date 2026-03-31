@@ -1,0 +1,17 @@
+-- Reproducer: build a string list, write to file, in a loop (no BG fiber).
+
+FN buildList(n: Int64) RETURNS String ->
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
+    RETURN join(parts, ",");
+END
+
+FN main() RETURNS Void ->
+    MUTABLE i: Int64 = 1;
+    WHILE i <= 10 DO
+        result = buildList(i * 10_i64);
+        writeFile("testdata/write_test_output.txt", result);
+        i += 1;
+    END
+    RETURN;
+END
