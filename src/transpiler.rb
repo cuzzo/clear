@@ -609,7 +609,7 @@ private
       rhs_ti = rhs_ident&.type_info
       rt_name = @do_rt_name || "rt"
 
-      @visiting_bind_value = true
+      @bind_value_node = node.value
       value_code = if node.full_type&.pool?
         # Pool: pre-allocate with fixed capacity via initCapacity.
         rt_name = @do_rt_name || "rt"
@@ -641,7 +641,7 @@ private
         visit(node.value)
       end
 
-      @visiting_bind_value = false
+      @bind_value_node = nil
 
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
@@ -680,9 +680,9 @@ private
         visit(proxy)
       else
         # Transpile as simple assignment
-        @visiting_bind_value = true
+        @bind_value_node = node.value
         value_str = visit(node.value)
-        @visiting_bind_value = false
+        @bind_value_node = nil
         move_logic = emit_move_suppression(node.value)
         "#{zig_safe_name(node.name)} = #{value_str}; #{move_logic}"
       end
@@ -1699,7 +1699,7 @@ private
 
         # Heap-promoted returns used as temporaries (not assigned to a variable)
         # must be captured with defer-free to prevent leaks.
-        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call && !@visiting_bind_value
+        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call && !node.equal?(@bind_value_node)
           @heap_temp_counter = (@heap_temp_counter || 0) + 1
           tmp = "__hpt_#{@heap_temp_counter}"
           @pending_heap_temps ||= []
@@ -2739,17 +2739,17 @@ private
       saved_temps = @pending_heap_temps
       @pending_heap_temps = []
       code = visit(stmt)
-      # Flush heap-promoted temporaries: emit const + defer free before the statement.
+      # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
+      # Uses the same emit_cleanup logic as VarDecl for correct type-specific cleanup.
       temps = @pending_heap_temps || []
       if temps.any?
         preamble = temps.map { |t|
-          cleanup = if t[:type_info]&.string?
-            "defer #{t[:rt]}.heapAlloc().free(#{t[:var]});"
-          else
-            # For structs/collections, use emit_cleanup pattern
-            "defer #{t[:rt]}.heapAlloc().free(#{t[:var]});"
-          end
-          "const #{t[:var]}: []const u8 = #{t[:call]};\n#{cleanup}"
+          ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
+          ti.heap_promoted = true
+          zig_t = ti.zig_type
+          proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, nil)
+          cleanup = emit_cleanup(t[:var], proxy)
+          "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
         code = "#{preamble}\n#{code}"
       end

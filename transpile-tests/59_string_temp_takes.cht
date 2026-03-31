@@ -1,0 +1,25 @@
+-- Test: heap-promoted string temporaries passed to functions.
+-- Verifies no double-free or use-after-free.
+
+FN buildStr(name: String) RETURNS String ->
+    RETURN "Hello, " + name + "!";
+END
+
+FN checkLength(s: String) RETURNS Int64 ->
+    RETURN s.length();
+END
+
+FN main() RETURNS Void ->
+    -- Temporary string passed as function argument
+    len = checkLength(buildStr("World"));
+    ASSERT len == 13_i64, "temp string passed to function";
+
+    -- Temporary string used in comparison
+    ASSERT buildStr("A") == "Hello, A!", "temp string in comparison";
+
+    -- Nested: temp string from function that takes a temp string
+    len2 = checkLength(buildStr("BB"));
+    ASSERT len2 == 10_i64, "nested temp string";
+
+    RETURN;
+END
