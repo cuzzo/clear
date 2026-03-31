@@ -717,7 +717,8 @@ class Type
       return 1 if schema.is_a?(Hash) && (schema[:kind] == :enum || schema[:kind] == :union || schema[:kind] == :resource)
       # Generic structs: treat as 1 slot (size depends on type args, unknown at this point)
       return 1 if schema.is_a?(Hash) && schema[:type_params]
-      return schema.values.sum { |t| Type.new(t).slot_size(resolver) }
+      # Only sum field entries (string keys). Skip metadata (symbol keys like :type_params, :extern_module).
+      return schema.select { |k, _| k.is_a?(String) }.values.sum { |t| Type.new(t).slot_size(resolver) }
     end
 
     1 # Default

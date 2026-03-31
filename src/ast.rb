@@ -352,12 +352,23 @@ module AST
   # RangeLit: a range expression (start..<end) or (start..<=end).
   # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
   RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
-  # ExternFnDecl: EXTERN FN name(params) RETURNS type [EFFECTS ALLOC] FROM "module"
+  # ExternFnDecl: EXTERN FN name<T>(params) RETURNS type [EFFECTS :alloc] FROM "module"
+  # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
-  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) { include Locatable }
-  # ExternStructDecl: EXTERN STRUCT Name { fields } FROM "module"
+  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) {
+    include Locatable
+    attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
+    attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
+    attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
+  }
+  # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
-  ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) { include Locatable }
+  # CLOSE registers the type as a resource with auto-defer cleanup (RAII).
+  ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) {
+    include Locatable
+    attr_accessor :type_params   # [:T, :U] for EXTERN STRUCT Name<T, U>
+    attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
+  }
   # EnumDef: ENUM Name { Variant1, Variant2, ... }
   # Declares a Zig enum type. variants is an Array of variant name strings.
   EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }

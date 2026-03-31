@@ -619,22 +619,70 @@ class Parser
 
   def parse_extern_fn(extern_tok)
     consume(:KEYWORD, 'FN')
-    name = consume(:VAR_ID).value
+
+    # Parse name: either "fnName", "fnName<T>", or "TypeName<T>.methodName"
+    owner_type = nil
+    owner_type_params = []
+    fn_type_params = []
+
+    if match?(:TYPE_ID)
+      # Could be TypeName<T>.method or just a TYPE_ID-named function
+      type_name = consume(:TYPE_ID).value
+      if match!(:CHAR, '<')
+        loop do
+          owner_type_params << consume(:TYPE_ID).value.to_sym
+          break unless match!(:CHAR, ',')
+        end
+        consume(:CHAR, '>')
+      end
+      if match!(:CHAR, '.')
+        # It's a method: TypeName<T>.methodName
+        owner_type = type_name
+        name = consume(:VAR_ID).value
+      else
+        # TYPE_ID without dot — treat as function name (unusual but valid)
+        name = type_name
+        fn_type_params = owner_type_params
+        owner_type_params = []
+      end
+    else
+      name = consume(:VAR_ID).value
+      # Optional generic type params on the function: fnName<T>
+      if match!(:CHAR, '<')
+        loop do
+          fn_type_params << consume(:TYPE_ID).value.to_sym
+          break unless match!(:CHAR, ',')
+        end
+        consume(:CHAR, '>')
+      end
+    end
+
     params = parse_argument_list
     return_type = match!(:KEYWORD, 'RETURNS') ? parse_type_annotation : nil
 
-    # Optional: EFFECTS :alloc, :other — declare side effects of the native fn.
-    # Accepted effects: :alloc (inject frame allocator as first native arg)
-    effects = Set.new
+    # Optional: EFFECTS :alloc:frame, :alloc:heap — declare side effects.
+    # :alloc:frame → inject rt.frameAlloc() for Alloc-typed parameters
+    # :alloc:heap  → inject rt.heapAlloc() for Alloc-typed parameters
+    # :alloc       → shorthand for :alloc:frame
+    effects = {}
     if match!(:KEYWORD, 'EFFECTS')
-      valid_effects = Set[:alloc]
       loop do
         consume(:CHAR, ':')
         eff_name = consume(:VAR_ID).value.to_sym
-        unless valid_effects.include?(eff_name)
-          error!(current, "Unknown effect ':#{eff_name}'. Valid effects: #{valid_effects.map { |e| ":#{e}" }.join(', ')}")
+        unless [:alloc].include?(eff_name)
+          error!(current, "Unknown effect ':#{eff_name}'. Valid effects: :alloc")
         end
-        effects << eff_name
+        # Check for :alloc:frame or :alloc:heap sub-qualifier
+        if eff_name == :alloc && match?(:CHAR, ':')
+          consume(:CHAR, ':')
+          qualifier = consume(:VAR_ID).value.to_sym
+          unless [:frame, :heap].include?(qualifier)
+            error!(current, "Unknown alloc qualifier ':#{qualifier}'. Use :alloc:frame or :alloc:heap")
+          end
+          effects[:alloc] = qualifier
+        else
+          effects[:alloc] = :frame  # default: frame allocator
+        end
         break unless match!(:CHAR, ',')
       end
     end
@@ -642,17 +690,43 @@ class Parser
     consume(:KEYWORD, 'FROM')
     from_module = consume(:STRING).value
     match!(:CHAR, ';')
-    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
+    node = AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
+    node.owner_type = owner_type if owner_type
+    node.owner_type_params = owner_type_params if owner_type_params.any?
+    node.fn_type_params = fn_type_params if fn_type_params.any?
+    node
   end
 
   def parse_extern_struct(extern_tok)
     consume(:KEYWORD, 'STRUCT')
     name = consume(:TYPE_ID).value
+
+    # Optional generic type params: EXTERN STRUCT Parsed<T> { ... }
+    type_params = []
+    if match!(:CHAR, '<')
+      loop do
+        type_params << consume(:TYPE_ID).value.to_sym
+        break unless match!(:CHAR, ',')
+      end
+      consume(:CHAR, '>')
+    end
+
+    # Fields can be empty: EXTERN STRUCT Opaque {} FROM "mod";
     fields = parse_struct_body
+
+    # Optional: CLOSE "method" — register cleanup method for RAII
+    close_method = nil
+    if match!(:KEYWORD, 'CLOSE')
+      close_method = consume(:STRING).value
+    end
+
     consume(:KEYWORD, 'FROM')
     from_module = consume(:STRING).value
     match!(:CHAR, ';')
-    AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
+    node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
+    node.type_params = type_params if type_params.any?
+    node.close_method = close_method
+    node
   end
 
   def parse_struct_def(visibility = :package)

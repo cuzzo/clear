@@ -257,16 +257,41 @@ private
       visibility: :pub,
       extern:     true,
       module_alias: node.from_module,
-      extern_effects: node.effects || Set.new
+      extern_effects: node.effects || {},
+      fn_type_params: node.fn_type_params || [],
+      owner_type: node.owner_type,
+      owner_type_params: node.owner_type_params || []
     }
+
+    if node.owner_type
+      # EXTERN FN TypeName<T>.method(...) — register as method on the type
+      type_sym = node.owner_type.to_sym
+      type_schema = current_scope.types[type_sym]&.dig(:schema)
+      if type_schema.is_a?(Hash)
+        type_schema[:methods] ||= {}
+        type_schema[:methods][node.name] = signature
+      end
+    else
+      # Free function — register in scope as before
+      current_scope.declare(node.name, nil, signature, false, false, nil, :static)
+    end
     node.full_type = :Void
-    current_scope.declare(node.name, nil, signature, false, false, nil, :static)
   end
 
-  # EXTERN STRUCT Name { fields } FROM "module"
+  # EXTERN STRUCT Name<T> { fields } [CLOSE "method"] FROM "module"
   # Registers a native Zig/C struct type for CLEAR type-checking.
+  # CLOSE makes it a resource type — auto-defer cleanup via RAII.
   def visit_ExternStructDecl(node)
     schema = node.fields.transform_keys(&:to_s).transform_values { |f| f[:type] }
+    type_params = node.respond_to?(:type_params) ? node.type_params : nil
+    schema[:type_params] = type_params if type_params&.any?
+    schema[:extern_module] = node.from_module
+
+    if node.close_method
+      schema[:kind] = :resource
+      schema[:close_zig] = "{0}.#{node.close_method}()"
+    end
+
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
@@ -1066,6 +1091,24 @@ private
 
     # Collection method dispatch (Pool/HashMap) via declarative registry.
     return if resolve_collection_method(node)
+
+    # EXTERN method dispatch: check if the object's type has EXTERN methods registered.
+    obj_type = node.object.type_info
+    if obj_type
+      resolved = obj_type.is_a?(Type) ? obj_type.resolved : obj_type.to_s.to_sym
+      # Check for generic instance: Parsed<MyDoc> → base type Parsed
+      base = obj_type.is_a?(Type) && obj_type.generic_instance? ? obj_type.generic_base : resolved
+      type_schema = current_scope.types[base]&.dig(:schema)
+      if type_schema.is_a?(Hash) && type_schema[:methods]&.key?(node.name)
+        method_sig = type_schema[:methods][node.name]
+        node.extern_call = true if node.respond_to?(:extern_call=)
+        node.extern_effects = method_sig[:extern_effects] if node.respond_to?(:extern_effects=) && method_sig[:extern_effects]
+        # Mark as extern method (not UFCS) — transpiler emits obj.method() not module.method(obj)
+        node.instance_variable_set(:@extern_method, true)
+        node.full_type = method_sig[:return]&.dig(:type) || :Void
+        return
+      end
+    end
 
     # Fall through to UFCS: obj.method(args) → method(obj, args)
     ufcs_args = [node.object] + node.args

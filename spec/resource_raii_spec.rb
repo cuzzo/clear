@@ -17,7 +17,7 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    expect(zig).to include("const f = try CheatLib.fileOpen")
+    expect(zig).to include("var f = try CheatLib.fileOpen")
     expect(zig).to include("var f_moved = false; _ = &f_moved;")
     expect(zig).to include("defer if (!f_moved) f.close();")
   end

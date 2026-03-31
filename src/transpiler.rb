@@ -529,6 +529,7 @@ private
       ft = Type.new(node.full_type || :Void)
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
       is_mutable ||= ft.collection?
+      is_mutable ||= ft.resource? || node.resource_close_zig  # Resources need var for defer deinit
       # @local pointers are always `const` — mutation goes through the pointer, not the binding.
       # Same as @locked: the pointer itself never changes, only the pointee.
       is_mutable = false if ft.local?
@@ -550,7 +551,7 @@ private
       end
       has_mutable_cleanup = ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
                             ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
-                            ft&.heap_promoted || ft&.resource? || struct_has_cleanup
+                            ft&.heap_promoted || ft&.resource? || node.resource_close_zig || struct_has_cleanup
       forced_var = is_mutable && has_mutable_cleanup
       keyword = if !is_mutable
         "const"
@@ -1485,6 +1486,14 @@ private
       result
 
     when AST::FuncCall, AST::MethodCall
+      # EXTERN method dispatch: obj.method() → direct method call (no UFCS, no module prefix)
+      if node.is_a?(AST::MethodCall) && node.instance_variable_get(:@extern_method)
+        obj_code = visit(node.object)
+        args_code = node.args.map { |a| visit(a) }.join(", ")
+        call = args_code.empty? ? "#{obj_code}.#{node.name}()" : "#{obj_code}.#{node.name}(#{args_code})"
+        return call
+      end
+
       # Pool method dispatch: pool.insert/get/remove bypass UFCS
       if node.is_a?(AST::MethodCall) && node.pool_method
         return transpile_pool_method(node)
@@ -1531,16 +1540,21 @@ private
         tid = @extern_trampoline_counter
 
         effects = node.extern_effects || Set.new
-        has_alloc = effects.include?(:alloc)
+        alloc_kind = effects.is_a?(Hash) ? effects[:alloc] : (effects.include?(:alloc) ? :frame : nil)
+        has_alloc = !!alloc_kind
         ret_type = node.full_type
         ret_type_obj = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type || :Void)
         is_error_union = ret_type_obj.error_union?
         inner_zig = is_error_union ? ret_type_obj.payload_type.zig_type : ret_type_obj.zig_type
         is_void = (inner_zig == "void")
 
-        # Build native call args: optionally inject allocator as first arg
+        # Build native call args: comptime type args first, then optional allocator, then regular args
         native_args = []
-        native_args << "#{rt_name}.frameAlloc()" if has_alloc
+        # Generic type args (comptime): parseFromSlice<MyDoc> → comptime first arg
+        if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
+          native_args += node.generic_type_args.map { |t| Type.new(t).zig_type }
+        end
+        native_args << "f.alloc" if has_alloc
         native_args += args_zig.each_with_index.map { |_, i| "f.a#{i}" }
         native_call = "#{mod_prefix}#{node.name}(#{native_args.join(', ')})"
         # If native returns error union, catch and store
@@ -1557,15 +1571,12 @@ private
         alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
         arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
 
-        # For EFFECTS Alloc, the trampoline needs rt.frameAlloc() passed as a field
-        # (rt isn't available inside the callconv(.c) wrapper)
-        if has_alloc
-          native_args_in_wrapper = ["f.alloc"] + args_zig.each_with_index.map { |_, i| "f.a#{i}" }
-          native_call = "#{mod_prefix}#{node.name}(#{native_args_in_wrapper.join(', ')})"
-          native_call = "(#{native_call} catch |err| { f.err = err; return; })" if is_error_union
-        end
-
-        alloc_init = has_alloc ? ", .alloc = #{rt_name}.frameAlloc()" : ""
+        alloc_zig = case alloc_kind
+                    when :frame then "#{rt_name}.frameAlloc()"
+                    when :heap  then "#{rt_name}.heapAlloc()"
+                    else nil
+                    end
+        alloc_init = has_alloc ? ", .alloc = #{alloc_zig}" : ""
         err_field = is_error_union ? "err: ?anyerror = null, " : ""
         err_check = is_error_union ? "if (__ext#{tid}_frame.err) |e| return e; " : ""
 
