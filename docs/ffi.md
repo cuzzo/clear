@@ -130,12 +130,61 @@ END
 | Struct field access | `doc.field`, `doc.data[i]`, `doc.data.length()` | Yes |
 | Slice iteration | `FOR i IN (0 ..< doc.data.length()) -> doc.data[i]` | Yes |
 
+## Local EXTERN STRUCT (no FROM)
+
+For defining Zig-compatible struct layouts without an external module:
+
+```clear-example
+-- Default options struct (empty -- Zig infers the type from context)
+EXTERN STRUCT ParseOptions {};
+
+-- Data shape for JSON deserialization
+EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
+```
+
+Local EXTERN STRUCTs emit Zig struct definitions in the transpiled output. Empty structs emit `.{}` for their literals, allowing Zig's type inference to provide default values.
+
+## Comptime Type Parameters
+
+Pass CLEAR types as comptime arguments to generic native functions:
+
+```clear-example
+EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions)
+    RETURNS !T EFFECTS :alloc:heap FROM "std.json";
+
+-- Usage: T is resolved to JsonRecord at compile time
+record = parseFromSliceLeaky(JsonRecord, content, ParseOptions{}) OR RAISE;
+```
+
+## Method Calls on EXTERN Structs
+
+Declare methods on EXTERN types for chained calls:
+
+```clear-example
+EXTERN STRUCT Dir {} FROM "std.fs";
+EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
+
+-- Chained call (both trampolined to g0)
+cwd().makePath("data");
+```
+
+## Dotted Module Paths
+
+Import from nested Zig modules using dotted paths:
+
+```clear-example
+-- FROM "std.json" emits @import("std").json
+EXTERN FN parseFromSliceLeaky<T>(...) FROM "std.json";
+
+-- FROM "std.fs" emits @import("std").fs
+EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+```
+
 ## What You Can't Import Yet
 
 | Pattern | Why not | Planned |
 |---------|---------|---------|
-| Generic types (`Parsed<T>`) | CLEAR has no generic EXTERN STRUCT yet | v0.1 |
-| Method calls (`doc.method()`) | No EXTERN method dispatch yet | v0.1 |
 | Callbacks (fn pointers to CLEAR) | One-way FFI only | v0.3 |
 | C header auto-parsing | Must write Zig wrapper | v0.2 |
 | Functions taking `*T` (pointer) | CLEAR passes by value | v0.2 |
