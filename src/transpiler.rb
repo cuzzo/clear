@@ -1699,7 +1699,11 @@ private
 
         # Heap-promoted returns used as temporaries (not assigned to a variable)
         # must be captured with defer-free to prevent leaks.
-        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call && !node.equal?(@bind_value_node)
+        # Skip temp hoisting when:
+        # - Direct bind value (VarDecl/BindExpr handles cleanup via emit_cleanup)
+        # - TAKES parameter (callee takes ownership, no caller cleanup needed)
+        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call &&
+           !node.equal?(@bind_value_node) && !node.was_moved
           @heap_temp_counter = (@heap_temp_counter || 0) + 1
           tmp = "__hpt_#{@heap_temp_counter}"
           @pending_heap_temps ||= []
@@ -2741,13 +2745,21 @@ private
       code = visit(stmt)
       # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
       # Uses the same emit_cleanup logic as VarDecl for correct type-specific cleanup.
+      # Resource types get their CLOSE method via the type schema.
       temps = @pending_heap_temps || []
       if temps.any?
         preamble = temps.map { |t|
           ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
           ti.heap_promoted = true
           zig_t = ti.zig_type
-          proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, nil)
+          # Look up resource CLOSE from type schema (same as resolve_resource_close)
+          resource_close = nil
+          resolved = ti.resolved
+          schema = (@struct_schemas || {})[resolved]
+          if schema.is_a?(Hash) && schema[:kind] == :resource
+            resource_close = schema[:close_zig]
+          end
+          proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, resource_close)
           cleanup = emit_cleanup(t[:var], proxy)
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
