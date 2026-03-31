@@ -75,7 +75,15 @@ END
 
 Rust & Go need to be combined to build the language of the future: one that can constantly leverage new and better architectures and run your code as fast as possible without you having to tell it *HOW* to do that exactly - like SQL code.
 
+### DECLARATIVE CONCURRENCY
+
+Concurrency is not hard.  We do it every day in SQL queries as effiently as possible.
+
+Concurrency is only hard when you have to do it yourself.  That's why CLEAR eliminates that need.
+
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
+
+### PROFILE GUIDED OPTIMIZATION
 
 In CLEAR, the compiler can tell when you're *probably* employing a bad strategy, and changing it is typically just a one-line fix, rather than a full-app rearchitecture.
 
@@ -156,7 +164,11 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
 
 Idiomatic CLEAR single-core performance vs *perfect* C code is typically 0-30% slower (in a fraction of the code).
 
+#### SINGLE CORE
+
 Idiomatic CLEAR multi-core performance is typically 0-10% slower than Rust/Tokio for non-pathological workloads. It typically outperforms Go, often significantly, using ~1/2 the peak memory (no garbage collector).
+
+#### MULTI CORE, NON-ADVERSARIAL
 
 In typical server workloads (benchmark 24: TCP JSON API), CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5%.
 
@@ -167,3 +179,12 @@ Benchmark 24 (10K GETs, 50 concurrent):
   CLEAR:       SET 1089ms  GET 21080ms
 ```
 
+NOTE: Rust/Tokio and CLEAR both use half as much memory as Go, and have noticably better p50 response times.
+
+#### MULTI CORE, ADVERSARIAL
+
+Go's runtime is a work of art. The optimization is truly incredible. In adversarial, pathological workloads, Go can substantially outperform both Rust/Tokio and CLEAR at the p99 level.
+
+In the v0.2 and v0.3 releases of CLEAR, this gap should close considerably.
+
+NOTE: In the most *extreme* adversarial workloads, CLEAR is unlikely to outperform Go at the p99 level in a reasonable timeline.
