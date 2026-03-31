@@ -166,12 +166,12 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
 
 CLEAR's numeric HashMap outperforms hand-optimized C with FNV-1a hashing. CLEAR uses Zig's AutoHashMap with frame-arena allocation - zero GPA calls in the hot path.
 
-```
-C (string key, FNV-1a):      ~350 ms   (1.0x baseline)
-C (f64 key, bit-cast):       ~200 ms   (0.57x)
-CLEAR (string key, frame):   ~735 ms   (2.1x)
-CLEAR (numeric i64 key):     ~168 ms   (0.48x -- faster than C)
-```
+| Language | Variant | Insert | Lookup | Total | vs C String |
+|----------|---------|--------|--------|-------|-------------|
+| C | string key, FNV-1a | ~180 ms | ~170 ms | ~350 ms | 1.0x (baseline) |
+| C | f64 key, bit-cast | ~130 ms | ~70 ms | ~200 ms | 0.57x |
+| CLEAR | string key, frame | ~580 ms | ~155 ms | ~735 ms | 2.1x |
+| CLEAR | numeric i64 key | ~110 ms | ~58 ms | ~168 ms | **0.48x** |
 
 Idiomatic CLEAR single-core performance vs hand-optimized C is typically 0-30% slower for string workloads, and competitive or faster for numeric workloads.
 
@@ -179,31 +179,34 @@ Idiomatic CLEAR single-core performance vs hand-optimized C is typically 0-30% s
 
 CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5% for typical server workloads. CLEAR and Rust use roughly half the peak memory of Go (no garbage collector).
 
-```
-Benchmark 24 (10K GETs, 50 concurrent, all verified):
-  Rust/Tokio:  SET 1292ms  GET 20830ms
-  Go:          SET 1252ms  GET 20393ms
-  CLEAR:       SET 1089ms  GET 21080ms
-```
+| Server | SET (ms) | GET (ms) | Verified |
+|--------|----------|----------|----------|
+| Rust/Tokio | 1292 | 20830 | 10000/10000 |
+| Go | 1252 | 20393 | 10000/10000 |
+| **CLEAR** | **1089** | 21080 | 10000/10000 |
+
+*10K GETs, 50 concurrent connections, all verified.*
 
 #### Multi-Core, Adversarial (Benchmark 25: Pathological Workloads)
 
 Benchmark 25 tests scheduler fairness under adversarial load using iterated SHA256 hashing. Three phases: uniform (all equal), skewed (1% of requests 1000x heavier), and adversarial (one connection does all heavy work).
 
-```
-Benchmark 25 -- Phase 2: Skewed (1% heavy, 2500 requests):
-  Rust/Tokio:  p50 8.8ms   p99 795ms    p99.9 1144ms
-  Go:          p50 5.4ms   p99 976ms    p99.9 1345ms
-  CLEAR:       p50 2.0ms   p99 1611ms   p99.9 2890ms
+**Phase 2: Skewed (1% heavy, 2500 requests, 25 concurrent)**
 
-Benchmark 25 -- Phase 3: Adversarial (1 heavy connection):
-  Rust/Tokio:  p50 3.3ms   p99 744ms    p99.9 1046ms
-  Go:          p50 2.7ms   p99 732ms    p99.9 808ms
-  CLEAR:       p50 6.9ms   p99 848ms    p99.9 1075ms
-```
+| Server | p50 | p99 | p99.9 |
+|--------|-----|-----|-------|
+| Rust/Tokio | 8.8 ms | 795 ms | 1144 ms |
+| Go | 5.4 ms | 976 ms | 1345 ms |
+| CLEAR | **2.0 ms** | 1611 ms | 2890 ms |
 
-CLEAR's cooperative scheduling shows higher tail latency under skewed load - heavy EXTERN FN calls (SHA256 loop) don't yield mid-computation. Go's preemptive goroutine scheduling handles this best at p99.9.
+**Phase 3: Adversarial (1 heavy connection, 2500 requests, 25 concurrent)**
 
-CLEAR's p50 is competitive or better (the common case is fast). The gap is at the tail - v0.2 aims to close this with yield injection for compute-heavy EXTERN calls.
+| Server | p50 | p99 | p99.9 |
+|--------|-----|-----|-------|
+| Rust/Tokio | 3.3 ms | 744 ms | 1046 ms |
+| Go | 2.7 ms | **732 ms** | **808 ms** |
+| CLEAR | 6.9 ms | 848 ms | 1075 ms |
 
-NOTE: In the most *extreme* adversarial workloads, CLEAR is unlikely to outperform Go at the p99 level in a reasonable timeline.
+CLEAR's p50 is competitive or better (the common case is fast). The gap is at the tail - heavy EXTERN FN calls (SHA256 loop) don't yield mid-computation. Go's preemptive goroutine scheduling handles adversarial workloads best at p99.9.
+
+v0.2 aims to close this gap with yield injection for compute-heavy EXTERN calls.
