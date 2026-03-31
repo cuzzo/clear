@@ -1,6 +1,12 @@
 # CLEAR Language Walkthrough
 
-This guide showcases CLEAR: a memory-safe language that combines the ergonomics of scripting with the safety of affine types and the performance of arena-based memory.
+This guide showcases CLEAR: a memory-safe language with raw speed that approaches Rust and Perfect C, and with throughput that matches Go in all but the most pathological cases.
+
+It achieves this while having a substantially simpler syntax and type system than Swift or Go or TypeScript.
+
+It does this by acting like a SQL engine. You describe your intent, and CLEAR gives you best-in-class allocation, syncronization, and core-utilization by default.
+
+Like a query engine, it can warn you when you're doing something likely inefficient.
 
 ## 1. Immutability & Mutability
 
@@ -191,7 +197,7 @@ BG {
     }
 }
 
--- Note: Functions still take the plain Type (Int64), making business 
+-- Note: Functions still take the plain Type (Int64), making business
 -- logic decoupled from the synchronization strategy.
 ```
 
@@ -212,7 +218,7 @@ BG {
 MUTABLE users: User[100]@pool:sharded(4) = [];      -- OKAY
 MUTABLE logs: String[]@list:sharded(2) = [];        -- OKAY
 
--- Note: Sharding provides peak throughput but carries a risk of 
+-- Note: Sharding provides peak throughput but carries a risk of
 -- data skew if keys/items are not uniformly distributed.
 ```
 
@@ -236,8 +242,8 @@ MUTABLE items: Int64[]@list = [];                   -- OKAY: Empty list literal
 MUTABLE names: String[] = List[];                   -- OKAY: Explicit List initializer
 
 -- 3. Generational Pool
--- Pools provide peak cache locality and stable handles. Switching from 
--- List to @pool:soa (Structure of Arrays) is a one-line refactor for 
+-- Pools provide peak cache locality and stable handles. Switching from
+-- List to @pool:soa (Structure of Arrays) is a one-line refactor for
 -- massive performance gains.
 -- See: [benchmarks/22_pool_vs_multiowned/](benchmarks/22_pool_vs_multiowned/)
 MUTABLE users: User[100]@pool = [];                 -- OKAY: Empty pool literal
@@ -245,7 +251,7 @@ MUTABLE entities: Entity[50] = Pool[];              -- OKAY: Explicit Pool initi
 
 id = users.insert(User{ name: "Alice" });           -- OKAY: Returns generational handle
 
--- Note: Unlike Arrays/Lists, Pools require access handling because 
+-- Note: Unlike Arrays/Lists, Pools require access handling because
 -- .get(id) returns an optional (?T) to account for stale handles.
 user = users.get(id) OR RAISE;                      -- OKAY
 ```
@@ -298,9 +304,9 @@ END
 
 FN main() RETURNS Void ->
     msg = "Hello";                                  -- OKAY
-    
+
     process(GIVE msg);                              -- OKAY: Transfer ownership
-    
+
     print(msg);                                     -- COMPILER ERROR: Use after move
     RETURN;
 END
@@ -333,6 +339,6 @@ EXTERN STRUCT Vec2 { x: Float64, y: Float64 };      -- OKAY
 -- Call a native function from a Zig module
 EXTERN FN computeDistance(v: Vec2) RETURNS Float64 FROM "math_native"; -- OKAY
 
--- Showcase: See benchmarks/24_json_api/ for high-performance 
+-- Showcase: See benchmarks/24_json_api/ for high-performance
 -- direct std.json FFI integration via EXTERN FN.
 ```
