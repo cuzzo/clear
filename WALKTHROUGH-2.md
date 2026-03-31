@@ -106,34 +106,40 @@ END
 
 ## 6. Higher-Order Functions & Error Handling
 
-CLEAR excels at high-throughput data processing via functional pipelines. Anonymous functions use the `%` sigil.
+CLEAR supports powerful functional pipelines via the Smooth operator `s>`.
 
 ```clear
--- Pipelines using s> (Smooth / safe) or |> (Standard)
-alive = entities s> WHERE _.health > 0;             -- OKAY: Filter
-total = scores s> SUM _.value;                      -- OKAY: Aggregate
-names = users s> SELECT _.name;                     -- OKAY: Transform
+-- 1. Pipelines: Filter, Aggregate, Transform
+alive = entities s> WHERE _.health > 0;             -- OKAY
+total = scores s> SUM _.value;                      -- OKAY
+names = users s> SELECT _.name;                     -- OKAY
 
--- In-place mutation
-entities s> EACH { _.x = _.x + _.vx; };             -- OKAY: Side effects
+-- 2. Function Piping & In-place Mutation
+result = data s> process s> validate s> format;     -- OKAY
+entities s> EACH { _.x = _.x + _.vx; };             -- OKAY
 
--- Explicit anonymous function (lambda): %(args) -> body
-doubled = numbers |> SELECT %(n) -> n * 2;          -- OKAY
+-- 3. Error Handling: Inline OR ELSE / OR RAISE
+val = parseInt("abc") OR ELSE 0;                    -- OKAY: Fallback value
+content = readFile("config.json") OR RAISE;         -- OKAY: Explicit propagation
 
--- Inline Error Handling: Provide a default or propagate
-val = parseInt("abc") OR ELSE 0;                    -- OKAY
-content = readFile("config.json") OR RAISE;         -- OKAY
-
--- Handle errors at the bottom of a function
+-- 4. Function-level CATCH
 FN main() RETURNS Void ->
     result = loadConfig("config.json") OR RAISE;
     print("Config: ${result}");
     RETURN;
-CATCH e                                             -- OKAY: Error handler
+CATCH e                                             -- OKAY: Handles any raised error
     print("Failed to load: ${e}");
     RETURN;
 END
 ```
+
+| Category | Operators |
+|---|---|
+| **Transform** | `SELECT`, `WHERE`, `ORDER_BY`, `LIMIT`, `DISTINCT`, `UNNEST`, `INDEX` |
+| **Aggregate** | `SUM`, `AVERAGE`, `MIN`, `MAX`, `REDUCE`, `COUNT`, `ANY`, `ALL`, `FIND` |
+| **Side Effects** | `EACH` |
+
+See [docs/pipelines.md#operators](docs/pipelines.md#operators) for a full list of higher-order function operators.
 
 ## 7. Time as Tense (~T)
 
@@ -191,19 +197,23 @@ BG {
 
 ## 9. Sharded Shared-Nothing Architecture
 
-The `@shard` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
+Sharded collections partition data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
 
 ```clear
--- A sharded map distributes keys across thread-local heaps
-MUTABLE registry: String{Int64}@shard = {};         -- OKAY
+-- A sharded map distributes keys across independent thread-local heaps
+MUTABLE registry: HashMap<Int64>@sharded(8) = {};   -- OKAY
 
 -- CLEAR automatically pins this fiber to the correct shard
 BG {
     registry["key"] = 42;                           -- OKAY
 }
 
+-- Sharding is also available for Pools and Lists
+MUTABLE users: User[100]@pool:sharded(4) = [];      -- OKAY
+MUTABLE logs: String[]@list:sharded(2) = [];        -- OKAY
+
 -- Note: Sharding provides peak throughput but carries a risk of 
--- data skew if keys are not uniformly distributed.
+-- data skew if keys/items are not uniformly distributed.
 ```
 
 ## 10. Collections: Array, List, and Pool
