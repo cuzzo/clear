@@ -10,20 +10,18 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ```bash
 # --- clear CLI (preferred) ---
-./clear build foo.cht                # Build a CLEAR program -> ./foo
+./clear build foo.cht                # Default: Zig backend, ~2s, safety checks, 64KB stacks
 ./clear build foo.cht -o bin/app     # Custom output path
-./clear build foo.cht --safe         # With bounds/overflow checks
+./clear build foo.cht --optimized    # LLVM backend, -O ReleaseFast (~22s, 16KB stacks)
+./clear build foo.cht --safe         # LLVM backend, -O ReleaseSafe (~28s, safety + optimization)
 ./clear run foo.cht                  # Build + execute
 ./clear run foo.cht -- --port 8080   # Pass args to program
-./clear test foo.cht                 # Test with leak detection (all 129 tests pass)
+./clear test foo.cht                 # Test single file with leak detection
+./clear test transpile-tests/        # Test all .cht files in directory (130 tests)
 
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
 bundle exec rspec                    # Run all Ruby specs (1343 examples)
-
-# Transpile-tests: generate + run all Zig integration tests
-ruby transpile-tests/gen.rb                              # Generates zig/all-tests.zig
-cd zig && zig test all-tests.zig -lc switch.S onRoot.S   # Run all 130 tests
 
 # Package integration test
 cd transpile-tests/module-integration && zig build test
@@ -32,11 +30,26 @@ cd transpile-tests/module-integration && zig build test
 cd transpile-tests/ffi-integration && zig build test
 ```
 
-Run **all three** test suites after making changes to the compiler:
+### Build Modes
+
+| Flag | Backend | Time | Safety | Stacks | Use |
+|------|---------|------|--------|--------|-----|
+| (default) | Zig x86 | ~2s | Bounds/overflow | 64KB | Development |
+| `--optimized` | LLVM | ~22s | None | 16KB | Benchmarks, deployment |
+| `--safe` | LLVM | ~28s | Bounds/overflow | 16KB | Debugging optimized builds |
+
+**NOTE**: The default build does NOT have stack-smash protection (`__morestack`). That
+requires the LLVM backend with the custom machine pass (not yet integrated into `clear`).
+Zig's safety checks (bounds, overflow, null) ARE enabled in the default build. The 64KB
+fiber stacks compensate for the larger stack frames that safety instrumentation produces.
+
+### Test Suites
+
+Run **all three** after making changes to the compiler:
 - **Ruby specs**: `bundle exec rspec` (1343 examples)
-- **transpile-tests**: 130 .cht files testing language features end-to-end
-- **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution
-- **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites
+- **transpile-tests**: `./clear test transpile-tests/` (130 tests)
+- **module-integration**: `cd transpile-tests/module-integration && zig build test`
+- **ffi-integration**: `cd transpile-tests/ffi-integration && zig build test`
 
 ## Benchmarks
 
