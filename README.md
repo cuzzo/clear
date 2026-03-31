@@ -162,13 +162,14 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
 
 ### Performance
 
-Idiomatic CLEAR single-core performance vs *perfect* C code is typically 0-30% slower (in a fraction of the code).
-
 #### SINGLE CORE
 
-Idiomatic CLEAR multi-core performance is typically 0-10% slower than Rust/Tokio for non-pathological workloads. It typically outperforms Go, often significantly, using ~1/2 the peak memory (no garbage collector).
+Idiomatic CLEAR single-core performance vs *perfect* C code is typically 0-30% slower (in a fraction of the code).
+
 
 #### MULTI CORE, NON-ADVERSARIAL
+
+Idiomatic CLEAR multi-core performance is typically 0-10% slower than Rust/Tokio for non-pathological workloads. It typically outperforms Go, often significantly, using ~1/2 the peak memory (no garbage collector).
 
 In typical server workloads (benchmark 24: TCP JSON API), CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5%.
 
