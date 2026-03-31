@@ -544,6 +544,26 @@ RSpec.describe SemanticAnnotator do
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("CheatLib.releaseFields(W, rt.heapAlloc(), w)")
       end
+
+      it "raises error when passing @link to function expecting plain type" do
+        src = 'STRUCT N { v: Int64 }
+              FN use(n: N) RETURNS Int64 -> RETURN n.v; END
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; use(w); RETURN; END'
+        expect { run(src) }.to raise_error(/Cannot pass @link variable.*RESOLVE it first/)
+      end
+
+      it "RESOLVE result has optional type, not @link" do
+        src = 'STRUCT N { v: Int64 }
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; ASSERT r != NIL, "ok"; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows passing @link to function expecting @link parameter" do
+        src = 'STRUCT N { v: Int64 }
+              FN check(w: N@link) RETURNS Void -> PASS END
+              FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; check(w); RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
     end
 
     # ------------------------------------------------------------------

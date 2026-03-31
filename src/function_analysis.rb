@@ -297,6 +297,15 @@ module FunctionAnalysis
         arg_node.was_moved = true
       end
 
+      # D0. @link arguments cannot be passed to functions expecting the plain type.
+      # The caller must RESOLVE the weak ref first.
+      arg_ti = arg_node.respond_to?(:type_info) ? arg_node.type_info : nil
+      param_type_obj = param[:type].is_a?(Type) ? param[:type] : nil
+      if arg_ti&.link? && !(param_type_obj&.link?)
+        arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
+        error!(arg_node, "Cannot pass @link variable '#{arg_name}' to parameter '#{param[:name]}' — RESOLVE it first to get an optional strong reference.")
+      end
+
       # D. Type Check
       expected = param[:type]
       actual = arg_node.resolved_type
