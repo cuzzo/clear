@@ -10,6 +10,10 @@ FN getLength(s: String) RETURNS Int64 ->
     RETURN s.length();
 END
 
+FN consumeString(TAKES s: String) RETURNS Int64 ->
+    RETURN s.length();
+END
+
 FN main() RETURNS Void ->
     -- 1. String temp assigned to variable (emit_cleanup handles it)
     a = buildGreeting("Alice");
@@ -22,12 +26,17 @@ FN main() RETURNS Void ->
     len = getLength(buildGreeting("C"));
     ASSERT len == 9_i64, "string temp as arg";
 
-    -- 4. Multiple temps in one statement (both get cleanup)
+    -- 4. GIVE to TAKES function (callee owns and cleans up)
+    MUTABLE tmp_s = buildGreeting("D");
+    len3 = consumeString(GIVE tmp_s);
+    ASSERT len3 == 9_i64, "GIVE to TAKES";
+
+    -- 5. Multiple temps in one statement (both get cleanup)
     ASSERT buildGreeting("X") == buildGreeting("X"), "two temps in one statement";
 
-    -- 5. Nested function calls with temps
-    len2 = getLength(buildGreeting("Hi"));
-    ASSERT len2 == 10_i64, "nested temp calls";
+    -- 6. Nested function calls with temps
+    len4 = getLength(buildGreeting("Hi"));
+    ASSERT len4 == 10_i64, "nested temp calls";
 
     -- 6. String temp in IF condition
     IF buildGreeting("Z") == "wrong" THEN

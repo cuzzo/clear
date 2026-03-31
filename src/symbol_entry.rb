@@ -7,7 +7,8 @@ class SymbolEntry
                 :invalid_reason, :resource, :close_zig, :read,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :state,          # Ownership state: :uninit, :live, :moved, :dropped
-                :ownership_kind  # :value, :collection, :affine, :resource, :rc, :sync
+                :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
+                :takes           # true if parameter declared with TAKES (callee owns)
 
   def initialize(reg:, type:, mutable:, storage:, sync: nil, rebindable: false,
                  size: 0, capabilities: Set.new, borrowed_paths: [],

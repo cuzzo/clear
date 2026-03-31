@@ -449,9 +449,11 @@ module FunctionAnalysis
       end
 
       current_scope.declare(
-        param[:name], nil, param[:type], param[:mutable], false, nil, :stack # TODO: param[:storage]
+        param[:name], nil, param[:type], param[:mutable], false, nil, :stack
       )
       current_scope.set_state(param[:name], :live)
+      # TAKES parameters own the data — force :affine so cleanup is emitted.
+      current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])
       param[:type]
     end

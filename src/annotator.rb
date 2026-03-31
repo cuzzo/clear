@@ -1417,6 +1417,9 @@ private
       :sync
     elsif type_obj.collection?
       :collection
+    elsif entry.takes
+      # TAKES parameters own the data — always affine so cleanup is emitted.
+      :affine
     elsif type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
       :value
     else

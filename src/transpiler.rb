@@ -502,9 +502,26 @@ private
         .map    { |name| "var #{name} = _m_#{name}; _ = &#{name};" }
         .join("\n    ")
 
+      # Emit cleanup for TAKES parameters that receive heap-promoted data.
+      # Only strings and resources need explicit cleanup — stack structs are value copies.
+      takes_cleanup = (node.deferred_drops || []).filter_map { |drop|
+        param_def = node.params.find { |p| p[:name] == drop[:name] }
+        next unless param_def&.dig(:takes)
+        ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
+        # Only emit cleanup for types that have heap-allocated data to free.
+        schema = (@struct_schemas || {})[ti.resolved]
+        is_resource = schema.is_a?(Hash) && schema[:kind] == :resource
+        next unless ti.string? || is_resource
+        ti.heap_promoted = true
+        proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, nil)
+        proxy.resource_close_zig = schema[:close_zig] if is_resource
+        emit_cleanup(drop[:name], proxy)
+      }.reject(&:empty?).join("\n    ")
+
       prologue_parts = [prologue,
                         param_suppressions.empty? ? nil : param_suppressions,
-                        mutable_param_shadows.empty? ? nil : mutable_param_shadows].compact
+                        mutable_param_shadows.empty? ? nil : mutable_param_shadows,
+                        takes_cleanup.empty? ? nil : takes_cleanup].compact
       prologue = prologue_parts.join("\n    ")
       body = transpile_block(node.body)
       @transpiler_context_stack.pop
