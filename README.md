@@ -34,391 +34,7 @@ It runs on a Go-like Runtime (the CHEAT runtime) that makes concurrent code as e
 * Making things Strictly-Correct, once Business-Logic correct, should be easy.
 * Making things *BLAZING* fast, once Strictly-Correct, should be easy.
 
-## OPINIONS
-
-1. Boiler Plate is bad.
-2. Understandable code is king.
-   * The easier it is to *UNDERSTAND* code, the more likely it is to arrive at a correct state.
-   * Understanding what a function is *supposed* to do should not be bogged down by it's error handling logic.
-     * Like test code, error handling code should be separate as much as possible.
-     * Read it as an addendum IFF you care.
-   * Implicit behavior / magic *can* make things *harder* to understand.
-3. You should be able to test anything, and it should be EASY.
-   * There should be ZERO test code in production code.
-     * Java @visibleForTesting is nice, but it shouldn't be necessary at all.
-   * The easier it is to write tests, the more likely you are to actually arrive at working code.
-4. Handling Errors should "just work".
-   * You should not always have to `checkOk`.
-     * We can *assume* okay, and look to the bottom to see what happens when not okay, if we ever care.
-   * The easier it is to handle errors, the more likely you are to handle them correctly!
-5. If your code compiles in `STRICT` mode, it will not produce a Run-time Error unless the system explicitly encounters a resource boundary, or the program executes an operation whose inputs are logically impossible to resolve correctly.
-   * TODO: Investigate Type Coercion Failure claims.
-     * Currently not implemented, but on the roadmap.
-   * TODO: Investigate claims of all errors being handled *somewhere*.
-6. Compiler errors should tell you *exactly* what's wrong, how to fix it, and be easy to understand.
-7. Types should be your friend, helping you write working code *faster*, not an enemy that is constantly slowing you down.
-8. 90% of your time should be spent writing the code you need, and 10% debugging, handling errors, fighting compilers - not the other way around.
-9. Writing efficient code should be the default, and the default should be easy.
-   * Writing ineffiecent code should be *obviously* wrong.
-10. Anything that *can* be 1-line *should* be!
-    * Readability and understandability beat cleverness -- unless direly critical to performance.
-    * The constructs and syntax of a language should lend itself to one-liners, as they are often easier to *UNDERSTAND*.
-11. Code should be as declaractive as possible.
-    * Every function should look like a clean chain of exactly what it *should* be doing.
-      * It should not look like a nested mess of *how* it's handling errors and undesirable states.
-        * Though it *MUST* have the capability to do that.
-12. You should not need to worry about memory management OR a garbage collector.
-    * Unless you're a rocket scientist, the right compiler can figure it out better than you can.
-    * A good SQL engine beats all but the absolute most elite programmers.
-    * A good compiler can also take an easy language and beat all but the most elite programmers (see LuaJIT).
-    * CLEAR *does* ask you think about *WHERE* an object lives.
-      * Cache locality is literally 100x faster. If you wrote something cache-locality optimized in Ruby, it would crush a pointer cache miss in C.
-      * Therefore, CLEAR is designed around making it as easy as possible to ensure you DON'T cache miss unless you absolutely must.
-        * This means you do need to think about if you want something on the STACK (default, fast) or the HEAP (slow, but sometimes required).
-13. You should not need to worry about a Global-Interpreter-Lock (GIL).
-    * Code *should* be able to run in parallel or concurrently *EFFICIENTLY* by default.
-14. Code should be as left-sided as possible.
-    * How many hours have *YOU* spent tracking down paren-syntax errors, figuring out which condition you're in, etc???
-    * Time spent figuring out *WHERE* you even are logically, is time wasted, that could be spent getting things done.
-15. Someone who doesn't know *CLEAR* should be able to look at *CLEAR* code and intuit what it does.
-16. Publicly-Exported APIs *SHOULD* have style-enforcements.
-    * At a minimum, if you're making a library, anyone should be able to understand the API.
-    * All `PUBLIC` functions *MUST* either *explicitly* `RAISE` an error OR handle all errors.
-      * All `PUBLIC` structs *MUST* either have a suitable default or `!!` suffix.
-        * All `PUBLIC` Union Types *MUST* be projectable for ease of use.
-17. Internal-code can be *Chill*-Correct.
-    * No interpretting errors because you have an unnused variable.
-    * No forbidding your code to run for a test because you didn't follow a covention, etc.
-    * Your code can fail because of `your` problems, but not becuase of your dependencies problems.
-      * `STRICT` mode compilation eliminates *Chill*-Correct and can guarantee you won't encounter virtually all preventable run-time errors.
-
-## Architecture
-
-**1. Arena-Based Memory & Isolation**
-  * CLEAR leverages affine types and Arena-based memory to give you near High-Frequency Trading standards of allocation with zero thought.
-  * Due to optimizing broadly for a fiber-runtime, there are cases when the stack could be better leveraged, but CLEAR chooses not to for large stack objects.
-
-**2. Deterministic Shared-Memory and a Declarative Concurrency Model**
-  * Parallelism is achieved via `BG/DO/CONCURRENT`, which creates isolated execution contexts.
-    * Rather than telling the code *how* to achieve fast speeds, you simply tell write the code that expresses your intent - the *what*.
-    * CLEAR provides one-line capability optimizations. Changing your app from an Arc/RwLock strategy suffering from syncronization bottle-necks to a shared-nothing architecture which can compete with Dragonfly DB can be a one-line change.
-  * Spawning a process creates a lightweight, isolated fiber / memory arena.
-
-**3. Implicit "Railway" Error Handling**
-  * CLEAR treats errors as data, but handles them via control flow.
-  * The `SMOOTH` operator `s>` (aka the `PIPE` or `||> ` in Elixir, etc) acts as a guard.
-    * It automatically bubbles errors down the chain, to be handled elsewhere, or allows them to be handled inline elegantly.
-  * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- making it always clear what's desired vs what's the fallback.
-  * *The Result:* No if [err != nil]() boilerplate. No [Pyramid of Doom](). No [checkOk]() clutter. No `if .nil?` everywhere.
-
-
-**4. A Type system that *just works***
-  * CLEAR is easy to write for beginners. The Type system is implicit, staying out-of-the-way by powerful Type inference.
-  * The compiler takes care of the confusing parts of the type system for you.
-  * *The Result:* If you can write code in JavaScript, Lua, Python, or Ruby - you can write blazing fast CLEAR code.
-
-**5. Fortress Architecture**
-  * All `PUBLIC` functions must return a single type with a suitable default - or explicitly error
-  * All `PUBLIC` structs must have a suitable default - or explicitly an error
-    * A `PUBLIC` function obviously cannot take a non-`PUBLIC` struct as an input.
-  * *The Result:* Guarantees that only *YOUR* code can cause run-time errors (or none if in `STRICT` mode).
-    * You can auto-gen tests for PUBLIC functions for all permutations of POSSIBLE unexpected inputs.
-      * This allows you to spot problems easily and arrive at robust, working code quickly.
-
-## WHO IS CLEAR *NOT* FOR
-
-CLEAR is opinionated. The specific optimizations that make it fast and safe for 99% of Business Logic make it extremely hostile to 1% of Architectural patterns.
-
-1. You are building a Pointer-Heavy Engine (like a Graph Database).
-  * CLEAR prevents Memory Leaks by forbidding reference cycles in `shared` objects (Shared A -> B, B -> A).
-  * If your architecture relies on a "Soup of Mutable Objects" where everything references everything else, CLEAR will fight you.
-  * *The Alternative:* Architect your data using IDs and centralized lookups (like a relational database), or use Rust/C++ for manual pointer management.
-
-2. You need to model Inherently Unsafe / Cyclic Relationships
-  * If your architecture relies on Rust-style "Weak Pointers" to manage reference cycles (A -> B -> A)
-     * OR if you need recursive fine-grained locking, and you are strictly managing memory and deadlock risks manually.
-  * CLEAR guarantees safety by forbidding these patterns entirely! They're rare!
-  * *The Alternative:* If you absolutely need a doubly-linked list or a cyclic graph with individual node locking, that is "Engine Code," not "Business Logic." Write that specific component in Zig (where you can manage the unsafe pointers yourself) and import it into CLEAR as a safe handle.
-
-## WHY CLEAR
-
-If you already know Logic (Javascript/Python), the only thing stopping you from writing System-Level code is Memory.
-
- * In Ruby/Python/JavaScript, Memory is "Magic."
- * In C, it's an incomprehensible arcana.
- * In CLEAR, Memory is "Physics."
-
-Here are the 9 Rules of Physics in CLEAR.
-
-### 1. Physics of change: `MUTABLE` vs `IMMUTABLE` (Default)
-
-In Ruby or Python, you can change the value of any variable by default (they behave as `MUTABLE`).
-
-```ruby
-name = "Bob"
-name = "Alice"
-```
-
-In CLEAR, binding a name for the first time creates an **immutable** variable. Reassigning it is a compiler error.
-
-```ruby
-name = "Bob";
-name = "Alice";             -- COMPILER ERROR! `name` is immutable.
-```
-
- * `x = value` = **READ** Only (immutable, no keyword needed).
- * `MUTABLE x = value` = **READ/WRITE**.
-
-**The "Gotcha":** If you want to modify a variable, it must be `MUTABLE`.
-
-```ruby
-MUTABLE name = "Bob";
-name = "Alice";             -- OK
-```
-
-### 2. Physics of SHAPE: TYPES
-
-In CLEAR, variables have types to ensure safety and speed.
-
-```ruby
-MUTABLE name = "Bob";
-name = 1;                   -- COMPILER ERROR: `name` is a String, cannot assign a Number.
-```
-
-### 3. Physics of Size: FIXED vs. DYNAMIC
-
-In CLEAR, you choose the physics you need.
-
- * **FIXED** Size: Optimized for speed and cache locality.
- * **DYNAMIC** Size: Grows indefinitely, but requires the Warehouse (HEAP).
-
-### 4. The Two Worlds: STACK vs. HEAP
-
-#### The STACK (Default)
-
-Think of this as your **Backpack**.
-
- * Pros: Instant access (L1 Cache). *Blazing* fast.
- * Cons: Itty-bitty space. Fixed size.
- * Behavior: When you finish a task (Function returns), you dump your backpack into the incinerator. Everything inside is gone. *POOF*.
-
-#### The HEAP
-
-Think of this as a **Warehouse**.
-
- * Pros: (nearly) Unlimited space. Can grow/shrink.
- * Cons: You have to drive there to get stuff (Slower).
-
-#### How to Choose
-
-In CLEAR, the compiler and runtime handle the physics of where data lives for you in 99% of cases. You don't need to use a sigil to choose between stack and heap.
-
- * `x = [1, 2]` → CLEAR decides the most efficient location.
- * `list = [1, 2, 3]` → This list is optimized for performance and safety.
-
-If you need to explicitly force an object onto the heap (e.g., for recursive structures or large buffers), you can use the `indirect` capability (similar to `Box` in Rust).
-
-```CLEAR
--- Recursive structures use 'indirect' to avoid infinite size on stack
-STRUCT Node {
-  value: Int64,
-  left: indirect Node,
-  left: indirect Node
-}
-```
-
-The "Gotcha": If you try to `.push!` or `.pop!` to a fixed-size array, the compiler will yell at you. It’s not being mean; it’s telling you that physics forbids it.
-
-```ruby
-x = [1, 2, 3];
--- ... do something, now I need to add to `x`, what do I do?
-x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
-```
-
-### 5. Physics of Capability: Capabilities vs Types
-
-In CLEAR, we separate **Types** from **Capabilities**.
-
-*   **Types** describe *what* the data is (e.g., `User`, `Account`).
-*   **Capabilities** describe *how* you access it (e.g., `shared`, `multiowned`, `alwaysMutable`).
-
-**The Rule:** Functions take **Types**, not **Capabilities**.
-
-### The CLEAR Model
-
-**Ownership:** Rc = `multiowned`, Arc = `shared`
-**Synchronization:** Mvcc = `shared:read`, RwLock = `shared:writeLocked`, Mutex = `shared:locked`
-**Future** -> `:actor` uses Object Actor Pattern combined with compiler aware SHARDING
-**Interior Mutability:** Cell, RefCell -> combined = `alwaysMutable`
-* Automatically acts like Cell for data under 16 bytes
-* `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
-**Existence:** Option, Result => not a capability -> a tense:
-* `T?` = Optional T
-* Unwrapped like in Rust and Zig with `.?`
-
-```CLEAR
-affUser = User.new();         -- creates `affine User` (default)
-a = affUser;                  -- OKAY, affine MOVE, affUser is dead
-b = affUser;                  -- Compiler error, affUser is dead
-
-sharedU = SHARE(User.new());  -- turns `affine User` into `shared User` (Arc)
-c = sharedU;                  -- OKAY, sharedU is not dead
-```
-
-#### Why it's superior: Zero Blast Radius Refactoring
-
-In Rust, capabilities like `Arc`, `Rc`, and `Mutex` infect function signatures. Changing from `Rc<User>` to `Arc<User>` forces a massive refactor because every function signature and call site must change.
-
-In CLEAR, if you need thread-safety, you change **one line** at the definition site:
-
-```CLEAR
--- Change multiowned (Rc) to shared (Arc)
-sharedU = SHARE(User.new());
-```
-
-Your functions (which just take `User`) never knew about the capability, so they don't need to change.
-
-#### Synchronization Strategies
-
-For multi-threaded `shared` objects, you choose the strategy:
-- `shared:read`: (MVCC) Optimized for massive read scaling.
-- `shared:writeLocked`: (`RwLock<Arc<T>>`) Multiple readers OR one writer.
-- `shared:locked`: (`Mutex<Arc<T>>`) One thread at a time.
-
-#### Interior Mutability
-
-For complex data, use `alwaysMutable` (`RefCell`). CLEAR handles the lock for you:
-
-```CLEAR
--- 99% Case: Compiler handles temporary lock
-user.login_count += 1;
-
--- 1% Case: Scoped mutation
-WITH user.config {
-  _.theme = "Light";
-  _.retries = 5;
-}
-```
-
-### 6. Physics of Sight (SCOPES)
-
-Functions can ONLY see what is explicitly passed into them:
-
-```ruby
-x = 10;
-FN add() ->
-  RETURN x + 5;                 -- COMPILER ERROR: I don't know what 'x' is.
-END
-```
-
-Use `USE` for upvalues:
-
-```ruby
-x = 10;
-FN add(n) USE (x) ->
-  RETURN n + x;                 -- OK
-END
-```
-
-### 7. Physics of Time: The ARENA (Lifetimes)
-
-Variable lifetimes follow a simple birth/death cycle: they live as long as the Function they were born in.
-
-#### The ARENA Rule:
-
-When a function starts, it opens a clean ARENA (A bank of memory). Any variable you create lives in this ARENA. When the function ends, the entire ARENA is wiped. *POOF*.
-
-### 8. Cheating Death: The `GIVE` Keyword
-
-When you return an object, you are `GIVING` it to the caller. CLEAR handles the transfer of ownership automatically for simple types. For complex capabilities, you use `GIVE` to satisfy `TAKES`.
-
-```ruby
-FN makeUser() -> User
-  u = User{name: "Neo"};
-  RETURN GIVE u;              -- Ownership moves to the caller.
-END
-```
-
-### 9. Cheating Death pt 2: The `TAKES` Keyword
-
-In 99% of cases, when you pass a variable to a function, you are just letting that function **Borrow** it. If a function needs to store that object in a long-lived structure (like a Tree or Global List), it must explicitly **TAKE** responsibility for it.
-
-```ruby
--- This function promises to adopt the 'child'
-FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
-  parent.list.push!(GIVE child);
-END
-
-node = Node.new();
-addChild!(root, GIVE node);   -- I surrender ownership.
-node.print();                 -- COMPILER ERROR: Variable 'node' is dead.
-```
-
-### 10. Simplified Lifetimes: `WITH RESTRICT`
-
-Rust's borrow checker is hard because its side effects are non-local and implicit. In CLEAR, borrows that "poison" (restrict) a mutable variable are explicitly scoped using `WITH RESTRICT`.
-
-```CLEAR
-MUT node = buildTree();
-WITH RESTRICT node.child {
-  -- Inside this block, node.child is immutable (restricted).
-  gc = node.grandChild();
-
-  node.child.name = "OK"; -- COMPILER ERROR: node.child is RESTRICTed.
-}
--- Outside the block, node.child is mutable again.
-```
-
-**Path-Based Scoping:** CLEAR allows you to restrict only the specific part of a data structure you are using (e.g., `node.child`), leaving the rest of the object mutable. This minimizes "poison" and makes complex architectures easier to reason about.
-
-This ensures that "poisoning" is always visible and local.
-
-## BUILDING & TESTING
-
-### Prerequisites
-
-- **Ruby** (for the compiler)
-- **Bundler** (`gem install bundler`)
-- **Zig 0.15.x** (for the Zig integration test and runtime)
-
-### Ruby Compiler Tests
-
-```bash
-bundle install
-bundle exec rspec
-```
-
-This runs all 278 Ruby specs covering the lexer, parser, annotator, and transpiler.
-
-### Zig Package Integration Test
-
-The integration test exercises multi-package compilation using Zig's build system. It transpiles two CLEAR packages (`math` and `geometry`) and a main program, wires them as Zig modules, and runs assertions end-to-end.
-
-```bash
-cd transpile-tests/module-integration
-zig build test
-```
-
-The test covers:
-- `REQUIRE "pkg:math"` — cross-package imports
-- `PUB FN` visibility (only public symbols are importable)
-- Transitive dependencies (geometry depends on math)
-- The `--module` transpiler flag (emits `@import("cheat_runtime")` and an embedded test block)
-- Zig `build.zig` module wiring via `captureStdOut()`
-
-### Transpiling a Single File
-
-```bash
-ruby src/transpiler.rb my_script.cht
-```
-
-With package dependencies:
-
-```bash
-ruby src/transpiler.rb --module src/lib.cht --pkg math=/abs/path/to/math/src/lib.cht
-```
-
-## EXAMPLES
+## WHAT DOES CLEAR LOOK LIKE
 
 ### The *SMOOTH* operator
 
@@ -426,7 +42,9 @@ ruby src/transpiler.rb --module src/lib.cht --pkg math=/abs/path/to/math/src/lib
 bill = users AS @u
   s> UNNEST _.orders
   s> SELECT _.price * @u.discount
-  s> REDUCE(0, (acc, x) -> acc + x );
+  s> COCURRENT REDUCE(0, (acc, x) -> acc + x );
+
+-- Automatically generates efficient, parallel partial reduction.
 ```
 
 ### Combine with in-line error handling
@@ -448,3 +66,88 @@ DEFAULT
   raise %e
 END
 ```
+
+## WHY CLEAR?
+
+* SQL solved the problem of writing code once, and it constantly improving as the engine improves.
+* Go proved the engine/run-time being added into the language can be fantastic.
+* Rust proved that affine types can manage memory without a garbage collector simply (it's borrow checker is what gives it a bad reputation for complicated, not Affine types).
+
+Rust & Go need to be combined to build the language of the future: one that can constantly leverage new and better architectures and run your code as fast as possible without you having to tell it *HOW* to do that exactly - like SQL code.
+
+In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
+
+In CLEAR, the compiler can tell when you're *probably* employing a bad strategy, and changing it is typically just a one-line fix, rather than a full-app rearchitecture.
+
+In CLEAR, at runtime, the Control Plane can detect when you've employed a bad strategy and *typically* self correct.  Some issues, like sharding a heavily skewed workload, require a recompile and restart to fix.
+
+CLEAR is designed such that you can override default compiler behviors if you know what you're doing, but you don't have the tools to shoot yourself in the foot.
+
+## BUILDING & TESTING
+
+### Prerequisites
+
+- **Ruby** (for the compiler)
+- **Bundler** (`gem install bundler`)
+- **Zig 0.15.x** (for the Zig integration test and runtime)
+
+### Ruby Compiler Tests and Benchmarks
+
+```bash
+bundle install
+bundle exec rspec
+```
+
+This runs all Ruby specs covering the lexer, parser, annotator, and transpiler.
+
+```bash
+clear test ...
+```
+
+This runs the transpile-tests/
+
+### Running / Building individual code
+
+```bash
+clear run benchmarks/.../bench.cht
+```
+
+This will run an individual benchmark.
+
+```bash
+clear run my_script.cht
+```
+
+This will run `my_script.cht` (for example).
+
+### Benchmarks
+
+```bash
+ruby benchmarks/runner.rb --cores=N
+```
+
+This will run all the benchmarks on `N` cores on your machine.
+
+### Zig Package Integration Test
+
+The integration test exercises multi-package compilation using Zig's build system. It transpiles two CLEAR packages (`math` and `geometry`) and a main program, wires them as Zig modules, and runs assertions end-to-end.
+
+```bash
+cd transpile-tests/module-integration
+zig build test
+```
+
+### Performance
+
+There's an extensive performance suite in benchmarks/
+
+Idiomatic CLEAR single core performance vs *perfect* C code is typically between 0-30% slower (in a fraction of the code).
+
+Idiomatic CLEAR multi-core performance is typically 0-10% slower than perfect Rust/Tokio for non-pathological workloads.  It typically outperforms Go, often signficantly, typically using 1/2 the peak memory (no Garbage Collector in CLEAR).
+
+In typical *non-pathological* server workloads (primarily waiting) - idiomatic CLEAR, Rust/Tokio, and Go have similar throughput within ~10% differences.  Though CLEAR and Rust/Tokio both use about half as much memory.
+
+Go's runtime is *extradinarly* optimized to achieve world-class throughput in even adversarial and pathological workloads.  It can substantially outperform Rust/Tokio and CLEAR at the p99 level.
+
+For v0.2, CLEAR aims to close this gap.
+
