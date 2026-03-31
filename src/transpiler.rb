@@ -1559,28 +1559,53 @@ private
         inner_zig = is_error_union ? ret_type_obj.payload_type.zig_type : ret_type_obj.zig_type
         is_void = (inner_zig == "void")
 
-        # Build native call args: comptime type args first, then optional allocator, then regular args
-        native_args = []
-        # Generic type args (comptime): parseFromSlice<MyDoc> → comptime first arg
-        if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
-          native_args += node.generic_type_args.map { |t| Type.new(t).zig_type }
+        # Separate comptime (type) args from runtime args.
+        # Comptime args go directly into the native call as type names.
+        # Runtime args go through the trampoline struct.
+        comptime_type_args = node.respond_to?(:generic_type_args) ? (node.generic_type_args || []) : []
+        runtime_indices = []
+        args_zig.each_with_index do |_, i|
+          arg = node.args[i]
+          arg_name = arg.is_a?(AST::Identifier) ? arg.name.to_sym : nil
+          is_comptime = arg_name && comptime_type_args.include?(arg_name)
+          runtime_indices << i unless is_comptime
         end
-        native_args << "f.alloc" if has_alloc
-        native_args += args_zig.each_with_index.map { |_, i| "f.a#{i}" }
+
+        # Build native call args in declaration order
+        native_args = []
+        field_idx = 0
+        args_zig.each_with_index do |_, i|
+          arg = node.args[i]
+          arg_name = arg.is_a?(AST::Identifier) ? arg.name.to_sym : nil
+          if arg_name && comptime_type_args.include?(arg_name)
+            # Comptime type arg — emit as bare type name
+            native_args << Type.new(node.args[i].name.to_sym).zig_type
+          elsif has_alloc && native_args.empty? && !comptime_type_args.any? { |t| native_args.include?(Type.new(t).zig_type) }
+            # This shouldn't happen in the normal flow; alloc is injected separately
+            native_args << "f.a#{field_idx}"
+            field_idx += 1
+          else
+            native_args << "f.a#{field_idx}"
+            field_idx += 1
+          end
+        end
+        # Inject allocator at the right position (after comptime args, before runtime args)
+        if has_alloc
+          insert_pos = comptime_type_args.length
+          native_args.insert(insert_pos, "f.alloc")
+        end
         native_call = "#{mod_prefix}#{node.name}(#{native_args.join(', ')})"
-        # If native returns error union, catch and store
         native_call = "(#{native_call} catch |err| { f.err = err; return; })" if is_error_union
 
-        # Build trampoline struct fields with explicit types from EXTERN FN params.
-        # Using @TypeOf on comptime literals (e.g., 100) makes the struct comptime-only.
-        arg_fields = args_zig.each_with_index.map { |_, i|
-          arg_type = node.args[i]&.type_info
-          zig_t = arg_type.is_a?(Type) ? arg_type.zig_type : (arg_type ? Type.new(arg_type).zig_type : "@TypeOf(__ext#{tid}_args[#{i}])")
-          "a#{i}: #{zig_t}"
+        # Build trampoline struct fields — only runtime args (skip comptime)
+        runtime_args_zig = runtime_indices.map { |i| args_zig[i] }
+        arg_fields = runtime_indices.each_with_index.map { |orig_i, field_i|
+          arg_type = node.args[orig_i]&.type_info
+          zig_t = arg_type.is_a?(Type) ? arg_type.zig_type : (arg_type ? Type.new(arg_type).zig_type : "@TypeOf(__ext#{tid}_args[#{field_i}])")
+          "a#{field_i}: #{zig_t}"
         }.join(", ")
-        # Allocator field for EFFECTS Alloc (captured from rt before trampoline)
         alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
-        arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
+        arg_tuple = runtime_args_zig.empty? ? ".{}" : ".{ #{runtime_args_zig.join(', ')} }"
 
         alloc_zig = case alloc_kind
                     when :frame then "#{rt_name}.frameAlloc()"
@@ -1591,13 +1616,14 @@ private
         err_field = is_error_union ? "err: ?anyerror = null, " : ""
         err_check = is_error_union ? "if (__ext#{tid}_frame.err) |e| return e; " : ""
 
+        field_inits = runtime_indices.each_with_index.map { |_, fi| ".a#{fi} = __ext#{tid}_args[#{fi}]" }.join(', ')
         if is_void && !is_error_union
           "{ const __ext#{tid}_args = #{arg_tuple}; " \
           "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "_ = #{native_call}; } }; " \
-          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')}#{alloc_init} }; " \
+          "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
           "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); }"
         else
           "blk_ext#{tid}: { const __ext#{tid}_args = #{arg_tuple}; " \
@@ -1605,7 +1631,7 @@ private
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
-          "var __ext#{tid}_frame = __Ext#{tid}{ #{args_zig.each_with_index.map { |a, i| ".a#{i} = __ext#{tid}_args[#{i}]" }.join(', ')}#{alloc_init} }; " \
+          "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
           "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); " \
           "#{err_check}break :blk_ext#{tid} __ext#{tid}_frame.ret; }"
         end

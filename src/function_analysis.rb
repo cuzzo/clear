@@ -134,6 +134,19 @@ module FunctionAnalysis
             error!(arg, "@soa collections cannot be passed to EXTERN FN — SOA memory layout is incompatible with C ABI. Materialize to a regular array first.")
           end
         end
+        # Comptime params: extract type args from arguments in comptime positions.
+        # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
+        comptime_type_args = []
+        params = func_type[:params] || []
+        params.each_with_index do |p, i|
+          if p[:comptime] && args[i].is_a?(AST::Identifier)
+            comptime_type_args << args[i].name.to_sym
+            args[i].full_type = :Type  # Mark as type-value, not a variable
+          end
+        end
+        if comptime_type_args.any?
+          node.generic_type_args = comptime_type_args if node.respond_to?(:generic_type_args=)
+        end
       end
 
       type_params = func_type[:type_params]
@@ -236,6 +249,7 @@ module FunctionAnalysis
 
     node.args.each_with_index do |arg_node, i|
       param = params[i]
+      next if param[:comptime]  # comptime type params are not type-checked
       verify_param_lifetime!(arg_node, param, signature)
 
       # B. Check mutability

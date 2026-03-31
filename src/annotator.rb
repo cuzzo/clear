@@ -251,7 +251,8 @@ private
         name: p[:name],
         type: p[:type],
         required: p[:default].nil?,
-        mutable: p[:mutable] || false
+        mutable: p[:mutable] || false,
+        comptime: p[:comptime] || false
       }},
       return:     { type: node.return_type || :Any, lifetime: nil },
       visibility: :pub,
@@ -1300,7 +1301,15 @@ private
     # lookup_scope_for searches all scopes. Normal code uses resolve_variable_scope
     # which restricts to local scope + function-as-value references.
     scope = @smooth_depth > 0 ? lookup_scope_for(node.name) : resolve_variable_scope(node.name)
-    error!(node, "Undefined variable '#{node.name}'") unless scope
+    unless scope
+      # Check if it's a type name used as a comptime argument (e.g., parseFromSlice(MyDoc, ...))
+      type_schema = lookup_type_schema(node.name.to_sym)
+      if type_schema
+        node.full_type = :Type
+        return
+      end
+      error!(node, "Undefined variable '#{node.name}'")
+    end
 
     # 1. Check Validity (View Invalidation Logic)
     scope.check_validity!(node.name)

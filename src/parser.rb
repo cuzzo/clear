@@ -545,20 +545,33 @@ class Parser
       takes = match!(:KEYWORD, 'TAKES')
       is_mutable = match!(:KEYWORD, 'MUTABLE')
 
-      p_name = consume(:VAR_ID).value
+      # comptime: T — compile-time type parameter (EXTERN FN only)
+      is_comptime = false
+      if match?(:VAR_ID) && current.value == "comptime"
+        # Peek ahead: if next is ':', it's a comptime param
+        if peek_at(1)&.type == :CHAR && peek_at(1)&.value == ":"
+          consume(:VAR_ID) # consume 'comptime'
+          is_comptime = true
+        end
+      end
+
+      p_name = consume(:VAR_ID).value unless is_comptime
       p_type = :Any
 
-      if match!(:CHAR, ":")
+      if is_comptime
+        consume(:CHAR, ':')
+        p_type = consume(:TYPE_ID).value.to_sym  # The type param name (T)
+        p_name = "comptime"
+      elsif match!(:CHAR, ":")
         p_type = parse_type_annotation(allow_capabilities: false)
       end
 
-      # TODO: This shouldn't be allowed for function calls
       default_val = nil
       if match!(:CHAR, '=')
         default_val = parse_expression()
       end
 
-      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes }
+      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime }
     end
      .last # always ignore the first token
   end
