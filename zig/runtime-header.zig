@@ -885,6 +885,16 @@ pub const CheatLib = struct {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Socket I/O: runs on the FIBER stack (epoll + yield, non-blocking).
+    //
+    // Unlike file I/O (readFile/writeFile) which trampolines to g0 via
+    // onRootStack because std.fs needs deep stack frames, socket I/O uses
+    // direct posix read/write syscalls with epoll-backed yield. The fiber
+    // yields on EAGAIN and resumes when data is ready. Minimal stack usage
+    // (~4KB temp buffer for reads, no std.fs overhead).
+    // -----------------------------------------------------------------------
+
     // Write `data` to a non-blocking socket fd.
     // Loops until all bytes are sent, yielding the fiber on EAGAIN.
     // Returns the total bytes sent (== data.len on success).
