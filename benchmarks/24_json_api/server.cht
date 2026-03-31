@@ -14,8 +14,6 @@ EXTERN STRUCT ParseOptions {};
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
 EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions) RETURNS !T EFFECTS :alloc:heap FROM "std.json";
 
-EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
-
 FN sizeForId(id: Int64) RETURNS Int64 ->
     RETURN ((id * 7 + 13) MOD 997) + 10;
 END
@@ -88,7 +86,6 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-    ensureDir("data");
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
