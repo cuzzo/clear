@@ -132,7 +132,52 @@ class ZigTranspiler
     # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
     has_cheat_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
-    test_block = if has_cheat_main
+    needs_scheduler = cheat_code.include?("DO {") || cheat_code.include?("BG {") ||
+                      cheat_code.include?("BG STREAM {") ||
+                      cheat_code.include?("TCPServer") || cheat_code.include?("TCPClient") ||
+                      cheat_code.include?("@pinned")
+
+    test_block = if has_cheat_main && needs_scheduler
+      <<~ZIG_TEST
+
+        test "cheat main" {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            defer _ = gpa.deinit();
+            const allocator = gpa.allocator();
+            var global_ctx = EbrContext{};
+            defer global_ctx.deinit(allocator);
+            var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
+            defer rt.deinit();
+            rt.wireAllocator();
+            const fp = CheatHeader.scheduler;
+            const fm = CheatHeader.fiber_memory;
+            var stack_pool = fm.StackPool.init(allocator);
+            defer stack_pool.deinit();
+            var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+            defer {
+                fp.scheduler_running = false;
+                sched.deinit();
+                fp.global_registry.deinit(allocator);
+            }
+            fp.active_scheduler = &sched;
+            fp.scheduler_running = true;
+            const MainRunner = struct {
+                fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                    _ = raw_args;
+                    const rt_ptr: *Runtime = @ptrCast(@alignCast(raw_rt));
+                    try clearMain(rt_ptr);
+                }
+            };
+            try sched.submitSpawn(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
+                null,
+                .{ .stack_size = .Large },
+            );
+            sched.run();
+        }
+      ZIG_TEST
+    elsif has_cheat_main
       <<~ZIG_TEST
 
         test "cheat main" {

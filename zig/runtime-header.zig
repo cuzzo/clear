@@ -13,6 +13,10 @@ pub const WaitGroup = fp.WaitGroup;
 pub const Semaphore = fp.Semaphore;
 pub const TaskFn = @import("queues.zig").TaskFn;
 
+// Scheduler + fiber-memory re-exported for test harness scheduler setup.
+pub const scheduler = fp;
+pub const fiber_memory = @import("fiber-memory.zig");
+
 
 // Helper Functions
 // Cached cwd file descriptor — resolved once, used by readFile/writeFile
