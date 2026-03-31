@@ -52,14 +52,20 @@ Capabilities are applied at the **declaration site** with `@` suffixes:
 In Rust, changing `Rc<User>` to `Arc<User>` means rewriting every function signature in the call chain. In CLEAR, functions take the plain type:
 
 ```clear
+-- ILLUSTRATIVE
+STRUCT User { name: String }
+
 FN process(u: User) RETURNS Void ->
   print(u.name);
   RETURN;
 END
 
--- At the call site, capabilities are unwrapped:
-shared_u = User{ name: "Alice" } @shared;
-WITH shared_u AS val { process(val); }
+FN main() RETURNS Void ->
+  -- At the call site, capabilities are unwrapped:
+  shared_u = User{ name: "Alice" } @shared;
+  WITH shared_u AS val { process(val); }
+  RETURN;
+END
 ```
 
 If you change `@shared` to `@multiowned`, the `process` function remains untouched. The refactor is a one-line change at the declaration.
@@ -131,6 +137,7 @@ FN sum(p: Point) RETURNS Float64 ->
     RETURN p.x + p.y;
 END
 
+-- ILLUSTRATIVE
 FN findUser(id: Int64) RETURNS !?User ->
     IF id < 0 -> RAISE "Invalid ID";
     RETURN result;
@@ -160,6 +167,7 @@ CLEAR provides standard control flow constructs with support for one-line shorth
 
 ```clear
 -- 1. IF / ELSE_IF / ELSE
+x = 75;
 IF x > 100 THEN
     print("Large");
 ELSE_IF x > 50 THEN
@@ -175,9 +183,8 @@ WHILE i < 10 DO
     i += 1;
 END
 
--- 3. FOR loops (Collection or Range iteration)
-FOR item IN items -> print(item.toString());        -- OKAY: One-line shorthand
-FOR j IN (1 ..= 5) DO print(j.toString()); END     -- OKAY: Inclusive range
+-- 3. FOR loops (Range iteration)
+FOR j IN (1_i64 ..= 5) DO print(j.toString()); END     -- OKAY: Inclusive range
 ```
 
 ## 8. Enums, Unions, and Pattern Matching
@@ -237,6 +244,7 @@ p = Pair<Int64>{ first: 1, second: 2 };
 CLEAR supports powerful functional pipelines via the Smooth operator `s>`.
 
 ```clear
+-- ILLUSTRATIVE
 -- 1. Pipelines: Filter, Aggregate, Transform
 alive = entities s> WHERE _.health > 0;
 total = scores s> SUM _.value;
@@ -272,6 +280,7 @@ Tense represents a value that will exist in the future. CLEAR eliminates the com
 - A **STREAM** of users is simply one way to produce "Future Users".
 
 ```clear
+-- ILLUSTRATIVE
 -- 1. Promise (~T): A single future value
 p: ~String = BG { sleep(100); RETURN "Data"; };
 val = NEXT p;                                       -- OKAY: Blocks until ready
@@ -302,6 +311,8 @@ All collections are **automatically monomorphized** -- the compiler generates ze
 | `T[N]@pool` | `Pool` | Fixed-capacity, generational handles |
 
 ```clear
+STRUCT User { name: String }
+
 -- 1. Fixed Array
 vals = [10, 20, 30];
 
@@ -342,6 +353,7 @@ full = "foo" + "bar";          -- "foobar" (single allocation, no intermediate)
 For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combined with `@reentrant` for recursive traversal:
 
 ```clear
+-- ILLUSTRATIVE
 -- Recursive tree node using @indirect for child pointers
 STRUCT Node {
     value: Int64,
@@ -365,6 +377,7 @@ END
 CLEAR makes background tasks and fork-join parallelism trivial.
 
 ```clear
+-- ILLUSTRATIVE
 -- BG: Background execution
 p: ~Int64 = BG { RETURN slowComputation(); };
 
@@ -394,6 +407,7 @@ results = items s> CONCURRENT(workers: 8) SELECT transform(_);
 CLEAR uses a simple namespace-based module system via `REQUIRE`.
 
 ```clear
+-- ILLUSTRATIVE
 REQUIRE "math_utils.cht" AS m;                      -- Local file alias
 REQUIRE "pkg:geometry";                             -- Package import
 
@@ -413,6 +427,7 @@ CLEAR integrates directly with Zig and C libraries via `EXTERN` declarations. Al
 ### Importing Functions and Types
 
 ```clear
+-- ILLUSTRATIVE
 -- Import a struct type from a Zig module
 EXTERN STRUCT Vec2 { x: Float64, y: Float64 } FROM "math_native";
 
@@ -429,6 +444,7 @@ EXTERN FN parseJson(data: String) RETURNS !JsonDoc
 For passing default options or defining Zig-compatible layouts:
 
 ```clear
+-- SKIP-DOC-TEST
 -- Local struct (no external module)
 EXTERN STRUCT ParseOptions {};
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
@@ -441,6 +457,7 @@ EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOpt
 ### Method Calls on EXTERN Structs
 
 ```clear
+-- SKIP-DOC-TEST
 EXTERN STRUCT Dir {} FROM "std.fs";
 EXTERN FN cwd() RETURNS Dir FROM "std.fs";
 EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
@@ -452,6 +469,7 @@ cwd().makePath("data");
 ### EXTERN STRUCT CLOSE (RAII)
 
 ```clear
+-- ILLUSTRATIVE
 EXTERN STRUCT Buffer { data: String }
     CLOSE "deinit" FROM "native_resource";
 
