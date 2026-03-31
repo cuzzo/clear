@@ -195,6 +195,17 @@ A RESP-compatible TCP KV store tested with `redis-benchmark`. Single thread, 100
 
 CLEAR is 3.7x faster on pipelined SET and 2.9x faster on pipelined GET. Without pipelining, CLEAR is ~25% faster on SET with better p50/p99 latency.
 
+**Important caveat**: This is NOT an apples-to-apples comparison. CLEAR's server is a minimal RESP parser with a sharded HashMap - it does a hash lookup and returns. Dragonfly is a production database that does significantly more work per command:
+- **Memory management**: mimalloc with per-key accounting, fragmentation optimization
+- **Expiry/eviction**: TTL tracking, background expiry (configurable `hz`), LRU/LFU metadata
+- **Persistence**: Snapshot subsystem (even when disabled, codepaths exist)
+- **Access control**: ACL system, AUTH enforcement
+- **Transactions**: MULTI/EXEC coordination, Lua scripting engine
+- **Observability**: Per-command statistics, slow log, CLIENT TRACKING
+- **Multi-shard coordination**: Distributed locking for cross-shard operations
+
+The comparison demonstrates CLEAR's raw I/O and HashMap performance, not a feature-equivalent database. A fair comparison would require CLEAR to implement these features.
+
 #### Multi-Core, Non-Adversarial (Benchmark 24: TCP JSON API)
 
 CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5% for typical server workloads. CLEAR and Rust use roughly half the peak memory of Go (no garbage collector).
