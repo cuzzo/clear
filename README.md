@@ -189,6 +189,8 @@ CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5% for typical serv
 
 #### Multi-Core, Adversarial (Benchmark 25: Pathological Workloads)
 
+NOTE: CLEAR performs well in these benchmarks, but in the ugly world of reality, it is highly unlikely to be this competitive with Go at p99.9 in adversarial workloads.
+
 Benchmark 25 tests scheduler fairness under adversarial load using iterated SHA256 hashing. Three phases: uniform (all equal), skewed (1% of requests 1000x heavier), and adversarial (one connection does all heavy work).
 
 **Phase 1: Uniform (50K requests, 50 concurrent)**
