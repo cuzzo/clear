@@ -219,34 +219,33 @@ Benchmark 25 tests scheduler fairness under adversarial load using iterated SHA2
 
 CLEAR wins on throughput and p99.9 in the adversarial phase. Go's preemptive scheduler gives it the best p99 under adversarial load, but CLEAR's cooperative scheduling with per-iteration yields is competitive across all percentiles.
 
-#### Reality: Shared-Nothing KV Store (Benchmark 20: RESP protocol, vs Dragonfly)
+#### Reality: Multi-Core KV Store (Benchmark 20: RESP protocol, vs Dragonfly)
 
-A RESP-compatible TCP KV store tested with `redis-benchmark`. Single thread, 100K operations, 50 concurrent connections. CLEAR uses `@sharded(8):locked` HashMap with fiber-per-connection.
+A RESP-compatible TCP KV store tested with `redis-benchmark`. 2 cores, 100K operations, 50 concurrent connections. CLEAR uses `@sharded(8):locked` HashMap with fiber-per-connection.
 
-**With pipelining (P=16):**
-
-| Server | SET rps | GET rps | SET p50 | SET p99 | GET p50 | GET p99 |
-|--------|---------|---------|---------|---------|---------|---------|
-| **CLEAR** | **471,698** | **438,596** | **0.87 ms** | **4.29 ms** | **0.87 ms** | **5.89 ms** |
-| Dragonfly v1.37 | 126,422 | 153,846 | 5.50 ms | 11.80 ms | 4.35 ms | 11.40 ms |
-
-**Without pipelining:**
+**With pipelining (P=16), 2 cores:**
 
 | Server | SET rps | GET rps | SET p50 | SET p99 | GET p50 | GET p99 |
 |--------|---------|---------|---------|---------|---------|---------|
-| **CLEAR** | **34,638** | 30,395 | **0.97 ms** | **2.90 ms** | **1.08 ms** | 4.30 ms |
-| Dragonfly v1.37 | 26,947 | **27,457** | 1.30 ms | 3.58 ms | 1.24 ms | **3.79 ms** |
+| CLEAR (2 threads) | 98,328 | **106,044** | 7.75 ms | **16.18 ms** | 6.70 ms | **17.10 ms** |
+| Dragonfly (2 threads) | 95,057 | 102,145 | **6.92 ms** | 20.91 ms | **6.68 ms** | 18.61 ms |
 
-CLEAR is 3.7x faster on pipelined SET and 2.9x faster on pipelined GET. Without pipelining, CLEAR is ~25% faster on SET with better p50/p99 latency.
+**Without pipelining, 2 cores:**
 
-**Important caveat**: This is NOT an apples-to-apples comparison. CLEAR's server is a minimal RESP parser with a sharded HashMap - it does a hash lookup and returns. Dragonfly is a production database that does significantly more work per command:
+| Server | SET rps | GET rps | SET p50 | SET p99 | GET p50 | GET p99 |
+|--------|---------|---------|---------|---------|---------|---------|
+| CLEAR (2 threads) | 17,152 | **17,061** | 1.98 ms | **6.96 ms** | **1.94 ms** | **7.43 ms** |
+| Dragonfly (2 threads) | 16,980 | 15,309 | **1.54 ms** | 9.14 ms | 2.10 ms | 8.90 ms |
+
+Throughput within 5-10%. CLEAR has consistently better p99 latency; Dragonfly has slightly better p50 without pipelining.
+
+**Important caveat**: This is NOT an apples-to-apples comparison. CLEAR's server is a minimal RESP parser with a sharded HashMap. Dragonfly is a production database with significantly more per-command overhead:
 - **Memory management**: mimalloc with per-key accounting, fragmentation optimization
-- **Expiry/eviction**: TTL tracking, background expiry (configurable `hz`), LRU/LFU metadata
-- **Persistence**: Snapshot subsystem (even when disabled, codepaths exist)
+- **Expiry/eviction**: TTL tracking, background expiry, LRU/LFU metadata
+- **Persistence**: Snapshot subsystem (codepaths exist even when disabled)
 - **Access control**: ACL system, AUTH enforcement
 - **Transactions**: MULTI/EXEC coordination, Lua scripting engine
 - **Observability**: Per-command statistics, slow log, CLIENT TRACKING
-- **Multi-shard coordination**: Distributed locking for cross-shard operations
 
-The comparison demonstrates CLEAR's raw I/O and HashMap performance, not a feature-equivalent database. A fair comparison would require CLEAR to implement these features.
+The comparison demonstrates CLEAR's raw multi-core I/O and sharded HashMap performance. A fair comparison would require CLEAR to implement these features.
 
