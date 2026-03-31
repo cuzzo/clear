@@ -1981,6 +1981,12 @@ private
     node.left.coerced_type = result.left_coercion if result.left_coercion
     node.right.coerced_type = result.right_coercion if result.right_coercion
     node.storage = result.storage if result.storage
+
+    # String concat (+) transpiles to std.mem.concat(rt.frameAlloc(), ...) —
+    # mark as frame allocation so needs_rt and loop mark elision are correct.
+    if node.op == :ADD && (node.left.type_info&.string? || node.right.type_info&.string?)
+      current_fn_ctx.frame_count += 1 if current_fn_ctx
+    end
   end
 
   def visit_Placeholder(node)

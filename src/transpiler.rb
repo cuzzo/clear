@@ -609,6 +609,7 @@ private
       rhs_ti = rhs_ident&.type_info
       rt_name = @do_rt_name || "rt"
 
+      @visiting_bind_value = true
       value_code = if node.full_type&.pool?
         # Pool: pre-allocate with fixed capacity via initCapacity.
         rt_name = @do_rt_name || "rt"
@@ -639,6 +640,8 @@ private
       else
         visit(node.value)
       end
+
+      @visiting_bind_value = false
 
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
@@ -677,7 +680,9 @@ private
         visit(proxy)
       else
         # Transpile as simple assignment
+        @visiting_bind_value = true
         value_str = visit(node.value)
+        @visiting_bind_value = false
         move_logic = emit_move_suppression(node.value)
         "#{zig_safe_name(node.name)} = #{value_str}; #{move_logic}"
       end
@@ -1690,7 +1695,19 @@ private
         can_fail  = callee_can_fail?(node.name)
         args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
         call = "#{mod_prefix}#{zig_safe_name(node.name)}(#{args.join(', ')})"
-        can_fail ? "try #{call}" : call
+        call_code = can_fail ? "try #{call}" : call
+
+        # Heap-promoted returns used as temporaries (not assigned to a variable)
+        # must be captured with defer-free to prevent leaks.
+        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call && !@visiting_bind_value
+          @heap_temp_counter = (@heap_temp_counter || 0) + 1
+          tmp = "__hpt_#{@heap_temp_counter}"
+          @pending_heap_temps ||= []
+          @pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info }
+          tmp
+        else
+          call_code
+        end
       end
 
     when AST::ReturnNode
@@ -2719,7 +2736,24 @@ private
 
   def transpile_block(statements)
     statements.map do |stmt|
+      saved_temps = @pending_heap_temps
+      @pending_heap_temps = []
       code = visit(stmt)
+      # Flush heap-promoted temporaries: emit const + defer free before the statement.
+      temps = @pending_heap_temps || []
+      if temps.any?
+        preamble = temps.map { |t|
+          cleanup = if t[:type_info]&.string?
+            "defer #{t[:rt]}.heapAlloc().free(#{t[:var]});"
+          else
+            # For structs/collections, use emit_cleanup pattern
+            "defer #{t[:rt]}.heapAlloc().free(#{t[:var]});"
+          end
+          "const #{t[:var]}: []const u8 = #{t[:call]};\n#{cleanup}"
+        }.join("\n")
+        code = "#{preamble}\n#{code}"
+      end
+      @pending_heap_temps = saved_temps
       # Zig requires non-void expression results to be consumed. Any AST node
       # that is an expression (not a declaration, assignment, or control flow)
       # with a non-void return type needs `_ = ` when used as a statement.
