@@ -191,19 +191,29 @@ private
 
     when AST::ExternFnDecl
       # Emit a Zig @import for the native module (once per unique module name).
+      # Dotted paths: FROM "std.json" → @import("std").json, alias __std_json
       @emitted_extern_modules ||= Set.new
-      if @emitted_extern_modules.add?(node.from_module)
-        "const #{node.from_module} = @import(\"#{node.from_module}\");"
+      mod = node.from_module
+      if @emitted_extern_modules.add?(mod)
+        mod_parts = mod.split(".")
+        import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
+        mod_alias = mod.gsub(".", "_")
+        "const #{mod_alias} = #{import_expr};"
       else
         nil
       end
 
     when AST::ExternStructDecl
       # Emit @import (once) and a type alias: const TypeName = module.TypeName;
+      # Dotted paths: FROM "std.json" → @import("std").json, alias __std_json
       @emitted_extern_modules ||= Set.new
+      mod = node.from_module
+      mod_parts = mod.split(".")
+      import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
+      mod_alias = mod.gsub(".", "_")
       parts = []
-      parts << "const #{node.from_module} = @import(\"#{node.from_module}\");" if @emitted_extern_modules.add?(node.from_module)
-      parts << "const #{node.name} = #{node.from_module}.#{node.name};"
+      parts << "const #{mod_alias} = #{import_expr};" if @emitted_extern_modules.add?(mod)
+      parts << "const #{node.name} = #{mod_alias}.#{node.name};"
       parts.join("\n")
 
     when AST::RequireNode
@@ -1273,9 +1283,10 @@ private
       # Resources captured by BG fibers transfer ownership — suppress outer defer close.
       # Without this, the outer scope's `defer socketClose(fd)` fires immediately,
       # closing the fd before the fiber reads it.
+      capture_close_zig = @_capture_close_zig || {}
       resource_moves = captured.filter_map do |name, type_obj|
         t = type_obj.is_a?(Type) ? type_obj : nil
-        "#{name}_moved = true;" if t&.resource?
+        "#{name}_moved = true;" if t&.resource? || capture_close_zig[name]
       end.join("\n")
 
       rt_name = @do_rt_name || "rt"
@@ -1531,7 +1542,7 @@ private
           arg_code
         end
       end
-      mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias}." : ""
+      mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
 
       if node.respond_to?(:extern_call) && node.extern_call
         # Native FFI call: trampoline to g0 stack via onRootStack.
