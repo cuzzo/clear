@@ -191,20 +191,28 @@ CLEAR, Rust/Tokio, and Go achieve similar throughput within ~5% for typical serv
 
 Benchmark 25 tests scheduler fairness under adversarial load using iterated SHA256 hashing. Three phases: uniform (all equal), skewed (1% of requests 1000x heavier), and adversarial (one connection does all heavy work).
 
-**Phase 2: Skewed (1% heavy, 2500 requests, 25 concurrent)**
+**Phase 1: Uniform (50K requests, 50 concurrent)**
 
 | Server | p50 | p99 | p99.9 | Throughput |
 |--------|-----|-----|-------|------------|
-| Rust/Tokio | 1.9 ms | 17.2 ms | 32 ms | 6215 req/s |
-| Go | 1.3 ms | 14.8 ms | 28 ms | 7641 req/s |
-| **CLEAR** | 1.4 ms | 15.3 ms | **25 ms** | 6707 req/s |
+| Rust/Tokio | 4.89 ms | 12.86 ms | 16.65 ms | 9228 req/s |
+| Go | 5.50 ms | 16.14 ms | 26.82 ms | 8043 req/s |
+| CLEAR | 5.36 ms | 14.21 ms | 18.52 ms | 8418 req/s |
 
-**Phase 3: Adversarial (1 heavy connection, 2500 requests, 25 concurrent)**
+**Phase 2: Skewed (1% of requests 1000x heavier, 50K requests, 50 concurrent)**
 
 | Server | p50 | p99 | p99.9 | Throughput |
 |--------|-----|-----|-------|------------|
-| Rust/Tokio | 1.1 ms | 8.5 ms | 15 ms | 1936 req/s |
-| Go | 0.9 ms | 7.9 ms | **14 ms** | 1972 req/s |
-| **CLEAR** | 1.4 ms | **7.1 ms** | 17 ms | **2035 req/s** |
+| Rust/Tokio | 4.30 ms | 32.69 ms | 59.12 ms | 7015 req/s |
+| Go | 4.10 ms | 25.82 ms | 36.86 ms | 7733 req/s |
+| **CLEAR** | 4.18 ms | **23.71 ms** | **33.71 ms** | **8086 req/s** |
 
-CLEAR is competitive with Go and Rust at all percentiles, including p99.9 under adversarial load. The key: compute-heavy work is structured as a CLEAR FOR loop calling single-iteration EXTERN FN primitives, so the scheduler can yield between iterations.
+**Phase 3: Adversarial (1 connection all-heavy, 49 all-light, 50K requests, 50 concurrent)**
+
+| Server | p50 | p99 | p99.9 | Throughput |
+|--------|-----|-----|-------|------------|
+| Rust/Tokio | 3.21 ms | 34.80 ms | 73.75 ms | 2868 req/s |
+| Go | 2.95 ms | 15.63 ms | 30.54 ms | 3492 req/s |
+| **CLEAR** | **2.80 ms** | 16.36 ms | **21.41 ms** | **3635 req/s** |
+
+CLEAR wins on throughput and p99.9 in the adversarial phase. Go's preemptive scheduler gives it the best p99 under adversarial load, but CLEAR's cooperative scheduling with per-iteration yields is competitive across all percentiles.
