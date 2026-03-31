@@ -129,6 +129,7 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 - If unsure: say "I don't know." Never guess confidently.
 - Never invent file paths, function names, or API signatures.
 - If a user corrects a factual claim: accept it as ground truth for the entire session. Never re-assert the original claim.
+- Whenever something doesn't work, you should first assume that your changes broke it. Code is always committed at working states.
 
 ## Code Output
 - Avoid brittle, narrow solutions. When fixing bugs, always consider: is this the only case? Or does this fix apply more broadly? Is the band-aid solution correct. Prefer architecturally correct fixes, that solve the problem at the root and apply to all cases.
