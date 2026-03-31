@@ -1,30 +1,27 @@
-// sha_native.zig -- SHA256 iterated hashing for CLEAR FFI.
-// hashN(seed, iterations) -> 16-char hex string (first 8 bytes of final hash).
+// sha_native.zig -- SHA256 primitives for CLEAR FFI.
+//
+// Two-function design: sha256Once does a single hash (fast, yields between
+// iterations via CLEAR's FOR loop checkYield), toHex encodes the final result.
+// This prevents one heavy request from starving the fiber scheduler.
 
 const std = @import("std");
 
-/// Compute SHA256(SHA256(...SHA256(seed)...)) iterated `n` times.
-/// Returns the first 8 bytes of the final hash as a 16-char hex string.
-pub fn hashN(allocator: std.mem.Allocator, seed: []const u8, n: i64) ![]const u8 {
-    var buf: [32]u8 = undefined;
-
-    // First hash: seed string
+/// Single SHA256 hash. Input: arbitrary bytes. Output: 32-byte hash as []u8.
+/// Called from CLEAR in a FOR loop so the scheduler can yield between iterations.
+pub fn sha256Once(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
+    const result = try allocator.alloc(u8, 32);
     var h = std.crypto.hash.sha2.Sha256.init(.{});
-    h.update(seed);
-    h.final(&buf);
+    h.update(data);
+    h.final(result[0..32]);
+    return result;
+}
 
-    // Subsequent iterations: hash the previous hash
-    var i: i64 = 1;
-    while (i < n) : (i += 1) {
-        var h2 = std.crypto.hash.sha2.Sha256.init(.{});
-        h2.update(&buf);
-        h2.final(&buf);
-    }
-
-    // Encode first 8 bytes as hex
+/// Encode first 8 bytes of a hash as a 16-char hex string.
+pub fn toHex(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
     const hex = try allocator.alloc(u8, 16);
     const charset = "0123456789abcdef";
-    for (buf[0..8], 0..) |b, idx| {
+    const len = if (data.len < 8) data.len else 8;
+    for (data[0..len], 0..) |b, idx| {
         hex[idx * 2] = charset[b >> 4];
         hex[idx * 2 + 1] = charset[b & 0x0f];
     }
