@@ -75,7 +75,7 @@ END
 
 Rust & Go need to be combined to build the language of the future: one that can constantly leverage new and better architectures and run your code as fast as possible without you having to tell it *HOW* to do that exactly - like SQL code.
 
-### DECLARATIVE CONCURRENCY
+### Declarative Concurrency
 
 Concurrency is not hard.  We do it every day in SQL queries as effiently as possible.
 
@@ -83,7 +83,7 @@ Concurrency is only hard when you have to do it yourself.  That's why CLEAR elim
 
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
 
-### PROFILE GUIDED OPTIMIZATION
+### Profile Guided Optimization
 
 In CLEAR, the compiler can tell when you're *probably* employing a bad strategy, and changing it is typically just a one-line fix, rather than a full-app rearchitecture.
 
