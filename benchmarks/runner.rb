@@ -27,9 +27,163 @@ MODES = {
 
 PORT = 6390
 
+# -------------------------------------------------------------------------
+# Structured output protocol
+# -------------------------------------------------------------------------
+# Benchmarks print lines matching:  metric_name: value [unit]
+# The runner captures these as { "metric_name" => "value unit" }.
+# Numeric values (with optional unit) are parsed for tabular display.
+# Non-matching lines are passed through to the console as-is.
+
+def parse_bench_output(output)
+  metrics = {}
+  output.each_line do |line|
+    if line =~ /^\s*(\w[\w\s]*\w|\w+)\s*:\s+(.+)$/
+      key = $1.strip.downcase
+      metrics[key] = $2.strip
+    end
+  end
+  metrics
+end
+
+def parse_metric_value(s)
+  return nil unless s
+  if s =~ /^([\d.]+)\s*(ms|s|us|ns|KB|MB)?$/i
+    [$1.to_f, $2]
+  elsif s =~ /^(\d+)$/
+    [$1.to_i, nil]
+  else
+    nil
+  end
+end
+
+def format_metric(s)
+  parsed = parse_metric_value(s)
+  return s unless parsed
+  val, unit = parsed
+  if unit
+    val == val.to_i ? "#{val.to_i} #{unit}" : "#{'%.1f' % val} #{unit}"
+  else
+    val.is_a?(Float) ? "#{'%.1f' % val}" : val.to_s
+  end
+end
+
+# Run a command, capture stdout via tempfile, return [wall_time, parsed_metrics].
+# Uses shell redirect instead of backtick to handle programs that don't flush
+# stdout on pipe (e.g. Zig's buffered writer).
+def measure_once(command)
+  require 'tempfile'
+  tmpf = Tempfile.new('bench_output')
+  t = Benchmark.measure { system("#{command} > #{tmpf.path} 2>&1") }.real
+  output = File.read(tmpf.path)
+  tmpf.unlink
+  metrics = parse_bench_output(output)
+  [t, metrics]
+end
+
+# Run a command `runs` times, return [best_wall_time, metrics_from_best_run].
 def measure_min(command, runs = 5)
-  times = runs.times.map { Benchmark.measure { `#{command}` }.real }
-  times.min
+  results = runs.times.map { measure_once(command) }
+  results.min_by { |t, _| t }
+end
+
+# -------------------------------------------------------------------------
+# Tabular reporting for standard benchmarks
+# -------------------------------------------------------------------------
+LANG_LABELS = {
+  c:     "C",
+  go:    "Go",
+  rust:  "Rust",
+  clear: "CLEAR",
+}.freeze
+
+def report_table(dir, results)
+  langs = results.keys
+  times = results.transform_values { |r| r[:wall] }
+  all_metrics = results.transform_values { |r| r[:metrics] || {} }
+
+  # Collect all metric keys in order of first appearance (from first language)
+  metric_keys = []
+  langs.each do |lang|
+    all_metrics[lang].each_key { |k| metric_keys << k unless metric_keys.include?(k) }
+  end
+
+  # Separate timing metrics from verification metrics
+  timing_keys = metric_keys.select do |k|
+    # A timing metric has a numeric value with a time unit in at least one language
+    langs.any? do |lang|
+      v = all_metrics[lang][k]
+      parsed = parse_metric_value(v)
+      parsed && parsed[1] && %w[ms s us ns].include?(parsed[1].downcase)
+    end
+  end
+  verify_keys = metric_keys - timing_keys
+
+  # Column widths
+  label_w = 14
+  col_w = langs.size > 2 ? 14 : 16
+  delta_w = 10
+
+  # Header
+  has_baseline = langs.size > 1 && langs.first != :clear
+  header = "  #{'%-*s' % [label_w, '']}"
+  langs.each { |l| header += "%*s" % [col_w, LANG_LABELS[l]] }
+  header += "%*s" % [delta_w, "Delta"] if has_baseline
+  puts header
+  puts "  " + "-" * (label_w + langs.size * col_w + (has_baseline ? delta_w : 0))
+
+  baseline_lang = (langs - [:clear]).first
+
+  # Timing metric rows
+  timing_keys.each do |key|
+    row = "  %-*s" % [label_w, key]
+    values = langs.map { |l| all_metrics[l][key] }
+    langs.each_with_index do |l, i|
+      row += "%*s" % [col_w, values[i] ? format_metric(values[i]) : "--"]
+    end
+    if has_baseline && baseline_lang
+      bv = parse_metric_value(all_metrics[baseline_lang][key])
+      cv = parse_metric_value(all_metrics[:clear]&.dig(key))
+      if bv && cv && bv[0] > 0
+        pct = (cv[0] / bv[0]) * 100 - 100
+        sign = pct >= 0 ? "+" : ""
+        row += "%*s" % [delta_w, "#{sign}#{'%.1f' % pct}%"]
+      else
+        row += "%*s" % [delta_w, "--"]
+      end
+    end
+    puts row
+  end
+
+  # Separator + total (wall time)
+  puts "  " + "-" * (label_w + langs.size * col_w + (has_baseline ? delta_w : 0))
+  row = "  %-*s" % [label_w, "total (wall)"]
+  langs.each { |l| row += "%*s" % [col_w, "#{'%.1f' % (times[l] * 1000)} ms"] }
+  if has_baseline && baseline_lang && times[:clear] && times[baseline_lang]
+    pct = (times[:clear] / times[baseline_lang]) * 100 - 100
+    sign = pct >= 0 ? "+" : ""
+    row += "%*s" % [delta_w, "#{sign}#{'%.1f' % pct}%"]
+  end
+  puts row
+
+  # Verification rows (checksum, count, etc.)
+  verify_keys.each do |key|
+    row = "  %-*s" % [label_w, key]
+    values = langs.map { |l| all_metrics[l][key] }
+    langs.each_with_index do |l, i|
+      row += "%*s" % [col_w, values[i] || "--"]
+    end
+    if has_baseline && baseline_lang
+      bv = all_metrics[baseline_lang][key]
+      cv = all_metrics[:clear]&.dig(key)
+      if bv && cv
+        row += "%*s" % [delta_w, bv == cv ? "ok" : "MISMATCH"]
+      else
+        row += "%*s" % [delta_w, "--"]
+      end
+    end
+    puts row
+  end
 end
 
 # -------------------------------------------------------------------------
@@ -120,17 +274,20 @@ def run_bench(dir, mode_cfg, cores)
 
   if has_c && File.exist?("#{dir}/bench_c")
     puts "Running C baseline (best of #{runs})..."
-    results[:c] = measure_min("./#{dir}/bench_c", runs)
+    wall, metrics = measure_min("./#{dir}/bench_c", runs)
+    results[:c] = { wall: wall, metrics: metrics }
   end
 
   if has_rust && File.exist?("#{dir}/bench_rust")
     puts "Running Rust baseline (best of #{runs})..."
-    results[:rust] = measure_min("TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs)
+    wall, metrics = measure_min("TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs)
+    results[:rust] = { wall: wall, metrics: metrics }
   end
 
   if has_go && File.exist?("#{dir}/bench_go")
     puts "Running Go baseline (best of #{runs})..."
-    results[:go] = measure_min("GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs)
+    wall, metrics = measure_min("GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs)
+    results[:go] = { wall: wall, metrics: metrics }
   end
 
   if has_clear
@@ -145,27 +302,14 @@ def run_bench(dir, mode_cfg, cores)
     jemalloc_note = jemalloc_lib ? ", jemalloc" : ""
 
     puts "Running CLEAR (best of #{runs}, CLEAR_THREADS=#{threads}#{jemalloc_note})..."
-    results[:clear] = measure_min("#{jemalloc_preload}CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs)
+    wall, metrics = measure_min("#{jemalloc_preload}CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs)
+    results[:clear] = { wall: wall, metrics: metrics }
   end
 
   # 6. Reporting
-  puts "\nRESULTS for #{dir}:"
-
-  rust_label = File.exist?("#{dir}/Cargo.toml") ? "Rust (tokio)" : "Rust (threads)"
-  label_map  = { c: "C (Perfect)", go: "Go (goroutines)", rust: rust_label,
-                 clear: "CLEAR (fibers)" }
-  baseline_label = { c: "C", go: "Go", rust: "Rust" }
-
-  results.each do |lang, t|
-    puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s"
-  end
-
-  [:c, :go, :rust].each do |k|
-    next unless results[:clear] && results[k]
-    overhead = (results[:clear] / results[k]) * 100 - 100
-    sign = overhead >= 0 ? "+" : ""
-    puts "CLEAR vs #{baseline_label[k]}:         #{sign}#{'%.2f' % overhead}%"
-  end
+  puts ""
+  report_table(dir, results)
+  puts ""
 end
 
 # -------------------------------------------------------------------------
