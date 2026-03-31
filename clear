@@ -57,13 +57,14 @@ def do_build(source, output: nil, opt_level: 'ReleaseFast', module_mode: false)
   output ||= File.join(source_dir, base_name)
 
   # Transpile
-  transpile_flag = module_mode ? '--module' : ''
+  transpile_flag = module_mode ? '--test' : ''
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(ZIG_DIR, tmp_name)
 
-  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source} 2>&1`
+  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source} 2>/dev/null`
   unless $?.success?
-    $stderr.puts zig_code
+    # Re-run with stderr visible for error messages
+    system("ruby #{TRANSPILER} #{transpile_flag} #{source} > /dev/null")
     error "Transpilation failed"
   end
   File.write(tmp_zig, zig_code)
@@ -82,11 +83,15 @@ def do_build(source, output: nil, opt_level: 'ReleaseFast', module_mode: false)
 
   # Build Zig command (runs from zig/ directory where runtime files live)
   if module_mode
-    # Module mode needs cheat_runtime resolved
-    deps = ['--dep', 'cheat_runtime']
-    mods = ['-Mcheat_runtime=runtime-header.zig']
-    ffi_modules.each { |m| deps += ['--dep', m]; mods += ["-M#{m}=#{m}.zig"] }
-    cmd_parts = [ZIG, 'test'] + deps + ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S'] + mods
+    # Test mode: zig test with same imports as standalone (runtime-header.zig)
+    cmd_parts = [ZIG, 'test']
+    if ffi_modules.any?
+      ffi_modules.each { |m| cmd_parts += ['--dep', m] }
+      cmd_parts += ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S']
+      ffi_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
+    else
+      cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
+    end
   else
     cmd_parts = [ZIG, 'build-exe']
     if ffi_modules.any?

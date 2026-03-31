@@ -36,7 +36,7 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false)
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false)
     @source_dir = File.expand_path(source_dir)
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
@@ -59,8 +59,15 @@ class ZigTranspiler
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
     # Auto-detect: use c_allocator when @sharded maps or @pinned BG blocks are present.
     # GPA is not suitable for multi-threaded workloads (canary corruption under concurrent load).
-    needs_c_alloc = use_c_allocator || @used_sharded_map
+    needs_c_alloc = !test_mode && (use_c_allocator || @used_sharded_map)
     alloc_config = needs_c_alloc ? "pub const USE_C_ALLOCATOR = true;\n" : ""
+
+    has_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+    footer = if test_mode
+      has_main ? TEST_FOOTER : ""
+    else
+      File.read("./zig/runtime-footer.zig")
+    end
 
     <<~ZIG
       const std = @import("std");
@@ -75,11 +82,50 @@ class ZigTranspiler
       #{body}
 
       // -------------------------------------------------------------------------
-      // 3. Main Entry (Test Harness)
+      // 3. #{test_mode ? 'Test Harness' : 'Main Entry'}
       // -------------------------------------------------------------------------
-      #{File.read("./zig/runtime-footer.zig")}
+      #{footer}
     ZIG
   end
+
+  TEST_FOOTER = <<~'ZIG'
+    test "cheat main" {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+        var global_ctx = EbrContext{};
+        defer global_ctx.deinit(allocator);
+        var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
+        defer rt.deinit();
+        rt.wireAllocator();
+        const fp = @import("scheduler.zig");
+        const fm = @import("fiber-memory.zig");
+        var stack_pool = fm.StackPool.init(allocator);
+        defer stack_pool.deinit();
+        var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+        defer {
+            fp.scheduler_running = false;
+            sched.deinit();
+            fp.global_registry.deinit(allocator);
+        }
+        fp.active_scheduler = &sched;
+        fp.scheduler_running = true;
+        const MainRunner = struct {
+            fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                _ = raw_args;
+                const rt_ptr: *Runtime = @ptrCast(@alignCast(raw_rt));
+                try clearMain(rt_ptr);
+            }
+        };
+        try sched.submitSpawn(
+            @intFromPtr(&Runtime.entryWrapper),
+            @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
+            null,
+            .{ .stack_size = .Large },
+        );
+        sched.run();
+    }
+  ZIG
 
   # Module entry point: transpile a pre-parsed+annotated AST, emitting only
   # declarations that are importable (non-private). Used by ModuleImporter.
@@ -3027,6 +3073,9 @@ if __FILE__ == $0
     opts.on('--module', 'Emit as a Zig module (uses @import("cheat_runtime"), no runtime footer)') do
       options[:mode] = :module
     end
+    opts.on('--test', 'Emit with test harness (GPA leak detection, scheduler setup)') do
+      options[:mode] = :test
+    end
     opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.cht"') do |spec|
       name, path = spec.split('=', 2)
       options[:pkg_paths][name] = File.expand_path(path)
@@ -3045,6 +3094,8 @@ if __FILE__ == $0
     case options[:mode]
     when :module
       puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
+    when :test
+      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths], test_mode: true)
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
     end
