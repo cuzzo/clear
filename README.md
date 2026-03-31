@@ -79,7 +79,7 @@ Rust & Go need to be combined to build the language of the future: one that can 
 
 Concurrency is not hard.  We do it every day in SQL queries as effiently as possible.
 
-Concurrency is only hard when you have to do it yourself.  That's why CLEAR eliminates that need.
+Concurrency is only hard when you have to tell the computer exactly how to achieve it efficiently.  CLEAR does tha hard part for you like a SQL engine.
 
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
 
