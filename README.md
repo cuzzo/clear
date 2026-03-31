@@ -249,3 +249,13 @@ Throughput within 5-10%. CLEAR has consistently better p99 latency; Dragonfly ha
 
 The comparison demonstrates CLEAR's raw multi-core I/O and sharded HashMap performance. A fair comparison would require CLEAR to implement these features.
 
+## DISCLAIMER
+
+CLEAR is currently in **v0.1-pre** release. It is an architectural preview and is NOT production-ready.
+
+- **Benchmarks**: While we have performed extensive benchmarking, "apples to apples" comparisons with mature ecosystems (Go, Rust, C) are difficult. Our results demonstrate raw engine potential, not feature-complete parity.
+- **Tail Latency**: While throughput is high, CLEAR's p99.9 latency is **NOT** expected to be competitive with Go's preemptive scheduler across all adversarial workloads in this release.
+- **Standard Library**: The current "standard library" is a barebones shim used for bootstrapping and internal testing. It is highly likely that none of the current internal APIs will survive into the v0.3 release.
+- **Stability**: Although CLEAR has an extensive test suite, several significant bugs were identified in the final week before this pre-release. The current state is an unstable preview and is not representative of the stability goals for v0.2.
+
+
