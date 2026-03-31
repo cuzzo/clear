@@ -1142,84 +1142,107 @@ pub const CheatLib = struct {
     // Reference Counting (multiowned / Rc)
     // -------------------------------------------------------------------------
 
-    /// Rc(T): a reference-counted wrapper around a heap-allocated T.
-    /// The data pointer and ref-count are both allocated via the provided allocator.
-    pub fn Rc(comptime T: type) type {
+    // -------------------------------------------------------------------------
+    // Reference Counting with Control Block (supports weak references)
+    // -------------------------------------------------------------------------
+    // Both Rc and Arc use a control block that holds strong + weak counts
+    // alongside the data pointer. This enables WeakRc/WeakArc to check if
+    // the value is still alive without holding a strong reference.
+
+    pub fn RcControlBlock(comptime T: type) type {
         return struct {
-            const Self = @This();
+            strong: usize,
+            weak: usize,
             data: *T,
-            ref_count: *usize,
+            alloc: std.mem.Allocator,
         };
     }
 
-    /// Create a new Rc from an already-heap-allocated *T.
-    /// The Rc takes ownership of data_ptr; ref_count starts at 1.
-    pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
-        const ref_count = try alloc.create(usize);
-        ref_count.* = 1;
-        const data_ptr = try alloc.create(T);
-        data_ptr.* = data;
-        return Rc(T){ .data = data_ptr, .ref_count = ref_count };
+    /// Rc(T): a reference-counted wrapper around a heap-allocated T.
+    /// Uses a control block shared with WeakRc for weak reference support.
+    pub fn Rc(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            ctrl: *RcControlBlock(T),
+            // Convenience: access data through .data for compatibility
+            pub fn getData(self: Self) *T { return self.ctrl.data; }
+        };
     }
 
-    /// Increment the reference count and return a copy of the handle.
-    /// Both the original and the returned handle must eventually be released.
+    pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
+        const ctrl = try alloc.create(RcControlBlock(T));
+        const data_ptr = try alloc.create(T);
+        data_ptr.* = data;
+        ctrl.* = .{ .strong = 1, .weak = 0, .data = data_ptr, .alloc = alloc };
+        return Rc(T){ .ctrl = ctrl };
+    }
+
     pub fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
-        rc.ref_count.* += 1;
+        rc.ctrl.strong += 1;
         return rc;
     }
 
-    /// Decrement the reference count.  When it reaches 0 the data and
-    /// ref-count allocation are freed.
     pub fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
-        rc.ref_count.* -= 1;
-        if (rc.ref_count.* == 0) {
-            alloc.destroy(rc.data);
-            alloc.destroy(rc.ref_count);
+        _ = alloc; // alloc stored in control block
+        rc.ctrl.strong -= 1;
+        if (rc.ctrl.strong == 0) {
+            rc.ctrl.alloc.destroy(rc.ctrl.data);
+            if (rc.ctrl.weak == 0) {
+                rc.ctrl.alloc.destroy(rc.ctrl);
+            }
         }
     }
 
     // -------------------------------------------------------------------------
-    // Atomic Reference Counting (shared / Arc)
+    // Atomic Reference Counting with Control Block (shared / Arc)
     // -------------------------------------------------------------------------
 
-    /// Arc(T): an atomically reference-counted wrapper around a heap-allocated T.
-    /// Thread-safe: the ref-count is an atomic usize.
-    pub fn Arc(comptime T: type) type {
+    pub fn ArcControlBlock(comptime T: type) type {
         return struct {
-            const Self = @This();
+            strong: std.atomic.Value(usize),
+            weak: std.atomic.Value(usize),
             data: *T,
-            ref_count: *std.atomic.Value(usize),
+            alloc: std.mem.Allocator,
         };
     }
 
-    /// Create a new Arc from an already-heap-allocated *T.
-    /// The Arc takes ownership of data_ptr; ref_count starts at 1.
-    pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
-        const ref_count = try alloc.create(std.atomic.Value(usize));
-        ref_count.* = std.atomic.Value(usize).init(1);
-        const data_ptr = try alloc.create(T);
-        data_ptr.* = data;
-        return Arc(T){ .data = data_ptr, .ref_count = ref_count };
+    /// Arc(T): an atomically reference-counted wrapper around a heap-allocated T.
+    /// Uses a control block shared with WeakArc for weak reference support.
+    pub fn Arc(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            ctrl: *ArcControlBlock(T),
+            pub fn getData(self: Self) *T { return self.ctrl.data; }
+        };
     }
 
-    /// Increment the reference count atomically and return a copy of the handle.
-    /// Both the original and the returned handle must eventually be released.
+    pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
+        const ctrl = try alloc.create(ArcControlBlock(T));
+        const data_ptr = try alloc.create(T);
+        data_ptr.* = data;
+        ctrl.* = .{
+            .strong = std.atomic.Value(usize).init(1),
+            .weak = std.atomic.Value(usize).init(0),
+            .data = data_ptr,
+            .alloc = alloc,
+        };
+        return Arc(T){ .ctrl = ctrl };
+    }
+
     pub fn arcRetain(comptime T: type, arc: Arc(T)) Arc(T) {
-        _ = arc.ref_count.fetchAdd(1, .acquire);
+        _ = arc.ctrl.strong.fetchAdd(1, .acquire);
         return arc;
     }
 
-    /// Decrement the reference count atomically. When it reaches 0 the data
-    /// and ref-count allocation are freed.
     pub fn arcRelease(comptime T: type, alloc: std.mem.Allocator, arc: Arc(T)) void {
-        const prev = arc.ref_count.fetchSub(1, .release);
+        _ = alloc;
+        const prev = arc.ctrl.strong.fetchSub(1, .release);
         if (prev == 1) {
-            // Acquire the release-sequence so all writes before prior arcRelease()
-            // calls are visible before we free the data.
-            _ = arc.ref_count.load(.acquire);
-            alloc.destroy(arc.data);
-            alloc.destroy(arc.ref_count);
+            _ = arc.ctrl.strong.load(.acquire);
+            arc.ctrl.alloc.destroy(arc.ctrl.data);
+            if (arc.ctrl.weak.load(.acquire) == 0) {
+                arc.ctrl.alloc.destroy(arc.ctrl);
+            }
         }
     }
 

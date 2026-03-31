@@ -112,7 +112,7 @@ module OwnershipGenerator
           if field_type.any_rc?
             inner = field_type.resolved.to_s
             func = field_type.shared? ? "arcRelease" : "rcRelease"
-            base_logic += "defer if (!#{name}_moved) CheatLib.#{func}(#{transpile_type(inner)}, rt.heapAlloc(), #{name}.data.#{fname});\n"
+            base_logic += "defer if (!#{name}_moved) CheatLib.#{func}(#{transpile_type(inner)}, rt.heapAlloc(), #{name}.ctrl.data.#{fname});\n"
           end
         end
       end

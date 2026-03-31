@@ -826,7 +826,7 @@ private
             @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
             # Transpile field and value with the alias substituted for the target.
             field = node.name.field
-            value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
+            value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.ctrl\.data\./, "#{alias_var}.")
             @locked_unwrap_map = prev_locked_map
 
             return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value};\n}"
@@ -1217,7 +1217,7 @@ private
       rc_bindings = rc_caps.map do |cap|
         name = cap[:var_node].name
         inner = "__#{name}_unwrap"
-        "const #{inner} = #{name}.data.*;\n_ = &#{inner};"
+        "const #{inner} = #{name}.ctrl.data.*;\n_ = &#{inner};"
       end.join("\n")
 
       # --- Mutex bindings: acquire(), bind alias as *T ---
@@ -1228,7 +1228,7 @@ private
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
         zig_var    = @do_capture_map&.dig(var_name) || var_name
-        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         <<~ZIG.chomp
           var #{guard_var} = #{lock_expr}.acquire();
           defer #{guard_var}.release();
@@ -1243,7 +1243,7 @@ private
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
         zig_var    = @do_capture_map&.dig(var_name) || var_name
-        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         <<~ZIG.chomp
           var #{guard_var} = #{lock_expr}.write();
           defer #{guard_var}.release();
@@ -1258,7 +1258,7 @@ private
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
         zig_var    = @do_capture_map&.dig(var_name) || var_name
-        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         <<~ZIG.chomp
           var #{guard_var} = #{lock_expr}.read();
           defer #{guard_var}.release();
@@ -1953,10 +1953,10 @@ private
       ti = node.target.type_info
       if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
         # Rc(T)/Arc(T) store the value as .data (*T); Zig auto-derefs through the pointer
-        "#{target_code}.data.#{node.field}"
+        "#{target_code}.ctrl.data.#{node.field}"
       elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
         # *Locked(T) / *RwLocked(T): auto-deref pointer, then access .data field
-        "#{target_code}.data.#{node.field}"
+        "#{target_code}.ctrl.data.#{node.field}"
       elsif @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         # SOA field-slice rewrite: _.field → __soa_field[__soa_i]
         @soa_needed_fields << node.field
