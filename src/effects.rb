@@ -82,9 +82,12 @@ module EffectTracker
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
       ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
-      heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
+      ret_type_obj = ret_type.is_a?(Type) ? ret_type : (ret_type ? Type.new(ret_type) : nil)
+      heap_return = ret_type_obj && (ret_type_obj.heap? || ret_type_obj.dynamic?)
+      # String returns need rt for heapAlloc().dupe() in emit_return_with_promotion.
+      string_return = ret_type_obj&.string?
       has_takes_heap = fn_node.params&.any? { |p| p[:takes] && Type.new(p[:type] || :Any).string? }
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || name == "main"
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || string_return || (@fn_has_fnptr[name] == true) || has_takes_heap || name == "main"
     end
 
     changed = true
@@ -111,8 +114,12 @@ module EffectTracker
   # are excluded from propagation — they don't use CLEAR's error union convention.
   def compute_can_fail!
     can_fail = {}
-    @fn_nodes.each do |name, _|
-      can_fail[name] = @fn_raises_directly[name] == true || name == "main"
+    @fn_nodes.each do |name, fn_node|
+      # String returns use heapAlloc().dupe() which can fail with OutOfMemory.
+      ret_type = fn_node.return_type
+      ret_type_obj = ret_type.is_a?(Type) ? ret_type : (ret_type ? Type.new(ret_type) : nil)
+      string_return = ret_type_obj&.string?
+      can_fail[name] = @fn_raises_directly[name] == true || string_return || name == "main"
     end
 
     changed = true

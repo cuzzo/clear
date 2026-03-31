@@ -425,6 +425,32 @@ RSpec.describe SemanticAnnotator do
     end
 
     # ------------------------------------------------------------------
+    # String affine move semantics (Rust-like)
+    # ------------------------------------------------------------------
+    describe "String move semantics" do
+      it "raises on use-after-move of String variable" do
+        src = 'FN f() RETURNS Void -> x = "hello"; y = x; z = x; RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'x'/)
+      end
+
+      it "raises on use-after-move of String in function call" do
+        src = 'FN f(s: String) RETURNS Void -> RETURN; END
+              FN g() RETURNS Void -> x = "hello"; y = x; f(x); RETURN; END'
+        expect { run(src) }.to raise_error(/Use of moved value 'x'/)
+      end
+
+      it "does not raise on normal string assignment and use" do
+        src = 'FN f() RETURNS Void -> x = "hello"; ASSERT x == "hello", "ok"; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "does not raise when string is used before move" do
+        src = 'FN f() RETURNS Void -> x = "hello"; ASSERT x == "hello", "ok"; y = x; RETURN; END'
+        expect { run(src) }.not_to raise_error
+      end
+    end
+
+    # ------------------------------------------------------------------
     # Phase 4 — File::create, fileWrite, TCPClient::connect
     # ------------------------------------------------------------------
     describe "Phase 4 — File::create" do

@@ -767,7 +767,6 @@ class Type
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    return true if string?
     return true if array? && !list_collection? && !pool? && !set_collection?
     # Unions and enums are value types in Zig — trivially copyable
     if lookup_arg || lookup_block
