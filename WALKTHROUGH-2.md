@@ -1,12 +1,6 @@
 # CLEAR Language Walkthrough
 
-This guide showcases CLEAR: a memory-safe language with raw speed that approaches Rust and Perfect C, and with throughput that matches Go in all but the most pathological cases.
-
-It achieves this while having a substantially simpler syntax and type system than Swift or Go or TypeScript.
-
-It does this by acting like a SQL engine. You describe your intent, and CLEAR gives you best-in-class allocation, syncronization, and core-utilization by default.
-
-Like a query engine, it can warn you when you're doing something likely inefficient.
+This guide showcases CLEAR: a memory-safe language that combines the ergonomics of scripting with the safety of affine types and the performance of arena-based memory.
 
 ## 1. Immutability & Mutability
 
@@ -25,7 +19,7 @@ counter = 1;                  -- OKAY: can reassign mutable binding
 
 ## 2. Primitive Types
 
-CLEAR provides a comprehensive set of primitives for precise control over memory and performance.
+CLEAR provides a comprehensive set of primitives for precise control over memory.
 
 | Type | Description | Example |
 | :--- | :--- | :--- |
@@ -38,48 +32,95 @@ CLEAR provides a comprehensive set of primitives for precise control over memory
 | `String` | UTF-8 encoded text (affine) | `"hello"` |
 | `Void` | Absence of a value | `RETURN;` |
 
-## 3. Function Signatures
+## 3. Affine Ownership: GIVE & TAKES
 
-Functions are defined with the `FN` keyword and use an arrow `->` to start the body.
-
-```clear
--- Simple function with explicit types
-FN add(a: Int64, b: Int64) RETURNS Int64 ->
-    RETURN a + b;                                   -- OKAY
-END
-
--- Failable function (!) and optional types (?)
-FN findUser(id: Int64) RETURNS !?User ->
-    IF id < 0 -> RAISE "Invalid ID";                -- OKAY: One-line shorthand
-    -- logic to return optional User
-    RETURN result;                                  -- OKAY
-END
-```
-
-## 4. Structs & Uniform Function Call Syntax (UFCS)
-
-Structs define data layouts. Functions defined with a type prefix can be called using method syntax.
+CLEAR uses **affine types** by default. Every value has exactly one owner. When you assign a value or pass it to a function, ownership is **moved**, not copied.
 
 ```clear
-STRUCT Point {
-    x: Float64,
-    y: Float64
-}
-
--- UFCS: Method-style call for functions
-FN Point::distance(p: Point) RETURNS Float64 ->
-    RETURN sqrt(p.x * p.x + p.y * p.y);             -- OKAY
+FN process(TAKES s: String) RETURNS Void ->
+    print(s);                                       -- OKAY
+    -- s is destroyed here (end of scope)
 END
 
 FN main() RETURNS Void ->
-    p = Point{ x: 3.0, y: 4.0 };                    -- OKAY: Struct literal
-    d = p.distance();                               -- OKAY: UFCS method call
-    d2 = Point::distance(p);                        -- OKAY: Equivalent static call
+    msg = "Hello";                                  -- OKAY
+    
+    process(GIVE msg);                              -- OKAY: Explicit transfer
+    
+    print(msg);                                     -- COMPILER ERROR: Use after move
     RETURN;
 END
 ```
 
-## 5. Basic Control Flow
+Explicit `GIVE` at the call site ensures that "data disappearance" is always visible to the reader. For more details, see [docs/sharing-capabilities.md](docs/sharing-capabilities.md).
+
+## 4. Capabilities: Shared & Synchronized
+
+Capabilities are the "solution" to affine movement. They define *how* data is accessed without changing the underlying Type. Multiple capabilities are joined using the `:` sigil and attached directly to the type.
+
+```clear
+-- @shared:locked — Multi-threaded ownership (Arc) + Mutex
+MUTABLE counter: Int64@shared:locked = 0;           -- OKAY
+
+-- 1. One-line updates (Auto-locking)
+counter += 1;                                       -- OKAY: Auto acquire/release
+
+-- 2. Multi-statement access (Manual block)
+WITH EXCLUSIVE counter AS c {                       -- OKAY: Manual lock
+    c += 1;
+    print(c.toString());
+}                                                   -- OKAY: Unlock here
+```
+
+By separating **Types** from **Capabilities**, functions remain decoupled from synchronization strategies. A function taking `Int64` works whether the caller provides a stack value, an `Rc`, or an `Arc<Mutex>`.
+
+## 5. Sharded Shared-Nothing Architecture
+
+The `@sharded` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
+
+```clear
+-- A sharded map distributes keys across independent thread-local heaps
+MUTABLE registry: HashMap<Int64>@sharded(8) = {};   -- OKAY
+
+-- CLEAR automatically pins this fiber to the correct shard
+BG {
+    registry["key"] = 42;                           -- OKAY
+}
+
+-- Sharding is also available for Pools and Lists
+MUTABLE users: User[100]@pool:sharded(4) = [];      -- OKAY
+MUTABLE logs: String[]@list:sharded(2) = [];        -- OKAY
+
+-- Note: Sharding provides peak throughput but carries a risk of 
+-- data skew if keys/items are not uniformly distributed.
+```
+
+## 6. Function Signatures & UFCS
+
+Functions support explicit types, failable returns (`!T`), and optional types (`?T`). **Uniform Function Call Syntax (UFCS)** allows calling any function with method syntax if its first argument matches the receiver type.
+
+```clear
+STRUCT Point { x: Float64, y: Float64 }
+
+-- FN Type::name(self, ...) defines a method
+FN Point::distance(p: Point) RETURNS Float64 ->
+    RETURN sqrt(p.x * p.x + p.y * p.y);             -- OKAY
+END
+
+FN findUser(id: Int64) RETURNS !?User ->
+    IF id < 0 -> RAISE "Invalid ID";                -- OKAY: One-line shorthand
+    -- Returns optional User or propagates error
+    RETURN result;                                  -- OKAY
+END
+
+FN main() RETURNS Void ->
+    p = Point{ x: 3.0, y: 4.0 };
+    d = p.distance();                               -- OKAY: UFCS method call
+    RETURN;
+END
+```
+
+## 7. Basic Control Flow
 
 CLEAR provides standard control flow constructs with support for one-line shorthands.
 
@@ -100,17 +141,12 @@ WHILE i < 10 DO
     i += 1;
 END
 
--- 3. FOR loops (Collection iteration)
-items = [1, 2, 3];
+-- 3. FOR loops (Collection or Range iteration)
 FOR item IN items -> print(item.toString());        -- OKAY: One-line shorthand
-
--- 4. FOR loops (Range iteration)
-FOR j IN (1 ..= 5) DO                               -- OKAY: Inclusive range
-    print(j.toString());
-END
+FOR j IN (1 ..= 5) DO print(j.toString()); END      -- OKAY: Inclusive range
 ```
 
-## 6. Higher-Order Functions & Error Handling
+## 8. Higher-Order Functions & Error Handling
 
 CLEAR supports powerful functional pipelines via the Smooth operator `s>`.
 
@@ -120,9 +156,9 @@ alive = entities s> WHERE _.health > 0;             -- OKAY
 total = scores s> SUM _.value;                      -- OKAY
 names = users s> SELECT _.name;                     -- OKAY
 
--- 2. Function Piping & In-place Mutation
+-- 2. side effects & Function Piping
+entities s> EACH { _.x += _.vx; };                  -- OKAY
 result = data s> process s> validate s> format;     -- OKAY
-entities s> EACH { _.x = _.x + _.vx; };             -- OKAY
 
 -- 3. Error Handling: Inline OR ELSE / OR RAISE
 val = parseInt("abc") OR ELSE 0;                    -- OKAY: Fallback value
@@ -139,126 +175,67 @@ CATCH e                                             -- OKAY: Handles any raised 
 END
 ```
 
-| Category | Operators |
-|---|---|
-| **Transform** | `SELECT`, `WHERE`, `ORDER_BY`, `LIMIT`, `DISTINCT`, `UNNEST`, `INDEX` |
-| **Aggregate** | `SUM`, `AVERAGE`, `MIN`, `MAX`, `REDUCE`, `COUNT`, `ANY`, `ALL`, `FIND` |
-| **Side Effects** | `EACH` |
-
 See [docs/pipelines.md#operators](docs/pipelines.md#operators) for a full list of higher-order function operators.
 
-## 7. Time as Tense (~T)
+## 9. Time as Tense (~T)
 
-Tense represents a value that will exist in the future. It allows composition of asynchronous logic and streams before deciding on a concurrency capability.
+Tense represents a value that will exist in the future. CLEAR eliminates the complexity of `Future/Promise/Observable` with a single unified tense.
+
+- `~User` is read as **"Future User"**.
+- `~User[]` is read as **"Future Users"**.
+- A **STREAM** of users is simply one way to produce "Future Users".
 
 ```clear
--- 1. Promise (~T): A single value in the future
+-- 1. Promise (~T): A single future value
 p: ~String = BG { sleep(100); RETURN "Data"; };
 val = NEXT p;                                       -- OKAY: Blocks until ready
 
--- 2. Bounded Stream (~T[N]): N concurrent parallel fibers
-stream: ~Int64[3] = [
-    BG { compute(1); },
-    BG { compute(2); },
-    BG { compute(3); }
-];
-v1 = NEXT stream;                                   -- OKAY: Popped in spawn order
-
--- 3. Open Stream (~T[?]): Asynchronous generator
+-- 2. Open Stream (~T[?]): Asynchronous generator
 gen: ~Int64[?] = BG STREAM {
     YIELD 10;
     YIELD 20;
 };
 val = NEXT gen;                                     -- OKAY: Returns ?Int64 (NIL when exhausted)
 
--- 4. Infinite Stream (~T[INF]): Lazy rendezvous generator
+-- 3. Infinite Stream (~T[INF]): Lazy rendezvous generator
 counter: ~Int64[INF] = BG STREAM {
     MUTABLE i = 0;
-    WHILE TRUE DO
-        YIELD i;
-        i += 1;
-    END
+    WHILE TRUE DO { YIELD i; i += 1; }
 };
 v1 = NEXT counter;                                  -- OKAY: Returns Int64 (never NIL)
 ```
 
-## 8. Capabilities: Shared & Synchronized
-
-Capabilities define *how* data is accessed. Functions take Types; call sites provide Capabilities. Joined capabilities use the `:` sigil.
-
-```clear
--- @shared:locked — Atomic refcount + Mutex
-MUTABLE counter: Int64@shared:locked = 0;           -- OKAY: Combined capabilities
-
--- Thread-safe mutation via WITH block
-BG {
-    WITH EXCLUSIVE counter AS c {                   -- OKAY: Acquire lock
-        c += 1;                                     -- Mutate the alias
-    }
-}
-
--- Note: Functions still take the plain Type (Int64), making business
--- logic decoupled from the synchronization strategy.
-```
-
-## 9. Sharded Shared-Nothing Architecture
-
-Sharded collections partition data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
-
-```clear
--- A sharded map distributes keys across independent thread-local heaps
-MUTABLE registry: HashMap<Int64>@sharded(8) = {};   -- OKAY
-
--- CLEAR automatically pins this fiber to the correct shard
-BG {
-    registry["key"] = 42;                           -- OKAY
-}
-
--- Sharding is also available for Pools and Lists
-MUTABLE users: User[100]@pool:sharded(4) = [];      -- OKAY
-MUTABLE logs: String[]@list:sharded(2) = [];        -- OKAY
-
--- Note: Sharding provides peak throughput but carries a risk of
--- data skew if keys/items are not uniformly distributed.
-```
-
 ## 10. Collections: Array, List, and Pool
 
-CLEAR provides three core collection types with distinct memory and performance profiles. All collections are **automatically monomorphized** — the compiler generates optimized, type-specific native code for every unique `T`, ensuring zero-overhead generics.
+All collections are **automatically monomorphized** — the compiler generates zero-overhead, type-specific native code for every unique `T`.
 
 | Sigil | Collection | Purpose |
 | :--- | :--- | :--- |
 | `T[N]` | `Array` | Fixed-size, stack-allocated (if small) |
 | `T[]@list` | `List` | Dynamic-size, heap-backed |
-| `T[N]@pool` | `Pool` | Fixed-capacity, pre-allocated handles |
+| `T[N]@pool` | `Pool` | Fixed-capacity, generational handles |
 
 ```clear
 -- 1. Fixed Array
-arr: Int64[3] = [1, 2, 3];                          -- OKAY
 vals = [10, 20, 30];                                -- OKAY: Type inference
 
 -- 2. Dynamic List
-MUTABLE items: Int64[]@list = [];                   -- OKAY: Empty list literal
-MUTABLE names: String[] = List[];                   -- OKAY: Explicit List initializer
+MUTABLE items: Int64[]@list = [];                   -- OKAY
+MUTABLE names: String[] = List[];                   -- OKAY
 
 -- 3. Generational Pool
--- Pools provide peak cache locality and stable handles. Switching from
--- List to @pool:soa (Structure of Arrays) is a one-line refactor for
--- massive performance gains.
+-- Pools provide peak cache locality. Switching from List to @pool:soa 
+-- (Structure of Arrays) is a one-line refactor for massive speed.
 -- See: [benchmarks/22_pool_vs_multiowned/](benchmarks/22_pool_vs_multiowned/)
-MUTABLE users: User[100]@pool = [];                 -- OKAY: Empty pool literal
-MUTABLE entities: Entity[50] = Pool[];              -- OKAY: Explicit Pool initializer
+MUTABLE users: User[100]@pool = [];                 -- OKAY
 
-id = users.insert(User{ name: "Alice" });           -- OKAY: Returns generational handle
-
--- Note: Unlike Arrays/Lists, Pools require access handling because
--- .get(id) returns an optional (?T) to account for stale handles.
-user = users.get(id) OR RAISE;                      -- OKAY
+id = users.insert(User{ name: "Alice" });           -- OKAY: Returns stable handle
+user = users.get(id) OR RAISE;                      -- OKAY: Returns ?T (checks for stale handles)
 ```
 
 ## 11. Strings, Buffers, and RingBuffers
 
-Strings in CLEAR are affine by default and can be specialized for specific performance profiles.
+Strings in CLEAR are affine and can be specialized for performance profiles.
 
 ```clear
 s = "Standard String";                              -- OKAY
@@ -273,13 +250,11 @@ MUTABLE ring: String@ring = RingBuffer::new(256);   -- OKAY
 
 ## 12. Concurrency: BG & DO
 
-CLEAR makes both background tasks and fork-join parallelism trivial.
+CLEAR makes background tasks and fork-join parallelism trivial.
 
 ```clear
 -- BG: Background execution
-p: ~Int64 = BG {                                    -- OKAY
-    RETURN slowComputation();
-};
+p: ~Int64 = BG { RETURN slowComputation(); };       -- OKAY
 
 -- DO: Fork-Join parallel execution
 DO {                                                -- OKAY
@@ -292,29 +267,9 @@ results = urls |> SELECT BG { fetch(_) };
 data = results |> SELECT NEXT _;                    -- OKAY
 ```
 
-## 13. Affine Ownership: GIVE & TAKES
+## 13. Refcounting & Cyclic Structures
 
-CLEAR uses affine types to ensure memory safety without a garbage collector. Values have exactly one owner.
-
-```clear
-FN process(TAKES s: String) RETURNS Void ->
-    print(s);                                       -- OKAY
-    -- s is destroyed here (end of scope)
-END
-
-FN main() RETURNS Void ->
-    msg = "Hello";                                  -- OKAY
-
-    process(GIVE msg);                              -- OKAY: Transfer ownership
-
-    print(msg);                                     -- COMPILER ERROR: Use after move
-    RETURN;
-END
-```
-
-## 14. Refcounting & Cyclic Structures
-
-For shared data, use `@multiowned` (single-threaded Rc). For recursive or cyclic structures, use `@indirect` (Box).
+For data shared by multiple owners, use `@multiowned` (single-threaded Rc). For recursive or cyclic structures, use `@indirect` (Box).
 
 ```clear
 -- Reference counted data (Rc)
@@ -328,7 +283,42 @@ STRUCT Node {                                       -- OKAY
 }
 ```
 
-## 15. FFI: Native Integration
+## 14. Match, Enums, and Generics
+
+CLEAR supports powerful pattern matching with destructuring and exhaustive checks (`MATCH IFF`).
+
+```clear
+UNION Shape {
+    Circle: Float64,
+    Rect: { w: Float64, h: Float64 }
+}
+
+FN area(s: Shape) RETURNS Float64 ->
+    MATCH IFF s START                               -- OKAY: IFF ensures exhaustiveness
+        Shape.Circle AS r -> RETURN 3.14 * r * r;
+        Shape.Rect{ w, h } -> RETURN w * h;         -- OKAY: Destructure fields
+    END
+END
+```
+
+## 15. Modules & Imports
+
+CLEAR uses a simple namespace-based module system via `REQUIRE`.
+
+```clear
+REQUIRE "math_utils.cht" AS m;                      -- OKAY: Local file alias
+REQUIRE "pkg:geometry";                             -- OKAY: Package import
+
+FN main() RETURNS Void ->
+    p = geometry.Point{ x: 1, y: 2 };
+    print(m.square(10).toString());
+    RETURN;
+END
+```
+
+See [docs/modules.md](docs/modules.md) for visibility (`PUB`/`PRIVATE`) and build details.
+
+## 16. FFI: Native Integration
 
 CLEAR integrates directly with Zig and C with zero-overhead.
 
@@ -339,6 +329,24 @@ EXTERN STRUCT Vec2 { x: Float64, y: Float64 };      -- OKAY
 -- Call a native function from a Zig module
 EXTERN FN computeDistance(v: Vec2) RETURNS Float64 FROM "math_native"; -- OKAY
 
--- Showcase: See benchmarks/24_json_api/ for high-performance
+-- Showcase: See benchmarks/24_json_api/ for high-performance 
 -- direct std.json FFI integration via EXTERN FN.
 ```
+
+## 17. The Reality of Concurrency
+
+In an ideal world, every workload would distribute perfectly across available cores and memory. In reality, concurrency is difficult because of the "messy middle":
+
+1.  **Skew:** Data is rarely uniform. Sharded collections can develop "hot shards" that bottleneck the system.
+2.  **Outliers:** The 0.1% of workers that take 100x longer than typical (due to cache misses or deep recursion) destroy p99 response times.
+3.  **Non-Cooperation:** Problems like head-of-line blocking and thundering herds can stall an entire thread pool.
+4.  **Variadic Depth:** Real-world recursion and loops often exceed the fixed stack sizes of traditional fibers.
+
+CLEAR handles these issues through its **Control Plane** — an active runtime observer that uses live telemetry to manage execution.
+
+- **Fiber Overflow:** The runtime detects imminent stack overflows and auto-upsizes future tasks to `@large` or `@xl` stacks.
+- **Workload Migration (v0.2):** Telemetry-driven migration allows the runtime to detect skewed workloads and move fibers away from bottlenecked schedulers.
+- **Shared-Nothing Safety:** By enforcing sharding and affine moves at the language level, the Control Plane can optimize memory layout without fear of data races.
+
+See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages the reality of high-performance systems.
+
