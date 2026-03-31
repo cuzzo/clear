@@ -9,53 +9,47 @@ This file provides guidance to Claude Code when working with code in this reposi
 ## Build & Test Commands
 
 ```bash
-bundle install              # Install Ruby dependencies
-bundle exec rspec           # Run all Ruby specs (1326 examples)
+# --- clear CLI (preferred) ---
+./clear build foo.cht                # Build a CLEAR program -> ./foo
+./clear build foo.cht -o bin/app     # Custom output path
+./clear build foo.cht --safe         # With bounds/overflow checks
+./clear run foo.cht                  # Build + execute
+./clear run foo.cht -- --port 8080   # Pass args to program
+./clear test foo.cht                 # Test with leak detection (non-BG tests)
 
-# Transpile-tests: generate + run Zig integration tests
+# --- Full test suites ---
+bundle install                       # Install Ruby dependencies
+bundle exec rspec                    # Run all Ruby specs (1343 examples)
+
+# Transpile-tests: generate + run all Zig integration tests
 ruby transpile-tests/gen.rb                              # Generates zig/all-tests.zig
-cd zig && zig test all-tests.zig -lc switch.S onRoot.S   # Run all 119 tests
+cd zig && zig test all-tests.zig -lc switch.S onRoot.S   # Run all 130 tests
 
-# Compile a single CLEAR program
-ruby src/transpiler.rb examples/json_parser/json.cht > zig/interp.zig
-cd zig && zig build-exe interp.zig -lc switch.S onRoot.S && ./interp
-
-# Build with safety checks (recommended for development)
-zig build-exe interp.zig -lc switch.S onRoot.S -OReleaseSafe
-
-# Build optimized (for benchmarks)
-zig build-exe interp.zig -lc switch.S onRoot.S -O ReleaseFast
-
-# WARNING: -OReleaseSafe inflates fiber stack frames significantly due to
-# bounds/overflow checks. Programs that work under ReleaseFast may segfault
-# under ReleaseSafe if fiber stacks overflow. Use ReleaseFast for benchmarks.
-
-# Package integration test (requires Zig)
+# Package integration test
 cd transpile-tests/module-integration && zig build test
 
-# FFI integration test (requires Zig)
+# FFI integration test
 cd transpile-tests/ffi-integration && zig build test
 ```
 
-Run **all three** test suites after making changes to the compiler. The Zig integration tests exercise the full pipeline end-to-end:
-- **transpile-tests**: 119 .cht files testing language features (gen.rb → all-tests.zig)
-- **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution, `--module` CLI flag
-- **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites (no rt/try), `@import` deduplication
+Run **all three** test suites after making changes to the compiler:
+- **Ruby specs**: `bundle exec rspec` (1343 examples)
+- **transpile-tests**: 130 .cht files testing language features end-to-end
+- **module-integration**: `REQUIRE "pkg:name"`, cross-package symbol resolution
+- **ffi-integration**: `EXTERN FN`/`EXTERN STRUCT` declarations, native Zig call sites
 
 ## Benchmarks
 
 ```bash
-# Run a single benchmark (auto-detects C/Go/Rust baselines)
-ruby benchmarks/runner.rb benchmarks/22_pool_vs_multiowned/
-
-# Run all benchmarks (01-09)
-ruby benchmarks/runner.rb
-
-# Run all benchmarks (01-19)
-ruby benchmarks/runner.rb --all
+# Benchmark runner modes
+ruby benchmarks/runner.rb --smoke benchmarks/24_json_api/   # CLEAR only, fast (~5s)
+ruby benchmarks/runner.rb --fast benchmarks/05_hashmap/     # All langs, reduced (~30s)
+ruby benchmarks/runner.rb benchmarks/05_hashmap/            # Normal (default)
+ruby benchmarks/runner.rb --release benchmarks/05_hashmap/  # Exhaustive (5x load)
+ruby benchmarks/runner.rb --all                             # All benchmarks (01-29)
+ruby benchmarks/runner.rb --smoke --all                     # Smoke test all benchmarks
+ruby benchmarks/runner.rb --cores=2 benchmarks/17_kvstore/  # Control core count
 ```
-
-Benchmarks 21-23 include cross-language memory comparisons using `peakMemoryKb()` and `currentMemoryKb()` (reads `/proc/self/status`). Control thread count with `CLEAR_THREADS=1` for single-threaded comparison. The runner builds with `-O ReleaseFast`.
 
 See `benchmarks/README.md` for the full benchmark index and details.
 
