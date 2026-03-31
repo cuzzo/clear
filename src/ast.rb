@@ -271,6 +271,9 @@ module AST
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
     attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
+    attr_accessor :extern_call       # true when calling a native EXTERN method
+    attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
+    attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     def wildcard?; false end
     def name; self[:name].to_s end
   end

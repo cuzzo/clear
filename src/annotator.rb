@@ -1105,14 +1105,23 @@ private
       resolved = obj_type.is_a?(Type) ? obj_type.resolved : obj_type.to_s.to_sym
       # Check for generic instance: Parsed<MyDoc> → base type Parsed
       base = obj_type.is_a?(Type) && obj_type.generic_instance? ? obj_type.generic_base : resolved
-      type_schema = current_scope.types[base]&.dig(:schema)
+      type_schema = lookup_type_schema(base)
       if type_schema.is_a?(Hash) && type_schema[:methods]&.key?(node.name)
         method_sig = type_schema[:methods][node.name]
-        node.extern_call = true if node.respond_to?(:extern_call=)
-        node.extern_effects = method_sig[:extern_effects] if node.respond_to?(:extern_effects=) && method_sig[:extern_effects]
-        # Mark as extern method (not UFCS) — transpiler emits obj.method() not module.method(obj)
+        node.extern_call = true
+        node.extern_effects = method_sig[:extern_effects] if method_sig[:extern_effects]
         node.instance_variable_set(:@extern_method, true)
         node.full_type = method_sig[:return]&.dig(:type) || :Void
+        record_effect(EffectTracker::EXTERN)
+        # Track allocator usage for EFFECTS :alloc methods.
+        alloc_kind = method_sig[:extern_effects]&.dig(:alloc)
+        if alloc_kind && current_fn_ctx
+          if alloc_kind == :heap
+            current_fn_ctx.heap_count += 1
+          else
+            current_fn_ctx.frame_count += 1
+          end
+        end
         return
       end
     end
