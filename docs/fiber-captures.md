@@ -30,8 +30,7 @@ A BG fiber runs on a separate timeline — the parent may restore its frame whil
 
 This uses the same escape promotion system as function returns — `needs_escape_promotion?` identifies frame-backed types, and `escape_promote_code` generates the promotion.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 fullPath = path + "/" + name;
 p = BG { scanDir(fullPath); };   -- fullPath is promoted to heap, moved
 -- fullPath is no longer usable here
@@ -39,8 +38,7 @@ p = BG { scanDir(fullPath); };   -- fullPath is promoted to heap, moved
 
 If you need the value in both the parent and the fiber, use explicit COPY:
 
-```clear
--- ILLUSTRATIVE (not yet implemented)
+```ruby clear illustrative
 fullPath = path + "/" + name;
 p = BG { scanDir(COPY fullPath); };  -- explicit copy; parent keeps original
 print(fullPath);                      -- still valid
@@ -54,8 +52,7 @@ Collections with `@sharded` or `:locked` capabilities are already heap-allocated
 - Multiple fibers need shared mutable access
 - The parent retains ownership; fibers borrow
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 MUTABLE store: HashMap<String>@sharded(8):locked = {};
 BG { store["key"] = "value"; };  -- store captured by pointer; parent still owns it
 ```
@@ -64,8 +61,7 @@ BG { store["key"] = "value"; };  -- store captured by pointer; parent still owns
 
 Resources (files, sockets) are affine — they can only have one owner. When captured by a BG fiber, ownership transfers to the fiber. The parent's `defer close()` is suppressed by setting a `_moved` flag:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 client = accept(server);
 BG { handleClient!(client); };  -- client ownership transferred to fiber
 -- client is moved; parent's defer close will NOT fire
@@ -87,8 +83,7 @@ DO branches capture everything by `*const` pointer. This is safe because:
 2. All branches finish before the parent continues
 3. No frame-allocated data escapes its scope
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 DO {
     process_a(data),    -- data captured by *const pointer
     process_b(data)     -- same pointer; both branches read the same data
@@ -150,8 +145,7 @@ Each BG fiber gets its own stack, which includes a 4KB frame arena carved from t
 | `@large` | 64 KB | 4 KB | String-heavy, recursive functions |
 | `@xl` | 256 KB | 4 KB | Deep recursion, large buffers |
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 BG { @large -> scanDir(path); }
 ```
 
