@@ -87,29 +87,44 @@ Throughput within 5-10%. CLEAR has consistently better p99 latency; Dragonfly ha
 
 The comparison demonstrates CLEAR's raw multi-core I/O and sharded HashMap performance. A fair comparison would require CLEAR to implement these features.
 
-## SCALING
+## Scaling (32 cores, normal mode, best of 5)
 
-```
+### Concurrent Compute
 
-  ┌──────────────────────┬──────────────────────────────────────┬─────────────┬─────────┐
-  │      Benchmark       │              2c -> 32c               │ vs Rust 32c │ Verdict │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 16 pubsub            │ 541ms -> 118ms (4.6x)                │ -96%        │ GREAT   │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 13 backpressure      │ 69ms -> 33ms (2.1x)                  │ -46%        │ GOOD    │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 17 kvstore           │ 916ms -> 241ms (3.8x)                │ +9%         │ GOOD    │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 15 stream_merge      │ 65ms -> 79ms (flat)                  │ -11%        │ OK      │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 12 fanout_fanin      │ 78ms -> 31ms (2.5x)                  │ +171%       │ MIXED   │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 10 concurrent_search │ 8ms -> 25ms (negative)               │ +164%       │ BAD     │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 11 atomic_contention │ 26ms -> 48ms (negative)              │ --          │ BAD     │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 14 dynamic_spawn     │ 47ms -> 42ms (erratic, 1106ms at 8c) │ +238%       │ BAD     │
-  ├──────────────────────┼──────────────────────────────────────┼─────────────┼─────────┤
-  │ 19 parallel_agg      │ 984ms -> 997ms (flat)                │ --          │ BAD     │
-  └──────────────────────┴──────────────────────────────────────┴─────────────┴─────────┘
-```
+| Benchmark | Rust | Go | CLEAR | vs Rust | Scaling |
+|-----------|------|----|-------|---------|---------|
+| 12 Fan-Out/Fan-In | 7.5ms | 42.8ms | **7ms** | **-7%** | 10.4x (1->32c) |
+| 13 Backpressure | 56ms | 69ms | **12ms** | **-79%** | 5.8x |
+| 15 Stream Merge | 83ms | 61ms | 265ms | +215% | flat |
+| 16 Pub/Sub | 2945ms | 826ms | **83ms** | **-97%** | 4.6x |
+
+### KV Store (Benchmark 17)
+
+`@shared:sharded(128):writeLocked` HashMap, zipfian distribution.
+
+| Workload | Rust | Go | CLEAR | vs Rust |
+|----------|------|----|-------|---------|
+| SET (1M keys) | 104ms | 1165ms | **93ms** | **-11%** |
+| GET (1M keys) | 21ms | 585ms | **16ms** | **-24%** |
+| Zipf GET | 18ms | 28ms | 17ms | -6% |
+| Mixed 80/20 | 23ms | 29ms | 72ms | +213% |
+| **Total** | **273ms** | **1821ms** | **261ms** | **-4%** |
+
+### TCP KV Store (Benchmark 20) vs DragonflyDB
+
+RESP protocol, 10K ops, 50 concurrent, pipeline 16.
+
+| Op | DragonflyDB | CLEAR | vs Dragonfly |
+|----|-------------|-------|--------------|
+| SET | 1.0M rps | 588K rps | 0.59x |
+| GET | 1.25M rps | **1.43M rps** | **+14%** |
+| INCR | 1.1M rps | **1.25M rps** | **+14%** |
+
+### Known Issues
+
+| Issue | Impact | Workaround |
+|-------|--------|------------|
+| `pthread_rwlock_t` writer starvation | Mixed workloads 3x slower | Use `:locked` (Mutex) |
+| `onRootStack` FFI overhead | 400x for hot FFI loops | Use `:safe` effect for lightweight FFI |
+| Fiber stealing + epoll (high load) | Crashes at 500+ GETs, 32 schedulers | Pin handlers or reduce concurrency |
+| BG capture analysis | Inner-scope vars incorrectly captured | Declare at BG block scope |
