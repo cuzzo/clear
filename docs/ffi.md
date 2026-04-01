@@ -4,7 +4,7 @@ CLEAR interfaces directly with Zig and C libraries via `EXTERN FN` and `EXTERN S
 
 ## EXTERN STRUCT — declare native types
 
-```clear-example
+```ruby clear illustrative
 EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_module";
 ```
 
@@ -16,7 +16,7 @@ EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_module";
 
 ### CLOSE — auto-cleanup via RAII
 
-```clear-example
+```ruby clear illustrative
 EXTERN STRUCT Buffer { data: String } CLOSE "deinit" FROM "native_resource";
 ```
 
@@ -31,7 +31,7 @@ No manual cleanup needed — same behavior as built-in `File` and `TCPClient`.
 
 ## EXTERN FN — call native functions
 
-```clear-example
+```ruby clear illustrative
 EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_module";
 EXTERN FN freeDoc(doc: JsonDoc) RETURNS Void FROM "json_module";
 ```
@@ -42,7 +42,7 @@ EXTERN FN freeDoc(doc: JsonDoc) RETURNS Void FROM "json_module";
 
 ### Error union returns (`!T`)
 
-```clear-example
+```ruby clear illustrative
 EXTERN FN safeDivide(a: Int64, b: Int64) RETURNS !Int64 FROM "math_utils";
 ```
 
@@ -50,7 +50,7 @@ When the return type is `!T`, the transpiler catches the native error inside the
 
 ### EFFECTS — automatic allocator injection
 
-```clear-example
+```ruby clear illustrative
 EXTERN FN zigDupe(src: String) RETURNS !String EFFECTS :alloc FROM "utils";
 EXTERN FN zigDupe(src: String) RETURNS !String EFFECTS :alloc:frame FROM "utils";
 EXTERN FN heapDupe(src: String) RETURNS !String EFFECTS :alloc:heap FROM "utils";
@@ -64,13 +64,15 @@ The CLEAR declaration omits the allocator parameter — the transpiler injects `
 | `:alloc:heap` | Inject `rt.heapAlloc()` — data persists until explicitly freed |
 
 Combine with `!T` for native functions that both allocate and fail:
-```clear-example
+
+```ruby clear illustrative
 EXTERN FN zigConcat(a: String, sep: String, b: String) RETURNS !String EFFECTS :alloc FROM "utils";
 ```
 
 ## Complete example: JSON parsing with RAII
 
 Native module (`json_native.zig`):
+
 ```zig
 const std = @import("std");
 
@@ -89,7 +91,8 @@ pub fn freeDoc(doc: JsonDoc) void {
 ```
 
 CLEAR code — iteration and summing in CLEAR, cleanup is automatic:
-```clear-example
+
+```ruby clear illustrative
 EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_native";
 EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_native";
 EXTERN FN freeDoc(doc: JsonDoc) RETURNS Void FROM "json_native";
@@ -104,7 +107,8 @@ END
 ```
 
 With `CLOSE`, the `freeDoc` call becomes unnecessary:
-```clear-example
+
+```ruby clear illustrative
 EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } CLOSE "freeDoc" FROM "json_native";
 EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "json_native";
 
@@ -134,7 +138,7 @@ END
 
 For defining Zig-compatible struct layouts without an external module:
 
-```clear-example
+```ruby clear illustrative
 -- Default options struct (empty -- Zig infers the type from context)
 EXTERN STRUCT ParseOptions {};
 
@@ -148,7 +152,7 @@ Local EXTERN STRUCTs emit Zig struct definitions in the transpiled output. Empty
 
 Pass CLEAR types as comptime arguments to generic native functions:
 
-```clear-example
+```ruby clear illustrative
 EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions)
     RETURNS !T EFFECTS :alloc:heap FROM "std.json";
 
@@ -160,7 +164,7 @@ record = parseFromSliceLeaky(JsonRecord, content, ParseOptions{}) OR RAISE;
 
 Declare methods on EXTERN types for chained calls:
 
-```clear-example
+```ruby clear illustrative
 EXTERN STRUCT Dir {} FROM "std.fs";
 EXTERN FN cwd() RETURNS Dir FROM "std.fs";
 EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
@@ -173,7 +177,7 @@ cwd().makePath("data");
 
 Import from nested Zig modules using dotted paths:
 
-```clear-example
+```ruby clear illustrative
 -- FROM "std.json" emits @import("std").json
 EXTERN FN parseFromSliceLeaky<T>(...) FROM "std.json";
 
@@ -196,7 +200,8 @@ All EXTERN FN calls run on the scheduler's OS thread stack (g0), not the fiber s
 ## Compilation
 
 EXTERN modules require Zig's `-M` flag:
-```bash
+
+```ruby clear illustrative
 zig build-exe --dep json_native -Mroot=program.zig -lc switch.S onRoot.S \
     -Mjson_native=json_native.zig -O ReleaseFast
 ```
