@@ -58,35 +58,49 @@ At 128 shards, it goes from 216ms (1w) to 72ms (32w) = 3.0x.
 
 **Current state**: bench.cht uses `@shared:sharded(128):locked`.
 
-### 3. String interpolation overhead in CLEAR hot loops (~7x)
+### 3. Fiber runtime per-iteration overhead (~138ms, NOT string allocation)
 
-**Symptom**: Raw Zig sharded mutex at 32w: zipf=23ms, mixed=31ms.
-CLEAR benchmark at 32w: zipf=169ms, mixed=223ms. That's 7x overhead.
+**Symptom**: Raw Zig sharded mutex at 32w: zipf=23ms.
+CLEAR benchmark at 32w: zipf=161ms. That's ~138ms / 7x overhead.
 
-**Root cause**: Each map access builds a key via string interpolation:
-`"key:${k.toString()}"` transpiles to:
-```zig
-try std.mem.concat(rt.frameAlloc(), u8, &.{
-    "key:",
-    try CheatLib.intToString(rt.frameAlloc(), k),
-    ""
-})
+**Root cause**: Layered benchmarking (bench_layers.zig) proved that string
+formatting, allocator choice, and vtable dispatch add ZERO measurable overhead:
+
+```
+Layer                              zipf (32w)
+L0: raw (pre-built keys)            23ms
+L1: + fmt.count+bufPrint+c_alloc    22ms    (string formatting: +0ms)
+L2: + bump alloc (no free)          24ms    (bump vs c_alloc: +0ms)
+L3: + vtable dispatch               24ms    (vtable overhead: +0ms)
+L4: + intToString+concat (old)      22ms    (2-alloc path: +0ms)
+L5: stack-buf fmt (0 allocs)        22ms    (0-alloc path: +0ms)
+CLEAR                              161ms    (+138ms from fiber runtime)
 ```
 
-This performs 2 allocations per map access (intToString + concat), even though the
-frame allocator is a bump allocator. The vtable dispatch, bounds checking, and memcpy
-add up at 1M operations.
+The entire 138ms gap is the fiber runtime's per-iteration overhead:
 
-Go and Rust have the same per-operation string formatting cost (`fmt.Sprintf` / `format!`),
-but their allocators (Go's GC heap, Rust's jemalloc) have lower per-allocation overhead
-than Zig's allocator vtable dispatch.
+1. `saveLoopMark()` + `defer restoreLoopMark()` — called EVERY loop iteration.
+   `getMark()` is cheap (3 field reads). `rewind()` is NOT cheap: checks
+   `large_objects.items.len`, `blocks.items.len`, conditional frees, etc.
+   Even when nothing needs freeing, the branching and memory accesses add up.
+
+2. `checkYield()` — called EVERY loop iteration. Increments counter, masks,
+   branches. The actual yield (coopYield) only fires every 4096 iterations,
+   but the check itself is ~2-3ns per call = ~60-90ms over 31.25M total calls.
+
+3. BG context struct pointer indirection — all captured variables accessed
+   through `ctx.map`, `ctx.cnt`, etc. instead of direct locals. Extra pointer
+   chase per access.
+
+4. `frameAlloc()` indirection — `fp.__pinned_local_alloc orelse self.frame_allocator`
+   branch on every allocation.
 
 **Fix options**:
-- Stack-buffer string formatting: `fmtInt` + `bufConcat` that write directly into a
-  `[256]u8` stack buffer. Zero allocation, zero vtable dispatch. This would eliminate
-  the 7x overhead for transient strings (map keys, comparisons).
-- Requires transpiler changes to detect transient string contexts and emit stack-buffer
-  code instead of allocator-based code.
+- Hoist `saveLoopMark`/`restoreLoopMark` out of tight inner loops when no
+  allocations escape the loop body (common case).
+- Reduce `checkYield` frequency or make it truly zero-cost (e.g., cooperative
+  points only at function calls, not every loop iteration).
+- Inline BG context fields as locals when the fiber is not stolen.
 
 ### 4. Zig's HashMap vs Rust's hashbrown (SwissTable)
 
@@ -100,16 +114,18 @@ generally 10-30% faster for lookups due to SIMD metadata scanning.
 **Current impact**: Negligible at current scale. May matter at higher operation counts
 or smaller shard counts where per-lookup time dominates.
 
-## Summary: where the time goes (mixed workload, 32 workers)
+## Summary: where the time goes (zipf GET, 32 workers)
 
 ```
 Component                   Zig raw    Rust raw    CLEAR
-Map + lock (mutex, 128sh)    31ms       15ms       31ms*
-String interpolation           -          -       ~190ms
-Total                        31ms       15ms       223ms
+Map + lock (mutex, 128sh)    23ms       13ms       23ms*
+Fiber runtime overhead         -          -       ~138ms
+Total                        23ms       13ms       161ms
 
-* CLEAR uses the same Zig primitives as the raw benchmark
+* String formatting adds 0ms — verified by layered benchmarking.
+  The frame allocator bump is ~5ns per alloc, invisible at this scale.
 ```
 
-The 2x gap between Zig Mutex (31ms) and Rust parking_lot (15ms) is the lock
-implementation quality. The 7x gap between Zig raw and CLEAR is string allocation.
+The 2x gap between Zig Mutex (23ms) and Rust parking_lot (13ms) is lock
+implementation quality. The 7x gap between Zig raw and CLEAR is the fiber
+runtime's per-loop-iteration overhead (loop mark save/restore + checkYield).

@@ -48,11 +48,12 @@ Note: Zig's `std.Thread.RwLock` is much worse - it's `pthread_rwlock_t` on Linux
 (kernel lock, reader-preferring). Mixed workloads see 72ms vs 15ms (5x). CLEAR
 uses Mutex (`:locked`) to avoid this.
 
-### String interpolation overhead (7x)
+### Fiber runtime per-iteration overhead (7x)
 
-See ANALYSIS.md for details. Each `"key:${k.toString()}"` generates 2 allocations
-(intToString + concat) through the frame allocator vtable. Raw Zig with pre-built
-keys: 31ms. CLEAR with per-access string building: 223ms.
+See ANALYSIS.md for details. Layered benchmarking proved string formatting adds
+0ms overhead — the frame allocator bump is ~5ns, invisible at this scale. The
+entire 138ms gap (23ms raw vs 161ms CLEAR) comes from the fiber runtime:
 
-This is a general CLEAR compiler issue, not specific to this benchmark. Fix is
-tracked separately.
+- `saveLoopMark()`/`restoreLoopMark()` every iteration (arena mark/rewind)
+- `checkYield()` every iteration (counter + branch)
+- BG context pointer indirection (captured vars accessed through ctx struct)
