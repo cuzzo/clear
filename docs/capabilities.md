@@ -20,16 +20,18 @@ FN increment(c: Counter) RETURNS Counter ->
 END
 
 -- All of these call the SAME function:
-a = Counter{ value: 0 } @local;
-b = Counter{ value: 0 } @locked;
-c = Counter{ value: 0 } @shared;
+a = Counter{ value: 0 };
+b = Counter{ value: 0 } @local;    -- pinned to core
+c = Counter{ value: 0 } @locked;
+d = Counter{ value: 0 } @shared;
 
-increment(a)                              -- direct deref
-WITH EXCLUSIVE b AS inner { increment(inner) }  -- mutex guard
-WITH c AS val { increment(val) }          -- arc unwrap
+increment(a);                                   -- stack object
+increment(b);                                   -- direct deref
+WITH EXCLUSIVE c AS inner { increment(inner) }  -- mutex guard
+WITH d AS val { increment(val) }                -- arc unwrap
 ```
 
-One function definition. Three concurrency strategies. Zero code changes to `increment`.
+One function definition. Four concurrency strategies. Zero code changes to `increment`.
 
 For one-line field mutations on `@locked`/`@writeLocked` variables, the compiler auto-wraps the statement in an inline mutex guard — no `WITH` block needed:
 
