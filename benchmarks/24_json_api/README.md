@@ -3,32 +3,41 @@
 TCP server that stores/retrieves JSON documents. SET generates JSON files,
 GET reads and parses them (sum of array elements via std.json FFI).
 
-## Status
-
-- 1 core: works correctly (100/100 verified)
-- 4+ cores: crashes under concurrent GETs (segfault in JSON parsing)
-
-## Known Issue
-
-Concurrent GET requests crash at 4+ cores. The GET path calls
-`readFile` + `parseFromSliceLeaky` (std.json via EXTERN FFI). At 1 core,
-all fibers run cooperatively on one scheduler. At 4+ cores, handler
-fibers are distributed across schedulers and call `onRootStack` + JSON
-parsing concurrently. The segfault occurs in the parsing path.
-
-Possible causes:
-- std.json.parseFromSliceLeaky is not thread-safe with a shared allocator
-- The EXTERN FFI onRootStack trampoline has a concurrency issue
-- Frame allocator corruption from concurrent file reads
-
-## Results (1 core, single-threaded)
+## Results
 
 ```
-Server          SET(ms)  GET(ms)  Peak RSS
-Rust (tokio)        59       17    5864 KB
-Go (goroutines)     60       59   13312 KB
-CLEAR (1 core)      97        4    5420 KB
+Server              SET(ms)  GET(ms)  Peak RSS     Verified
+Rust (tokio)             60       17    5788 KB    2500/2500
+Go (goroutines)          72       62   11776 KB    2500/2500
+CLEAR (fibers)          382      139  233868 KB    2500/2500
 ```
 
-CLEAR's GET is fastest at 4ms (vs 17ms Rust, 59ms Go) because the fiber
-cooperative model has zero context-switch overhead for sequential I/O.
+## Known Issues
+
+### Fiber stealing corrupts epoll fd registration
+
+Unpinned BG fibers that do TCP I/O crash at 4+ cores. When a fiber is
+stolen from scheduler A to scheduler B, its client fd is registered with
+scheduler A's epoll. On the next `read()`, if WouldBlock fires, the fd
+gets registered with scheduler B's epoll. Now TWO epoll instances watch
+the same fd. Both wake the fiber on data arrival, causing double-push
+to the ready queue and use-after-free.
+
+Workaround: pin handler fibers by capturing a `@sharded` map. This
+prevents stealing but limits throughput to one scheduler.
+
+Fix: unregister fds from the old scheduler's epoll when a fiber is stolen,
+or track fd-to-scheduler affinity in the runtime.
+
+### High memory usage (234MB vs 6MB Rust)
+
+`parseFromSliceLeaky` (std.json) allocates parse nodes on `heapAlloc`
+and never frees them. Each GET leaks ~200 bytes of parse tree. With
+2500 GETs, this accumulates. Fix: use `parseFromSlice` with proper
+cleanup, or allocate on the frame arena (freed per loop iteration).
+
+### SET/GET throughput
+
+CLEAR is 6x slower on SET and 8x slower on GET vs Rust. The bottleneck
+is RESP parsing (character-by-character WHILE loops) and string
+concatenation (`resp = resp + "..."` per command).
