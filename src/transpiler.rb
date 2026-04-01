@@ -2232,10 +2232,10 @@ private
 
       if node.op == :DIV
         # Zig's `/` only works on unsigned integers; signed i64 requires @divTrunc.
-        # Number (f64) can still use `/` directly.
-        left_type = node.left.full_type
-        resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
-        if resolved == :Int64
+        # Only apply when BOTH sides are integers. Mixed int/float uses native `/`.
+        left_ti = node.left.type_info
+        right_ti = node.right.type_info
+        if left_ti&.integer? && right_ti&.integer?
           return "@divTrunc(#{left}, #{right})"
         end
       end
