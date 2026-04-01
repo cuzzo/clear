@@ -58,49 +58,47 @@ At 128 shards, it goes from 216ms (1w) to 72ms (32w) = 3.0x.
 
 **Current state**: bench.cht uses `@shared:sharded(128):locked`.
 
-### 3. Fiber runtime per-iteration overhead (~138ms, NOT string allocation)
+### 3. Fiber execution model overhead (~139ms, NOT generated code)
 
 **Symptom**: Raw Zig sharded mutex at 32w: zipf=23ms.
-CLEAR benchmark at 32w: zipf=161ms. That's ~138ms / 7x overhead.
+CLEAR benchmark at 32w: zipf=161ms. That's ~139ms / 7x overhead.
 
-**Root cause**: Layered benchmarking (bench_layers.zig) proved that string
-formatting, allocator choice, and vtable dispatch add ZERO measurable overhead:
+**Root cause**: Layered benchmarking (bench_layers.zig) isolates every source of
+overhead individually. NONE of the generated code contributes measurable cost:
 
 ```
-Layer                              zipf (32w)
-L0: raw (pre-built keys)            23ms
-L1: + fmt.count+bufPrint+c_alloc    22ms    (string formatting: +0ms)
-L2: + bump alloc (no free)          24ms    (bump vs c_alloc: +0ms)
-L3: + vtable dispatch               24ms    (vtable overhead: +0ms)
-L4: + intToString+concat (old)      22ms    (2-alloc path: +0ms)
-L5: stack-buf fmt (0 allocs)        22ms    (0-alloc path: +0ms)
-CLEAR                              161ms    (+138ms from fiber runtime)
+Layer                              zipf (32w)   delta
+L0: raw (pre-built keys)            23ms         baseline
+L1: + string formatting (c_alloc)   22ms         +0ms
+L2: + bump allocator                22ms         +0ms
+L3: + vtable dispatch               23ms         +0ms
+L4: + intToString+concat (2 alloc)  23ms         +0ms
+L5: + stack-buf (0 allocs)          22ms         +0ms
+R1: + checkYield                    23ms         +0ms
+R2: + loopMark save/restore         21ms         +0ms
+R3: + ctx pointer indirection       23ms         +0ms
+R4: + ALL overhead combined         23ms         +0ms
+R5: + REAL CheatArena               23ms         +0ms
+R6: EXACT CLEAR code, native thr    22ms         +0ms
+CLEAR (fibers)                     161ms       +139ms
 ```
 
-The entire 138ms gap is the fiber runtime's per-iteration overhead:
+**R6 is the critical result**: the EXACT code pattern CLEAR generates — Arc deref,
+CheatArena vtable alloc, getMark/rewind, checkYield, context pointer — runs at 22ms
+on native OS threads. CLEAR runs the same code at 161ms on fibers.
 
-1. `saveLoopMark()` + `defer restoreLoopMark()` — called EVERY loop iteration.
-   `getMark()` is cheap (3 field reads). `rewind()` is NOT cheap: checks
-   `large_objects.items.len`, `blocks.items.len`, conditional frees, etc.
-   Even when nothing needs freeing, the branching and memory accesses add up.
+The entire 139ms gap is the fiber execution model:
+- Running on 64KB mmap'd stacks vs 8MB OS thread stacks
+- Cooperative scheduler overhead (work stealing, queue management)
+- Fiber stack cache/TLB behavior (mmap'd memory in a different region)
+- Potential lack of kernel thread-local optimizations on fiber stacks
 
-2. `checkYield()` — called EVERY loop iteration. Increments counter, masks,
-   branches. The actual yield (coopYield) only fires every 4096 iterations,
-   but the check itself is ~2-3ns per call = ~60-90ms over 31.25M total calls.
-
-3. BG context struct pointer indirection — all captured variables accessed
-   through `ctx.map`, `ctx.cnt`, etc. instead of direct locals. Extra pointer
-   chase per access.
-
-4. `frameAlloc()` indirection — `fp.__pinned_local_alloc orelse self.frame_allocator`
-   branch on every allocation.
-
-**Fix options**:
-- Hoist `saveLoopMark`/`restoreLoopMark` out of tight inner loops when no
-  allocations escape the loop body (common case).
-- Reduce `checkYield` frequency or make it truly zero-cost (e.g., cooperative
-  points only at function calls, not every loop iteration).
-- Inline BG context fields as locals when the fiber is not stolen.
+**This is NOT fixable by optimizing generated code.** The fix must be in the
+fiber runtime or scheduler itself. Potential approaches:
+- Thread-pool mode for compute-heavy BG blocks (bypass fiber overhead)
+- Larger fiber stacks to improve cache locality
+- Reduce scheduler polling frequency
+- Use native threads when fiber count equals scheduler count
 
 ### 4. Zig's HashMap vs Rust's hashbrown (SwissTable)
 
@@ -118,14 +116,14 @@ or smaller shard counts where per-lookup time dominates.
 
 ```
 Component                   Zig raw    Rust raw    CLEAR
-Map + lock (mutex, 128sh)    23ms       13ms       23ms*
-Fiber runtime overhead         -          -       ~138ms
+Map + lock (mutex, 128sh)    23ms       13ms       23ms
+Generated code overhead        -          -        +0ms  (verified: R6 = 22ms)
+Fiber execution model          -          -      +139ms
 Total                        23ms       13ms       161ms
-
-* String formatting adds 0ms — verified by layered benchmarking.
-  The frame allocator bump is ~5ns per alloc, invisible at this scale.
 ```
 
-The 2x gap between Zig Mutex (23ms) and Rust parking_lot (13ms) is lock
-implementation quality. The 7x gap between Zig raw and CLEAR is the fiber
-runtime's per-loop-iteration overhead (loop mark save/restore + checkYield).
+Two independent problems:
+1. **Zig Mutex vs Rust parking_lot (2x)**: 23ms vs 13ms. Lock quality.
+2. **Fiber model vs native threads (7x)**: 22ms vs 161ms for identical code.
+   String formatting, allocators, vtable, checkYield, loopMark — all add 0ms.
+   The overhead is entirely in how the cooperative fiber scheduler executes code.

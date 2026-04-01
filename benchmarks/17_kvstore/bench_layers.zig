@@ -354,6 +354,390 @@ fn layer5_stack(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 
     return nowMs() - t0;
 }
 
+// =========================================================================
+// Runtime overhead layers — isolate each CLEAR fiber runtime cost
+// All use stack-buf formatting (L5 baseline) + add one runtime feature.
+// =========================================================================
+
+// R1: + checkYield every iteration (counter + mask + branch)
+fn runtime1_checkYield(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+    for (0..N_WORKERS) |wi| {
+        const Ctx = struct {
+            map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+            seed: i64, chunk_size: usize, hI: f64, hF: f64,
+            fn run(ctx: @This()) void {
+                var state: i64 = ctx.seed;
+                var hits: usize = 0;
+                var yield_counter: u32 = 0;
+                for (0..ctx.chunk_size) |_| {
+                    const k = zipfNext(&state, @intCast(N_KEYS), 1.0, ctx.hI, ctx.hF);
+                    state = state *% 6364136223846793005 +% 1442695040888963407;
+                    var sb: [32]u8 = undefined;
+                    const key = std.fmt.bufPrint(&sb, "key:{d}", .{k}) catch unreachable;
+                    if (ctx.map.get(key)) |_| hits += 1;
+                    // Simulate checkYield
+                    yield_counter = (yield_counter +% 1) & 4095;
+                    if (yield_counter == 0) {
+                        std.mem.doNotOptimizeAway(yield_counter);
+                    }
+                }
+                std.mem.doNotOptimizeAway(hits);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, Ctx.run, .{Ctx{
+            .map = map, .seed = @intCast(wi + 42), .chunk_size = chunk,
+            .hI = hIntegral, .hF = hFraction,
+        }}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| threads[wi].join();
+    return nowMs() - t0;
+}
+
+// R2: + loop mark save/restore (simulates arena getMark + rewind)
+fn runtime2_loopMark(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+    for (0..N_WORKERS) |wi| {
+        const Ctx = struct {
+            map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+            seed: i64, chunk_size: usize, hI: f64, hF: f64,
+            fn run(ctx: @This()) void {
+                var state: i64 = ctx.seed;
+                var hits: usize = 0;
+                // Simulate arena state that getMark/rewind touches
+                var arena_cursor: usize = 0;
+                var arena_block_index: usize = 0;
+                var arena_large_count: usize = 0;
+                var blocks_len: usize = 0;
+                const static_block_len: usize = 4096; // non-zero = has static
+                for (0..ctx.chunk_size) |_| {
+                    // saveLoopMark: read 3 fields + conditional
+                    const shift: usize = if (static_block_len > 0 and blocks_len > 0) 1 else 0;
+                    const mark_bi = arena_block_index + shift;
+                    const mark_cursor = arena_cursor;
+                    const mark_large = arena_large_count;
+
+                    const k = zipfNext(&state, @intCast(N_KEYS), 1.0, ctx.hI, ctx.hF);
+                    state = state *% 6364136223846793005 +% 1442695040888963407;
+                    var sb: [32]u8 = undefined;
+                    const key = std.fmt.bufPrint(&sb, "key:{d}", .{k}) catch unreachable;
+                    if (ctx.map.get(key)) |_| hits += 1;
+
+                    // restoreLoopMark (rewind): conditional logic
+                    const has_static = (static_block_len > 0);
+                    if (has_static) {
+                        if (mark_bi == 0) {
+                            arena_block_index = 0;
+                        } else {
+                            arena_block_index = mark_bi - 1;
+                        }
+                    } else {
+                        arena_block_index = mark_bi;
+                    }
+                    arena_cursor = mark_cursor;
+                    // Check large objects (while loop that doesn't execute)
+                    while (arena_large_count > mark_large) {
+                        arena_large_count -= 1;
+                    }
+                    // Check blocks (while loop that doesn't execute)
+                    while (blocks_len > arena_block_index + 1) {
+                        blocks_len -= 1;
+                    }
+                }
+                std.mem.doNotOptimizeAway(hits);
+                std.mem.doNotOptimizeAway(arena_cursor);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, Ctx.run, .{Ctx{
+            .map = map, .seed = @intCast(wi + 42), .chunk_size = chunk,
+            .hI = hIntegral, .hF = hFraction,
+        }}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| threads[wi].join();
+    return nowMs() - t0;
+}
+
+// R3: + context pointer indirection (access everything through a heap-allocated struct ptr)
+fn runtime3_ctxPtr(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+    const alloc = std.heap.c_allocator;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+
+    const BgCtx = struct {
+        map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+        seed: i64, chunk_size: usize, hI: f64, hF: f64,
+        n: i64, zipfSkew: f64,
+    };
+
+    var ctxs: [N_WORKERS]*BgCtx = undefined;
+    for (0..N_WORKERS) |wi| {
+        ctxs[wi] = alloc.create(BgCtx) catch unreachable;
+        ctxs[wi].* = .{
+            .map = map, .seed = @intCast(wi + 42), .chunk_size = chunk,
+            .hI = hIntegral, .hF = hFraction, .n = @intCast(N_KEYS), .zipfSkew = s,
+        };
+        const WorkerFn = struct {
+            fn run(ctx: *BgCtx) void {
+                var state: i64 = ctx.seed;
+                var hits: usize = 0;
+                for (0..ctx.chunk_size) |_| {
+                    const k = zipfNext(&state, ctx.n, ctx.zipfSkew, ctx.hI, ctx.hF);
+                    state = state *% 6364136223846793005 +% 1442695040888963407;
+                    var sb: [32]u8 = undefined;
+                    const key = std.fmt.bufPrint(&sb, "key:{d}", .{k}) catch unreachable;
+                    if (ctx.map.get(key)) |_| hits += 1;
+                }
+                std.mem.doNotOptimizeAway(hits);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, WorkerFn.run, .{ctxs[wi]}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| {
+        threads[wi].join();
+        alloc.destroy(ctxs[wi]);
+    }
+    return nowMs() - t0;
+}
+
+// R4: + ALL runtime overheads combined (checkYield + loopMark + ctxPtr)
+fn runtime4_all(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+    const alloc = std.heap.c_allocator;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+
+    const BgCtx = struct {
+        map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+        seed: i64, chunk_size: usize, hI: f64, hF: f64,
+        n: i64, zipfSkew: f64,
+    };
+
+    var ctxs: [N_WORKERS]*BgCtx = undefined;
+    for (0..N_WORKERS) |wi| {
+        ctxs[wi] = alloc.create(BgCtx) catch unreachable;
+        ctxs[wi].* = .{
+            .map = map, .seed = @intCast(wi + 42), .chunk_size = chunk,
+            .hI = hIntegral, .hF = hFraction, .n = @intCast(N_KEYS), .zipfSkew = s,
+        };
+        const WorkerFn = struct {
+            fn run(ctx: *BgCtx) void {
+                var state: i64 = ctx.seed;
+                var hits: usize = 0;
+                var yield_counter: u32 = 0;
+                var arena_cursor: usize = 0;
+                var arena_block_index: usize = 0;
+                var arena_large_count: usize = 0;
+                var blocks_len: usize = 0;
+                const static_block_len: usize = 4096;
+                for (0..ctx.chunk_size) |_| {
+                    // saveLoopMark
+                    const shift: usize = if (static_block_len > 0 and blocks_len > 0) 1 else 0;
+                    const mark_bi = arena_block_index + shift;
+                    const mark_cursor = arena_cursor;
+                    const mark_large = arena_large_count;
+
+                    const k = zipfNext(&state, ctx.n, ctx.zipfSkew, ctx.hI, ctx.hF);
+                    state = state *% 6364136223846793005 +% 1442695040888963407;
+                    var sb: [32]u8 = undefined;
+                    const key = std.fmt.bufPrint(&sb, "key:{d}", .{k}) catch unreachable;
+                    if (ctx.map.get(key)) |_| hits += 1;
+
+                    // checkYield
+                    yield_counter = (yield_counter +% 1) & 4095;
+                    if (yield_counter == 0) std.mem.doNotOptimizeAway(yield_counter);
+
+                    // restoreLoopMark
+                    const has_static = (static_block_len > 0);
+                    if (has_static) {
+                        if (mark_bi == 0) { arena_block_index = 0; } else { arena_block_index = mark_bi - 1; }
+                    } else { arena_block_index = mark_bi; }
+                    arena_cursor = mark_cursor;
+                    while (arena_large_count > mark_large) arena_large_count -= 1;
+                    while (blocks_len > arena_block_index + 1) blocks_len -= 1;
+                }
+                std.mem.doNotOptimizeAway(hits);
+                std.mem.doNotOptimizeAway(arena_cursor);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, WorkerFn.run, .{ctxs[wi]}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| {
+        threads[wi].join();
+        alloc.destroy(ctxs[wi]);
+    }
+    return nowMs() - t0;
+}
+
+// R5: + REAL CheatArena (use actual Runtime saveLoopMark/restoreLoopMark)
+fn runtime5_realArena(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+    const CheatArena = @import("frame.zig").CheatArena;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+    for (0..N_WORKERS) |wi| {
+        const Ctx = struct {
+            map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+            seed: i64, chunk_size: usize, hI: f64, hF: f64,
+            fn run(ctx: @This()) void {
+                // Create a real CheatArena like the CLEAR runtime does
+                const arena_buf = std.heap.c_allocator.alloc(u8, 64 * 1024) catch unreachable;
+                defer std.heap.c_allocator.free(arena_buf);
+                var arena = CheatArena.init(std.heap.c_allocator, arena_buf);
+                defer arena.deinit();
+
+                var state: i64 = ctx.seed;
+                var hits: usize = 0;
+                var yield_counter: u32 = 0;
+                for (0..ctx.chunk_size) |_| {
+                    // Real saveLoopMark
+                    const mark = arena.getMark();
+
+                    const k = zipfNext(&state, @intCast(N_KEYS), 1.0, ctx.hI, ctx.hF);
+                    state = state *% 6364136223846793005 +% 1442695040888963407;
+                    var sb: [32]u8 = undefined;
+                    const key = std.fmt.bufPrint(&sb, "key:{d}", .{k}) catch unreachable;
+                    if (ctx.map.get(key)) |_| hits += 1;
+
+                    // checkYield
+                    yield_counter = (yield_counter +% 1) & 4095;
+                    if (yield_counter == 0) std.mem.doNotOptimizeAway(yield_counter);
+
+                    // Real restoreLoopMark
+                    arena.rewind(mark);
+                }
+                std.mem.doNotOptimizeAway(hits);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, Ctx.run, .{Ctx{
+            .map = map, .seed = @intCast(wi + 42), .chunk_size = chunk,
+            .hI = hIntegral, .hF = hFraction,
+        }}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| threads[wi].join();
+    return nowMs() - t0;
+}
+
+// R6: Exact CLEAR generated code pattern, running on native threads (not fibers)
+fn runtime6_exactClear(map_arc: *CheatLib.Arc(CheatLib.MutexShardedStringMap([]const u8, N_SHARDS))) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+    const heap = std.heap.c_allocator;
+    const CheatArena = @import("frame.zig").CheatArena;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+
+    const BgCtx = struct {
+        map: *CheatLib.Arc(CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)),
+        seed: i64, cnt: i64, n: i64, zipfSkew: f64, hIntegral: f64, hFraction: f64,
+    };
+
+    var ctxs: [N_WORKERS]*BgCtx = undefined;
+    for (0..N_WORKERS) |wi| {
+        ctxs[wi] = heap.create(BgCtx) catch unreachable;
+        ctxs[wi].* = .{
+            .map = map_arc, .seed = @intCast(wi + 42), .cnt = @intCast(chunk),
+            .n = @intCast(N_KEYS), .zipfSkew = s, .hIntegral = hIntegral, .hFraction = hFraction,
+        };
+        const WorkerFn = struct {
+            fn run(ctx_ptr: *BgCtx) void {
+                // Replicate exact CLEAR pattern: CheatArena + frameAlloc vtable + error handling
+                const arena_buf = std.heap.c_allocator.alloc(u8, 64 * 1024) catch unreachable;
+                defer std.heap.c_allocator.free(arena_buf);
+                var arena = CheatArena.init(std.heap.c_allocator, arena_buf);
+                defer arena.deinit();
+                // Wire allocator through vtable, same as Runtime.wireAllocator
+                const ArenaVTable = struct {
+                    fn vtAlloc(arena_ptr: *anyopaque, n: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+                        const a: *CheatArena = @ptrCast(@alignCast(arena_ptr));
+                        return a.alloc(n, @intCast(ptr_align.toByteUnits()), ret_addr);
+                    }
+                    fn vtFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
+                    fn vtResize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool { return false; }
+                    fn vtRemap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 { return null; }
+                    const table = std.mem.Allocator.VTable{
+                        .alloc = @ptrCast(&vtAlloc),
+                        .free = @ptrCast(&vtFree),
+                        .resize = @ptrCast(&vtResize),
+                        .remap = @ptrCast(&vtRemap),
+                    };
+                };
+                const frame_alloc = std.mem.Allocator{
+                    .ptr = &arena,
+                    .vtable = &ArenaVTable.table,
+                };
+
+                const ctx = ctx_ptr;
+                var hits: i64 = 0;
+                var state: i64 = ctx.seed;
+                var yield_counter: u32 = 0;
+
+                var __for: i64 = 0;
+                while (__for < ctx.cnt) : (__for += 1) {
+                    // saveLoopMark
+                    const __loop_mark = arena.getMark();
+
+                    const k: i64 = zipfNext(&state, ctx.n, ctx.zipfSkew, ctx.hIntegral, ctx.hFraction);
+                    state = state *% 6364136223846793005 +% 1442695040888963407;
+
+                    // Exact CLEAR interp pattern: count + vtable alloc + bufPrint
+                    const __n = std.fmt.count("key:{d}", .{k});
+                    const __buf = frame_alloc.alloc(u8, __n) catch unreachable;
+                    _ = std.fmt.bufPrint(__buf, "key:{d}", .{k}) catch unreachable;
+
+                    // Arc deref + map get (exact CLEAR path)
+                    const got: []const u8 = (ctx.map.ctrl.data.*.get(__buf)) orelse "";
+
+                    if (got.len > 0) {
+                        hits = hits + 1;
+                    }
+
+                    // checkYield
+                    yield_counter = (yield_counter +% 1) & 4095;
+                    if (yield_counter == 0) std.mem.doNotOptimizeAway(yield_counter);
+
+                    // restoreLoopMark
+                    arena.rewind(__loop_mark);
+                }
+                std.mem.doNotOptimizeAway(hits);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, WorkerFn.run, .{ctxs[wi]}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| {
+        threads[wi].join();
+        heap.destroy(ctxs[wi]);
+    }
+    return nowMs() - t0;
+}
+
 pub fn main() !void {
     const alloc = std.heap.c_allocator;
     try initKeys(alloc);
@@ -377,9 +761,15 @@ pub fn main() !void {
         "L3: + vtable dispatch            ",
         "L4: + intToString+concat (old)   ",
         "L5: stack-buf fmt (0 allocs)     ",
+        "R1: L5 + checkYield             ",
+        "R2: L5 + loopMark save/restore  ",
+        "R3: L5 + ctx pointer indirection",
+        "R4: L5 + ALL simulated overhead ",
+        "R5: L5 + REAL CheatArena        ",
     };
     const funcs = [_]*const fn (*CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64{
         &layer0_raw, &layer1_fmt, &layer2_bump, &layer3_vtable, &layer4_old_interp, &layer5_stack,
+        &runtime1_checkYield, &runtime2_loopMark, &runtime3_ctxPtr, &runtime4_all, &runtime5_realArena,
     };
 
     for (labels, funcs) |label, func| {
@@ -389,6 +779,27 @@ pub fn main() !void {
             if (ms < best) best = ms;
         }
         std.debug.print("  {s}  {d:>4}ms\n", .{ label, best });
+    }
+
+    // R6: exact CLEAR code on native threads (needs Arc-wrapped map)
+    {
+        const CheatArena = @import("frame.zig").CheatArena;
+        _ = CheatArena;
+        var arc_map = CheatLib.arcCreate(
+            CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+            alloc,
+            CheatLib.MutexShardedStringMap([]const u8, N_SHARDS){ .alloc = alloc },
+        ) catch unreachable;
+        for (0..N_KEYS) |i| {
+            arc_map.ctrl.data.*.put(alloc, alloc, key_buf[i], key_buf[i]) catch unreachable;
+        }
+        var best: i64 = std.math.maxInt(i64);
+        for (0..3) |_| {
+            const ms = runtime6_exactClear(&arc_map);
+            if (ms < best) best = ms;
+        }
+        std.debug.print("  R6: EXACT CLEAR code, native thr   {d:>4}ms\n", .{best});
+        CheatLib.arcRelease(CheatLib.MutexShardedStringMap([]const u8, N_SHARDS), alloc, arc_map);
     }
 
     std.debug.print("\n", .{});
