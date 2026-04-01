@@ -8,7 +8,7 @@ name = "bench_rust"
 path = "bench.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+crossbeam-channel = "0.5"
 
 [profile.release]
 opt-level = 3
