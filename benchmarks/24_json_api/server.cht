@@ -94,16 +94,10 @@ FN main() RETURNS Void ->
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
-    -- Cache for parsed JSON sums (also pins BG fibers to the main scheduler,
-    -- preventing fiber stealing which corrupts epoll fd registration).
-    MUTABLE cache: HashMap<Int64>@sharded(32):locked = {};
-
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
         tasks.append(BG {
-            -- Reference cache to pin BG to main scheduler (prevents fiber stealing)
-            n = cache.count();
             handleClient!(client);
         });
     END

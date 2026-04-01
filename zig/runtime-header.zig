@@ -61,12 +61,15 @@ pub const CheatLib = struct {
     // Read from a non-blocking socket
     // Only works on Linux
     pub fn read(fd: i32, buffer: []u8) !usize {
-        const sched = fp.active_scheduler;
-        const task = sched.getCurrent();
-
         while (true) {
             const n = std.posix.read(fd, buffer) catch |err| {
                 if (err == error.WouldBlock) {
+                    const sched = fp.active_scheduler;
+                    const task = sched.getCurrent();
+                    // Unregister from any previous scheduler's epoll
+                    if (task.epoll_fd >= 0 and task.epoll_io_fd == fd and task.epoll_fd != sched.poller.epoll_fd) {
+                        std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+                    }
                     try sched.registerFd(fd, task);
                     task.status = .Blocked;
                     task.base.yield();
@@ -74,7 +77,6 @@ pub const CheatLib = struct {
                 }
                 return err;
             };
-
             return n;
         }
     }
@@ -932,7 +934,6 @@ pub const CheatLib = struct {
 
     // Join: List -> String (technically an array function)
     pub fn join(allocator: std.mem.Allocator, list: anytype, delimiter: []const u8) ![]const u8 {
-        // Support both ArrayListUnmanaged and raw Slices
         const items = if (@hasField(@TypeOf(list), "items")) list.items else list;
         return std.mem.join(allocator, delimiter, items);
     }
@@ -999,21 +1000,18 @@ pub const CheatLib = struct {
     // and yields the current fiber until a connection arrives.
     // Returns the client fd (set non-blocking via fcntl). Caller owns it.
     pub fn socketAccept(server_fd: i32) !i32 {
-        const sched = fp.active_scheduler;
-        const task  = sched.getCurrent();
-
         while (true) {
             var client_addr: std.posix.sockaddr = undefined;
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
 
-            // Use the high-level posix wrapper — it maps kernel errors to Zig errors
-            // (same pattern as std.posix.read used in CheatLib.read above).
             const client_fd = std.posix.accept(
                 server_fd, &client_addr, &addr_len,
                 std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
             ) catch |err| {
                 if (err == error.WouldBlock) {
-                    // No client yet — register for read-readiness and yield.
+                    // Reload scheduler/task on every yield (fiber may be stolen).
+                    const sched = fp.active_scheduler;
+                    const task = sched.getCurrent();
                     try sched.registerFd(server_fd, task);
                     task.status = .Blocked;
                     task.base.yield();
@@ -1040,14 +1038,13 @@ pub const CheatLib = struct {
     // Loops until all bytes are sent, yielding the fiber on EAGAIN.
     // Returns the total bytes sent (== data.len on success).
     pub fn socketWrite(fd: i32, data: []const u8) !usize {
-        const sched = fp.active_scheduler;
-        const task  = sched.getCurrent();
-
         var sent: usize = 0;
         while (sent < data.len) {
             const n = std.posix.write(fd, data[sent..]) catch |err| {
                 if (err == error.WouldBlock) {
-                    // Socket send buffer is full — wait for write-readiness.
+                    // Reload scheduler/task on every yield (fiber may be stolen).
+                    const sched = fp.active_scheduler;
+                    const task = sched.getCurrent();
                     try sched.registerWriteFd(fd, task);
                     task.status = .Blocked;
                     task.base.yield();
@@ -1105,9 +1102,6 @@ pub const CheatLib = struct {
     // epoll signals write-readiness, then the connection result is verified.
     // Returns the client fd; caller owns it (close via socketClose / RAII).
     pub fn socketConnect(host: []const u8, port: u16) !i32 {
-        const sched = fp.active_scheduler;
-        const task  = sched.getCurrent();
-
         const fd = try std.posix.socket(
             std.posix.AF.INET,
             std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
@@ -1124,9 +1118,10 @@ pub const CheatLib = struct {
         };
 
         std.posix.connect(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch |err| {
-            // Non-blocking connect returns WouldBlock (EINPROGRESS) immediately.
             if (err != error.WouldBlock) return err;
-            // Wait for epoll OUT event — kernel signals it when the 3-way handshake completes.
+            // Reload scheduler/task at yield point (fiber may be stolen).
+            const sched = fp.active_scheduler;
+            const task = sched.getCurrent();
             try sched.registerWriteFd(fd, task);
             task.status = .Blocked;
             task.base.yield();

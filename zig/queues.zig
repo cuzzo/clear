@@ -233,5 +233,10 @@ pub const Task = struct {
     /// cleared when drainInbox processes it. Detects double-push.
     in_inbox: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
+    /// Tracks which scheduler's epoll this task's fd is registered with.
+    /// When a fiber is stolen, the old scheduler's epoll still has the fd.
+    /// On the next registerFd, we unregister from the old scheduler first.
+    epoll_fd: i32 = -1,
+    epoll_io_fd: i32 = -1,
 };
 

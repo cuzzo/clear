@@ -750,14 +750,26 @@ pub const Scheduler = struct {
         self.sleeping_queue.append(self.allocator, task) catch unreachable;
     }
 
-    // Helper to do IO
+    // Register fd for read-readiness with this scheduler's epoll.
+    // If the fd was previously registered with a DIFFERENT scheduler (fiber
+    // was stolen), unregister from the old one first to prevent double-wake.
     pub fn registerFd(self: *Scheduler, fd: i32, task: *Task) !void {
-        // We cast the task pointer to usize to store it in epoll user_data
+        if (task.epoll_fd >= 0 and task.epoll_fd != self.poller.epoll_fd) {
+            // Unregister from old scheduler's epoll
+            std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+        }
+        task.epoll_fd = self.poller.epoll_fd;
+        task.epoll_io_fd = fd;
         try self.poller.register(fd, @intFromPtr(task));
     }
 
     // Register fd for write-readiness (used by socketWrite EAGAIN path).
     pub fn registerWriteFd(self: *Scheduler, fd: i32, task: *Task) !void {
+        if (task.epoll_fd >= 0 and task.epoll_fd != self.poller.epoll_fd) {
+            std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+        }
+        task.epoll_fd = self.poller.epoll_fd;
+        task.epoll_io_fd = fd;
         try self.poller.registerWrite(fd, @intFromPtr(task));
     }
 
