@@ -176,10 +176,12 @@ pub const RunQueue = struct {
         }
 
         // Now we own the slot. Safe to dereference.
-        // If pinned, we can't steal it — return null (the task is lost from
-        // the victim's queue, which is acceptable: the owner will re-drain).
+        // If pinned, push it back — the task must stay on its owning scheduler.
         if (task) |t_ptr| {
-            if (t_ptr.config.pinned) return null;
+            if (t_ptr.config.pinned) {
+                self.push(std.heap.c_allocator, t_ptr) catch {};
+                return null;
+            }
         }
         return task;
     }
