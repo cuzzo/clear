@@ -145,6 +145,7 @@ pub fn build(b: *std.Build) void {
         "spsc-test.zig",
         "spsc-scheduler-test.zig",
         "stream-test.zig",
+        "vopr-loom.zig",
         "yield-test.zig",
     };
 
