@@ -2246,6 +2246,11 @@ private
     lhs = node.left
     rhs = node.right
 
+    # Try pipeline loop fusion: WHERE/SELECT chains ending in a fold
+    # are fused into a single loop with no intermediate allocations.
+    fusible = collect_fusible_chain(node)
+    return transpile_fused_pipeline(fusible) if fusible
+
     # Check Higher-Order functions
     if node.right.is_a?(AST::SelectOp)
       return transpile_select_projection(node.left, node.right.expression)

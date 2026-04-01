@@ -6,6 +6,191 @@ module PipelineGenerator
     "__pblk#{@pipe_label_counter}"
   end
 
+  # -------------------------------------------------------------------------
+  # Pipeline Loop Fusion
+  # -------------------------------------------------------------------------
+  # Detects chains like `source s> WHERE pred s> SELECT expr s> SUM _`
+  # and fuses them into a single loop with no intermediate allocations.
+
+  FOLD_TYPES = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+                AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
+  FUSIBLE_TYPES = [AST::WhereOp, AST::SelectOp].freeze
+
+  # Walk the left-spine of nested s> BinaryOps and collect fusible stages.
+  # Returns { source:, stages: [WhereOp/SelectOp, ...], terminal: FoldOp, terminal_node: } or nil.
+  def collect_fusible_chain(node)
+    return nil unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+    return nil unless FOLD_TYPES.any? { |t| node.right.is_a?(t) }
+
+    terminal = node.right
+    stages = []
+    cursor = node.left
+
+    while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
+      stage = cursor.right
+      break unless FUSIBLE_TYPES.any? { |t| stage.is_a?(t) }
+      stages.unshift(stage)
+      cursor = cursor.left
+    end
+
+    return nil if stages.empty?  # single-stage fold: no fusion needed
+
+    { source: cursor, stages: stages, terminal: terminal, smooth_node: node }
+  end
+
+  # Generate a single fused loop for a fusible chain.
+  def transpile_fused_pipeline(chain)
+    source = chain[:source]
+    stages = chain[:stages]
+    terminal = chain[:terminal]
+    smooth_node = chain[:smooth_node]
+
+    my_label = next_pipe_label
+    source_code = visit(source)
+    @current_pipe_label = my_label
+
+    lhs_type = source.type_info
+    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+    items_block = build_pipe_items_block(lhs_type, alloc)
+
+    # Build the WHERE guards and SELECT transforms
+    guards = []
+    transforms = []
+    stages.each do |stage|
+      if stage.is_a?(AST::WhereOp)
+        expr = visit_pipeline_expr(source, stage.expression)
+        guards << expr
+      elsif stage.is_a?(AST::SelectOp)
+        expr = visit_pipeline_expr(source, stage.expression)
+        transforms << expr
+      end
+    end
+
+    # Build the fold body
+    fold_body = build_fold_body(terminal, source, smooth_node, has_transform: transforms.any?)
+
+    # Assemble the fused loop
+    indent = "    "
+    lines = []
+    lines << "for (pipe_items) |it| {"
+
+    # Open WHERE guards
+    guards.each do |g|
+      lines << "#{indent}if (#{g}) {"
+      indent += "    "
+    end
+
+    # Apply SELECT transforms (chain them: each uses the previous result)
+    if transforms.any?
+      transforms.each_with_index do |t, i|
+        if i == 0
+          lines << "#{indent}const __fused = #{t};"
+        else
+          # Subsequent transforms operate on previous result
+          lines << "#{indent}const __fused#{i} = #{t.gsub('it', "__fused#{i > 1 ? i - 1 : ''}")};"
+        end
+      end
+    end
+
+    # Fold accumulation
+    fold_body[:accum_lines].each { |l| lines << "#{indent}#{l}" }
+
+    # Close WHERE guards
+    guards.each { indent = indent[0...-4]; lines << "#{indent}}" }
+
+    lines << "}"
+    lines << "break :#{my_label} #{fold_body[:result_expr]};"
+
+    loop_code = lines.join("\n            ")
+
+    <<~ZIG
+      #{my_label}: {
+          const pipe_src_list = #{source_code};
+          #{items_block}
+          #{fold_body[:init]}
+
+          #{loop_code}
+      }
+    ZIG
+  end
+
+  # Build the fold-specific initialization, accumulation, and result expression.
+  def build_fold_body(terminal, source, smooth_node, has_transform: false)
+    # The fold's expression may reference `it` — if a SELECT preceded it,
+    # `it` should refer to the transformed value (__fused).
+    val_ref = has_transform ? "__fused" : "it"
+
+    case terminal
+    when AST::SumOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_sum: f64 = 0;",
+        accum_lines: ["__fused_sum += #{expr};"],
+        result_expr: "__fused_sum" }
+
+    when AST::AverageOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_sum: f64 = 0;\n          var __fused_count: usize = 0;",
+        accum_lines: ["__fused_sum += #{expr};", "__fused_count += 1;"],
+        result_expr: "if (__fused_count == 0) @as(f64, 0) else __fused_sum / @as(f64, @floatFromInt(__fused_count))" }
+
+    when AST::MinOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_min: f64 = std.math.floatMax(f64);",
+        accum_lines: ["const __fv = #{expr};", "if (__fv < __fused_min) __fused_min = __fv;"],
+        result_expr: "__fused_min" }
+
+    when AST::MaxOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_max: f64 = -std.math.floatMax(f64);",
+        accum_lines: ["const __fv = #{expr};", "if (__fv > __fused_max) __fused_max = __fv;"],
+        result_expr: "__fused_max" }
+
+    when AST::CountOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_count: i64 = 0;",
+        accum_lines: ["if (#{expr}) __fused_count += 1;"],
+        result_expr: "__fused_count" }
+
+    when AST::ReduceOp
+      acc_type = transpile_type(terminal.full_type)
+      initial_code = visit(terminal.initial_value)
+      expr = with_pipeline_context(placeholder: val_ref, acc: "acc") { visit(terminal.expression) }
+      { init: "var acc: #{acc_type} = #{initial_code};",
+        accum_lines: ["acc = #{expr};"],
+        result_expr: "acc" }
+
+    when AST::AnyOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_any: bool = false;",
+        accum_lines: ["if (#{expr}) { __fused_any = true; break; }"],
+        result_expr: "__fused_any" }
+
+    when AST::AllOp
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_all: bool = true;",
+        accum_lines: ["if (!(#{expr})) { __fused_all = false; break; }"],
+        result_expr: "__fused_all" }
+
+    when AST::FindOp
+      elem_zig = transpile_type(source.type_info.element_type.resolved.to_s)
+      expr = visit_pipeline_expr(source, terminal.expression)
+      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      { init: "var __fused_find: ?#{elem_zig} = null;",
+        accum_lines: ["if (#{expr}) { __fused_find = #{val_ref}; break; }"],
+        result_expr: "__fused_find" }
+
+    else
+      raise "Unsupported fold type in fusion: #{terminal.class}"
+    end
+  end
+
   # Save and restore all pipeline state around a block. Ensures that nested
   # pipeline visits (chained pipelines, SHARD bodies, etc.) don't leak state.
   # Any keyword argument overrides the corresponding state for the block's duration.

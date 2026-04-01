@@ -1,0 +1,83 @@
+-- Test: pipeline loop fusion
+-- WHERE/SELECT chains ending in a fold fuse into a single loop.
+
+FN test_where_sum() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+
+    result = data s> WHERE _ > 5.0 s> SUM _;
+    -- 6+7+8+9 = 30
+    ASSERT result == 30.0, "WHERE + SUM fusion";
+    RETURN;
+END
+
+FN test_select_sum() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    result = data s> SELECT _ * 10.0 s> SUM _;
+    -- (1+2+3+4+5)*10 = 150
+    ASSERT result == 150.0, "SELECT + SUM fusion";
+    RETURN;
+END
+
+FN test_where_select_sum() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i * 100));
+
+    result = data s> WHERE _ > 300.0 s> SELECT _ * 2.0 s> SUM _;
+    -- values > 300: 400,500,600,700,800,900 -> doubled: 800+1000+1200+1400+1600+1800 = 7800
+    ASSERT result == 7800.0, "WHERE + SELECT + SUM fusion";
+    RETURN;
+END
+
+FN test_where_select_reduce() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 6_i64) -> data.append(toFloat(i + 1_i64));
+
+    result = data s> WHERE _ > 2.0 s> SELECT _ * _ s> REDUCE(0.0) acc + _;
+    -- values > 2: 3,4,5,6 -> squared: 9+16+25+36 = 86
+    ASSERT result == 86.0, "WHERE + SELECT + REDUCE fusion";
+    RETURN;
+END
+
+FN test_where_min_max() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+
+    mn = data s> WHERE _ > 3.0 s> MIN _;
+    mx = data s> WHERE _ < 7.0 s> MAX _;
+    ASSERT mn == 4.0, "WHERE + MIN fusion";
+    ASSERT mx == 6.0, "WHERE + MAX fusion";
+    RETURN;
+END
+
+FN test_where_count() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+
+    n = data s> WHERE _ >= 5.0 s> COUNT _ >= 0.0;
+    ASSERT n == 5_i64, "WHERE + COUNT fusion";
+    RETURN;
+END
+
+FN test_single_stage_unfused() RETURNS Void ->
+    -- Single-stage pipelines should NOT attempt fusion
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    s = data s> SUM _;
+    ASSERT s == 15.0, "single SUM (no fusion)";
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    test_where_sum();
+    test_select_sum();
+    test_where_select_sum();
+    test_where_select_reduce();
+    test_where_min_max();
+    test_where_count();
+    test_single_stage_unfused();
+    RETURN;
+END
