@@ -2459,7 +2459,7 @@ RSpec.describe SemanticAnnotator do
         expect(imports.length).to eq(1)
       end
 
-      it "emits the native call trampolined via onRootStack (no rt, no try)" do
+      it "emits the native call directly for non-std.fs modules (no rt, no try, no onRootStack)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           FN main() RETURNS Void ->
@@ -2468,7 +2468,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
         expect(output).to include("native_math.native_add(")
-        expect(output).to include("onRootStack")
+        expect(output).not_to include("onRootStack")
         expect(output).not_to match(/try native_math\.native_add/)
         expect(output).not_to match(/native_math\.native_add\(rt,/)
       end
@@ -2483,7 +2483,7 @@ RSpec.describe SemanticAnnotator do
         expect(output).to include("const Vec2 = native_math.Vec2;")
       end
 
-      it "emits onRootStack and blk_ext label for non-void EXTERN FN call" do
+      it "calls non-std.fs EXTERN FN directly (no onRootStack)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           FN main() RETURNS Void ->
@@ -2491,22 +2491,21 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).to include("onRootStack")
+        expect(output).not_to include("onRootStack")
         expect(output).to match(/blk_ext\d+/)
-        expect(output).to match(/__ext\d+_frame\.ret/)
+        expect(output).to match(/__Ext\d+\.run/)
       end
 
-      it "emits onRootStack without a break label for void EXTERN FN call" do
+      it "uses onRootStack for std.fs EXTERN FN calls" do
         code = <<~CLEAR
-          EXTERN FN native_log(val: Number) RETURNS Void FROM "native_io";
+          EXTERN STRUCT Dir {} FROM "std.fs";
+          EXTERN FN cwd() RETURNS Dir FROM "std.fs";
           FN main() RETURNS Void ->
-            native_log(42.0);
+            d = cwd();
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
         expect(output).to include("onRootStack")
-        expect(output).not_to match(/blk_ext\d+/)
-        expect(output).not_to match(/break :blk_ext/)
       end
 
       it "passes arguments through the trampoline struct" do

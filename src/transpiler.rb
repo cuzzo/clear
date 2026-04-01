@@ -1727,7 +1727,7 @@ private
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.self_val.#{node.name}(#{native_args.join(', ')}) catch {}; } }; " \
           "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}#{field_inits.empty? ? '' : ', ' + field_inits}#{alloc_init} }; " \
-          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__ExtM#{tid}.run), @ptrCast(&__extm#{tid}_frame)); }"
+          "#{trampoline_call_method(tid, rt_name, node)}; }"
         else
           return "blk_extm#{tid}: { const __extm#{tid}_args = #{arg_tuple}; " \
           "const __ExtM#{tid} = struct { #{all_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
@@ -1735,7 +1735,7 @@ private
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
           "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}, #{field_inits}#{alloc_init} }; " \
-          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__ExtM#{tid}.run), @ptrCast(&__extm#{tid}_frame)); " \
+          "#{trampoline_call_method(tid, rt_name, node)}; " \
           "#{err_check}break :blk_extm#{tid} __extm#{tid}_frame.ret; }"
         end
       end
@@ -1780,7 +1780,10 @@ private
       mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
 
       if node.respond_to?(:extern_call) && node.extern_call
-        # Native FFI call: trampoline to g0 stack via onRootStack.
+        # Native FFI call. Only trampoline to g0 stack (onRootStack) when
+        # the function needs deep stacks (filesystem I/O, std.json, etc).
+        # Pure compute functions (SHA256, math, etc.) run directly on the
+        # fiber stack for zero overhead.
         rt_name = @do_rt_name || "rt"
         @extern_trampoline_counter = (@extern_trampoline_counter || 0) + 1
         tid = @extern_trampoline_counter
@@ -1872,7 +1875,7 @@ private
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "_ = #{native_call}; } }; " \
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
-          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); }"
+          "#{trampoline_call(tid, rt_name, node)}; }"
         else
           "blk_ext#{tid}: { #{args_decl}" \
           "const __Ext#{tid} = struct { #{struct_fields}#{struct_fields.empty? ? '' : ', '}#{err_field}ret: #{inner_zig} = undefined, " \
@@ -1880,7 +1883,7 @@ private
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
-          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); " \
+          "#{trampoline_call(tid, rt_name, node)}; " \
           "#{err_check}break :blk_ext#{tid} __ext#{tid}_frame.ret; }"
         end
       elsif node.respond_to?(:fn_var_call) && node.fn_var_call
@@ -2982,6 +2985,31 @@ private
       parts << node
     end
     parts
+  end
+
+  # EXTERN FFI trampoline: only use onRootStack for functions that need deep
+  # stacks (filesystem I/O, std.json). Pure compute functions (SHA256, math)
+  # run directly on the fiber stack for zero overhead.
+  NEEDS_ROOT_STACK_MODULES = %w[std.fs].freeze
+
+  def trampoline_call(tid, rt_name, node)
+    mod = node.respond_to?(:module_alias) ? node.module_alias : nil
+    needs_root = mod && NEEDS_ROOT_STACK_MODULES.any? { |m| mod.start_with?(m) }
+    if needs_root
+      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame))"
+    else
+      "__Ext#{tid}.run(@ptrCast(&__ext#{tid}_frame))"
+    end
+  end
+
+  def trampoline_call_method(tid, rt_name, node)
+    mod = node.respond_to?(:extern_module) ? node.extern_module : nil
+    needs_root = mod && NEEDS_ROOT_STACK_MODULES.any? { |m| mod.start_with?(m) }
+    if needs_root
+      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__ExtM#{tid}.run), @ptrCast(&__extm#{tid}_frame))"
+    else
+      "__ExtM#{tid}.run(@ptrCast(&__extm#{tid}_frame))"
+    end
   end
 
   # allocPrint optimization helpers: detect when string interpolation can use
