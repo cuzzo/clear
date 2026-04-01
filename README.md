@@ -91,7 +91,15 @@ In CLEAR, at runtime, the Control Plane can detect when you've employed a bad st
 
 CLEAR is designed such that you can override default compiler behviors if you know what you're doing, but you don't have the tools to shoot yourself in the foot.
 
+### Full Access to the C Standard Library
+
+CLEAR lowers to Zig, which has native access to the entire C standard library.
+
+In addition, Zig supports compiling *to* any target *from* any machine. I.e. you can compile for a Mac architecture from your Linux workstation.
+
 ## BUILDING & TESTING
+
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Prerequisites
 

@@ -19,18 +19,44 @@ CLEAR is focused on describing intent, and the compiler transforming that into t
   * Server architectures are getting increasingly complicated.
   * Application code should not need major re-architectures to leverage better future hardware.
 
-
 ## Architectural Overview
 
 ### 0. Lexer (`src/lexer.rb`)
+
+ * This takes text and parses it into valid CLEAR tokens.
+ * If you're adding a new syntax feature, you likely need to start here.
+
 ### 1. Parser (`src/parser.rb`)
+
+ * This parses tokens and transforms them into Abstract Syntax Tree (AST) nodes.
+   * An AST node basically extracts all relevant data from the source text about a particular CLEAR construct (like a function, or while loop).
+
 ### 2. Annotator (`src/annotator.rb`)
+
+ * This is the monolithic monster that does everything else besides lower to Zig.
+ * It ensures that the data inside the function is valid.
+   * For example, in CLEAR, functions that mutate must be suffixed with `!`
+   * The annotator is responsible for all these ensurities
+ * In addition, it hydrates AST nodes with all data that *can't* be processed in-line by the parser.
+   * A `BG` block might need to know if the code inside `EFFECTS` I/O, etc.
+
 ### 3. Transpiler (`src/transpiler.rb`)
+
+ * This takes the fully hydrated AST Nodes and simply pretty prints them as valid Zig.
+   * The most complicated part here is managing affine lifetimes properly.
+
 ### 4. Runtime (`zig/runtime-header.zig`)
+
+  * This is the Zig code that includes all the concurrency constructs that allow you to write easy code that seamlessly runs efficiently on multiple cores.
+  * The majority of performance improvements that will be accepted live here.
+    * The biggest impacts come from scheduler efficiency.
+      * Go's scheduler is a God-like work of art.  Despite the language itself having many efficiency flaws, it is *very* difficult to outperform Go, strictly due to how good it's scheduler is.
+      * CLEAR's scheduler is far behind, and improvements here will make the most impact.
+      * See [docs/benchmarks.md](docs/benchmarks.md) for a list of known areas for improvement.
 
 ## Local Development Setup
 
-See [README.md#building--testing](README.md#building--testing).
+See [Getting Started](README.md#building--testing).
 
 ## The Test Trinity
 
@@ -97,6 +123,7 @@ Other wish-list items are:
 
  * Standard Library Additions
  * Re-architectures (though one is needed)
+   * Migrations to MPSC/MPMC: CLEAR intends to be strictly SPSC at the architecture level.
  * Micro-performance improvements
    * If we are allocating an additional frameAlloc somewhere, and the fix includes 100+ lines of code - it will likely not get approved at this time.
  * Non-trivial runtime changes (zig/)
@@ -112,3 +139,16 @@ Other wish-list items are:
    * In addition, any new syntax must include adequate error messaging for the user.
  * Performance fixes must include a performance benchmark that demonstrates prior poor performance and how it has been increased.
    * There are a number of known performance issues on both single-core compared to perfect C, and in wait-heavy workloads compared to Go.
+
+## LLM Code
+
+ * The foundation of CLEAR was developed by hand
+ * But a substantial portion of it has been developed by LLMs
+ * Due to rapid development, the core architecture of the annotator is sloppy
+   * LLM code will continue to be accepted gladly, and is perhaps best suited to contribute to the code in its current *ai-slop-ish* state.
+
+## FINAL NOTE
+
+ * Please reach out *before* adding any major feature.
+ * I likely have a doc that lays out how it is supposed to be designed.
+
