@@ -2,6 +2,24 @@
 
 ## Welcome & Philosophy
 
+The goal of CLEAR is:
+
+  * To be the *simplest* Typed language,
+  * While being *more* safe than Rust,
+  * And nearly as fast as perfect C
+
+CLEAR aims to maximize local reasoning and minimize global complexity:
+
+  1. This is the definition of simple.
+  2. This allows for compiler optimizations not possible in other languages.
+  3. This *should* allow LLMs to write efficient, correct code more easily than any other language.
+
+CLEAR is focused on describing intent, and the compiler transforming that into the perfect execution model for your architecture (like SQL does):
+
+  * Server architectures are getting increasingly complicated.
+  * Application code should not need major re-architectures to leverage better future hardware.
+
+
 ## Architectural Overview
 
 ### 0. Lexer (`src/lexer.rb`)
@@ -12,13 +30,13 @@
 
 ## Local Development Setup
 
+See [README.md#building--testing](README.md#building--testing).
+
 ## The Test Trinity
 
 ### 1. Ruby Specs (`rspec`)
 ### 2. Integration Tests (`./clear test transpile-tests/`)
 ### 3. Benchmarks (`ruby benchmarks/runner.rb --all`)
-
-## Benchmark-Driven Development (BDD)
 
 ## Roadmap & Milestones
 
