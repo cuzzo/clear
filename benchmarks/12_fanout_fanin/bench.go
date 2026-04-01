@@ -18,7 +18,7 @@ import (
 
 const (
 	nWorkers   = 10_000
-	iterations = 1_000
+	iterations = 100_000
 )
 
 // CPU-bound work: iterated LCG hash to prevent optimization.

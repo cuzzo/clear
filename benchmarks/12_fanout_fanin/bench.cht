@@ -1,6 +1,6 @@
 -- Fan-Out / Fan-In Benchmark — CLEAR
 --
--- 10,000 items, each processed with CPU-bound work (1000 LCG iterations),
+-- 10,000 items, each processed with CPU-bound work (100K LCG iterations),
 -- results collected into a single sum.
 --
 -- Uses CONCURRENT(workers: 8, parallel: TRUE) SELECT — persistent worker
@@ -14,7 +14,7 @@ STRUCT Work { seed: Int64 }
 
 FN doWork(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
-    FOR i IN (0_i64 ..< 1000) -> x = x * 6364136223846793005 + 1442695040888963407;
+    FOR i IN (0_i64 ..< 100000) -> x = x * 6364136223846793005 + 1442695040888963407;
     RETURN x;
 END
 
@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
     checksum = total MOD 1000000000;
     print("Checksum:", checksum);
     print("Workers: 10000");
-    print("Iterations: 1000");
+    print("Iterations: 100000");
 
     elapsed = timestampMs() - t0;
     print("Time: ${elapsed.toString()} ms");

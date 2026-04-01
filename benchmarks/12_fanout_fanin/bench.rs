@@ -12,7 +12,7 @@ use std::time::Instant;
 use tokio::task::JoinSet;
 
 const N_WORKERS: usize = 10_000;
-const ITERATIONS: usize = 1_000;
+const ITERATIONS: usize = 100_000;
 
 fn do_work(seed: u64) -> u64 {
     let mut x = seed;
