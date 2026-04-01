@@ -117,6 +117,8 @@ module AllocHelper
     when AST::MatchStatement
       node.cases.any? { |c| loop_allocates_frame?(c[:body]) } ||
         loop_allocates_frame?(node.default_case)
+    when AST::GetIndex
+      node_allocates_frame?(node.index)
     when AST::ReturnNode
       node_allocates_frame?(node.value)
     when AST::Assignment
