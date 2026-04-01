@@ -2727,7 +2727,6 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.RwLock = .{},
-                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -2743,7 +2742,6 @@ pub const CheatLib = struct {
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
-                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 if (self.shards[s].map.getPtr(key)) |val_ptr| {
                     val_ptr.* = value;
                     return;
@@ -2756,7 +2754,6 @@ pub const CheatLib = struct {
                 const s = shardIndex(key);
                 self.shards[s].lock.lockShared();
                 defer self.shards[s].lock.unlockShared();
-                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 return self.shards[s].map.get(key);
             }
 
@@ -2820,9 +2817,8 @@ pub const CheatLib = struct {
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {
-                var counts: [N]u64 = undefined;
-                for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
-                return counts;
+                _ = self;
+                return [_]u64{0} ** N;
             }
         };
     }
@@ -2950,7 +2946,6 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.Mutex = .{},
-                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -2965,7 +2960,6 @@ pub const CheatLib = struct {
             }
 
             inline fn acquire(shard: *Shard, elided: bool) void {
-                _ = shard.ops.fetchAdd(1, .monotonic);
                 if (!elided) shard.lock.lock();
             }
 
@@ -3027,9 +3021,8 @@ pub const CheatLib = struct {
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {
-                var counts: [N]u64 = undefined;
-                for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
-                return counts;
+                _ = self;
+                return [_]u64{0} ** N;
             }
 
             pub fn enableLocks(self: *Self) void {
