@@ -469,7 +469,7 @@ module AST
 
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
-  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops) { include Locatable }
+  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) { include Locatable }
 
   # ForEach: FOR var IN collection DO body END
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops) { include Locatable }

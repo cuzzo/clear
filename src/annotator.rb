@@ -785,7 +785,10 @@ private
     error!(node, "FOR range start must be Int64, got #{start_type}") unless start_type == :Int64
     error!(node, "FOR range end must be Int64, got #{end_type}") unless end_type == :Int64
 
-    # 2. Analyze body in new scope with loop variable declared as immutable Int64
+    # 2. Capture outer-scope variable names before visiting the body.
+    outer_vars = @scope_stack.flat_map { |s| s.locals.keys }.to_set
+
+    # 3. Analyze body in new scope with loop variable declared as immutable Int64
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
     analyze_control_flow_branches([
       proc {
@@ -798,6 +801,12 @@ private
       }
     ], merge_to_parent: false)
     if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
+
+    # 4. Loop Mark Elision: emit saveLoopMark/restoreLoopMark when the loop body
+    # allocates from the frame arena AND those allocations don't target an
+    # outer-scope variable (which mark-rewind would corrupt).
+    node.mark_per_iter = loop_allocates_frame?(node.body) &&
+                         !loop_frame_escapes_to_outer?(node.body, outer_vars)
 
     node.full_type = :Void
   end

@@ -112,6 +112,8 @@ module AllocHelper
       loop_allocates_frame?(node.then_branch) || loop_allocates_frame?(node.else_branch)
     when AST::WhileLoop
       loop_allocates_frame?(node.do_branch)
+    when AST::ForRange, AST::ForEach
+      loop_allocates_frame?(node.body)
     when AST::MatchStatement
       node.cases.any? { |c| loop_allocates_frame?(c[:body]) } ||
         loop_allocates_frame?(node.default_case)
