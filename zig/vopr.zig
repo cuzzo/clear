@@ -290,7 +290,11 @@ fn executeInjectFault(state: *VoprState, sched_idx: usize) void {
 
 /// Run the VOPR for a single seed.
 pub fn runVopr(seed: u64, max_ticks: u64) !void {
-    var state = VoprState.init(seed, std.heap.c_allocator);
+    return runVoprAlloc(seed, max_ticks, std.heap.c_allocator);
+}
+
+fn runVoprAlloc(seed: u64, max_ticks: u64, allocator: std.mem.Allocator) !void {
+    var state = VoprState.init(seed, allocator);
     // Re-bind random interface after move — the pointer inside random()
     // captures &state.rng which was on the stack during init().
     state.random = state.rng.random();
@@ -408,4 +412,17 @@ pub fn main() !void {
     }
 
     std.debug.print("VOPR: PASSED — all {d} seeds OK\n", .{seed_count});
+}
+
+// -----------------------------------------------------------------------
+// Unit tests -- 100 seeds, ~200 ticks each. Catches task conservation
+// and pinned affinity bugs on the first steal. Complements the Loom
+// tests which catch interleaving bugs but can't detect uninitialized
+// memory (SimAtomic uses plain values, not raw memory).
+// -----------------------------------------------------------------------
+
+test "vopr: task conservation and pinned affinity" {
+    for (0..100) |seed| {
+        try runVoprAlloc(seed, 200, std.testing.allocator);
+    }
 }
