@@ -2,20 +2,23 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha256"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 )
 
-// hashN computes SHA256 iterated n times on seed, returns first 8 bytes as hex.
-func hashN(seed string, n int) string {
-	buf := sha256.Sum256([]byte(seed))
-	for i := 1; i < n; i++ {
-		buf = sha256.Sum256(buf[:])
+// heavyCompute does N iterations of integer math. Pure compute, no crypto.
+func heavyCompute(seed int64, n int) int64 {
+	x := seed
+	for i := 0; i < n; i++ {
+		x = x*6364136223846793005 + 1442695040888963407
+		x = x*x + 1
 	}
-	return fmt.Sprintf("%x", buf[:8])
+	if x < 0 {
+		x = -x
+	}
+	return x % 1000000000
 }
 
 func handleClient(conn net.Conn) {
@@ -36,8 +39,9 @@ func handleClient(conn net.Conn) {
 			if n < 1 {
 				n = 1
 			}
-			result := hashN("seed:"+id, n)
-			fmt.Fprintf(writer, ":%s\r\n", result)
+			idNum, _ := strconv.ParseInt(id, 10, 64)
+			result := heavyCompute(idNum, n)
+			fmt.Fprintf(writer, ":%d\r\n", result)
 			writer.Flush()
 		} else if line == "QUIT" {
 			fmt.Fprintf(writer, "+OK\r\n")

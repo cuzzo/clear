@@ -4,14 +4,13 @@
 //
 // Three phases:
 //   1. Uniform:     all requests WORK:ID:100
-//   2. Skewed:      99% WORK:ID:10, 1% WORK:ID:10000
+//   2. Skewed:      0.5% WORK:ID:10000, 99.5% WORK:ID:10 (1-in-200 for p99)
 //   3. Adversarial: connection 0 all WORK:ID:10000, rest all WORK:ID:10
 
 package main
 
 import (
 	"bufio"
-	"crypto/sha256"
 	"fmt"
 	"math/rand"
 	"net"
@@ -23,12 +22,16 @@ import (
 	"time"
 )
 
-func hashN(seed string, n int) string {
-	buf := sha256.Sum256([]byte(seed))
-	for i := 1; i < n; i++ {
-		buf = sha256.Sum256(buf[:])
+func heavyCompute(seed int64, n int) int64 {
+	x := seed
+	for i := 0; i < n; i++ {
+		x = x*6364136223846793005 + 1442695040888963407
+		x = x*x + 1
 	}
-	return fmt.Sprintf("%x", buf[:8])
+	if x < 0 {
+		x = -x
+	}
+	return x % 1000000000
 }
 
 func readServerRSS(pid string) (hwm, rss int64) {
@@ -102,7 +105,8 @@ func runPhase(name string, addr string, numRequests int, concurrency int,
 
 			for r := 0; r < requestsPerWorker; r++ {
 				cmd, expectedN, expectedID := workFn(workerIdx, r)
-				expected := hashN("seed:"+expectedID, expectedN)
+				idNum, _ := strconv.ParseInt(expectedID, 10, 64)
+				expected := fmt.Sprintf("%d", heavyCompute(idNum, expectedN))
 
 				start := time.Now()
 				resp, err := sendCommand(conn, reader, cmd)
@@ -214,16 +218,15 @@ func main() {
 			return fmt.Sprintf("WORK:%s:100", id), 100, id
 		})
 
-	// Phase 2: Skewed (1% heavy)
-	// Pre-generate which requests are heavy
+	// Phase 2: Skewed (0.5% heavy, 1-in-200 so p99 is meaningful)
 	heavySet := make(map[int]bool)
-	for i := 0; i < numRequests/100; i++ {
+	for i := 0; i < numRequests/200; i++ {
 		heavySet[rng.Intn(numRequests)] = true
 	}
 	globalReqIdx := 0
 	var idxMu sync.Mutex
 
-	runPhase("Phase 2: Skewed (1% heavy)", addr, numRequests, concurrency,
+	runPhase("Phase 2: Skewed (0.5% heavy)", addr, numRequests, concurrency,
 		func(workerIdx, reqIdx int) (string, int, string) {
 			idxMu.Lock()
 			idx := globalReqIdx

@@ -9,4 +9,3 @@ path = "bench.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-sha2 = "0.10"

@@ -1,18 +1,13 @@
-use sha2::{Sha256, Digest};
-use std::fmt::Write as FmtWrite;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
-fn hash_n(seed: &str, n: usize) -> String {
-    let mut buf = Sha256::digest(seed.as_bytes());
-    for _ in 1..n {
-        buf = Sha256::digest(&buf);
+fn heavy_compute(seed: i64, n: usize) -> i64 {
+    let mut x = seed;
+    for _ in 0..n {
+        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        x = x.wrapping_mul(x).wrapping_add(1);
     }
-    let mut hex = String::with_capacity(16);
-    for b in &buf[..8] {
-        write!(hex, "{:02x}", b).unwrap();
-    }
-    hex
+    (x % 1000000000).abs()
 }
 
 async fn handle_client(stream: tokio::net::TcpStream) {
@@ -29,8 +24,8 @@ async fn handle_client(stream: tokio::net::TcpStream) {
             let rest = &line[5..];
             if let Some((id, n_str)) = rest.split_once(':') {
                 let n: usize = n_str.parse().unwrap_or(1).max(1);
-                let seed = format!("seed:{}", id);
-                let result = hash_n(&seed, n);
+                let id_num: i64 = id.parse().unwrap_or(0);
+                let result = heavy_compute(id_num, n);
                 let resp = format!(":{}\r\n", result);
                 let _ = writer.write_all(resp.as_bytes()).await;
             } else {
