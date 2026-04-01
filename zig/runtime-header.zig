@@ -65,28 +65,16 @@ pub const CheatLib = struct {
         const task = sched.getCurrent();
 
         while (true) {
-            // 1. Try to read using the high-level wrapper
-            // This returns an error union (!usize), not a raw number.
             const n = std.posix.read(fd, buffer) catch |err| {
                 if (err == error.WouldBlock) {
-                    // 2. EAGAIN! No data yet.
-
-                    // Register with Epoll
-                    // We catch 'FileDescriptorAlreadyPresent' just in case we loop rapidly
                     try sched.registerFd(fd, task);
-
-                    // Yield (Block)
                     task.status = .Blocked;
                     task.base.yield();
-
-                    // When we wake up, loop back and try read() again!
                     continue;
                 }
-                // Propagate legitimate errors (e.g. ConnectionReset, etc)
                 return err;
             };
 
-            // Success! 'n' is definitely the valid byte count.
             return n;
         }
     }
@@ -1086,6 +1074,10 @@ pub const CheatLib = struct {
     // The returned slice lives until the enclosing loop iteration's
     // restoreLoopMark rewinds the arena — zero GPA calls in the hot path.
     //
+    // Usage: data = tcpRead(client)
+    // After a successful read, yields the fiber so other fibers on the same
+    // scheduler get a turn. Without this, a single client with pipelined
+    // data can monopolize the scheduler indefinitely.
     // Usage: data = tcpRead(client)
     pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
         var buf: [4096]u8 = undefined;

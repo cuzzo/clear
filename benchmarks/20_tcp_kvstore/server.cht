@@ -1,6 +1,6 @@
 -- TCP KV Store — Minimal RESP-compatible GET/SET/INCR server
 --
--- DragonflyDB-style shared-nothing architecture: @sharded(32) HashMap
+-- DragonflyDB-style shared-nothing architecture: @sharded(128) HashMap
 -- with per-shard locking.  BG fiber per client connection.
 -- Supports pipelining via response batching (one tcpWrite per tcpRead).
 --
@@ -126,8 +126,8 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
 END
 
 FN main() RETURNS Void ->
-    MUTABLE store: HashMap<String>@sharded(32):locked = {};
-    MUTABLE counters: HashMap<Int64>@sharded(32):locked = {};
+    MUTABLE store: HashMap<String>@sharded(128):locked = {};
+    MUTABLE counters: HashMap<Int64>@sharded(128):locked = {};
 
     server = TCPServer::listen(6390);
     print("CLEAR kvstore listening on port 6390");

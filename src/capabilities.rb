@@ -283,6 +283,8 @@ module CapabilityHelper
           # shared+striped maps (DashMap) are self-synchronizing — per-shard locking
           # means any thread can access any shard without pinning. Skip has_shared
           # so BG blocks are NOT auto-pinned, enabling work stealing.
+          # Non-shared striped maps (@sharded(N):locked without @shared) MUST be pinned
+          # because the map is affine-owned and concurrent access without Arc is unsafe.
           is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
           unless is_dashmap
             result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local

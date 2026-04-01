@@ -549,17 +549,20 @@ pub const Scheduler = struct {
             }
 
             // ── Fast path: if the ready_queue has work, run it immediately.
-            // Skip inbox, sleepers, I/O checks, and work stealing.
-            // Every 64 fast-path iterations, drain the inbox to pick up
-            // newly spawned tasks so they aren't starved.
+            // Every 64 fast-path iterations, drain inbox + poll epoll to
+            // pick up newly spawned tasks and wake I/O-blocked fibers.
             if (self.ready_queue.len() > 0) {
                 self.fast_path_counter +%= 1;
                 // Drain RemoteCalls every iteration (O(1) when empty).
-                // Full drain (Spawn/Resume) every 64th to avoid heavy alloc.
                 self.drainRemoteCalls();
                 if (self.fast_path_counter & 63 == 0) {
                     self.drainChannels();
                 }
+                // Non-blocking epoll poll EVERY iteration: wake I/O-blocked
+                // fibers that have data ready. This is critical for I/O servers
+                // where one fiber with pipelined data can monopolize the scheduler.
+                // epoll_wait(timeout=0) is ~100ns when empty — acceptable overhead.
+                self.pollEpollNonBlocking();
             } else {
                 // ── Slow path: no ready work — check all sources.
                 self.drainChannels();
@@ -779,6 +782,26 @@ pub const Scheduler = struct {
 
     /// Drain all ready CQEs from the io_uring, writing the result into each
     /// IoWaiter and pushing the corresponding task back onto the ready queue.
+    // Non-blocking epoll poll: check for I/O readiness without sleeping.
+    // Wakes any Blocked fibers whose fds have data ready.
+    fn pollEpollNonBlocking(self: *Scheduler) void {
+        const count = self.poller.poll(&self.epoll_events, 0);
+        if (count > 0) {
+            for (self.epoll_events[0..count]) |event| {
+                const data_ptr = event.data.ptr;
+                if (data_ptr == 0) {
+                    self.event_fd.consume();
+                } else if (data_ptr == 1) {
+                    self.drainCqes();
+                } else {
+                    const task: *Task = @ptrFromInt(data_ptr);
+                    task.status = .Ready;
+                    self.ready_queue.push(self.allocator, task) catch unreachable;
+                }
+            }
+        }
+    }
+
     fn drainCqes(self: *Scheduler) void {
         const n = self.ring.copy_cqes(&self.uring_cqes, 0) catch return;
         for (self.uring_cqes[0..n]) |cqe| {
