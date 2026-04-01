@@ -16,9 +16,8 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 const TOTAL_ITEMS: u64 = 100_000;
-const N_CONSUMERS: usize = 8;
 const CHAN_CAP: usize = 64;
-const WORK_PER_ITEM: usize = 500;
+const WORK_PER_ITEM: usize = 5_000;
 
 fn process_item(val: u64) -> u64 {
     let mut x = val;
@@ -36,9 +35,10 @@ async fn main() {
     let t0 = Instant::now();
 
     // Start consumers (share the receiver via Arc<Mutex>)
+    let n_consumers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
     let mut consumer_handles = Vec::new();
     let rx = Arc::new(tokio::sync::Mutex::new(rx));
-    for _ in 0..N_CONSUMERS {
+    for _ in 0..n_consumers {
         let rx = Arc::clone(&rx);
         let total = Arc::clone(&total);
         consumer_handles.push(tokio::spawn(async move {
@@ -70,7 +70,8 @@ async fn main() {
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
-    println!("Total: {}", total.load(Ordering::Relaxed));
-    println!("Items: {}, Consumers: {}, Channel: {}", TOTAL_ITEMS, N_CONSUMERS, CHAN_CAP);
+    println!("Checksum: {}", total.load(Ordering::Relaxed) % 1_000_000_000);
+    println!("Items: {}", TOTAL_ITEMS);
+    println!("Workers: {}", n_consumers);
     println!("Time: {:.4} s", elapsed);
 }

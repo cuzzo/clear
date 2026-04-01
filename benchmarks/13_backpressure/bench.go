@@ -14,6 +14,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,9 +22,8 @@ import (
 
 const (
 	totalItems  = 100_000
-	nConsumers  = 8
 	chanCap     = 64
-	workPerItem = 500
+	workPerItem = 5_000
 )
 
 func processItem(val uint64) uint64 {
@@ -41,7 +41,8 @@ func main() {
 
 	t0 := time.Now()
 
-	// Start consumers
+	// Start consumers — scale with available cores
+	nConsumers := runtime.GOMAXPROCS(0)
 	for c := 0; c < nConsumers; c++ {
 		wg.Add(1)
 		go func() {
@@ -62,7 +63,8 @@ func main() {
 	wg.Wait()
 
 	elapsed := time.Since(t0).Seconds()
-	fmt.Printf("Total: %d\n", total.Load())
-	fmt.Printf("Items: %d, Consumers: %d, Channel: %d\n", totalItems, nConsumers, chanCap)
+	fmt.Printf("Checksum: %d\n", total.Load()%1_000_000_000)
+	fmt.Printf("Items: %d\n", totalItems)
+	fmt.Printf("Workers: %d\n", nConsumers)
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }

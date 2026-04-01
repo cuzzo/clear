@@ -1,9 +1,9 @@
 -- Backpressure Benchmark — CLEAR
 --
 -- Producer generates 100,000 items.  Consumer pool processes each item
--- with CPU work (500 LCG iterations).  Backpressure is applied via
--- CONCURRENT(workers: 8) which uses a semaphore to limit in-flight
--- work — the producer fiber blocks when all 8 slots are busy.
+-- with CPU work (5000 LCG iterations).  Backpressure is applied via
+-- CONCURRENT(workers: 32) which uses a semaphore to limit in-flight
+-- work — the producer fiber blocks when all 32 slots are busy.
 --
 -- CLEAR does not have bounded channels (v0.1).  The CONCURRENT pipeline
 -- is the closest mechanism: it gates fan-out with a semaphore, providing
@@ -16,7 +16,7 @@ STRUCT Item { seed: Int64, result: Int64 }
 
 FN processItem(val: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = val;
-    FOR i IN (0_i64 ..< 500) -> x = x * 6364136223846793005 + 1442695040888963407;
+    FOR i IN (0_i64 ..< 5000) -> x = x * 6364136223846793005 + 1442695040888963407;
     RETURN x;
 END
 
@@ -27,14 +27,16 @@ FN main() RETURNS Void ->
     FOR i IN (0_i64 ..< 100000) -> items.append(Item{ seed: i, result: 0 });
 
     -- Process with backpressure (workers: 8 = max 8 concurrent fibers)
-    processed = items s> CONCURRENT(workers: 8, parallel: TRUE) SELECT processItem(_.seed);
+    processed = items s> CONCURRENT(workers: 32, parallel: TRUE) SELECT processItem(_.seed);
 
     -- Sum results (SUM returns Float64, so we accumulate as Float64)
     MUTABLE total: Int64 = 0;
     FOR j IN (0_i64 ..< 100000) -> total += processed[j];
 
-    print("Total:", total);
-    print("Items: 100000, Consumers: 8, Pool: 8");
+    checksum = total MOD 1000000000;
+    print("Checksum:", checksum);
+    print("Items: 100000");
+    print("Workers: 32");
 
     elapsed = timestampMs() - t0;
     print("Time: ${elapsed.toString()} ms");
