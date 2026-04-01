@@ -1,12 +1,12 @@
 -- Heap Array Benchmark
 --
--- All three languages allocate a 1000-element array per outer iteration,
--- fill it, sum it, and discard it. 1000 outer iterations.
+-- All three languages allocate a 1000-element heap array per outer
+-- iteration, fill it, sum it, and discard it. 1000 outer iterations.
 --
--- C:     malloc(N * sizeof(double)) + free per iteration.
--- Rust:  Vec::with_capacity(1000) — 1 heap alloc per iteration.
--- CLEAR: Float64[1000]@list — pre-allocated frame arena list, rewound
---        each iteration via saveLoopMark/restoreLoopMark.
+-- C:     malloc + indexed write (arr[i] = val). Zero overhead per element.
+-- Rust:  Vec::with_capacity + push. Bounds check per push, no realloc.
+-- CLEAR: Float64[1000]@list + append. Error-union check per append,
+--        pre-allocated so no realloc. Frame arena rewound each iteration.
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
