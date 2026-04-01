@@ -3,6 +3,13 @@
 require 'fileutils'
 require 'benchmark'
 
+# Returns true if binary is missing or any source is newer than binary.
+def needs_rebuild?(binary, *sources)
+  return true unless File.exist?(binary)
+  bin_mtime = File.mtime(binary)
+  sources.flatten.compact.any? { |src| File.exist?(src) && File.mtime(src) > bin_mtime }
+end
+
 # Find the Zig compiler (local or system). Resolve to absolute path
 # since the runner chdir's into zig/ for compilation.
 ZIG = [
@@ -236,31 +243,50 @@ def run_bench(dir, mode_cfg, cores)
   has_rust = !clear_only && File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
   has_go   = !clear_only && File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
 
+  # Compiler sources that invalidate CLEAR builds when changed.
+  clear_compiler_deps = Dir.glob("src/*.rb") + ["zig/runtime-header.zig"]
+
   # 1. Compile C Baseline
   if has_c
-    puts "Compiling C baseline..."
-    `gcc -O3 #{dir}/bench.c -o #{dir}/bench_c`
+    if needs_rebuild?("#{dir}/bench_c", "#{dir}/bench.c")
+      puts "Compiling C baseline..."
+      `gcc -O3 #{dir}/bench.c -o #{dir}/bench_c`
+    else
+      puts "C baseline up to date."
+    end
   end
 
   # 2. Compile Rust Baseline
   if has_rust
     if File.exist?("#{dir}/Cargo.toml")
-      puts "Compiling Rust baseline (cargo)..."
-      Dir.chdir(dir) { `cargo build --release -q 2>&1` }
-      src = "#{dir}/target/release/bench_rust"
-      FileUtils.cp(src, "#{dir}/bench_rust") if File.exist?(src)
+      if needs_rebuild?("#{dir}/bench_rust", Dir.glob("#{dir}/src/*.rs") + ["#{dir}/Cargo.toml"])
+        puts "Compiling Rust baseline (cargo)..."
+        Dir.chdir(dir) { `cargo build --release -q 2>&1` }
+        src = "#{dir}/target/release/bench_rust"
+        FileUtils.cp(src, "#{dir}/bench_rust") if File.exist?(src)
+      else
+        puts "Rust baseline up to date."
+      end
     else
-      puts "Compiling Rust baseline..."
-      `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
+      if needs_rebuild?("#{dir}/bench_rust", "#{dir}/bench.rs")
+        puts "Compiling Rust baseline..."
+        `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
+      else
+        puts "Rust baseline up to date."
+      end
     end
   end
 
   # 3. Compile Go Baseline
   if has_go
-    puts "Compiling Go baseline..."
-    Dir.chdir(dir) do
-      `go mod init bench 2>/dev/null` unless File.exist?("go.mod")
-      `go build -o bench_go bench.go`
+    if needs_rebuild?("#{dir}/bench_go", "#{dir}/bench.go")
+      puts "Compiling Go baseline..."
+      Dir.chdir(dir) do
+        `go mod init bench 2>/dev/null` unless File.exist?("go.mod")
+        `go build -o bench_go bench.go`
+      end
+    else
+      puts "Go baseline up to date."
     end
   end
 
@@ -273,32 +299,42 @@ def run_bench(dir, mode_cfg, cores)
             File.exist?("#{dir}/bench.cht") &&
             File.read("#{dir}/bench.cht").include?("@use_zig")
 
-  if use_zt
-    puts "Compiling CLEAR (runtime Zig, .zt)..."
-    FileUtils.cp("#{dir}/bench.zt", "zig/bench.zig")
-  elsif use_zig
-    puts "Compiling CLEAR (native Zig, scheduler required)..."
-    FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
-  elsif File.exist?("#{dir}/bench.cht")
-    puts "Transpiling CLEAR..."
-    `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
-    puts "Compiling CLEAR (Zig output)..."
-  else
-    puts "No CLEAR source found, skipping CLEAR."
-  end
+  clear_src = if use_zt then "#{dir}/bench.zt"
+              elsif use_zig then "#{dir}/bench.zig"
+              elsif File.exist?("#{dir}/bench.cht") then "#{dir}/bench.cht"
+              end
 
-  has_clear = false
-  if File.exist?("zig/bench.zig")
-    Dir.chdir("zig") do
-      `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
-    end
-    if File.exist?("zig/bench_clear")
-      FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
-      has_clear = true
+  if clear_src && !needs_rebuild?("#{dir}/bench_clear", clear_src, clear_compiler_deps)
+    puts "CLEAR up to date."
+    has_clear = File.exist?("#{dir}/bench_clear")
+  else
+    if use_zt
+      puts "Compiling CLEAR (runtime Zig, .zt)..."
+      FileUtils.cp("#{dir}/bench.zt", "zig/bench.zig")
+    elsif use_zig
+      puts "Compiling CLEAR (native Zig, scheduler required)..."
+      FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
+    elsif File.exist?("#{dir}/bench.cht")
+      puts "Transpiling CLEAR..."
+      `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
+      puts "Compiling CLEAR (Zig output)..."
     else
-      puts "WARNING: bench_clear was not generated."
+      puts "No CLEAR source found, skipping CLEAR."
     end
-    FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+
+    has_clear = false
+    if File.exist?("zig/bench.zig")
+      Dir.chdir("zig") do
+        `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
+      end
+      if File.exist?("zig/bench_clear")
+        FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
+        has_clear = true
+      else
+        puts "WARNING: bench_clear was not generated."
+      end
+      FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+    end
   end
 
 # 5. Execution & Timing
