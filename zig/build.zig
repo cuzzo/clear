@@ -295,6 +295,25 @@ pub fn build(b: *std.Build) void {
     vopr_step.dependOn(&run_vopr.step);
 
     // -------------------------------------------------------------------------
+    // LOOM — Deterministic atomic interleaving tests
+    // -------------------------------------------------------------------------
+    const loom_step = b.step("loom", "Run Loom deterministic interleaving tests");
+    const loom_exe = b.addExecutable(.{
+        .name = "loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("vopr-loom.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    loom_exe.addAssemblyFile(b.path("switch.S"));
+    loom_exe.addAssemblyFile(b.path("onRoot.S"));
+    loom_exe.linkLibC();
+    const run_loom = b.addRunArtifact(loom_exe);
+    run_loom.has_side_effects = true;
+    loom_step.dependOn(&run_loom.step);
+
+    // -------------------------------------------------------------------------
     // STATIC LIBRARY (cheat-runtime)
     // -------------------------------------------------------------------------
     const lib = b.addLibrary(.{

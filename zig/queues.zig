@@ -4,6 +4,14 @@ const fc = @import("fiber-core.zig");
 const Fiber = fc.Fiber;
 const StackSize = fc.StackSize;
 
+// Comptime atomic type selection: SimAtomic in Loom mode, real atomics otherwise.
+// When the root module exports SimAtomic (vopr-loom.zig), all atomic operations
+// in RunQueue become yield points for deterministic interleaving.
+pub const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 pub const InboxType = enum { Spawn, Resume, RemoteCall };
 
 
@@ -30,7 +38,7 @@ pub const InboxNode = struct {
 pub const AtomicInbox = struct {
     // The "Head" of the linked list.
     // Producers CAS this to push. Consumer SWAPs this to pop all.
-    head: std.atomic.Value(?*InboxNode) = std.atomic.Value(?*InboxNode).init(null),
+    head: Atomic(?*InboxNode) = Atomic(?*InboxNode).init(null),
 
     /// Producer: Push a single node. Wait-Free.
     pub fn push(self: *AtomicInbox, node: *InboxNode) void {
@@ -80,15 +88,15 @@ pub const AtomicInbox = struct {
 // TODO: Rename to Deque
 pub const RunQueue = struct {
     // Fixed size ring buffer for MVP
-    buffer: [65536]std.atomic.Value(?*Task) = undefined,
+    buffer: [65536]Atomic(?*Task) = undefined,
     mask: u32 = 65535,
 
-    top: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    bottom: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    top: Atomic(u32) = Atomic(u32).init(0),
+    bottom: Atomic(u32) = Atomic(u32).init(0),
 
     pub fn init() RunQueue {
         var q = RunQueue{};
-        for (&q.buffer) |*slot| slot.* = std.atomic.Value(?*Task).init(null);
+        for (&q.buffer) |*slot| slot.* = Atomic(?*Task).init(null);
         return q;
     }
 
@@ -158,7 +166,7 @@ pub const RunQueue = struct {
 
     // Used internally by tryStealFrom.
     // Skips pinned tasks — they must stay on their owning scheduler's thread.
-    fn stealOne(self: *RunQueue) ?*Task {
+    pub fn stealOne(self: *RunQueue) ?*Task {
         const t = self.top.load(.acquire);
         const b = self.bottom.load(.seq_cst);
 
@@ -231,7 +239,7 @@ pub const Task = struct {
     is_on_root_stack: bool = false,
     /// Debug guard: set to true when inbox_link is pushed to an inbox,
     /// cleared when drainInbox processes it. Detects double-push.
-    in_inbox: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    in_inbox: Atomic(bool) = Atomic(bool).init(false),
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
     /// Tracks which scheduler's epoll this task's fd is registered with.
     /// When a fiber is stolen, the old scheduler's epoll still has the fd.
