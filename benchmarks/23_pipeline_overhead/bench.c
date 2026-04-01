@@ -100,16 +100,12 @@ int main(void) {
     if (accum == 0.0) { printf("unexpected zero\n"); return 1; }
 
     /* ---- Report ---- */
-    printf("Pipeline Overhead (%d Float64 elements, %d iters) — C baseline\n", N, ITER);
-    printf("\n");
-    printf("Test 1: SUM only (zero-alloc, single pass)\n");
-    printf("  Handwritten loop:  %.1f ms\n", sum_ms);
-    printf("  RSS after:         %ld KB\n", sum_rss);
-    printf("\n");
-    printf("Test 2: WHERE + SELECT + SUM (fused loop)\n");
-    printf("  Fused loop:        %.1f ms  RSS %ld KB\n", fused_ms, fused_rss);
-    printf("\n");
-    printf("  Peak RSS (VmHWM):  %ld KB\n", fused_hwm);
+    printf("Elements: %d\n", N);
+    printf("Iterations: %d\n", ITER);
+    printf("Handwritten loop: %.1f ms\n", sum_ms);
+    printf("Fused loop: %.1f ms\n", fused_ms);
+    printf("RSS after: %ld KB\n", sum_rss);
+    printf("Peak RSS: %ld KB\n", fused_hwm);
 
     free(data);
     return 0;

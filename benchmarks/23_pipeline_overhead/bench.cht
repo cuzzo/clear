@@ -95,20 +95,14 @@ FN main() RETURNS Void ->
     ASSERT accum != 0.0, "prevent dead code elimination";
 
     -- ---- Report ----
-    print("Pipeline Overhead (${n.toString()} Float64 elements, ${iters.toString()} iters)");
-    print("");
-    print("Test 1: SUM only (zero-alloc, single pass)");
-    print("  Handwritten loop:  ${sumLoopMs.toString()} ms");
-    print("  s> SUM pipeline:   ${sumPipeMs.toString()} ms");
-    print("  RSS after:         ${sumRssKb.toString()} KB");
-
-    print("");
-    print("Test 2: WHERE + SELECT + SUM (multi-pass)");
-    print("  Fused loop:        ${fusedMs.toString()} ms  RSS ${fusedRssKb.toString()} KB");
-    print("  s> pipeline:       ${chainMs.toString()} ms  RSS ${chainRssKb.toString()} KB");
-
-    print("");
-    print("  Peak RSS (VmHWM):  ${peakMemoryKb().toString()} KB");
+    print("Elements: ${n.toString()}");
+    print("Iterations: ${iters.toString()}");
+    print("Handwritten loop: ${sumLoopMs.toString()} ms");
+    print("SUM pipeline: ${sumPipeMs.toString()} ms");
+    print("Fused loop: ${fusedMs.toString()} ms");
+    print("Chained pipeline: ${chainMs.toString()} ms");
+    print("RSS after: ${sumRssKb.toString()} KB");
+    print("Peak RSS: ${peakMemoryKb().toString()} KB");
 
     RETURN;
 END

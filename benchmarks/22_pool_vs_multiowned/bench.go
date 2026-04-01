@@ -92,9 +92,10 @@ func main() {
 	ptrMs := time.Since(t1).Milliseconds()
 	ptrHWM, ptrRSS := readMemory()
 
-	fmt.Printf("Pool vs Pointer insert (%d entities) — Go baseline\n", N)
-	fmt.Printf("  Slice (dense array): %d ms  RSS %d KB\n", sliceMs, sliceRSS)
-	fmt.Printf("  Pointer (scattered): %d ms  RSS %d KB\n", ptrMs, ptrRSS)
-	fmt.Printf("  Peak RSS (VmHWM):    %d KB\n", ptrHWM)
-	fmt.Printf("  slice_count=%d  ptr_count=%d\n", sliceCount, ptrCount)
+	fmt.Printf("Entities: %d\n", N)
+	fmt.Printf("Slice: %d ms\n", sliceMs)
+	fmt.Printf("Slice RSS: %d KB\n", sliceRSS)
+	fmt.Printf("Pointer: %d ms\n", ptrMs)
+	fmt.Printf("Pointer RSS: %d KB\n", ptrRSS)
+	fmt.Printf("Peak RSS: %d KB\n", ptrHWM)
 }

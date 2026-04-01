@@ -103,7 +103,7 @@ func main() {
 		accum += fusedLoop(data)
 	}
 	fusedMs := time.Since(t1).Milliseconds()
-	fusedHWM, fusedRSS := readMemory()
+	fusedHWM, _ := readMemory()
 
 	// Prevent DCE
 	if accum == 0.0 {
@@ -112,14 +112,10 @@ func main() {
 	}
 
 	// ---- Report ----
-	fmt.Printf("Pipeline Overhead (%d Float64 elements, %d iters) — Go baseline\n", N, ITER)
-	fmt.Println()
-	fmt.Printf("Test 1: SUM only (zero-alloc, single pass)\n")
-	fmt.Printf("  Handwritten loop:  %d ms\n", sumMs)
-	fmt.Printf("  RSS after:         %d KB\n", sumRSS)
-	fmt.Println()
-	fmt.Printf("Test 2: WHERE + SELECT + SUM (fused loop)\n")
-	fmt.Printf("  Fused loop:        %d ms  RSS %d KB\n", fusedMs, fusedRSS)
-	fmt.Println()
-	fmt.Printf("  Peak RSS (VmHWM):  %d KB\n", fusedHWM)
+	fmt.Printf("Elements: %d\n", N)
+	fmt.Printf("Iterations: %d\n", ITER)
+	fmt.Printf("Handwritten loop: %d ms\n", sumMs)
+	fmt.Printf("Fused loop: %d ms\n", fusedMs)
+	fmt.Printf("RSS after: %d KB\n", sumRSS)
+	fmt.Printf("Peak RSS: %d KB\n", fusedHWM)
 }

@@ -42,9 +42,11 @@ FN main() RETURNS Void ->
 
     ASSERT poolCount == listCount, "both must insert same count";
 
-    print("Pool vs List insert (${n.toString()} entities)");
-    print("  Pool (generational): ${poolMs.toString()} ms  RSS ${poolRssKb.toString()} KB");
-    print("  List (dense array):  ${listMs.toString()} ms  RSS ${listRssKb.toString()} KB");
-    print("  Peak RSS (VmHWM):    ${peakMemoryKb().toString()} KB");
+    print("Entities: ${n.toString()}");
+    print("Pool: ${poolMs.toString()} ms");
+    print("Pool RSS: ${poolRssKb.toString()} KB");
+    print("List: ${listMs.toString()} ms");
+    print("List RSS: ${listRssKb.toString()} KB");
+    print("Peak RSS: ${peakMemoryKb().toString()} KB");
     RETURN;
 END

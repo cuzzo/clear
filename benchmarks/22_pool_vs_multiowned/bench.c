@@ -93,11 +93,12 @@ int main(void) {
     long ptr_hwm, ptr_rss;
     read_memory(&ptr_hwm, &ptr_rss);
 
-    printf("Pool vs Pointer insert (%d entities) — C baseline\n", N);
-    printf("  Pool (contiguous):   %.1f ms  RSS %ld KB\n", pool_ms, pool_rss);
-    printf("  Pointer (scattered): %.1f ms  RSS %ld KB\n", ptr_ms, ptr_rss);
-    printf("  Peak RSS (VmHWM):    %ld KB\n", ptr_hwm);
-    printf("  pool_count=%ld  ptr_count=%ld\n", pool_count, ptr_count);
+    printf("Entities: %d\n", N);
+    printf("Pool: %.1f ms\n", pool_ms);
+    printf("Pool RSS: %ld KB\n", pool_rss);
+    printf("Pointer: %.1f ms\n", ptr_ms);
+    printf("Pointer RSS: %ld KB\n", ptr_rss);
+    printf("Peak RSS: %ld KB\n", ptr_hwm);
 
     return 0;
 }
