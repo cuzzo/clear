@@ -3017,12 +3017,16 @@ private
         }.join
         fmt += escaped.gsub("{", "{{").gsub("}", "}}")
       else
-        # Numeric toString(): emit {d} and pass the raw numeric value.
-        fmt += "{d}"
+        # Numeric toString(): emit {d} for integers, {d:.0} for floats
+        # (truncate to integer, matching CLEAR's toString() semantics).
         obj_type = p.object.type_info
-        val = visit(p.object)
-        # Float64.toString() truncates to integer — match existing behavior.
-        args << (obj_type&.float? ? "@as(i64, @intFromFloat(#{val}))" : val)
+        if obj_type&.float?
+          fmt += "{d:.0}"
+          args << visit(p.object)
+        else
+          fmt += "{d}"
+          args << visit(p.object)
+        end
       end
     end
     [fmt, args]
