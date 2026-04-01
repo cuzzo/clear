@@ -41,7 +41,8 @@ async fn main() {
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
-    println!("Total: {}", total);
-    println!("Workers: {}, Iterations: {}", N_WORKERS, ITERATIONS);
+    println!("Checksum: {}", total % 1_000_000_000);
+    println!("Workers: {}", N_WORKERS);
+    println!("Iterations: {}", ITERATIONS);
     println!("Time: {:.4} s", elapsed);
 }

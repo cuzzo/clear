@@ -54,7 +54,8 @@ func main() {
 	}
 
 	elapsed := time.Since(t0).Seconds()
-	fmt.Printf("Total: %d\n", total)
-	fmt.Printf("Workers: %d, Iterations: %d\n", nWorkers, iterations)
+	fmt.Printf("Checksum: %d\n", total%1_000_000_000)
+	fmt.Printf("Workers: %d\n", nWorkers)
+	fmt.Printf("Iterations: %d\n", iterations)
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }
