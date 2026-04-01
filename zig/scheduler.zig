@@ -258,6 +258,11 @@ pub const Scheduler = struct {
         // distinguish from the eventfd sentinel (0) and task pointers (>4096).
         try sched.poller.register(ring.fd, 1);
 
+        // Initialize the RunQueue buffer to null. The default `= undefined`
+        // leaves 65536 slots as garbage; in ReleaseFast, stealOne() can read
+        // garbage pointers from uninitialized slots, causing use-after-free.
+        for (&sched.ready_queue.buffer) |*slot| slot.* = std.atomic.Value(?*Task).init(null);
+
         return sched;
     }
 
@@ -578,7 +583,9 @@ pub const Scheduler = struct {
 
             // Look for tasks ready to start:
             if (self.ready_queue.len() > 0) {
-                const task = self.ready_queue.pop().?;
+                // pop() can return null if a thief stole the last task between
+                // the len() check and this pop() (TOCTOU race). Not an error.
+                const task = self.ready_queue.pop() orelse continue;
                 self.current_task = task;
 
                 // Set task identity for the control plane.

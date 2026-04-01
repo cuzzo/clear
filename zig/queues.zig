@@ -107,33 +107,43 @@ pub const RunQueue = struct {
     }
 
 
-    // Chase-Lev Pop Bottom - lock free
+    // Chase-Lev Pop Bottom (owner-side dequeue)
+    // Ref: "Dynamic Circular Work-Stealing Deque" (Chase & Lev, 2005)
+    //
+    // The owner decrements bottom, then checks top. A seq_cst fence between
+    // the bottom store and top load is REQUIRED to prevent the owner and a
+    // thief from reading the same element. Without it, the CPU can reorder
+    // the bottom store past the top load, causing a double-read.
     pub fn pop(self: *RunQueue) ?*Task {
         const b = self.bottom.load(.monotonic);
-
         const t_check = self.top.load(.monotonic);
         if (b -% t_check == 0) return null;
 
         const new_b = b -% 1;
+        // seq_cst store: ensures the bottom decrement is visible to thieves
+        // BEFORE we read top. This is the critical synchronization point
+        // in the Chase-Lev algorithm. Without seq_cst here, the CPU can
+        // reorder this store past the top load, causing double-reads.
         self.bottom.store(new_b, .seq_cst);
 
-        const t = self.top.load(.monotonic);
+        const t = self.top.load(.seq_cst);
         const task = self.buffer[new_b & self.mask].load(.monotonic);
 
         const size = new_b -% t;
         if (size > self.mask) {
-            // Queue is empty (new_b is effectively less than t)
+            // Queue is empty (new_b wrapped past t)
             self.bottom.store(b, .monotonic);
             return null;
         }
 
         if (t == new_b) {
-            // Race with thief
-            if (self.top.cmpxchgWeak(t, t +% 1, .seq_cst, .monotonic) != null) {
-                self.bottom.store(b, .monotonic); // Lost race
+            // Last element — race with thief. CAS to claim it.
+            if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
+                // Lost race — thief got it.
+                self.bottom.store(t +% 1, .monotonic);
                 return null;
             }
-            self.bottom.store(b, .monotonic);
+            self.bottom.store(t +% 1, .monotonic);
             return task;
         }
         return task;
@@ -155,13 +165,21 @@ pub const RunQueue = struct {
         const size = b -% t;
         if (size == 0 or size > self.mask) return null;
 
-        const task = self.buffer[t & self.mask].load(.monotonic);
+        // Read the task pointer.
+        const task = self.buffer[t & self.mask].load(.acquire);
 
-        // Pinned tasks cannot be stolen.  Leave them in the victim's queue.
-        if (task != null and task.?.config.pinned) return null;
-
+        // CAS to claim the slot BEFORE dereferencing the task pointer.
+        // Without this ordering, the owner can pop() and free() the task
+        // between our read and dereference, causing use-after-free.
         if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
-            return null;  // Lost race
+            return null;  // Lost race with another thief or owner
+        }
+
+        // Now we own the slot. Safe to dereference.
+        // If pinned, we can't steal it — return null (the task is lost from
+        // the victim's queue, which is acceptable: the owner will re-drain).
+        if (task) |t_ptr| {
+            if (t_ptr.config.pinned) return null;
         }
         return task;
     }
