@@ -71,7 +71,7 @@ pub const CheatLib = struct {
                         std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
                     }
                     try sched.registerFd(fd, task);
-                    task.status = .Blocked;
+                    task.status.store(.Blocked, .release);
                     task.base.yield();
                     continue;
                 }
@@ -1013,7 +1013,7 @@ pub const CheatLib = struct {
                     const sched = fp.active_scheduler;
                     const task = sched.getCurrent();
                     try sched.registerFd(server_fd, task);
-                    task.status = .Blocked;
+                    task.status.store(.Blocked, .release);
                     task.base.yield();
                     continue;
                 }
@@ -1046,7 +1046,7 @@ pub const CheatLib = struct {
                     const sched = fp.active_scheduler;
                     const task = sched.getCurrent();
                     try sched.registerWriteFd(fd, task);
-                    task.status = .Blocked;
+                    task.status.store(.Blocked, .release);
                     task.base.yield();
                     continue;
                 }
@@ -1123,7 +1123,7 @@ pub const CheatLib = struct {
             const sched = fp.active_scheduler;
             const task = sched.getCurrent();
             try sched.registerWriteFd(fd, task);
-            task.status = .Blocked;
+            task.status.store(.Blocked, .release);
             task.base.yield();
             // Check SO_ERROR to distinguish success from async errors (e.g. ECONNREFUSED).
             try std.posix.getsockoptError(fd);
@@ -2091,7 +2091,7 @@ pub const CheatLib = struct {
                         return; // Value was consumed — proceed to next YIELD
                     }
                     const task = inner.sched.getCurrent();
-                    task.status = .Blocked;
+                    task.status.store(.Blocked, .release);
                     inner.producer_task = task;
                     inner.lock.store(0, .release);
                     task.base.yield();
@@ -2125,7 +2125,7 @@ pub const CheatLib = struct {
                         return val;
                     }
                     const task = inner.sched.getCurrent();
-                    task.status = .Blocked;
+                    task.status.store(.Blocked, .release);
                     inner.consumer_task = task;
                     inner.lock.store(0, .release);
                     task.base.yield();
@@ -2715,7 +2715,7 @@ pub const CheatLib = struct {
                 // Cost: ~100ns per yield (register save/restore).
                 while (!done_flag.load(.acquire)) {
                     const task = fp.active_scheduler.getCurrent();
-                    task.status = .Ready;
+                    task.status.store(.Ready, .release);
                     task.base.yield();
                 }
             }

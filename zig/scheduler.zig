@@ -251,12 +251,12 @@ pub const Scheduler = struct {
             .local_arena = std.heap.ArenaAllocator.init(allocator),
         };
 
-        try sched.poller.register(sched.event_fd.fd, 0);
+        try sched.poller.registerPersistent(sched.event_fd.fd, 0);
 
         // Register the io_uring fd with epoll so CQE readiness wakes the
         // scheduler from epoll_wait.  Use a sentinel user_data value (1) to
         // distinguish from the eventfd sentinel (0) and task pointers (>4096).
-        try sched.poller.register(ring.fd, 1);
+        try sched.poller.registerPersistent(ring.fd, 1);
 
         // Initialize the RunQueue buffer to null. The default `= undefined`
         // leaves 65536 slots as garbage; in ReleaseFast, stealOne() can read
@@ -488,14 +488,16 @@ pub const Scheduler = struct {
                                 self.allocator.destroy(fiber_ptr);
                                 continue;
                             };
-                            t.base = fiber_ptr;
+                            // Zero-initialize all fields via aggregate init, then
+                            // set the fiber pointer. This ensures epoll_fd, wake_time,
+                            // inbox_link, etc. are properly initialized — not garbage
+                            // from the allocator.
+                            t.* = Task{ .base = fiber_ptr, .user_fn = msg.user_fn.? };
                             break :blk t;
                         };
-                        task.user_fn = msg.user_fn.?;
                         task.context = msg.args;
-                        task.status = .Ready;
+                        task.status.store(.Ready, .release);
                         task.config = config;
-                        task.in_inbox = std.atomic.Value(bool).init(false);
                         self.ready_queue.push(self.allocator, task) catch {
                             self.freeStack(stack_mem);
                             self.fiber_pool.append(self.allocator, task) catch
@@ -507,7 +509,7 @@ pub const Scheduler = struct {
                     .Resume => {
                         const task: *Task = @ptrCast(@alignCast(msg.task.?));
                         task.in_inbox.store(false, .release);
-                        task.status = .Ready;
+                        task.status.store(.Ready, .release);
                         self.ready_queue.push(self.allocator, task) catch unreachable;
                     },
                     .RemoteCall => {
@@ -575,7 +577,7 @@ pub const Scheduler = struct {
                         const task = self.sleeping_queue.items[i];
                         if (now >= task.wake_time) {
                             _ = self.sleeping_queue.swapRemove(i);
-                            task.status = .Ready;
+                            task.status.store(.Ready, .release);
                             self.ready_queue.push(self.allocator, task) catch unreachable;
                         } else {
                             i += 1;
@@ -604,14 +606,12 @@ pub const Scheduler = struct {
                 }
 
                 // 1. Switch to the Task
-                // The task will resume inside 'entryWrapper' (if new)
-                // or wherever it yielded (if old).
                 task.base.switchTo(&self.main_ctx);
 
                 // Clear pinned allocator — we're back on the scheduler's context.
                 __pinned_local_alloc = null;
 
-                switch (task.status) {
+                switch (task.status.load(.acquire)) {
                     .Finished => {
                         _ = self.active_tasks.fetchSub(1, .monotonic);
                         self.freeStack(task.base.stack.memory);
@@ -698,14 +698,12 @@ pub const Scheduler = struct {
                         self.drainCqes();
                     }
                     else {
-                        // It's a standard IO Task Wakeup.
-                        // Guard: skip if task is already Ready (e.g. from coopYield
-                        // in socketRead). Double-push causes use-after-free when
-                        // the first pop frees the task and the second pop reads
-                        // stale memory.
+                        // IO Task Wakeup: CAS from Blocked → Ready.
+                        // Only the winner pushes to the ready queue.
+                        // This prevents double-push when a stale epoll event
+                        // races with the task being woken by another path.
                         const task = @as(*Task, @ptrFromInt(data_ptr));
-                        if (task.status != .Ready) {
-                            task.status = .Ready;
+                        if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
                             self.ready_queue.push(self.allocator, task) catch unreachable;
                         }
                     }
@@ -737,7 +735,7 @@ pub const Scheduler = struct {
     pub fn coopYield(self: *Scheduler) void {
         if (self.ready_queue.len() > 0) {
             const task = self.getCurrent();
-            task.status = .Ready;
+            task.status.store(.Ready, .release);
             task.base.yield();
             // Resumed here — task.status remains .Ready (scheduler sets nothing on resume)
         }
@@ -746,7 +744,7 @@ pub const Scheduler = struct {
     // Lay this beautiful task to rest until a specific time
     pub fn sleepTask(self: *Scheduler, task: *Task, wake_time: i64) void {
         task.wake_time = wake_time;
-        task.status = .Blocked;
+        task.status.store(.Blocked, .release);
         self.sleeping_queue.append(self.allocator, task) catch unreachable;
     }
 
@@ -795,7 +793,7 @@ pub const Scheduler = struct {
     pub fn submitRead(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
         _ = try self.ring.read(@intFromPtr(waiter), fd, .{ .buffer = buffer }, 0);
         _ = try self.ring.submit();
-        waiter.task.status = .Blocked;
+        waiter.task.status.store(.Blocked, .release);
     }
 
     /// Drain all ready CQEs from the io_uring, writing the result into each
@@ -813,8 +811,7 @@ pub const Scheduler = struct {
                     self.drainCqes();
                 } else {
                     const task: *Task = @ptrFromInt(data_ptr);
-                    if (task.status != .Ready) {
-                        task.status = .Ready;
+                    if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
                         self.ready_queue.push(self.allocator, task) catch unreachable;
                     }
                 }
@@ -827,7 +824,7 @@ pub const Scheduler = struct {
         for (self.uring_cqes[0..n]) |cqe| {
             const waiter: *IoWaiter = @ptrFromInt(cqe.user_data);
             waiter.result = cqe.res;
-            waiter.task.status = .Ready;
+            waiter.task.status.store(.Ready, .release);
             self.ready_queue.push(self.allocator, waiter.task) catch unreachable;
         }
     }
@@ -1045,7 +1042,7 @@ pub const WaitGroup = struct {
 
         // 1. Get current task
         const task = self.sched.getCurrent();
-        task.status = .Blocked;
+        task.status.store(.Blocked, .release);
 
         // 2. Register as waiter (Spinlock protected)
         // CRITICAL: We must check counter *inside* the lock or right before/after
@@ -1057,7 +1054,7 @@ pub const WaitGroup = struct {
         // Double Check inside lock: Did it finish while we were acquiring lock?
         if (self.counter.load(.seq_cst) == 0) {
             self.lock.store(0, .release);
-            task.status = .Ready; // Undo status change
+            task.status.store(.Ready, .release); // Undo status change
             return;
         }
 
@@ -1068,7 +1065,7 @@ pub const WaitGroup = struct {
         task.base.yield();
 
         // 4. Back (Reset status)
-        task.status = .Ready;
+        task.status.store(.Ready, .release);
     }
 };
 
@@ -1103,7 +1100,7 @@ pub const Semaphore = struct {
 
             // Slow path: must block
             const task = self.sched.getCurrent();
-            task.status = .Blocked;
+            task.status.store(.Blocked, .release);
 
             while (self.lock.swap(1, .acquire) == 1) {
                 std.Thread.yield() catch {};
@@ -1112,14 +1109,14 @@ pub const Semaphore = struct {
             const recheck = self.counter.load(.seq_cst);
             if (recheck > 0) {
                 self.lock.store(0, .release);
-                task.status = .Ready;
+                task.status.store(.Ready, .release);
                 continue;
             }
             self.waiting_task = task;
             self.lock.store(0, .release);
 
             task.base.yield();
-            task.status = .Ready;
+            task.status.store(.Ready, .release);
             // Slot was granted by release() directly — return
             return;
         }
@@ -1160,12 +1157,28 @@ pub const Poller = struct {
         std.posix.close(self.epoll_fd);
     }
 
-    // Register a file descriptor (socket) to watch for READ events
-    // user_data: We will store the *Task pointer here so we know who to wake up
-    // Only works on Linux
+    // Register a fd for persistent edge-triggered monitoring (no ONESHOT).
+    // Used ONLY for scheduler-internal fds (eventfd, io_uring ring fd) that
+    // must fire on every edge without re-arming.
+    pub fn registerPersistent(self: *Poller, fd: i32, user_data: usize) !void {
+        var event = std.os.linux.epoll_event{
+            .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET,
+            .data = .{ .ptr = user_data },
+        };
+        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event) catch |err| {
+            if (err == error.FileDescriptorAlreadyPresentInSet) {
+                try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, fd, &event);
+            } else return err;
+        };
+    }
+
+    // Register a file descriptor (socket) to watch for READ events.
+    // user_data: We will store the *Task pointer here so we know who to wake up.
+    // ONESHOT: the fd is disabled after each event, preventing stale events
+    // when a fiber is stolen to another scheduler. Re-armed on next WouldBlock.
     pub fn register(self: *Poller, fd: i32, user_data: usize) !void {
         var event = std.os.linux.epoll_event{
-            .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET, // Read + Edge Triggered
+            .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET | std.os.linux.EPOLL.ONESHOT,
             .data = .{ .ptr = user_data },
         };
         // Try CTL_ADD first; if the fd is already registered (e.g. after a prior
@@ -1178,9 +1191,10 @@ pub const Poller = struct {
     }
 
     // Register a file descriptor to watch for WRITE readiness (non-blocking sends).
+    // ONESHOT: disabled after each event to prevent stale cross-scheduler wakes.
     pub fn registerWrite(self: *Poller, fd: i32, user_data: usize) !void {
         var event = std.os.linux.epoll_event{
-            .events = std.os.linux.EPOLL.OUT | std.os.linux.EPOLL.ET,
+            .events = std.os.linux.EPOLL.OUT | std.os.linux.EPOLL.ET | std.os.linux.EPOLL.ONESHOT,
             .data = .{ .ptr = user_data },
         };
         // Use MOD if already registered for reads, ADD if new.

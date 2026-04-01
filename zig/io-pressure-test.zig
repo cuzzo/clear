@@ -115,7 +115,7 @@ fn cheatMain(rt: *Runtime) !void {
     // (yield a few times so the scheduler runs them)
     for (0..100) |_| {
         const task = fp.active_scheduler.getCurrent();
-        task.status = .Ready;
+        task.status.store(.Ready, .release);
         task.base.yield();
     }
 
@@ -129,7 +129,7 @@ fn cheatMain(rt: *Runtime) !void {
         // Yield to let readers process
         for (0..200) |_| {
             const task = fp.active_scheduler.getCurrent();
-            task.status = .Ready;
+            task.status.store(.Ready, .release);
             task.base.yield();
         }
     }

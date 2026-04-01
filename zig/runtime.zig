@@ -341,7 +341,7 @@ pub const Runtime = struct {
         // 5. Cleanup & Yield
         // When we yield here, we go back to Scheduler.run loop.
         rt.deinit();  // must manually de-init
-        task.status = .Finished;
+        task.status.store(.Finished, .release);
         task.base.yield();
     }
 

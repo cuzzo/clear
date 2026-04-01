@@ -208,10 +208,10 @@ pub const RunQueue = struct {
 
 pub const TaskFn = *const fn (rt: *anyopaque, ctx: ?*anyopaque) anyerror!void;
 
-pub const TaskStatus = enum {
-    Ready,    // Run me again
-    Finished, // Recycle me
-    Blocked,  // Don't run me, I'm waiting on something
+pub const TaskStatus = enum(u8) {
+    Ready = 0,    // Run me again
+    Finished = 1, // Recycle me
+    Blocked = 2,  // Don't run me, I'm waiting on something
 };
 
 pub const TaskConfig = struct {
@@ -226,7 +226,7 @@ pub const Task = struct {
     inbox_link: InboxNode = .{ .type = .Resume },
     runtime_ptr: ?*anyopaque = null,
     context: ?*anyopaque = null,
-    status: TaskStatus = .Ready,
+    status: std.atomic.Value(TaskStatus) = std.atomic.Value(TaskStatus).init(.Ready),
     config: TaskConfig = .{},
     is_on_root_stack: bool = false,
     /// Debug guard: set to true when inbox_link is pushed to an inbox,

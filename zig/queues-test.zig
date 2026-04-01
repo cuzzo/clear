@@ -127,7 +127,7 @@ fn createTask(id: usize) *Task {
     // but we can store ID in the context or similar if Task structure allows.
     // Assuming Task has a `context` field we can abuse for ID verification:
     t.context = @ptrFromInt(id);
-    t.status = .Ready;
+    t.status.store(.Ready, .release);
     return t;
 }
 
