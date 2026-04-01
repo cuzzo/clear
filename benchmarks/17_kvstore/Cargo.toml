@@ -7,8 +7,13 @@ edition = "2021"
 name = "bench_rust"
 path = "bench.rs"
 
+[[bin]]
+name = "bench_compare_rs"
+path = "bench_compare.rs"
+
 [dependencies]
 dashmap = "6"
+num_cpus = "1"
 
 [profile.release]
 opt-level = 3

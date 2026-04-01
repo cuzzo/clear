@@ -311,6 +311,14 @@ STD_LIB = {
     zig: "CheatLib.timestampMs()"
   },
 
+  # Number of scheduler threads (main + workers). Matches CLEAR_THREADS env var.
+  # Usage: workers = threadCount();
+  "threadCount" => {
+    args: [],
+    return: :Int64,
+    zig: "CheatLib.threadCount()"
+  },
+
   # Peak resident set size (VmHWM) in KB — high-water mark of physical memory.
   # Cross-language comparable (reads /proc/self/status).
   "peakMemoryKb" => {

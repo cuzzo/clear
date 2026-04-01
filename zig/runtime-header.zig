@@ -700,6 +700,12 @@ pub const CheatLib = struct {
         return std.time.milliTimestamp();
     }
 
+    /// Returns the total number of scheduler threads.
+    /// Matches the CLEAR_THREADS environment variable.
+    pub fn threadCount() i64 {
+        return @as(i64, @intCast(fp.global_registry.count()));
+    }
+
     // sleep is called directly on rt: rt.sleep(ms) — see Runtime.sleep in runtime.zig
 
     /// Peak resident set size (VmHWM) in KB, from /proc/self/status.
