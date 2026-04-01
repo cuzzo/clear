@@ -2177,12 +2177,32 @@ private
 
       if (node.op == :ADD || node.op == "+") &&
          (node.left.type_info&.string? || node.right.type_info&.string?)
-        # Flatten chained string + into a single std.mem.concat call.
-        # "a" + "b" + "c" → std.mem.concat(alloc, u8, &.{ "a", "b", "c" })
-        # instead of concat(concat("a", "b"), "c") which wastes intermediate buffers.
+        # Flatten chained string + into a single allocation.
         rt_ref = @do_rt_name || "rt"
         alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
         parts = collect_string_concat_parts(node)
+
+        # Optimization: when all parts are string literals or numeric toString(),
+        # use count+alloc+bufPrint (1 alloc, no intermediates) instead of
+        # intToString+concat (2 allocs + intermediate copies).
+        # allocPrint is NOT used because CLEAR's frame allocator can't resize
+        # in-place (smartResize returns false), causing wasteful reallocation.
+        if parts.all? { |p| interp_string_literal?(p) || interp_numeric_to_string?(p) }
+          @interp_counter ||= 0
+          id = @interp_counter
+          @interp_counter += 1
+          fmt_str, fmt_args = build_alloc_print_args(parts)
+          args_tuple = fmt_args.empty? ? ".{}" : ".{ #{fmt_args.join(', ')} }"
+          label = "__interp#{id}"
+          return "#{label}: {\n" \
+                 "    const __n = std.fmt.count(\"#{fmt_str}\", #{args_tuple});\n" \
+                 "    const __buf = try #{alloc}.alloc(u8, __n);\n" \
+                 "    _ = std.fmt.bufPrint(__buf, \"#{fmt_str}\", #{args_tuple}) catch unreachable;\n" \
+                 "    break :#{label} __buf;\n" \
+                 "}"
+        end
+
+        # Fallback: general concat path for mixed string expressions.
         parts_zig = parts.map { |p| visit(p) }
         return "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
       end
@@ -2932,6 +2952,50 @@ private
       parts << node
     end
     parts
+  end
+
+  # allocPrint optimization helpers: detect when string interpolation can use
+  # std.fmt.allocPrint (1 alloc) instead of intToString+concat (2 allocs).
+
+  def interp_string_literal?(node)
+    node.is_a?(AST::Literal) && node.type == :STRING
+  end
+
+  def interp_numeric_to_string?(node)
+    node.is_a?(AST::MethodCall) &&
+      node.name == "toString" &&
+      node.object.type_info&.numeric?
+  end
+
+  def build_alloc_print_args(parts)
+    fmt = ""
+    args = []
+    parts.each do |p|
+      if interp_string_literal?(p)
+        # Zig-escape the literal bytes, then escape { } for std.fmt.
+        escaped = p.value.bytes.map { |b|
+          case b
+          when 0x5C then '\\\\'
+          when 0x22 then '\\"'
+          when 0x0A then '\\n'
+          when 0x0D then '\\r'
+          when 0x09 then '\\t'
+          when 0x00 then '\\x00'
+          when 0x80..0xFF then "\\x#{'%02x' % b}"
+          else b.chr
+          end
+        }.join
+        fmt += escaped.gsub("{", "{{").gsub("}", "}}")
+      else
+        # Numeric toString(): emit {d} and pass the raw numeric value.
+        fmt += "{d}"
+        obj_type = p.object.type_info
+        val = visit(p.object)
+        # Float64.toString() truncates to integer — match existing behavior.
+        args << (obj_type&.float? ? "@as(i64, @intFromFloat(#{val}))" : val)
+      end
+    end
+    [fmt, args]
   end
 
   # these are naming conventions not valid in Zig identifiers.
