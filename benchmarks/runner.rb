@@ -467,6 +467,16 @@ def run_server_bench(dir, mode_cfg, cores)
   servers = []
   servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: { "TOKIO_WORKER_THREADS" => cores } } if has_rust && File.exist?("#{dir}/bench_rust")
   servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: { "GOMAXPROCS" => cores } } if has_go && File.exist?("#{dir}/server_go")
+
+  # Dragonfly: external RESP-compatible server (DragonflyDB model comparison)
+  has_dragonfly = !clear_only && system("command -v dragonfly > /dev/null 2>&1")
+  if has_dragonfly
+    servers << { key: :dragonfly, label: "DragonflyDB",
+                 bin: "dragonfly", absolute: true,
+                 args: ["--port", PORT.to_s, "--dbfilename", "", "--dir", "/tmp", "--proactor_threads", cores],
+                 env: {} }
+  end
+
   clear_env = { "CLEAR_THREADS" => threads }
   clear_env["LD_PRELOAD"] = jemalloc_lib if jemalloc_lib
   servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: clear_env } if has_clear
@@ -478,7 +488,13 @@ def run_server_bench(dir, mode_cfg, cores)
 
     # Start server
     puts "\nRunning #{srv[:label]}..."
-    pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
+    if srv[:args]
+      pid = spawn(srv[:env], srv[:bin], *srv[:args], [:out, :err] => "/dev/null")
+    elsif srv[:absolute]
+      pid = spawn(srv[:env], srv[:bin], [:out, :err] => "/dev/null")
+    else
+      pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
+    end
     sleep 1
 
     # Run client
@@ -526,13 +542,13 @@ def run_server_bench(dir, mode_cfg, cores)
   end
 
   # Memory comparison
-  if results[:clear] && results[:go] && results[:clear][:peak_rss_kb]&.positive? && results[:go][:peak_rss_kb]&.positive?
-    ratio = ((results[:clear][:peak_rss_kb].to_f / results[:go][:peak_rss_kb]) * 100).round(1)
-    puts "\nCLEAR peak RSS: #{ratio}% of Go"
-  end
-  if results[:clear] && results[:rust] && results[:clear][:peak_rss_kb]&.positive? && results[:rust][:peak_rss_kb]&.positive?
-    ratio = ((results[:clear][:peak_rss_kb].to_f / results[:rust][:peak_rss_kb]) * 100).round(1)
-    puts "CLEAR peak RSS: #{ratio}% of Rust"
+  first_ratio = true
+  (results.keys - [:clear]).each do |other|
+    next unless results[:clear]&.dig(:peak_rss_kb)&.positive? && results[other]&.dig(:peak_rss_kb)&.positive?
+    label = servers.find { |s| s[:key] == other }&.dig(:label) || other.to_s
+    ratio = ((results[:clear][:peak_rss_kb].to_f / results[other][:peak_rss_kb]) * 100).round(1)
+    puts(first_ratio ? "\nCLEAR peak RSS: #{ratio}% of #{label}" : "CLEAR peak RSS: #{ratio}% of #{label}")
+    first_ratio = false
   end
 end
 
