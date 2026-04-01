@@ -2990,25 +2990,26 @@ private
   # EXTERN FFI trampoline: only use onRootStack for functions that need deep
   # stacks (filesystem I/O, std.json). Pure compute functions (SHA256, math)
   # run directly on the fiber stack for zero overhead.
-  NEEDS_ROOT_STACK_MODULES = %w[std.fs].freeze
-
+  # EXTERN FFI trampoline dispatch. Functions marked :safe run directly on the
+  # fiber stack (zero overhead). All others go through onRootStack (safe for
+  # deep stacks / filesystem I/O but adds ~1us per call).
   def trampoline_call(tid, rt_name, node)
-    mod = node.respond_to?(:module_alias) ? node.module_alias : nil
-    needs_root = mod && NEEDS_ROOT_STACK_MODULES.any? { |m| mod.start_with?(m) }
-    if needs_root
-      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame))"
-    else
+    effects = node.respond_to?(:extern_effects) ? (node.extern_effects || {}) : {}
+    is_safe = effects.is_a?(Hash) ? effects[:safe] : false
+    if is_safe
       "__Ext#{tid}.run(@ptrCast(&__ext#{tid}_frame))"
+    else
+      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame))"
     end
   end
 
   def trampoline_call_method(tid, rt_name, node)
-    mod = node.respond_to?(:extern_module) ? node.extern_module : nil
-    needs_root = mod && NEEDS_ROOT_STACK_MODULES.any? { |m| mod.start_with?(m) }
-    if needs_root
-      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__ExtM#{tid}.run), @ptrCast(&__extm#{tid}_frame))"
-    else
+    effects = node.respond_to?(:extern_effects) ? (node.extern_effects || {}) : {}
+    is_safe = effects.is_a?(Hash) ? effects[:safe] : false
+    if is_safe
       "__ExtM#{tid}.run(@ptrCast(&__extm#{tid}_frame))"
+    else
+      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__ExtM#{tid}.run), @ptrCast(&__extm#{tid}_frame))"
     end
   end
 

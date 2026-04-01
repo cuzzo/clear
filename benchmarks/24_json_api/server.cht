@@ -12,7 +12,7 @@
 -- Direct FFI -- no shim .zig files needed.
 EXTERN STRUCT ParseOptions {};
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
-EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions) RETURNS !T EFFECTS :alloc:heap FROM "std.json";
+EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions) RETURNS !T EFFECTS :safe, :alloc:heap FROM "std.json";
 
 EXTERN STRUCT Dir {} FROM "std.fs";
 EXTERN FN cwd() RETURNS Dir FROM "std.fs";

@@ -2459,7 +2459,7 @@ RSpec.describe SemanticAnnotator do
         expect(imports.length).to eq(1)
       end
 
-      it "emits the native call directly for non-std.fs modules (no rt, no try, no onRootStack)" do
+      it "emits onRootStack by default for EXTERN FN (no :safe effect)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           FN main() RETURNS Void ->
@@ -2468,9 +2468,20 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
         expect(output).to include("native_math.native_add(")
+        expect(output).to include("onRootStack")
+      end
+
+      it "skips onRootStack for EXTERN FN with :safe effect" do
+        code = <<~CLEAR
+          EXTERN FN fast_add(a: Number, b: Number) RETURNS Number EFFECTS :safe FROM "native_math";
+          FN main() RETURNS Void ->
+            x = fast_add(3.0, 4.0);
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("native_math.fast_add(")
         expect(output).not_to include("onRootStack")
-        expect(output).not_to match(/try native_math\.native_add/)
-        expect(output).not_to match(/native_math\.native_add\(rt,/)
+        expect(output).to match(/__Ext\d+\.run/)
       end
 
       it "emits a type alias for EXTERN STRUCT" do
@@ -2483,7 +2494,7 @@ RSpec.describe SemanticAnnotator do
         expect(output).to include("const Vec2 = native_math.Vec2;")
       end
 
-      it "calls non-std.fs EXTERN FN directly (no onRootStack)" do
+      it "uses onRootStack for EXTERN FN without :safe (default)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
           FN main() RETURNS Void ->
@@ -2491,21 +2502,19 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).not_to include("onRootStack")
-        expect(output).to match(/blk_ext\d+/)
-        expect(output).to match(/__Ext\d+\.run/)
+        expect(output).to include("onRootStack")
       end
 
-      it "uses onRootStack for std.fs EXTERN FN calls" do
+      it "skips onRootStack for :safe EXTERN FN (void return)" do
         code = <<~CLEAR
-          EXTERN STRUCT Dir {} FROM "std.fs";
-          EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+          EXTERN FN fast_log(val: Number) RETURNS Void EFFECTS :safe FROM "native_io";
           FN main() RETURNS Void ->
-            d = cwd();
+            fast_log(42.0);
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).to include("onRootStack")
+        expect(output).not_to include("onRootStack")
+        expect(output).to match(/__Ext\d+\.run/)
       end
 
       it "passes arguments through the trampoline struct" do

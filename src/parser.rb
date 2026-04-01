@@ -684,20 +684,24 @@ class Parser
     params = parse_argument_list
     return_type = match!(:KEYWORD, 'RETURNS') ? parse_type_annotation : nil
 
-    # Optional: EFFECTS :alloc:frame, :alloc:heap — declare side effects.
+    # Optional: EFFECTS :alloc:frame, :alloc:heap, :safe — declare side effects.
     # :alloc:frame → inject rt.frameAlloc() for Alloc-typed parameters
     # :alloc:heap  → inject rt.heapAlloc() for Alloc-typed parameters
     # :alloc       → shorthand for :alloc:frame
+    # :safe        → run directly on fiber stack (skip onRootStack trampoline).
+    #                Use for pure compute FFI (SHA256, math, JSON parsing).
+    #                Do NOT use for filesystem I/O or deep-stack functions.
     effects = {}
     if match!(:KEYWORD, 'EFFECTS')
       loop do
         consume(:CHAR, ':')
         eff_name = consume(:VAR_ID).value.to_sym
-        unless [:alloc].include?(eff_name)
-          error!(current, "Unknown effect ':#{eff_name}'. Valid effects: :alloc")
+        unless [:alloc, :safe].include?(eff_name)
+          error!(current, "Unknown effect ':#{eff_name}'. Valid effects: :alloc, :safe")
         end
-        # Check for :alloc:frame or :alloc:heap sub-qualifier
-        if eff_name == :alloc && match?(:CHAR, ':')
+        if eff_name == :safe
+          effects[:safe] = true
+        elsif eff_name == :alloc && match?(:CHAR, ':')
           consume(:CHAR, ':')
           qualifier = consume(:VAR_ID).value.to_sym
           unless [:frame, :heap].include?(qualifier)
@@ -705,7 +709,7 @@ class Parser
           end
           effects[:alloc] = qualifier
         else
-          effects[:alloc] = :frame  # default: frame allocator
+          effects[:alloc] = :frame
         end
         break unless match!(:CHAR, ',')
       end
