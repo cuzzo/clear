@@ -105,6 +105,8 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                     END
                     IF cmd == "PING" || cmd == "ping" THEN
                         resp = resp + "+PONG\r\n";
+                    ELSE_IF cmd == "READY?" THEN
+                        resp = resp + "+READY\r\n";
                     ELSE_IF cmd == "QUIT" || cmd == "quit" THEN
                         resp = resp + "+OK\r\n";
                         running = FALSE;
@@ -122,11 +124,11 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
 END
 
 FN main() RETURNS Void ->
-    MUTABLE store: HashMap<String>@sharded(8):locked = {};
-    MUTABLE counters: HashMap<Int64>@sharded(8):locked = {};
+    MUTABLE store: HashMap<String>@sharded(32):locked = {};
+    MUTABLE counters: HashMap<Int64>@sharded(32):locked = {};
 
-    server = TCPServer::listen(6380);
-    print("CLEAR kvstore listening on port 6380");
+    server = TCPServer::listen(6390);
+    print("CLEAR kvstore listening on port 6390");
 
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
