@@ -47,7 +47,10 @@ FN main() RETURNS Void ->
     END
     elapsed = timestampMs() - t0;
 
-    print("Messages: 100000, Subscribers: 64, Work/msg: 200");
+    checksum = total MOD 1000000000;
+    print("Checksum: ${checksum.toString()}");
+    print("Messages: 100000");
+    print("Subscribers: 64");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

@@ -68,10 +68,8 @@ async fn main() {
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
-    println!("Total: {}", total.load(Ordering::Relaxed));
-    println!(
-        "Messages: {}, Subscribers: {}, Work/msg: {}",
-        N_MESSAGES, N_SUBSCRIBERS, WORK_PER_MSG
-    );
+    println!("Checksum: {}", total.load(Ordering::Relaxed) % 1_000_000_000);
+    println!("Messages: {}", N_MESSAGES);
+    println!("Subscribers: {}", N_SUBSCRIBERS);
     println!("Time: {:.4} s", elapsed);
 }

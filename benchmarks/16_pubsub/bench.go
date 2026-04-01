@@ -78,7 +78,8 @@ func main() {
 	wg.Wait()
 
 	elapsed := time.Since(t0).Seconds()
-	fmt.Printf("Total: %d\n", total.Load())
-	fmt.Printf("Messages: %d, Subscribers: %d, Work/msg: %d\n", nMessages, nSubscribers, workPerMsg)
+	fmt.Printf("Checksum: %d\n", total.Load()%1_000_000_000)
+	fmt.Printf("Messages: %d\n", nMessages)
+	fmt.Printf("Subscribers: %d\n", nSubscribers)
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }
