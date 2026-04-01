@@ -161,7 +161,7 @@ const LoomHarness = struct {
         self.stub_tasks[idx] = Task{
             .base = &self.stub_fibers[idx],
             .user_fn = @ptrCast(&dummyFn),
-            .status = .Ready,
+            .status = std.atomic.Value(qs.TaskStatus).init(.Ready),
             .config = .{ .pinned = pinned },
         };
         return &self.stub_tasks[idx];
@@ -608,7 +608,7 @@ test "loom: queue wraparound" {
         stub_tasks[i] = Task{
             .base = &stub_fibers[i],
             .user_fn = @ptrCast(&LoomHarness.dummyFn),
-            .status = .Ready,
+            .status = std.atomic.Value(qs.TaskStatus).init(.Ready),
             .config = .{},
         };
         // Push wraps around u32 max

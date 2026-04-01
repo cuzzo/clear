@@ -98,7 +98,7 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             // Block on I/O — first time
             const fd = state.allocFd(task, sim.owner_sched);
             sim.io_fd = fd;
-            task.status = .Blocked;
+            task.status.store(.Blocked, .release);
             task.epoll_fd = @intCast(sim.owner_sched); // Simulated epoll identity
             task.epoll_io_fd = fd;
             state.blocked_tasks.put(state.allocator, task, fd) catch unreachable;
@@ -108,7 +108,7 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             sim.will_do_io = false; // Don't block again
         } else {
             // Task finished
-            task.status = .Finished;
+            task.status.store(.Finished, .release);
             sched.active_tasks -|= 1;
             state.total_finished += 1;
             state.task_registry.put(state.allocator, task, .Finished) catch unreachable;
@@ -116,7 +116,7 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
         }
     } else {
         // Yield — push back to ready queue
-        task.status = .Ready;
+        task.status.store(.Ready, .release);
         sched.ready_queue.push(state.allocator, task) catch unreachable;
         state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
     }
@@ -161,7 +161,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
                 const task = entry.value_ptr.*;
 
                 // Bug 4 fix: skip if already Ready (the double-push guard)
-                if (task.status != .Ready) {
+                if (task.status.load(.acquire) != .Ready) {
                     to_wake.append(state.allocator, task) catch unreachable;
                 }
 
@@ -173,7 +173,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
 
     // Wake the tasks
     for (to_wake.items) |task| {
-        task.status = .Ready;
+        task.status.store(.Ready, .release);
         sched.ready_queue.push(state.allocator, task) catch unreachable;
         state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
         _ = state.blocked_tasks.remove(task);
@@ -209,7 +209,7 @@ fn executeWakeSleepers(state: *VoprState, sched: *SimScheduler) void {
         const task = sched.sleeping_queue.items[i];
         if (state.sim_time_ms >= task.wake_time) {
             _ = sched.sleeping_queue.swapRemove(i);
-            task.status = .Ready;
+            task.status.store(.Ready, .release);
             sched.ready_queue.push(state.allocator, task) catch unreachable;
             state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
         } else {
@@ -225,12 +225,12 @@ fn executeInjectFault(state: *VoprState, sched_idx: usize) void {
     switch (fault) {
         .EpollDoubleFire => {
             // Bug 4: try to push a task that's already Ready in the queue.
-            // The production code guards with `if (task.status != .Ready)`.
+            // The production code guards with `if (task.status.load(.acquire) != .Ready)`.
             // We simulate what happens if epoll fires for an already-ready task.
             var fd_iter = sched.epoll_fds.iterator();
             while (fd_iter.next()) |entry| {
                 const task = entry.value_ptr.*;
-                if (task.status == .Ready) {
+                if (task.status.load(.acquire) == .Ready) {
                     // In buggy code, this would double-push.
                     // The fix skips the push.  We don't push here either —
                     // the invariant checker verifies no duplicates exist.
