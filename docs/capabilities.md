@@ -73,7 +73,7 @@ CLEAR has three orthogonal capability dimensions. They can be combined in any or
 
 ```clear
 -- ILLUSTRATIVE
-config = AppConfig{ port: 8080 } @shared:locked;     -- Arc<Mutex<T>>
+config = AppConfig{ port: 8080 } @shared:locked;      -- Arc<Mutex<T>>
 node   = TreeNode{ left: NIL }   @multiowned;         -- Rc<T>
 cache  = LargeStruct{ data: [] } @local:indirect;     -- *T (both intents expressed)
 counter = Counter{ value: 0 }    @local;              -- *T (zero-cost sharing)
@@ -169,43 +169,56 @@ Stable heap address needed (graphs)?
 └── @indirect (combinable with any of the above)
 ```
 
-## Why Capabilities Can't "Leak" Through Structs
+## Internal vs. External Capabilities
 
-A natural concern: what if a `@local` struct contains a field that points to `@shared` data? Could capturing the `@local` outer struct in a `@parallel` block silently expose the inner `@shared` pointer to cross-scheduler access?
+In CLEAR, capabilities can be applied in two places: at the Binding Level (variable declaration) and at the Struct Level (field definition). This allows you to define the "architectural physics" of a data structure once, rather than repeating it at every call site.
 
-**This can't happen.** Capabilities exist on *bindings*, not on *struct field definitions*. Struct fields are always plain Types:
+### 1. Struct-Level (Architectural Strategy)
+When a capability is part of a STRUCT definition, it defines the inherent memory and concurrency strategy for that data type. This is ideal for recursive structures like Graphs or Trees where a node must be reference-counted to exist.
 
-```clear
+```ruby clear
 STRUCT Node {
-    value: Int64,
-    left: Node,          -- plain Type, no capability
-    right: Node,         -- plain Type, no capability
+    id: Int64,
+    parent: ?Node@link,        -- Weak reference (WeakRc/WeakArc)
+    left: ?Node@multiowned,    -- Strong reference (Rc)
+    right: ?Node@multiowned
 }
 ```
 
-You cannot write:
+* Reasoning: You define the "source of truth" for the data's architecture. If a Node must be shared, you bake that into the definition so the compiler can enforce it everywhere.
 
-```clear
-STRUCT Node {
-    value: Int64,
-    left: Node @shared,      -- NOT valid CLEAR syntax
-    cache: Counter @local,   -- NOT valid CLEAR syntax
-}
+### 2. Binding-Level (Access Strategy)
+When a capability is applied to a variable, it defines how the current fiber interacts with that instance.
+
+```
+-- A "plain" struct wrapped in a Mutex at the point of use
+MUTABLE settings = AppSettings{...} @shared:locked;
 ```
 
-Capabilities are applied at the **declaration site**, when a value is bound to a variable:
+### The "Unwrapping" Hierarchy
 
-```clear
--- ILLUSTRATIVE
-root = Node{ value: 1, left: NIL, right: NIL } @local;
+CLEAR maintains "Zero Blast Radius" refactoring by automatically unwrapping internal capabilities when a field is accessed or passed to a function.
+
+ * Field Access: When you call myWrapper.inner, the compiler automatically handles the Rc dereference or Arc load.
+ * Function Calls: Functions still take Types, not Capabilities.
+
+```ruby clear illustrative
+FN process(n: Node) -> ...
+
+-- Works regardless of whether 'inner' is @multiowned, @shared, or affine.
+w = Wrapper{ inner: Node{...} @multiowned };
+process(w.inner);
 ```
 
-This means a struct's field types are always capability-free. When the compiler checks whether a BG block captures `@local` or `@shared` state, it only needs to check the **top-level binding** — there's no capability nesting to recurse into.
+### Risks and Technical Implications
 
-The separation is enforced at two levels:
+While field-level capabilities are more expressive, they introduce specific rchitectural risks that the developer (and compiler) must manage:
 
-1. **Parser**: The type annotation grammar (`field: Type`) does not accept capability suffixes on struct field definitions. `STRUCT Foo { x: Counter @locked }` is a parse error.
-
-2. **Functions**: Functions take plain Types (`FN process(c: Counter)`), not capabilities. A function can't receive or return a capability-wrapped value — it always works with the unwrapped inner type.
-
-This is a deliberate design constraint. Capabilities describe how a *binding* is accessed, not what a *type* contains. The cost and safety of a capability is always visible at the single line where the binding is declared — never hidden inside a type definition.
+ * Recursive Poisoning: If a STRUCT contains even one non-thread-safe field (like @multiowned or @local), the entire struct is considered "poisoned."
+    * It cannot be captured in a @parallel block or moved across schedulers, even
+    * if the top-level binding looks "plain."
+        * Compiler Requirement: The annotator must recursively audit all struct fields during fiber capture analysis.
+ * Hidden "Move" Costs: Moving a "plain-looking" struct by value may no longer be a zero-cost operation.
+    * If the struct contains reference-counted fields, a move (or a COPY) will trigger internal retain/release logic (via CheatLib.releaseFields).
+ * Refactoring Friction: While internal capabilities centralize logic, they "color" the struct.
+    * Changing a field from @multiowned to @shared is a one-line change in the STRUCT, but it may cause compile errors in remote parts of the app that were capturing that struct in @parallel blocks (which were valid for @shared but invalid for @multiowned).
