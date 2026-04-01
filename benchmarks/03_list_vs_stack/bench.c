@@ -1,21 +1,17 @@
 /*
- * List vs. Stack Benchmark — C Baseline (Perfect)
+ * List vs. Stack Benchmark — C Baseline (Heap Array)
  *
- * WHY C IS FAST:
- *   C can declare a fixed-size array on the OS stack: double arr[N].
- *   The OS stack is pre-committed memory — filling and summing it is a
- *   tight load/store loop with no allocator involvement whatsoever.
+ * Allocates a heap array each outer iteration via malloc, fills it,
+ * sums it, and frees it. Apples-to-apples comparison with Rust
+ * (Vec::with_capacity) and CLEAR (Float64[1000]@list).
  *
- *   1000 outer iterations × 1000 element fills + sums:
- *     - 0 malloc/free calls
- *     - 0 allocator function calls
- *     - 0 error-union checks
- *     - Stack reclamation is free at each inner-loop scope exit
- *
- * Expected: 1M fills + 1M reads in ~1–2ms.
+ * 1000 outer iterations × 1000 element fills + sums:
+ *   - 1 malloc + 1 free per outer iteration
+ *   - 0 reallocs (pre-allocated to exact size)
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <assert.h>
 #include <time.h>
@@ -28,12 +24,13 @@ int main(void) {
 
     double total = 0.0;
     for (int64_t outer = 0; outer < N; outer++) {
-        double arr[N];
+        double *arr = (double *)malloc(N * sizeof(double));
         for (int64_t i = 0; i < N; i++) arr[i] = (double)i;
 
         double s = 0.0;
         for (int64_t i = 0; i < N; i++) s += arr[i];
         total += s;
+        free(arr);
     }
 
     assert(total > 0.0);

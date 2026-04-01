@@ -1,33 +1,12 @@
--- List vs. Stack Benchmark
+-- Heap Array Benchmark
 --
--- BEFORE (heapAlloc era):  ~52× slower than C
--- AFTER  (frameAlloc + per-loop marks): matches C wall-clock time
+-- All three languages allocate a 1000-element array per outer iteration,
+-- fill it, sum it, and discard it. 1000 outer iterations.
 --
--- WHAT CHANGED:
---
---   Step 1 — @list switched from rt.heapAlloc() to rt.frameAlloc().
---   The frame arena (CheatArena) grows dynamically via heap-backed pages
---   (4KB → 16KB → 64KB → 256KB) so it never OOMs.  append now uses a
---   bump allocator with no GPA lock and no bookkeeping overhead.
---   Result: ~52× → ~5× overhead (GPA lock eliminated).
---
---   Step 2 — Per-iteration arena rewind for loop-local lists.
---   The compiler detects that vals is declared inside the outer loop body
---   and wraps each iteration with saveLoopMark/restoreLoopMark.  The
---   stranded realloc buffers (from ArrayListUnmanaged's geometric growth)
---   are reclaimed at each iteration end rather than accumulating to ~16MB.
---   Arena usage stays O(1) across iterations.
---   Result: ~5× → matches C.
---
--- REMAINING GAP vs C (minor):
---   - `try` error-union check on every append (vs no check in C)
---   - ArrayListUnmanaged copies on capacity doubling (vs C's fixed array)
---   C uses a fixed-size stack array (zero realloc); CLEAR uses a growable
---   list that pays for realloc copies.  The allocation cost is now gone.
---
--- C:     stack array double arr[1000] — 0 allocations, 0 error checks.
--- Rust:  Vec::with_capacity(1000) — 1 alloc per outer, 0 reallocs, no try.
--- CLEAR: frame arena + per-loop rewind — 0 GPA calls in the hot path.
+-- C:     malloc(N * sizeof(double)) + free per iteration.
+-- Rust:  Vec::with_capacity(1000) — 1 heap alloc per iteration.
+-- CLEAR: Float64[1000]@list — pre-allocated frame arena list, rewound
+--        each iteration via saveLoopMark/restoreLoopMark.
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
