@@ -453,15 +453,23 @@ def run_server_bench(dir, mode_cfg, cores)
     FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
   end
 
-  threads = ENV['CLEAR_THREADS'] || "1"
+  threads = cores
+  threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
 
   # 2. Run each server with the shared client
   results = {}
 
+  # Use jemalloc for CLEAR server if available.
+  jemalloc_lib = Dir.glob("/lib/x86_64-linux-gnu/libjemalloc.so*").first ||
+                 Dir.glob("/usr/lib/libjemalloc.so*").first ||
+                 Dir.glob("/usr/local/lib/libjemalloc.so*").first
+
   servers = []
   servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: { "TOKIO_WORKER_THREADS" => cores } } if has_rust && File.exist?("#{dir}/bench_rust")
   servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: { "GOMAXPROCS" => cores } } if has_go && File.exist?("#{dir}/server_go")
-  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: { "CLEAR_THREADS" => threads } } if has_clear
+  clear_env = { "CLEAR_THREADS" => threads }
+  clear_env["LD_PRELOAD"] = jemalloc_lib if jemalloc_lib
+  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: clear_env } if has_clear
 
   servers.each do |srv|
     # Clean data directory
