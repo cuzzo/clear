@@ -137,9 +137,8 @@ FFI modules (`.zig` files referenced via `EXTERN ... FROM`) are auto-detected an
 bundle exec rspec
 
 # Transpile integration tests - two ways:
-./clear test transpile-tests/58_bg.cht           # One at a time (129 tests)
-ruby transpile-tests/gen.rb && \
-  cd zig && zig test all-tests.zig -lc switch.S onRoot.S  # All at once (130 tests, faster)
+./clear test transpile-tests/                    # Run all at once (139 tests)
+./clear test transpile-tests/58_bg.cht           # One at a time
 
 # Package integration
 cd transpile-tests/module-integration && zig build test
