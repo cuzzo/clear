@@ -10,7 +10,7 @@ Importing a CLEAR module makes its `PUB` and package-private symbols available u
 
 Use a relative path string to import files in your own project:
 
-```clear-example
+```ruby clear illustrative
 REQUIRE "math_utils.cht";
 
 FN main() RETURNS Void ->
@@ -22,7 +22,7 @@ END
 
 Use the `pkg:` prefix to import registered libraries:
 
-```clear-example
+```ruby clear illustrative
 REQUIRE "pkg:geometry";
 
 FN main() RETURNS Void ->
@@ -34,7 +34,7 @@ END
 
 You can rename any import to avoid collisions:
 
-```clear-example
+```ruby clear illustrative
 REQUIRE "math_utils.cht" AS m;
 REQUIRE "pkg:geometry" AS geo;
 
@@ -57,7 +57,7 @@ CLEAR enforces three levels of visibility. Access control is checked at compile-
 
 ### Example
 
-```clear-example
+```ruby clear illustrative
 -- internal_helper.cht
 
 PRIVATE FN secret_calc() RETURNS Int64 -> ... END
@@ -71,7 +71,7 @@ PUB FN public_api() RETURNS Int64 ->
 END
 ```
 
-```clear-example
+```ruby clear illustrative
 -- main.cht
 REQUIRE "internal_helper.cht";
 
