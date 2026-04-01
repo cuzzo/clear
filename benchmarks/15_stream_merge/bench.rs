@@ -14,7 +14,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 const N_PRODUCERS: usize = 8;
-const ITEMS_PER_PROD: usize = 10_000;
+const ITEMS_PER_PROD: usize = 100_000;
 
 #[tokio::main]
 async fn main() {
@@ -42,7 +42,8 @@ async fn main() {
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
-    println!("Total: {}", total);
-    println!("Producers: {}, Items/producer: {}", N_PRODUCERS, ITEMS_PER_PROD);
+    println!("Checksum: {}", total.wrapping_rem(1_000_000_000));
+    println!("Producers: {}", N_PRODUCERS);
+    println!("Items per producer: {}", ITEMS_PER_PROD);
     println!("Time: {:.4} s", elapsed);
 }

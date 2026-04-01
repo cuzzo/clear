@@ -18,7 +18,7 @@ import (
 
 const (
 	nProducers    = 8
-	itemsPerProd  = 10_000
+	itemsPerProd  = 100_000
 )
 
 func producer(ch chan<- int64, seed int64) {
@@ -54,7 +54,8 @@ func main() {
 	}
 
 	elapsed := time.Since(t0).Seconds()
-	fmt.Printf("Total: %d\n", total)
-	fmt.Printf("Producers: %d, Items/producer: %d\n", nProducers, itemsPerProd)
+	fmt.Printf("Checksum: %d\n", total%1_000_000_000)
+	fmt.Printf("Producers: %d\n", nProducers)
+	fmt.Printf("Items per producer: %d\n", itemsPerProd)
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }

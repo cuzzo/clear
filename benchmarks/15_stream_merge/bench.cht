@@ -1,8 +1,8 @@
 -- Stream Merge Benchmark — CLEAR
 --
--- 8 BG STREAM producers each yield 10K values (LCG sequence).
+-- 8 BG STREAM producers each yield 100K values (LCG sequence).
 -- Consumer reads round-robin from all 8 streams, sums all values.
--- Total: 80K values merged from 8 streams.
+-- Total: 800K values merged from 8 streams.
 --
 -- Uses infinite streams (~T[INF]) — NEXT returns T directly (not optional).
 -- Each YIELD suspends the producer fiber; NEXT resumes it.
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     -- Consumer: round-robin merge from all 8 streams
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
-    WHILE j < 10000 DO
+    WHILE j < 100000 DO
         v0: Int64 = NEXT s0; v1: Int64 = NEXT s1;
         v2: Int64 = NEXT s2; v3: Int64 = NEXT s3;
         v4: Int64 = NEXT s4; v5: Int64 = NEXT s5;
@@ -32,8 +32,10 @@ FN main() RETURNS Void ->
         j += 1;
     END
 
-    print("Total:", total);
-    print("Producers: 8, Items/producer: 10000");
+    checksum = total MOD 1000000000;
+    print("Checksum:", checksum);
+    print("Producers: 8");
+    print("Items per producer: 100000");
 
     elapsed = timestampMs() - t0;
     print("Time: ${elapsed.toString()} ms");
