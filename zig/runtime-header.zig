@@ -60,7 +60,7 @@ pub const CheatLib = struct {
     // Mostly for green fibers
     // Read from a non-blocking socket
     // Only works on Linux
-    pub fn read(fd: i32, buffer: []u8) !usize {
+    pub noinline fn read(fd: i32, buffer: []u8) !usize {
         while (true) {
             const n = std.posix.read(fd, buffer) catch |err| {
                 if (err == error.WouldBlock) {
@@ -999,7 +999,7 @@ pub const CheatLib = struct {
     // If no connection is ready yet (EAGAIN/WouldBlock), registers with epoll
     // and yields the current fiber until a connection arrives.
     // Returns the client fd (set non-blocking via fcntl). Caller owns it.
-    pub fn socketAccept(server_fd: i32) !i32 {
+    pub noinline fn socketAccept(server_fd: i32) !i32 {
         while (true) {
             var client_addr: std.posix.sockaddr = undefined;
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
@@ -1037,7 +1037,7 @@ pub const CheatLib = struct {
     // Write `data` to a non-blocking socket fd.
     // Loops until all bytes are sent, yielding the fiber on EAGAIN.
     // Returns the total bytes sent (== data.len on success).
-    pub fn socketWrite(fd: i32, data: []const u8) !usize {
+    pub noinline fn socketWrite(fd: i32, data: []const u8) !usize {
         var sent: usize = 0;
         while (sent < data.len) {
             const n = std.posix.write(fd, data[sent..]) catch |err| {
@@ -1077,7 +1077,7 @@ pub const CheatLib = struct {
     // data can monopolize the scheduler indefinitely.
     // Usage: data = tcpRead(client)
     // Yields after successful read for I/O fairness among concurrent client fibers.
-    pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
+    pub noinline fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
         var buf: [4096]u8 = undefined;
         const n = try CheatLib.read(fd, &buf);
         const result = try allocator.dupe(u8, buf[0..n]);
@@ -1101,7 +1101,7 @@ pub const CheatLib = struct {
     // Non-blocking: if the kernel returns EINPROGRESS the fiber yields until
     // epoll signals write-readiness, then the connection result is verified.
     // Returns the client fd; caller owns it (close via socketClose / RAII).
-    pub fn socketConnect(host: []const u8, port: u16) !i32 {
+    pub noinline fn socketConnect(host: []const u8, port: u16) !i32 {
         const fd = try std.posix.socket(
             std.posix.AF.INET,
             std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,

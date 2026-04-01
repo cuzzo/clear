@@ -732,7 +732,7 @@ pub const Scheduler = struct {
     // Cooperative yield: switch to the scheduler only if other fibers are ready.
     // Called from rt.checkYield() every YIELD_BUDGET iterations of a while loop.
     // Zero-cost when no other fiber is waiting (single-fiber programs).
-    pub fn coopYield(self: *Scheduler) void {
+    pub noinline fn coopYield(self: *Scheduler) void {
         if (self.ready_queue.len() > 0) {
             const task = self.getCurrent();
             task.status.store(.Ready, .release);
