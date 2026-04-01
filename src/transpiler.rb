@@ -2279,6 +2279,12 @@ private
     elsif node.right.is_a?(AST::EachOp)
       return transpile_each(node)
 
+    elsif node.right.is_a?(AST::TapOp)
+      return transpile_tap(node)
+
+    elsif node.right.is_a?(AST::SkipOp)
+      return transpile_skip(node.left, node.right, node)
+
     elsif node.right.is_a?(AST::FindOp)
       return transpile_find(node.left, node.right, node)
 

@@ -59,6 +59,7 @@ pool s> EACH { _.health = _.health - damage; };
 | **WHERE** | `list s> WHERE pred` | `ElemType[]` | Keep elements matching a boolean predicate |
 | **ORDER_BY** | `list s> ORDER_BY key` | `ElemType[]` | Sort by key expression |
 | **LIMIT** | `list s> LIMIT n` | `ElemType[]` | First N elements |
+| **SKIP** | `list s> SKIP n` | `ElemType[]` | Drop first N elements, return rest |
 | **DISTINCT** | `list s> DISTINCT key` | `ElemType[]` | Unique by key (first occurrence wins) |
 | **UNNEST** | `list s> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
 | **INDEX** | `list s> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
@@ -95,12 +96,39 @@ ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
 | **EACH** | `list s> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
+| **TAP** | `list s> TAP { body }` | `ElemType[]` | Observe each element (read-only `_`), pass collection through |
 
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
 
 ```clear
 -- ILLUSTRATIVE
 entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
+```
+
+### TAP (Debugging / Observation)
+
+TAP runs a body for each element but passes the collection through unchanged. Unlike EACH, `_` is read-only and TAP returns the original collection:
+
+```clear
+-- ILLUSTRATIVE
+-- Debug: inspect filtered values before summing
+result = scores
+    s> WHERE _.points > 100
+    s> TAP { print("score: ${_.points.toString()}"); }
+    s> SUM _.points;
+```
+
+### SKIP and LIMIT (Pagination)
+
+SKIP and LIMIT are complementary: SKIP drops the first N elements, LIMIT takes the first N.
+
+```clear
+-- ILLUSTRATIVE
+-- Pagination: page 3, 10 items per page
+page = items s> SKIP 20_i64 s> LIMIT 10_i64;
+
+-- Skip header row, process the rest
+data = rows s> SKIP 1_i64 s> SELECT parseRow(_);
 ```
 
 ## Chaining
@@ -151,6 +179,21 @@ avg = soa_list s> AVERAGE _.health;   -- contiguous f64 slice
 MUTABLE sharded: Entity[10000]@pool:sharded(4) = [];
 sharded s> EACH { _.processed = TRUE; };
 ```
+
+## Loop Fusion
+
+The compiler automatically fuses chains of WHERE and SELECT stages ending in a fold (SUM, REDUCE, AVERAGE, MIN, MAX, COUNT, ANY, ALL, FIND) into a single loop with zero intermediate allocations.
+
+```clear
+-- ILLUSTRATIVE
+-- Written as 3 stages:
+result = data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
+
+-- Compiled as a single loop (no intermediate arrays):
+-- for (data) |it| { if (it > 500) { sum += it * it; } }
+```
+
+This eliminates the allocation and iteration overhead of intermediate lists. Stages that require materialization (ORDER_BY, DISTINCT, INDEX) break the fusion chain - operations before them are fused separately.
 
 ## SOA Optimization
 

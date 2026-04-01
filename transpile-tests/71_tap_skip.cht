@@ -1,0 +1,73 @@
+-- Test: TAP and SKIP pipeline operators
+
+-- TAP: side-effect observer, passes collection through unchanged
+FN test_tap_passthrough() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    -- TAP block runs for each item, original list passes through
+    result = data s> TAP { ASSERT _ > 0.0, "tap sees positive"; } s> SUM _;
+    ASSERT result == 15.0, "TAP passes through to SUM";
+    RETURN;
+END
+
+FN test_tap_in_chain() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+
+    -- TAP in middle of chain: WHERE -> TAP -> SUM
+    result = data s> WHERE _ > 5.0 s> TAP { ASSERT _ > 5.0, "tap sees filtered"; } s> SUM _;
+    -- values > 5: 6,7,8,9 -> sum = 30
+    ASSERT result == 30.0, "TAP in chain preserves values";
+    RETURN;
+END
+
+-- SKIP: skip first N elements, return rest
+FN test_skip_basic() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    skipped = data s> SKIP 2_i64;
+    ASSERT skipped.length() == 3, "SKIP 2 leaves 3 elements";
+    RETURN;
+END
+
+FN test_skip_with_sum() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    -- [1,2,3,4,5] -> SKIP 2 -> [3,4,5] -> SUM = 12
+    result = data s> SKIP 2_i64 s> SUM _;
+    ASSERT result == 12.0, "SKIP then SUM";
+    RETURN;
+END
+
+FN test_skip_all() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i));
+
+    -- SKIP more than length -> empty
+    skipped = data s> SKIP 100_i64;
+    ASSERT skipped.length() == 0, "SKIP beyond length gives empty";
+    RETURN;
+END
+
+FN test_skip_zero() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i));
+
+    -- SKIP 0 -> full list
+    skipped = data s> SKIP 0_i64;
+    ASSERT skipped.length() == 3, "SKIP 0 gives full list";
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    test_tap_passthrough();
+    test_tap_in_chain();
+    test_skip_basic();
+    test_skip_with_sum();
+    test_skip_all();
+    test_skip_zero();
+    RETURN;
+END

@@ -495,6 +495,47 @@ module PipelineGenerator
     end
   end
 
+  def transpile_skip(list_node, skip_node, smooth_node)
+    element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
+    count_code = visit(skip_node.count)
+
+    transpile_pipeline_macro(list_node, smooth_node, force_aos: true) do |alloc|
+      <<~ZIG
+        const skip_requested: usize = @intCast(#{count_code});
+        const skip_actual = @min(skip_requested, pipe_items.len);
+
+        break :#{@current_pipe_label} try CheatLib.makeList(#{element_zig_type}, #{alloc}, pipe_items[skip_actual..]);
+      ZIG
+    end
+  end
+
+  # TAP: side-effect observer — iterates collection, runs body, returns original.
+  # Unlike EACH (which returns void), TAP passes the collection through.
+  def transpile_tap(smooth_node)
+    lhs     = smooth_node.left
+    tap_op  = smooth_node.right
+    lhs_type = lhs.type_info
+
+    body_code = with_pipeline_context(placeholder: "__tap_item") do
+      tap_op.body.map { |stmt|
+        code = visit(stmt)
+        code.strip.end_with?(";") ? code : "#{code};"
+      }.join("\n        ")
+    end
+
+    list_code = visit(lhs)
+    <<~ZIG.chomp
+      __tap_blk: {
+          const __tap_src = #{list_code};
+          const __tap_items = if (@hasField(@TypeOf(__tap_src), "items")) __tap_src.items else __tap_src[0..];
+          for (__tap_items) |__tap_item| {
+              #{body_code}
+          }
+          break :__tap_blk __tap_src;
+      }
+    ZIG
+  end
+
   def transpile_unnest(list_node, unnest_node, smooth_node)
     inner_element_type = unnest_node.full_type.element_type.resolved.to_s
     inner_zig_type = transpile_type(inner_element_type)

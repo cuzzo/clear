@@ -135,9 +135,11 @@ class Parser
   primary(:KEYWORD, 'REDUCE') { parse_reduce_op }
   primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :pipe_expression])
   primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :pipe_expression])
+  primary(:KEYWORD, 'SKIP', AST::SkipOp, ['SKIP', :pipe_expression])
   primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :pipe_expression])
   primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :pipe_expression])
   primary(:KEYWORD, 'EACH')  { parse_each_op }
+  primary(:KEYWORD, 'TAP')   { parse_tap_op }
   primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :pipe_expression])
   primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :pipe_expression])
   primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :pipe_expression])
@@ -1794,6 +1796,22 @@ class Parser
     body = parse_block_body(['}'])
     consume(:CHAR, '}')
     AST::EachOp.new(token, body)
+  end
+
+  def parse_tap_op
+    token = consume(:KEYWORD, 'TAP')
+    # TAP f -> single function call (short form)
+    # TAP { body } -> block form
+    if match?(:CHAR, '{')
+      consume(:CHAR, '{')
+      body = parse_block_body(['}'])
+      consume(:CHAR, '}')
+      AST::TapOp.new(token, body)
+    else
+      # Short form: TAP func -> becomes TAP { func(_); }
+      expr = parse_expression(1)  # parse_pipe_expression
+      AST::TapOp.new(token, [AST::FuncCall.new(token, expr.respond_to?(:name) ? expr.name : expr.to_s, [AST::Identifier.new(token, "_")])])
+    end
   end
 
   # Parses an optional `:sharded(N)` or `:soa` suffix after @pool or @list.

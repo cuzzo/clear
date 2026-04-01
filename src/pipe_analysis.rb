@@ -49,7 +49,9 @@ module PipeAnalysis
     node.is_a?(AST::MinOp) ||
     node.is_a?(AST::MaxOp) ||
     node.is_a?(AST::ConcurrentOp) ||
-    node.is_a?(AST::ShardOp)
+    node.is_a?(AST::ShardOp) ||
+    node.is_a?(AST::SkipOp) ||
+    node.is_a?(AST::TapOp)
   end
 
   def analyze_higher_order_op(node)
@@ -86,6 +88,10 @@ module PipeAnalysis
       analyze_concurrent_op(node)
     when AST::ShardOp
       analyze_shard_op(node)
+    when AST::SkipOp
+      analyze_skip_op(node)
+    when AST::TapOp
+      analyze_tap_op(node)
     end
   end
 
@@ -317,6 +323,47 @@ module PipeAnalysis
 
     node.full_type = :Void
     node.storage   = :frame
+  end
+
+  def analyze_skip_op(node)
+    # SKIP: list s> SKIP n -> same list type with first n elements removed
+    require_array_input!(node, "SKIP")
+    item_type = node.left.type_info.element_type.resolved
+
+    visit(node.right.count)
+    count_type = node.right.count.resolved_type
+    unless [:Int64, :Number].include?(count_type)
+      error!(node.right.count, "SKIP count must be a number, got #{count_type}")
+    end
+
+    node.full_type = :"#{item_type}[]"
+    node.storage = :frame
+  end
+
+  def analyze_tap_op(node)
+    # TAP: list s> TAP { body } -> same list type (pass-through)
+    lhs_type = node.left.type_info
+    is_pool  = lhs_type&.pool?
+    is_list  = lhs_type&.list_collection?
+    is_array = node.left.metatype == :array
+
+    unless is_pool || is_list || is_array
+      error!(node.left, "Cannot TAP non-collection type #{node.left.resolved_type}.")
+      node.full_type = :Void
+      return
+    end
+
+    item_type = lhs_type.element_type.resolved
+
+    with_new_scope do
+      # Read-only: TAP is for observation, not mutation
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      node.right.body.each { |stmt| visit(stmt) }
+    end
+
+    # TAP returns the original collection (pass-through)
+    node.full_type = node.left.full_type
+    node.storage = node.left.storage
   end
 
   # =========================================================

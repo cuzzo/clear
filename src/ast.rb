@@ -326,6 +326,11 @@ module AST
   # Syntax: collection s> EACH { _.field = value; };
   # On sharded pools, auto-dispatches N parallel fibers (one per shard).
   EachOp       = Struct.new(:token, :body) { include Locatable }
+  # TAP: side-effect observer — runs body for each item, returns original list unchanged.
+  # Unlike EACH, TAP passes through the collection (not void).
+  TapOp        = Struct.new(:token, :body) { include Locatable }
+  # SKIP: skip first N elements, return rest (inverse of LIMIT).
+  SkipOp       = Struct.new(:token, :count) { include Locatable }
   # Phase 3 predicate query operators — return scalar values (not new lists).
   # All use `_` as the implicit item binding (like SELECT/WHERE).
   FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType
