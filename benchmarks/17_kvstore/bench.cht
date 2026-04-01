@@ -110,9 +110,9 @@ END
 -- =========================================================================
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(8):locked = {};
+    MUTABLE map: HashMap<String>@sharded(32):locked = {};
     n = 1000000;
-    workers = 8;
+    workers = 32;
     chunk = n / workers;
     zipfSkew = 1.0;
 

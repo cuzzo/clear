@@ -18,7 +18,6 @@ use std::thread;
 use std::time::Instant;
 
 const NUM_KEYS: usize = 1_000_000;
-const NUM_WORKERS: usize = 8;
 const ZIPF_SKEW: f64 = 1.0;
 
 // =========================================================================
@@ -82,13 +81,14 @@ fn h_int_inv(x: f64, s: f64) -> f64 {
 // =========================================================================
 
 fn main() {
-    let ops_per_worker = NUM_KEYS / NUM_WORKERS;
+    let num_workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
+    let ops_per_worker = NUM_KEYS / num_workers;
     let map: Arc<DashMap<String, String>> = Arc::new(DashMap::new());
 
     // --- Workload 1: Uniform SET ---
     let t0 = Instant::now();
     let mut handles = Vec::new();
-    for w in 0..NUM_WORKERS {
+    for w in 0..num_workers {
         let map = Arc::clone(&map);
         let start = w * ops_per_worker;
         handles.push(thread::spawn(move || {
@@ -103,7 +103,7 @@ fn main() {
     // --- Workload 2: Uniform GET ---
     let t0 = Instant::now();
     let mut handles = Vec::new();
-    for w in 0..NUM_WORKERS {
+    for w in 0..num_workers {
         let map = Arc::clone(&map);
         let start = w * ops_per_worker;
         handles.push(thread::spawn(move || {
@@ -118,7 +118,7 @@ fn main() {
     // --- Workload 3: Zipfian GET ---
     let t0 = Instant::now();
     let mut handles = Vec::new();
-    for w in 0..NUM_WORKERS {
+    for w in 0..num_workers {
         let map = Arc::clone(&map);
         handles.push(thread::spawn(move || {
             let mut z = ZipfGen::new(NUM_KEYS, ZIPF_SKEW, (w as u64 + 42) | 1);
@@ -134,7 +134,7 @@ fn main() {
     // --- Workload 4: Mixed 80/20 ---
     let t0 = Instant::now();
     let mut handles = Vec::new();
-    for w in 0..NUM_WORKERS {
+    for w in 0..num_workers {
         let map = Arc::clone(&map);
         handles.push(thread::spawn(move || {
             let mut z = ZipfGen::new(NUM_KEYS, ZIPF_SKEW, (w as u64 + 99) | 1);
@@ -154,7 +154,7 @@ fn main() {
     let mixed_time = t0.elapsed().as_secs_f64();
 
     println!("Keys: {}", NUM_KEYS);
-    println!("Workers: {}", NUM_WORKERS);
+    println!("Workers: {}", num_workers);
     println!("Set: {:.4} s", set_time);
     println!("Get: {:.4} s", get_uniform_time);
     println!("Zipf: {:.4} s", get_zipf_time);

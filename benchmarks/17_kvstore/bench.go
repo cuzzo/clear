@@ -24,9 +24,8 @@ import (
 )
 
 const (
-	numKeys    = 1_000_000
-	numWorkers = 8
-	zipfSkew   = 1.0
+	numKeys  = 1_000_000
+	zipfSkew = 1.0
 )
 
 // =========================================================================
@@ -81,7 +80,7 @@ func (z *ZipfGen) next() int {
 // =========================================================================
 
 func main() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	numWorkers := runtime.GOMAXPROCS(0)
 	opsPerWorker := numKeys / numWorkers
 
 	var m sync.Map
