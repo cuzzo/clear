@@ -93,12 +93,33 @@ The entire 139ms gap is the fiber execution model:
 - Fiber stack cache/TLB behavior (mmap'd memory in a different region)
 - Potential lack of kernel thread-local optimizations on fiber stacks
 
-**This is NOT fixable by optimizing generated code.** The fix must be in the
-fiber runtime or scheduler itself. Potential approaches:
-- Thread-pool mode for compute-heavy BG blocks (bypass fiber overhead)
-- Larger fiber stacks to improve cache locality
-- Reduce scheduler polling frequency
-- Use native threads when fiber count equals scheduler count
+**R6 proved generated code is not the issue.** But CLEAR also scales NEGATIVELY:
+
+```
+             Raw Zig (native threads)     CLEAR (fibers)
+  1 worker    203ms                         98ms
+  2 workers   113ms                         80ms   (best)
+  4 workers    69ms                        130ms   (degrading)
+  8 workers    44ms                        164ms
+ 16 workers    27ms                        185ms
+ 32 workers    23ms                        177ms
+```
+
+CLEAR at 1 worker is faster than raw Zig at 1 worker (98ms vs 203ms) because
+the frame allocator's bump allocation has better cache locality than c_allocator
+free/alloc per key. But scaling is inverted: raw Zig goes from 203ms to 23ms
+(8.8x), CLEAR goes from 98ms to 177ms (0.55x - gets WORSE).
+
+This is a concurrency contention issue in the fiber runtime. The generated code
+runs at 22ms on native threads (R6). Something about the fiber scheduler's
+interaction with concurrent map access causes degradation under thread count
+scaling. Potential causes:
+- Scheduler housekeeping between yields (drainRemoteCalls atomic load per yield)
+- Thread-local variable access pattern (`fp.active_scheduler`, `fp.__pinned_local_alloc`)
+  causing cache line bouncing across cores
+- The fiber yield/resume cycle disrupting CPU branch prediction or prefetch
+- Frame allocator state (Runtime struct fields) bouncing between L1 caches
+  when fibers are stolen between schedulers
 
 ### 4. Zig's HashMap vs Rust's hashbrown (SwissTable)
 
@@ -122,8 +143,10 @@ Fiber execution model          -          -      +139ms
 Total                        23ms       13ms       161ms
 ```
 
-Two independent problems:
+Three independent problems:
 1. **Zig Mutex vs Rust parking_lot (2x)**: 23ms vs 13ms. Lock quality.
-2. **Fiber model vs native threads (7x)**: 22ms vs 161ms for identical code.
-   String formatting, allocators, vtable, checkYield, loopMark — all add 0ms.
-   The overhead is entirely in how the cooperative fiber scheduler executes code.
+2. **Generated code runs at native speed (R6 = 22ms)**: string formatting,
+   allocators, vtable, checkYield, loopMark, Arc deref — all add 0ms.
+3. **Fiber runtime causes NEGATIVE scaling**: 1w=98ms, 32w=177ms. The fiber
+   scheduler's concurrency model degrades performance under thread scaling.
+   Not a per-iteration cost — a systemic contention issue.

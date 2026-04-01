@@ -738,6 +738,57 @@ fn runtime6_exactClear(map_arc: *CheatLib.Arc(CheatLib.MutexShardedStringMap([]c
     return nowMs() - t0;
 }
 
+// R7: Native thread but on mmap'd stack-sized memory for locals
+// Tests whether the 64KB mmap'd stack region causes cache/TLB issues
+fn runtime7_mmapStack(map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS)) i64 {
+    const chunk = N_KEYS / N_WORKERS;
+    const s: f64 = 1.0;
+    const hIntegral = hInt(@as(f64, @floatFromInt(N_KEYS)) + 0.5, s);
+    const hFraction = hFunc(1.5, s) - 1.0;
+
+    const t0 = nowMs();
+    var threads: [N_WORKERS]std.Thread = undefined;
+    for (0..N_WORKERS) |wi| {
+        const Ctx = struct {
+            map: *CheatLib.MutexShardedStringMap([]const u8, N_SHARDS),
+            seed: i64, chunk_size: usize, hI: f64, hF: f64,
+            fn run(ctx: @This()) void {
+                // Allocate hot locals on mmap'd memory (like fiber stacks)
+                const page = std.posix.mmap(
+                    null,
+                    4096,
+                    std.posix.PROT.READ | std.posix.PROT.WRITE,
+                    .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+                    -1,
+                    0,
+                ) catch unreachable;
+                defer std.posix.munmap(page);
+
+                // Put state/hits on mmap'd page to simulate fiber stack access pattern
+                const state_ptr: *i64 = @ptrCast(@alignCast(page.ptr));
+                const hits_ptr: *usize = @ptrCast(@alignCast(page.ptr + 8));
+                state_ptr.* = ctx.seed;
+                hits_ptr.* = 0;
+
+                for (0..ctx.chunk_size) |_| {
+                    const k = zipfNext(state_ptr, @intCast(N_KEYS), 1.0, ctx.hI, ctx.hF);
+                    state_ptr.* = state_ptr.* *% 6364136223846793005 +% 1442695040888963407;
+                    if (ctx.map.get(key_buf[@intCast(k)])) |_| hits_ptr.* += 1;
+                }
+                std.mem.doNotOptimizeAway(hits_ptr.*);
+            }
+        };
+        threads[wi] = std.Thread.spawn(.{}, Ctx.run, .{Ctx{
+            .map = map, .seed = @intCast(wi + 42), .chunk_size = chunk,
+            .hI = hIntegral, .hF = hFraction,
+        }}) catch unreachable;
+    }
+    for (0..N_WORKERS) |wi| threads[wi].join();
+    return nowMs() - t0;
+}
+
+// (R8 removed — scheduler integration too complex for standalone benchmark)
+
 pub fn main() !void {
     const alloc = std.heap.c_allocator;
     try initKeys(alloc);
@@ -799,6 +850,15 @@ pub fn main() !void {
             if (ms < best) best = ms;
         }
         std.debug.print("  R6: EXACT CLEAR code, native thr   {d:>4}ms\n", .{best});
+
+        // R7: mmap'd stack memory
+        best = std.math.maxInt(i64);
+        for (0..3) |_| {
+            const ms = runtime7_mmapStack(&map);
+            if (ms < best) best = ms;
+        }
+        std.debug.print("  R7: native thr + mmap'd locals     {d:>4}ms\n", .{best});
+
         CheatLib.arcRelease(CheatLib.MutexShardedStringMap([]const u8, N_SHARDS), alloc, arc_map);
     }
 
