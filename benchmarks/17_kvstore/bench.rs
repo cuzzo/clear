@@ -81,7 +81,10 @@ fn h_int_inv(x: f64, s: f64) -> f64 {
 // =========================================================================
 
 fn main() {
-    let num_workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
+    let num_workers = std::env::var("TOKIO_WORKER_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8));
     let ops_per_worker = NUM_KEYS / num_workers;
     let map: Arc<DashMap<String, String>> = Arc::new(DashMap::new());
 

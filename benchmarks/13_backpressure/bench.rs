@@ -35,7 +35,10 @@ async fn main() {
     let t0 = Instant::now();
 
     // Start consumers (share the receiver via Arc<Mutex>)
-    let n_consumers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
+    let n_consumers = std::env::var("TOKIO_WORKER_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8));
     let mut consumer_handles = Vec::new();
     let rx = Arc::new(tokio::sync::Mutex::new(rx));
     for _ in 0..n_consumers {
