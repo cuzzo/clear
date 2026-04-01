@@ -1,19 +1,22 @@
 -- Dynamic Spawn Benchmark — CLEAR
 --
--- Spawns 100K individual BG blocks, each does trivial work (return index * 3).
--- Measures pure per-spawn overhead: GPA alloc for SpawnRequest + Fiber + Task,
--- stack allocation, 0xCC fill, context switch, stack scan on completion.
+-- Spawns 10K individual BG blocks, each does CPU-bound work (10K LCG
+-- iterations).  Measures per-spawn overhead + parallel execution.
 --
--- This is CLEAR's WORST CASE — each BG block pays ~60μs of GPA overhead.
--- For real workloads, use CONCURRENT(workers: N) which avoids per-item spawning.
---
--- Known issue: v0.1 uses GPA for task creation. Object pooling (v0.2) will
--- reduce per-spawn cost to ~2-5μs, closing the gap with Go (~2.4μs/goroutine).
+-- This is CLEAR's individual-spawn path — each BG block pays GPA alloc
+-- for SpawnRequest + Fiber + Task.  For batch workloads, prefer
+-- CONCURRENT(workers: N) which avoids per-item spawning.
+
+FN doWork(seed: Int64) RETURNS Int64 ->
+    MUTABLE x: Int64 = seed;
+    FOR i IN (0_i64 ..< 10000) -> x = x * 6364136223846793005 + 1442695040888963407;
+    RETURN x;
+END
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0_i64 ..< 10000) -> futures.append(BG { i * 3; });
+    FOR i IN (0_i64 ..< 10000) -> futures.append(BG { doWork(i); });
 
     MUTABLE total: Int64 = 0;
     FOR j IN (0_i64 ..< 10000) DO
@@ -22,8 +25,10 @@ FN main() RETURNS Void ->
     END
     elapsed = timestampMs() - t0;
 
-    print("Total: ${total.toString()}");
+    checksum = total MOD 1000000000;
+    print("Checksum: ${checksum.toString()}");
     print("Tasks: 10000");
+    print("Iterations: 10000");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

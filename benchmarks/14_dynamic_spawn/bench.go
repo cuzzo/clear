@@ -1,8 +1,7 @@
 // Dynamic Spawn Benchmark — Go
 //
-// Spawns 100K goroutines, each does trivial work (return its index).
-// Measures pure spawn + collect overhead with minimal CPU work.
-// This is the worst case for per-spawn allocation overhead.
+// Spawns 10K goroutines, each does CPU-bound work (10K LCG iterations).
+// Measures goroutine spawn overhead + parallel execution.
 //
 // Build: go build -o bench_go .
 // Run:   ./bench_go
@@ -15,7 +14,18 @@ import (
 	"time"
 )
 
-const nTasks = 10_000
+const (
+	nTasks     = 10_000
+	iterations = 10_000
+)
+
+func doWork(seed int64) int64 {
+	x := seed
+	for i := 0; i < iterations; i++ {
+		x = x*6364136223846793005 + 1442695040888963407
+	}
+	return x
+}
 
 func main() {
 	results := make([]int64, nTasks)
@@ -27,7 +37,7 @@ func main() {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = int64(idx) * 3
+			results[idx] = doWork(int64(idx))
 		}(i)
 	}
 	wg.Wait()
@@ -38,7 +48,10 @@ func main() {
 	}
 
 	elapsed := time.Since(t0).Seconds()
-	fmt.Printf("Total: %d\n", total)
+	checksum := total % 1_000_000_000
+	if checksum < 0 { checksum += 1_000_000_000 }
+	fmt.Printf("Checksum: %d\n", checksum)
 	fmt.Printf("Tasks: %d\n", nTasks)
+	fmt.Printf("Iterations: %d\n", iterations)
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }
