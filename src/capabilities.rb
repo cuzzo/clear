@@ -279,12 +279,18 @@ module CapabilityHelper
 
           result.has_local   = true if info.sync == :local
           result.has_rc      = true if info.storage == :multiowned
-          result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
-          result.has_shared  = true if info.storage == :shared || info.storage == :multiowned
           ti = info.type
-          if ti.is_a?(Type) && ti.sharded?
-            result.has_sharded = true
-            result.has_shared  = true
+          # shared+striped maps (DashMap) are self-synchronizing — per-shard locking
+          # means any thread can access any shard without pinning. Skip has_shared
+          # so BG blocks are NOT auto-pinned, enabling work stealing.
+          is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
+          unless is_dashmap
+            result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+            result.has_shared  = true if info.storage == :shared || info.storage == :multiowned
+            if ti.is_a?(Type) && ti.sharded?
+              result.has_sharded = true
+              result.has_shared  = true
+            end
           end
 
           # Audit: mark capability usage for over-engineering warnings

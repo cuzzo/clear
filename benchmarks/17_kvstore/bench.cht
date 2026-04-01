@@ -1,8 +1,9 @@
--- KV Store Benchmark — CLEAR (HashMap@shared:writeLocked, Arc+RwLock)
+-- KV Store Benchmark — CLEAR (HashMap@shared:sharded(8):writeLocked, DashMap)
 --
--- Uses @shared:writeLocked — Arc-wrapped RwLock HashMap. Readers are
--- concurrent; writers are exclusive. BG fibers are not pinned, enabling
--- work stealing across schedulers.
+-- Uses @shared:sharded(8):writeLocked — Arc-wrapped lock-striped HashMap.
+-- Each of 8 shards has its own RwLock: readers are concurrent within a shard,
+-- writers are exclusive per-shard. No WITH blocks needed — methods handle
+-- shard selection and locking internally.
 --
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys (split across 8 workers)
@@ -55,9 +56,9 @@ END
 -- =========================================================================
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@shared:writeLocked = {};
+    MUTABLE map: HashMap<String>@shared:sharded(8):writeLocked = {};
     n = 1000000;
-    workers = 8;
+    workers = 32;
     chunk = n / workers;
     zipfSkew = 1.0;
 
@@ -70,7 +71,7 @@ FN main() RETURNS Void ->
         cnt = chunk;
         set_futures.append(BG {
             FOR idx IN (start ..< start + cnt) DO
-                WITH EXCLUSIVE map AS m { m["key:${idx.toString()}"] = "value-${idx.toString()}"; }
+                map["key:${idx.toString()}"] = "value-${idx.toString()}";
             END
         });
         wi += 1;
@@ -88,10 +89,8 @@ FN main() RETURNS Void ->
         get_futures.append(BG {
             MUTABLE hits: Int64 = 0;
             FOR idx IN (start ..< start + cnt) DO
-                WITH map AS m {
-                    got = m["key:${idx.toString()}"] OR "";
-                    IF got.length() > 0 THEN hits += 1; END
-                }
+                got = map["key:${idx.toString()}"] OR "";
+                IF got.length() > 0 THEN hits += 1; END
             END
             hits;
         });
@@ -116,10 +115,8 @@ FN main() RETURNS Void ->
             FOR idx IN (0_i64 ..< cnt) DO
                 k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
                 state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-                WITH map AS m {
-                    got = m["key:${k.toString()}"] OR "";
-                    IF got.length() > 0 THEN hits += 1; END
-                }
+                got = map["key:${k.toString()}"] OR "";
+                IF got.length() > 0 THEN hits += 1; END
             END
             hits;
         });
@@ -139,20 +136,17 @@ FN main() RETURNS Void ->
         mix_futures.append(BG {
             MUTABLE hits: Int64 = 0;
             MUTABLE state: Int64 = seed;
+            MUTABLE val: String = "";
             FOR idx IN (0_i64 ..< cnt) DO
                 k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
                 state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
                 MUTABLE decision = state MOD 100;
                 IF decision < 0 THEN decision = 0 - decision; END
                 IF decision < 80 THEN
-                    WITH map AS m {
-                        got = m["key:${k.toString()}"] OR "";
-                        IF got.length() > 0 THEN hits += 1; END
-                    }
+                    val = map["key:${k.toString()}"] OR "";
+                    IF val.length() > 0 THEN hits += 1; END
                 ELSE
-                    WITH EXCLUSIVE map AS m {
-                        m["key:${k.toString()}"] = "updated-${idx.toString()}";
-                    }
+                    map["key:${k.toString()}"] = "updated-${idx.toString()}";
                 END
             END
             hits;
