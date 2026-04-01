@@ -1,0 +1,58 @@
+# Benchmark 17: KV Store (Concurrent HashMap)
+
+1M key-value operations across N workers with four workloads:
+uniform SET, uniform GET, Zipfian GET (hot-key skew), mixed 80/20 read/write.
+
+## Strategy
+
+CLEAR uses `@shared:sharded(128):locked` - an Arc-wrapped HashMap with 128 shards,
+Mutex per shard. Any fiber can access any shard; the Mutex handles synchronization
+internally. No WITH blocks needed.
+
+- Go: `sync.Map`
+- Rust: `DashMap` (parking_lot RwLock, `num_cpus * 4` shards)
+
+## Running
+
+```bash
+ruby benchmarks/runner.rb --smoke benchmarks/17_kvstore/   # CLEAR only
+ruby benchmarks/runner.rb --fast benchmarks/17_kvstore/    # All langs, 3 runs
+ruby benchmarks/runner.rb benchmarks/17_kvstore/           # Normal, 5 runs
+ruby benchmarks/runner.rb --cores=8 benchmarks/17_kvstore/ # Control core count
+```
+
+## Known Issues
+
+### Zig Mutex vs Rust parking_lot (2x gap at 32 cores)
+
+Raw map backend comparison with pre-built keys (no language overhead):
+
+```
+                       Zig Mutex 128sh    Rust DashMap 128sh
+  1 worker               209ms              215ms
+  8 workers                41ms               45ms
+ 32 workers                31ms               15ms          <-- 2x gap
+```
+
+At low core counts, Zig Mutex and Rust parking_lot are equivalent. At 32 cores
+the gap widens to 2x. Both use userspace atomics on the fast path, but parking_lot
+has adaptive spinning and a smaller lock word (1 byte vs 4 bytes), reducing cache
+line contention under heavy parallelism.
+
+This is a Zig stdlib quality issue. Zig's `std.Thread.Mutex` (`FutexImpl`) uses a
+simple spin-then-futex strategy. parking_lot uses adaptive spinning calibrated to
+the critical section length, plus thread parking with backoff. Closing this gap
+requires a custom Mutex implementation.
+
+Note: Zig's `std.Thread.RwLock` is much worse - it's `pthread_rwlock_t` on Linux
+(kernel lock, reader-preferring). Mixed workloads see 72ms vs 15ms (5x). CLEAR
+uses Mutex (`:locked`) to avoid this.
+
+### String interpolation overhead (7x)
+
+See ANALYSIS.md for details. Each `"key:${k.toString()}"` generates 2 allocations
+(intToString + concat) through the frame allocator vtable. Raw Zig with pre-built
+keys: 31ms. CLEAR with per-access string building: 223ms.
+
+This is a general CLEAR compiler issue, not specific to this benchmark. Fix is
+tracked separately.
