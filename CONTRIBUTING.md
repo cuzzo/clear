@@ -51,7 +51,7 @@ CLEAR is focused on describing intent, and the compiler transforming that into t
   * The majority of performance improvements that will be accepted live here.
     * The biggest impacts come from scheduler efficiency.
       * Go's scheduler is a God-like work of art.  Despite the language itself having many efficiency flaws, it is *very* difficult to outperform Go, strictly due to how good it's scheduler is.
-      * CLEAR's scheduler is far behind, and improvements here will make the most impact.
+      * CLEAR's scheduler is far less sophisticated, and improvements here will make the most impact.
       * See [docs/benchmarks.md](docs/benchmarks.md) for a list of known areas for improvement.
 
 ## Local Development Setup
