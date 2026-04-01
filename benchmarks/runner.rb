@@ -459,9 +459,9 @@ def run_server_bench(dir, mode_cfg, cores)
   results = {}
 
   servers = []
-  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: "TOKIO_WORKER_THREADS=#{cores} " } if has_rust && File.exist?("#{dir}/bench_rust")
-  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: "GOMAXPROCS=#{cores} " } if has_go && File.exist?("#{dir}/server_go")
-  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: "CLEAR_THREADS=#{threads} " } if has_clear
+  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: { "TOKIO_WORKER_THREADS" => cores } } if has_rust && File.exist?("#{dir}/bench_rust")
+  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: { "GOMAXPROCS" => cores } } if has_go && File.exist?("#{dir}/server_go")
+  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: { "CLEAR_THREADS" => threads } } if has_clear
 
   servers.each do |srv|
     # Clean data directory
@@ -470,7 +470,7 @@ def run_server_bench(dir, mode_cfg, cores)
 
     # Start server
     puts "\nRunning #{srv[:label]}..."
-    pid = spawn("#{srv[:env]}./#{srv[:bin]}", [:out, :err] => "/dev/null")
+    pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
     sleep 1
 
     # Run client
@@ -518,11 +518,11 @@ def run_server_bench(dir, mode_cfg, cores)
   end
 
   # Memory comparison
-  if results[:clear] && results[:go] && results[:clear][:peak_rss_kb] && results[:go][:peak_rss_kb]
+  if results[:clear] && results[:go] && results[:clear][:peak_rss_kb]&.positive? && results[:go][:peak_rss_kb]&.positive?
     ratio = ((results[:clear][:peak_rss_kb].to_f / results[:go][:peak_rss_kb]) * 100).round(1)
     puts "\nCLEAR peak RSS: #{ratio}% of Go"
   end
-  if results[:clear] && results[:rust] && results[:clear][:peak_rss_kb] && results[:rust][:peak_rss_kb]
+  if results[:clear] && results[:rust] && results[:clear][:peak_rss_kb]&.positive? && results[:rust][:peak_rss_kb]&.positive?
     ratio = ((results[:clear][:peak_rss_kb].to_f / results[:rust][:peak_rss_kb]) * 100).round(1)
     puts "CLEAR peak RSS: #{ratio}% of Rust"
   end
