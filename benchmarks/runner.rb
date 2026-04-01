@@ -244,7 +244,7 @@ def run_bench(dir, mode_cfg, cores)
   has_go   = !clear_only && File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
 
   # Compiler sources that invalidate CLEAR builds when changed.
-  clear_compiler_deps = Dir.glob("src/*.rb") + ["zig/runtime-header.zig"]
+  clear_compiler_deps = Dir.glob("src/*.rb") + Dir.glob("zig/*.zig") + Dir.glob("zig/*.S")
 
   # 1. Compile C Baseline
   if has_c
