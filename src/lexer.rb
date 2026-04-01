@@ -185,6 +185,20 @@ class Lexer
         when '\\' then buffer << '\\'
         when 'r'  then buffer << "\r"   # actual CR byte (0x0D)
         when '0'  then buffer << "\0"   # actual null byte (0x00)
+        when 'x'                        # \xHH hex byte
+          hex = @s.scan(/[0-9a-fA-F]{2}/)
+          raise "Lexer Error: \\x requires exactly 2 hex digits at line #{@line}:#{@column}" unless hex
+          advance_pos(hex)
+          buffer << hex.to_i(16).chr
+        when 'u'                        # \u{HHHH} unicode codepoint -> UTF-8
+          raise "Lexer Error: \\u requires {hex} at line #{@line}:#{@column}" unless @s.peek(1) == '{'
+          @s.getch; advance_pos('{')
+          hex = @s.scan(/[0-9a-fA-F]{1,6}/)
+          raise "Lexer Error: invalid \\u{} escape at line #{@line}:#{@column}" unless hex
+          advance_pos(hex)
+          raise "Lexer Error: unclosed \\u{} at line #{@line}:#{@column}" unless @s.peek(1) == '}'
+          @s.getch; advance_pos('}')
+          buffer << hex.to_i(16).chr(Encoding::UTF_8)
         else buffer << '\\' << (ch || '')
         end
         next

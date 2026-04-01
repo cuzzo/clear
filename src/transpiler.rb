@@ -2090,6 +2090,7 @@ private
           when 0x0D then '\\r'   # carriage return
           when 0x09 then '\\t'   # tab
           when 0x00 then '\\x00' # null
+          when 0x80..0xFF then "\\x#{'%02x' % b}" # non-ASCII -> hex escape
           else b.chr
           end
         }.join

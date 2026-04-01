@@ -1,0 +1,29 @@
+-- Test: \xHH hex byte and \u{HHHH} unicode codepoint escape sequences
+
+FN main() RETURNS Void ->
+    -- \xHH produces a single byte
+    ASSERT "\x41" == "A", "\\x41 is A";
+    ASSERT "\x42" == "B", "\\x42 is B";
+    ASSERT "\x09" == "\t", "\\x09 is tab";
+    ASSERT "\x0A" == "\n", "\\x0A is newline";
+
+    -- \u{HHHH} produces UTF-8 encoded codepoint
+    ASSERT "\u{0041}" == "A", "\\u{0041} is A";
+    ASSERT "\u{00E9}".length() == 2, "e-acute is 2 bytes";
+    ASSERT "\u{00E9}".codepointCount() == 1, "e-acute is 1 codepoint";
+
+    -- Multi-byte unicode
+    ASSERT "\u{1F680}".length() == 4, "rocket emoji is 4 bytes";
+    ASSERT "\u{1F680}".codepointCount() == 1, "rocket is 1 codepoint";
+
+    -- In string context
+    greeting = "caf\u{00E9}";
+    ASSERT greeting.length() == 5, "cafe is 5 bytes";
+    ASSERT greeting.codepointCount() == 4, "cafe is 4 codepoints";
+
+    -- Mixed escapes in one string
+    mixed = "\x48\x69\u{0021}";
+    ASSERT mixed == "Hi!", "mixed hex + unicode";
+
+    RETURN;
+END
