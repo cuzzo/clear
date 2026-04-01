@@ -471,7 +471,10 @@ module AST
 
   UNARY_OPS = ['-', '!', '~']
 
-  PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64]
+  PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64,
+                     :Int8, :Int16, :Int32,
+                     :UInt8, :UInt16, :UInt32, :UInt64,
+                     :Float32]
 
   PRECEDENCE_MAP = {
     8 => { ops: ['**'], assoc: :right },

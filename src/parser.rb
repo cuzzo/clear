@@ -103,6 +103,13 @@ class Parser
   primary(:INT64) { parse_literal(:INT64, :stack) }
   primary(:STRING) { parse_literal(:STRING, :stack) }
   primary(:BYTE) { parse_literal(:BYTE, :stack) }
+  primary(:INT8)    { parse_literal(:INT8,    :stack) }
+  primary(:INT16)   { parse_literal(:INT16,   :stack) }
+  primary(:INT32)   { parse_literal(:INT32,   :stack) }
+  primary(:UINT16)  { parse_literal(:UINT16,  :stack) }
+  primary(:UINT32)  { parse_literal(:UINT32,  :stack) }
+  primary(:UINT64)  { parse_literal(:UINT64,  :stack) }
+  primary(:FLOAT32) { parse_literal(:FLOAT32, :stack) }
   primary(:VAR_ID) { parse_var_id }
 
   primary(:KEYWORD, 'TRUE') { t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }

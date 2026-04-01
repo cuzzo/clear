@@ -25,7 +25,7 @@ module ZigTypeMapper
     #:OR_RESCUE   => "orelse"
   }
 
-  ZIG_PRIMITIVES = ["i64", "f64", "bool", "void", "[]const u8"]
+  ZIG_PRIMITIVES = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void", "[]const u8"]
 
   # Delegates to Type#zig_type for type-to-Zig conversion.
   # This keeps the transpiler interface stable while the logic lives in Type.
@@ -35,30 +35,43 @@ module ZigTypeMapper
     t.zig_type(is_param: is_param, is_field: is_field)
   end
 
-  # TODO: from_type/to_type may need to be simplified
   def transpile_cast(code, from_type, to_type)
     from = from_type.respond_to?(:resolved) ? from_type.resolved : from_type
     to = to_type.respond_to?(:resolved) ? to_type.resolved : to_type
 
     return code if from == to
 
-    # A. Int -> Float (e.g. i64 -> f64)
-    if [:Int64, :Byte].include?(from) && to == :Number
-      return "@as(f64, @floatFromInt(#{code}))"
+    from_t = from_type.is_a?(Type) ? from_type : Type.new(from)
+    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to)
+
+    # Skip numeric casts for fn_type (resolved type is the return type, not the fn itself)
+    return "@as(#{transpile_type(to)}, #{code})" if from_t.fn_type? || to_t.fn_type?
+
+    # A. Int -> Float (any integer to any float)
+    if from_t.integer? && to_t.float?
+      zig_to = transpile_type(to)
+      return "@as(#{zig_to}, @floatFromInt(#{code}))"
     end
 
-    # B. Float -> Int (e.g. f64 -> i64)
-    #    But skip if both are actually integer types (annotator may over-coerce)
-    if from == :Number && to == :Int64
-      return "@intFromFloat(#{code})"
+    # B. Float -> Int (any float to any integer)
+    if from_t.float? && to_t.integer?
+      zig_to = transpile_type(to)
+      return "@as(#{zig_to}, @intFromFloat(#{code}))"
     end
 
-    # C. Int Widening (e.g. u8 -> i64)
-    if from == :Byte && to == :Int64
-      return "@intCast(#{code})"
+    # C. Int -> Int (widening or narrowing via @intCast)
+    if from_t.integer? && to_t.integer?
+      zig_to = transpile_type(to)
+      return "@as(#{zig_to}, @intCast(#{code}))"
     end
 
-    # D. Array coercion (e.g. Any[] -> Int64[])
+    # D. Float -> Float (f32 <-> f64 via @floatCast)
+    if from_t.float? && to_t.float?
+      zig_to = transpile_type(to)
+      return "@as(#{zig_to}, @floatCast(#{code}))"
+    end
+
+    # E. Array coercion (e.g. Any[] -> Int64[])
     #    ArrayList types are already correctly typed by makeList, no cast needed
     from_str = from.to_s
     to_str = to.to_s
@@ -66,18 +79,15 @@ module ZigTypeMapper
       return code
     end
 
-    # E. Error union coercion: T -> !T (Zig handles this automatically)
-    #    No explicit cast needed when returning payload from error union function
+    # F. Error union coercion: T -> !T (Zig handles this automatically)
     if to_str.start_with?("!")
       payload_type = to_str[1..]
       from_matches = from_str == payload_type || from == to.to_s[1..].to_sym
-      # String literals (Byte[N]) are compatible with String error union
       from_matches ||= from_str.start_with?("Byte[") && payload_type == "String"
-      return code if from_matches  # Zig auto-wraps payload in error union
+      return code if from_matches
     end
 
-    # Fallback: Zig's generic cast (often works for simple types)
-    # e.g. @as(f64, 10.5)
+    # Fallback: Zig's generic cast
     zig_to = transpile_type(to)
     return "@as(#{zig_to}, #{code})"
   end

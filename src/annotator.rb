@@ -1984,7 +1984,14 @@ private
         else
           Type.new(Type::STRING_TYPE, location: :heap)
         end
-      when :BYTE then :Byte
+      when :BYTE    then :Byte
+      when :INT8    then :Int8
+      when :INT16   then :Int16
+      when :INT32   then :Int32
+      when :UINT16  then :UInt16
+      when :UINT32  then :UInt32
+      when :UINT64  then :UInt64
+      when :FLOAT32 then :Float32
       when :BOOLEAN then :Bool
       when :NIL then :NIL
       else

@@ -1,0 +1,56 @@
+-- Test: full numeric type suite (Int8-Int64, UInt8-UInt64, Float32)
+
+FN test_signed_integers() RETURNS Void ->
+    a: Int8  = 42_i8;
+    b: Int16 = 1000_i16;
+    c: Int32 = 100000_i32;
+    d: Int64 = 999_i64;
+    ASSERT d == 999_i64, "Int64 literal";
+    RETURN;
+END
+
+FN test_unsigned_integers() RETURNS Void ->
+    e: UInt8  = 200_u8;
+    f: UInt16 = 65000_u16;
+    g: UInt32 = 4000000_u32;
+    h: UInt64 = 99_u64;
+    ASSERT h == 99_u64, "UInt64 literal";
+    RETURN;
+END
+
+FN test_float32() RETURNS Void ->
+    x: Float32 = 3.14_f32;
+    y: Float32 = 2.0_f32;
+    z = x + y;
+    RETURN;
+END
+
+FN test_cross_type_arithmetic() RETURNS Void ->
+    -- Int32 + Int64 promotes to Int64
+    a = 10_i32 + 5_i64;
+    ASSERT a == 15_i64, "i32 + i64 promotes to i64";
+
+    -- Int + Float promotes to float
+    b = 10_i32 + 2.5;
+    ASSERT b == 12.5, "i32 + f64 promotes to f64";
+
+    RETURN;
+END
+
+FN test_type_annotations() RETURNS Void ->
+    x: Int32 = 42_i32;
+    y: UInt16 = 1000_u16;
+    z: Float32 = 9.8_f32;
+    ASSERT x == 42_i32, "i32 annotation";
+    ASSERT y == 1000_u16, "u16 annotation";
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    test_signed_integers();
+    test_unsigned_integers();
+    test_float32();
+    test_cross_type_arithmetic();
+    test_type_annotations();
+    RETURN;
+END

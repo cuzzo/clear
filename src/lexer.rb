@@ -110,16 +110,30 @@ class Lexer
         case suffix
         when 'i64'
           add(:INT64, val, start_col)
-
         when 'f64'
           add(:NUMBER, val.to_f, start_col)
-
         when 'u8'
           raise_if_byte_overflow(val)
           add(:BYTE, val, start_col)
-
+        when 'i8'  then add(:INT8,   val, start_col)
+        when 'i16' then add(:INT16,  val, start_col)
+        when 'i32' then add(:INT32,  val, start_col)
+        when 'u16' then add(:UINT16, val, start_col)
+        when 'u32' then add(:UINT32, val, start_col)
+        when 'u64' then add(:UINT64, val, start_col)
+        when 'f32' then add(:FLOAT32, val.to_f, start_col)
         else
           raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
+        end
+
+      when @s.scan(/\d+\.\d+_([a-zA-Z0-9]+)/)
+        # Float literal with type suffix: 3.14_f32, 1.0_f64
+        val = @s.matched.split('_')[0].to_f
+        suffix = @s[1]
+        case suffix
+        when 'f32' then add(:FLOAT32, val, start_col)
+        when 'f64' then add(:NUMBER, val, start_col)
+        else raise "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
         end
 
       when @s.scan(/\d+\.\d+/)

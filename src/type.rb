@@ -75,35 +75,49 @@ class Type
   private
 
   def self.resolve_numeric_op(t_left, t_right)
-    # Both Int64: result is Int64 (no promotion needed).
-    if t_left == :Int64 && t_right == :Int64
-      return BinaryOpResult.new(type: :Int64)
+    lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
+    rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
+
+    # Same type: result is that type
+    if t_left == t_right
+      return BinaryOpResult.new(type: t_left)
     end
 
-    # Mixed Int64/Float64: promote Int64 operand to Float64 (implicit numeric promotion).
-    if t_left == :Int64 || t_right == :Int64
-      left_coercion = (t_left == :Int64 && t_right != :Int64) ? :Number : nil
-      right_coercion = (t_right == :Int64 && t_left != :Int64) ? :Number : nil
-      return BinaryOpResult.new(type: :Number, left_coercion: left_coercion, right_coercion: right_coercion)
+    # Both integers: promote to the wider type (use Int64 as default)
+    if lt.integer? && rt.integer?
+      return BinaryOpResult.new(type: :Int64,
+        left_coercion: t_left == :Int64 ? nil : :Int64,
+        right_coercion: t_right == :Int64 ? nil : :Int64)
+    end
+
+    # Both floats: promote to f64
+    if lt.float? && rt.float?
+      return BinaryOpResult.new(type: :Number,
+        left_coercion: t_left == :Number ? nil : :Number,
+        right_coercion: t_right == :Number ? nil : :Number)
+    end
+
+    # Mixed int/float: promote integer operand to the float type
+    if lt.integer? && rt.float?
+      return BinaryOpResult.new(type: t_right, left_coercion: t_right)
+    end
+    if lt.float? && rt.integer?
+      return BinaryOpResult.new(type: t_left, right_coercion: t_left)
     end
 
     BinaryOpResult.new(type: :Number)
   end
 
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
-    # A. Int64 Optimization
-    if t_left == :Int64 && t_right == :Int64
-      return BinaryOpResult.new(type: :Int64)
+    lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
+    rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
+
+    # A. Numeric addition (all int/float types)
+    if lt.numeric? && rt.numeric?
+      return resolve_numeric_op(t_left, t_right)
     end
 
-    # B. Float Propagation (Mixed Int/Number -> Number)
-    if t_left == :Number || t_right == :Number
-      left_coercion = (t_left == :Int64) ? :Number : nil
-      right_coercion = (t_right == :Int64) ? :Number : nil
-      return BinaryOpResult.new(type: :Number, left_coercion: left_coercion, right_coercion: right_coercion)
-    end
-
-    # C. String Concatenation
+    # B. String Concatenation
     if t_left == HEAP_STRING_TYPE || t_right == HEAP_STRING_TYPE
       left_coercion = (t_left != :String && safe_autocast?(t_left, :String)) ? :String : nil
       right_coercion = (t_right != :String && safe_autocast?(t_right, :String)) ? :String : nil
@@ -120,10 +134,13 @@ class Type
 
   def self.safe_autocast?(from_type, to_type)
     return false if from_type.nil?
-    # Int64 → Float64 (implicit numeric promotion, always safe)
-    return true if from_type == :Int64 && (to_type == :Number || to_type == :Float64)
-    # Numbers and booleans can be auto-cast to strings
-    [:Number, :Int64, :Bool, :Byte].include?(from_type)
+    from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
+    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
+    return false if from_t.fn_type? || to_t.fn_type?
+    # Any numeric -> any numeric (implicit promotion/narrowing handled by Zig casts)
+    return true if from_t.numeric? && to_t.numeric?
+    # Original types that can auto-cast to strings
+    [:Number, :Int64, :Bool, :Byte].include?(from_t.resolved)
   end
 
   public
@@ -349,8 +366,30 @@ class Type
   # ----------------------------------------------
   # Type Predicates
   # ----------------------------------------------
+  SIGNED_INT_TYPES   = [:Int8, :Int16, :Int32, :Int64].freeze
+  UNSIGNED_INT_TYPES = [:UInt8, :Byte, :UInt16, :UInt32, :UInt64].freeze
+  INT_TYPES          = (SIGNED_INT_TYPES + UNSIGNED_INT_TYPES).freeze
+  FLOAT_TYPES        = [:Float32, :Number, :Float64].freeze
+  NUMERIC_TYPES      = (INT_TYPES + FLOAT_TYPES).freeze
+
   def numeric?
-    [:Number, :Byte, :Float, :Int64].include?(resolved)
+    NUMERIC_TYPES.include?(resolved)
+  end
+
+  def integer?
+    INT_TYPES.include?(resolved)
+  end
+
+  def signed_int?
+    SIGNED_INT_TYPES.include?(resolved)
+  end
+
+  def unsigned_int?
+    UNSIGNED_INT_TYPES.include?(resolved)
+  end
+
+  def float?
+    FLOAT_TYPES.include?(resolved)
   end
 
   def boolean?
@@ -564,6 +603,14 @@ class Type
     Void:      "void",
     Bool:      "bool",
     Byte:      "u8",
+    Int8:      "i8",
+    Int16:     "i16",
+    Int32:     "i32",
+    UInt8:     "u8",
+    UInt16:    "u16",
+    UInt32:    "u32",
+    UInt64:    "u64",
+    Float32:   "f32",
     Any:       "f64",
     Range:     "CheatLib.Range",
     File:      "std.fs.File",

@@ -2107,6 +2107,16 @@ private
         end
       when :INT64
         node.value.to_s
+      when :INT8    then "@as(i8, #{node.value})"
+      when :INT16   then "@as(i16, #{node.value})"
+      when :INT32   then "@as(i32, #{node.value})"
+      when :UINT16  then "@as(u16, #{node.value})"
+      when :UINT32  then "@as(u32, #{node.value})"
+      when :UINT64  then "@as(u64, #{node.value})"
+      when :FLOAT32
+        s = node.value.to_s
+        s = "#{s}.0" if node.value == node.value.to_i && !s.include?('.')
+        "@as(f32, #{s})"
       when :BOOLEAN
         node.value.to_s      # "true"/"false" is fine
       when :NIL
