@@ -10,8 +10,8 @@
 --   2. Skewed:      1% of requests do 1000x more work
 --   3. Adversarial: one connection does all heavy work
 
-EXTERN FN sha256Once(data: String) RETURNS !String EFFECTS :safe, :alloc:heap FROM "sha_native";
-EXTERN FN toHex(data: String) RETURNS !String EFFECTS :safe, :alloc:heap FROM "sha_native";
+EXTERN FN sha256Once(data: String) RETURNS !String EFFECTS :alloc:heap FROM "sha_native";
+EXTERN FN toHex(data: String) RETURNS !String EFFECTS :alloc:heap FROM "sha_native";
 
 FN hashN(seed: String, n: Int64) RETURNS String ->
     MUTABLE result = sha256Once(seed) OR RAISE;
@@ -76,7 +76,7 @@ FN main() RETURNS Void ->
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
-        tasks.append(BG {
+        tasks.append(BG { @large ->
             handleClient!(client);
         });
     END
