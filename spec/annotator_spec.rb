@@ -3371,7 +3371,7 @@ RSpec.describe SemanticAnnotator do
           RETURN sum;
         END
       CLEAR
-      expect(zig).to include("sum = (sum + i)")
+      expect(zig).to include("sum = CheatLib.intAdd(sum, i)")
     end
 
     it "iterates over a fixed array" do

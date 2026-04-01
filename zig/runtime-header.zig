@@ -695,6 +695,47 @@ pub const CheatLib = struct {
     // Clock & Timing
     // -----------------------------------------------------------------
 
+    // Integer arithmetic: checked in debug/safe (panics on overflow),
+    // wrapping in release (matches Rust semantics). This ensures hash
+    // functions, RNGs, and checksums work correctly in production while
+    // catching accidental overflow bugs during development.
+    fn IntResult(comptime A: type, comptime B: type) type {
+        // When mixing comptime_int with a fixed-width int, use the fixed-width type.
+        if (A == comptime_int) return B;
+        return A;
+    }
+
+    pub inline fn intAdd(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        const av: R = a;
+        const bv: R = b;
+        if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) {
+            return av + bv;
+        } else {
+            return av +% bv;
+        }
+    }
+    pub inline fn intSub(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        const av: R = a;
+        const bv: R = b;
+        if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) {
+            return av - bv;
+        } else {
+            return av -% bv;
+        }
+    }
+    pub inline fn intMul(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        const av: R = a;
+        const bv: R = b;
+        if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) {
+            return av * bv;
+        } else {
+            return av *% bv;
+        }
+    }
+
     /// Wall clock milliseconds since Unix epoch.
     pub fn timestampMs() i64 {
         return std.time.milliTimestamp();
@@ -771,6 +812,49 @@ pub const CheatLib = struct {
         std.crypto.random.bytes(&bytes);
         const val = std.mem.readInt(u64, &bytes, .little);
         return @intCast(val % umax);
+    }
+
+    /// Format an integer into a caller-provided buffer. Returns the slice written.
+    /// Zero-allocation — use for transient string interpolation (map keys, comparisons).
+    pub fn fmtInt(buf: []u8, value: i64) []const u8 {
+        var tmp: [21]u8 = undefined;
+        var slen: usize = 0;
+        var v: u64 = if (value < 0) @intCast(-value) else @intCast(value);
+        if (v == 0) {
+            tmp[0] = '0';
+            slen = 1;
+        } else {
+            while (v > 0) : (slen += 1) {
+                tmp[slen] = @intCast('0' + (v % 10));
+                v /= 10;
+            }
+            if (value < 0) {
+                tmp[slen] = '-';
+                slen += 1;
+            }
+            var lo: usize = 0;
+            var hi: usize = slen - 1;
+            while (lo < hi) {
+                const t = tmp[lo];
+                tmp[lo] = tmp[hi];
+                tmp[hi] = t;
+                lo += 1;
+                hi -= 1;
+            }
+        }
+        @memcpy(buf[0..slen], tmp[0..slen]);
+        return buf[0..slen];
+    }
+
+    /// Concatenate slices into a caller-provided buffer. Returns the slice written.
+    /// Zero-allocation — use for transient string building (map keys, comparisons).
+    pub fn bufConcat(buf: []u8, parts: anytype) []const u8 {
+        var pos: usize = 0;
+        inline for (parts) |part| {
+            @memcpy(buf[pos..][0..part.len], part);
+            pos += part.len;
+        }
+        return buf[0..pos];
     }
 
     pub fn intToString(allocator: std.mem.Allocator, value: i64) ![]const u8 {
@@ -2861,6 +2945,9 @@ pub const CheatLib = struct {
         };
     }
 
+    // MutexShardedStringMap: report contention stats to stderr on deinit.
+    // This is temporary instrumentation for performance debugging.
+
     // MutexShardedStringMap(V, N) — Mutex-sharded string hash map.
     // Like ShardedStringMap but uses Mutex (exclusive) instead of RwLock.
     // Simpler locking, lower per-op overhead, but readers block each other.
@@ -2874,6 +2961,8 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.Mutex = .{},
+                contention_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+                lock_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -2883,11 +2972,66 @@ pub const CheatLib = struct {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
+            inline fn instrumentedLock(shard: *Shard) void {
+                _ = shard.lock_count.fetchAdd(1, .monotonic);
+                if (!shard.lock.tryLock()) {
+                    _ = shard.contention_count.fetchAdd(1, .monotonic);
+                    shard.lock.lock();
+                }
+            }
+
+            pub fn getContentionStats(self: *Self) struct { total_locks: u64, total_contentions: u64, hot_shard_locks: u64, hot_shard_contentions: u64, hot_shard_idx: usize } {
+                var total_locks: u64 = 0;
+                var total_contentions: u64 = 0;
+                var hot_shard_locks: u64 = 0;
+                var hot_shard_contentions: u64 = 0;
+                var hot_shard_idx: usize = 0;
+                for (&self.shards, 0..) |*shard, i| {
+                    const lc = shard.lock_count.load(.monotonic);
+                    const cc = shard.contention_count.load(.monotonic);
+                    total_locks += lc;
+                    total_contentions += cc;
+                    if (lc > hot_shard_locks) {
+                        hot_shard_locks = lc;
+                        hot_shard_contentions = cc;
+                        hot_shard_idx = i;
+                    }
+                }
+                return .{ .total_locks = total_locks, .total_contentions = total_contentions, .hot_shard_locks = hot_shard_locks, .hot_shard_contentions = hot_shard_contentions, .hot_shard_idx = hot_shard_idx };
+            }
+
+            pub fn printShardDistribution(self: *Self) void {
+                // Print top 5 shards by lock count
+                var top_idx: [5]usize = .{0} ** 5;
+                var top_cnt: [5]u64 = .{0} ** 5;
+                for (&self.shards, 0..) |*shard, i| {
+                    const lc = shard.lock_count.load(.monotonic);
+                    for (0..5) |j| {
+                        if (lc > top_cnt[j]) {
+                            // Shift down
+                            var k: usize = 4;
+                            while (k > j) : (k -= 1) {
+                                top_idx[k] = top_idx[k - 1];
+                                top_cnt[k] = top_cnt[k - 1];
+                            }
+                            top_idx[j] = i;
+                            top_cnt[j] = lc;
+                            break;
+                        }
+                    }
+                }
+                std.debug.print("[top shards] ", .{});
+                for (0..5) |j| {
+                    if (top_cnt[j] > 0) std.debug.print("[{d}]={d} ", .{ top_idx[j], top_cnt[j] });
+                }
+                std.debug.print("\n", .{});
+            }
+
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 _ = key_alloc;
                 _ = bucket_alloc;
                 const s = shardIndex(key);
-                self.shards[s].lock.lock();
+                instrumentedLock(&self.shards[s]);
                 defer self.shards[s].lock.unlock();
                 // Update in-place if key exists (avoids key re-dupe and leak).
                 if (self.shards[s].map.getPtr(key)) |val_ptr| {
@@ -2900,7 +3044,7 @@ pub const CheatLib = struct {
 
             pub fn get(self: *Self, key: []const u8) ?V {
                 const s = shardIndex(key);
-                self.shards[s].lock.lock();
+                instrumentedLock(&self.shards[s]);
                 defer self.shards[s].lock.unlock();
                 return self.shards[s].map.get(key);
             }
@@ -2957,6 +3101,18 @@ pub const CheatLib = struct {
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
                 _ = key_alloc;
                 _ = bucket_alloc;
+                // Report contention stats
+                const stats = self.getContentionStats();
+                if (stats.total_locks > 0) {
+                    const pct = if (stats.total_locks > 0) (stats.total_contentions * 100) / stats.total_locks else 0;
+                    const hot_pct = if (stats.hot_shard_locks > 0) (stats.hot_shard_contentions * 100) / stats.hot_shard_locks else 0;
+                    std.debug.print("[contention] locks={d} contentions={d} ({d}%) hot_shard[{d}]: locks={d} contentions={d} ({d}%)\n", .{
+                        stats.total_locks, stats.total_contentions, pct,
+                        stats.hot_shard_idx,
+                        stats.hot_shard_locks, stats.hot_shard_contentions, hot_pct,
+                    });
+                    self.printShardDistribution();
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
                     while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
