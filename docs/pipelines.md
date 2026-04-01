@@ -2,8 +2,7 @@
 
 CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`s>`). Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, and `@pool:soa` — the same syntax regardless of the underlying storage.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 scores s> WHERE _ > 50 s> SUM _;
 entities s> EACH { _.health = _.health - 1.0; };
 users s> SELECT _.name s> DISTINCT _;
@@ -13,8 +12,7 @@ users s> SELECT _.name s> DISTINCT _;
 
 `s>` pipes a value into a function or operator. It's CLEAR's equivalent of `|>` (Elixir) or `.` method chaining (Ruby), but it also works with collection operators.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Pipe to a function: x s> f  →  f(x)
 result = data s> process s> validate s> format;
 
@@ -27,7 +25,8 @@ Pipelines chain left to right. Each stage passes its result to the next.
 ## The `_` Variable
 
 Inside pipeline expressions, `_` refers to the current element. For struct elements, access fields with `_.fieldname`:
-```clear
+
+```ruby clear
 -- _ is the element itself (for scalar collections)
 nums: Float64[] = [1.0, 3.0, 7.0, 9.0];
 big = nums s> WHERE _ > 5.0;
@@ -44,8 +43,7 @@ ASSERT total == 30.0, "SUM aggregates field values";
 
 In EACH blocks, `_` is mutable — you can assign to fields:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 pool s> EACH { _.health = _.health - damage; };
 ```
 
@@ -76,7 +74,7 @@ pool s> EACH { _.health = _.health - damage; };
 
 Aggregate expressions must be numeric (Number or Int64). REDUCE is the general fold — `acc` is the mutable accumulator, `_` is the current element:
 
-```clear
+```ruby clear
 nums: Float64[] = [2.0, 3.0, 4.0];
 product = nums s> REDUCE(1.0) acc * _;
 ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
@@ -100,8 +98,7 @@ ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
 ```
 
@@ -109,9 +106,7 @@ entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
 
 TAP runs a body for each element but passes the collection through unchanged. Unlike EACH, `_` is read-only and TAP returns the original collection:
 
-```clear
--- ILLUSTRATIVE
--- Debug: inspect filtered values before summing
+```ruby clear illustrative
 result = scores
     s> WHERE _.points > 100
     s> TAP { print("score: ${_.points.toString()}"); }
@@ -122,8 +117,7 @@ result = scores
 
 SKIP and LIMIT are complementary: SKIP drops the first N elements, LIMIT takes the first N.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Pagination: page 3, 10 items per page
 page = items s> SKIP 20_i64 s> LIMIT 10_i64;
 
@@ -135,8 +129,7 @@ data = rows s> SKIP 1_i64 s> SELECT parseRow(_);
 
 Operators compose naturally:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Filter, sort, take top 3
 leaderboard = scores
     s> WHERE _.points > 100
@@ -153,8 +146,7 @@ n = users
 
 Every operator works on every collection type:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Array
 nums: Float64[] = [1, 2, 3];
 total = nums s> SUM _;
@@ -184,8 +176,7 @@ sharded s> EACH { _.processed = TRUE; };
 
 The compiler automatically fuses chains of WHERE and SELECT stages ending in a fold (SUM, REDUCE, AVERAGE, MIN, MAX, COUNT, ANY, ALL, FIND) into a single loop with zero intermediate allocations.
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Written as 3 stages:
 result = data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
 
@@ -199,7 +190,7 @@ This eliminates the allocation and iteration overhead of intermediate lists. Sta
 
 When a `@pool:soa` is used in a pipeline, the compiler rewrites field accesses to iterate directly over contiguous field arrays instead of striding over whole structs. This happens automatically for all operators — no syntax change needed.
 
-```clear
+```ruby clear
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 MUTABLE pool: Entity[10000]@pool:soa = [];
 
@@ -221,8 +212,7 @@ NOTE: Pipeline accesses 1 of 5 fields (health). Consider @soa
 
 The `CONCURRENT` modifier parallelizes SELECT, WHERE, and EACH across shards:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 MUTABLE data: Score[10000]@pool:sharded(4) = [];
 
 -- Parallel WHERE: one fiber per shard
