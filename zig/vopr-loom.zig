@@ -402,7 +402,9 @@ fn scenarioPinnedSteal(h: *LoomHarness) !void {
     try h.run();
     try checkPinnedNotStolen(h);
     try checkNoDuplicates(h);
-    const total = countResults(h);
+    // Conservation: 2 tasks pushed. Results + remaining queue must == 2.
+    const total = countResults(h) + h.queue.len();
+    if (total < 2) return LoomError.TaskLost;
     if (total > 2) return LoomError.TaskDuplicated;
 }
 
@@ -416,7 +418,9 @@ fn scenarioMultiThief(h: *LoomHarness) !void {
     try h.createThread(2, @intFromPtr(&entryThiefDoubleSteal2));
     try h.run();
     try checkNoDuplicates(h);
-    if (countResults(h) > 4) return LoomError.TaskDuplicated;
+    const total = countResults(h) + h.queue.len();
+    if (total < 4) return LoomError.TaskLost;
+    if (total > 4) return LoomError.TaskDuplicated;
 }
 
 fn scenarioPushDuringSteal(h: *LoomHarness) !void {
@@ -426,7 +430,9 @@ fn scenarioPushDuringSteal(h: *LoomHarness) !void {
     try h.createThread(1, @intFromPtr(&entryThiefSteal));
     try h.run();
     try checkNoDuplicates(h);
-    if (countResults(h) > 2) return LoomError.TaskDuplicated;
+    const total = countResults(h) + h.queue.len();
+    if (total < 2) return LoomError.TaskLost;
+    if (total > 2) return LoomError.TaskDuplicated;
 }
 
 // -----------------------------------------------------------------------
