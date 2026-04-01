@@ -698,10 +698,16 @@ pub const Scheduler = struct {
                         self.drainCqes();
                     }
                     else {
-                        // It's a standard IO Task Wakeup
+                        // It's a standard IO Task Wakeup.
+                        // Guard: skip if task is already Ready (e.g. from coopYield
+                        // in socketRead). Double-push causes use-after-free when
+                        // the first pop frees the task and the second pop reads
+                        // stale memory.
                         const task = @as(*Task, @ptrFromInt(data_ptr));
-                        task.status = .Ready;
-                        self.ready_queue.push(self.allocator, task) catch unreachable;
+                        if (task.status != .Ready) {
+                            task.status = .Ready;
+                            self.ready_queue.push(self.allocator, task) catch unreachable;
+                        }
                     }
                 }
             }
@@ -795,8 +801,10 @@ pub const Scheduler = struct {
                     self.drainCqes();
                 } else {
                     const task: *Task = @ptrFromInt(data_ptr);
-                    task.status = .Ready;
-                    self.ready_queue.push(self.allocator, task) catch unreachable;
+                    if (task.status != .Ready) {
+                        task.status = .Ready;
+                        self.ready_queue.push(self.allocator, task) catch unreachable;
+                    }
                 }
             }
         }
