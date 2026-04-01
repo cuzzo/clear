@@ -2,8 +2,8 @@
 --
 -- Models 1 publisher broadcasting 100K messages to 64 subscribers.
 -- Each subscriber processes every message with CPU-bound work
--- (200 LCG iterations per message).
--- Total work: 100K * 64 * 200 = 1.28 billion LCG iterations.
+-- (2000 LCG iterations per message).
+-- Total work: 100K * 64 * 2000 = 12.8 billion LCG iterations.
 --
 -- CLEAR approach: each subscriber is a BG fiber that processes
 -- the message range using CONCURRENT(workers: 8, parallel: TRUE).
@@ -19,7 +19,7 @@ STRUCT Msg { seed: Int64 }
 
 FN processMessage(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
-    FOR i IN (0_i64 ..< 200) -> x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
+    FOR i IN (0_i64 ..< 2000) -> x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
     RETURN x;
 END
 
@@ -28,7 +28,7 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
     MUTABLE msgs: Msg[] = [];
     FOR i IN (0_i64 ..< n) -> msgs.append(Msg{ seed: i });
     -- Process all messages with parallel workers
-    results = msgs s> CONCURRENT(workers: 8, parallel: TRUE) SELECT processMessage(_.seed);
+    results = msgs s> CONCURRENT(workers: 32, parallel: TRUE) SELECT processMessage(_.seed);
     -- Manual sum (SUM _ returns Float64, we need Int64)
     MUTABLE total: Int64 = 0;
     FOR j IN (0_i64 ..< results.length()) -> total += results[j];

@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 
 const N_MESSAGES: u64 = 100_000;
 const N_SUBSCRIBERS: usize = 64;
-const WORK_PER_MSG: usize = 200;
+const WORK_PER_MSG: usize = 2_000;
 const CHAN_BUF: usize = 256;
 
 fn process_message(seed: u64) -> u64 {

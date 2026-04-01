@@ -23,7 +23,7 @@ import (
 const (
 	nMessages    = 100_000
 	nSubscribers = 64
-	workPerMsg   = 200 // LCG iterations per message per subscriber
+	workPerMsg   = 2_000 // LCG iterations per message per subscriber
 	chanBuf      = 256
 )
 
