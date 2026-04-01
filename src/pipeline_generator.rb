@@ -39,6 +39,8 @@ module PipelineGenerator
   end
 
   # Generate a single fused loop for a fusible chain.
+  # Processes stages in order (not split into guards/transforms), threading
+  # the current variable name through each stage.
   def transpile_fused_pipeline(chain)
     source = chain[:source]
     stages = chain[:stages]
@@ -53,50 +55,39 @@ module PipelineGenerator
     alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
     items_block = build_pipe_items_block(lhs_type, alloc)
 
-    # Build the WHERE guards and SELECT transforms
-    guards = []
-    transforms = []
-    stages.each do |stage|
-      if stage.is_a?(AST::WhereOp)
-        expr = visit_pipeline_expr(source, stage.expression)
-        guards << expr
-      elsif stage.is_a?(AST::SelectOp)
-        expr = visit_pipeline_expr(source, stage.expression)
-        transforms << expr
-      end
-    end
-
-    # Build the fold body
-    fold_body = build_fold_body(terminal, source, smooth_node, has_transform: transforms.any?)
-
-    # Assemble the fused loop
+    # Process stages sequentially, tracking the current value binding.
+    # WHERE: emits an if-guard (opens a block), current binding unchanged.
+    # SELECT: emits a const binding with a new name, updates current binding.
     indent = "    "
     lines = []
     lines << "for (pipe_items) |it| {"
+    current_var = "it"
+    where_depth = 0
+    select_counter = 0
 
-    # Open WHERE guards
-    guards.each do |g|
-      lines << "#{indent}if (#{g}) {"
-      indent += "    "
-    end
-
-    # Apply SELECT transforms (chain them: each uses the previous result)
-    if transforms.any?
-      transforms.each_with_index do |t, i|
-        if i == 0
-          lines << "#{indent}const __fused = #{t};"
-        else
-          # Subsequent transforms operate on previous result
-          lines << "#{indent}const __fused#{i} = #{t.gsub('it', "__fused#{i > 1 ? i - 1 : ''}")};"
-        end
+    stages.each do |stage|
+      if stage.is_a?(AST::WhereOp)
+        expr = with_pipeline_context(placeholder: current_var) { visit(stage.expression) }
+        lines << "#{indent}if (#{expr}) {"
+        indent += "    "
+        where_depth += 1
+      elsif stage.is_a?(AST::SelectOp)
+        expr = with_pipeline_context(placeholder: current_var) { visit(stage.expression) }
+        new_var = "__fused#{select_counter > 0 ? select_counter : ''}"
+        select_counter += 1
+        lines << "#{indent}const #{new_var} = #{expr};"
+        current_var = new_var
       end
     end
+
+    # Build fold body using current_var as the element reference
+    fold_body = build_fold_body(terminal, source, smooth_node, current_var: current_var)
 
     # Fold accumulation
     fold_body[:accum_lines].each { |l| lines << "#{indent}#{l}" }
 
     # Close WHERE guards
-    guards.each { indent = indent[0...-4]; lines << "#{indent}}" }
+    where_depth.times { indent = indent[0...-4]; lines << "#{indent}}" }
 
     lines << "}"
     lines << "break :#{my_label} #{fold_body[:result_expr]};"
@@ -115,43 +106,36 @@ module PipelineGenerator
   end
 
   # Build the fold-specific initialization, accumulation, and result expression.
-  def build_fold_body(terminal, source, smooth_node, has_transform: false)
-    # The fold's expression may reference `it` — if a SELECT preceded it,
-    # `it` should refer to the transformed value (__fused).
-    val_ref = has_transform ? "__fused" : "it"
-
+  # current_var is the Zig variable name holding the element at this point in the
+  # pipeline (either "it" for no transforms, or "__fused"/"__fused1" after SELECTs).
+  def build_fold_body(terminal, source, smooth_node, current_var: "it")
     case terminal
     when AST::SumOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_sum: f64 = 0;",
         accum_lines: ["__fused_sum += #{expr};"],
         result_expr: "__fused_sum" }
 
     when AST::AverageOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_sum: f64 = 0;\n          var __fused_count: usize = 0;",
         accum_lines: ["__fused_sum += #{expr};", "__fused_count += 1;"],
         result_expr: "if (__fused_count == 0) @as(f64, 0) else __fused_sum / @as(f64, @floatFromInt(__fused_count))" }
 
     when AST::MinOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_min: f64 = std.math.floatMax(f64);",
         accum_lines: ["const __fv = #{expr};", "if (__fv < __fused_min) __fused_min = __fv;"],
         result_expr: "__fused_min" }
 
     when AST::MaxOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_max: f64 = -std.math.floatMax(f64);",
         accum_lines: ["const __fv = #{expr};", "if (__fv > __fused_max) __fused_max = __fv;"],
         result_expr: "__fused_max" }
 
     when AST::CountOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_count: i64 = 0;",
         accum_lines: ["if (#{expr}) __fused_count += 1;"],
         result_expr: "__fused_count" }
@@ -159,31 +143,29 @@ module PipelineGenerator
     when AST::ReduceOp
       acc_type = transpile_type(terminal.full_type)
       initial_code = visit(terminal.initial_value)
-      expr = with_pipeline_context(placeholder: val_ref, acc: "acc") { visit(terminal.expression) }
+      expr = with_pipeline_context(placeholder: current_var, acc: "acc") { visit(terminal.expression) }
       { init: "var acc: #{acc_type} = #{initial_code};",
         accum_lines: ["acc = #{expr};"],
         result_expr: "acc" }
 
     when AST::AnyOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_any: bool = false;",
         accum_lines: ["if (#{expr}) { __fused_any = true; break; }"],
         result_expr: "__fused_any" }
 
     when AST::AllOp
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
       { init: "var __fused_all: bool = true;",
         accum_lines: ["if (!(#{expr})) { __fused_all = false; break; }"],
         result_expr: "__fused_all" }
 
     when AST::FindOp
-      elem_zig = transpile_type(source.type_info.element_type.resolved.to_s)
-      expr = visit_pipeline_expr(source, terminal.expression)
-      expr = expr.gsub(/\bit\b/, val_ref) if has_transform
-      { init: "var __fused_find: ?#{elem_zig} = null;",
-        accum_lines: ["if (#{expr}) { __fused_find = #{val_ref}; break; }"],
+      # Use current_var's type (post-transform), not source element type
+      find_zig = current_var == "it" ? transpile_type(source.type_info.element_type.resolved.to_s) : "@TypeOf(#{current_var})"
+      expr = with_pipeline_context(placeholder: current_var) { visit(terminal.expression) }
+      { init: "var __fused_find: ?#{find_zig} = null;",
+        accum_lines: ["if (#{expr}) { __fused_find = #{current_var}; break; }"],
         result_expr: "__fused_find" }
 
     else

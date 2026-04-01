@@ -61,6 +61,29 @@ FN test_where_count() RETURNS Void ->
     RETURN;
 END
 
+FN test_select_then_where() RETURNS Void ->
+    -- Regression: SELECT before WHERE must apply in order.
+    -- SELECT doubles first, then WHERE filters the doubled values.
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    -- data = [1,2,3,4,5] -> SELECT *2 -> [2,4,6,8,10] -> WHERE >5 -> [6,8,10] -> SUM = 24
+    result = data s> SELECT _ * 2.0 s> WHERE _ > 5.0 s> SUM _;
+    ASSERT result == 24.0, "SELECT then WHERE ordering";
+    RETURN;
+END
+
+FN test_chained_selects() RETURNS Void ->
+    -- Regression: multiple SELECTs must chain correctly.
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i + 1_i64));
+
+    -- data = [1,2,3] -> SELECT +10 -> [11,12,13] -> SELECT *2 -> [22,24,26] -> SUM = 72
+    result = data s> SELECT _ + 10.0 s> SELECT _ * 2.0 s> SUM _;
+    ASSERT result == 72.0, "chained SELECTs";
+    RETURN;
+END
+
 FN test_single_stage_unfused() RETURNS Void ->
     -- Single-stage pipelines should NOT attempt fusion
     MUTABLE data: Float64[]@list = [];
@@ -78,6 +101,8 @@ FN main() RETURNS Void ->
     test_where_select_reduce();
     test_where_min_max();
     test_where_count();
+    test_select_then_where();
+    test_chained_selects();
     test_single_stage_unfused();
     RETURN;
 END
