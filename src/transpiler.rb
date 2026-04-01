@@ -766,6 +766,11 @@ private
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
 
+      # T[N]@list: expand len to capacity so indexed writes (arr[i] = val) work.
+      if node.full_type&.list_collection? && node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
+        decl += "\n#{safe_name}.expandToCapacity();"
+      end
+
       # 2. Cleanup & Move Suppression (must be computed before suppression decision)
       affine_logic = emit_cleanup(safe_name, node)
       move_source_logic = emit_move_suppression(rhs_ident)
