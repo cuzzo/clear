@@ -33,7 +33,7 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE total: Float64 = 0.0;
     FOR outer IN (0_i64 ..< 1000) DO
-        MUTABLE vals: Float64[]@list = [];
+        MUTABLE vals: Float64[1000]@list = [];
         FOR inner IN (0_i64 ..< 1000) -> vals.append(inner + 0.0);
         s = vals s> SUM _;
         total = total + s;

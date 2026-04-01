@@ -71,11 +71,16 @@ module ZigTypeMapper
       return "@as(#{zig_to}, @floatCast(#{code}))"
     end
 
-    # E. Array coercion (e.g. Any[] -> Int64[])
-    #    ArrayList types are already correctly typed by makeList, no cast needed
+    # E. Array coercion (e.g. Any[] -> Int64[], or Int64[1000] -> Int64[])
+    #    ArrayList types are already correctly typed by makeList, no cast needed.
+    #    @list with capacity (T[N]@list) is the same Zig type as T[]@list — skip cast.
     from_str = from.to_s
     to_str = to.to_s
     if from_str.end_with?("[]") && to_str.end_with?("[]")
+      return code
+    end
+    # @list with capacity: T[N] -> Any[] is the same Zig ArrayList, no cast needed.
+    if from_str =~ /\[\d+\]$/ && to_str == "Any[]"
       return code
     end
 

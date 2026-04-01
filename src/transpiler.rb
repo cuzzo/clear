@@ -739,6 +739,11 @@ private
         rhs = @current_rhs_is_move ? node.value.value : node.value
         if rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)
           visit(node.value)
+        elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
+          # T[N]@list: pre-allocate N slots to avoid realloc during append.
+          rt_name = @do_rt_name || "rt"
+          alloc = node.storage == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+          "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{node.full_type.capacity})"
         else
           "#{node.full_type.zig_type}{}"
         end
