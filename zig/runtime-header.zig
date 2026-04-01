@@ -1262,9 +1262,41 @@ pub const CheatLib = struct {
         const prev = arc.ctrl.strong.fetchSub(1, .release);
         if (prev == 1) {
             _ = arc.ctrl.strong.load(.acquire);
+            // Deinit inner data before freeing the pointer.
+            // RwLocked/Locked wrap types that may own heap memory (StringMap keys, etc.).
+            arcDeinitInner(T, arc.ctrl.alloc, arc.ctrl.data);
             arc.ctrl.alloc.destroy(arc.ctrl.data);
             if (arc.ctrl.weak.load(.acquire) == 0) {
                 arc.ctrl.alloc.destroy(arc.ctrl);
+            }
+        }
+    }
+
+    /// Recursively deinit inner data for Arc-wrapped types.
+    /// Handles RwLocked(StringMap), Locked(StringMap), and plain StringMap.
+    fn arcDeinitInner(comptime T: type, a: std.mem.Allocator, ptr: *T) void {
+        // RwLocked(U) or Locked(U): deinit the inner .data field
+        if (@hasField(T, "data") and @hasField(T, "lock")) {
+            const DataT = @TypeOf(ptr.data);
+            if (@hasDecl(DataT, "deinit")) {
+                // StringMap.deinit takes (key_alloc, bucket_alloc) but uses self.alloc internally
+                const deinit_fn = @typeInfo(@TypeOf(DataT.deinit)).@"fn";
+                if (deinit_fn.params.len == 3) {
+                    ptr.data.deinit(a, a);
+                } else if (deinit_fn.params.len == 2) {
+                    ptr.data.deinit(a);
+                } else {
+                    ptr.data.deinit();
+                }
+            }
+        } else if (@hasDecl(T, "deinit")) {
+            const deinit_fn = @typeInfo(@TypeOf(T.deinit)).@"fn";
+            if (deinit_fn.params.len == 3) {
+                ptr.deinit(a, a);
+            } else if (deinit_fn.params.len == 2) {
+                ptr.deinit(a);
+            } else {
+                ptr.deinit();
             }
         }
     }
