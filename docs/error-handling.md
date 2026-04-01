@@ -8,8 +8,7 @@ The most important thing to know: **the compiler handles error propagation for y
 
 This is CLEAR's most important error handling feature. Consider:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 FN compute(x: Float64) RETURNS !Float64 ->
     half = divide(x, 2.0);      -- if divide fails, compute fails too
     quarter = divide(half, 2.0); -- same here
@@ -30,12 +29,9 @@ The compiler computes `can_fail` for every function via a call-graph fixed-point
 
 A function that can fail declares its return type with the `!` prefix:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 FN divide(a: Float64, b: Float64) RETURNS !Float64 ->
-    IF b == 0.0 THEN
-        RAISE "Division by zero";
-    END
+    IF b == 0.0 -> RAISE "Division by zero";
     RETURN a / b;
 END
 ```
@@ -46,8 +42,7 @@ END
 
 `RAISE` signals an error from inside a function:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 RAISE "Out of bounds";
 ```
 
@@ -59,8 +54,7 @@ When you *do* want to handle an error (instead of letting it propagate), use `OR
 
 ### OR *value* — Provide a fallback
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 val = divide(10.0, 0.0) OR 0.0;
 -- val is guaranteed to be Float64 (0.0 if divide failed)
 ```
@@ -69,8 +63,7 @@ The most common pattern. If the left side fails, use the right side instead. The
 
 ### OR RAISE — Propagate explicitly
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 FN compute(x: Float64) RETURNS !Float64 ->
     half = divide(x, 2.0) OR RAISE;
     RETURN half * 2.0;
@@ -81,8 +74,7 @@ Identical to automatic propagation, but makes the error path visible in the sour
 
 ### OR PASS — Silence the error
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 val = risky_operation() OR PASS;
 ```
 
@@ -90,8 +82,7 @@ Ignores the error and uses an undefined/default value. **Use with extreme cautio
 
 ### OR PRUNE — Filter in concurrent pipelines
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 results = data s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
 ```
 
@@ -113,8 +104,7 @@ Specific to `CONCURRENT` pipelines. If an item causes an error, it is dropped fr
 
 When a BG fiber fails, the error is captured in the promise. It surfaces when you `NEXT` the promise:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 p = BG { divide(10.0, 0.0); };
 result = NEXT p OR 0.0;  -- handle the error from the fiber
 ```
@@ -127,8 +117,7 @@ DO blocks wait for all branches. If any branch fails, the error propagates after
 
 CONCURRENT pipelines support two error strategies:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Strategy 1: Fail the whole pipeline on first error
 results = items s> CONCURRENT(workers: 4) SELECT process(_) OR RAISE;
 
