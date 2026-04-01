@@ -1079,10 +1079,18 @@ pub const CheatLib = struct {
     // scheduler get a turn. Without this, a single client with pipelined
     // data can monopolize the scheduler indefinitely.
     // Usage: data = tcpRead(client)
+    // Yields after successful read for I/O fairness among concurrent client fibers.
     pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
         var buf: [4096]u8 = undefined;
         const n = try CheatLib.read(fd, &buf);
-        return allocator.dupe(u8, buf[0..n]);
+        const result = try allocator.dupe(u8, buf[0..n]);
+        // Cooperative yield: if other fibers are Ready, give them a turn.
+        // This prevents a single client with pipelined data from monopolizing
+        // the scheduler across multiple read-process-write cycles.
+        if (fp.scheduler_running) {
+            fp.active_scheduler.coopYield();
+        }
+        return result;
     }
 
     // Write all bytes from `data` to a connected client socket, discarding the byte count.
