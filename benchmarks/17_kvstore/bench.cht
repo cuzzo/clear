@@ -169,11 +169,12 @@ FN main() RETURNS Void ->
     ASSERT zipf_hits > 0, "Zipf hits must be > 0";
     ASSERT mix_hits > 0, "Mixed hits must be > 0";
 
-    print("Keys: ${n.toString()} Workers: ${workers.toString()}");
-    print("  SET:   ${setMs.toString()} ms");
-    print("  GET:   ${getMs.toString()} ms  hits: ${total_hits.toString()}");
-    print("  Zipf:  ${zipfMs.toString()} ms  hits: ${zipf_hits.toString()}");
-    print("  Mixed: ${mixMs.toString()} ms  hits: ${mix_hits.toString()}");
-    print("VERIFIED: all workloads completed correctly");
+    print("Keys: ${n.toString()}");
+    print("Workers: ${workers.toString()}");
+    print("Set: ${setMs.toString()} ms");
+    print("Get: ${getMs.toString()} ms");
+    print("Zipf: ${zipfMs.toString()} ms");
+    print("Mixed: ${mixMs.toString()} ms");
+    print("Verified: yes");
     RETURN;
 END

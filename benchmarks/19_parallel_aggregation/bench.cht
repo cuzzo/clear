@@ -55,9 +55,13 @@ FN main() RETURNS Void ->
 
     ASSERT total == toFloat(n), "total mismatch";
 
-    print("Events: ${n.toString()} Buckets: ${buckets.toString()}");
-    print("  SHARD histogram: ${shardMs.toString()} ms");
-    print("  Aggregation:     ${statsMs.toString()} ms");
-    print("Total: ${total.toString()} Max: ${highest.toString()} Min: ${lowest.toString()} Avg: ${average.toString()}");
-    print("VERIFIED");
+    print("Events: ${n.toString()}");
+    print("Buckets: ${buckets.toString()}");
+    print("Shard histogram: ${shardMs.toString()} ms");
+    print("Aggregation: ${statsMs.toString()} ms");
+    print("Total: ${total.toString()}");
+    print("Max: ${highest.toString()}");
+    print("Min: ${lowest.toString()}");
+    print("Avg: ${average.toString()}");
+    print("Verified: yes");
 END

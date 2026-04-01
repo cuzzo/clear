@@ -42,8 +42,12 @@ fn main() {
     assert!(lowest > 0.0);
     assert!(average > 0.0);
 
-    println!("Events: {} Buckets: {}", n, buckets);
-    println!("Total: {} Max: {} Min: {} Avg: {}", total, highest, lowest, average);
-    println!("VERIFIED");
+    println!("Events: {}", n);
+    println!("Buckets: {}", buckets);
+    println!("Total: {}", total);
+    println!("Max: {}", highest);
+    println!("Min: {}", lowest);
+    println!("Avg: {}", average);
+    println!("Verified: yes");
     println!("Time: {:.4} s", elapsed.as_secs_f64());
 }

@@ -153,12 +153,11 @@ fn main() {
     for h in handles { h.join().unwrap(); }
     let mixed_time = t0.elapsed().as_secs_f64();
 
-    println!("Workload 1: Uniform SET ({} ops)", NUM_KEYS);
-    println!("  Time: {:.4} s  Throughput: {:.0} ops/sec\n", set_time, NUM_KEYS as f64 / set_time);
-    println!("Workload 2: Uniform GET ({} ops)", NUM_KEYS);
-    println!("  Time: {:.4} s  Throughput: {:.0} ops/sec\n", get_uniform_time, NUM_KEYS as f64 / get_uniform_time);
-    println!("Workload 3: Zipfian GET ({} ops, skew={:.1})", NUM_KEYS, ZIPF_SKEW);
-    println!("  Time: {:.4} s  Throughput: {:.0} ops/sec\n", get_zipf_time, NUM_KEYS as f64 / get_zipf_time);
-    println!("Workload 4: Mixed 80/20 ({} ops, Zipfian)", NUM_KEYS);
-    println!("  Time: {:.4} s  Throughput: {:.0} ops/sec", mixed_time, NUM_KEYS as f64 / mixed_time);
+    println!("Keys: {}", NUM_KEYS);
+    println!("Workers: {}", NUM_WORKERS);
+    println!("Set: {:.4} s", set_time);
+    println!("Get: {:.4} s", get_uniform_time);
+    println!("Zipf: {:.4} s", get_zipf_time);
+    println!("Mixed: {:.4} s", mixed_time);
+    println!("Verified: yes");
 }

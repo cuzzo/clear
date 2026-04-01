@@ -60,8 +60,12 @@ func main() {
 		panic("total mismatch")
 	}
 
-	fmt.Printf("Events: %d Buckets: %d\n", n, buckets)
-	fmt.Printf("Total: %.0f Max: %.0f Min: %.0f Avg: %.0f\n", total, highest, lowest, average)
-	fmt.Println("VERIFIED")
+	fmt.Printf("Events: %d\n", n)
+	fmt.Printf("Buckets: %d\n", buckets)
+	fmt.Printf("Total: %.0f\n", total)
+	fmt.Printf("Max: %.0f\n", highest)
+	fmt.Printf("Min: %.0f\n", lowest)
+	fmt.Printf("Avg: %.0f\n", average)
+	fmt.Println("Verified: yes")
 	fmt.Printf("Time: %.4f s\n", elapsed.Seconds())
 }
