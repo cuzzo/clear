@@ -1050,7 +1050,7 @@ RSpec.describe SemanticAnnotator do
       expect(out).not_to include("Semaphore")
     end
 
-    it "CONCURRENT SELECT uses default 8 workers when omitted" do
+    it "CONCURRENT SELECT uses threadCount as default workers when omitted" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
           items: Number[] = [1.0, 2.0];
@@ -1058,7 +1058,7 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("@intCast(8)")
+      expect(out).to include("@intCast(CheatLib.threadCount())")
     end
 
     it "CONCURRENT SELECT fn OR PRUNE — expression type is unwrapped T (not !T)" do

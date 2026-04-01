@@ -993,7 +993,7 @@ module PipelineGenerator
     id = @conc_counter
     @conc_counter += 1
 
-    workers_code = options["workers"] ? visit(options["workers"]) : "8"
+    workers_code = options["workers"] ? visit(options["workers"]) : "CheatLib.threadCount()"
     rt_name = @do_rt_name || "rt"
 
     case inner
