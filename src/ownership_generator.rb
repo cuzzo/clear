@@ -54,7 +54,14 @@ module OwnershipGenerator
     # String map: always use heapAlloc for deinit — matches put allocator.
     # Keys are duped via heapAlloc in put(); deinit must free with same allocator.
     # For frame-local maps, heapAlloc.free on frame pointers is a no-op (safe).
+    # Arc-wrapped maps use arcRelease instead of direct deinit.
     if type_info&.map? && !type_info&.numeric_map?
+      if type_info.shared?
+        inner_zig = type_info.sync == :write_locked ? "CheatLib.RwLocked(#{Type.new(type_info.resolved.to_s).zig_type})" :
+                    type_info.sync == :locked ? "CheatLib.Locked(#{Type.new(type_info.resolved.to_s).zig_type})" :
+                    Type.new(type_info.resolved.to_s).zig_type
+        return "defer CheatLib.arcRelease(#{inner_zig}, rt.heapAlloc(), #{name});\n"
+      end
       return "defer #{name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
     end
     # Numeric map: no key copies; bucket array in frameAlloc.

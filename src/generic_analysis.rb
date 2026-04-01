@@ -288,6 +288,10 @@ module GenericAnalysis
         node.type_info.sync = decl_t.sync
         node.full_type.sync = decl_t.sync if node.full_type.is_a?(Type)
       end
+      if decl_t.ownership != :affine && node.type_info
+        node.type_info.instance_variable_set(:@ownership, decl_t.ownership)
+        node.full_type.instance_variable_set(:@ownership, decl_t.ownership) if node.full_type.is_a?(Type)
+      end
     end
   end
 

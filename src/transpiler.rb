@@ -2673,20 +2673,46 @@ private
   def transpile_hash_lit(node)
     # Prefer coerced_type (the declared type) over the inferred HashMap<Any> from empty literals.
     # Use Type objects directly to preserve shard_count (not lost through to_s round-trip).
-    map_ft = if node.coerced_type && node.full_type.map? && node.full_type.value_type.resolved == :Any
-      node.coerced_type.is_a?(Type) ? node.coerced_type : Type.new(node.coerced_type)
+    # Use coerced_type_info (full Type with capabilities) instead of coerced_type (raw symbol).
+    coerced_ti = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : nil
+    map_ft = if coerced_ti && node.full_type.map? && node.full_type.value_type.resolved == :Any
+      coerced_ti
     else
       node.full_type.is_a?(Type) ? node.full_type : Type.new(node.full_type)
     end
     rt_name  = @do_rt_name || "rt"
+
+    # Build the bare inner map type (without Arc/RwLocked wrapping) for initialization.
+    bare_ft = Type.new(map_ft.resolved.to_s)
+    bare_ft.shard_count = map_ft.shard_count if map_ft.shard_count
+
     # StringMap, ShardedStringMap, MutexShardedStringMap store their allocator.
     # Numeric maps and PartitionedStringMap (shared-nothing) don't have alloc.
-    if map_ft.numeric_map? || (map_ft.sharded? && !map_ft.striped?)
-      zig_init = "#{map_ft.zig_type}{}"
-    elsif map_ft.striped?
-      zig_init = "#{map_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+    if bare_ft.numeric_map? || (bare_ft.sharded? && !bare_ft.striped?)
+      bare_init = "#{bare_ft.zig_type}{}"
+    elsif bare_ft.striped? || map_ft.shared? || map_ft.multiowned?
+      bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
     else
-      zig_init = "#{map_ft.zig_type}{ .alloc = #{rt_name}.frameAlloc() }"
+      bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.frameAlloc() }"
+    end
+
+    # Wrap with RwLocked/Locked and Arc/Rc if capabilities require it.
+    if map_ft.sync == :write_locked
+      bare_init = "CheatLib.RwLocked(#{bare_ft.zig_type}).init(#{bare_init})"
+    elsif map_ft.sync == :locked
+      bare_init = "CheatLib.Locked(#{bare_ft.zig_type}).init(#{bare_init})"
+    end
+
+    if map_ft.shared?
+      inner_zig = map_ft.sync == :write_locked ? "CheatLib.RwLocked(#{bare_ft.zig_type})" :
+                  map_ft.sync == :locked ? "CheatLib.Locked(#{bare_ft.zig_type})" : bare_ft.zig_type
+      zig_init = "try CheatLib.arcCreate(#{inner_zig}, #{rt_name}.heapAlloc(), #{bare_init})"
+    elsif map_ft.multiowned?
+      inner_zig = map_ft.sync == :write_locked ? "CheatLib.RwLocked(#{bare_ft.zig_type})" :
+                  map_ft.sync == :locked ? "CheatLib.Locked(#{bare_ft.zig_type})" : bare_ft.zig_type
+      zig_init = "try CheatLib.rcCreate(#{inner_zig}, #{rt_name}.heapAlloc(), #{bare_init})"
+    else
+      zig_init = bare_init
     end
 
     return zig_init if node.pairs.empty?

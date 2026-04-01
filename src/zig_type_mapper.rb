@@ -84,6 +84,12 @@ module ZigTypeMapper
       return code
     end
 
+    # E2. HashMap coercion (e.g. HashMap<Any> -> HashMap<String>)
+    #     Same Zig type (StringMap or NumericMap), no cast needed.
+    if from_str.start_with?("HashMap<") && to_str.start_with?("HashMap<")
+      return code
+    end
+
     # F. Error union coercion: T -> !T (Zig handles this automatically)
     if to_str.start_with?("!")
       payload_type = to_str[1..]
