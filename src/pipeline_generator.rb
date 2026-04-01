@@ -38,9 +38,45 @@ module PipelineGenerator
     { source: cursor, stages: stages, terminal: terminal, smooth_node: node }
   end
 
+  # Build direct iteration setup + loop header for fused pipelines.
+  # Avoids materializing into a temporary ArrayList (which would cause
+  # use-after-free for FIND/REDUCE that return references into the buffer).
+  def build_fused_iteration(lhs_type, source_var)
+    if lhs_type&.pool? && lhs_type&.sharded?
+      n = lhs_type.shard_count
+      { setup: "",
+        loop_open: "for (0..#{n}) |__psi| {\n            for (#{source_var}.shards[__psi].slots) |*__pslot| {\n                if (!__pslot.alive) continue;\n                const it = __pslot.value;",
+        loop_close: "}\n            }" }
+    elsif lhs_type&.pool? && lhs_type&.soa?
+      { setup: "",
+        loop_open: "for (0..@intCast(#{source_var}.data.len)) |__psi| {\n                if (!#{source_var}.alive[__psi]) continue;\n                const it = #{source_var}.data.get(__psi);",
+        loop_close: "}" }
+    elsif lhs_type&.pool?
+      { setup: "",
+        loop_open: "for (#{source_var}.slots) |*__pslot| {\n                if (!__pslot.alive) continue;\n                const it = __pslot.value;",
+        loop_close: "}" }
+    elsif lhs_type&.list_collection? && lhs_type&.sharded?
+      n = lhs_type.shard_count
+      { setup: "",
+        loop_open: "for (0..#{n}) |__psi| {\n            for (#{source_var}.shards[__psi].items) |it| {",
+        loop_close: "}\n            }" }
+    elsif lhs_type&.list_collection? && lhs_type&.soa?
+      { setup: "",
+        loop_open: "for (0..@intCast(#{source_var}.data.len)) |__psi| {\n                const it = #{source_var}.data.get(__psi);",
+        loop_close: "}" }
+    else
+      # Standard array/list: direct .items or slice
+      { setup: "const pipe_items = if (@hasField(@TypeOf(#{source_var}), \"items\")) #{source_var}.items else #{source_var}[0..];",
+        loop_open: "for (pipe_items) |it| {",
+        loop_close: "}" }
+    end
+  end
+
   # Generate a single fused loop for a fusible chain.
   # Processes stages in order (not split into guards/transforms), threading
   # the current variable name through each stage.
+  # Uses direct iteration (no temporary ArrayList) to avoid use-after-free
+  # when FIND/REDUCE return references from pool/sharded sources.
   def transpile_fused_pipeline(chain)
     source = chain[:source]
     stages = chain[:stages]
@@ -52,15 +88,14 @@ module PipelineGenerator
     @current_pipe_label = my_label
 
     lhs_type = source.type_info
-    alloc = smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
-    items_block = build_pipe_items_block(lhs_type, alloc)
+    iter = build_fused_iteration(lhs_type, "pipe_src_list")
 
     # Process stages sequentially, tracking the current value binding.
     # WHERE: emits an if-guard (opens a block), current binding unchanged.
     # SELECT: emits a const binding with a new name, updates current binding.
     indent = "    "
     lines = []
-    lines << "for (pipe_items) |it| {"
+    lines << iter[:loop_open]
     current_var = "it"
     where_depth = 0
     select_counter = 0
@@ -89,7 +124,7 @@ module PipelineGenerator
     # Close WHERE guards
     where_depth.times { indent = indent[0...-4]; lines << "#{indent}}" }
 
-    lines << "}"
+    lines << iter[:loop_close]
     lines << "break :#{my_label} #{fold_body[:result_expr]};"
 
     loop_code = lines.join("\n            ")
@@ -97,7 +132,7 @@ module PipelineGenerator
     <<~ZIG
       #{my_label}: {
           const pipe_src_list = #{source_code};
-          #{items_block}
+          #{iter[:setup]}
           #{fold_body[:init]}
 
           #{loop_code}
