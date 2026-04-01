@@ -598,3 +598,50 @@ See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages
 | `!T` | Error union type | `RETURNS !Float64` |
 | `?T` | Optional type | `RETURNS ?User` |
 | `~T` | Promise / stream type | `p: ~Int64 = BG { 42; }` |
+
+## Integer Overflow Operators
+
+CLEAR uses fixed-width integers (Int64, Int32, etc.) that can overflow. Three tiers of arithmetic operators control what happens on overflow:
+
+### Default: `+`, `-`, `*`
+
+Panics on overflow in **debug** builds, wraps silently in **release** builds. This matches Rust's semantics - catches accidental overflow during development, zero overhead in production.
+
+```
+a: Int64 = 9223372036854775807_i64;
+b = a + 1_i64;  -- debug: PANIC!  release: wraps to -9223372036854775808
+```
+
+### Wrapping: `%+`, `%-`, `%*`
+
+Always wraps on overflow in **all** build modes. Use for hash functions, random number generators, checksums, and any code that intentionally overflows.
+
+```
+-- LCG random number generator (intentional overflow)
+MUTABLE state: Int64 = seed;
+state = state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
+
+-- Max + 1 wraps to min
+max: Int64 = 9223372036854775807_i64;
+min = max %+ 1_i64;  -- always -9223372036854775808, never panics
+```
+
+### Checked: `!+`, `!-`, `!*`
+
+Always panics on overflow in **all** build modes, including release. Use for financial calculations, safety-critical code, and anywhere overflow indicates a logic error.
+
+```
+-- Financial calculation: overflow means a bug, even in production
+balance = balance !+ deposit;  -- panics if result exceeds Int64 range
+total = quantity !* price;     -- panics on overflow, even in release
+```
+
+### Summary
+
+| Operator | Debug build | Release build | Use case |
+|----------|-------------|---------------|----------|
+| `+`, `-`, `*` | panic | wrap | General arithmetic |
+| `%+`, `%-`, `%*` | wrap | wrap | Hash, RNG, checksum |
+| `!+`, `!-`, `!*` | panic | panic | Financial, safety |
+
+Float arithmetic (`Float64`) is unaffected - IEEE 754 handles overflow via infinity/NaN.

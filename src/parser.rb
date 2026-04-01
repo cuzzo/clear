@@ -979,8 +979,8 @@ class Parser
     when '||'             then 4
     when '&&'             then 5
     when '==', '!=', '<', '>', '<=', '>=' then 6
-    when '+', '-'         then 7
-    when '*', '/', 'MOD'  then 8
+    when '+', '-', '%+', '%-', '!+', '!-' then 7
+    when '*', '/', 'MOD', '%*', '!*'     then 8
     when '**'             then 9
     else nil
     end

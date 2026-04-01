@@ -27,7 +27,7 @@ class Type
 
   # Operator categories
   BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
-  NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD]
+  NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
 
   # Resolves the result type of a binary operation given two operand types.
   # Returns a BinaryOpResult with type, optional coercions, and storage.
@@ -47,6 +47,9 @@ class Type
 
     when :ADD
       resolve_add_op(t_left, t_right, left_type, right_type)
+
+    when :WRAP_ADD, :CHECK_ADD
+      resolve_numeric_op(t_left, t_right)
 
     else
       BinaryOpResult.new(error: "Unknown operator: #{op}")

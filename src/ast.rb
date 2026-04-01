@@ -532,7 +532,13 @@ module AST
     'MOD' => :MOD,
     'OR' => :OR_RESCUE, # TODO: Check if this is necessary
     '~' => :BITWISE_NOT,
-    'AS' => :BIND_VAR
+    'AS' => :BIND_VAR,
+    '%+' => :WRAP_ADD,
+    '%-' => :WRAP_SUB,
+    '%*' => :WRAP_MUL,
+    '!+' => :CHECK_ADD,
+    '!-' => :CHECK_SUB,
+    '!*' => :CHECK_MUL,
   }
 
   CAPABILITIES = [:RESTRICT, :EXCLUSIVE]

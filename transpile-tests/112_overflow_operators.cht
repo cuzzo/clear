@@ -1,0 +1,53 @@
+-- Test: explicit overflow operators (%+, %-, %*, !+, !-, !*)
+--
+-- %+, %-, %* = wrapping (always wraps, all build modes)
+-- !+, !-, !* = checked (always panics on overflow, all build modes)
+-- +, -, *   = default (panic debug, wrap release)
+--
+-- This test only uses values that DON'T overflow, so all three tiers
+-- produce the same result and the test passes in all build modes.
+
+FN main() RETURNS Void ->
+    a: Int64 = 100;
+    b: Int64 = 200;
+
+    -- Wrapping operators (same result as normal when no overflow)
+    ASSERT a %+ b == 300, "wrap add";
+    ASSERT b %- a == 100, "wrap sub";
+    ASSERT a %* b == 20000, "wrap mul";
+
+    -- Checked operators (same result as normal when no overflow)
+    ASSERT a !+ b == 300, "check add";
+    ASSERT b !- a == 100, "check sub";
+    ASSERT a !* b == 20000, "check mul";
+
+    -- Default operators (for comparison)
+    ASSERT a + b == 300, "default add";
+    ASSERT b - a == 100, "default sub";
+    ASSERT a * b == 20000, "default mul";
+
+    -- Wrapping with negatives
+    c: Int64 = -50;
+    ASSERT a %+ c == 50, "wrap add negative";
+    ASSERT c %- a == -150, "wrap sub negative";
+    ASSERT c %* b == -10000, "wrap mul negative";
+
+    -- Checked with negatives
+    ASSERT a !+ c == 50, "check add negative";
+    ASSERT c !- a == -150, "check sub negative";
+    ASSERT c !* b == -10000, "check mul negative";
+
+    -- Wrapping with typed _i64 literals
+    d = 1000000_i64;
+    e = 1000000_i64;
+    ASSERT d %* e == 1000000000000_i64, "wrap mul large";
+
+    -- Chained wrapping
+    ASSERT a %+ b %+ c == 250, "chained wrap add";
+    ASSERT a %* b %+ c == 19950, "wrap mul then wrap add";
+
+    -- Mixed precedence: %* binds tighter than %+
+    ASSERT a %+ b %* c == -9900, "wrap precedence: 100 + (200 * -50)";
+
+    RETURN;
+END

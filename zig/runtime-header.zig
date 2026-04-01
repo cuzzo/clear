@@ -736,6 +736,42 @@ pub const CheatLib = struct {
         }
     }
 
+    // Explicit wrapping arithmetic (%+, %-, %*) — wraps in ALL build modes.
+    // Use for hash functions, RNGs, checksums, and other intentional-overflow code.
+    pub inline fn wrapAdd(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        return @as(R, a) +% @as(R, b);
+    }
+    pub inline fn wrapSub(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        return @as(R, a) -% @as(R, b);
+    }
+    pub inline fn wrapMul(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        return @as(R, a) *% @as(R, b);
+    }
+
+    // Explicit checked arithmetic (!+, !-, !*) — panics in ALL build modes.
+    // Use for financial math, safety-critical code, and overflow detection.
+    pub inline fn checkAdd(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        const result = @addWithOverflow(@as(R, a), @as(R, b));
+        if (result[1] != 0) @panic("integer overflow in checked addition (!+)");
+        return result[0];
+    }
+    pub inline fn checkSub(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        const result = @subWithOverflow(@as(R, a), @as(R, b));
+        if (result[1] != 0) @panic("integer overflow in checked subtraction (!-)");
+        return result[0];
+    }
+    pub inline fn checkMul(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
+        const R = IntResult(@TypeOf(a), @TypeOf(b));
+        const result = @mulWithOverflow(@as(R, a), @as(R, b));
+        if (result[1] != 0) @panic("integer overflow in checked multiplication (!*)");
+        return result[0];
+    }
+
     /// Wall clock milliseconds since Unix epoch.
     pub fn timestampMs() i64 {
         return std.time.milliTimestamp();

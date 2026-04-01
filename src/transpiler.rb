@@ -2252,20 +2252,28 @@ private
         end
       end
 
-      # Integer arithmetic: use wrapping-safe helpers (checked in debug, wrapping in release).
+      # Explicit wrapping operators (%+, %-, %*) — always wrap, all build modes.
+      if %i[WRAP_ADD WRAP_SUB WRAP_MUL].include?(node.op)
+        fn_name = { WRAP_ADD: "wrapAdd", WRAP_SUB: "wrapSub", WRAP_MUL: "wrapMul" }[node.op]
+        return "CheatLib.#{fn_name}(#{left}, #{right})"
+      end
+
+      # Explicit checked operators (!+, !-, !*) — always panic on overflow, all build modes.
+      if %i[CHECK_ADD CHECK_SUB CHECK_MUL].include?(node.op)
+        fn_name = { CHECK_ADD: "checkAdd", CHECK_SUB: "checkSub", CHECK_MUL: "checkMul" }[node.op]
+        return "CheatLib.#{fn_name}(#{left}, #{right})"
+      end
+
+      # Default integer arithmetic (+, -, *): checked in debug, wrapping in release.
       # Float arithmetic uses native operators (IEEE 754 handles overflow correctly).
       # Only apply when BOTH operands are integers (not float, not comptime literals).
       if %i[ADD SUB MUL].include?(node.op)
         left_ti = node.left.type_info
         right_ti = node.right.type_info
-        # Exclude untyped NUMBER literals (comptime_int in Zig) but ALLOW typed _i64 literals.
-        # Untyped: AST::Literal with type :NUMBER and no coerced_type or Int64 coercion.
-        # Typed _i64: AST::Literal with type :INT64 — these have fixed width, safe for *%.
         left_is_comptime = node.left.is_a?(AST::Literal) && node.left.type == :NUMBER && !left_ti&.integer?
         right_is_comptime = node.right.is_a?(AST::Literal) && node.right.type == :NUMBER && !right_ti&.integer?
         both_int = left_ti&.integer? && right_ti&.integer?
         no_lits = !left_is_comptime && !right_is_comptime
-        # Also skip if either operand was coerced to float (mixed int/float arithmetic).
         no_float_coerce = !node.left.respond_to?(:coerced_type) || node.left.coerced_type.nil? || Type.new(node.left.coerced_type).integer?
         no_float_coerce &&= !node.right.respond_to?(:coerced_type) || node.right.coerced_type.nil? || Type.new(node.right.coerced_type).integer?
         if both_int && no_lits && no_float_coerce
