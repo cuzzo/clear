@@ -278,6 +278,23 @@ pub fn build(b: *std.Build) void {
     }
 
     // -------------------------------------------------------------------------
+    // VOPR — Deterministic simulation testing
+    // -------------------------------------------------------------------------
+    const vopr_step = b.step("vopr", "Run VOPR deterministic simulation tests");
+    const vopr_exe = b.addExecutable(.{
+        .name = "vopr",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("vopr.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    vopr_exe.linkLibC();
+    const run_vopr = b.addRunArtifact(vopr_exe);
+    run_vopr.has_side_effects = true;
+    vopr_step.dependOn(&run_vopr.step);
+
+    // -------------------------------------------------------------------------
     // STATIC LIBRARY (cheat-runtime)
     // -------------------------------------------------------------------------
     const lib = b.addLibrary(.{
