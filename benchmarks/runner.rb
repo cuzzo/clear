@@ -359,7 +359,12 @@ def run_bench(dir, mode_cfg, cores)
   end
 
   if has_clear
-    threads = cores
+    # Auto-detect threading: use cores for concurrent benchmarks, 1 for sequential.
+    # Concurrent benchmarks use BG, CONCURRENT, or SHARD in their source.
+    clear_src_file = clear_src || "#{dir}/bench.cht"
+    clear_src_text = File.exist?(clear_src_file) ? File.read(clear_src_file) : ""
+    needs_threads = clear_src_text.match?(/\bBG\b|\bCONCURRENT\b|\bSHARD\b/)
+    threads = needs_threads ? cores : "1"
     threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
 
     # Use jemalloc for CLEAR benchmarks if available.
