@@ -1,6 +1,6 @@
 # Allocation
 
-Allocation is the single largest hidden cost in most programs.
+Allocation is the single largest hidden cost in programs.
 
 A typical web server handling 10K requests/second makes millions of allocations per second — each one touching a global lock, a free list, or a system call.  This inherently does not scale.
 
@@ -31,7 +31,7 @@ x = 42.0;                              -- stack: 8 bytes (f64)
 point = Point{ x: 1.0, y: 2.0 };      -- stack: 16 bytes (2 × f64)
 ```
 
-The compiler uses a **128-slot threshold** (~1KB on 64-bit): structs with ≤ 128 fields stay on the stack. Larger structs automatically move to the frame arena to prevent stack overflow on small fiber stacks.
+The compiler uses a **128-slot threshold** (~1KB on 64-bit): structs with ≤ 128 fields stay on the stack (for SROA optimizations). Larger structs automatically move to the frame arena to prevent stack overflow on small fiber stacks.
 
 ### Frame Arena — Near Zero Cost
 

@@ -122,10 +122,11 @@ Other wish-list items are:
 ## What We Are NOT Accepting (The "Hard No" List)
 
  * Standard Library Additions
+ * Example programs that don't sufficiently showcase something not already covered.
  * Re-architectures (though one is needed)
    * Migrations to MPSC/MPMC: CLEAR intends to be strictly SPSC at the architecture level.
  * Micro-performance improvements
-   * If we are allocating an additional frameAlloc somewhere, and the fix includes 100+ lines of code - it will likely not get approved at this time.
+   * If CLEAR allocates an additional frameAlloc somewhere (2ns), and the fix includes 100+ lines of code - it will likely not get approved at this time.
  * Non-trivial runtime changes (zig/)
    * This is temporary until VOPR is implemented.
 
