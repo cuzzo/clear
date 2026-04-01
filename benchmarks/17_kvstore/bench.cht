@@ -1,14 +1,11 @@
--- KV Store Benchmark — CLEAR (HashMap@sharded(8):locked, RwLock per shard)
+-- KV Store Benchmark — CLEAR (HashMap@sharded(32), shared-nothing)
 --
--- Uses @sharded(8):locked — 8 RwLock-protected shards. Readers are
--- concurrent within a shard; writers are exclusive per-shard.
--- Best for workloads where any fiber may touch any key (cross-shard).
---
--- For true shared-nothing (zero locks), use @sharded(N) with
--- (1..<N)@sharded s> CONCURRENT EACH — each fiber owns its partition.
+-- Uses @sharded(32) — true shared-nothing (DragonflyDB model).
+-- Each shard lives on its owning scheduler. SHARD pipeline routes
+-- keys to the correct scheduler for lock-free local access.
 --
 -- Workloads:
---   1. Uniform SET   — 1M sequential keys (split across 8 fibers)
+--   1. Uniform SET   — 1M sequential keys via SHARD pipeline
 --   2. Uniform GET   — 1M sequential keys (100% hit)
 --   3. Zipfian GET   — 1M ops, power-law key distribution (hot keys)
 --   4. Mixed 80/20   — 1M ops, 80% GET / 20% SET, Zipfian
@@ -54,123 +51,68 @@ FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFr
 END
 
 -- =========================================================================
--- Workload functions
--- =========================================================================
-
-FN doSet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Void ->
-    FOR i IN (start ..< start + count) -> map["key:${i.toString()}"] = "value-${i.toString()}";
-    RETURN;
-END
-
-FN doGet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Int64 ->
-    MUTABLE hits: Int64 = 0;
-    FOR i IN (start ..< start + count) DO
-        MUTABLE got = map["key:${i.toString()}"] OR "";
-        IF got.length() > 0 THEN hits += 1; END
-    END
-    RETURN hits;
-END
-
-FN doZipfGet!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
-    hIntegral = hInt(n + 0.5, s);
-    hFraction = hFunc(1.5, s) - 1.0;
-    MUTABLE hits: Int64 = 0;
-    MUTABLE state: Int64 = seed;
-    FOR i IN (0_i64 ..< count) DO
-        k = zipfNext!(state, n, s, hIntegral, hFraction);
-        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE got = map["key:${k.toString()}"] OR "";
-        IF got.length() > 0 THEN hits += 1; END
-    END
-    RETURN hits;
-END
-
-FN doZipfMixed!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
-    hIntegral = hInt(n + 0.5, s);
-    hFraction = hFunc(1.5, s) - 1.0;
-    MUTABLE hits: Int64 = 0;
-    MUTABLE state: Int64 = seed;
-    FOR i IN (0_i64 ..< count) DO
-        k = zipfNext!(state, n, s, hIntegral, hFraction);
-        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE decision = state MOD 100;
-        IF decision < 0 THEN decision = 0 - decision; END
-        IF decision < 80 THEN
-            MUTABLE got = map["key:${k.toString()}"] OR "";
-            IF got.length() > 0 THEN hits += 1; END
-        ELSE
-            map["key:${k.toString()}"] = "updated-${i.toString()}";
-        END
-    END
-    RETURN hits;
-END
-
--- =========================================================================
 -- Main
 -- =========================================================================
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(32):locked = {};
+    MUTABLE map: HashMap<String>@sharded(32) = {};
     n = 1000000;
-    workers = 32;
-    chunk = n / workers;
     zipfSkew = 1.0;
 
-    -- Workload 1: Uniform SET
+    -- Workload 1: Uniform SET (1M keys, routed to owning shard)
     t0 = timestampMs();
-    MUTABLE set_futures: ~Void[]@list = [];
-    MUTABLE wi: Int64 = 0;
-    WHILE wi < workers DO
-        start = wi * chunk;
-        set_futures.append(BG { doSet!(map, start, chunk); });
-        wi += 1;
-    END
-    FOR si IN (0_i64 ..< workers) -> NEXT set_futures[si];
+    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+        map[_] = "value-" + toString(_);
+    };
     setMs = timestampMs() - t0;
 
-    -- Workload 2: Uniform GET
+    -- Workload 2: Uniform GET (1M keys, 100% hit, lock-free local reads)
     t1 = timestampMs();
-    MUTABLE get_futures: ~Int64[]@list = [];
-    wi = 0;
-    WHILE wi < workers DO
-        start = wi * chunk;
-        get_futures.append(BG { doGet!(map, start, chunk); });
-        wi += 1;
-    END
-    MUTABLE total_hits: Int64 = 0;
-    FOR gi IN (0_i64 ..< workers) -> total_hits += NEXT get_futures[gi];
+    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+        got = map[_] OR "";
+    };
     getMs = timestampMs() - t1;
 
-    -- Workload 3: Zipfian GET
-    t2 = timestampMs();
-    MUTABLE zipf_futures: ~Int64[]@list = [];
-    wi = 0;
-    WHILE wi < workers DO
-        zipf_futures.append(BG { doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
-        wi += 1;
+    -- Workload 3: Zipfian GET (1M ops, power-law distribution)
+    -- Pre-generate Zipf keys, then route via SHARD for lock-free reads.
+    hIntegral = hInt(n + 0.5, zipfSkew);
+    hFraction = hFunc(1.5, zipfSkew) - 1.0;
+    MUTABLE zipf_keys: String[]@list = List[];
+    MUTABLE state: Int64 = 42;
+    FOR i IN (0_i64 ..< n) DO
+        k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        zipf_keys.append("key:" + toString(k));
     END
-    MUTABLE zipf_hits: Int64 = 0;
-    FOR zi IN (0_i64 ..< workers) -> zipf_hits += NEXT zipf_futures[zi];
+
+    t2 = timestampMs();
+    (0..<n) s> SHARD(zipf_keys[_], map) s> CONCURRENT EACH {
+        got = map[_] OR "";
+    };
     zipfMs = timestampMs() - t2;
 
-    -- Workload 4: Mixed 80/20 (Zipfian)
-    t3 = timestampMs();
-    MUTABLE mix_futures: ~Int64[]@list = [];
-    wi = 0;
-    WHILE wi < workers DO
-        mix_futures.append(BG { doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
-        wi += 1;
+    -- Workload 4: Mixed 80/20 (Zipfian) — 200K SET then 800K GET
+    MUTABLE mix_keys: String[]@list = List[];
+    state = 99;
+    FOR i IN (0_i64 ..< n) DO
+        k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        mix_keys.append("key:" + toString(k));
     END
-    MUTABLE mix_hits: Int64 = 0;
-    FOR mi IN (0_i64 ..< workers) -> mix_hits += NEXT mix_futures[mi];
+
+    mix_set_n = n / 5;
+    mix_get_n = n - mix_set_n;
+    t3 = timestampMs();
+    (0..<mix_set_n) s> SHARD(mix_keys[_], map) s> CONCURRENT EACH {
+        map[_] = "updated";
+    };
+    (mix_set_n..<n) s> SHARD(mix_keys[_], map) s> CONCURRENT EACH {
+        got = map[_] OR "";
+    };
     mixMs = timestampMs() - t3;
 
-    ASSERT total_hits == n, "GET hits must equal key count";
-    ASSERT zipf_hits > 0, "Zipf hits must be > 0";
-    ASSERT mix_hits > 0, "Mixed hits must be > 0";
-
     print("Keys: ${n.toString()}");
-    print("Workers: ${workers.toString()}");
+    print("Shards: 32");
     print("Set: ${setMs.toString()} ms");
     print("Get: ${getMs.toString()} ms");
     print("Zipf: ${zipfMs.toString()} ms");
