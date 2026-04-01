@@ -2330,9 +2330,10 @@ private
       acquire_capability!(node, cap, expanded_capabilities)
     end
 
-    # 2. Enter a new scope for the capability block
-    # This isolates any variables declared inside
-    with_new_scope do
+    # 2. Enter a child scope for the capability block
+    # Inherits parent variables so the WITH body can see enclosing locals,
+    # but new declarations inside are isolated to the WITH block.
+    with_new_scope(current_scope) do
       expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
       node.body.each { |stmt| visit(stmt) }
       finalize_scope(node)
