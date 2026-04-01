@@ -4,7 +4,7 @@
 // code, with a coordinator controlling which thread's next atomic operation runs.
 // Every atomic op in SimAtomic yields to the coordinator, creating a deterministic
 // interleaving driven by either:
-//   - Exhaustive enumeration (2-thread scenarios, ~200 interleavings, complete proof)
+//   - Exhaustive enumeration (2-thread scenarios, complete proof)
 //   - PRNG sampling (3+ thread scenarios, statistical coverage)
 //
 // Usage:
@@ -12,6 +12,43 @@
 //   zig build test                       # includes exhaustive Loom tests
 //   ./vopr-loom --seeds 1000000          # 1M PRNG seeds
 //   ./vopr-loom --start 42 --seeds 1     # reproduce seed 42
+//
+// -----------------------------------------------------------------------
+// MAINTAINING EXHAUSTIVE DEPTH
+// -----------------------------------------------------------------------
+// The exhaustive enumerator uses a binary schedule of depth D, trying all
+// 2^D possible thread-selection sequences. This must cover every unique
+// interleaving of the two threads' atomic operations.
+//
+// Unique interleavings = C(a + b, b), where:
+//   a = max atomic ops in thread A (owner: pop/push)
+//   b = max atomic ops in thread B (thief: stealOne)
+//
+// Current op counts (from queues.zig):
+//   pop()      = 7 ops max  (2 loads, 1 store, 2 loads, 1 CAS, 1 store)
+//   stealOne() = 4 ops max  (2 loads, 1 load, 1 CAS)
+//   push()     = 4 ops max  (1 load, 1 load, 1 store, 1 store)
+//
+// Scenario          | a  | b | C(a+b,b) | Depth needed
+// ------------------+----+---+----------+-------------
+// pop vs steal      | 7  | 4 |      330 | 11 (2048)
+// pinned steal      | 7  | 8 |    6435* | 15 (32768)
+// push during steal | 11 | 4 |     1365 | 12 (4096)
+//
+// * pinned steal: stealOne hits pinned path, calls push() internally (4 more ops)
+//
+// We use depth 12 for unit tests and depth 14 for the main binary, which
+// covers all scenarios with margin.
+//
+// WHEN TO INCREASE DEPTH:
+//   - You add atomic operations to pop(), push(), or stealOne()
+//   - You add a new code path with more ops (e.g., dynamic buffer resize)
+//   - A scenario calls multiple RunQueue methods per thread
+//
+// HOW TO VERIFY: count the SimAtomic yield points (load/store/CAS calls)
+// in the longest code path for each thread. Compute C(a+b, b). Ensure
+// 2^depth >= C(a+b, b). When in doubt, increase depth -- the cost is
+// 2x per extra bit, and the tests are fast.
 
 const std = @import("std");
 const fc = @import("fiber-core.zig");
@@ -446,17 +483,19 @@ fn runExhaustive(
 // -----------------------------------------------------------------------
 
 test "loom: exhaustive pop vs steal" {
-    // Depth 10 = 1024 schedules. Covers all ~210 real interleavings.
+    // pop=7 ops, steal=4 ops. C(11,4)=330. Depth 12 = 4096 schedules.
     const count = try runExhaustiveN(std.testing.allocator, &scenarioPopVsSteal, "pop_vs_steal", 12);
     std.debug.print("  pop_vs_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive pinned steal" {
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioPinnedSteal, "pinned_steal", 12);
+    // pop=7 ops, steal+push_back=8 ops. C(15,8)=6435. Depth 14 = 16384 schedules.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioPinnedSteal, "pinned_steal", 14);
     std.debug.print("  pinned_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive push during steal" {
+    // push+pop=11 ops, steal=4 ops. C(15,4)=1365. Depth 12 = 4096 schedules.
     const count = try runExhaustiveN(std.testing.allocator, &scenarioPushDuringSteal, "push_during_steal", 12);
     std.debug.print("  push_during_steal: {d} interleavings OK\n", .{count});
 }
