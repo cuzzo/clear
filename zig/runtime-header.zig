@@ -1473,6 +1473,24 @@ pub const CheatLib = struct {
         list.deinit(alloc);
     }
 
+    /// Deinit a set whose elements may be ref-counted. Releases each element
+    /// before freeing the backing hashmap. For string sets, frees duped keys.
+    /// If elements are not ref-counted, comptime eliminates the release loop.
+    pub fn deinitSet(comptime ElemT: type, alloc: std.mem.Allocator, set: *Set(ElemT)) void {
+        const is_string = ElemT == []const u8;
+        if (comptime refInnerType(ElemT) != null) {
+            var it = set.inner.keyIterator();
+            while (it.next()) |key_ptr| {
+                releaseOne(ElemT, alloc, key_ptr.*);
+            }
+        }
+        if (is_string) {
+            var it = set.inner.keyIterator();
+            while (it.next()) |key_ptr| alloc.free(key_ptr.*);
+        }
+        set.inner.deinit(alloc);
+    }
+
     // -------------------------------------------------------------------------
     // Mutex-Protected (locked / Locked)
     // -------------------------------------------------------------------------
@@ -2349,6 +2367,7 @@ pub const CheatLib = struct {
                 if (is_string) {
                     if (!self.inner.contains(value)) {
                         const owned = try alloc.dupe(u8, value);
+                        errdefer alloc.free(owned);
                         try self.inner.put(alloc, owned, {});
                     }
                 } else {

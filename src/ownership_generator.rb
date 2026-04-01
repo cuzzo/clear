@@ -36,9 +36,10 @@ module OwnershipGenerator
     if type_info&.pool?
       return "defer #{name}.deinit(rt.heapAlloc());\n"
     end
-    # @set backing hashmap is heap-allocated; auto-deinit.
+    # @set: comptime deinitSet releases RC elements then frees backing hashmap.
     if type_info&.set_collection?
-      return "defer #{name}.deinit(rt.heapAlloc());\n"
+      elem_zig = type_info.element_type&.zig_type || "[]const u8"
+      return "defer CheatLib.deinitSet(#{elem_zig}, rt.heapAlloc(), &#{name});\n"
     end
 
     # Sharded/striped maps: shared across fibers, use heapAlloc for keys and buckets.
@@ -83,25 +84,17 @@ module OwnershipGenerator
       end
     end
 
-    # Structs containing @link or @multiowned/@shared fields need field-level cleanup
-    # even when the struct itself is a plain stack value. Uses comptime releaseFields
-    # to walk struct fields and release any Rc/Arc/WeakRc/WeakArc values.
+    # Structs containing RC/link fields: emit comptime releaseFields.
+    # The scan detects whether to emit; releaseFields handles the actual
+    # field-by-field cleanup at Zig comptime (zero-cost for non-RC structs).
     if !type_info&.any_rc? && !type_info&.link? && !type_info&.any_sync?
       resolved = type_info&.resolved
       schema = (@struct_schemas ||= {})[resolved]
-      if schema
-        has_rc_fields = schema.any? do |fname, fdef|
-          next if fname.is_a?(Symbol)
-          ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
-          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          ft.link? || ft.any_rc?
-        end
-        if has_rc_fields
-          zig_type = transpile_type(resolved.to_s)
-          moved_guard = "var #{name}_moved = false; _ = &#{name}_moved;\n"
-          moved_guard += "defer if (!#{name}_moved) CheatLib.releaseFields(#{zig_type}, rt.heapAlloc(), #{name});\n"
-          return moved_guard
-        end
+      if schema && schema.any? { |k, v| !k.is_a?(Symbol) && (ft = v.is_a?(Hash) ? v[:type] : v; t = ft.is_a?(Type) ? ft : Type.new(ft || :Any); t.link? || t.any_rc?) }
+        zig_type = transpile_type(resolved.to_s)
+        moved_guard = "var #{name}_moved = false; _ = &#{name}_moved;\n"
+        moved_guard += "defer if (!#{name}_moved) CheatLib.releaseFields(#{zig_type}, rt.heapAlloc(), #{name});\n"
+        return moved_guard
       end
     end
 
@@ -146,19 +139,13 @@ module OwnershipGenerator
 
     base_logic += "defer if (!#{name}_moved) #{cleanup_stmt};\n"
 
-    # Handle recursive field cleanup for RC structs via comptime releaseFields
+    # RC structs: unconditionally emit releaseFields on the inner data.
+    # Comptime eliminates it for structs without RC/link fields.
     if is_rc
       schema = (@struct_schemas ||= {})[type_info.resolved]
       if schema
-        has_rc_fields = schema.any? do |fname, fdef|
-          next if fname.is_a?(Symbol)
-          ft = Type.new(fdef[:type])
-          ft.any_rc? || ft.link?
-        end
-        if has_rc_fields
-          zig_type = transpile_type(type_info.resolved.to_s)
-          base_logic += "defer if (!#{name}_moved) CheatLib.releaseFields(#{zig_type}, rt.heapAlloc(), #{name}.ctrl.data.*);\n"
-        end
+        zig_type = transpile_type(type_info.resolved.to_s)
+        base_logic += "defer if (!#{name}_moved) CheatLib.releaseFields(#{zig_type}, rt.heapAlloc(), #{name}.ctrl.data.*);\n"
       end
     end
 
