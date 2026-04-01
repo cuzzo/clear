@@ -19,7 +19,7 @@ When multiple fibers need to access the same data, CLEAR must answer two questio
 
 ## @local — Zero-Cost Shared Mutable Reference
 
-```clear
+```ruby clear
 MUTABLE c = Counter{ value: 0 } @local;
 
 BG { c.value += 1; }            -- direct field access, no WITH block
@@ -33,16 +33,15 @@ BG { print(c.value); }          -- direct read
 **When to use it**: This is the **default choice** for shared mutable state within a function scope. It's the fastest option — zero synchronization overhead.
 
 **Compile-time enforcement**:
-```clear
--- ILLUSTRATIVE
+
+```ruby clear illustrative
 BG { @parallel -> c.value = 1; }
 -- ERROR: @local variable cannot be used in @parallel block
 ```
 
 ## @multiowned — Non-Atomic Reference Counting (Rc)
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 node = TreeNode{ left: NIL, right: NIL } @multiowned;
 
 -- Multiple owners via WITH block:
@@ -64,8 +63,8 @@ WITH node AS val { print(val.left); }
 **Why it's NOT thread-safe**: `Rc` uses a plain integer for its refcount — no atomic CAS, no memory barriers. If two threads increment/decrement simultaneously, the count corrupts (use-after-free or double-free).
 
 **Compile-time enforcement**:
-```clear
--- ILLUSTRATIVE
+
+```ruby clear illustrative
 BG { @parallel -> WITH node AS val { ... } }
 -- ERROR: @multiowned (Rc) variable cannot be used in @parallel block —
 -- Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.
@@ -75,8 +74,7 @@ BG { @parallel -> WITH node AS val { ... } }
 
 ## @shared — Atomic Reference Counting (Arc)
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 config = AppConfig{ port: 8080 } @shared;
 
 BG { @parallel -> WITH config AS c { print(c.port); } }  -- OK
@@ -93,8 +91,7 @@ BG { @parallel -> WITH config AS c { print(c.port); } }  -- OK
 
 Sharing capabilities can be combined with sync capabilities for mutable cross-thread access:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 -- Arc + Mutex: one-line mutations auto-lock
 MUTABLE counter = Counter{ value: 0 } @shared:locked;
 BG { @parallel -> counter.value += 1; }                             -- auto mutex
@@ -133,8 +130,7 @@ Stable heap address needed (graph edges, self-referential)?
 The compiler automatically pins BG/DO blocks to the local scheduler when they capture `@local`, `@multiowned`, `@shared`, `@locked`, or `@writeLocked` variables. This is a **cache-line bouncing optimization** for thread-safe types and a **safety requirement** for non-thread-safe types.
 
 To override auto-pinning for thread-safe types:
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 BG { @parallel -> ... }   -- distribute across schedulers
 ```
 
