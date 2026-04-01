@@ -750,7 +750,17 @@ private
       elsif node.type.is_a?(Type) && node.type.map? && node.type.striped?
         # Striped map (ShardedStringMap/MutexShardedStringMap): store heapAlloc.
         @used_sharded_map = true
-        "#{node.type.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+        if node.type.shared? || node.type.multiowned?
+          # Arc/Rc-wrapped striped map: build inner map, then wrap with Arc/Rc.
+          bare = Type.new(node.type.resolved.to_s)
+          bare.shard_count = node.type.shard_count
+          bare.sync = node.type.sync
+          bare_init = "#{bare.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+          create_fn = node.type.shared? ? "arcCreate" : "rcCreate"
+          "try CheatLib.#{create_fn}(#{bare.zig_type}, #{rt_name}.heapAlloc(), #{bare_init})"
+        else
+          "#{node.type.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+        end
       elsif node.type.is_a?(Type) && node.type.map? && node.type.sharded?
         # PartitionedStringMap (shared-nothing): no alloc field.
         @used_sharded_map = true
@@ -852,6 +862,9 @@ private
           if target_node.metatype == :hashmap
              map_ft   = Type.new(target_node.full_type)
              map_ref  = visit(target_node)
+             # Auto-deref Arc-wrapped maps
+             map_ti = target_node.type_info
+             map_ref = "#{map_ref}.ctrl.data.*" if map_ti&.shared? || map_ti&.multiowned?
              key_ref  = visit(node.name.index)
              val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
@@ -1054,6 +1067,9 @@ private
 
       if node.target.metatype == :hashmap
         map_ft = Type.new(node.target.full_type)
+        # Auto-deref Arc/Rc-wrapped maps (same pattern as Assignment and map methods).
+        map_ti = node.target.type_info
+        target = "#{target}.ctrl.data.*" if map_ti&.shared? || map_ti&.multiowned?
 
         if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
           key_zig = map_ft.key_type.zig_type
@@ -2685,6 +2701,7 @@ private
     # Build the bare inner map type (without Arc/RwLocked wrapping) for initialization.
     bare_ft = Type.new(map_ft.resolved.to_s)
     bare_ft.shard_count = map_ft.shard_count if map_ft.shard_count
+    bare_ft.sync = map_ft.sync if map_ft.shard_count && map_ft.sync
 
     # StringMap, ShardedStringMap, MutexShardedStringMap store their allocator.
     # Numeric maps and PartitionedStringMap (shared-nothing) don't have alloc.
@@ -2697,20 +2714,19 @@ private
     end
 
     # Wrap with RwLocked/Locked and Arc/Rc if capabilities require it.
-    if map_ft.sync == :write_locked
-      bare_init = "CheatLib.RwLocked(#{bare_ft.zig_type}).init(#{bare_init})"
-    elsif map_ft.sync == :locked
-      bare_init = "CheatLib.Locked(#{bare_ft.zig_type}).init(#{bare_init})"
+    # Skip Locked/RwLocked wrapping for striped maps — sync is built into the map type.
+    if !bare_ft.striped?
+      if map_ft.sync == :write_locked
+        bare_init = "CheatLib.RwLocked(#{bare_ft.zig_type}).init(#{bare_init})"
+      elsif map_ft.sync == :locked
+        bare_init = "CheatLib.Locked(#{bare_ft.zig_type}).init(#{bare_init})"
+      end
     end
 
     if map_ft.shared?
-      inner_zig = map_ft.sync == :write_locked ? "CheatLib.RwLocked(#{bare_ft.zig_type})" :
-                  map_ft.sync == :locked ? "CheatLib.Locked(#{bare_ft.zig_type})" : bare_ft.zig_type
-      zig_init = "try CheatLib.arcCreate(#{inner_zig}, #{rt_name}.heapAlloc(), #{bare_init})"
+      zig_init = "try CheatLib.arcCreate(#{bare_ft.zig_type}, #{rt_name}.heapAlloc(), #{bare_init})"
     elsif map_ft.multiowned?
-      inner_zig = map_ft.sync == :write_locked ? "CheatLib.RwLocked(#{bare_ft.zig_type})" :
-                  map_ft.sync == :locked ? "CheatLib.Locked(#{bare_ft.zig_type})" : bare_ft.zig_type
-      zig_init = "try CheatLib.rcCreate(#{inner_zig}, #{rt_name}.heapAlloc(), #{bare_init})"
+      zig_init = "try CheatLib.rcCreate(#{bare_ft.zig_type}, #{rt_name}.heapAlloc(), #{bare_init})"
     else
       zig_init = bare_init
     end
@@ -2747,6 +2763,9 @@ private
     obj_code = visit(node.object)
     rt_name  = @do_rt_name || "rt"
     map_ft   = Type.new(node.object.full_type)
+    # Auto-deref Arc-wrapped maps: map.ctrl.data.* gives the inner map.
+    obj_ti = node.object.type_info
+    obj_code = "#{obj_code}.ctrl.data.*" if obj_ti&.shared? || obj_ti&.multiowned?
 
     # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
     if !map_ft.numeric_map?

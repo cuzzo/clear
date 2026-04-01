@@ -1672,29 +1672,38 @@ class Parser
       # `:` join: allow combining ownership + sync in a single annotation (order-independent).
       # Only for @multiowned/@shared/@locked/@writeLocked — not @list/@pool.
       # Accepts both 'locked' and '@locked' after ':' (same convention as branch prefixes).
-      if (ownership || sync) && !collection && match?(:CHAR, ':')
+      # Allow chaining multiple modifiers with ':' (e.g., @shared:sharded(32):locked)
+      while (ownership || sync || shard_count) && !collection && match?(:CHAR, ':')
         consume(:CHAR, ':')
-        unless current.type == :VAR_ID
-          error!(current, "Expected a capability modifier (locked, writeLocked, shared, multiowned) after ':'")
+        unless current.type == :VAR_ID || current.type == :INT64
+          error!(current, "Expected a capability modifier after ':'")
         end
-        normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
-        unless %w[@multiowned @shared @locked @writeLocked].include?(normalized)
-          error!(current, "Expected a capability modifier (locked, writeLocked, shared, multiowned) after ':'")
-        end
-        second_tok = consume(:VAR_ID)
+        normalized = current.value.to_s
+        normalized = normalized.start_with?('@') ? normalized : "@#{normalized}"
+
         case normalized
         when "@multiowned"
-          error!(second_tok, "Duplicate ownership capability in '#{cap_tok.value}:#{second_tok.value}'") if ownership
-          ownership = :multiowned
+          error!(current, "Duplicate ownership") if ownership
+          consume(:VAR_ID); ownership = :multiowned
         when "@shared"
-          error!(second_tok, "Duplicate ownership capability in '#{cap_tok.value}:#{second_tok.value}'") if ownership
-          ownership = :shared
+          error!(current, "Duplicate ownership") if ownership
+          consume(:VAR_ID); ownership = :shared
         when "@locked"
-          error!(second_tok, "Duplicate sync capability in '#{cap_tok.value}:#{second_tok.value}'") if sync
-          sync = :locked
+          error!(current, "Duplicate sync") if sync
+          consume(:VAR_ID); sync = :locked
         when "@writeLocked"
-          error!(second_tok, "Duplicate sync capability in '#{cap_tok.value}:#{second_tok.value}'") if sync
-          sync = :write_locked
+          error!(current, "Duplicate sync") if sync
+          consume(:VAR_ID); sync = :write_locked
+        when "@sharded"
+          error!(current, "Duplicate shard count") if shard_count
+          consume(:VAR_ID)
+          consume(:CHAR, '(')
+          n = consume_number.value.to_i
+          error!(cap_tok, "@sharded requires N >= 2, got #{n}") if n < 2
+          consume(:CHAR, ')')
+          shard_count = n
+        else
+          error!(current, "Expected a capability modifier (locked, writeLocked, shared, sharded) after ':'")
         end
       end
 

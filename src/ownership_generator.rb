@@ -43,7 +43,14 @@ module OwnershipGenerator
     end
 
     # Sharded/striped maps: shared across fibers, use heapAlloc for keys and buckets.
+    # Arc-wrapped striped maps use arcRelease instead of direct deinit.
     if type_info&.map? && (type_info&.sharded? || type_info&.striped?)
+      if type_info.shared?
+        bare = Type.new(type_info.resolved.to_s)
+        bare.shard_count = type_info.shard_count
+        bare.sync = type_info.sync if type_info.sync
+        return "defer CheatLib.arcRelease(#{bare.zig_type}, rt.heapAlloc(), #{name});\n"
+      end
       if type_info.numeric_map?
         return "defer #{name}.deinit(rt.heapAlloc());\n"
       else

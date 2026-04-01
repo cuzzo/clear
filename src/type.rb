@@ -1114,13 +1114,22 @@ class Type
 
     # 2b. Derive Zig type from ownership × sync dimensions
     # Only apply capability wrapping when there's an actual capability set.
-    # Exception: sharded maps with sync use StripedMap (sync built into the map type).
-    if (@ownership != :affine || @sync) && !(map? && striped?)
-      # Get the plain inner zig type (ownership=:affine creates a bare type with no wrapping)
-      inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
-
-      inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
-      inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
+    # Sharded maps with sync use StripedMap (sync built into the map type) —
+    # skip Locked/RwLocked wrapping but still apply Arc/Rc if @shared/@multiowned.
+    if (@ownership != :affine || @sync) && !(map? && striped? && @ownership == :affine)
+      # For shared striped maps, the inner type is the striped map itself (sync built-in).
+      # For other types, get the plain inner type and wrap with Locked/RwLocked.
+      if map? && striped?
+        # Striped map: sync is built into ShardedStringMap — get it with shard_count.
+        bare = Type.new(resolved.to_s)
+        bare.shard_count = @shard_count
+        bare.sync = @sync
+        inner_zig = bare.zig_type(is_param: is_param, is_field: is_field)
+      else
+        inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
+        inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
+        inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
+      end
 
       case @ownership
       when :multiowned
@@ -1128,12 +1137,10 @@ class Type
       when :shared
         return "CheatLib.Arc(#{inner_zig})"
       when :link
-        # Weak ref type — infer from link_source if available, default to WeakRc
         source = link_source
         return source == :shared ? "CheatLib.WeakArc(#{inner_zig})" : "CheatLib.WeakRc(#{inner_zig})"
       else
-        # affine + sync: needs pointer (stable heap address)
-        return "*#{inner_zig}"
+        return "*#{inner_zig}" unless map? && striped?
       end
     end
 

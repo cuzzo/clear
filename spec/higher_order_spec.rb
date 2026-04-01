@@ -846,6 +846,75 @@ RSpec.describe SemanticAnnotator do
         expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
       end
     end
+
+    describe "HashMap@shared:sharded(N):writeLocked (DashMap — Arc-wrapped lock-striped map)" do
+      it "accepts @shared:sharded(N):writeLocked as a valid type annotation" do
+        expect {
+          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END")
+        }.not_to raise_error
+      end
+
+      it "generates Arc-wrapped ShardedStringMap via arcCreate" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("arcCreate(CheatLib.ShardedStringMap(i64, 4)")
+      end
+
+      it "generates Arc-wrapped MutexShardedStringMap for @shared:sharded(N):locked" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):locked = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("arcCreate(CheatLib.MutexShardedStringMap(i64, 4)")
+      end
+
+      it "emits arcCreate for initialization" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("arcCreate(CheatLib.ShardedStringMap(i64, 4)")
+      end
+
+      it "emits arcRelease for cleanup" do
+        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("arcRelease(CheatLib.ShardedStringMap(i64, 4)")
+      end
+
+      it "auto-derefs Arc for index read (.get)" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+              m["key"] = 42_i64;
+              v = m["key"] OR 0;
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.ctrl.data.*.get(')
+      end
+
+      it "auto-derefs Arc for index write (.put)" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+              m["key"] = 42_i64;
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.ctrl.data.*.put(')
+      end
+
+      it "auto-derefs Arc for .count()" do
+        code = <<~CLEAR
+          FN f() RETURNS Void ->
+              MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+              n: Int64 = m.count();
+              RETURN;
+          END
+        CLEAR
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include('.ctrl.data.*.count()')
+      end
+    end
   end
 
   # ===========================================================================

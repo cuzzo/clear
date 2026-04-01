@@ -14,7 +14,7 @@ module PipelineGenerator
 
   FOLD_TYPES = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
                 AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
-  FUSIBLE_TYPES = [AST::WhereOp, AST::SelectOp].freeze
+  FUSIBLE_TYPES = [AST::WhereOp, AST::SelectOp, AST::TapOp].freeze
 
   # Walk the left-spine of nested s> BinaryOps and collect fusible stages.
   # Returns { source:, stages: [WhereOp/SelectOp, ...], terminal: FoldOp, terminal_node: } or nil.
@@ -112,6 +112,14 @@ module PipelineGenerator
         select_counter += 1
         lines << "#{indent}const #{new_var} = #{expr};"
         current_var = new_var
+      elsif stage.is_a?(AST::TapOp)
+        body_code = with_pipeline_context(placeholder: current_var) do
+          stage.body.map { |stmt|
+            code = visit(stmt)
+            code.strip.end_with?(";") ? code : "#{code};"
+          }.join("\n#{indent}")
+        end
+        lines << "#{indent}#{body_code}"
       end
     end
 
@@ -531,17 +539,20 @@ module PipelineGenerator
   end
 
   def transpile_skip(list_node, skip_node, smooth_node)
-    element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
     count_code = visit(skip_node.count)
+    my_label = next_pipe_label
+    list_code = visit(list_node)
+    @current_pipe_label = my_label
 
-    transpile_pipeline_macro(list_node, smooth_node, force_aos: true) do |alloc|
-      <<~ZIG
-        const skip_requested: usize = @intCast(#{count_code});
-        const skip_actual = @min(skip_requested, pipe_items.len);
-
-        break :#{@current_pipe_label} try CheatLib.makeList(#{element_zig_type}, #{alloc}, pipe_items[skip_actual..]);
-      ZIG
-    end
+    <<~ZIG
+      #{my_label}: {
+          const __skip_src = #{list_code};
+          const __skip_items = if (@hasField(@TypeOf(__skip_src), "items")) __skip_src.items else __skip_src[0..];
+          const skip_requested: usize = @intCast(#{count_code});
+          const skip_actual = @min(skip_requested, __skip_items.len);
+          break :#{my_label} __skip_items[skip_actual..];
+      }
+    ZIG
   end
 
   # TAP: side-effect observer — iterates collection, runs body, returns original.
