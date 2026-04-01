@@ -110,6 +110,17 @@ The comparison demonstrates CLEAR's raw multi-core I/O and sharded HashMap perfo
 | Mixed 80/20 | 23ms | 29ms | 72ms | +213% |
 | **Total** | **273ms** | **1821ms** | **261ms** | **-4%** |
 
+Scaling (CLEAR):
+
+| Cores | SET | GET | Zipf |
+|-------|-----|-----|------|
+| 1 | 361ms | 175ms | 186ms |
+| 2 | 365ms | 182ms | 184ms |
+| 8 | 150ms | 32ms | 50ms |
+| 32 | 179ms | **16ms** | **16ms** |
+
+GET scales 10.9x (1->32). SET scales 2x. Zipf scales 11.6x.
+
 ### TCP KV Store (Benchmark 20) vs DragonflyDB
 
 RESP protocol, 10K ops, 50 concurrent, pipeline 16.
@@ -119,6 +130,10 @@ RESP protocol, 10K ops, 50 concurrent, pipeline 16.
 | SET | 1.0M rps | 588K rps | 0.59x |
 | GET | 1.25M rps | **1.43M rps** | **+14%** |
 | INCR | 1.1M rps | **1.25M rps** | **+14%** |
+
+All handler fibers are pinned to the main scheduler (cooperative I/O
+multiplexing). Throughput scales with pipeline depth, not core count.
+The benchmark tests I/O efficiency, not CPU parallelism.
 
 ### Known Issues
 
