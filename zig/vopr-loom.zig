@@ -374,6 +374,26 @@ fn checkPinnedNotStolen(h: *LoomHarness) LoomError!void {
     }
 }
 
+/// Thread 0: owner double pop for aggressive pinned scenario
+fn entryOwnerDoublePop2() callconv(.c) void {
+    const h = harness;
+    h.recordResult(0, h.queue.pop());
+    h.recordResult(0, h.queue.pop());
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+/// Thread 1: thief double steal for aggressive pinned scenario
+fn entryThiefDoubleSteal() callconv(.c) void {
+    const h = harness;
+    h.recordResult(1, h.queue.stealOne());
+    h.recordResult(1, h.queue.stealOne());
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
 // -----------------------------------------------------------------------
 // Scenarios
 // -----------------------------------------------------------------------
@@ -433,6 +453,46 @@ fn scenarioPushDuringSteal(h: *LoomHarness) !void {
     const total = countResults(h) + h.queue.len();
     if (total < 2) return LoomError.TaskLost;
     if (total > 2) return LoomError.TaskDuplicated;
+}
+
+/// Scenario 5: Aggressive pinned push-back under contention.
+/// 3 pinned + 2 unpinned tasks. Owner pops twice, thief steals twice.
+/// The thief's pinned push-back calls push() on the victim's queue
+/// concurrently with the owner's pop() -- both modify `bottom`.
+fn scenarioAggressivePinned(h: *LoomHarness) !void {
+    for (0..3) |i| {
+        const task = h.initStubTask(i, true); // pinned
+        h.queue.push(std.heap.c_allocator, task) catch unreachable;
+    }
+    for (3..5) |i| {
+        const task = h.initStubTask(i, false); // unpinned
+        h.queue.push(std.heap.c_allocator, task) catch unreachable;
+    }
+    try h.createThread(0, @intFromPtr(&entryOwnerDoublePop2));
+    try h.createThread(1, @intFromPtr(&entryThiefDoubleSteal));
+    try h.run();
+    try checkPinnedNotStolen(h);
+    try checkNoDuplicates(h);
+    const total = countResults(h) + h.queue.len();
+    if (total < 5) return LoomError.TaskLost;
+    if (total > 5) return LoomError.TaskDuplicated;
+}
+
+/// Scenario 6: All-pinned queue. Thief steals and pushes back every task.
+/// tryStealFrom should return 0 stolen. No tasks lost.
+fn scenarioAllPinned(h: *LoomHarness) !void {
+    for (0..4) |i| {
+        const task = h.initStubTask(i, true);
+        h.queue.push(std.heap.c_allocator, task) catch unreachable;
+    }
+    try h.createThread(0, @intFromPtr(&entryOwnerDoublePop2));
+    try h.createThread(1, @intFromPtr(&entryThiefDoubleSteal));
+    try h.run();
+    try checkPinnedNotStolen(h);
+    try checkNoDuplicates(h);
+    const total = countResults(h) + h.queue.len();
+    if (total < 4) return LoomError.TaskLost;
+    if (total > 4) return LoomError.TaskDuplicated;
 }
 
 // -----------------------------------------------------------------------
@@ -506,6 +566,72 @@ test "loom: exhaustive push during steal" {
     std.debug.print("  push_during_steal: {d} interleavings OK\n", .{count});
 }
 
+test "loom: exhaustive aggressive pinned" {
+    // pop=7*2=14 ops, steal+push_back=8*2=16 ops. Depth 14 for coverage.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioAggressivePinned, "aggressive_pinned", 14);
+    std.debug.print("  aggressive_pinned: {d} interleavings OK\n", .{count});
+}
+
+test "loom: exhaustive all-pinned queue" {
+    // Same ops as aggressive pinned. Every steal hits pinned path.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioAllPinned, "all_pinned", 14);
+    std.debug.print("  all_pinned: {d} interleavings OK\n", .{count});
+}
+
+test "loom: queue wraparound" {
+    // Push/pop enough to wrap the u32 bottom index near max.
+    // Verifies modular arithmetic in pop() and stealOne().
+    const allocator = std.testing.allocator;
+    const q = try allocator.create(RunQueue);
+    defer allocator.destroy(q);
+    q.* = RunQueue.init();
+
+    // Advance bottom/top near u32 max to test wrapping
+    const near_max: u32 = std.math.maxInt(u32) - 10;
+    q.bottom.store(near_max, .monotonic);
+    q.top.store(near_max, .monotonic);
+
+    // Stub tasks
+    var stub_fibers: [4]Fiber = undefined;
+    var stub_stacks: [4][64]u8 = undefined;
+    var stub_tasks: [4]Task = undefined;
+    for (0..4) |i| {
+        @memset(&stub_stacks[i], 0);
+        stub_fibers[i] = Fiber{
+            .stack = Stack{ .memory = &stub_stacks[i] },
+            .ctx = Context{ .sp = 0 },
+            .parent_ctx = undefined,
+            .size_class = .Standard,
+            .stack_limit = 0,
+            .stack_guard_head = null,
+        };
+        stub_tasks[i] = Task{
+            .base = &stub_fibers[i],
+            .user_fn = @ptrCast(&LoomHarness.dummyFn),
+            .status = .Ready,
+            .config = .{},
+        };
+        // Push wraps around u32 max
+        try q.push(allocator, &stub_tasks[i]);
+    }
+
+    if (q.len() != 4) return error.TestUnexpectedResult;
+
+    // Pop all -- exercises wrapping arithmetic in pop()
+    var popped: usize = 0;
+    while (q.pop()) |_| popped += 1;
+    if (popped != 4) return error.TestUnexpectedResult;
+    if (q.len() != 0) return error.TestUnexpectedResult;
+
+    // Push again and steal -- exercises wrapping in stealOne()
+    for (0..2) |i| {
+        try q.push(allocator, &stub_tasks[i]);
+    }
+    const stolen = q.stealOne();
+    if (stolen == null) return error.TestUnexpectedResult;
+    if (q.len() != 1) return error.TestUnexpectedResult;
+}
+
 // -----------------------------------------------------------------------
 // Main -- PRNG mode for 3+ thread scenarios + exhaustive for 2-thread
 // -----------------------------------------------------------------------
@@ -523,6 +649,8 @@ fn runSeed(allocator: std.mem.Allocator, seed: u64) !void {
         .{ .name = "pinned_steal", .func = &scenarioPinnedSteal },
         .{ .name = "multi_thief", .func = &scenarioMultiThief },
         .{ .name = "push_during_steal", .func = &scenarioPushDuringSteal },
+        .{ .name = "aggressive_pinned", .func = &scenarioAggressivePinned },
+        .{ .name = "all_pinned", .func = &scenarioAllPinned },
     };
 
     for (scenarios) |s| {
@@ -562,6 +690,8 @@ pub fn main() !void {
         .{ .name = "pop_vs_steal", .func = &scenarioPopVsSteal },
         .{ .name = "pinned_steal", .func = &scenarioPinnedSteal },
         .{ .name = "push_during_steal", .func = &scenarioPushDuringSteal },
+        .{ .name = "aggressive_pinned", .func = &scenarioAggressivePinned },
+        .{ .name = "all_pinned", .func = &scenarioAllPinned },
     };
     for (exhaustive_scenarios) |s| {
         const count = runExhaustive(allocator, s.func, s.name) catch |err| {
