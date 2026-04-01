@@ -1,11 +1,8 @@
--- KV Store Benchmark — CLEAR (HashMap@sharded(32):locked, RwLock per shard)
+-- KV Store Benchmark — CLEAR (HashMap@shared:writeLocked, Arc+RwLock)
 --
--- Uses @sharded(32):locked — 32 RwLock-protected shards. Readers are
--- concurrent within a shard; writers are exclusive per-shard.
---
--- NOTE: @shared:writeLocked (Arc+RwLock, unpinned fibers) would allow
--- work stealing and improve Zipfian performance, but currently blocked
--- by a BG capture type mismatch. Filed for v0.2.
+-- Uses @shared:writeLocked — Arc-wrapped RwLock HashMap. Readers are
+-- concurrent; writers are exclusive. BG fibers are not pinned, enabling
+-- work stealing across schedulers.
 --
 -- Workloads:
 --   1. Uniform SET   — 1M sequential keys (split across 8 workers)
@@ -54,63 +51,11 @@ FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFr
 END
 
 -- =========================================================================
--- Workload functions
--- =========================================================================
-
-FN doSet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Void ->
-    FOR i IN (start ..< start + count) -> map["key:${i.toString()}"] = "value-${i.toString()}";
-    RETURN;
-END
-
-FN doGet!(MUTABLE map: HashMap<String>, start: Int64, count: Int64) RETURNS Int64 ->
-    MUTABLE hits: Int64 = 0;
-    FOR i IN (start ..< start + count) DO
-        MUTABLE got = map["key:${i.toString()}"] OR "";
-        IF got.length() > 0 THEN hits += 1; END
-    END
-    RETURN hits;
-END
-
-FN doZipfGet!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
-    hIntegral = hInt(n + 0.5, s);
-    hFraction = hFunc(1.5, s) - 1.0;
-    MUTABLE hits: Int64 = 0;
-    MUTABLE state: Int64 = seed;
-    FOR i IN (0_i64 ..< count) DO
-        k = zipfNext!(state, n, s, hIntegral, hFraction);
-        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE got = map["key:${k.toString()}"] OR "";
-        IF got.length() > 0 THEN hits += 1; END
-    END
-    RETURN hits;
-END
-
-FN doZipfMixed!(MUTABLE map: HashMap<String>, seed: Int64, count: Int64, n: Int64, s: Float64) RETURNS Int64 ->
-    hIntegral = hInt(n + 0.5, s);
-    hFraction = hFunc(1.5, s) - 1.0;
-    MUTABLE hits: Int64 = 0;
-    MUTABLE state: Int64 = seed;
-    FOR i IN (0_i64 ..< count) DO
-        k = zipfNext!(state, n, s, hIntegral, hFraction);
-        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
-        MUTABLE decision = state MOD 100;
-        IF decision < 0 THEN decision = 0 - decision; END
-        IF decision < 80 THEN
-            MUTABLE got = map["key:${k.toString()}"] OR "";
-            IF got.length() > 0 THEN hits += 1; END
-        ELSE
-            map["key:${k.toString()}"] = "updated-${i.toString()}";
-        END
-    END
-    RETURN hits;
-END
-
--- =========================================================================
 -- Main
 -- =========================================================================
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(32):locked = {};
+    MUTABLE map: HashMap<String>@shared:writeLocked = {};
     n = 1000000;
     workers = 8;
     chunk = n / workers;
@@ -122,7 +67,12 @@ FN main() RETURNS Void ->
     MUTABLE wi: Int64 = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        set_futures.append(BG { doSet!(map, start, chunk); });
+        cnt = chunk;
+        set_futures.append(BG {
+            FOR idx IN (start ..< start + cnt) DO
+                WITH EXCLUSIVE map AS m { m["key:${idx.toString()}"] = "value-${idx.toString()}"; }
+            END
+        });
         wi += 1;
     END
     FOR si IN (0_i64 ..< workers) -> NEXT set_futures[si];
@@ -134,7 +84,17 @@ FN main() RETURNS Void ->
     wi = 0;
     WHILE wi < workers DO
         start = wi * chunk;
-        get_futures.append(BG { doGet!(map, start, chunk); });
+        cnt = chunk;
+        get_futures.append(BG {
+            MUTABLE hits: Int64 = 0;
+            FOR idx IN (start ..< start + cnt) DO
+                WITH map AS m {
+                    got = m["key:${idx.toString()}"] OR "";
+                    IF got.length() > 0 THEN hits += 1; END
+                }
+            END
+            hits;
+        });
         wi += 1;
     END
     MUTABLE total_hits: Int64 = 0;
@@ -142,11 +102,27 @@ FN main() RETURNS Void ->
     getMs = timestampMs() - t1;
 
     -- Workload 3: Zipfian GET
+    hIntegral = hInt(n + 0.5, zipfSkew);
+    hFraction = hFunc(1.5, zipfSkew) - 1.0;
     t2 = timestampMs();
     MUTABLE zipf_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        zipf_futures.append(BG { doZipfGet!(map, wi + 42, chunk, n, zipfSkew); });
+        seed = wi + 42;
+        cnt = chunk;
+        zipf_futures.append(BG {
+            MUTABLE hits: Int64 = 0;
+            MUTABLE state: Int64 = seed;
+            FOR idx IN (0_i64 ..< cnt) DO
+                k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                WITH map AS m {
+                    got = m["key:${k.toString()}"] OR "";
+                    IF got.length() > 0 THEN hits += 1; END
+                }
+            END
+            hits;
+        });
         wi += 1;
     END
     MUTABLE zipf_hits: Int64 = 0;
@@ -158,7 +134,29 @@ FN main() RETURNS Void ->
     MUTABLE mix_futures: ~Int64[]@list = [];
     wi = 0;
     WHILE wi < workers DO
-        mix_futures.append(BG { doZipfMixed!(map, wi + 99, chunk, n, zipfSkew); });
+        seed = wi + 99;
+        cnt = chunk;
+        mix_futures.append(BG {
+            MUTABLE hits: Int64 = 0;
+            MUTABLE state: Int64 = seed;
+            FOR idx IN (0_i64 ..< cnt) DO
+                k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                MUTABLE decision = state MOD 100;
+                IF decision < 0 THEN decision = 0 - decision; END
+                IF decision < 80 THEN
+                    WITH map AS m {
+                        got = m["key:${k.toString()}"] OR "";
+                        IF got.length() > 0 THEN hits += 1; END
+                    }
+                ELSE
+                    WITH EXCLUSIVE map AS m {
+                        m["key:${k.toString()}"] = "updated-${idx.toString()}";
+                    }
+                END
+            END
+            hits;
+        });
         wi += 1;
     END
     MUTABLE mix_hits: Int64 = 0;

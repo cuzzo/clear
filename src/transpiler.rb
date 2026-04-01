@@ -2887,6 +2887,9 @@ private
       if (e.is_a?(AST::BindExpr) || e.is_a?(AST::VarDecl)) && e.name.is_a?(String)
         locally_bound = locally_bound | Set[e.name]
       end
+      if (e.is_a?(AST::ForRange) || e.is_a?(AST::ForEach)) && e.var_name.is_a?(String)
+        locally_bound = locally_bound | Set[e.var_name]
+      end
       # ThenChain: all step bindings are locally declared inside the fiber.
       if e.is_a?(AST::ThenChain)
         e.steps.each { |step| locally_bound = locally_bound | Set[step[:binding]] if step[:binding] }
@@ -2926,7 +2929,6 @@ private
     if node.is_a?(AST::Identifier)
       unless locally_bound.include?(node.name)
         result[node.name] ||= node.type_info
-        # Capture the resource close pattern from the symbol entry if available.
         if node.symbol.respond_to?(:close_zig) && node.symbol.close_zig && !@_capture_close_zig.key?(node.name)
           @_capture_close_zig[node.name] = node.symbol.close_zig
         end
@@ -2934,13 +2936,23 @@ private
       return
     end
     # ThenChain: process steps in order, accumulating bindings into locally_bound
-    # so later steps that reference earlier bindings are NOT captured from outer scope.
     if node.is_a?(AST::ThenChain)
       lb = locally_bound
       node.steps.each do |step|
         walk_do_identifiers(step[:expr], result, lb)
         lb = lb | Set[step[:binding]] if step[:binding]
       end
+      return
+    end
+    # ForRange/ForEach: loop variable is locally declared, not an outer capture.
+    if node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
+      new_bound = locally_bound | Set[node.var_name]
+      walk_do_body(node.body, result, new_bound)
+      if node.respond_to?(:start_expr)
+        walk_do_identifiers(node.start_expr, result, locally_bound)
+        walk_do_identifiers(node.end_expr, result, locally_bound)
+      end
+      walk_do_identifiers(node.collection, result, locally_bound) if node.respond_to?(:collection) && node.collection
       return
     end
     # WithBlock: visit var_nodes as outer refs but exclude aliases from capture.
@@ -2950,12 +2962,23 @@ private
       end
       aliases = node.capabilities.filter_map { |cap| cap[:alias] || cap[:var_node]&.name }.to_set
       new_bound = locally_bound | aliases
-      node.body.each { |stmt| walk_do_identifiers(stmt, result, new_bound) }
+      walk_do_body(node.body, result, new_bound)
       return
     end
     node.members.each do |m|
       child = node.send(m)
       do_walk_child(child, result, locally_bound)
+    end
+  end
+
+  # Walk a body (array of statements), tracking declarations as locally_bound.
+  def walk_do_body(stmts, result, locally_bound)
+    lb = locally_bound
+    stmts.each do |stmt|
+      walk_do_identifiers(stmt, result, lb)
+      if (stmt.is_a?(AST::BindExpr) || stmt.is_a?(AST::VarDecl)) && stmt.name.is_a?(String)
+        lb = lb | Set[stmt.name]
+      end
     end
   end
 

@@ -264,6 +264,9 @@ module CapabilityHelper
       if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
         locally_bound = locally_bound | Set[node.name]
       end
+      if (node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)) && node.var_name.is_a?(String)
+        locally_bound = locally_bound | Set[node.var_name]
+      end
 
       if node.is_a?(AST::Identifier)
         name = node.name
@@ -361,6 +364,9 @@ module CapabilityHelper
     lb = locally_bound
     if node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)
       lb = lb | Set[node.name.to_s] if node.name.is_a?(String)
+    end
+    if node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
+      lb = lb | Set[node.var_name.to_s] if node.var_name.is_a?(String)
     end
 
     node.class.members.each do |member|
