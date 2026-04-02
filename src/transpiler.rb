@@ -2943,8 +2943,17 @@ private
   # spawnPinned distributes fibers round-robin across schedulers — each
   # scheduler gets its own set of pinned fibers (shared-nothing model).
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
-    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
-    if node.pinned
+    if node.stack_size == :service
+      # @service: spawn a dedicated OS thread (not a green fiber).
+      # The thread gets its own Runtime. No scheduler involvement.
+      <<~ZIG.chomp
+        try CheatHeader.spawnOsThread(
+                    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                    #{ctx_var},
+                );
+      ZIG
+    elsif node.pinned
+      task_cfg = task_config_zig(node.stack_size, pinned: true)
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -2954,6 +2963,7 @@ private
                 );
       ZIG
     else
+      task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
       <<~ZIG.chomp
         try CheatHeader.spawnBest(
                     @intFromPtr(&Runtime.entryWrapper),

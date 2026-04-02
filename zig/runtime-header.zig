@@ -3407,4 +3407,34 @@ pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, con
     try target.submitSpawn(trampoline_addr, user_fn, args, config);
 }
 
+/// Spawn a BG block on a dedicated OS thread (not a green fiber).
+/// Designed for heavy-compute tasks that are non-cooperative (no yields).
+/// The OS handles preemption. The result is delivered via the existing
+/// Promise/WaitGroup mechanism — the thread calls wg.done() when finished,
+/// which wakes the calling fiber on its scheduler.
+///
+/// Unlike fiber-based BG, the user function receives a freshly allocated
+/// Runtime with its own frame arena. No scheduler is involved — the thread
+/// runs independently until completion.
+pub fn spawnOsThread(user_fn: TaskFn, args: ?*anyopaque) !void {
+    _ = std.Thread.spawn(.{}, struct {
+        fn run(fn_ptr: TaskFn, fn_args: ?*anyopaque) void {
+            // Allocate a standalone Runtime for this thread.
+            // Use c_allocator (no GPA — OS threads are outside the scheduler).
+            const allocator = std.heap.c_allocator;
+            const frame_size = 64 * 1024; // 64 KB frame arena
+            const frame_mem = allocator.alloc(u8, frame_size) catch return;
+            defer allocator.free(frame_mem);
+
+            var global_ctx = EbrContext{};
+            var rt = Runtime.initFromSlice(frame_mem, &global_ctx, allocator, 0) catch return;
+            defer rt.deinit();
+            rt.wireAllocator();
+
+            const rt_ptr = @as(*anyopaque, @ptrCast(&rt));
+            if (fn_ptr(rt_ptr, fn_args)) |_| {} else |_| {}
+        }
+    }.run, .{ user_fn, args }) catch return error.ThreadSpawnFailed;
+}
+
 

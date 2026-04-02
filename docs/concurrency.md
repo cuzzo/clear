@@ -26,15 +26,35 @@ BG { @large:@pinned -> heavy_work(); }
 
 | Modifier | Effect |
 |---|---|
-| `@micro` | 4 KB stack |
-| `@standard` | 16 KB stack (default) |
-| `@large` | 64 KB stack |
-| `@xl` | 256 KB stack |
+| `@micro` | 4 KB fiber stack |
+| `@standard` | 16 KB fiber stack (default) |
+| `@large` | 64 KB fiber stack |
+| `@xl` | 256 KB fiber stack |
+| `@service` | **OS thread** (not a fiber). Full OS stack. For heavy non-cooperative compute. |
 | `@pinned` | Pin to local scheduler (no work stealing) |
 | `@parallel` | Distribute to least-loaded scheduler |
 | `@arena` | Thread-local arena allocation; implies @pinned |
 
 Combine with `:` — `@large:@arena` gives a large stack with arena allocation.
+
+### @service — OS Thread Spawning
+
+`@service` spawns a **dedicated OS thread** instead of a green fiber. Use it for heavy-compute tasks that won't cooperatively yield - the OS handles preemption.
+
+```clear
+-- ILLUSTRATIVE
+p = BG { @service ->
+    trainModel(dataset);  -- runs on its own OS thread
+};
+-- fiber continues concurrently
+result = NEXT p;  -- blocks fiber until OS thread finishes
+```
+
+The OS thread gets its own Runtime with a 64 KB frame arena. No scheduler is involved - the thread runs independently until completion, then signals the Promise.
+
+**When to use @service vs fibers:**
+- Fibers (`@standard`/`@large`): I/O-bound, short compute bursts, cooperative yielding
+- `@service`: CPU-bound, long-running, no yields, true OS-level parallelism
 
 ### Captures
 

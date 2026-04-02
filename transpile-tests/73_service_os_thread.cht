@@ -1,0 +1,37 @@
+-- @service: spawn a BG block on a dedicated OS thread.
+-- Designed for heavy-compute tasks that don't cooperatively yield.
+-- The OS handles preemption. Result delivered via Promise.
+
+FN heavyCompute(n: Int64) RETURNS Int64 ->
+    MUTABLE x: Int64 = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < n DO
+        x = x %+ (i %* i);
+        i += 1;
+    END
+    RETURN x;
+END
+
+FN main() RETURNS Void ->
+    -- Spawn heavy compute on OS thread
+    p: ~Int64 = BG { @service ->
+        heavyCompute(1000000);
+    };
+
+    -- Meanwhile, do lightweight work on the fiber
+    light = heavyCompute(100);
+    ASSERT light == 328350, "light compute on fiber";
+
+    -- Await the OS thread result
+    result: Int64 = NEXT p;
+    ASSERT result != 0, "OS thread returned a result";
+
+    -- Multiple concurrent OS threads
+    p1: ~Int64 = BG { @service -> heavyCompute(500000); };
+    p2: ~Int64 = BG { @service -> heavyCompute(500000); };
+    r1: Int64 = NEXT p1;
+    r2: Int64 = NEXT p2;
+    ASSERT r1 == r2, "two OS threads compute same result";
+
+    RETURN;
+END
