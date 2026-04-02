@@ -6,7 +6,6 @@ class SymbolEntry
                 :size, :capabilities, :borrowed_paths, :valid,
                 :invalid_reason, :resource, :close_zig, :read,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
-                :state,          # Ownership state: :uninit, :live, :moved, :dropped
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
                 :takes,          # true if parameter declared with TAKES (callee owns)
                 :link_source     # :shared or :multiowned — tracks which strong ref @link was created from

@@ -329,11 +329,8 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "succeeds" do
-        class Track
-          include OwnershipTracker
-        end
-        t = Track.new
-        expect(t.get_lifetime_path(func_def)).to eq("r.foo.bar")
+        annotator = SemanticAnnotator.new
+        expect(annotator.send(:get_lifetime_path, func_def)).to eq("r.foo.bar")
         expect(result).to eq(:Bar)
       end
     end

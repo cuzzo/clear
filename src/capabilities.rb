@@ -184,7 +184,7 @@ module CapabilityHelper
       inner_type = cap[:old_scope].resolve_type(var_name)
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
-      og_declare(alias_name, nil, inner_type, :stack) if respond_to?(:og_declare, true)
+      og_declare(alias_name, nil, inner_type, :stack)
       current_scope.declare_with_new_capability(cap)
     else
       current_scope.declare_with_new_capability(cap)
@@ -359,12 +359,11 @@ module CapabilityHelper
       classify_ownership!(info) unless info.ownership_kind
       kind = info.ownership_kind
       ti = info.type
-      is_live = @og ? @og.live?(name) : (info.state == :live)
-      if is_live
+      if @og.live?(name)
         if kind == :resource || kind == :affine
-          og_set_moved(name) if respond_to?(:og_set_moved, true)
+          og_set_moved(name)
         elsif ti.is_a?(Type) && ti.needs_escape_promotion?
-          og_set_moved(name) if respond_to?(:og_set_moved, true)
+          og_set_moved(name)
         end
       end
       return

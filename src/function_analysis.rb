@@ -47,7 +47,7 @@ module FunctionAnalysis
 
     # 2. Body Analysis (Inside Scope)
     with_new_scope do
-      og_push_scope if respond_to?(:og_push_scope, true)
+      og_push_scope
       declare_and_verify_params(node)
       declare_captures(node)
 
@@ -58,7 +58,7 @@ module FunctionAnalysis
       end
 
       finalize_scope(node)
-      og_pop_scope if respond_to?(:og_pop_scope, true)
+      og_pop_scope
     end
 
     # 3. Routine Epilogue (Process Returns)
@@ -293,7 +293,7 @@ module FunctionAnalysis
       inner_node = is_give ? arg_node.value : arg_node
       if param[:takes] || is_give
         if inner_node.is_a?(AST::Identifier)
-          og_set_moved(inner_node.name) if respond_to?(:og_set_moved, true)
+          og_set_moved(inner_node.name)
         end
         inner_node.was_moved = true
         arg_node.was_moved = true
@@ -468,7 +468,7 @@ module FunctionAnalysis
       # TAKES parameters own the data — force :affine so cleanup is emitted.
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])
-      og_declare(param[:name], nil, param[:type], :stack) if respond_to?(:og_declare, true)
+      og_declare(param[:name], nil, param[:type], :stack)
       param[:type]
     end
   end

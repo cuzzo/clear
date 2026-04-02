@@ -5,7 +5,6 @@ require_relative "./std_lib"
 require_relative "./function_context"
 require_relative "./function_analysis"
 require_relative "./pipe_analysis"
-require_relative "./ownership_tracker"
 require_relative "./ownership_graph"
 require_relative "./generic_analysis"
 require_relative "./capabilities"
@@ -19,7 +18,6 @@ class SemanticAnnotator
   include ErrorHelper
   include FunctionAnalysis
   include PipeAnalysis
-  include OwnershipTracker
   include ScopeHelper
   include TypeHelper
   include GenericAnalysis
@@ -2645,67 +2643,233 @@ private
     names
   end
 
-  # ── Ownership Graph Bridge ──────────────────────────────────────
-  # Shadow calls that populate @og alongside the scope-based tracker.
-  # These are no-ops if @og is nil (e.g., in tests that don't init it).
+  # ── Ownership: move, escape, borrow, drop ────────────────────────
+  # All ownership state lives in @og (OwnershipGraph). The scope is
+  # still used for type resolution, borrow path tracking, and storage
+  # promotion (mark_escaped), but liveness is graph-only.
+
+  def handle_assign_move(node)
+    if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
+      path = get_path_to_root(node.value)
+      return if path.nil?
+      if Type.new(node.value.resolved_type).requires_move?
+        root_name = path.first.to_s
+        scope = lookup_scope_for(root_name)
+        scope&.mark_path_moved(path) if scope
+      end
+      return
+    end
+
+    return unless node.value.is_a?(AST::Identifier)
+    rhs_name = node.value.name
+    rhs_type = current_scope.resolve_type(rhs_name)
+    rhs_info = current_scope.locals[rhs_name]
+    return if rhs_info&.storage == :multiowned || rhs_info&.storage == :shared || rhs_info&.sync
+
+    if Type.new(rhs_type).requires_move? || rhs_info&.resource
+      lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
+      og_move(rhs_name, lhs_name)
+    end
+  end
+
+  def handle_assign_escape(node)
+    return unless node.value.is_a?(AST::Identifier)
+    rhs_name = node.value.name
+    rhs_scope = lookup_scope_for(rhs_name)
+    target_is_heap = false
+
+    if node.name.is_a?(AST::Identifier)
+      lhs_scope = lookup_scope_for(node.name.name)
+      target_is_heap = true if lhs_scope && (lhs_scope.is_on_heap?(node.name.name) || is_global_scope?(lhs_scope))
+    elsif node.name.is_a?(AST::GetField) || node.name.is_a?(AST::GetIndex)
+      root = get_root_object(node.name)
+      if root.is_a?(AST::Identifier)
+        root_scope = lookup_scope_for(root.name)
+        target_is_heap = true if root_scope && (is_global_scope?(root_scope) || root_scope.is_on_heap?(root.name))
+      end
+    end
+
+    if target_is_heap && rhs_scope && Type.new(rhs_scope.resolve_type(rhs_name)).requires_move?
+      rhs_scope.mark_escaped(rhs_name)
+      og_escape(rhs_name)
+    end
+  end
+
+  def handle_assign_borrow(node)
+    return unless node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
+    call_node = node.value
+    return if call_node.is_a?(AST::MethodCall) && call_node.pool_method
+
+    func_name = call_node.name
+    scope = lookup_scope_for(func_name)
+    return unless scope
+
+    func_type = scope.resolve_type(func_name)
+    return unless func_type.is_a?(Hash)
+
+    lifetime = func_type.dig(:return, :lifetime)
+    return if lifetime.nil?
+
+    param_index = func_type[:params].find_index { |p| p[:name] == lifetime }
+    error!(node, "Missing lifetime") if param_index.nil?
+
+    args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
+    actual_arg = args[param_index]
+    error!(node, "Missing borrowed param") if actual_arg.nil?
+
+    path = get_path_to_root(actual_arg)
+    return if path.nil?
+
+    root_var = path.first.to_s
+    borrowed_scope = lookup_scope_for(root_var)
+    error!(node, "Variable not found") if borrowed_scope.nil?
+    return if borrowed_scope.is_immutable?(root_var)
+
+    borrow_type = node.mutable ? :mutable : :immutable
+    unless borrowed_scope.can_borrow?(root_var, path, borrow_type)
+      error!(node, "Lifetime Error: '#{root_var}' (or part of it) is already borrowed.")
+    end
+    current_scope.mark_borrowed(root_var, path, borrow_type)
+  end
+
+  def handle_return_escape(value_node, expected_type = nil)
+    return false if value_node.nil?
+    if expected_type
+      expected = Type.new(expected_type)
+      return false unless expected.heap? || expected.dynamic?
+    end
+
+    root = get_root_object(value_node)
+    return false unless root.is_a?(AST::Identifier)
+
+    var_name = root.name
+    sym = root.symbol
+    return false unless sym
+
+    owner_scope = sym.scope
+    return false unless owner_scope
+    return false if sym.storage == :multiowned || sym.storage == :shared || sym.sync
+
+    type = owner_scope.resolve_type(var_name)
+    return false unless Type.new(type).requires_move?
+
+    is_frame_dec = owner_scope.mark_escaped(var_name)
+    og_escape(var_name)
+    if owner_scope.is_on_heap?(var_name) && root.respond_to?(:storage=)
+      root.storage = :heap
+    end
+    is_frame_dec
+  end
+
+  def verify_unrestricted!(node)
+    path = get_path_to_root(node.name)
+    return if path.nil?
+    root_name = path.first.to_s
+    scope = lookup_scope_for(root_name)
+    return if scope.nil?
+    unless scope.can_borrow?(root_name, path, :mutable)
+      error!(node, "Lifetime Error: Cannot assign to '#{root_name}' because it is currently borrowed.")
+    end
+  end
+
+  def finalize_scope(node, branch: nil)
+    drops = []
+    current_scope.locals.each do |name, info|
+      next unless current_scope.owned_names.include?(name)
+      next unless @og.live?(name)
+      classify_ownership!(info) unless info.ownership_kind
+
+      case info.ownership_kind
+      when :resource
+        drops << { name: name, type: info.type, resource: true }
+        og_drop(name)
+      when :affine
+        if Type.new(info.type).tense?
+          error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
+        end
+        drops << { name: name, type: info.type }
+        og_drop(name)
+      end
+    end
+
+    case branch
+    when :then  then node.then_drops = drops
+    when :else  then node.else_drops = drops
+    else node.deferred_drops = drops
+    end
+
+    # Unused variable warnings (function-level finalize only)
+    if branch.nil?
+      current_scope.locals.each do |name, info|
+        next unless current_scope.owned_names.include?(name)
+        next if name.start_with?('_')
+        next if info.read
+        next if info.reg&.respond_to?(:var_used) && info.reg.var_used
+        classify_ownership!(info) unless info.ownership_kind
+        next if [:resource, :collection, :rc].include?(info.ownership_kind)
+        next unless info.reg
+        loc = info.reg.respond_to?(:line) ? " (line #{info.reg.line})" : ""
+        $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{name}'#{loc}"
+      end
+    end
+  end
+
+  def collect_scope_drops(node: nil)
+    drops = []
+    current_scope.locals.each do |name, info|
+      next unless @og.live?(name)
+      classify_ownership!(info) unless info.ownership_kind
+      case info.ownership_kind
+      when :resource
+        drops << { name: name, type: info.type, resource: true }
+        og_drop(name)
+      when :affine
+        if node && Type.new(info.type).tense?
+          error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
+        end
+        drops << { name: name, type: info.type }
+        og_drop(name)
+      end
+    end
+    drops
+  end
+
+  def get_path_to_root(node)
+    path = []
+    curr = node
+    while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
+      path.unshift(curr.is_a?(AST::GetField) ? curr.field.to_sym : :*)
+      curr = curr.target
+    end
+    return nil unless curr.is_a?(AST::Identifier)
+    path.unshift(curr.name.to_sym)
+    path
+  end
+
+  def get_lifetime_path(func_node)
+    get_path_to_root(func_node.return_lifetime)&.join(".")
+  end
+
+  # ── Ownership Graph Operations ─────────────────────────────────
 
   def og_declare(name, node, type_info, storage)
-    return unless @og
     kind = classify_og_kind(type_info)
     ti = type_info.is_a?(Type) ? type_info : (type_info ? Type.new(type_info) : nil)
     @og.declare(name, kind: kind, type_info: ti, storage: storage,
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
 
-  def og_move(from, to)
-    return unless @og
-    @og.transfer(from, to)
-  end
-
-  def og_set_moved(name)
-    return unless @og
-    node = @og[name]
-    return unless node
-    node.state = :moved
-  end
-
-  def og_set_live(name)
-    return unless @og
-    node = @og[name]
-    return unless node
-    node.state = :live
-  end
-
-  def og_escape(name)
-    return unless @og
-    @og.escape(name)
-  end
-
-  def og_drop(name)
-    return unless @og
-    @og.drop(name)
-  end
-
-  def og_fork
-    return nil unless @og
-    @og.fork
-  end
+  def og_move(from, to)  = @og.transfer(from, to)
+  def og_set_moved(name) = (@og[name]&.state = :moved)
+  def og_set_live(name)  = (@og[name]&.state = :live)
+  def og_escape(name)    = @og.escape(name)
+  def og_drop(name)      = @og.drop(name)
+  def og_fork            = @og.fork
+  def og_push_scope      = (@og_scope_depth += 1)
+  def og_pop_scope       = (@og_scope_depth -= 1)
 
   def og_merge(snapshot)
-    return unless @og && snapshot
-    @og.merge(snapshot)
-  end
-
-  def og
-    @og
-  end
-
-  def og_push_scope
-    @og_scope_depth += 1 if @og
-  end
-
-  def og_pop_scope
-    @og_scope_depth -= 1 if @og
+    @og.merge(snapshot) if snapshot
   end
 
   def classify_og_kind(type_info)

@@ -204,30 +204,12 @@ class Scope
     entry ? [:heap, :multiowned, :shared].include?(entry.storage) : false
   end
 
-  def set_state(name, state)
-    @locals[name].state = state if @locals[name]
-  end
-
-  def get_state(name)
-    @locals[name]&.state || :uninit
-  end
-
   # Mark a variable as read (used as an r-value in user code).
   def mark_read(name)
     entry = @locals[name]
     return unless entry
     entry.read = true
     entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
-  end
-
-  # Snapshot all entry states for branch analysis. Returns {name => state_symbol}.
-  def clone_states
-    @locals.transform_values { |entry| entry.state || :uninit }
-  end
-
-  # Restore entry states from a snapshot (produced by clone_states).
-  def restore_states(state_map)
-    state_map.each { |name, state| @locals[name].state = state if @locals[name] }
   end
 
   def mark_escaped(name)
