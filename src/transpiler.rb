@@ -639,6 +639,8 @@ private
       @transpiler_context_stack.pop
 
       has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+      @current_fn_has_catch = has_catch
+      @current_fn_snapshot_types = Set.new if has_catch
 
       if !has_catch
         <<~ZIG
@@ -654,6 +656,14 @@ private
         # we wrap the body in a helper that we call with catch.
         rt_name = @do_rt_name || "rt"
 
+        # After transpiling the body, check snapshot types for ambiguity
+        snap_types = @current_fn_snapshot_types || Set.new
+        snapshot_decl = ""
+        if snap_types.size == 1
+          snap_zig = transpile_type(snap_types.first)
+          snapshot_decl = "const snapshot = #{rt_name}.__error.snapshotAs(#{snap_zig});\n            _ = &snapshot;"
+        end
+
         catch_clauses_zig = node.catch_clauses.map do |clause|
           kind = clause[:kind]
           error_name = clause[:error_name]
@@ -663,7 +673,7 @@ private
           cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
           cond = cond_parts.join(" and ")
 
-          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{clause_body_code}\n        }"
+          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            #{clause_body_code}\n        }"
         end.join(" else ")
 
         # DEFAULT clause
@@ -2539,7 +2549,49 @@ private
       synthetic_call.coerced_type = rhs.coerced_type
     end
 
-    # Visit the fake node as if it were in the original source
+    # If this function has CATCH blocks and the pipe step can fail,
+    # generate snapshot capture: bind LHS to a variable, wrap call in
+    # catch that heap-copies the LHS before propagating the error.
+    lhs_type = lhs.respond_to?(:full_type) ? lhs.full_type : nil
+    lhs_t = lhs_type ? Type.new(lhs_type) : nil
+    rhs_can_fail = rhs.respond_to?(:full_type) && rhs.full_type && Type.new(rhs.full_type).error_union?
+
+    if @current_fn_has_catch && rhs_can_fail && lhs_t && !lhs_t.void?
+      zig_type = transpile_type(lhs_t.resolved.to_s)
+      rt_name = @do_rt_name || "rt"
+      @snapshot_counter = (@snapshot_counter || 0) + 1
+      snap_var = "__snap_#{@snapshot_counter}"
+      snap_label = "__snap_blk#{@snapshot_counter}"
+
+      # Track types for ambiguity checking
+      @current_fn_snapshot_types ||= Set.new
+      @current_fn_snapshot_types << lhs_t.resolved.to_s
+
+      # Visit LHS once, bind to variable
+      lhs_code = visit(lhs)
+
+      # Build the function call with snap_var replacing LHS
+      if rhs.is_a?(AST::Identifier)
+        call_zig = "#{rhs.name}(#{rt_name}, #{snap_var})"
+      elsif rhs.is_a?(AST::FuncCall)
+        extra_args = rhs.args.map { |a| visit(a) }.join(', ')
+        fn_name = rhs.name
+        call_zig = "#{fn_name}(#{rt_name}, #{snap_var}#{extra_args.empty? ? '' : ', ' + extra_args})"
+      else
+        # Fallback: just visit normally
+        return visit(synthetic_call)
+      end
+
+      return "#{snap_label}: {\n" \
+             "    const #{snap_var} = #{lhs_code};\n" \
+             "    break :#{snap_label} #{call_zig} catch |__snap_err| {\n" \
+             "        #{rt_name}.captureSnapshot(#{zig_type}, &#{snap_var});\n" \
+             "        return __snap_err;\n" \
+             "    };\n" \
+             "}"
+    end
+
+    # Normal path: no CATCH blocks or non-failing step
     visit(synthetic_call)
   end
 

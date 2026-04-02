@@ -56,9 +56,9 @@ pub const ErrorKind = enum(u8) {
 
 pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
-    error_name: []const u8 = "",   // user-defined error enum name
+    error_name: []const u8 = "",
     message: []const u8 = "",
-    snapshot: ?[]const u8 = null,
+    snapshot_ptr: usize = 0,       // @intFromPtr of heap-copied element, 0 = no snapshot
     clear_line: u32 = 0,
 
     pub fn reset(self: *ErrorContext) void {
@@ -71,6 +71,12 @@ pub const ErrorContext = struct {
 
     pub fn matchesName(self: *const ErrorContext, name: []const u8) bool {
         return std.mem.eql(u8, self.error_name, name);
+    }
+
+    /// Cast the snapshot pointer to a typed pointer. Returns null if no snapshot.
+    pub fn snapshotAs(self: *const ErrorContext, comptime T: type) ?*const T {
+        if (self.snapshot_ptr == 0) return null;
+        return @as(*const T, @ptrFromInt(self.snapshot_ptr));
     }
 };
 
@@ -263,9 +269,11 @@ pub const Runtime = struct {
         self.__error = .{ .kind = kind, .error_name = error_name, .message = message, .clear_line = clear_line };
     }
 
-    pub fn setErrorSnapshot(self: *Runtime, data: []const u8) void {
-        // Heap-dupe the snapshot so it survives frame rewind. OOM = no snapshot.
-        self.__error.snapshot = self.heap_allocator.dupe(u8, data) catch null;
+    /// Heap-copy a value as a snapshot. OOM = no snapshot (snapshot_ptr stays 0).
+    pub fn captureSnapshot(self: *Runtime, comptime T: type, value: *const T) void {
+        const copy = self.heap_allocator.create(T) catch return;
+        copy.* = value.*;
+        self.__error.snapshot_ptr = @intFromPtr(copy);
     }
 
     pub fn clearError(self: *Runtime) void {
