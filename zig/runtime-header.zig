@@ -253,21 +253,10 @@ pub const CheatLib = struct {
                 try self.inner.put(self.alloc, key_copy, stored_value);
             }
 
-            /// If V is a tagged union with []const u8 fields, dupe the active
-            /// variant's string to the given allocator. Otherwise return as-is.
+            /// Deep-copy heap-owning payloads in a tagged union value.
+            /// Delegates to CheatLib.dupeUnionValue for the actual work.
             fn dupeUnionStrings(value: V, alloc: std.mem.Allocator) !V {
-                const info = @typeInfo(V);
-                if (info != .@"union") return value;
-                var result = value;
-                inline for (info.@"union".fields) |field| {
-                    if (field.type == []const u8) {
-                        if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
-                            @field(result, field.name) = try alloc.dupe(u8, @field(value, field.name));
-                            return result;
-                        }
-                    }
-                }
-                return value;
+                return CheatLib.dupeUnionValue(V, value, alloc);
             }
 
             pub fn get(self: anytype, key: []const u8) ?V {
@@ -346,6 +335,11 @@ pub const CheatLib = struct {
                                 freeUnionPayloadGeneric(@TypeOf(entry.value_ptr.*), entry.value_ptr.*, map.alloc);
                             }
                             map.inner.deinit(map.alloc);
+                        } else if (ft_info == .@"struct" and
+                            !CheatLib.isArrayList(FT) and !CheatLib.isStringMap(FT) and
+                            !CheatLib.isNumericMap(FT) and !CheatLib.isPool(FT))
+                        {
+                            freeStructPayload(FT, @field(value, field.name), alloc_);
                         }
                         return;
                     }
@@ -380,8 +374,41 @@ pub const CheatLib = struct {
                                 freeUnionPayloadGeneric(@TypeOf(entry.value_ptr.*), entry.value_ptr.*, map.alloc);
                             }
                             map.inner.deinit(map.alloc);
+                        } else if (ft_info == .@"struct" and
+                            !CheatLib.isArrayList(FT) and !CheatLib.isStringMap(FT) and
+                            !CheatLib.isNumericMap(FT) and !CheatLib.isPool(FT))
+                        {
+                            freeStructPayload(FT, @field(value, field.name), alloc_);
                         }
                         return;
+                    }
+                }
+            }
+
+            /// Free heap-owned fields in a struct payload (slices, pointers, nested unions).
+            fn freeStructPayload(comptime T: type, value: T, alloc_: std.mem.Allocator) void {
+                const sinfo = @typeInfo(T);
+                if (sinfo != .@"struct") return;
+                inline for (sinfo.@"struct".fields) |sf| {
+                    const SFT = sf.type;
+                    const sf_info = @typeInfo(SFT);
+                    if (SFT == []const u8) {
+                        const s = @field(value, sf.name);
+                        if (s.len > 0) alloc_.free(s);
+                    } else if (sf_info == .pointer and sf_info.pointer.size == .slice and SFT != []u8) {
+                        const s = @field(value, sf.name);
+                        const ElemT = sf_info.pointer.child;
+                        if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
+                            for (s) |elem| freeUnionPayloadGeneric(ElemT, elem, alloc_);
+                        }
+                        if (s.len > 0) alloc_.free(s);
+                    } else if (sf_info == .pointer and sf_info.pointer.size == .one) {
+                        const child_ptr = @field(value, sf.name);
+                        const ChildT = sf_info.pointer.child;
+                        if (@typeInfo(ChildT) == .@"union" and @typeInfo(ChildT).@"union".tag_type != null) {
+                            freeUnionPayloadGeneric(ChildT, child_ptr.*, alloc_);
+                        }
+                        alloc_.destroy(child_ptr);
                     }
                 }
             }
@@ -1909,9 +1936,10 @@ pub const CheatLib = struct {
         if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
             inline for (ft_info.@"union".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
-                // TODO: Non-string slice variants need cleanup but require MATCH
-                // destructure to be a move first (to prevent double-free from
-                // shared pointers). Enable after MATCH move semantics implemented.
+                // Non-string slice variants need cleanup (heap buffers from promoteList).
+                const fi = @typeInfo(field.type);
+                if (fi == .pointer and fi.pointer.size == .slice and
+                    field.type != []const u8 and field.type != []u8) return true;
             }
         }
         return false;
@@ -1919,6 +1947,78 @@ pub const CheatLib = struct {
 
     /// Promote all escapable fields of a struct from frame arena to heap.
     /// DEPRECATED: use promote() for new code. Kept for backward compat.
+    /// Deep-copy a union value's heap-owning payload (strings, slices, struct fields).
+    pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
+        const info = @typeInfo(T);
+        if (info != .@"union" or info.@"union".tag_type == null) return value;
+        var result = value;
+        inline for (info.@"union".fields) |field| {
+            if (std.meta.activeTag(value) == @field(std.meta.Tag(T), field.name)) {
+                const FT = field.type;
+                const ft_info = @typeInfo(FT);
+                if (FT == []const u8) {
+                    const src = @field(value, field.name);
+                    @field(result, field.name) = if (src.len > 0) try alloc.dupe(u8, src) else src;
+                    return result;
+                } else if (ft_info == .pointer and ft_info.pointer.size == .slice and FT != []u8) {
+                    const src = @field(value, field.name);
+                    if (src.len > 0) {
+                        const ElemT = ft_info.pointer.child;
+                        const buf = try alloc.alloc(ElemT, src.len);
+                        for (src, 0..) |elem, i| {
+                            buf[i] = dupeUnionValue(ElemT, elem, alloc) catch elem;
+                        }
+                        @field(result, field.name) = buf;
+                    }
+                    return result;
+                } else if (ft_info == .@"struct" and
+                    !isArrayList(FT) and !isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
+                    !(@hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")))
+                {
+                    @field(result, field.name) = dupeStructSlices(FT, @field(value, field.name), alloc) catch @field(value, field.name);
+                    return result;
+                }
+                return value;
+            }
+        }
+        return value;
+    }
+
+    /// Deep-copy slice and pointer fields inside a struct.
+    fn dupeStructSlices(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return value;
+        var result = value;
+        inline for (info.@"struct".fields) |field| {
+            const FT = field.type;
+            const ft_info = @typeInfo(FT);
+            if (ft_info == .pointer and ft_info.pointer.size == .slice) {
+                const src = @field(value, field.name);
+                if (src.len > 0) {
+                    const ElemT = ft_info.pointer.child;
+                    if (FT == []const u8 or FT == []u8) {
+                        @field(result, field.name) = try alloc.dupe(u8, src);
+                    } else {
+                        const buf = try alloc.alloc(ElemT, src.len);
+                        for (src, 0..) |elem, i| {
+                            buf[i] = dupeUnionValue(ElemT, elem, alloc) catch elem;
+                        }
+                        @field(result, field.name) = buf;
+                    }
+                }
+            } else if (ft_info == .pointer and ft_info.pointer.size == .one) {
+                const child_ptr = @field(value, field.name);
+                const ChildT = ft_info.pointer.child;
+                const new_ptr = try alloc.create(ChildT);
+                new_ptr.* = dupeUnionValue(ChildT, child_ptr.*, alloc) catch child_ptr.*;
+                @field(result, field.name) = new_ptr;
+            } else if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
+                @field(result, field.name) = dupeUnionValue(FT, @field(value, field.name), alloc) catch @field(value, field.name);
+            }
+        }
+        return result;
+    }
+
     pub fn promoteFields(comptime T: type, rt: *Runtime, value: *T) !void {
         try promote(T, rt, value);
     }
@@ -2728,8 +2828,41 @@ pub const CheatLib = struct {
                                 freeUnionPayloadGeneric(MapT, entry.value_ptr.*, map.alloc);
                             }
                             map.inner.deinit(map.alloc);
+                        } else if (ft_info == .@"struct" and
+                            !CheatLib.isArrayList(FT) and !CheatLib.isStringMap(FT) and
+                            !CheatLib.isNumericMap(FT))
+                        {
+                            freeStructPayloadPool(FT, @field(value, field.name), alloc_);
                         }
                         return;
+                    }
+                }
+            }
+
+            /// Free heap-owned fields in a struct payload (Pool version).
+            fn freeStructPayloadPool(comptime ST: type, value: ST, alloc_: std.mem.Allocator) void {
+                const sinfo = @typeInfo(ST);
+                if (sinfo != .@"struct") return;
+                inline for (sinfo.@"struct".fields) |sf| {
+                    const SFT = sf.type;
+                    const sf_info = @typeInfo(SFT);
+                    if (SFT == []const u8) {
+                        const s = @field(value, sf.name);
+                        if (s.len > 0) alloc_.free(s);
+                    } else if (sf_info == .pointer and sf_info.pointer.size == .slice and SFT != []u8) {
+                        const s = @field(value, sf.name);
+                        const ElemT = sf_info.pointer.child;
+                        if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
+                            for (s) |elem| freeUnionPayloadGeneric(@TypeOf(value), elem, alloc_);
+                        }
+                        if (s.len > 0) alloc_.free(s);
+                    } else if (sf_info == .pointer and sf_info.pointer.size == .one) {
+                        const child_ptr = @field(value, sf.name);
+                        const ChildT = sf_info.pointer.child;
+                        if (@typeInfo(ChildT) == .@"union" and @typeInfo(ChildT).@"union".tag_type != null) {
+                            freeUnionPayloadGeneric(@TypeOf(value), child_ptr.*, alloc_);
+                        }
+                        alloc_.destroy(child_ptr);
                     }
                 }
             }

@@ -309,3 +309,157 @@ test "promote: Array variant promotes backing" {
     try std.testing.expect(val.Array.items.len == 2);
     val.Array.deinit(ctx.rt.heapAlloc());
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Bug reproduction tests — each tests one specific broken behavior.
+// All should FAIL before the fix and PASS after.
+// ═══════════════════════════════════════════════════════════════════
+
+// --- Bug 2: HashMap.put doesn't deep-copy non-string slice variants ---
+
+test "BUG: StringMap.put must deep-copy Value.List slice variant" {
+    // When storing MinValue.List ([]MinValue) into a HashMap, the slice
+    // buffer must be duplicated so the map owns its own copy. Without
+    // this, freeing the original buffer leaves the map with a dangling
+    // pointer (use-after-free / segfault on access).
+    const alloc = std.testing.allocator;
+
+    var map = CheatLib.StringMap(MinValue){ .alloc = alloc };
+    defer map.deinit(alloc, alloc);
+
+    const slice = try alloc.alloc(MinValue, 2);
+    slice[0] = MinValue{ .Num = 1.0 };
+    slice[1] = MinValue{ .Num = 2.0 };
+
+    try map.put(alloc, alloc, "items", MinValue{ .List = slice });
+
+    // Free the ORIGINAL slice. If the map didn't dupe, this is use-after-free.
+    alloc.free(slice);
+
+    // Read from the map — must still be valid.
+    const stored = map.get("items").?;
+    try std.testing.expect(std.meta.activeTag(stored) == .List);
+    try std.testing.expect(stored.List.len == 2);
+    try std.testing.expect(stored.List[0].Num == 1.0);
+}
+
+// --- Bug 3: HashMap.put doesn't deep-copy struct variants with slice/pointer fields ---
+
+const LamPayload = struct {
+    params: []MinValue,
+    body: *MinValue,
+    env_id: u64,
+};
+const LamValue = union(enum) {
+    Num: f64,
+    List: []LamValue,
+    Lambda: LamPayload,
+};
+
+test "BUG: StringMap.put must deep-copy struct variant slice+pointer fields" {
+    // Lambda-style struct variant: params is []MinValue (slice), body is
+    // *MinValue (heap pointer). Both must be duplicated on put so the
+    // map owns independent copies.
+    const alloc = std.testing.allocator;
+
+    var map = CheatLib.StringMap(LamValue){ .alloc = alloc };
+    defer map.deinit(alloc, alloc);
+
+    const params = try alloc.alloc(MinValue, 2);
+    params[0] = MinValue{ .Num = 5.0 };
+    params[1] = MinValue{ .Num = 6.0 };
+    const body = try alloc.create(MinValue);
+    body.* = MinValue{ .Num = 99.0 };
+
+    try map.put(alloc, alloc, "fn", LamValue{ .Lambda = .{
+        .params = params,
+        .body = body,
+        .env_id = 1,
+    } });
+
+    // Free originals. Map must have its own copies.
+    alloc.free(params);
+    alloc.destroy(body);
+
+    const stored = map.get("fn").?;
+    try std.testing.expect(std.meta.activeTag(stored) == .Lambda);
+    try std.testing.expect(stored.Lambda.params.len == 2);
+    try std.testing.expect(stored.Lambda.params[0].Num == 5.0);
+    try std.testing.expect(stored.Lambda.body.*.Num == 99.0);
+}
+
+// --- Bug 4: freeUnionPayload doesn't free struct variant slice/pointer fields ---
+
+test "BUG: StringMap.deinit must free struct variant slice+pointer fields" {
+    // When a HashMap containing LamValue.Lambda entries is deinited,
+    // freeUnionPayload must free the params slice and body pointer that
+    // were deep-copied on put. Otherwise they leak.
+    const alloc = std.testing.allocator;
+
+    var map = CheatLib.StringMap(LamValue){ .alloc = alloc };
+
+    const params = try alloc.alloc(MinValue, 2);
+    params[0] = MinValue{ .Num = 10.0 };
+    params[1] = MinValue{ .Num = 20.0 };
+    const body = try alloc.create(MinValue);
+    body.* = MinValue{ .Num = 42.0 };
+
+    // put deep-copies (assuming bug 3 is fixed), so free originals.
+    try map.put(alloc, alloc, "fn", LamValue{ .Lambda = .{
+        .params = params,
+        .body = body,
+        .env_id = 1,
+    } });
+    alloc.free(params);
+    alloc.destroy(body);
+
+    // deinit must free the map's deep-copied params slice + body pointer.
+    // If freeUnionPayload doesn't handle struct variants, these leak.
+    map.deinit(alloc, alloc);
+    // testing.allocator detects any leaked memory.
+}
+
+// --- Bug 5: Pool's freeUnionPayloadGeneric doesn't free struct variant fields ---
+
+const PoolEnv = struct {
+    vars: CheatLib.StringMap(LamValue),
+};
+
+test "BUG: Pool.deinit must free struct variant fields in HashMap values" {
+    // Scheme pattern: Pool(Env) where Env.vars is StringMap(Value).
+    // When a Lambda (struct variant with params: []Value, body: *Value)
+    // is stored via vars.put, dupeUnionStrings deep-copies the fields.
+    // Pool.deinit -> deinitFields -> freeUnionPayloadGeneric must free
+    // those deep-copied fields. The Pool has its OWN copy of
+    // freeUnionPayloadGeneric which is missing struct variant handling.
+    const alloc = std.testing.allocator;
+
+    var pool = try CheatLib.Pool(PoolEnv).initCapacity(alloc, 4);
+
+    // Insert an env with a StringMap
+    const env_id = try pool.insert(alloc, PoolEnv{
+        .vars = CheatLib.StringMap(LamValue){ .alloc = alloc },
+    });
+
+    // Store a Lambda with heap-allocated params and body into the env's map
+    const params = try alloc.alloc(MinValue, 2);
+    params[0] = MinValue{ .Num = 1.0 };
+    params[1] = MinValue{ .Num = 2.0 };
+    const body = try alloc.create(MinValue);
+    body.* = MinValue{ .Num = 99.0 };
+
+    try pool.get(env_id).?.vars.put(alloc, alloc, "f", LamValue{ .Lambda = .{
+        .params = params,
+        .body = body,
+        .env_id = 0,
+    } });
+
+    // Free originals — map owns deep copies
+    alloc.free(params);
+    alloc.destroy(body);
+
+    // Pool.deinit must free everything: map keys, map values (including
+    // Lambda's deep-copied params slice and body pointer).
+    pool.deinit(alloc);
+    // testing.allocator detects leaks.
+}
