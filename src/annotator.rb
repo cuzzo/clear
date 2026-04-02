@@ -564,38 +564,28 @@ private
   # @param branches [Array<Proc>] Procs that execute branch logic
   # @return [Array<Array<Hash>>] Array of drops for each branch
   def analyze_control_flow_branches(branches, merge_to_parent: true)
-    initial_state = current_scope.clone_states
     og_snapshot = og_fork
-    branch_states = []
     og_branch_snapshots = []
     all_drops = []
 
     branches.each do |branch_logic|
-      current_scope.restore_states(initial_state)
-      og_branch = og_snapshot&.dup
+      # Restore graph to pre-branch state before analyzing each branch
+      @og.restore_from(og_snapshot) if @og && og_snapshot
       with_new_scope(current_scope) do
         og_push_scope
         all_drops << branch_logic.call
-        branch_states << current_scope.clone_states
         og_branch_snapshots << (@og&.fork)
         og_pop_scope
       end
     end
 
-    # Merge States: If a variable died in ANY branch, it must be considered dead in the parent.
-    # Exception: copyable types (primitives, strings) are never moved — they're copied implicitly.
     if merge_to_parent
-      initial_state.each_key do |var|
-        if branch_states.any? { |bs| bs[var] != :live }
-          entry = current_scope.locals[var]
-          classify_ownership!(entry) if entry && !entry.ownership_kind
-          current_scope.set_state(var, :moved) unless entry&.ownership_kind == :value
-        end
-      end
+      # Restore to base, then merge all branch results
+      @og.restore_from(og_snapshot) if @og && og_snapshot
       og_branch_snapshots.each { |snap| og_merge(snap) }
     else
-      # Just restore the initial state if merging is disabled (e.g. for WHILE loops)
-      current_scope.restore_states(initial_state)
+      # Restore the initial state (e.g. for WHILE loops)
+      @og.restore_from(og_snapshot) if @og && og_snapshot
     end
 
     all_drops
@@ -649,7 +639,7 @@ private
           field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
           field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
           current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
-          current_scope.set_state(f[:name], :live)
+          og_declare(f[:name], nil, field_type, :stack)
         end
       else
         visit(f[:value])
@@ -733,12 +723,12 @@ private
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
                   synthetic_type = :"#{type_name}_#{variant_name}"
                   current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
-                  current_scope.set_state(c[:binding], :live)
+                  og_declare(c[:binding], nil, Type.new(synthetic_type), :stack)
                   classify_ownership!(current_scope.locals[c[:binding]])
                 else
                   payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
                   current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
-                  current_scope.set_state(c[:binding], :live)
+                  og_declare(c[:binding], nil, payload_type, :stack)
                   classify_ownership!(current_scope.locals[c[:binding]])
                 end
               end
@@ -773,7 +763,7 @@ private
                   field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
                   field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
                   current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
-                  current_scope.set_state(f[:name], :live)
+                  og_declare(f[:name], nil, field_type, :stack)
                 end
               end
             end
@@ -931,7 +921,7 @@ private
 
     # We use analyze_control_flow_branches to handle state merging and drops.
     # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
-    pre_loop_state = current_scope.clone_states
+    pre_loop_og = @og&.fork
 
     analyze_control_flow_branches([
       proc {
@@ -947,10 +937,10 @@ private
         # Variables not referenced in the loop body are also exempt — they were moved before the
         # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
         loop_body_names = collect_body_identifier_names(node.do_branch)
-        current_scope.locals.each do |name, entry|
-          new_state = entry.state
-          old_state = pre_loop_state[name]
-          if old_state == :live && new_state == :moved
+        current_scope.locals.each do |name, _entry|
+          was_live = pre_loop_og&.live?(name)
+          is_moved = @og&.moved?(name)
+          if was_live && is_moved
             next unless loop_body_names.include?(name)
             var_type = current_scope.locals[name]&.type
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
@@ -1304,7 +1294,6 @@ private
       resource: is_resource,
       close_zig: resource_close
     )
-    current_scope.set_state(node.name, :live)
     node.symbol = current_scope.locals[node.name]
     # Propagate @link_source from the value type to the scope entry
     val_ti = node.value&.type_info
@@ -1364,7 +1353,6 @@ private
         resource: is_resource,
         close_zig: resource_close
       )
-      current_scope.set_state(node.name, :live)
       node.symbol = current_scope.locals[node.name]
       # Propagate @link_source from the value type to the scope entry
       val_ti = node.value&.type_info
@@ -1392,7 +1380,7 @@ private
       handle_assign_borrow(node)
 
       mark_var_mutated(node.name)
-      current_scope.set_state(node.name, :live)
+      og_set_live(node.name)
     end
   end
 
@@ -1427,10 +1415,7 @@ private
     end
 
     # 3. Liveness
-    state = scope.get_state(node.name)
-    type = scope.resolve_type(node.name)
-
-    if state == :moved
+    if @og&.moved?(node.name)
       # TODO: Better error
       error!(node, "Use of moved value '#{node.name}'")
     end
@@ -1562,7 +1547,7 @@ private
 
     # If sucessfully assigned, set live
     target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
-    current_scope.set_state(target_name, :live)
+    og_set_live(target_name)
   end
 
   def visit_assignment_variable(identifier_or_name, node)
@@ -1757,9 +1742,14 @@ private
     path = get_path_to_root(node)
     if path
       root_name = path.first.to_s
-      scope = lookup_scope_for(root_name)
-      if scope&.is_path_moved?(path)
+      if @og&.moved?(root_name)
         error!(node, "Use of moved value '#{path.join(".")}'")
+      elsif path.size > 1
+        # Check sub-paths (e.g. x.child when x.child was moved)
+        scope = lookup_scope_for(root_name)
+        if scope&.is_path_moved?(path)
+          error!(node, "Use of moved value '#{path.join(".")}'")
+        end
       end
     end
 
@@ -2318,7 +2308,6 @@ private
     node.storage   = node.value.storage
 
     # Consume the source variable — it is affinely transferred
-    current_scope.set_state(node.value.name, :moved)
     og_set_moved(node.value.name)
   end
 
@@ -2368,7 +2357,6 @@ private
     # Mark the original as moved
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier)
-      current_scope.set_state(root.name, :moved)
       og_set_moved(root.name)
     end
 
@@ -2604,7 +2592,6 @@ private
     else
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)
-        node.expr.symbol&.scope&.set_state(node.expr.name, :moved)
         og_set_moved(node.expr.name)
       end
       node.full_type = promise_type.tense_type.to_sym
@@ -2682,6 +2669,13 @@ private
     node.state = :moved
   end
 
+  def og_set_live(name)
+    return unless @og
+    node = @og[name]
+    return unless node
+    node.state = :live
+  end
+
   def og_escape(name)
     return unless @og
     @og.escape(name)
@@ -2700,6 +2694,10 @@ private
   def og_merge(snapshot)
     return unless @og && snapshot
     @og.merge(snapshot)
+  end
+
+  def og
+    @og
   end
 
   def og_push_scope

@@ -159,6 +159,13 @@ class OwnershipGraph
     snapshot
   end
 
+  # Restore graph state from a snapshot (destructive — replaces all nodes/edges).
+  def restore_from(snapshot)
+    @nodes = {}
+    snapshot.nodes.each { |k, v| @nodes[k] = v.dup }
+    @edges = snapshot.instance_variable_get(:@edges).map(&:dup)
+  end
+
   # Merge a branch's graph state back. Both branches must agree on
   # moved/dropped state; conflicts are returned as error strings.
   def merge(other)

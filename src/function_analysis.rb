@@ -293,7 +293,7 @@ module FunctionAnalysis
       inner_node = is_give ? arg_node.value : arg_node
       if param[:takes] || is_give
         if inner_node.is_a?(AST::Identifier)
-          current_scope.set_state(inner_node.name, :moved)
+          og_set_moved(inner_node.name) if respond_to?(:og_set_moved, true)
         end
         inner_node.was_moved = true
         arg_node.was_moved = true
@@ -465,7 +465,6 @@ module FunctionAnalysis
       current_scope.declare(
         param[:name], nil, param[:type], param[:mutable], false, nil, :stack
       )
-      current_scope.set_state(param[:name], :live)
       # TAKES parameters own the data — force :affine so cleanup is emitted.
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])

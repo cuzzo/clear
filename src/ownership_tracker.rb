@@ -33,7 +33,6 @@ module OwnershipTracker
 
     # Primitives COPY, everything else MOVES (including resources)
     if Type.new(rhs_type).requires_move? || rhs_info&.resource
-      current_scope.set_state(rhs_name, :moved)
       lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
       og_move(rhs_name, lhs_name) if respond_to?(:og_move, true)
     end
@@ -222,18 +221,16 @@ module OwnershipTracker
     current_scope.locals.each do |name, info|
 
       next unless current_scope.owned_names.include?(name)
-      next unless current_scope.get_state(name) == :live
+      next unless @og ? @og.live?(name) : (current_scope.get_state(name) == :live)
       classify_ownership!(info) unless info.ownership_kind
 
       case info.ownership_kind
       when :resource
         drops << { name: name, type: info.type, resource: true }
-        current_scope.set_state(name, :dropped)
         og_drop(name) if respond_to?(:og_drop, true)
       when :affine
         check_tense_linear!(node, name, info)
         drops << { name: name, type: info.type }
-        current_scope.set_state(name, :dropped)
         og_drop(name) if respond_to?(:og_drop, true)
       # :value, :collection, :rc, :sync — no drop needed
       end
@@ -271,18 +268,16 @@ module OwnershipTracker
   def collect_scope_drops(node: nil)
     drops = []
     current_scope.locals.each do |name, info|
-      next unless current_scope.get_state(name) == :live
+      next unless @og ? @og.live?(name) : (current_scope.get_state(name) == :live)
       classify_ownership!(info) unless info.ownership_kind
 
       case info.ownership_kind
       when :resource
         drops << { name: name, type: info.type, resource: true }
-        current_scope.set_state(name, :dropped)
         og_drop(name) if respond_to?(:og_drop, true)
       when :affine
         check_tense_linear!(node, name, info) if node
         drops << { name: name, type: info.type }
-        current_scope.set_state(name, :dropped)
         og_drop(name) if respond_to?(:og_drop, true)
       end
     end
