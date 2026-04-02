@@ -887,7 +887,13 @@ private
           "_ = &#{safe_name};"
         end
       else
-        (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
+        # In test mode, always suppress unused const (stubs may bypass usage).
+        # In normal mode, suppress only when unused and no cleanup.
+        if @test_mode
+          "_ = &#{safe_name};"
+        else
+          (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
+        end
       end
 
       "#{decl} #{suppression}\n#{affine_logic}\n#{move_source_logic}"
@@ -2011,7 +2017,14 @@ private
           # Only inject rt / emit try if the callee actually needs them.
           needs_rt = callee_needs_rt?(node.name)
           can_fail  = callee_can_fail?(node.name)
-          args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
+          # UFCS: inject the object as the first argument for method calls
+          ufcs_args = if node.is_a?(AST::MethodCall) && node.respond_to?(:object)
+            obj_code = visit(node.object)
+            [obj_code]
+          else
+            []
+          end
+          args = type_arg_strs + (needs_rt ? [rt_name] : []) + ufcs_args + args_zig
           fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
 
           is_tail_self_call = @current_tail_call_fn == node.name

@@ -24,13 +24,17 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
-bundle exec rspec                    # Run all Ruby specs (1343 examples)
+bundle exec rspec                    # Run all Ruby specs (1476 examples)
 
 # Package integration test
 cd transpile-tests/module-integration && zig build test
 
 # FFI integration test
 cd transpile-tests/ffi-integration && zig build test
+
+# Example tests (run before committing)
+./clear test examples/testing/basic_test.cht
+./clear test examples/testing/stub_ufcs.cht
 ```
 
 ### Build Modes
