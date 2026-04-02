@@ -62,6 +62,20 @@ result = BG {
 
 Each `AS name` binds the result for subsequent steps. The last step's value becomes the promise result.
 
+**Error handling:** use `OR` before the `AS` binding. If a step returns `!T`, handle it inline:
+
+```clear
+-- ILLUSTRATIVE
+result = BG {
+    fetch(url) OR RAISE           -- propagate error to caller
+    AS response THEN parse(response) OR default_value
+    AS parsed THEN transform(parsed);
+};
+```
+
+- `OR RAISE` - propagate the error (caller sees it via `NEXT`)
+- `OR value` - replace error with a fallback, chain continues
+
 ## DO — Fork-Join
 
 Execute multiple branches concurrently, wait for all to complete:
