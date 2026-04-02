@@ -245,7 +245,7 @@ pub const CheatLib = struct {
                 _ = bucket_alloc;
                 const stored_value = dupeUnionStrings(value, self.alloc) catch value;
                 if (self.inner.getPtr(key)) |val_ptr| {
-                    freeUnionStrings(val_ptr.*, self.alloc);
+                    freeUnionPayload(val_ptr.*, self.alloc);
                     val_ptr.* = stored_value;
                     return;
                 }
@@ -282,7 +282,7 @@ pub const CheatLib = struct {
                 _ = key_alloc;
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
-                    freeUnionStrings(kv.value, self.alloc);
+                    freeUnionPayload(kv.value, self.alloc);
                 }
             }
 
@@ -297,23 +297,81 @@ pub const CheatLib = struct {
                 var it = self.inner.iterator();
                 while (it.next()) |entry| {
                     self.alloc.free(entry.key_ptr.*);
-                    freeUnionStrings(entry.value_ptr.*, self.alloc);
+                    freeUnionPayload(entry.value_ptr.*, self.alloc);
                 }
                 self.inner.deinit(self.alloc);
             }
 
-            /// Free heap-duped strings inside tagged union values.
-            /// Companion to dupeUnionStrings (called by put).
-            fn freeUnionStrings(value: V, alloc_: std.mem.Allocator) void {
+            /// Free heap-allocated payloads inside tagged union values.
+            /// Handles: strings ([]const u8), slices ([]T), nested StringMaps.
+            /// Recurses into slice elements for nested union cleanup.
+            fn freeUnionPayload(value: V, alloc_: std.mem.Allocator) void {
                 const info = @typeInfo(V);
                 if (info != .@"union") return;
                 inline for (info.@"union".fields) |field| {
-                    if (field.type == []const u8) {
-                        if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
+                    if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
+                        const FT = field.type;
+                        const ft_info = @typeInfo(FT);
+
+                        if (FT == []const u8) {
+                            // String: free if non-empty
                             const slice = @field(value, field.name);
                             if (slice.len > 0) alloc_.free(slice);
-                            return;
+                        } else if (ft_info == .pointer and ft_info.pointer.size == .slice) {
+                            // Slice (e.g. []Value): free elements recursively, then free slice
+                            const slice = @field(value, field.name);
+                            const ElemT = ft_info.pointer.child;
+                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
+                                for (slice) |elem| {
+                                    freeUnionPayloadGeneric(ElemT, elem, alloc_);
+                                }
+                            }
+                            if (slice.len > 0) alloc_.free(slice);
+                        } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
+                            // Nested StringMap: deinit it
+                            var map = @field(value, field.name);
+                            var it = map.inner.iterator();
+                            while (it.next()) |entry| {
+                                map.alloc.free(entry.key_ptr.*);
+                                freeUnionPayloadGeneric(@TypeOf(entry.value_ptr.*), entry.value_ptr.*, map.alloc);
+                            }
+                            map.inner.deinit(map.alloc);
                         }
+                        return;
+                    }
+                }
+            }
+
+            /// Standalone version for recursive calls with different union types.
+            fn freeUnionPayloadGeneric(comptime T: type, value: T, alloc_: std.mem.Allocator) void {
+                const info = @typeInfo(T);
+                if (info != .@"union") return;
+                inline for (info.@"union".fields) |field| {
+                    if (std.meta.activeTag(value) == @field(std.meta.Tag(T), field.name)) {
+                        const FT = field.type;
+                        const ft_info = @typeInfo(FT);
+                        if (FT == []const u8) {
+                            const slice = @field(value, field.name);
+                            if (slice.len > 0) alloc_.free(slice);
+                        } else if (ft_info == .pointer and ft_info.pointer.size == .slice) {
+                            const slice = @field(value, field.name);
+                            const ElemT = ft_info.pointer.child;
+                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
+                                for (slice) |elem| {
+                                    freeUnionPayloadGeneric(ElemT, elem, alloc_);
+                                }
+                            }
+                            if (slice.len > 0) alloc_.free(slice);
+                        } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
+                            var map = @field(value, field.name);
+                            var it = map.inner.iterator();
+                            while (it.next()) |entry| {
+                                map.alloc.free(entry.key_ptr.*);
+                                freeUnionPayloadGeneric(@TypeOf(entry.value_ptr.*), entry.value_ptr.*, map.alloc);
+                            }
+                            map.inner.deinit(map.alloc);
+                        }
+                        return;
                     }
                 }
             }
@@ -2325,26 +2383,45 @@ pub const CheatLib = struct {
                         var it = map.inner.iterator();
                         while (it.next()) |entry| {
                             map.alloc.free(entry.key_ptr.*);
-                            freeUnionStringsGeneric(FT, entry.value_ptr.*, map.alloc);
+                            freeUnionPayloadGeneric(FT, entry.value_ptr.*, map.alloc);
                         }
                         map.inner.deinit(map.alloc);
                     }
                 }
             }
 
-            /// Generic freeUnionStrings that works with any V type.
-            fn freeUnionStringsGeneric(comptime MapT: type, value: anytype, alloc_: std.mem.Allocator) void {
-                _ = MapT;
+            /// Pool's version of freeUnionPayloadGeneric — delegates to StringMap's version.
+            fn freeUnionPayloadGeneric(comptime MapT: type, value: anytype, alloc_: std.mem.Allocator) void {
                 const VT = @TypeOf(value);
                 const v_info = @typeInfo(VT);
                 if (v_info != .@"union") return;
+                if (v_info.@"union".tag_type == null) return;
                 inline for (v_info.@"union".fields) |field| {
-                    if (field.type == []const u8) {
-                        if (std.meta.activeTag(value) == @field(std.meta.Tag(VT), field.name)) {
+                    if (std.meta.activeTag(value) == @field(std.meta.Tag(VT), field.name)) {
+                        const FT = field.type;
+                        const ft_info = @typeInfo(FT);
+                        if (FT == []const u8) {
                             const slice = @field(value, field.name);
                             if (slice.len > 0) alloc_.free(slice);
-                            return;
+                        } else if (ft_info == .pointer and ft_info.pointer.size == .slice) {
+                            const slice = @field(value, field.name);
+                            const ElemT = ft_info.pointer.child;
+                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
+                                for (slice) |elem| {
+                                    freeUnionPayloadGeneric(MapT, elem, alloc_);
+                                }
+                            }
+                            if (slice.len > 0) alloc_.free(slice);
+                        } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
+                            var map = @field(value, field.name);
+                            var it = map.inner.iterator();
+                            while (it.next()) |entry| {
+                                map.alloc.free(entry.key_ptr.*);
+                                freeUnionPayloadGeneric(MapT, entry.value_ptr.*, map.alloc);
+                            }
+                            map.inner.deinit(map.alloc);
                         }
+                        return;
                     }
                 }
             }
