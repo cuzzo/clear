@@ -155,6 +155,50 @@ RSpec.describe "Use-after-move detection" do
   end
 
   # =========================================================================
+  # 9. GIVE on non-RC types should work (ownership transfer to TAKES param)
+  # =========================================================================
+  it "allows GIVE on collection type to TAKES parameter" do
+    expect_no_error(<<~CLEAR)
+      FN consume(TAKES items: Int64[]) RETURNS Int64 ->
+          RETURN items.length();
+      END
+      FN main() RETURNS Void ->
+          MUTABLE vals: Int64[]@list = List[];
+          vals.append(1_i64);
+          n = consume(GIVE vals);
+          RETURN;
+      END
+    CLEAR
+  end
+
+  it "allows GIVE on union type to TAKES parameter" do
+    expect_no_error(<<~CLEAR)
+      UNION Value { Num: Float64, List: Int64[] }
+      FN consume(TAKES v: Value) RETURNS Float64 ->
+          RETURN 1.0;
+      END
+      FN main() RETURNS Void ->
+          v = Value{ Num: 1.0 };
+          r = consume(GIVE v);
+          RETURN;
+      END
+    CLEAR
+  end
+
+  it "rejects GIVE on Copy types" do
+    expect_error(<<~CLEAR, /Copy/)
+      FN consume(x: Float64) RETURNS Float64 ->
+          RETURN x;
+      END
+      FN main() RETURNS Void ->
+          n = 42.0;
+          r = consume(GIVE n);
+          RETURN;
+      END
+    CLEAR
+  end
+
+  # =========================================================================
   # 8. Single use is fine — no error.
   # =========================================================================
   it "allows single use of non-Copy value" do

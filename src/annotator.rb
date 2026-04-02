@@ -2439,8 +2439,9 @@ private
       is_resource = info&.resource
     end
 
-    unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource
-      error!(node, "MOVE can only be applied to @multiowned, @shared, promise, or resource variables, got '#{node.value.resolved_type}'")
+    is_copy = ti&.implicitly_copyable? { |t| lookup_type_schema(t) } rescue false
+    unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource || !is_copy
+      error!(node, "GIVE cannot be applied to Copy types (#{node.value.resolved_type} is implicitly copyable)")
     end
 
     # Inherit the capability type so the VarDecl or ReturnNode can infer storage correctly

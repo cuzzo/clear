@@ -1,0 +1,106 @@
+require "rspec"
+require_relative "../src/lexer"
+require_relative "../src/parser"
+require_relative "../src/annotator"
+require_relative "../src/transpiler"
+
+# TAKES should automatically move the argument — no explicit GIVE needed.
+# After calling fn(TAKES val), val is consumed. Using val again is an error.
+
+RSpec.describe "TAKES auto-move" do
+  def annotate(src)
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    SemanticAnnotator.new.annotate!(ast)
+    ast
+  end
+
+  def transpile(src)
+    ZigTranspiler.new.transpile(src)
+  end
+
+  it "calling TAKES fn without GIVE compiles (auto-move)" do
+    expect {
+      annotate(<<~CLEAR)
+        FN consume(TAKES v: Int64[]) RETURNS Int64 ->
+            RETURN v.length();
+        END
+        FN main() RETURNS Void ->
+            MUTABLE vals: Int64[]@list = List[];
+            vals.append(1_i64);
+            n = consume(vals);
+            RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
+  it "using variable after TAKES call raises use-after-move" do
+    expect {
+      annotate(<<~CLEAR)
+        UNION Value { Num: Float64, List: Int64[] }
+        FN consume(TAKES v: Value) RETURNS Float64 ->
+            RETURN 1.0;
+        END
+        FN main() RETURNS Void ->
+            MUTABLE v = Value{ Num: 1.0 };
+            r1 = consume(v);
+            r2 = consume(v);
+            RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /moved/)
+  end
+
+  it "emits _moved = true in Zig for TAKES arg" do
+    zig = transpile(<<~CLEAR)
+      UNION Value { Num: Float64, List: Int64[] }
+      FN consume(TAKES v: Value) RETURNS Float64 ->
+          RETURN 1.0;
+      END
+      FN main() RETURNS Void ->
+          MUTABLE v = Value{ Num: 1.0 };
+          r = consume(v);
+          RETURN;
+      END
+    CLEAR
+    expect(zig).to include("v_moved = true")
+  end
+
+  it "RETURN fn(TAKES arg) sets _moved before return" do
+    zig = transpile(<<~CLEAR)
+      UNION Value { Num: Float64, List: Int64[] }
+      FN makeValue() RETURNS Value ->
+          MUTABLE items: Int64[]@list = List[];
+          items.append(1_i64);
+          RETURN Value{ List: items };
+      END
+      FN consume(TAKES v: Value) RETURNS Float64 ->
+          RETURN 1.0;
+      END
+      FN main() RETURNS Float64 ->
+          ast = makeValue();
+          RETURN consume(ast);
+      END
+    CLEAR
+    body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
+    expect(body).to include("ast_moved = true")
+  end
+
+  it "TAKES + RETURN suppresses caller defer (no double-free)" do
+    zig = transpile(<<~CLEAR)
+      UNION Value { Num: Float64, List: Int64[] }
+      FN passthrough(TAKES v: Value) RETURNS Value ->
+          RETURN v;
+      END
+      FN main() RETURNS Void ->
+          MUTABLE v = Value{ Num: 1.0 };
+          result = passthrough(v);
+          RETURN;
+      END
+    CLEAR
+    body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
+    # v_moved should be set, so v's defer doesn't fire
+    expect(body).to include("v_moved = true")
+  end
+end

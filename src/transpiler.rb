@@ -2106,6 +2106,19 @@ private
       # 2. Standard Return with Move Suppression for unique heap
       rt_name = @do_rt_name || "rt"
       suppress = emit_move_suppression(node.value)
+      # TAKES auto-move: when RETURN fn(args), mark TAKES args as moved BEFORE return.
+      if node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
+        node.value.args.each do |a|
+          next unless a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier)
+          sym = a.respond_to?(:symbol) ? a.symbol : nil
+          decl = sym&.reg
+          is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+          fn_name = current_tp_ctx&.fn_name
+          plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(a.name)
+          has_guard = is_local && (sym&.mutable || plan_entry)
+          suppress = "#{zig_safe_name(a.name)}_moved = true;\n#{suppress}" if has_guard
+        end
+      end
       val_code = if node.value.nil?
         ""
       elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
