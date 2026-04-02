@@ -2,6 +2,8 @@
 
 require 'fileutils'
 require 'benchmark'
+require 'socket'
+require 'timeout'
 
 # Returns true if binary is missing or any source is newer than binary.
 def needs_rebuild?(binary, *sources)
@@ -494,24 +496,64 @@ def run_server_bench(dir, mode_cfg, cores)
     FileUtils.rm_rf("data")
     FileUtils.mkdir_p("data")
 
+    # Kill any leftover process on the benchmark port
+    leftover = `lsof -ti :#{PORT} 2>/dev/null`.strip
+    leftover.split("\n").each { |p| Process.kill("KILL", p.to_i) rescue nil } if leftover != ""
+    sleep 0.5 if leftover != ""
+
     # Start server
     puts "\nRunning #{srv[:label]}..."
-    if srv[:args]
-      pid = spawn(srv[:env], srv[:bin], *srv[:args], [:out, :err] => "/dev/null")
-    elsif srv[:absolute]
-      pid = spawn(srv[:env], srv[:bin], [:out, :err] => "/dev/null")
-    else
-      pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
+    pid = nil
+    begin
+      if srv[:args]
+        pid = spawn(srv[:env], srv[:bin], *srv[:args], [:out, :err] => "/dev/null")
+      elsif srv[:absolute]
+        pid = spawn(srv[:env], srv[:bin], [:out, :err] => "/dev/null")
+      else
+        pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
+      end
+
+      # Wait for server to be ready (probe the port)
+      ready = false
+      20.times do
+        sleep 0.25
+        begin
+          s = TCPSocket.new("127.0.0.1", PORT)
+          s.close
+          ready = true
+          break
+        rescue Errno::ECONNREFUSED
+          # not ready yet
+        end
+      end
+      unless ready
+        puts "WARNING: server did not become ready on port #{PORT}"
+      end
+
+      # Run client with timeout
+      output = ""
+      client_timeout = [num_gets.to_i / 10, 30].max
+      IO.popen("./#{dir}/client_go #{pid} #{PORT} #{num_gets} #{concurrency} 2>&1") do |io|
+        begin
+          Timeout.timeout(client_timeout) { output = io.read }
+        rescue Timeout::Error
+          Process.kill("KILL", io.pid) rescue nil
+          output = "ERROR: client timed out after #{client_timeout}s"
+        end
+      end
+      puts output
+    ensure
+      # Always kill the server, even if client crashes or times out
+      if pid
+        Process.kill("TERM", pid) rescue nil
+        begin
+          Timeout.timeout(3) { Process.wait(pid) }
+        rescue Timeout::Error
+          Process.kill("KILL", pid) rescue nil
+          Process.wait(pid) rescue nil
+        end
+      end
     end
-    sleep 1
-
-    # Run client
-    output = `./#{dir}/client_go #{pid} #{PORT} #{num_gets} #{concurrency} 2>&1`
-    puts output
-
-    # Kill server
-    Process.kill("TERM", pid) rescue nil
-    Process.wait(pid) rescue nil
 
     # Parse results from client output
     results[srv[:key]] ||= {}
