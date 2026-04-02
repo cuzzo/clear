@@ -3693,6 +3693,13 @@ private
       saved_temps = ctx&.pending_heap_temps
       ctx.pending_heap_temps = [] if ctx
       code = visit(stmt)
+      # Move suppression: for consumed args (TAKES, append, struct/union construction).
+      # Appended AFTER the statement with semicolons to form valid Zig.
+      consumed = emit_consumed_moves(stmt)
+      unless consumed.empty?
+        code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+        code = "#{code}\n#{consumed}"
+      end
       # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
       # Uses the same emit_cleanup logic as VarDecl for correct type-specific cleanup.
       # Resource types get their CLOSE method via the type schema.

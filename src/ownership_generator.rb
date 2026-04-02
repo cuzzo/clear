@@ -20,31 +20,34 @@ module OwnershipGenerator
     fn_name = current_tp_ctx&.fn_name
     plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(name.to_s)
     if plan_entry && plan_entry[:alloc] == :heap
-      # For unions, gate on ownership graph — aliased/consumed variables skip cleanup.
-      skip_union = plan_entry[:kind] == :heap_union && !@ownership_graph&.needs_cleanup?(name)
-      unless skip_union
-        case plan_entry[:kind]
-        when :heap_string
-          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
-        when :heap_slice
-          zig_type = type_info.zig_type
-          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-        when :heap_union
-          zig_type = transpile_type(type_info.resolved.to_s)
-          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-        when :heap_struct
-          zig_type = transpile_type(type_info.resolved.to_s)
-          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-        end
+      case plan_entry[:kind]
+      when :heap_string
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
+      when :heap_slice
+        zig_type = type_info.zig_type
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+      when :heap_union
+        zig_type = transpile_type(type_info.resolved.to_s)
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+      when :heap_struct
+        zig_type = transpile_type(type_info.resolved.to_s)
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
       end
     end
 
     # ── Simple cases: use unified CheatLib.cleanup ──────────────────
 
-    # Lists (non-sharded, non-heap-promoted): cleanup handles ArrayList
+    # Lists (non-sharded, non-heap-promoted): cleanup handles ArrayList.
     if type_info&.list_collection? && !type_info&.sharded? && !type_info&.heap_promoted
       zig_type = type_info.zig_type
-      return "defer CheatLib.cleanup(#{zig_type}, rt.frameAlloc(), &#{name});\n"
+      elem_type = type_info.element_type
+      elem_resolved = elem_type&.resolved
+      elem_schema = (@union_schemas ||= {})[elem_resolved]
+      if elem_schema && elem_schema.any? { |_, vt| Type.variant_has_heap?(vt) }
+        elem_zig = transpile_type(elem_resolved.to_s)
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); };\n"
+      end
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.frameAlloc(), &#{name});\n"
     end
 
     # Sharded/promoted lists: heapAlloc
@@ -162,18 +165,107 @@ module OwnershipGenerator
   # Marks the source identifier as moved if it requires affine transfer.
   def emit_move_suppression(rhs_node)
     if rhs_node.is_a?(AST::Identifier)
-      is_rc = rhs_node.type_info&.any_rc?
-      is_sync = rhs_node.type_info&.any_sync?
       ti = rhs_node.type_info
-      is_resource = ti&.resource?
+      return "" unless ti
 
-      should_suppress = (is_rc && @current_rhs_is_move) ||
-                        (!is_rc && (rhs_node.type_info&.requires_move? || is_sync || is_resource) &&
-                         (rhs_node.storage == :heap || is_resource))
+      is_rc = ti.any_rc? rescue false
+      is_sync = ti.any_sync? rescue false
+      is_resource = ti.resource? rescue false
+      is_collection = ti.collection? rescue false
+      is_heap = rhs_node.storage == :heap
 
-      return "#{rhs_node.name}_moved = true;" if should_suppress
+      # Escaped variables have no _moved guard (cleanup suppressed for return)
+      return "" if ti.escaped_return && (is_collection || ti.string?)
+
+      # RC types: only move on explicit GIVE
+      if is_rc
+        return "#{rhs_node.name}_moved = true;" if @current_rhs_is_move
+        return ""
+      end
+
+      # Move when: heap storage, resource, sync, or any type that requires move
+      should_suppress = (ti.requires_move? || is_sync || is_resource) &&
+                        (is_heap || is_resource)
+
+      # Also move for collections (map, list, pool, set) — they have _moved guards
+      should_suppress ||= is_collection
+
+      # Also move for non-copyable types (unions with heap variants, etc.)
+      unless should_suppress
+        schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+        should_suppress = !ti.implicitly_copyable?(schema_lookup)
+      end
+
+      # Only emit _moved for local variables (not function parameters).
+      # Parameters don't have var X_moved = false guards.
+      if should_suppress
+        sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
+        decl = sym&.reg
+        is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+        # Only emit if the variable has a _moved guard (mutable + defer with _moved).
+        # Check if variable has a _moved guard: mutable locals, heap_promoted, or CleanupPlan.
+        fn_name = current_tp_ctx&.fn_name
+        plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(rhs_node.name)
+        has_moved_guard = is_local && (sym&.mutable || ti.heap_promoted || plan_entry)
+        return "#{rhs_node.name}_moved = true;" if has_moved_guard
+      end
     end
     ""
+  end
+
+  # Emit _moved = true statements for arguments consumed by a call or construction.
+  # Called after visit() for FuncCall (TAKES/append), StructLit, UnionVariantLit.
+  def emit_consumed_moves(node)
+    moves = []
+    # Unwrap VarDecl/BindExpr to get the value expression (FuncCall, StructLit, etc.)
+    inner = node
+    inner = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    inner = inner.value if inner.is_a?(AST::MoveNode)
+
+    args = case inner
+    when AST::StructLit
+      inner.fields.values.select { |v| v.is_a?(AST::Identifier) }
+    when AST::FuncCall, AST::MethodCall
+      consumed = inner.args.select { |a| a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier) } +
+        inner.args.select { |a| a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier) }.map(&:value)
+      # Intrinsic append: the value arg is consumed by the collection.
+      # For MethodCall: args = [value], object = list
+      # For FuncCall (UFCS): args = [list, value]
+      if inner.respond_to?(:zig_pattern) && inner.zig_pattern.is_a?(String) && inner.zig_pattern.include?("append")
+        val_arg = inner.args.last
+        val_arg = val_arg.is_a?(AST::MoveNode) ? val_arg.value : val_arg
+        consumed << val_arg if val_arg.is_a?(AST::Identifier) && !consumed.include?(val_arg)
+      end
+      consumed
+    else
+      []
+    end
+
+    args.each do |arg|
+      name = arg.respond_to?(:name) ? arg.name : nil
+      next unless name
+      ti = arg.type_info
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      next unless ti
+
+      # Only emit _moved for local variables that have a _moved guard.
+      # Skip: parameters, immutable-without-plan, escaped variables (no defer).
+      sym = arg.respond_to?(:symbol) ? arg.symbol : nil
+      decl = sym&.reg
+      is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+      next unless is_local
+      next if ti.escaped_return && (ti.collection? || ti.string?)
+      fn_name = current_tp_ctx&.fn_name
+      plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(name)
+      has_guard = sym&.mutable || ti.heap_promoted || plan_entry
+      next unless has_guard
+
+      needs_move = ti.collection? || ti.map? || (ti.requires_move? rescue false) ||
+                   ti.any_rc? || ti.any_sync? || ti.link? || ti.heap_promoted
+      moves << "#{zig_safe_name(name)}_moved = true;" if needs_move
+    end
+
+    moves.join("\n")
   end
 
   def transpile_rc_retain(type_info, name)

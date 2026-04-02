@@ -34,7 +34,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks source as moved after append", pending: "append should consume source" do
+    it "marks source as moved after append" do
       body = fn_body(zig, "clearMain")
       expect(body).to include("m_moved = true")
     end
@@ -107,7 +107,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks source as moved after struct construction", pending: "struct literal should move captured heap vars" do
+    it "marks source as moved after struct construction" do
       body = fn_body(zig, "clearMain")
       expect(body).to include("m_moved = true")
     end
@@ -129,7 +129,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "suppresses list defer after items captured in union", pending: "union construction should move payload" do
+    it "suppresses list defer after items captured in union" do
       body = fn_body(zig, "clearMain")
       # items is captured in the union — its defer cleanup must not fire
       has_items_defer = body.include?("defer") && body.include?("cleanup") && body.include?("items")
@@ -158,7 +158,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks v1 as moved after assignment to v2", pending: "binding move for non-Copy unions" do
+    it "marks v1 as moved after assignment to v2" do
       body = fn_body(zig, "clearMain")
       expect(body).to include("v1_moved = true")
     end
@@ -182,7 +182,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks source as moved at call site", pending: "TAKES on @list should set _moved" do
+    it "marks source as moved at call site" do
       body = fn_body(zig, "clearMain")
       expect(body).to include("vals_moved = true")
     end
@@ -192,7 +192,7 @@ RSpec.describe "Move semantics for heap-owning types" do
   # 8. ArrayList of unions: element cleanup frees variant heap data
   # =========================================================================
   describe "ArrayList element cleanup frees union slice variants" do
-    it "generates element-level cleanup for union list", pending: "ArrayList element recursion for unions with heap variants" do
+    it "generates element-level cleanup for union list" do
       zig = transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS Value ->
