@@ -1,161 +1,183 @@
 # Error Handling
 
-CLEAR uses **error unions** — errors are returned by value, not thrown. There is no stack unwinding, no hidden cost, and no `if err != nil` boilerplate.
+CLEAR uses **error unions** -- errors are returned by value, not thrown. There is no stack unwinding, no hidden cost, and no `if err != nil` boilerplate.
 
 The most important thing to know: **the compiler handles error propagation for you by default.** If you call a function that can fail and don't handle the error, the compiler automatically propagates it to your caller. You only write explicit error handling when you want to *change* the default behavior.
 
+## The 6 Error Kinds
+
+HTTP status codes run the most complicated distributed system ever built using 5 categories: 1xx informational, 2xx success, 3xx redirect, 4xx client error, 5xx server error. Infinite specific error codes collapse into a handful of *intents* -- and the caller almost always only cares about the intent, not the specific code.
+
+CLEAR applies the same principle. Every error has a **Kind** that tells the caller what to do about it:
+
+| Kind | Intent | Caller action | HTTP analog |
+|---|---|---|---|
+| `Transient` | Temporary failure, try again | Retry with backoff | 503 Service Unavailable |
+| `Input` | Caller sent bad data | Fix the input and retry | 400 Bad Request |
+| `System` | Infrastructure failure | Stop, alert, escalate | 500 Internal Server Error |
+| `NotFound` | Resource doesn't exist | Create it or use a default | 404 Not Found |
+| `Permission` | Not authorized | Re-authenticate or abort | 403 Forbidden |
+| `Canceled` | Operation was canceled | Clean up and stop | 499 Client Closed |
+
+Six categories. That's it. Every error in every CLEAR program falls into one of these.
+
+### Why not infinite error types?
+
+Languages with infinite error types (Java's checked exceptions, Rust's custom enums) create infinite branching. Every function in the call chain must decide what to do with `HttpTimeoutError` vs `DnsResolutionError` vs `TlsHandshakeError`. But the answer is almost always the same: **retry** (they're all transient).
+
+CLEAR collapses the error space at the point of creation, not the point of handling. The function that *raises* knows whether the failure is transient, and tags it. The caller doesn't need to enumerate every possible failure mode.
+
+### Specific errors as subtypes
+
+You can optionally name a specific error within a kind:
+
+```clear
+-- ILLUSTRATIVE
+RAISE Transient, Timeout, "connection timed out after 30s";
+RAISE Transient, DnsFailure;
+RAISE Input, InvalidJson, "expected { at position 0";
+RAISE NotFound;
+```
+
+The specific error (`Timeout`, `DnsFailure`, `InvalidJson`) is available in CATCH blocks via `WITH(ErrorName)` for the rare case where you need fine-grained matching. But the default path just matches on Kind.
+
 ## Automatic Error Propagation
 
-This is CLEAR's most important error handling feature. Consider:
-
-```ruby clear illustrative
+```clear
+-- ILLUSTRATIVE
 FN compute(x: Float64) RETURNS !Float64 ->
-    half = divide(x, 2.0);      -- if divide fails, compute fails too
-    quarter = divide(half, 2.0); -- same here
+    half = divide(x, 2.0);
+    quarter = divide(half, 2.0);
     RETURN quarter;
 END
 ```
 
-You don't need `OR RAISE` on every call. The compiler sees that `divide` can fail, and automatically emits error propagation (Zig's `try`) for unhandled error unions. The function's return type `!Float64` tells callers that `compute` can fail.
+You don't need `OR RAISE` on every call. The compiler sees that `divide` can fail, and automatically emits error propagation. `!Float64` tells callers that `compute` can fail.
 
-This means:
-- **You write the happy path.** The compiler ensures errors propagate safely.
-- **You only write `OR` when you want to *handle* the error** — provide a fallback, silence it, or do something specific.
-- **No Go-style `if err != nil` on every line.** No Rust-style `?` on every call. Just write your code.
+## RAISE
 
-The compiler computes `can_fail` for every function via a call-graph fixed-point pass. If a function allocates, calls a function that can fail, or contains a `RAISE`, it `can_fail` — and the return type is automatically widened to `!T`.
+`RAISE` signals an error with a Kind, optional specific name, and optional message:
 
-## Error Unions (`!T`)
-
-A function that can fail declares its return type with the `!` prefix:
-
-```ruby clear illustrative
-FN divide(a: Float64, b: Float64) RETURNS !Float64 ->
-    IF b == 0.0 -> RAISE "Division by zero";
-    RETURN a / b;
-END
+```clear
+-- ILLUSTRATIVE
+RAISE Input, InvalidJson, "expected { at position 0";
+RAISE Transient, Timeout;
+RAISE Input, "bad data";
+RAISE NotFound;
+RAISE "something went wrong";
 ```
-
-`!Float64` means "returns either a `Float64` or an error." Under the hood, this compiles to Zig's `anyerror!f64` — a zero-cost tagged union where the happy path has no overhead.
-
-### RAISE
-
-`RAISE` signals an error from inside a function:
-
-```ruby clear illustrative
-RAISE "Out of bounds";
-```
-
-The string is a human-readable message. Control flow returns immediately to the caller with an error value. There is no stack unwinding — it's a normal return with the error variant of the union.
 
 ## Handling Errors: The OR Operator
 
-When you *do* want to handle an error (instead of letting it propagate), use `OR`:
+### OR *value* -- Provide a fallback
 
-### OR *value* — Provide a fallback
-
-```ruby clear illustrative
+```clear
+-- ILLUSTRATIVE
 val = divide(10.0, 0.0) OR 0.0;
--- val is guaranteed to be Float64 (0.0 if divide failed)
 ```
 
-The most common pattern. If the left side fails, use the right side instead. The result type is always the payload type (`Float64`), never an error union.
+### OR RAISE -- Propagate explicitly
 
-### OR RAISE — Propagate explicitly
-
-```ruby clear illustrative
-FN compute(x: Float64) RETURNS !Float64 ->
-    half = divide(x, 2.0) OR RAISE;
-    RETURN half * 2.0;
-END
+```clear
+-- ILLUSTRATIVE
+half = divide(x, 2.0) OR RAISE;
 ```
 
-Identical to automatic propagation, but makes the error path visible in the source. Use this when you want to document that a specific call can fail, even though the compiler would handle it automatically.
+### OR EXIT "message" -- Annotate and propagate
 
-### OR PASS — Silence the error
+```clear
+-- ILLUSTRATIVE
+parsed = parseHeader(data) OR EXIT "failed at header parsing";
+```
 
-```ruby clear illustrative
+Sets the error context message, then propagates. Useful in pipelines where you want to know *which step* failed.
+
+### OR PASS -- Silence the error
+
+```clear
+-- ILLUSTRATIVE
 val = risky_operation() OR PASS;
 ```
 
-Ignores the error and uses an undefined/default value. **Use with extreme caution** — this is the closest thing CLEAR has to swallowing an exception. It exists for low-level scenarios where failure is acceptable and the value is never read on the error path.
+### OR PRUNE -- Filter in concurrent pipelines
 
-### OR PRUNE — Filter in concurrent pipelines
-
-```ruby clear illustrative
+```clear
+-- ILLUSTRATIVE
 results = data s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
 ```
 
-Specific to `CONCURRENT` pipelines. If an item causes an error, it is dropped from the result set rather than failing the whole pipeline. The output array will have fewer elements than the input.
+### RECOVER(default) -- Pipeline error recovery
+
+```clear
+-- ILLUSTRATIVE
+result = fetchData(url) s> RECOVER(defaultData());
+```
 
 ### Quick reference
 
-| Syntax | Behavior | Result type | Use when |
-|---|---|---|---|
-| *(no handler)* | Auto-propagate to caller | `!T` | Default — let errors bubble up |
-| `expr OR value` | Use fallback on error | `T` | You have a sensible default |
-| `expr OR RAISE` | Propagate explicitly | `!T` | You want the error path visible in source |
-| `expr OR PASS` | Silence, use undefined | `T` | Low-level code where failure is OK |
-| `expr OR PRUNE` | Drop item from pipeline | `T[]` (shorter) | Concurrent pipelines with acceptable failures |
+| Syntax | Behavior | Use when |
+|---|---|---|
+| *(no handler)* | Auto-propagate | Default -- let errors bubble up |
+| `OR value` | Use fallback | You have a sensible default |
+| `OR RAISE` | Propagate explicitly | You want the error path visible |
+| `OR EXIT "msg"` | Annotate + propagate | Pipeline step identification |
+| `OR PASS` | Silence | Low-level code, failure is OK |
+| `OR PRUNE` | Drop from pipeline | Concurrent pipelines |
+| `s> RECOVER(val)` | Pipeline fallback | Error recovery in chains |
 
-## Errors in Concurrency
+## CATCH Blocks
 
-### BG (Background Fibers)
+CATCH blocks go at the bottom of a function, before `END`. They match on error Kind and optionally on specific error names:
 
-When a BG fiber fails, the error is captured in the promise. It surfaces when you `NEXT` the promise:
+```clear
+-- ILLUSTRATIVE
+FN fetchAndParse(url: String) RETURNS String ->
+    data = fetch(url) OR RAISE;
+    parsed = parse(data) OR EXIT "parse step failed";
+    RETURN transform(parsed);
 
-```ruby clear illustrative
-p = BG { divide(10.0, 0.0); };
-result = NEXT p OR 0.0;  -- handle the error from the fiber
+CATCH Transient
+    RETURN "service unavailable, try again";
+CATCH Input WITH(InvalidJson)
+    RETURN "bad json from " + url;
+DEFAULT
+    RETURN "unknown error";
+END
 ```
 
-### DO (Fork-Join)
+Rules:
+- CATCH can only appear at the **bottom** of a function, after all body statements
+- Multiple CATCH clauses are checked in order
+- `CATCH Kind` matches any error with that kind
+- `CATCH Kind WITH(ErrorName)` matches kind + specific error
+- `DEFAULT` catches everything not matched above
+- `__error` is available in CATCH bodies with `.kind`, `.error_name`, `.message`, `.snapshot`
 
-DO blocks wait for all branches. If any branch fails, the error propagates after all branches complete.
+### Error Snapshots in Pipelines
 
-### CONCURRENT Pipelines
+When an error occurs inside a pipeline, the ErrorContext's `.snapshot` field captures the element that caused the failure:
 
-CONCURRENT pipelines support two error strategies:
-
-```ruby clear illustrative
--- Strategy 1: Fail the whole pipeline on first error
-results = items s> CONCURRENT(workers: 4) SELECT process(_) OR RAISE;
-
--- Strategy 2: Skip failed items, keep the rest
-results = items s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
+```clear
+-- ILLUSTRATIVE
+data s> WHERE validate(_) OR PRUNE;
 ```
 
-`OR RAISE` propagates the first error encountered. `OR PRUNE` silently drops failed items. Without either, errors auto-propagate (same as `OR RAISE`).
+Snapshots are heap-allocated. If allocation fails during error handling, snapshot is null -- the error still propagates, you just lose the debug data.
 
 ## Design Principles
 
+### Collapsed Error Space
+
+Infinite error types create infinite branching. CLEAR collapses errors into 6 Kinds based on caller intent. This is the same insight that made HTTP status codes work for 30+ years: the caller almost never needs to know the *specific* failure, just what to *do* about it.
+
 ### No Unwinding
 
-CLEAR does not use stack unwinding (C++ exceptions, Java throws). Errors are returned by value as part of a sum type (error union). This means:
-- **Deterministic performance**: No hidden cost for the error path.
-- **Explicit control flow**: You can see exactly where a function might fail.
-- **Tiny binaries**: No exception-handling tables.
+Errors are returned by value. No hidden cost, explicit control flow, tiny binaries.
 
 ### Zero-Cost Happy Path
 
-Error unions are a tagged union — an integer error code plus the payload. On the happy path, the error code is zero and the payload is used directly. There is no allocation, no vtable lookup, no string formatting unless you explicitly `RAISE`.
+Error unions are a tagged union. On the happy path, the error code is zero and the payload is used directly. No allocation, no vtable lookup, no string formatting unless you explicitly `RAISE`.
 
 ### Errors Are Values
 
-Because errors are values (not control flow exceptions), they compose naturally with CLEAR's pipeline system. `OR PRUNE` in a `CONCURRENT SELECT` is just a value-level filter — no special exception-catching machinery.
-
-## Implementation Status
-
-| Feature | Status |
-|---|---|
-| Error unions (`!T`) | **v0.1** — shipping |
-| `RAISE` | **v0.1** — shipping |
-| `OR value` (fallback) | **v0.1** — shipping |
-| `OR RAISE` (propagate) | **v0.1** — shipping |
-| `OR PASS` (silence) | **v0.1** — shipping |
-| `OR PRUNE` (concurrent filter) | **v0.1** — shipping |
-| Automatic error propagation | **v0.1** — shipping |
-| `OR EXIT` (fatal termination) | v0.2 — planned |
-| `!!` (explicit panic/unwrap) | v0.2 — planned |
-| `CATCH` blocks (pattern-matched error handling) | v0.2 — planned |
-| Custom error types | v0.2 — planned |
+Because errors are values, they compose naturally with pipelines. `OR PRUNE` is just a value-level filter. `RECOVER(default)` is just `catch`. No special exception machinery.
