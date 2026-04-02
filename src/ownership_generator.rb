@@ -62,15 +62,19 @@ module OwnershipGenerator
       return "defer CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
     end
 
-    # Maps (string and numeric) - cleanup handles both
-    if type_info&.map? || type_info&.numeric_map?
+    # String maps: always heapAlloc (keys duped via heapAlloc)
+    if type_info&.map? && !type_info&.numeric_map?
       zig_type = type_info.zig_type
-      alloc = "rt.heapAlloc()"
-      # Arc-wrapped shared maps: cleanup the Arc directly
       if type_info&.shared?
         return emit_rc_cleanup(name, type_info)
       end
-      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+    end
+
+    # Numeric maps: frameAlloc (no key copies, backing array in frame arena)
+    if type_info&.numeric_map?
+      zig_type = type_info.zig_type
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.frameAlloc(), &#{name});\n"
     end
 
     # Struct with RC/link fields (non-RC, non-link, non-sync root)
