@@ -737,6 +737,128 @@ STRUCT Frame {
 -- Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
 -- Build bytecode by appending directly to ops/consts/lines arrays inline.
 
+-- Bytecode dispatch loop. Executes ops using an operand stack.
+-- Returns the value left on top of the stack at halt.
+
+-- Bytecode dispatch loop. Executes ops using a stack-pointer-based operand stack.
+-- Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
+-- Returns the value on top of the stack at halt.
+
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+    MUTABLE stack: Value[]@list = List[];
+    MUTABLE sp: Int64 = 0;
+    MUTABLE ip: Int64 = 0;
+    MUTABLE curEnv: Id<Env> = envId;
+    MUTABLE running = TRUE;
+
+    WHILE running && ip < ops.length() DO
+        MUTABLE pv: Value = Value.Nil;
+        op = ops[ip];
+        ip += 1;
+
+        IF op == 1 THEN
+            idx = ops[ip]; ip += 1;
+            pv = consts[idx];
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 2 THEN
+            idx = ops[ip]; ip += 1;
+            pv = envGet!(curEnv, getSymName(consts[idx]), pool);
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 3 THEN
+            idx = ops[ip]; ip += 1;
+            pool[curEnv]?.vars[getSymName(consts[idx])] = stack[sp - 1];
+        ELSE_IF op == 4 THEN
+            sp -= 1;
+        ELSE_IF op == 10 THEN
+            pv = Value{ Number: getNum(stack[sp - 2]) + getNum(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 11 THEN
+            pv = Value{ Number: getNum(stack[sp - 2]) - getNum(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 12 THEN
+            pv = Value{ Number: getNum(stack[sp - 2]) * getNum(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 13 THEN
+            pv = Value{ Number: getNum(stack[sp - 2]) / getNum(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 20 THEN
+            pv = boolVal(valEqual?(stack[sp - 2], stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 21 THEN
+            pv = boolVal(getNum(stack[sp - 2]) < getNum(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 22 THEN
+            pv = boolVal(getNum(stack[sp - 2]) > getNum(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 23 THEN
+            pv = boolVal(getNum(stack[sp - 2]) <= getNum(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 24 THEN
+            pv = boolVal(getNum(stack[sp - 2]) >= getNum(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 30 THEN
+            sp -= 1;
+            pv = boolVal(isTruthy?(stack[sp]) == FALSE);
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 40 THEN
+            ip = ops[ip];
+        ELSE_IF op == 41 THEN
+            target = ops[ip]; ip += 1;
+            sp -= 1;
+            IF isTruthy?(stack[sp]) == FALSE THEN ip = target; END
+        ELSE_IF op == 61 THEN
+            idx = ops[ip]; ip += 1;
+            sp -= 1;
+            setVal = stack[sp];
+            envSet!(curEnv, getSymName(consts[idx]), setVal, pool);
+            pv = setVal;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 70 THEN
+            nid = ops[ip]; ip += 1;
+            argc = ops[ip]; ip += 1;
+            MUTABLE nArgs: Value[]@list = List[];
+            nArgs.append(Value.Nil);
+            FOR ni IN (0_i64 ..< argc) DO
+                nArgs.append(stack[sp - argc + ni]);
+            END
+            sp -= argc;
+            pv = applyNative(nid, nArgs);
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 71 THEN
+            running = FALSE;
+        END
+    END
+
+    IF sp > 0 THEN
+        result = stack[sp - 1];
+        RETURN result;
+    END
+    RETURN Value.Nil;
+END
+
 -- Test helpers: create fresh interpreter, run input, return result string.
 
 FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String ->
@@ -750,6 +872,50 @@ FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: E
         result = runTest!(inputs[i], rootId, pool, penv);
     END
     RETURN prStr(result, readable);
+END
+
+FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void ->
+    -- Test 1: (10 - 4) * 3 = 18 (arithmetic + stack ops)
+    MUTABLE ops1: Int64[]@list = List[];
+    MUTABLE c1: Value[]@list = List[];
+    c1.append(Value{ Number: 10.0 }); c1.append(Value{ Number: 4.0 }); c1.append(Value{ Number: 3.0 });
+    ops1.append(1); ops1.append(0);   -- loadConst 10
+    ops1.append(1); ops1.append(1);   -- loadConst 4
+    ops1.append(11);                  -- sub -> 6
+    ops1.append(1); ops1.append(2);   -- loadConst 3
+    ops1.append(12);                  -- mul -> 18
+    ops1.append(71);                  -- halt
+    ASSERT prStr(exec!(ops1, c1, rootId, pool), TRUE) == "18", "bc: (10-4)*3 = 18";
+
+    -- Test 2: if 1 < 2 then 10 else 20 (control flow)
+    MUTABLE ops2: Int64[]@list = List[];
+    MUTABLE c2: Value[]@list = List[];
+    c2.append(Value{ Number: 1.0 }); c2.append(Value{ Number: 2.0 });
+    c2.append(Value{ Number: 10.0 }); c2.append(Value{ Number: 20.0 });
+    ops2.append(1); ops2.append(0);     -- loadConst 1
+    ops2.append(1); ops2.append(1);     -- loadConst 2
+    ops2.append(21);                    -- lt
+    ops2.append(41); ops2.append(11);   -- jumpIfFalse -> 11
+    ops2.append(1); ops2.append(2);     -- loadConst 10 (then)
+    ops2.append(40); ops2.append(13);   -- jump -> 13
+    ops2.append(1); ops2.append(3);     -- loadConst 20 (else)
+    ops2.append(71);                    -- halt
+    ASSERT prStr(exec!(ops2, c2, rootId, pool), TRUE) == "10", "bc: if 1<2 then 10 else 20";
+
+    -- Test 3: define x=5, native +(x, 3) -> 8 (env + native calls)
+    MUTABLE ops3: Int64[]@list = List[];
+    MUTABLE c3: Value[]@list = List[];
+    c3.append(Value{ Number: 5.0 }); c3.append(Value{ Symbol: "x" }); c3.append(Value{ Number: 3.0 });
+    ops3.append(1); ops3.append(0);     -- loadConst 5
+    ops3.append(3); ops3.append(1);     -- storeName "x"
+    ops3.append(4);                     -- pop
+    ops3.append(2); ops3.append(1);     -- loadName "x" -> 5
+    ops3.append(1); ops3.append(2);     -- loadConst 3
+    ops3.append(70); ops3.append(1); ops3.append(2); -- nativeCall +(id=1), argc=2
+    ops3.append(71);                    -- halt
+    ASSERT prStr(exec!(ops3, c3, rootId, pool), TRUE) == "8", "bc: define x=5, x+3=8";
+
+    RETURN;
 END
 
 FN main() RETURNS Void ->
@@ -885,6 +1051,9 @@ FN main() RETURNS Void ->
     ASSERT bcOps[0] == 1, "first op is loadConst (1)";
     ASSERT bcOps[2] == 71, "last op is halt (71)";
 
-    print("All 79 interpreter tests PASSED!");
+    -- Bytecode exec! tests
+    testBytecode!(rootId, pool);
+
+    print("All 82 interpreter tests PASSED!");
     RETURN;
 END
