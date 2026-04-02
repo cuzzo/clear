@@ -7,6 +7,7 @@
 
 $LOAD_PATH.unshift(File.expand_path("../../src", __dir__))
 
+require "set"
 require "lexer"
 require "parser"
 require "ast"
@@ -14,6 +15,8 @@ require "ast"
 class SchemeTranspiler
   def initialize
     @output = []
+    @structs = {}  # name -> [field_name, field_name, ...] (ordered)
+    @mutables = Set.new  # names declared as MUTABLE
   end
 
   def transpile(source)
@@ -29,6 +32,9 @@ class SchemeTranspiler
   def emit_program(program)
     program.statements.each do |stmt|
       case stmt
+      when AST::StructDef
+        # Register struct schema (field order matters for vector indexing)
+        @structs[stmt.name.to_s] = stmt.fields.keys
       when AST::FunctionDef
         if stmt.name == "main"
           # Emit main body as top-level expressions (skip bare returns)
@@ -38,8 +44,9 @@ class SchemeTranspiler
           end
         else
           # Emit as (define name (lambda (params) body))
-          params = stmt.params.map { |p| p.name }.join(" ")
-          body = stmt.body.map { |n| emit(n) }
+          params = stmt.params.map { |p| p.is_a?(Hash) ? p[:name] : p.name }.join(" ")
+          body = stmt.body.map { |n| emit(n) }.reject { |s| s == "nil" && stmt.body.last.is_a?(AST::ReturnNode) && stmt.body.last.value.nil? }
+          body = ["nil"] if body.empty?
           if body.length == 1
             @output << "(define #{stmt.name} (lambda (#{params}) #{body[0]}))"
           else
@@ -66,12 +73,21 @@ class SchemeTranspiler
       emit_binary(node)
     when AST::UnaryOp
       emit_unary(node)
+    when AST::StructLit
+      emit_struct_lit(node)
+    when AST::GetField
+      emit_get_field(node)
     when AST::BindExpr
-      # x = expr -> (define x expr)
-      "(define #{node.name} #{emit(node.value)})"
+      if @mutables.include?(node.name.to_s)
+        "(set! #{node.name} #{emit(node.value)})"
+      else
+        "(define #{node.name} #{emit(node.value)})"
+      end
+    when AST::VarDecl
+      @mutables.add(node.name.to_s) if node.mutable
+      "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
     when AST::Assignment
-      # x = expr (reassignment) -> (set! x expr)
-      "(set! #{node.name} #{emit(node.value)})"
+      emit_assignment(node)
     when AST::ReturnNode
       node.value ? emit(node.value) : "nil"
     when AST::IfStatement
@@ -79,7 +95,7 @@ class SchemeTranspiler
     when AST::WhileLoop
       emit_while(node)
     when AST::Assert
-      "(assert #{emit(node.condition)} #{node.message ? "\"#{node.message}\"" : "\"assertion failed\""})"
+      emit_assert(node)
     when NilClass
       "nil"
     else
@@ -100,6 +116,50 @@ class SchemeTranspiler
     else
       node.value.to_s
     end
+  end
+
+  def emit_struct_lit(node)
+    name = node.name.to_s
+    fields = @structs[name]
+    return ";; unknown struct: #{name}" unless fields
+    # Emit fields in schema order as a vector
+    vals = fields.map { |f| node.fields[f] ? emit(node.fields[f]) : "nil" }
+    "(vector #{vals.join(' ')})"
+  end
+
+  def emit_get_field(node)
+    target = emit(node.target)
+    field = node.field.to_s
+    # Look up field index from struct schema
+    # We need to know the struct type of the target - for now, search all schemas
+    @structs.each do |_name, fields|
+      idx = fields.index(field)
+      return "(vector-ref #{target} #{idx})" if idx
+    end
+    ";; unknown field: #{field}"
+  end
+
+  def emit_assignment(node)
+    if node.name.is_a?(AST::GetField)
+      # p.x = val -> (vector-set! p idx val)
+      target = emit(node.name.target)
+      field = node.name.field.to_s
+      val = emit(node.value)
+      @structs.each do |_name, fields|
+        idx = fields.index(field)
+        return "(vector-set! #{target} #{idx} #{val})" if idx
+      end
+      ";; unknown field assignment: #{field}"
+    else
+      "(set! #{node.name} #{emit(node.value)})"
+    end
+  end
+
+  def emit_assert(node)
+    cond = emit(node.condition)
+    msg = node.message || "assertion failed"
+    # Emit as: if not cond, raise error
+    "(if (not #{cond}) (raise \"#{msg}\" \"Assert\") nil)"
   end
 
   def emit_func_call(node)
@@ -188,10 +248,13 @@ class SchemeTranspiler
   end
 
   def emit_while(node)
-    # CLEAR WHILE -> named let loop
+    # CLEAR WHILE -> recursive lambda that captures outer env for set! mutations
+    @while_counter ||= 0
+    @while_counter += 1
+    fname = "__loop#{@while_counter}"
     cond = emit(node.condition)
     body = node.do_branch.map { |n| emit(n) }.join(" ")
-    "(let loop () (if #{cond} (begin #{body} (loop)) nil))"
+    "(begin (define #{fname} (lambda () (if #{cond} (begin #{body} (#{fname})) nil))) (#{fname}))"
   end
 end
 
@@ -210,7 +273,7 @@ if run_mode
   # Read the interpreter source, strip everything from main() onward,
   # and replace with a main() that executes the transpiled S-expressions.
   project_root = File.expand_path("../../", __dir__)
-  interp_path = File.join(File.dirname(ARGV[0]), "interpreter.cht")
+  interp_path = File.join(__dir__, "interpreter.cht")
   interp_src = File.read(interp_path)
 
   # Find main() and strip it + everything after (tests, benchmarks)
@@ -221,26 +284,31 @@ if run_mode
     interp_base = interp_src
   end
 
-  # Generate main() that runs the S-expressions
+  # Wrap all S-expressions in a single (begin ...) to share one frame arena.
+  # This avoids vector/list values being freed between separate runTest! calls.
+  lines = scheme.each_line.map(&:strip).reject(&:empty?)
+  if lines.length == 1
+    combined = lines[0]
+  else
+    combined = "(begin #{lines.join(' ')})"
+  end
+  escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+
   main_code = "FN main() RETURNS Void ->\n"
   main_code += "    MUTABLE pool: Env[50000]@pool = [];\n"
   main_code += "    MUTABLE penv: HashMap<Value> = {};\n"
   main_code += "    rootId = setupEnv!(pool);\n"
-
-  scheme.each_line do |line|
-    line = line.strip
-    next if line.empty?
-    escaped = line.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
-    main_code += "    runTest!(\"#{escaped}\", rootId, pool, penv);\n"
-  end
+  main_code += "    MUTABLE schemeResult: Value = runTest!(\"#{escaped}\", rootId, pool, penv);\n"
+  main_code += "    IF isError?(schemeResult) THEN print(\"SCHEME ASSERT FAILED: \" + getErrMsg(schemeResult)); END\n"
+  main_code += "    IF isError?(schemeResult) == FALSE THEN print(\"SCHEME: all expressions completed\"); END\n"
 
   main_code += "    RETURN;\nEND\n"
 
-  tmp_path = File.join(File.dirname(ARGV[0]), "_scheme_run.cht")
+  tmp_path = File.join(__dir__, "_scheme_run.cht")
   File.write(tmp_path, interp_base + main_code)
 
   system("#{project_root}/clear", "run", tmp_path)
-  File.delete(tmp_path) if File.exist?(tmp_path)
+  File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
 else
   puts scheme
 end
