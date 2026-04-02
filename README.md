@@ -195,7 +195,6 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 - **Standard Library**: The current "standard library" is a barebones shim used for bootstrapping and internal testing. It is highly likely that none of the current internal APIs will survive into the v0.3 release.
 - **Stability**: Although CLEAR has an extensive test suite, several significant bugs were identified in the final week before this pre-release. The current state is an unstable preview and is not representative of the stability goals for v0.2.
 - **Linux Only**: CLEAR is not currently cross platform. It will only support x86 Linux until v0.3+.
-  - Though by v0.1 it *will* optionally lower to a VM that *can* run anywhere - with caveats.
 
 ## KNOWN SCALING ISSUES
 
