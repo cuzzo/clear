@@ -43,7 +43,7 @@ pub fn switchContext(from: *Context, to: *Context) void {
 // 3. switch to Root Stack
 extern fn call_on_stack_asm(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void;
 
-pub fn callOnStack(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
+pub noinline fn callOnStack(stack_ptr: usize, func: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
     const aligned_sp = stack_ptr & ~@as(usize, 0xF);
     call_on_stack_asm(aligned_sp, func, arg);
 }

@@ -510,7 +510,7 @@ pub const CheatLib = struct {
         }
     };
 
-    pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    pub noinline fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         var ctx = ReadFileCtx{ .allocator = allocator, .path = path };
         if (fp.scheduler_running) {
             const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
@@ -606,7 +606,7 @@ pub const CheatLib = struct {
         }
     };
 
-    pub fn writeFile(path: []const u8, content: []const u8) !void {
+    pub noinline fn writeFile(path: []const u8, content: []const u8) !void {
         var ctx = WriteFileCtx{ .path = path, .content = content };
         if (fp.scheduler_running) {
             const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
@@ -1058,7 +1058,7 @@ pub const CheatLib = struct {
     }
 
     // Close a TCP socket fd, removing it from epoll first so no stale events fire.
-    pub fn socketClose(fd: i32) void {
+    pub noinline fn socketClose(fd: i32) void {
         fp.active_scheduler.unregisterFd(fd);
         std.posix.close(fd);
     }
@@ -1093,7 +1093,7 @@ pub const CheatLib = struct {
     // Write all bytes from `data` to a connected client socket, discarding the byte count.
     // Yields the fiber if the send buffer is temporarily full (epoll-backed).
     // Usage: tcpWrite(client, "hello")
-    pub fn socketWriteVoid(fd: i32, data: []const u8) !void {
+    pub noinline fn socketWriteVoid(fd: i32, data: []const u8) !void {
         _ = try CheatLib.socketWrite(fd, data);
     }
 

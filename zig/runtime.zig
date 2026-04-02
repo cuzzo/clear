@@ -350,7 +350,7 @@ pub const Runtime = struct {
     /// If we're already on the main thread (no scheduler running) or already
     /// on the root stack, calls the function directly — no trampoline overhead.
     /// NOTE: The trampolined function must NOT yield (no io_uring, no fiber sleep).
-    pub fn onRootStack(_: *Runtime, user_fn: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
+    pub noinline fn onRootStack(_: *Runtime, user_fn: *const fn (?*anyopaque) callconv(.c) void, arg: ?*anyopaque) void {
         // Fast path: not in a fiber — already on the OS stack.
         if (!fp.scheduler_running) {
             user_fn(arg);
