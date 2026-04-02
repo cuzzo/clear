@@ -92,10 +92,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
       CLEAR
     end
 
-    # Known limitation: walk_promote_callers doesn't traverse IF branches.
-    # The MUTABLE declaration gets cleanup, but the nested assignment doesn't
-    # propagate heap_promoted.
-    it "emits defer cleanup for the binding", pending: "walk_promote_callers IF branch traversal" do
+    it "emits defer cleanup for the binding" do
       main_body = fn_body(zig, "clearMain")
       expect(main_body).to include("defer")
     end

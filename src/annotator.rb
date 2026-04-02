@@ -3154,17 +3154,39 @@ private
       when Array
         node.each { |n| walk_promote_callers([n]) }
       when AST::FunctionDef
+        @_walk_current_fn = node
         walk_promote_callers(node.body)
       when AST::VarDecl, AST::BindExpr
         # If value is a FuncCall from a returns_promoted function, set heap_promoted
         val = node.value
         if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
           node.type_info.heap_promoted = true if node.type_info
+          # For reassignment (BindExpr mode=assign), also propagate to the declaration.
+          # The declaration is the original VarDecl/BindExpr for this variable name.
+          if node.is_a?(AST::BindExpr) && node.mode == :assign
+            var_name = node.name
+            decl = find_decl_in_body(@_walk_current_fn&.body, var_name) if @_walk_current_fn
+            decl.type_info.heap_promoted = true if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+          end
+        end
+        walk_promote_callers([val]) if val
+      when AST::Assignment
+        # Reassignment: result = makeList() inside IF/MATCH branches.
+        # Use the target identifier's symbol to find the declaration node.
+        val = node.value
+        if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
+          target = node.name
+          sym = target.respond_to?(:symbol) ? target.symbol : nil
+          decl = sym&.reg
+          decl.type_info.heap_promoted = true if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
         end
         walk_promote_callers([val]) if val
       when AST::IfStatement
         walk_promote_callers(node.then_branch)
         walk_promote_callers(node.else_branch)
+      when AST::MatchStatement
+        node.cases&.each { |c| walk_promote_callers(c[:body]) }
+        walk_promote_callers(node.default_case) if node.default_case
       when AST::WhileLoop
         b = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
         walk_promote_callers(b)
@@ -3179,6 +3201,21 @@ private
         node.each_pair { |_, v| walk_promote_callers([v]) if v.is_a?(Array) } if node.respond_to?(:each_pair)
       end
     end
+  end
+
+  # Find the declaration (VarDecl/BindExpr with mode=decl) for a variable name in a function body.
+  def find_decl_in_body(body, var_name)
+    return nil unless body
+    body = [body] unless body.is_a?(Array)
+    body.each do |node|
+      case node
+      when AST::VarDecl
+        return node if node.name == var_name
+      when AST::BindExpr
+        return node if node.name == var_name && node.mode == :decl
+      end
+    end
+    nil
   end
 
   def walk_ownership(nodes)
