@@ -22,10 +22,9 @@ module OwnershipGenerator
     # Heap-promoted struct/union: emit cleanup so heap data is freed.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
-      # Check union schemas for union types with collection/string variants
-      # TODO: comptime union cleanup crashes with constCast on const locals.
-      # Needs the transpiler to emit `var` for union results from promoted calls.
-      # For now, skip union cleanup - these leak but don't crash.
+      # Union with collection variants: cleanup requires Pass B ownership analysis
+      # to determine which variables own data vs alias shared backing.
+      # Deferred to the pass-separation refactor (graph.needs_cleanup? queries).
 
       # Struct with escapable fields
       schema = (@struct_schemas ||= {})[resolved]

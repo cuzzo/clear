@@ -1380,6 +1380,7 @@ private
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type, storage)
     accumulate_stack_bytes(storage, node)
+    track_union_alias(node.name, node.value)
     record_capability_binding(node.name, node, final_type, storage)
   end
 
@@ -1440,6 +1441,7 @@ private
       classify_ownership!(node.symbol)
       og_declare(node.name, node, node.type_info || final_type, storage)
       accumulate_stack_bytes(storage, node)
+      track_union_alias(node.name, node.value)
       record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
@@ -1588,6 +1590,42 @@ private
 
   # Accumulate stack-local variable bytes for the current function context.
   # Only counts :stack storage — :frame and :heap don't consume fiber stack.
+  # Track alias relationships for union values extracted from collections.
+  # When x = f(source) where f returns a union and source is a union/collection,
+  # x's backing data may alias source's. Skip cleanup for x.
+  # Track alias relationships for union values extracted from collections.
+  # Only UFCS method calls (x.get(key) returning same union type) are aliasing.
+  # FuncCall (parseValue!(json, pos, penv, depth)) creates new data, not aliasing.
+  # Track alias relationships for union values extracted from another union/collection.
+  # Aliased variables share backing data with the source - skip cleanup to avoid double-free.
+  def track_union_alias(var_name, value_node)
+    return unless value_node.is_a?(AST::FuncCall) || value_node.is_a?(AST::MethodCall)
+    ret_type = value_node.respond_to?(:full_type) ? value_node.full_type : nil
+    return unless ret_type
+    ret_type_obj = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type)
+
+    # Check if the return type is a union with heap variants
+    schema = lookup_type_schema(ret_type_obj.resolved)
+    return unless schema.is_a?(Hash) && schema[:kind] == :union
+    has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    return unless has_heap
+
+    # Get the first argument (object for MethodCall, first arg for FuncCall)
+    first_arg = if value_node.is_a?(AST::MethodCall)
+      value_node.object
+    elsif value_node.args&.any?
+      value_node.args.first
+    end
+    return unless first_arg.is_a?(AST::Identifier)
+    arg_type = first_arg.resolved_type
+
+    # Alias when: first arg is the SAME union type (extraction like jsonGet)
+    # or first arg is a map (HashMap lookup returning union value)
+    if arg_type == ret_type_obj.resolved || first_arg.type_info&.map?
+      @og.edges << OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases)
+    end
+  end
+
   def accumulate_stack_bytes(storage, node)
     return unless storage == :stack && current_fn_ctx
     bytes = (node.slot_size || 1) * 8

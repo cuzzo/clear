@@ -30,6 +30,7 @@ class OwnershipGraph
   #   :borrows_mut — mutable borrow (y mutably borrows x)
   #   :moves       — ownership transferred (y moved from x)
   #   :rc_share    — reference-counted share (y is an Rc clone of x)
+  #   :aliases     — y is a shallow copy sharing backing data with x (skip cleanup on y)
 
   attr_reader :nodes, :edges
 
@@ -132,6 +133,11 @@ class OwnershipGraph
   # Is the path live?
   def live?(path)
     @nodes[path]&.live? || false
+  end
+
+  # Does this path alias another variable's backing data? (skip cleanup)
+  def aliases?(path)
+    @edges.any? { |e| e.from == path && e.kind == :aliases }
   end
 
   # Is the path moved?

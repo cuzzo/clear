@@ -212,6 +212,17 @@ module FunctionAnalysis
         node.heap_promoted_call = true
       elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
         node.heap_promoted_call = true
+      else
+        # Union return types with heap variants need heap_promoted_call
+        ret_type = node.type_info
+        if ret_type
+          ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
+          schema = lookup_type_schema(ret_sym)
+          if schema.is_a?(Hash) && schema[:kind] == :union
+            has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+            node.heap_promoted_call = true if has_heap && callee_node&.returns_promoted
+          end
+        end
       end
     end
   end

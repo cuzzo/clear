@@ -842,13 +842,27 @@ class Type
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     return true if array? && !list_collection? && !pool? && !set_collection?
-    # Unions and enums are value types in Zig — trivially copyable
     if lookup_arg || lookup_block
       resolver = lookup_arg || lookup_block
       schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
-      return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
+      return true if schema.is_a?(Hash) && schema[:kind] == :enum
+      # Unions with collection/map/array variants need cleanup, not implicitly copyable
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        return !has_heap
+      end
     end
     false
+  end
+
+  # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).
+  # Used to determine if a union needs cleanup.
+  def self.variant_has_heap?(vt)
+    return false unless vt
+    return false if vt.is_a?(Hash) # inline struct variant
+    t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
+    return false unless t
+    (t.collection? || t.map? || (t.array? && !t.fixed?)) rescue false
   end
 
   # Custom setter for location that invalidates zig_type cache
