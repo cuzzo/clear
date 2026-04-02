@@ -424,6 +424,9 @@ private
       if node.tail_call
         validate_tail_call!(node)
       end
+    elsif node.tail_call
+      error!(node, "@reentrant:tailCall on '#{node.name}' but the function is not recursive. " \
+                   "Remove :tailCall - it only applies to self-recursive functions.")
     end
 
     # Note: calling through a fn-type variable (parameter or local lambda) does NOT

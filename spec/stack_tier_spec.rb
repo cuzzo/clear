@@ -260,6 +260,12 @@ RSpec.describe "Stack Tier Recommendations" do
       expect { analyze(src) }.to raise_error(CompilerError, /tailCall/)
     end
 
+    it "errors when applied to non-recursive function" do
+      src = "FN add(a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+            "    RETURN a + b;\nEND\n"
+      expect { analyze(src) }.to raise_error(CompilerError, /not recursive/)
+    end
+
     it "emits @call(.always_tail) in release mode" do
       src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
             "    IF n < 1.0 THEN RETURN a; END\n" \

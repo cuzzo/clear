@@ -138,7 +138,16 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   ffi_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
 
   unless success
-    $stderr.puts compile_output
+    # Map known Zig errors to CLEAR-level messages
+    if compile_output.include?("unable to perform tail call")
+      $stderr.puts "\e[31m[CLEAR Error]\e[0m @reentrant:tailCall failed: the Zig backend cannot " \
+                   "perform tail call optimization on this target.\n" \
+                   "  - Debug builds (default) use the stage2 backend which does not support TCO.\n" \
+                   "  - Use --optimized or --safe to enable the LLVM backend with TCO support.\n" \
+                   "  - Or remove :tailCall and use @reentrant with @canSmash instead."
+    else
+      $stderr.puts compile_output
+    end
     error "Compilation failed"
   end
 
