@@ -19,12 +19,19 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
     end
 
-    # Heap-promoted struct: emit field-level escape cleanup so heap data is freed.
+    # Heap-promoted struct/union: emit cleanup so heap data is freed.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
+      # Check union schemas for union types with collection/string variants
+      # TODO: comptime union cleanup crashes with constCast on const locals.
+      # Needs the transpiler to emit `var` for union results from promoted calls.
+      # For now, skip union cleanup - these leak but don't crash.
+
+      # Struct with escapable fields
       schema = (@struct_schemas ||= {})[resolved]
       if schema
         cleanups = schema.filter_map do |fname, fdef|
+          next if fname.is_a?(Symbol) # skip :kind, :variants etc.
           ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
           ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
           ft.escape_cleanup_code("#{name}.#{fname}")

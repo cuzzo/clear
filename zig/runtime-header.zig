@@ -1839,7 +1839,45 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 9. Primitives, enums, unions, etc.: no-op (comptime-eliminated)
+        // 9. Tagged unions: check active variant and clean up its payload
+        if (info == .@"union" and info.@"union".tag_type != null) {
+            inline for (info.@"union".fields) |field| {
+                if (comptime needsCleanup(field.type)) {
+                    if (std.meta.activeTag(ptr.*) == @field(std.meta.Tag(T), field.name)) {
+                        var payload = @field(ptr, field.name);
+                        cleanup(field.type, alloc, &payload);
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        // 10. Primitives, enums, untagged unions: no-op (comptime-eliminated)
+    }
+
+    /// Returns true if a type needs cleanup (has heap-allocated data).
+    /// Excludes []const u8 — strings have mixed provenance (static, frame, heap)
+    /// and cannot be freed generically. StringMap handles its own string cleanup.
+    fn needsCleanup(comptime FT: type) bool {
+        if (refInnerType(FT) != null) return true;
+        if (isArrayList(FT)) return true;
+        if (isStringMap(FT)) return true;
+        if (isNumericMap(FT)) return true;
+        if (isPool(FT)) return true;
+        const ft_info = @typeInfo(FT);
+        if (ft_info == .@"struct") {
+            // Check if any field needs cleanup
+            inline for (ft_info.@"struct".fields) |field| {
+                if (comptime needsCleanup(field.type)) return true;
+            }
+        }
+        if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
+            inline for (ft_info.@"union".fields) |field| {
+                if (comptime needsCleanup(field.type)) return true;
+            }
+        }
+        return false;
     }
 
     /// Promote all escapable fields of a struct from frame arena to heap.
