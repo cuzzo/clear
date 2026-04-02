@@ -54,7 +54,8 @@ module PipeAnalysis
     node.is_a?(AST::TapOp) ||
     node.is_a?(AST::TakeWhileOp) ||
     node.is_a?(AST::WindowOp) ||
-    node.is_a?(AST::JoinOp)
+    node.is_a?(AST::JoinOp) ||
+    node.is_a?(AST::RecoverOp)
   end
 
   def analyze_higher_order_op(node)
@@ -101,6 +102,8 @@ module PipeAnalysis
       analyze_window_op(node)
     when AST::JoinOp
       analyze_join_op(node)
+    when AST::RecoverOp
+      analyze_recover_op(node)
     end
   end
 
@@ -246,6 +249,19 @@ module PipeAnalysis
     node.full_type = :"#{join_type_name}[]"
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  def analyze_recover_op(node)
+    # RECOVER(default): replace error with default value in pipeline
+    visit(node.right.default_expr)
+    lhs_type = node.left.respond_to?(:full_type) ? node.left.full_type : nil
+    lhs_t = lhs_type ? Type.new(lhs_type) : nil
+    if lhs_t&.error_union?
+      node.full_type = lhs_t.payload_type.resolved
+    else
+      node.full_type = lhs_type
+    end
+    node.storage = :stack
   end
 
   def analyze_reduce_op(node)

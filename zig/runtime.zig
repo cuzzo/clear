@@ -38,6 +38,36 @@ comptime {
 const YIELD_BUDGET: u32 = 4096;
 const YIELD_MASK:   u32 = YIELD_BUDGET - 1;
 
+// ── Error Context ──────────────────────────────────────────────────
+// Fiber-local error context for CLEAR's intent-based error handling.
+// Set on RAISE/EXIT, read in CATCH blocks. No race conditions: only
+// one fiber runs per thread (cooperative scheduling), and error
+// propagation is synchronous (no yields between raise and catch).
+
+pub const ErrorKind = enum(u8) {
+    Transient = 0,
+    Input = 1,
+    System = 2,
+    NotFound = 3,
+    Permission = 4,
+    Canceled = 5,
+    Unknown = 6,
+};
+
+pub const ErrorContext = struct {
+    kind: ErrorKind = .Unknown,
+    message: []const u8 = "",
+    snapshot: ?[]const u8 = null,
+    clear_line: u32 = 0,
+
+    pub fn reset(self: *ErrorContext) void {
+        self.kind = .Unknown;
+        self.message = "";
+        self.snapshot = null;
+        self.clear_line = 0;
+    }
+};
+
 pub const Runtime = struct {
     // Control
     ebr: ThreadLocalEbr,  // This probably needs to be global...
@@ -46,6 +76,9 @@ pub const Runtime = struct {
     deadline: i64 = 0,
     // Cooperative scheduling: counts loop back-edges; yields when lower 12 bits hit 0.
     yield_counter: u32 = 0,
+
+    // Error context: set on RAISE/EXIT, read in CATCH blocks.
+    __error: ErrorContext = .{},
 
     // OVERFLOW (The Safety Valve)
     // We use an Arena so we can track all the overflow allocations
@@ -217,6 +250,20 @@ pub const Runtime = struct {
         const ptr = try self.globalAlloc().create(T);
         ptr.* = value;
         return ptr;
+    }
+
+    // ── Error Context Helpers ─────────────────────────────────────
+    pub fn setError(self: *Runtime, kind: ErrorKind, message: []const u8, clear_line: u32) void {
+        self.__error = .{ .kind = kind, .message = message, .clear_line = clear_line };
+    }
+
+    pub fn setErrorSnapshot(self: *Runtime, data: []const u8) void {
+        // Heap-dupe the snapshot so it survives frame rewind. OOM = no snapshot.
+        self.__error.snapshot = self.heap_allocator.dupe(u8, data) catch null;
+    }
+
+    pub fn clearError(self: *Runtime) void {
+        self.__error.reset();
     }
 
     // For green fibers

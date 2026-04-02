@@ -2098,6 +2098,16 @@ private
     t_left_type = node.left.type_info
     t_right_type = node.right.type_info
 
+    # Handle OR EXIT "msg": set error context + propagate (same as OR RAISE for types)
+    if node.right.is_a?(AST::OrExit)
+      if t_left_type.error_union?
+        node.full_type = t_left_type.payload_type.resolved
+      else
+        node.full_type = t_left_type.resolved
+      end
+      return
+    end
+
     # Handle OR RAISE: bubble up error (Zig's try)
     if node.right.is_a?(AST::OrRaise)
       if t_left_type.error_union?
@@ -2194,6 +2204,11 @@ private
   def visit_OrPrune(node)
     # This is a marker node for OR PRUNE - no type annotation needed
     # The actual type handling is done in visit_OrRescue
+    node.full_type = :Void
+  end
+
+  def visit_OrExit(node)
+    visit(node.message) if node.message
     node.full_type = :Void
   end
 

@@ -306,7 +306,7 @@ module AST
     attr_accessor :collection_return  # true when returning a collection that needs escape promotion
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
-  Raise        = Struct.new(:token, :message_expr) { include Locatable }
+  Raise        = Struct.new(:token, :message_expr, :error_context) { include Locatable }
   ThrowNode    = Struct.new(:token, :value) { include Locatable }
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
@@ -367,9 +367,16 @@ module AST
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
+  OrExit         = Struct.new(:token, :message) { include Locatable }  # OR EXIT "msg" - set error context + raise
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops
+  # CATCH block: error handler at function bottom. Multiple CATCH clauses + optional DEFAULT.
+  # catch_clauses: [{ error_name: String|nil, with_msg: String|nil, body: [ASTNode] }]
+  # default_body: [ASTNode] or nil
+  CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) { include Locatable }
+  # RECOVER(default): pipeline operator that replaces errors with a default value.
+  RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked | :local

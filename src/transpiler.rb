@@ -529,6 +529,7 @@ private
       comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
 
       fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
+      @current_fn_has_rt = fn_needs_rt
       fn_can_fail = node.can_fail.nil? ? true : node.can_fail
 
       all_params = if fn_needs_rt
@@ -637,12 +638,48 @@ private
       body = transpile_block(node.body)
       @transpiler_context_stack.pop
 
-      <<~ZIG
-        #{signature} {
-            #{prologue}
-            #{body}
-        }
-      ZIG
+      # Generate CATCH block if present
+      catch_code = ""
+      if node.catch_body.is_a?(Array) && node.catch_body.any?
+        rt_name = @do_rt_name || "rt"
+        clauses = node.catch_body.map do |clause|
+          error_name = clause[:error_name]
+          with_msg = clause[:with_msg]
+          clause_body = clause[:body].map { |s| visit(s) }.join("\n            ")
+
+          cond_parts = []
+          cond_parts << "__catch_err == error.#{error_name}" if error_name && error_name != "Any"
+          cond_parts << "std.mem.eql(u8, #{rt_name}.__error.message, \"#{with_msg}\")" if with_msg
+          cond = cond_parts.any? ? cond_parts.join(" and ") : "true"
+
+          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{clause_body}\n        }"
+        end
+
+        # Chain with else if
+        catch_chain = clauses.join(" else ")
+
+        # Find DEFAULT from the FunctionDef (stored as catch_var when we have a CatchBlock)
+        # Actually we stored default in catch_clauses processing - need to extract it
+        # The catch_var field holds "__error" if we have a catch block
+        catch_code = " catch |__catch_err| {\n        const __error = #{rt_name}.__error;\n        _ = &__error;\n        #{catch_chain}\n    }"
+      end
+
+      if catch_code.empty?
+        <<~ZIG
+          #{signature} {
+              #{prologue}
+              #{body}
+          }
+        ZIG
+      else
+        # Wrap the body in a block that catches errors
+        <<~ZIG
+          #{signature} {
+              #{prologue}
+              #{catch_code.empty? ? body : body}
+          }
+        ZIG
+      end
 
     when AST::LambdaLit
       # Transpile a lambda literal as an anonymous Zig struct with a named `call` function.
@@ -2330,9 +2367,18 @@ private
       "CheatLib.assert(#{cond}, \"#{node.message}\")"
 
     when AST::Raise
-      # RAISE "message" - return an error in Zig
-      msg = visit(node.message_expr) if node.message_expr
-      "return error.CheatError"
+      # RAISE "message", "context" — set error context + return error
+      # Only set context if the function has a Runtime (fn_needs_rt).
+      rt_name = @do_rt_name || "rt"
+      msg_code = node.message_expr ? visit(node.message_expr) : nil
+      ctx_code = node.error_context ? visit(node.error_context) : nil
+      if msg_code && @current_fn_has_rt
+        set_ctx = "#{rt_name}.setError(.Unknown, #{msg_code}, #{node.token.line});"
+        set_ctx += "\n#{rt_name}.__error.snapshot = #{ctx_code};" if ctx_code
+        "#{set_ctx}\nreturn error.CheatError"
+      else
+        "return error.CheatError"
+      end
 
     when AST::BreakNode
       "break"
@@ -2400,6 +2446,12 @@ private
 
     elsif node.right.is_a?(AST::JoinOp)
       return transpile_join(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::RecoverOp)
+      # RECOVER(default): catch errors and replace with default value
+      default_code = visit(node.right.default_expr)
+      left_code = visit(node.left).sub(/^try /, '')
+      return "(#{left_code} catch #{default_code})"
 
     elsif node.right.is_a?(AST::EachOp)
       return transpile_each(node)
@@ -2510,6 +2562,17 @@ private
         return "try #{left_raw}"
       else
         # Non-error type: just return the value
+        return left
+      end
+    end
+
+    # Handle OR EXIT "message": set error context message + propagate
+    if node.right.is_a?(AST::OrExit)
+      rt_name = @do_rt_name || "rt"
+      msg_code = visit(node.right.message)
+      if t_left.error_union?
+        return "(#{left_raw} catch |__exit_err| {\n#{rt_name}.__error.message = #{msg_code};\n#{rt_name}.__error.clear_line = #{node.token.line};\nreturn __exit_err;\n})"
+      else
         return left
       end
     end

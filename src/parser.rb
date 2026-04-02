@@ -81,7 +81,7 @@ class Parser
   stmt(:KEYWORD, 'TIGHT') { parse_tight_stmt }
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
-  stmt(:KEYWORD, 'RAISE', AST::Raise, ['RAISE', :raise_msg, ';'])
+  stmt(:KEYWORD, 'RAISE') { parse_raise_stmt }
   stmt(:KEYWORD, 'EXIT') { parse_exit }
   stmt(:KEYWORD, 'DIE') { parse_die }
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
@@ -149,6 +149,7 @@ class Parser
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
+  primary(:KEYWORD, 'RECOVER') { parse_recover_op }
   primary(:KEYWORD, 'WINDOW') { parse_window_op }
   primary(:KEYWORD, 'JOIN') { parse_join_op }
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
@@ -939,16 +940,41 @@ class Parser
     consume(:ARROW, '->')
     body = parse_block_body(['END', 'CATCH'])
 
-    # 2. Parse Optional CATCH block
-    catch_body = []
-    catch_var = nil
-    if match!(:KEYWORD, 'CATCH')
-      catch_var = consume(:VAR_ID).value # Capture 'e' in CATCH e
-      catch_body = parse_block_body(['END'])
+    # 2. Parse Optional CATCH blocks (multi-clause)
+    # Syntax:
+    #   CATCH ErrorName WITH("msg")
+    #     body;
+    #   CATCH ErrorName
+    #     body;
+    #   DEFAULT
+    #     body;
+    #   END
+    catch_block = nil
+    if match?(:KEYWORD, 'CATCH')
+      catch_clauses = []
+      default_body = nil
+      while match?(:KEYWORD, 'CATCH')
+        consume(:KEYWORD, 'CATCH')
+        error_name = consume(:TYPE_ID).value rescue (consume(:VAR_ID).value)
+        with_msg = nil
+        if match?(:KEYWORD, 'WITH')
+          consume(:KEYWORD, 'WITH')
+          consume(:CHAR, '(')
+          with_msg = consume(:STRING).value
+          consume(:CHAR, ')')
+        end
+        clause_body = parse_block_body(['CATCH', 'DEFAULT', 'END'])
+        catch_clauses << { error_name: error_name, with_msg: with_msg, body: clause_body }
+      end
+      if match?(:KEYWORD, 'DEFAULT')
+        consume(:KEYWORD, 'DEFAULT')
+        default_body = parse_block_body(['END'])
+      end
+      catch_block = AST::CatchBlock.new(fn_token, catch_clauses, default_body)
     end
 
     consume(:KEYWORD, 'END')
-    node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_body, catch_var, visibility)
+    node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_block ? catch_block.catch_clauses : [], catch_block ? "__error" : nil, visibility)
     node.type_params = type_params unless type_params.empty?
     node.reentrant = reentrant
     node
@@ -1050,6 +1076,11 @@ class Parser
     # Syntax: ... OR RAISE (bubble up error - Zig's `try`)
     elsif match!(:KEYWORD, 'RAISE')
       rhs = AST::OrRaise.new(previous)
+
+    # Syntax: ... OR EXIT "message" (set error context message + raise)
+    elsif match!(:KEYWORD, 'EXIT')
+      msg = parse_expression
+      rhs = AST::OrExit.new(previous, msg)
 
     # Syntax: ... OR PASS (ignore error, use undefined/default)
     elsif match!(:KEYWORD, 'PASS')
@@ -1300,9 +1331,20 @@ class Parser
     AST::StructPattern.new(tok, fields, partial)
   end
 
-  def parse_raise_msg
-    return nil if match?(:CHAR, ';')
-    parse_expression
+  def parse_raise_stmt
+    tok = consume(:KEYWORD, 'RAISE')
+    if match?(:CHAR, ';')
+      consume(:CHAR, ';')
+      return AST::Raise.new(tok, nil, nil)
+    end
+    msg = parse_expression
+    ctx = nil
+    if match?(:CHAR, ',')
+      consume(:CHAR, ',')
+      ctx = parse_expression
+    end
+    consume(:CHAR, ';')
+    AST::Raise.new(tok, msg, ctx)
   end
 
   def parse_while_loop
@@ -1477,6 +1519,15 @@ class Parser
     consume(:CHAR, ')')
     body = parse_expression
     AST::ReduceOp.new(reduce_token, initial_value, body)
+  end
+
+  # RECOVER(default_expr) — pipeline error recovery
+  def parse_recover_op
+    tok = consume(:KEYWORD, 'RECOVER')
+    consume(:CHAR, '(')
+    default_expr = parse_expression
+    consume(:CHAR, ')')
+    AST::RecoverOp.new(tok, default_expr)
   end
 
   # WINDOW(size) expression
