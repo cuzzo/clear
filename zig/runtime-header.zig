@@ -245,6 +245,7 @@ pub const CheatLib = struct {
                 _ = bucket_alloc;
                 const stored_value = dupeUnionStrings(value, self.alloc) catch value;
                 if (self.inner.getPtr(key)) |val_ptr| {
+                    freeUnionStrings(val_ptr.*, self.alloc);
                     val_ptr.* = stored_value;
                     return;
                 }
@@ -281,6 +282,7 @@ pub const CheatLib = struct {
                 _ = key_alloc;
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
+                    freeUnionStrings(kv.value, self.alloc);
                 }
             }
 
@@ -291,10 +293,29 @@ pub const CheatLib = struct {
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
                 _ = key_alloc;
                 _ = bucket_alloc;
-                // Use stored allocator — guarantees consistency with put().
+                // Free keys and any heap-duped strings inside union values.
                 var it = self.inner.iterator();
-                while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+                while (it.next()) |entry| {
+                    self.alloc.free(entry.key_ptr.*);
+                    freeUnionStrings(entry.value_ptr.*, self.alloc);
+                }
                 self.inner.deinit(self.alloc);
+            }
+
+            /// Free heap-duped strings inside tagged union values.
+            /// Companion to dupeUnionStrings (called by put).
+            fn freeUnionStrings(value: V, alloc_: std.mem.Allocator) void {
+                const info = @typeInfo(V);
+                if (info != .@"union") return;
+                inline for (info.@"union".fields) |field| {
+                    if (field.type == []const u8) {
+                        if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
+                            const slice = @field(value, field.name);
+                            if (slice.len > 0) alloc_.free(slice);
+                            return;
+                        }
+                    }
+                }
             }
 
             // Delegate to inner for code that still uses raw HashMap API
