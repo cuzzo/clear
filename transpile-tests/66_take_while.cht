@@ -35,5 +35,13 @@ FN main() RETURNS Void ->
     ASSERT chained[0] == 10.0, "chain: first * 10";
     ASSERT chained[2] == 30.0, "chain: last * 10";
 
+    -- Fusion: TAKE_WHILE + SUM (single loop, no intermediate)
+    fused = data s> TAKE_WHILE _ < 5.0 s> SUM _;
+    ASSERT fused == 6.0, "TAKE_WHILE + SUM fusion: 1+2+3 = 6";
+
+    -- Fusion: TAKE_WHILE + SELECT + SUM
+    fused2 = data s> TAKE_WHILE _ < 5.0 s> SELECT _ * 2.0 s> SUM _;
+    ASSERT fused2 == 12.0, "TAKE_WHILE + SELECT + SUM: (1+2+3)*2 = 12";
+
     RETURN;
 END

@@ -1,0 +1,28 @@
+-- WINDOW(size): sliding window over a collection.
+-- _ is the sub-slice of `size` elements.
+
+FN main() RETURNS Void ->
+    data: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    -- Window of size 3: _.length() returns the window size
+    lengths = data s> WINDOW(3) _.length();
+    ASSERT lengths.length() == 3, "3 windows from 5 elements";
+    ASSERT lengths[0] == 3, "window size is 3";
+
+    -- Window of size 1: each element individually
+    singles = data s> WINDOW(1) _[0];
+    ASSERT singles.length() == 5, "5 windows of size 1";
+    ASSERT singles[0] == 1.0, "first element";
+    ASSERT singles[4] == 5.0, "last element";
+
+    -- Window of size equal to list: single window
+    full = data s> WINDOW(5) _.length();
+    ASSERT full.length() == 1, "single window when size == len";
+    ASSERT full[0] == 5, "window contains all 5";
+
+    -- Window larger than list: empty result
+    empty = data s> WINDOW(10) _.length();
+    ASSERT empty.length() == 0, "empty when window > list";
+
+    RETURN;
+END

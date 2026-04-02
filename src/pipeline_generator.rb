@@ -14,7 +14,7 @@ module PipelineGenerator
 
   FOLD_TYPES = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
                 AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
-  FUSIBLE_TYPES = [AST::WhereOp, AST::SelectOp, AST::TapOp].freeze
+  FUSIBLE_TYPES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp].freeze
 
   # Walk the left-spine of nested s> BinaryOps and collect fusible stages.
   # Returns { source:, stages: [WhereOp/SelectOp, ...], terminal: FoldOp, terminal_node: } or nil.
@@ -112,6 +112,9 @@ module PipelineGenerator
         select_counter += 1
         lines << "#{indent}const #{new_var} = #{expr};"
         current_var = new_var
+      elsif stage.is_a?(AST::TakeWhileOp)
+        expr = with_pipeline_context(placeholder: current_var) { visit(stage.expression) }
+        lines << "#{indent}if (!(#{expr})) break;"
       elsif stage.is_a?(AST::TapOp)
         body_code = with_pipeline_context(placeholder: current_var) do
           stage.body.map { |stmt|
@@ -467,6 +470,33 @@ module PipelineGenerator
             const matches = #{expr_code};
             if (!matches) break;
             try res_list.append(#{alloc}, it);
+        }
+        break :#{@current_pipe_label} res_list;
+      ZIG
+    end
+  end
+
+  def transpile_window(list_node, window_node, smooth_node)
+    size_code = visit(window_node.size)
+    expr_type_str = (window_node.expression.full_type || window_node.expression.resolved_type).to_s
+    element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
+
+    expr_code = with_pipeline_context(placeholder: "window_slice") {
+      visit(window_node.expression)
+    }
+
+    transpile_pipeline_macro(list_node, smooth_node, res_type: expr_type_str) do |alloc|
+      <<~ZIG
+        {
+            const __w_size: usize = @intCast(#{size_code});
+            if (pipe_items.len >= __w_size) {
+                var __wi: usize = 0;
+                while (__wi <= pipe_items.len - __w_size) : (__wi += 1) {
+                    const window_slice = pipe_items[__wi .. __wi + __w_size];
+                    const val = #{expr_code};
+                    try res_list.append(#{alloc}, val);
+                }
+            }
         }
         break :#{@current_pipe_label} res_list;
       ZIG

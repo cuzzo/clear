@@ -1261,6 +1261,44 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # WINDOW
+  # ===========================================================================
+  describe "WINDOW" do
+    it "result type is expression-type[]" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Float64[] = [1.0, 2.0, 3.0];
+            result = data s> WINDOW(2) _.length();
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Int64[]")
+    end
+
+    it "rejects non-numeric size" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Float64[] = [1.0];
+              result = data s> WINDOW("bad") _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WINDOW size must be a number/)
+    end
+
+    it "rejects non-list input" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              x: Float64 = 1.0;
+              result = x s> WINDOW(2) _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot WINDOW non-list/)
+    end
+  end
+
+  # ===========================================================================
   # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
   # ===========================================================================
   describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do

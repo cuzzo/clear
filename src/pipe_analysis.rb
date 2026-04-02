@@ -52,7 +52,8 @@ module PipeAnalysis
     node.is_a?(AST::ShardOp) ||
     node.is_a?(AST::SkipOp) ||
     node.is_a?(AST::TapOp) ||
-    node.is_a?(AST::TakeWhileOp)
+    node.is_a?(AST::TakeWhileOp) ||
+    node.is_a?(AST::WindowOp)
   end
 
   def analyze_higher_order_op(node)
@@ -95,6 +96,8 @@ module PipeAnalysis
       analyze_tap_op(node)
     when AST::TakeWhileOp
       analyze_take_while_op(node)
+    when AST::WindowOp
+      analyze_window_op(node)
     end
   end
 
@@ -158,6 +161,30 @@ module PipeAnalysis
     end
 
     node.full_type = :"#{item_type}[]"
+    node.storage = :frame
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  def analyze_window_op(node)
+    require_array_input!(node, "WINDOW")
+    item_type = node.left.type_info.element_type.resolved
+
+    # Validate the size argument is numeric
+    visit(node.right.size)
+    size_type = node.right.size.resolved_type
+    unless [:Int64, :Number].include?(size_type)
+      error!(node.right.size, "WINDOW size must be a number, got #{size_type}")
+    end
+
+    # _ is a sub-slice of the same element type
+    with_new_scope do
+      current_scope.declare("_", nil, :"#{item_type}[]", false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    # Result is a list of whatever the expression produces
+    expr_type = node.right.expression.full_type || node.right.expression.resolved_type
+    node.full_type = :"#{expr_type}[]"
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end

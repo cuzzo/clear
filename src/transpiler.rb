@@ -2365,6 +2365,9 @@ private
     elsif node.right.is_a?(AST::TakeWhileOp)
       return transpile_take_while(node.left, node.right.expression, node)
 
+    elsif node.right.is_a?(AST::WindowOp)
+      return transpile_window(node.left, node.right, node)
+
     elsif node.right.is_a?(AST::EachOp)
       return transpile_each(node)
 

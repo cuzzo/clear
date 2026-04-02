@@ -149,6 +149,7 @@ class Parser
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
+  primary(:KEYWORD, 'WINDOW') { parse_window_op }
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
   primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
 
@@ -1468,6 +1469,17 @@ class Parser
     consume(:CHAR, ')')
     body = parse_expression
     AST::ReduceOp.new(reduce_token, initial_value, body)
+  end
+
+  # WINDOW(size) expression
+  # e.g., prices s> WINDOW(3) SUM(_) / 3.0
+  def parse_window_op
+    window_token = consume(:KEYWORD, 'WINDOW')
+    consume(:CHAR, '(')
+    size = parse_expression
+    consume(:CHAR, ')')
+    body = parse_expression(1)  # pipe_expression precedence
+    AST::WindowOp.new(window_token, size, body)
   end
 
   # SHARD(key_expr, target_map)
