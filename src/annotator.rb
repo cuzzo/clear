@@ -191,8 +191,10 @@ private
     mark_fn_value_references!(node)
 
     # PASS 6: Compute effect sets for every function via call-graph fixed-point.
-    # Silent infrastructure for future STRICT mode / #HOT enforcement.
     compute_effects!
+
+    # PASS 7: Compute stack tier recommendations per function.
+    compute_stack_tiers!
 
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
@@ -437,6 +439,7 @@ private
     node.uses_frame = (ctx.frame_count > 0)
     node.uses_heap  = (ctx.heap_count > 0)
     node.uses_alloc = (ctx.alloc_count > 0)
+    node.stack_vars_bytes = ctx.stack_vars_bytes
     # Seed for compute_can_fail! post-pass: direct failure sources.
     ret_type_obj = signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil
     heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
@@ -1301,6 +1304,7 @@ private
     end
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type, storage)
+    accumulate_stack_bytes(storage, node)
     record_capability_binding(node.name, node, final_type, storage)
   end
 
@@ -1360,6 +1364,7 @@ private
       end
       classify_ownership!(node.symbol)
       og_declare(node.name, node, node.type_info || final_type, storage)
+      accumulate_stack_bytes(storage, node)
       record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
@@ -1504,6 +1509,14 @@ private
     else
       :affine
     end
+  end
+
+  # Accumulate stack-local variable bytes for the current function context.
+  # Only counts :stack storage — :frame and :heap don't consume fiber stack.
+  def accumulate_stack_bytes(storage, node)
+    return unless storage == :stack && current_fn_ctx
+    bytes = (node.slot_size || 1) * 8
+    current_fn_ctx.stack_vars_bytes += bytes
   end
 
   def mark_var_mutated(name)

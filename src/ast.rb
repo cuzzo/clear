@@ -225,6 +225,8 @@ module AST
     attr_accessor :returns_promoted  # true when return value contains heap-promoted collection data
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
+    attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
+    attr_accessor :stack_vars_bytes  # lower-bound estimate of stack-local variable bytes
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }

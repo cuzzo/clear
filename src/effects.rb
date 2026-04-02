@@ -171,6 +171,52 @@ module EffectTracker
     traverse.call(program_node.statements)
   end
 
+  # --- Stack tier recommendation ---
+  #
+  # Maps each function's effect set + stack variable usage to a fiber stack tier.
+  # The tier is a lower bound: the runtime control plane can upsize adaptively.
+  #
+  # Tiers:
+  #   :micro    (4 KB)  - pure compute, no allocations, no blocking
+  #   :standard (16 KB) - heap allocations, extern calls, moderate locals
+  #   :large    (64 KB) - recursive functions, deep call chains
+  #   :xl       (256 KB)- recursive + heap-heavy
+  #
+  STACK_TIER_BUDGET = { micro: 4096, standard: 16384, large: 65536, xl: 262144 }.freeze
+
+  def compute_stack_tiers!
+    @fn_nodes.each do |name, fn_node|
+      effs = fn_node.effects || Set.new
+      stack_bytes = fn_node.stack_vars_bytes || 0
+
+      tier = if effs.include?(REENTRANT) && effs.include?(HEAP)
+        :xl
+      elsif effs.include?(REENTRANT)
+        :large
+      elsif effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
+        :standard
+      else
+        :micro
+      end
+
+      # Promote tier if stack-local variables alone exceed the tier budget.
+      # Leave headroom: use 50% of tier for locals (rest for Zig frames, alignment, spills).
+      budget = STACK_TIER_BUDGET[tier]
+      while stack_bytes > budget / 2 && tier != :xl
+        tier = case tier
+               when :micro    then :standard
+               when :standard then :large
+               when :large    then :xl
+               else :xl
+               end
+        budget = STACK_TIER_BUDGET[tier]
+      end
+
+      fn_node.stack_tier = tier
+      fn_node.stack_vars_bytes = stack_bytes
+    end
+  end
+
   # --- Queries (for future use by #HOT / STRICT mode) ---
 
   def effects_for(fn_name)
