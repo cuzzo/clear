@@ -12,6 +12,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 # --- clear CLI (preferred) ---
 ./clear build foo.cht                # Default: Zig backend, ~2s, safety checks, 64KB stacks
 ./clear build foo.cht -o bin/app     # Custom output path
+./clear build foo.cht --stack-check  # Build + verify stack usage per function via objdump
 ./clear build foo.cht --optimized    # LLVM backend, -O ReleaseFast (~22s, 16KB stacks)
 ./clear build foo.cht --safe         # LLVM backend, -O ReleaseSafe (~28s, safety + optimization)
 ./clear run foo.cht                  # Build + execute

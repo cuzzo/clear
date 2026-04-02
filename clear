@@ -158,6 +158,7 @@ when 'build'
 
   # Parse build flags
   remaining = []
+  stack_check = false
   i = 0
   while i < args.length
     case args[i]
@@ -177,6 +178,9 @@ when 'build'
       opt_level = 'ReleaseFast'
       extra_flags = []
       i += 1
+    when '--stack-check'
+      stack_check = true
+      i += 1
     else
       remaining << args[i]
       i += 1
@@ -184,12 +188,35 @@ when 'build'
   end
 
   source = remaining.first
-  error "Usage: clear build <file.cht> [-o output] [--release|--safe]" unless source
+  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check]" unless source
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   puts "Built: #{output_path}"
+
+  # Post-build stack verification
+  if stack_check && File.exist?(output_path)
+    require_relative 'src/stack_verifier'
+    require_relative 'src/transpiler'
+
+    begin
+      src_text = File.read(source)
+      tokens = Lexer.new(src_text).tokenize
+      ast = Parser.new(tokens, src_text).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      fn_nodes = annotator.instance_variable_get(:@fn_nodes)
+
+      base_name = File.basename(source, '.cht')
+      prefix = "._clear_tmp_#{base_name}"
+      verifier = StackVerifier.new(output_path, prefix)
+      report = verifier.analyze(fn_nodes: fn_nodes)
+      verifier.print_report(report)
+    rescue => e
+      $stderr.puts "[stack-check] Analysis failed: #{e.message}"
+    end
+  end
 
 when 'run'
   # Split on -- for pass-through args
