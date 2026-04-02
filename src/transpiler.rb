@@ -798,7 +798,7 @@ private
       end
       has_mutable_cleanup = ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
                             ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
-                            ft&.heap_promoted || ft&.resource? || node.resource_close_zig || struct_has_cleanup
+                            node.type_info&.heap_promoted || ft&.resource? || node.resource_close_zig || struct_has_cleanup
       forced_var = is_mutable && has_mutable_cleanup
       keyword = if !is_mutable
         "const"
@@ -2925,8 +2925,16 @@ private
       return [suppress, *pre_promos.compact, "#{decl} = #{val_code};", *post_promos.compact, "return __ret;"].reject(&:empty?).join("\n")
     end
 
-    # No promotion needed.
-    [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
+    # Universal fallback: use comptime CheatLib.promote for any type.
+    # Only emit when the function has runtime access (needs_rt).
+    # Comptime eliminates the call for types that don't need promotion.
+    zig_type = ret_type ? transpile_type(ret_type.resolved.to_s) : nil
+    has_rt = current_tp_ctx&.has_rt
+    if zig_type && has_rt
+      [suppress, "var __ret = #{val_code};", "try CheatLib.promote(#{zig_type}, #{rt_name}, &__ret);", "return __ret;"].reject(&:empty?).join("\n")
+    else
+      [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
+    end
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).

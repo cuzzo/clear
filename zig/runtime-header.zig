@@ -1891,22 +1891,86 @@ pub const CheatLib = struct {
     }
 
     /// Promote all escapable fields of a struct from frame arena to heap.
-    /// Handles strings (dupe), lists (promoteList), and maps (mapPromote).
-    /// Fields that don't need promotion emit no code at comptime.
+    /// DEPRECATED: use promote() for new code. Kept for backward compat.
     pub fn promoteFields(comptime T: type, rt: *Runtime, value: *T) !void {
-        inline for (@typeInfo(T).@"struct".fields) |field| {
-            const FT = field.type;
-            if (FT == []const u8 or FT == []u8) {
-                // String field: dupe to heap
-                @field(value, field.name) = try rt.heapAlloc().dupe(u8, @field(value, field.name));
-            } else if (comptime isArrayList(FT)) {
-                // List field: promote backing buffer to heap
-                const ElemT = comptime arrayListElemType(FT).?;
-                try promoteList(ElemT, rt, &@field(value, field.name));
-            }
-            // Maps use a wrapper struct (StringMap) — can't detect generically
-            // without name inspection. Handled by pre-promotion in Ruby.
+        try promote(T, rt, value);
+    }
+
+    /// Generic comptime promotion: walks any type and dupes all frame-arena
+    /// data to heap. Handles strings, ArrayLists, StringMaps, structs, and
+    /// tagged unions recursively. No-op for primitives (comptime eliminated).
+    pub fn promote(comptime T: type, rt: *Runtime, value: *T) !void {
+        const info = @typeInfo(T);
+
+        // 1. Strings: dupe to heap
+        if (T == []const u8 or T == []u8) {
+            value.* = try rt.heapAlloc().dupe(u8, value.*);
+            return;
         }
+
+        // 2. ArrayList: promote backing buffer + recurse into elements
+        if (comptime isArrayList(T)) {
+            const ElemT = comptime arrayListElemType(T).?;
+            try promoteList(ElemT, rt, value);
+            // Recursively promote elements if they contain escapable data
+            if (comptime needsPromotion(ElemT)) {
+                for (value.items) |*elem| {
+                    try promote(ElemT, rt, elem);
+                }
+            }
+            return;
+        }
+
+        // 3. StringMap: alloc is already heapAlloc (set at construction).
+        // Ensure alloc field is heap. Keys and values are managed by StringMap.
+        if (comptime isStringMap(T)) {
+            value.alloc = rt.heapAlloc();
+            return;
+        }
+
+        // 4. Tagged unions: promote the active variant's payload
+        if (info == .@"union" and info.@"union".tag_type != null) {
+            inline for (info.@"union".fields) |field| {
+                if (comptime needsPromotion(field.type)) {
+                    if (std.meta.activeTag(value.*) == @field(std.meta.Tag(T), field.name)) {
+                        try promote(field.type, rt, &@field(value, field.name));
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        // 5. Structs: walk fields recursively
+        if (info == .@"struct") {
+            inline for (info.@"struct".fields) |field| {
+                if (comptime needsPromotion(field.type)) {
+                    try promote(field.type, rt, &@field(value, field.name));
+                }
+            }
+            return;
+        }
+
+        // 6. Primitives, enums, etc.: no-op (comptime-eliminated)
+    }
+
+    /// Returns true if a type has data that needs promotion (frame -> heap).
+    fn needsPromotion(comptime FT: type) bool {
+        if (FT == []const u8 or FT == []u8) return true;
+        if (isArrayList(FT)) return true;
+        if (isStringMap(FT)) return true;
+        const ft_info = @typeInfo(FT);
+        if (ft_info == .@"struct") {
+            inline for (ft_info.@"struct".fields) |field| {
+                if (comptime needsPromotion(field.type)) return true;
+            }
+        }
+        if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
+            inline for (ft_info.@"union".fields) |field| {
+                if (comptime needsPromotion(field.type)) return true;
+            }
+        }
+        return false;
     }
 
     fn isArrayList(comptime T: type) bool {
