@@ -1306,6 +1306,18 @@ private
 
     # 5. Collection type narrowing (e.g., append narrows Any[] → T[])
     narrow_collection_type!(matched_def, args)
+
+    # 6. Append moves: the value arg is consumed by the collection.
+    if matched_def[:zig].is_a?(String) && matched_def[:zig].include?("append") && args.length >= 2
+      val_arg = args.last
+      if val_arg.is_a?(AST::Identifier)
+        vt = val_arg.type_info
+        vt = Type.new(vt) if vt && !vt.is_a?(Type)
+        if vt && !vt.implicitly_copyable? { |t| lookup_type_schema(t) }
+          og_set_moved(val_arg.name)
+        end
+      end
+    end
   end
 
   # Loop-local SROA: when a large struct literal (storage == :frame) is declared
@@ -2002,6 +2014,15 @@ private
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
       end
+      # Move: union literal captures non-Copy values.
+      if val_node.is_a?(AST::Identifier)
+        vt = val_node.type_info
+        vt = Type.new(vt) if vt && !vt.is_a?(Type)
+        is_generic = current_fn_ctx&.type_params&.include?(vt&.resolved)
+        if vt && !is_generic && !vt.implicitly_copyable? { |t| lookup_type_schema(t) }
+          og_set_moved(val_node.name)
+        end
+      end
       node.full_type = if node.type_args&.any?
         :"#{node.name}<#{node.type_args.join(',')}>"
       else
@@ -2051,6 +2072,17 @@ private
           error!(node, "Field '#{field_name}' expected #{expected_type}, got #{val_node.resolved_type}")
         end
         val_node.coerced_type = expected_type
+      end
+
+      # Move: struct literal captures non-Copy values.
+      # Skip generic type parameters (T) — can't determine copyability at annotation time.
+      if val_node.is_a?(AST::Identifier)
+        vt = val_node.type_info
+        vt = Type.new(vt) if vt && !vt.is_a?(Type)
+        is_generic = current_fn_ctx&.type_params&.include?(vt&.resolved)
+        if vt && !is_generic && !vt.implicitly_copyable? { |t| lookup_type_schema(t) }
+          og_set_moved(val_node.name)
+        end
       end
     end
 
@@ -2783,7 +2815,9 @@ private
     rhs_info = current_scope.locals[rhs_name]
     return if rhs_info&.storage == :multiowned || rhs_info&.storage == :shared || rhs_info&.sync
 
-    if Type.new(rhs_type).requires_move? || rhs_info&.resource
+    type_obj = Type.new(rhs_type)
+    is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+    if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
       lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
       og_move(rhs_name, lhs_name)
     end

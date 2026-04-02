@@ -348,12 +348,12 @@ Element-level capabilities are primarily useful in struct fields where individua
 
 ## 12. Strings and Buffers
 
-Strings in CLEAR are affine (Rust-like move semantics). Assignment moves ownership.
+Strings in CLEAR are Copy (like Rust's `&str` — a pointer + length). Assignment copies the slice header.
 
 ```ruby clear
 x = "hello";
-y = x;                         -- x is moved
-z = x;                         -- COMPILER ERROR: Use of moved value 'x'
+y = x;                         -- x is copied (strings are Copy)
+z = x;                         -- OK — strings can be reused
 
 -- String interpolation
 name = "World";

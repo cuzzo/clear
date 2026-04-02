@@ -841,15 +841,25 @@ class Type
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
+    return true if string?  # Strings are slice headers (ptr+len) — trivially copyable
     return true if array? && !list_collection? && !pool? && !set_collection?
     if lookup_arg || lookup_block
       resolver = lookup_arg || lookup_block
       schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
       return true if schema.is_a?(Hash) && schema[:kind] == :enum
-      # Unions with collection/map/array variants need cleanup, not implicitly copyable
+      # Unions: Copy if no heap variants
       if schema.is_a?(Hash) && schema[:kind] == :union
         has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
         return !has_heap
+      end
+      # Structs: Copy if all fields are Copy
+      if schema.is_a?(Hash) && !schema[:kind]
+        all_copy = schema.all? do |k, v|
+          next true if k.is_a?(Symbol) # skip metadata (:type_params etc.)
+          ft = v.is_a?(Type) ? v : (v.is_a?(Hash) ? Type.new(v[:type] || :Any) : Type.new(v || :Any))
+          ft.implicitly_copyable?(resolver)
+        end
+        return true if all_copy
       end
     end
     false

@@ -594,16 +594,16 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     # String affine move semantics (Rust-like)
     # ------------------------------------------------------------------
-    describe "String move semantics" do
-      it "raises on use-after-move of String variable" do
+    describe "String copy semantics" do
+      it "allows reuse of String variable (strings are Copy)" do
         src = 'FN f() RETURNS Void -> x = "hello"; y = x; z = x; RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'x'/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "raises on use-after-move of String in function call" do
+      it "allows String reuse after function call (implicit borrow)" do
         src = 'FN f(s: String) RETURNS Void -> RETURN; END
               FN g() RETURNS Void -> x = "hello"; y = x; f(x); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'x'/)
+        expect { run(src) }.not_to raise_error
       end
 
       it "does not raise on normal string assignment and use" do
