@@ -2671,8 +2671,8 @@ private
 
   # ── Ownership: move, escape, borrow, drop ────────────────────────
   # All ownership state lives in @og (OwnershipGraph). The scope is
-  # still used for type resolution, borrow path tracking, and storage
-  # promotion (mark_escaped), but liveness is graph-only.
+  # The scope handles type resolution, variable declarations, mutability,
+  # and capability tracking. All ownership state is in the OwnershipGraph.
 
   def handle_assign_move(node)
     if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)

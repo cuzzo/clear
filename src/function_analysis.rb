@@ -392,7 +392,7 @@ module FunctionAnalysis
     return true if lifetime.nil?
 
     borrow_type = param[:mutable] ? :mutable : :immutable
-    return true if current_scope.is_borrowable?(arg_node.name, lifetime, borrow_type)
+    return true if current_scope.is_immutable?(arg_node.name) || current_scope.is_restricted?(arg_node.name)
 
     base_path = signature.dig(:return, :lifetime).split(".").first
     return true if param[:name] != base_path

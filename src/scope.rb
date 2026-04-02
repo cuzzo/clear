@@ -12,7 +12,7 @@ class Scope
     @owned_names = Set.new  # Variables declared in THIS scope (not inherited from parent)
   end
 
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
       reg: reg,
@@ -23,7 +23,6 @@ class Scope
       rebindable: is_rebindable,
       size: size || 0,
       capabilities: capabilities,
-      borrowed_paths: borrowed_paths,
       resource: resource,
       close_zig: close_zig,
     )
@@ -41,7 +40,6 @@ class Scope
       new_entry = entry.dup
       # Sets/Arrays inside the entry must be duped too, or they remain shared
       new_entry.capabilities = entry.capabilities.dup
-      new_entry.borrowed_paths = entry.borrowed_paths&.map(&:dup)
       new_entry.scope = self  # Point to the new (copied) scope
       new_entry
     end
@@ -135,50 +133,8 @@ class Scope
     !is_mutable?(name)
   end
 
-  def is_borrowable?(name, requested_path, type)
-    is_immutable?(name) ||
-      (is_restricted?(name) && can_borrow?(name, requested_path, type))
-  end
-
   def is_restricted?(name)
     @locals[name]&.capabilities&.include?(:RESTRICT)
-  end
-
-  def can_borrow?(name, requested_path, requested_type)
-    entry = @locals[name]
-
-    entry.borrowed_paths.each do |borrow|
-      existing_path = borrow[:path]
-      existing_type = borrow[:type]
-
-      is_overlapping = path_overlaps?(existing_path, requested_path)
-      next unless is_overlapping
-
-      # 2. APPLY RUST RULES
-      # Rule A: If I want a WRITER (Mutable), NO ONE else can be there.
-      if requested_type == :mutable
-        return false # Conflict with ANY existing borrow
-      end
-
-      # Rule B: If I want a READER (Immutable), only WRITERS block me.
-      # (Existing Readers are fine!)
-      if requested_type == :immutable && existing_type == :mutable
-        return false # Conflict with existing writer
-      end
-    end
-
-    true
-  end
-
-  def path_overlaps?(p1, p2)
-    return true if p1 == p2
-    return true if p2.size > p1.size && p2[0...p1.size] == p1
-    return true if p1.size > p2.size && p1[0...p2.size] == p2
-    false
-  end
-
-  def mark_borrowed(name, path, type)
-    @locals[name]&.borrowed_paths&.push({ path: path, type: type })
   end
 
   def is_on_heap?(name)
@@ -194,35 +150,14 @@ class Scope
     entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
   end
 
-  # DEPRECATED: use annotator's promote_to_heap instead.
-  # Kept only for declare_with_new_capability which still reads entry.storage.
-  def mark_escaped(name)
-    entry = @locals[name]
-    return false unless entry
-    return false if !Type.new(entry.type).requires_move?
-    return false unless entry.storage == :frame || entry.storage == :stack
-    was_frame = entry.storage == :frame
-    entry.storage = :heap
-    entry.reg.storage = :heap if entry.reg&.respond_to?(:storage=)
-    entry.reg.value.storage = :heap if entry.reg&.respond_to?(:value) && entry.reg.value&.respond_to?(:storage=)
-    was_frame
-  end
-
   def declare_with_new_capability(capability)
     name = capability[:var_node].name
     local = capability[:old_scope].locals[name]
     error!("Cannot add capability: #{name}") if local.nil?
     local = local.dup
-
-    if capability[:var_node].is_a?(AST::GetField)
-      # This is a field-specific restriction (e.g. WITH RESTRICT foo.child)
-      path = get_path_to_root(capability[:var_node])
-      local.borrowed_paths << { path: path, type: :mutable }
-    else
-      # Whole-variable restriction
-      local.capabilities << capability[:capability]
-    end
-    
+    # Whole-variable or field restriction: add capability marker.
+    # Borrow conflict detection is handled by the OwnershipGraph.
+    local.capabilities << capability[:capability]
     @locals[name] = local
   end
 

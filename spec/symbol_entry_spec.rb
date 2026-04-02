@@ -69,7 +69,6 @@ RSpec.describe SymbolEntry do
       expect(minimal.rebindable).to eq(false)
       expect(minimal.size).to eq(0)
       expect(minimal.capabilities).to eq(Set.new)
-      expect(minimal.borrowed_paths).to eq([])
       expect(minimal.valid).to eq(true)
       expect(minimal.invalid_reason).to be_nil
       expect(minimal.resource).to be_nil
