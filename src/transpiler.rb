@@ -1803,7 +1803,7 @@ private
           return "{ const __extm#{tid}_args = #{arg_tuple}; " \
           "const __ExtM#{tid} = struct { #{all_fields}, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); _ = f; " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.self_val.#{node.name}(#{native_args.join(', ')}) catch {}; } }; " \
           "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}#{field_inits.empty? ? '' : ', ' + field_inits}#{alloc_init} }; " \
           "#{trampoline_call_method(tid, rt_name, node)}; }"
@@ -1811,7 +1811,7 @@ private
           return "blk_extm#{tid}: { const __extm#{tid}_args = #{arg_tuple}; " \
           "const __ExtM#{tid} = struct { #{all_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); _ = f; " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
           "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}, #{field_inits}#{alloc_init} }; " \
           "#{trampoline_call_method(tid, rt_name, node)}; " \
@@ -1954,10 +1954,11 @@ private
         struct_fields = [alloc_field.rstrip.chomp(','), arg_fields].reject(&:empty?).join(", ")
         args_decl = runtime_args_zig.any? ? "const __ext#{tid}_args = #{arg_tuple}; " : ""
         if is_void && !is_error_union
+          f_discard = native_call.include?("f.") ? "" : "_ = f; "
           "{ #{args_decl}" \
           "const __Ext#{tid} = struct { #{struct_fields}#{struct_fields.empty? ? '' : ', '}" \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); _ = f; " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); #{f_discard}" \
           "_ = #{native_call}; } }; " \
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
           "#{trampoline_call(tid, rt_name, node)}; }"
@@ -1965,7 +1966,7 @@ private
           "blk_ext#{tid}: { #{args_decl}" \
           "const __Ext#{tid} = struct { #{struct_fields}#{struct_fields.empty? ? '' : ', '}#{err_field}ret: #{inner_zig} = undefined, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); _ = f; " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
           "#{trampoline_call(tid, rt_name, node)}; " \
