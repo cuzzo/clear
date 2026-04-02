@@ -45,6 +45,7 @@ class ZigTranspiler
     ast       = Parser.new(tokens, cheat_code).parse
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
     annotator.annotate!(ast)
+    @ownership_graph = annotator.instance_variable_get(:@og)
 
     @needs_safety_import = false
     # Pre-populate needs_rt/can_fail lookup tables from annotated FunctionDef nodes
@@ -764,6 +765,8 @@ private
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
       is_mutable ||= ft.collection?
       is_mutable ||= ft.resource? || node.resource_close_zig  # Resources need var for defer deinit
+      # Union locals with graph-driven cleanup need `var` for CheatLib.cleanup.
+      is_mutable ||= @ownership_graph&.needs_cleanup?(node.name.to_s)
       # @local pointers are always `const` — mutation goes through the pointer, not the binding.
       # Same as @locked: the pointer itself never changes, only the pointee.
       is_mutable = false if ft.local?

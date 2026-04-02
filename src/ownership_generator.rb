@@ -22,9 +22,16 @@ module OwnershipGenerator
     # Heap-promoted struct/union: emit cleanup so heap data is freed.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
-      # Union with collection variants: cleanup requires Pass B ownership analysis
-      # to determine which variables own data vs alias shared backing.
-      # Deferred to the pass-separation refactor (graph.needs_cleanup? queries).
+
+      # Union with collection variants: use graph to determine cleanup.
+      # Graph.needs_cleanup? returns false for aliased variables (shared backing).
+      if @ownership_graph&.needs_cleanup?(name)
+        union_variants = (@union_schemas ||= {})[resolved]
+        if union_variants && union_variants.any? { |_, vt| Type.variant_has_heap?(vt) }
+          zig_type = transpile_type(resolved.to_s)
+          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+        end
+      end
 
       # Struct with escapable fields
       schema = (@struct_schemas ||= {})[resolved]

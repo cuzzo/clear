@@ -169,7 +169,10 @@ class OwnershipGraph
   def restore_from(snapshot)
     @nodes = {}
     snapshot.nodes.each { |k, v| @nodes[k] = v.dup }
-    @edges = snapshot.instance_variable_get(:@edges).map(&:dup)
+    # Preserve alias edges (permanent facts) across branch analysis.
+    # Only restore borrow/move/owns edges from the snapshot.
+    alias_edges = @edges.select { |e| e.kind == :aliases }
+    @edges = snapshot.instance_variable_get(:@edges).map(&:dup) + alias_edges
   end
 
   # Merge a branch's graph state back. Both branches must agree on
