@@ -1,0 +1,25 @@
+-- Test: Union values appended to list — list cleanup frees variant heap data
+--
+-- When Value.List (containing a heap-promoted []Int64 slice) is appended
+-- to an ArrayList, the ArrayList owns the copy. When the ArrayList is
+-- cleaned up, it must recursively free each element's heap data.
+
+UNION Value { Num: Float64, Items: Int64[] }
+
+FN makeItems() RETURNS Value ->
+    MUTABLE items: Int64[]@list = List[];
+    items.append(1_i64);
+    items.append(2_i64);
+    RETURN Value{ Items: items };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE results: Value[]@list = List[];
+    results.append(makeItems());
+    results.append(makeItems());
+    results.append(makeItems());
+
+    ASSERT results.length() == 3, "should have 3 values";
+
+    RETURN;
+END

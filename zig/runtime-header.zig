@@ -1897,8 +1897,9 @@ pub const CheatLib = struct {
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
         const ft_info = @typeInfo(FT);
-        // Note: generic slice cleanup removed — slices may be borrowed views.
-        // Heap-promoted slices inside unions are cleaned up by freeUnionPayload.
+        // Note: non-string slices excluded from needsCleanup. Slice cleanup
+        // inside unions is handled by the union cleanup handler directly.
+        // Including slices here causes over-freeing in ArrayList element recursion.
         if (ft_info == .@"struct") {
             // Check if any field needs cleanup
             inline for (ft_info.@"struct".fields) |field| {

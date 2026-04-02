@@ -197,6 +197,32 @@ test "full cycle: promote then cleanup Array of mixed values" {
     CheatLib.cleanup(TestValue, alloc, &val);
 }
 
+test "cleanup: ArrayList of unions frees element slice variants" {
+    // The scheme interpreter pattern: ArrayList(Value) where Value.List
+    // holds a heap-promoted []Value slice. When the ArrayList is cleaned up,
+    // each element's List variant slice must be freed.
+    const alloc = std.testing.allocator;
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(alloc);
+    var arena_buf: [4096]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    // Build an ArrayList of TestValue, each containing a List slice.
+    var results = std.ArrayListUnmanaged(TestValue){};
+    for (0..3) |i| {
+        // Create a List variant with a heap slice
+        const slice = try alloc.alloc(TestValue, 2);
+        slice[0] = TestValue{ .Num = @as(f64, @floatFromInt(i)) };
+        slice[1] = TestValue{ .Num = @as(f64, @floatFromInt(i + 10)) };
+        try results.append(alloc, TestValue{ .List = slice });
+    }
+
+    // cleanup should free: the ArrayList backing + each element's List slice
+    CheatLib.cleanup(std.ArrayListUnmanaged(TestValue), alloc, &results);
+}
+
 test "cleanup: List variant ([]T slice) is freed by cleanup" {
     // Simulates the json_parser leak: promoteList creates a heap slice
     // inside a union List variant. cleanup must free it.
