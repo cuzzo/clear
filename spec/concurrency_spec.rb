@@ -1370,6 +1370,26 @@ RSpec.describe SemanticAnnotator do
              .body.first.value
       expect(bg.full_type.to_s).to eq("~Number")
     end
+
+    it "unwraps error union in AS binding (!T -> T)" do
+      code = <<~CLEAR
+        FN might_fail(x: Number) RETURNS !Number ->
+          IF x < 0.0 THEN RAISE "negative"; END
+          RETURN x * 2.0;
+        END
+        FN add_one(x: Number) RETURNS Number ->
+          RETURN x + 1.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { might_fail(5.0) AS r THEN add_one(r) };
+          v = NEXT h;
+        END
+      CLEAR
+      tree = run(code)
+      # Should compile without error - r is Number, not !Number
+      main_fn = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+      expect(main_fn).not_to be_nil
+    end
   end
 
   # ===================================================================

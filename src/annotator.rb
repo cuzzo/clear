@@ -2457,16 +2457,25 @@ private
     # Sequential chaining: each step runs in order inside the same fiber.
     # Steps with AS bindings declare a local variable accessible to later steps.
     # The last step's type determines the ThenChain's type.
+    #
+    # Error propagation: if a step returns !T and has an AS binding, the
+    # binding type is T (unwrapped). The error propagates to the BG result
+    # via try/errdefer in the generated Zig code.
     last_type = :Void
     node.steps.each do |step|
       visit(step[:expr])
       step_type = step[:expr].respond_to?(:full_type) ? (step[:expr].full_type || :Void) : :Void
 
       if step[:binding]
+        # Unwrap error union for the binding: !T -> T
+        bind_type = step_type
+        t = Type.new(step_type)
+        bind_type = t.payload_type if t.error_union?
+
         current_scope.declare(
           step[:binding],
           nil,
-          step_type,
+          bind_type,
           false,  # immutable
           false,  # not rebindable
           nil,

@@ -53,5 +53,28 @@ FN main() RETURNS Void ->
     v5: Float64 = NEXT h5;
     ASSERT v5 == 8.0, "THEN chain captures outer var: add_one(3)=4, double(4)=8";
 
+    -- -------------------------------------------------------
+    -- Test 6: Error propagation through THEN chain.
+    -- If step 1 returns !T, the AS binding unwraps to T.
+    -- -------------------------------------------------------
+    h6 = BG { might_fail(5.0) AS r THEN double(r) };
+    v6: Float64 = NEXT h6;
+    ASSERT v6 == 20.0, "error union unwrap: might_fail(5)=10, double(10)=20";
+
+    -- -------------------------------------------------------
+    -- Test 7: THEN chain where intermediate returns different types.
+    -- add_one returns Float64, to_int returns Int64.
+    -- -------------------------------------------------------
+    h7 = BG { add_one(4.0) AS r THEN r };
+    v7: Float64 = NEXT h7;
+    ASSERT v7 == 5.0, "identity in THEN step";
+
     RETURN;
+END
+
+FN might_fail(x: Float64) RETURNS !Float64 ->
+    IF x < 0.0 THEN
+        RAISE "negative input";
+    END
+    RETURN x * 2.0;
 END
