@@ -442,7 +442,57 @@ private
       (@fn_has_fnptr[node.name] == true) ||
       (node.reentrant == :non_reentrant) ||
       scan_for_raises(node.body)
+
+    # Visit CATCH clause bodies with __error and snapshot in scope.
+    if node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+      # Collect snapshot types from pipeline steps for typed snapshot access
+      snap_types = Set.new
+      collect_pipe_input_types(node.body, snap_types)
+      node.snapshot_types = snap_types
+
+      all_catch_bodies = node.catch_clauses.map { |c| c[:body] }
+      all_catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
+      all_catch_bodies.compact.each do |clause_body|
+        with_new_scope do
+          # Declare __error as a struct-like type accessible in CATCH
+          current_scope.declare("__error", nil, :ErrorContext, false, false, nil, :stack)
+          # Declare snapshot if unambiguous
+          if snap_types.size == 1
+            current_scope.declare("snapshot", nil, snap_types.first.to_sym, false, false, nil, :stack)
+          end
+          clause_body.each { |stmt| visit(stmt) }
+        end
+      end
+    end
+
     @function_context_stack.pop
+  end
+
+  # Collect input types from pipeline s> steps that can fail.
+  def collect_pipe_input_types(body, types)
+    body.each do |stmt|
+      walk_ast(stmt) do |node|
+        if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+          lhs_type = node.left.respond_to?(:full_type) ? node.left.full_type : nil
+          if lhs_type
+            t = Type.new(lhs_type)
+            types << t.resolved.to_s unless t.void? || t.error_union?
+          end
+        end
+      end
+    end
+  end
+
+  def walk_ast(node, &block)
+    block.call(node)
+    return unless node.respond_to?(:class) && node.class.respond_to?(:members)
+    node.class.members.each do |m|
+      val = node.send(m) rescue next
+      case val
+      when Array then val.each { |v| walk_ast(v, &block) if v.respond_to?(:class) }
+      when AST::Locatable then walk_ast(val, &block)
+      end
+    end
   end
 
   def visit_StructDef(node)

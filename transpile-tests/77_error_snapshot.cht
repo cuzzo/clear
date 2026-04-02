@@ -1,0 +1,48 @@
+-- Error snapshots: pipeline s> steps capture the input element on failure.
+
+STRUCT User { name: String, age: Int64 }
+
+FN validateUser(u: User) RETURNS !User ->
+    IF u.age < 0 THEN
+        RAISE Input, InvalidAge;
+    END
+    RETURN u;
+END
+
+FN processUser(u: User) RETURNS String ->
+    valid = u s> validateUser;
+    RETURN valid.name;
+
+CATCH Input
+    -- snapshot is the User that failed validation
+    RETURN snapshot.name;
+END
+
+FN doublePositive(x: Int64) RETURNS !Int64 ->
+    IF x < 0 THEN RAISE Input; END
+    RETURN x * 2;
+END
+
+FN processInt(x: Int64) RETURNS Int64 ->
+    result = x s> doublePositive;
+    RETURN result;
+
+CATCH Input
+    RETURN -1;
+END
+
+FN main() RETURNS Void ->
+    r1 = processUser(User{ name: "Alice", age: 30 });
+    ASSERT r1 == "Alice", "success";
+
+    r2 = processUser(User{ name: "Bob", age: -1 });
+    ASSERT r2 == "Bob", "snapshot.name captured";
+
+    r3 = processInt(5);
+    ASSERT r3 == 10, "int success";
+
+    r4 = processInt(-1);
+    ASSERT r4 == -1, "int caught";
+
+    RETURN;
+END

@@ -635,12 +635,12 @@ private
                         mutable_param_shadows.empty? ? nil : mutable_param_shadows,
                         takes_cleanup.empty? ? nil : takes_cleanup].compact
       prologue = prologue_parts.join("\n    ")
-      body = transpile_block(node.body)
-      @transpiler_context_stack.pop
-
       has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
       @current_fn_has_catch = has_catch
       @current_fn_snapshot_types = Set.new if has_catch
+
+      body = transpile_block(node.body)
+      @transpiler_context_stack.pop
 
       if !has_catch
         <<~ZIG
@@ -661,7 +661,11 @@ private
         snapshot_decl = ""
         if snap_types.size == 1
           snap_zig = transpile_type(snap_types.first)
-          snapshot_decl = "const snapshot = #{rt_name}.__error.snapshotAs(#{snap_zig});\n            _ = &snapshot;"
+          # Unwrap the optional pointer so CATCH body can access snapshot.field directly
+          snapshot_decl = "const __snap_ptr = #{rt_name}.__error.snapshotAs(#{snap_zig});\n" \
+                          "            const snapshot = if (__snap_ptr) |p| p.* else undefined;\n" \
+                          "            const __has_snapshot = __snap_ptr != null;\n" \
+                          "            _ = &snapshot; _ = &__has_snapshot;"
         end
 
         catch_clauses_zig = node.catch_clauses.map do |clause|
@@ -682,8 +686,12 @@ private
           default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
           default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{default_body}\n        }"
         else
-          # No DEFAULT: re-raise the error
-          default_code = " else {\n            return error.CheatError;\n        }"
+          # No DEFAULT: re-raise if function returns error union, else unreachable
+          if fn_can_fail
+            default_code = " else {\n            return error.CheatError;\n        }"
+          else
+            default_code = " else {\n            unreachable;\n        }"
+          end
         end
 
         # Use an inner function so the body's errors can be caught.
@@ -2554,7 +2562,9 @@ private
     # catch that heap-copies the LHS before propagating the error.
     lhs_type = lhs.respond_to?(:full_type) ? lhs.full_type : nil
     lhs_t = lhs_type ? Type.new(lhs_type) : nil
-    rhs_can_fail = rhs.respond_to?(:full_type) && rhs.full_type && Type.new(rhs.full_type).error_union?
+    # Check if the RHS function can fail: look up the function name in @fn_can_fail
+    rhs_fn_name = rhs.is_a?(AST::Identifier) ? rhs.name : (rhs.is_a?(AST::FuncCall) ? rhs.name : nil)
+    rhs_can_fail = rhs_fn_name && (@fn_can_fail || {})[rhs_fn_name]
 
     if @current_fn_has_catch && rhs_can_fail && lhs_t && !lhs_t.void?
       zig_type = transpile_type(lhs_t.resolved.to_s)

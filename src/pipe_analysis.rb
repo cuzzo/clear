@@ -30,6 +30,11 @@ module PipeAnalysis
 
   private
 
+  def has_catch_blocks?
+    fn = @fn_nodes&.dig(current_fn_ctx&.name)
+    fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
+  end
+
   def higher_order_list_op?(node)
     node.is_a?(AST::SelectOp) ||
     node.is_a?(AST::WhereOp) ||
@@ -361,8 +366,14 @@ module PipeAnalysis
     visit(node.right)
     node.right.args.shift
 
-    # Propagate Result Type
-    node.full_type = node.right.full_type
+    # Propagate Result Type. In functions with CATCH blocks, unwrap error
+    # unions — the CATCH handles errors locally, so the pipe result is T not !T.
+    result_type = node.right.full_type
+    if has_catch_blocks? && result_type
+      t = Type.new(result_type)
+      result_type = t.payload_type.resolved if t.error_union?
+    end
+    node.full_type = result_type
   end
 
   def analyze_pipe_to_identifier(node)
@@ -413,8 +424,13 @@ module PipeAnalysis
       end
     end
 
-    # 3. Set Result Type
-    node.full_type = sig[:return][:type]
+    # 3. Set Result Type. Unwrap error unions in CATCH functions.
+    result_type = sig[:return][:type]
+    if has_catch_blocks? && result_type
+      t = result_type.is_a?(Type) ? result_type : Type.new(result_type)
+      result_type = t.payload_type.resolved if t.error_union?
+    end
+    node.full_type = result_type
   end
 
   def analyze_each_op(node)

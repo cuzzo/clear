@@ -84,7 +84,9 @@ module EffectTracker
       ret_type = fn_node.full_type.is_a?(Type) ? fn_node.full_type[:return]&.dig(:type) : nil
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params&.any? { |p| p[:takes] && Type.new(p[:type] || :Any).string? }
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || name == "main"
+      has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
+      has_raise = @fn_raises_directly[name]
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || name == "main"
     end
 
     changed = true
