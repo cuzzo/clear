@@ -50,20 +50,19 @@ bill = users AS @u
 ### Combine with in-line error handling
 
 ```ruby
-FN myFunc(a, b, c) ->
-  val = fetchData(a, b, c) OR RAISE
+FN myFunc(id: Int64, name: String) ->
+  val = fetchData(id, name) OR RAISE
    s> parseHeader OR EXIT "Invalid Header"
    s> parseBody OR EXIT "Invalid Body"
    s> fetchUser
       s> RECOVER(DefaultUser())
-   s> saveToDb(a, b, c, %%)
+   s> saveToDb(id, name, _);
 
-CATCH ParseError WITH("Invalid Header")
-  logInvalidHeader(%e.snapshot.header());
+CATCH Input WITH(ParseError)
+  IF __error.context = "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
   RETURN defaultPage();
 DEFAULT
-  logUnknownError(%e)
-  raise %e
+  RAISE __error;
 END
 ```
 
