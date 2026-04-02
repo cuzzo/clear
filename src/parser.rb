@@ -150,6 +150,7 @@ class Parser
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
   primary(:KEYWORD, 'WINDOW') { parse_window_op }
+  primary(:KEYWORD, 'JOIN') { parse_join_op }
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
   primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
 
@@ -1480,6 +1481,18 @@ class Parser
     consume(:CHAR, ')')
     body = parse_expression(1)  # pipe_expression precedence
     AST::WindowOp.new(window_token, size, body)
+  end
+
+  # JOIN(right_source) key_expr_or_lambda
+  # e.g., users s> JOIN(orders) _.userId
+  # e.g., users s> JOIN(orders) %(a, b) -> a.id == b.userId
+  def parse_join_op
+    join_token = consume(:KEYWORD, 'JOIN')
+    consume(:CHAR, '(')
+    right_source = parse_expression
+    consume(:CHAR, ')')
+    key_expr = parse_expression(1)  # pipe_expression precedence
+    AST::JoinOp.new(join_token, right_source, key_expr)
   end
 
   # SHARD(key_expr, target_map)

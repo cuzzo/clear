@@ -1299,6 +1299,53 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # JOIN
+  # ===========================================================================
+  describe "JOIN" do
+    it "result type is JoinResult_L_R[]" do
+      tree = run(<<~CLEAR)
+        STRUCT A { id: Int64 }
+        STRUCT B { id: Int64 }
+        FN f() RETURNS Void ->
+            as: A[] = [A{ id: 1 }];
+            bs: B[] = [B{ id: 1 }];
+            result = as s> JOIN(bs) %(a, b) -> a.id == b.id;
+        END
+      CLEAR
+      bind = tree.statements.last.body.last
+      expect(bind.full_type.to_s).to include("JoinResult")
+      expect(bind.full_type.to_s).to include("[]")
+    end
+
+    it "rejects non-list right source" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT A { id: Int64 }
+          FN f() RETURNS Void ->
+              as: A[] = [A{ id: 1 }];
+              b: Int64 = 1;
+              result = as s> JOIN(b) %(a, b2) -> TRUE;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /JOIN right source must be a list/)
+    end
+
+    it "rejects lambda with wrong param count" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT A { id: Int64 }
+          STRUCT B { id: Int64 }
+          FN f() RETURNS Void ->
+              as: A[] = [A{ id: 1 }];
+              bs: B[] = [B{ id: 1 }];
+              result = as s> JOIN(bs) %(x) -> TRUE;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /JOIN lambda must take exactly 2 parameters/)
+    end
+  end
+
+  # ===========================================================================
   # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
   # ===========================================================================
   describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do

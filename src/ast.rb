@@ -335,6 +335,10 @@ module AST
   TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
   # WINDOW(size): sliding window of `size` elements. _ is the sub-slice.
   WindowOp = Struct.new(:token, :size, :expression) { include Locatable }
+  # JOIN(right_source) key_expr_or_lambda
+  # Equi-join: shared key applied to both sides, or lambda(a, b) -> Bool.
+  # Result: anonymous struct { left: L, right: ?R } for each left element.
+  JoinOp = Struct.new(:token, :right_source, :key_expr) { include Locatable }
   # Phase 3 predicate query operators — return scalar values (not new lists).
   # All use `_` as the implicit item binding (like SELECT/WHERE).
   FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType

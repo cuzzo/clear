@@ -2100,6 +2100,10 @@ private
       if node.name == "_" && @placeholder_name
         return @placeholder_name
       end
+      # JOIN lambda param mapping
+      if @join_param_map && @join_param_map[node.name]
+        return @join_param_map[node.name]
+      end
 
       # Named function used as a value: emit a function pointer
       return "&#{zig_safe_name(node.name)}" if node.respond_to?(:fn_ref) && node.fn_ref
@@ -2367,6 +2371,9 @@ private
 
     elsif node.right.is_a?(AST::WindowOp)
       return transpile_window(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::JoinOp)
+      return transpile_join(node.left, node.right, node)
 
     elsif node.right.is_a?(AST::EachOp)
       return transpile_each(node)

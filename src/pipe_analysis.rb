@@ -53,7 +53,8 @@ module PipeAnalysis
     node.is_a?(AST::SkipOp) ||
     node.is_a?(AST::TapOp) ||
     node.is_a?(AST::TakeWhileOp) ||
-    node.is_a?(AST::WindowOp)
+    node.is_a?(AST::WindowOp) ||
+    node.is_a?(AST::JoinOp)
   end
 
   def analyze_higher_order_op(node)
@@ -98,6 +99,8 @@ module PipeAnalysis
       analyze_take_while_op(node)
     when AST::WindowOp
       analyze_window_op(node)
+    when AST::JoinOp
+      analyze_join_op(node)
     end
   end
 
@@ -185,6 +188,62 @@ module PipeAnalysis
     # Result is a list of whatever the expression produces
     expr_type = node.right.expression.full_type || node.right.expression.resolved_type
     node.full_type = :"#{expr_type}[]"
+    node.storage = :frame
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  def analyze_join_op(node)
+    require_array_input!(node, "JOIN")
+    left_type = node.left.type_info.element_type.resolved
+
+    # Visit and validate the right source
+    visit(node.right.right_source)
+    rhs_type_info = node.right.right_source.type_info
+    unless node.right.right_source.metatype == :array || rhs_type_info&.collection?
+      error!(node.right.right_source, "JOIN right source must be a list, got #{node.right.right_source.resolved_type}")
+    end
+    right_type = rhs_type_info.element_type.resolved
+
+    key_expr = node.right.key_expr
+
+    if key_expr.is_a?(AST::LambdaLit)
+      # Lambda form: %(a, b) -> a.id == b.userId
+      params = key_expr.params
+      error!(key_expr, "JOIN lambda must take exactly 2 parameters") unless params.size == 2
+      left_name  = params[0].is_a?(Hash) ? params[0][:name] : params[0].name
+      right_name = params[1].is_a?(Hash) ? params[1][:name] : params[1].name
+      with_new_scope do
+        current_scope.declare(left_name, nil, left_type, false, false, nil, :stack)
+        current_scope.declare(right_name, nil, right_type, false, false, nil, :stack)
+        visit(key_expr.body)
+      end
+      unless key_expr.body.resolved_type == :Bool
+        error!(key_expr, "JOIN lambda must return Bool, got #{key_expr.body.resolved_type}")
+      end
+    else
+      # Shared key form: _.field applied to both sides
+      # Validate the key expression with _ as left type
+      with_new_scope do
+        current_scope.declare("_", nil, left_type, false, false, nil, :stack)
+        visit(key_expr)
+      end
+      # Also validate with right type (both must have the field)
+      with_new_scope do
+        current_scope.declare("_", nil, right_type, false, false, nil, :stack)
+        visit(key_expr)
+      end
+    end
+
+    # Register a synthetic struct type for the join result so field access works.
+    join_type_name = :"JoinResult_#{left_type}_#{right_type}"
+    unless current_scope.resolve_type_definition(join_type_name)
+      current_scope.declare_type(join_type_name, {
+        "left"  => left_type,
+        "right" => :"?#{right_type}",
+      })
+    end
+
+    node.full_type = :"#{join_type_name}[]"
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end

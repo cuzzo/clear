@@ -503,6 +503,69 @@ module PipelineGenerator
     end
   end
 
+  def transpile_join(list_node, join_node, smooth_node)
+    left_zig  = transpile_type(list_node.full_type.element_type.resolved.to_s)
+    right_src = visit(join_node.right_source)
+    right_type_info = join_node.right_source.type_info
+    right_zig = transpile_type(right_type_info.element_type.resolved.to_s)
+
+    key_expr = join_node.key_expr
+    is_lambda = key_expr.is_a?(AST::LambdaLit)
+
+    if is_lambda
+      # Lambda: %(a, b) -> predicate
+      params = key_expr.params
+      left_param  = params[0].is_a?(Hash) ? params[0][:name] : params[0].name
+      right_param = params[1].is_a?(Hash) ? params[1][:name] : params[1].name
+      # Map lambda param names to the Zig loop variables via @join_param_map.
+      # The transpiler's Identifier visitor checks this map.
+      old_join_map = @join_param_map
+      @join_param_map = { left_param => "__jl", right_param => "__jr" }
+      pred_code = visit(key_expr.body)
+      @join_param_map = old_join_map
+    else
+      # Shared key: _.field applied to both
+      left_key  = with_pipeline_context(placeholder: "__jl") { visit(key_expr) }
+      right_key = with_pipeline_context(placeholder: "__jr") { visit(key_expr) }
+      pred_code = "CheatLib.eql(#{left_key}, #{right_key})"
+    end
+
+    result_zig = "struct { left: #{left_zig}, right: ?#{right_zig} }"
+    my_label = next_pipe_label
+
+    left_code = visit(list_node)
+    @current_pipe_label = my_label
+
+    right_items = if right_type_info&.list_collection?
+      "if (@hasField(@TypeOf(__jr_src), \"items\")) __jr_src.items else __jr_src[0..]"
+    else
+      "if (@hasField(@TypeOf(__jr_src), \"items\")) __jr_src.items else __jr_src[0..]"
+    end
+
+    left_items = "if (@hasField(@TypeOf(__jl_src), \"items\")) __jl_src.items else __jl_src[0..]"
+
+    <<~ZIG
+      #{my_label}: {
+          const __jl_src = #{left_code};
+          const __jr_src = #{right_src};
+          const __jl_items = #{left_items};
+          const __jr_items = #{right_items};
+          var res_list = try CheatLib.makeList(#{result_zig}, rt.frameAlloc(), &.{});
+          for (__jl_items) |__jl| {
+              var __match: ?#{right_zig} = null;
+              for (__jr_items) |__jr| {
+                  if (#{pred_code}) {
+                      __match = __jr;
+                      break;
+                  }
+              }
+              try res_list.append(rt.frameAlloc(), .{ .left = __jl, .right = __match });
+          }
+          break :#{my_label} res_list;
+      }
+    ZIG
+  end
+
   def transpile_index_grouping(list_node, expression_node, smooth_node)
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 

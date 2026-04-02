@@ -1,0 +1,36 @@
+-- JOIN: left outer join on shared key or lambda predicate.
+-- Result: struct { left: L, right: ?R }[] for each left element.
+
+STRUCT User { id: Int64, name: String }
+STRUCT Order { userId: Int64, amount: Float64 }
+
+FN main() RETURNS Void ->
+    users: User[] = [
+        User{ id: 1, name: "Alice" },
+        User{ id: 2, name: "Bob" },
+        User{ id: 3, name: "Carol" }
+    ];
+
+    orders: Order[] = [
+        Order{ userId: 1, amount: 100.0 },
+        Order{ userId: 3, amount: 200.0 }
+    ];
+
+    -- Lambda join: match user.id to order.userId
+    results = users s> JOIN(orders) %(u, o) -> u.id == o.userId;
+    ASSERT results.length() == 3, "one result per left element";
+
+    -- Alice (id=1) has a match
+    ASSERT results[0].left.name == "Alice", "first is Alice";
+    ASSERT results[0].right != NIL, "Alice has a matching order";
+
+    -- Bob (id=2) has no match
+    ASSERT results[1].left.name == "Bob", "second is Bob";
+    ASSERT results[1].right == NIL, "Bob has no order";
+
+    -- Carol (id=3) has a match
+    ASSERT results[2].left.name == "Carol", "third is Carol";
+    ASSERT results[2].right != NIL, "Carol has a matching order";
+
+    RETURN;
+END
