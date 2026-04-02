@@ -675,10 +675,17 @@ private
                           "            _ = &snapshot; _ = &__has_snapshot;"
         end
 
+        # If this function has returns_promoted (set by Pass B), CATCH clause
+        # string returns must be duped to heap so both paths return heap-owned data.
+        catch_dupe = node.returns_promoted && node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+
         catch_clauses_zig = node.catch_clauses.map do |clause|
           kind = clause[:kind]
           error_name = clause[:error_name]
+          prev_catch_dupe = @catch_dupe_string_returns
+          @catch_dupe_string_returns = catch_dupe
           clause_body_code = clause[:body].map { |s| visit(s) }.join("\n            ")
+          @catch_dupe_string_returns = prev_catch_dupe
 
           cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
           cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
@@ -690,7 +697,10 @@ private
         # DEFAULT clause
         default_code = ""
         if node.default_catch.is_a?(Array) && node.default_catch.any?
+          prev_catch_dupe = @catch_dupe_string_returns
+          @catch_dupe_string_returns = catch_dupe
           default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
+          @catch_dupe_string_returns = prev_catch_dupe
           default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
         else
           # No DEFAULT: re-raise if function returns error union, else unreachable
@@ -2096,6 +2106,15 @@ private
       if node.collection_return
         ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
         emit_return_with_promotion(val_code, ret_type, rt_name, suppress, node: node.value)
+      elsif @catch_dupe_string_returns && node.value
+        # CATCH clause in a promoted function: dupe string returns to heap
+        # so both success and error paths return heap-owned data.
+        ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
+        if ret_type&.string?
+          [suppress, "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"].reject(&:empty?).join("\n")
+        else
+          [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
+        end
       else
         [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       end

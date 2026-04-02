@@ -3093,16 +3093,6 @@ private
     # and the function returns the callee's result (directly or via field access).
     @fn_nodes.each do |name, fn|
       next if fn.returns_promoted  # already set by Pass A
-      # Skip functions with CATCH clauses that return literals (non-promoted).
-      # CATCH clauses that return snapshot fields are OK (deep-copied by captureSnapshot).
-      if fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
-        catch_returns_literal = (fn.catch_clauses + [fn.default_catch].compact).any? { |clause|
-          body = clause.is_a?(Hash) ? clause[:body] : clause
-          next false unless body.is_a?(Array)
-          body.any? { |s| s.is_a?(AST::ReturnNode) && s.value.is_a?(AST::Literal) }
-        }
-        next if catch_returns_literal
-      end
 
       # Find return nodes in the function body
       returns = collect_return_nodes(fn.body)
@@ -3137,7 +3127,6 @@ private
     end
 
     # Step 2: Propagate returns_promoted transitively through call graph.
-    # Skip functions with CATCH clauses - the catch may return non-promoted data.
     changed = true
     while changed
       changed = false
@@ -3145,7 +3134,6 @@ private
         fn = @fn_nodes[fn_name]
         next unless fn
         next if fn.returns_promoted
-        next if fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?  # CATCH can return non-promoted
         if callees.any? { |c| @fn_nodes[c]&.returns_promoted }
           returns = collect_return_nodes(fn.body)
           if returns.any? { |r| r.value.is_a?(AST::FuncCall) && @fn_nodes[r.value.name]&.returns_promoted }
