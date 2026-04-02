@@ -51,7 +51,8 @@ module PipeAnalysis
     node.is_a?(AST::ConcurrentOp) ||
     node.is_a?(AST::ShardOp) ||
     node.is_a?(AST::SkipOp) ||
-    node.is_a?(AST::TapOp)
+    node.is_a?(AST::TapOp) ||
+    node.is_a?(AST::TakeWhileOp)
   end
 
   def analyze_higher_order_op(node)
@@ -92,6 +93,8 @@ module PipeAnalysis
       analyze_skip_op(node)
     when AST::TapOp
       analyze_tap_op(node)
+    when AST::TakeWhileOp
+      analyze_take_while_op(node)
     end
   end
 
@@ -138,6 +141,24 @@ module PipeAnalysis
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
     # transpiler level via rt.frameAlloc(). Signal this so compute_needs_rt!
     # propagates the Runtime dependency correctly.
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  def analyze_take_while_op(node)
+    require_array_input!(node, "TAKE_WHILE")
+    item_type = node.left.type_info.element_type.resolved
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      visit(node.right.expression)
+    end
+
+    unless node.right.expression.resolved_type == :Bool
+      error!(node.right, "TAKE_WHILE predicate must evaluate to Bool, got #{node.right.expression.resolved_type}")
+    end
+
+    node.full_type = :"#{item_type}[]"
+    node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
 

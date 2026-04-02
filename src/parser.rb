@@ -148,6 +148,7 @@ class Parser
   primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :pipe_expression])
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
+  primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
   primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
 

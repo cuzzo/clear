@@ -457,6 +457,22 @@ module PipelineGenerator
     end
   end
 
+  def transpile_take_while(list_node, expression_node, smooth_node)
+    element_type_str = list_node.full_type.element_type.resolved.to_s
+    expr_code = visit_pipeline_expr(list_node, expression_node)
+
+    transpile_pipeline_macro(list_node, smooth_node, res_type: element_type_str) do |alloc|
+      <<~ZIG
+        for (pipe_items) |it| {
+            const matches = #{expr_code};
+            if (!matches) break;
+            try res_list.append(#{alloc}, it);
+        }
+        break :#{@current_pipe_label} res_list;
+      ZIG
+    end
+  end
+
   def transpile_index_grouping(list_node, expression_node, smooth_node)
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 

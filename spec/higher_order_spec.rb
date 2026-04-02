@@ -1223,6 +1223,44 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # TAKE_WHILE
+  # ===========================================================================
+  describe "TAKE_WHILE" do
+    it "returns same element type as input" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Float64[] = [1.0, 2.0, 3.0];
+            result = data s> TAKE_WHILE _ < 5.0;
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Number[]")
+    end
+
+    it "rejects non-Bool predicate" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Float64[] = [1.0];
+              result = data s> TAKE_WHILE _ + 1.0;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /TAKE_WHILE predicate must evaluate to Bool/)
+    end
+
+    it "rejects non-list input" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              x: Float64 = 1.0;
+              result = x s> TAKE_WHILE _ < 5.0;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot TAKE_WHILE non-list/)
+    end
+  end
+
+  # ===========================================================================
   # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
   # ===========================================================================
   describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do

@@ -331,6 +331,8 @@ module AST
   TapOp        = Struct.new(:token, :body) { include Locatable }
   # SKIP: skip first N elements, return rest (inverse of LIMIT).
   SkipOp       = Struct.new(:token, :count) { include Locatable }
+  # TAKE_WHILE: take elements from the front while predicate is true.
+  TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
   # Phase 3 predicate query operators — return scalar values (not new lists).
   # All use `_` as the implicit item binding (like SELECT/WHERE).
   FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType
