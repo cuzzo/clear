@@ -144,4 +144,13 @@ pub fn main() !void {
     for (0..num_workers) |i| {
         workers[i].join();
     }
+
+    // 10. Dump allocation profile (if profiling was enabled at compile time).
+    const profiling_enabled = if (@hasDecl(@import("root"), "CLEAR_PROFILE"))
+        @import("root").CLEAR_PROFILE
+    else
+        false;
+    if (profiling_enabled) {
+        @import("alloc-profile.zig").dump();
+    }
 }

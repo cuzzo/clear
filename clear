@@ -47,7 +47,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -67,6 +67,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     # Re-run with stderr visible for error messages
     system("ruby #{TRANSPILER} #{transpile_flag} #{source} > /dev/null")
     error "Transpilation failed"
+  end
+  # Inject comptime profiling flag when building with `clear profile`.
+  # This enables allocation tracking in the runtime allocator VTable
+  # with zero overhead in production builds.
+  if profile
+    zig_code = "pub const CLEAR_PROFILE = true;\n" + zig_code
   end
   File.write(tmp_zig, zig_code)
 
@@ -223,6 +229,58 @@ when 'test'
     output = do_build(source, module_mode: true)
     puts output unless output.strip.empty?
   end
+
+when 'profile'
+  # Split on -- for pass-through args
+  idx = ARGV.index('--')
+  if idx
+    clear_args = ARGV[1...idx]
+    run_args = ARGV[(idx + 1)..]
+  else
+    clear_args = ARGV[1..] || []
+    run_args = []
+  end
+
+  source = clear_args.first
+  error "Usage: clear profile <file.cht> [-- args...]" unless source
+
+  source = File.expand_path(source)
+  base_name = File.basename(source, '.cht')
+  output = File.join(File.dirname(source), base_name)
+  profile_dir = File.join(File.dirname(source), "#{base_name}.profile")
+  FileUtils.mkdir_p(profile_dir)
+
+  alloc_file = File.join(profile_dir, 'alloc.txt')
+  perf_data = File.join(profile_dir, 'perf.data')
+
+  # Build optimized with profiling enabled (comptime CLEAR_PROFILE flag)
+  do_build(source, output: output, opt_level: 'ReleaseFast', profile: true)
+  puts "Built: #{output} (ReleaseFast + alloc profiling)"
+
+  # Check if perf is available for CPU profiling
+  has_perf = system('which perf > /dev/null 2>&1') &&
+    File.readable?('/proc/sys/kernel/perf_event_paranoid') &&
+    File.read('/proc/sys/kernel/perf_event_paranoid').strip.to_i <= 2
+  hint "perf unavailable. CPU profiling skipped." unless has_perf
+
+  # Build the run command
+  env_parts = ["CLEAR_ALLOC_PROFILE=#{alloc_file}"]
+  env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
+  target_env = env_parts.join(' ')
+
+  if has_perf
+    cmd = "perf record -g -o #{perf_data} -- env #{target_env} #{output} #{run_args.join(' ')}".strip
+  else
+    cmd = "env #{target_env} #{output} #{run_args.join(' ')}".strip
+  end
+
+  puts "Profiling: #{cmd}"
+  system(cmd)
+
+  puts ""
+  puts "Profile data: #{profile_dir}/"
+  puts "  Heap: #{alloc_file} (#{File.exist?(alloc_file) ? "#{(File.size(alloc_file) / 1024.0).round(1)} KB" : 'not generated'})"
+  puts "  CPU:  #{perf_data} (#{File.exist?(perf_data) ? "#{(File.size(perf_data) / 1024.0).round(1)} KB" : 'skipped'})" if has_perf
 
 when 'help', '--help', '-h', nil
   puts <<~HELP

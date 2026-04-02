@@ -3,9 +3,18 @@ const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
 const ebr_mod = @import("ebr.zig");
+const alloc_profile = @import("alloc-profile.zig");
 
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const EbrContext = ebr_mod.EbrContext;
+
+// Comptime profiling flag: set by `clear profile` builds via
+// `pub const CLEAR_PROFILE = true;` in the root module.
+// When false, all profiling code is eliminated at compile time.
+const profiling_enabled = if (@hasDecl(@import("root"), "CLEAR_PROFILE"))
+    @import("root").CLEAR_PROFILE
+else
+    false;
 
 // Compat: std.time.milliTimestamp was removed in newer Zig versions.
 fn milliTimestamp() i64 {
@@ -121,7 +130,10 @@ pub const Runtime = struct {
         const self = @as(*Runtime, @ptrCast(@alignCast(ctx)));
         const align_u8 = @as(u8, @intCast(ptr_align.toByteUnits()));
 
-        // No more "try fba, else try arena". It's just arena.
+        if (profiling_enabled) {
+            alloc_profile.recordAlloc(ret_addr, n);
+        }
+
         return self.overflow_arena.alloc(n, align_u8, ret_addr);
     }
 
