@@ -1673,6 +1673,158 @@ pub const CheatLib = struct {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Unified comptime cleanup — replaces per-type Ruby emit_cleanup logic.
+    // The transpiler emits `defer CheatLib.cleanup(T, alloc, &x);` for every
+    // variable that needs cleanup. Zig comptime eliminates no-op branches,
+    // so primitives and copy types emit zero code.
+    // -------------------------------------------------------------------------
+
+    /// Returns true if T is a StringMap(V) wrapper (has inner + alloc + put).
+    fn isStringMap(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasField(T, "inner") and @hasField(T, "alloc") and @hasDecl(T, "put");
+    }
+
+    /// Returns true if T is a numeric map (AutoHashMapUnmanaged or similar).
+    /// Detected by: struct with metadata field and deinit, but not a StringMap.
+    fn isNumericMap(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        if (isStringMap(T)) return false;
+        return @hasField(T, "metadata") and @hasDecl(T, "deinit");
+    }
+
+    /// Returns true if T is a Pool(U) — has slots, free_stack, free_top, capacity.
+    fn isPool(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasField(T, "slots") and @hasField(T, "free_stack") and
+               @hasField(T, "free_top") and @hasField(T, "capacity");
+    }
+
+    /// Returns true if T is a Set(U) — has inner field and is not a StringMap.
+    fn isSetType(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        if (!@hasField(T, "inner")) return false;
+        if (isStringMap(T)) return false;
+        // Set has insert/remove/contains but no alloc field
+        return @hasDecl(T, "insert") and !@hasField(T, "alloc");
+    }
+
+    /// Returns true if T is a Locked(U) — has mutex + data fields.
+    fn isLocked(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasField(T, "mutex") and @hasField(T, "data") and !@hasField(T, "lock");
+    }
+
+    /// Returns true if T is a RwLocked(U) — has lock (RwLock) + data fields.
+    fn isRwLocked(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasField(T, "lock") and @hasField(T, "data") and !@hasField(T, "mutex");
+    }
+
+    /// Unified comptime cleanup for any CLEAR type.
+    /// Dispatches to the correct cleanup function based on structural type analysis.
+    /// For types that need no cleanup (primitives, enums, plain structs without RC fields),
+    /// comptime eliminates the entire function body — zero runtime cost.
+    pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
+        const ptr = @constCast(cptr);
+        // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
+        if (comptime refInnerType(T) != null) {
+            releaseOne(T, alloc, ptr.*);
+            return;
+        }
+
+        // 2. ArrayList (list collections)
+        if (comptime isArrayList(T)) {
+            const ElemT = comptime arrayListElemType(T).?;
+            // Release ref-counted elements before freeing backing buffer
+            if (comptime refInnerType(ElemT) != null) {
+                for (ptr.items) |item| {
+                    releaseOne(ElemT, alloc, item);
+                }
+            }
+            ptr.deinit(alloc);
+            return;
+        }
+
+        // 3. StringMap(V) — string-keyed hashmap wrapper
+        if (comptime isStringMap(T)) {
+            ptr.deinit(alloc, alloc);
+            return;
+        }
+
+        // 4. Numeric map (AutoHashMapUnmanaged or custom hash)
+        if (comptime isNumericMap(T)) {
+            ptr.deinit(alloc);
+            return;
+        }
+
+        // 5. Pool(U)
+        if (comptime isPool(T)) {
+            ptr.deinit(alloc);
+            return;
+        }
+
+        // 6. Set(U)
+        if (comptime isSetType(T)) {
+            // Release ref-counted elements
+            const InnerMap = @TypeOf(ptr.inner);
+            const inner_info = @typeInfo(InnerMap);
+            if (inner_info == .@"struct") {
+                // Iterate keys to release RC elements or free duped strings
+                var it = ptr.inner.keyIterator();
+                while (it.next()) |key_ptr| {
+                    const KeyT = @TypeOf(key_ptr.*);
+                    if (comptime refInnerType(KeyT) != null) {
+                        releaseOne(KeyT, alloc, key_ptr.*);
+                    } else if (KeyT == []const u8) {
+                        alloc.free(key_ptr.*);
+                    }
+                }
+            }
+            ptr.inner.deinit(alloc);
+            return;
+        }
+
+        // 7. Locked(U) / RwLocked(U)
+        if (comptime isLocked(T)) {
+            alloc.destroy(@as(*align(@alignOf(T)) T, @alignCast(ptr)));
+            return;
+        }
+        if (comptime isRwLocked(T)) {
+            alloc.destroy(@as(*align(@alignOf(T)) T, @alignCast(ptr)));
+            return;
+        }
+
+        // 8. Structs: recursively clean up RC/link fields
+        const info = @typeInfo(T);
+        if (info == .@"struct") {
+            // Walk fields for any that are ref-counted
+            inline for (info.@"struct".fields) |field| {
+                if (comptime refInnerType(field.type) != null) {
+                    releaseOne(field.type, alloc, @field(ptr, field.name));
+                }
+                // Recurse into struct fields that might contain RC fields
+                if (comptime @typeInfo(field.type) == .@"struct" and
+                    refInnerType(field.type) == null and
+                    !isArrayList(field.type) and !isStringMap(field.type) and
+                    !isNumericMap(field.type) and !isPool(field.type))
+                {
+                    cleanup(field.type, alloc, &@field(ptr, field.name));
+                }
+            }
+            return;
+        }
+
+        // 9. Primitives, enums, unions, etc.: no-op (comptime-eliminated)
+    }
+
     /// Promote all escapable fields of a struct from frame arena to heap.
     /// Handles strings (dupe), lists (promoteList), and maps (mapPromote).
     /// Fields that don't need promotion emit no code at comptime.

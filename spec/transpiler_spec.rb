@@ -35,7 +35,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("vals.deinit(rt.frameAlloc())")
+      expect(zig).to include("CheatLib.cleanup(std.ArrayListUnmanaged(f64), rt.frameAlloc(), &vals)")
     end
 
     it "sharded list still uses heapAlloc" do
@@ -140,12 +140,13 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include(".put(rt.heapAlloc(), rt.frameAlloc()")
     end
 
-    it "caller uses mapDeinit with heapAlloc for promoted map" do
+    it "caller uses cleanup with heapAlloc for promoted map" do
       zig = transpile(map_return_src)
-      expect(zig).to include("result.deinit(rt.heapAlloc(), rt.heapAlloc())")
+      expect(zig).to include("CheatLib.cleanup(")
+      expect(zig).to include("rt.heapAlloc()")
     end
 
-    it "all string maps use heapAlloc deinit (consistent with put allocator)" do
+    it "all string maps use heapAlloc cleanup (consistent with put allocator)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
@@ -154,7 +155,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("m.deinit(rt.heapAlloc(), rt.heapAlloc())")
+      expect(zig).to include("CheatLib.cleanup(")
+      expect(zig).to include("rt.heapAlloc()")
     end
   end
 
@@ -396,8 +398,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # v is reassigned — no _ = &v (which would block SROA)
-      expect(zig).not_to include("_ = &v")
+      # v is reassigned — no _ = &v; (which would block SROA)
+      # (but _ = &v_moved is fine — moved flags don't block SROA)
+      expect(zig).not_to match(/_ = &v;/)
     end
 
     it "omits _ = &name for a mutable struct with field mutation" do
@@ -411,8 +414,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # p.x mutation marks p as mutated — no _ = &p
-      expect(zig).not_to include("_ = &p")
+      # p.x mutation marks p as mutated — no _ = &p;
+      expect(zig).not_to match(/_ = &p;/)
     end
 
     it "downgrades MUTABLE to const when never reassigned (SROA-safe)" do

@@ -872,10 +872,11 @@ RSpec.describe SemanticAnnotator do
         expect(zig).to include("arcCreate(CheatLib.ShardedStringMap(i64, 4)")
       end
 
-      it "emits arcRelease for cleanup" do
+      it "emits cleanup for shared sharded map" do
         code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("arcRelease(CheatLib.ShardedStringMap(i64, 4)")
+        expect(zig).to include("CheatLib.cleanup(")
+        expect(zig).to include("rt.heapAlloc()")
       end
 
       it "auto-derefs Arc for index read (.get)" do

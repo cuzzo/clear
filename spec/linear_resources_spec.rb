@@ -529,20 +529,20 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("target: CheatLib.WeakRc(N)")
       end
 
-      it "struct with @link field emits releaseFields cleanup" do
+      it "struct with @link field emits cleanup" do
         src = 'STRUCT N { v: Int64 }
               STRUCT Edge { target: N@link }
               FN f() RETURNS Void -> n = N{ v: 1 } @multiowned; e = Edge{ target: LINK n }; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.releaseFields(Edge, rt.heapAlloc(), e)")
+        expect(out).to include("CheatLib.cleanup(Edge, rt.heapAlloc(), &e)")
       end
 
-      it "struct with @multiowned field emits releaseFields cleanup" do
+      it "struct with @multiowned field emits cleanup" do
         src = 'STRUCT N { v: Int64 }
               STRUCT W { inner: N@multiowned }
               FN f() RETURNS Void -> n = N{ v: 1 } @multiowned; w = W{ inner: n }; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.releaseFields(W, rt.heapAlloc(), w)")
+        expect(out).to include("CheatLib.cleanup(W, rt.heapAlloc(), &w)")
       end
 
       it "raises error when passing @link to function expecting plain type" do

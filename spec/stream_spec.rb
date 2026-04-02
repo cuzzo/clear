@@ -1394,7 +1394,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to match(/var futures /)
       end
 
-      it "emits defer futures.deinit(rt.frameAlloc()) for cleanup" do
+      it "emits defer cleanup for futures list" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             MUTABLE futures: ~Int64[]@list = [];
@@ -1402,7 +1402,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to match(/defer futures\.deinit/)
+        expect(out).to match(/CheatLib\.cleanup\(/)
       end
 
       it "emits try futures.append(rt.frameAlloc(), ...) for append" do
