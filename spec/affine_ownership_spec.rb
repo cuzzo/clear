@@ -25,7 +25,7 @@ RSpec.describe SemanticAnnotator do
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX
-        STRUCT Config { id: Float64 }
+        STRUCT Config { id: Float64, data: HashMap<Float64> }
       FLUX
     }
 

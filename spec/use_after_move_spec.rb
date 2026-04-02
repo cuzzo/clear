@@ -47,12 +47,12 @@ RSpec.describe "Use-after-move detection" do
   # =========================================================================
   it "raises on use after move via append" do
     expect_error(<<~CLEAR, /moved/)
-      STRUCT Pair { x: Float64, y: Float64 }
+      UNION Value { Num: Float64, List: Int64[] }
       FN main() RETURNS Void ->
-          MUTABLE p = Pair{ x: 1.0, y: 2.0 };
-          MUTABLE items: Pair[]@list = List[];
-          items.append(p);
-          items.append(p);
+          MUTABLE v = Value{ Num: 1.0 };
+          MUTABLE items: Value[]@list = List[];
+          items.append(v);
+          items.append(v);
           RETURN;
       END
     CLEAR

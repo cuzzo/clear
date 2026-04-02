@@ -301,11 +301,11 @@ RSpec.describe "OwnershipGraph integration" do
     expect(og.nodes.keys).to include("b")
   end
 
-  it "marks moved struct variables in the graph" do
+  it "marks moved non-Copy variables in the graph" do
     og = graph_for(<<~CLEAR)
-      STRUCT Point { x: Float64, y: Float64 }
+      UNION Value { Num: Float64, List: Int64[] }
       FN test() ->
-        p = Point { x: 1, y: 2 };
+        p = Value { Num: 1.0 };
         q = p;
       END
     CLEAR
@@ -329,9 +329,9 @@ RSpec.describe "OwnershipGraph integration" do
 
   it "drops variables at scope exit" do
     og = graph_for(<<~CLEAR)
-      STRUCT Obj { v: Float64 }
+      UNION Value { Num: Float64, List: Int64[] }
       FN test() ->
-        o = Obj { v: 1 };
+        o = Value { Num: 1.0 };
       END
     CLEAR
     expect(og["o"]&.dropped?).to be true

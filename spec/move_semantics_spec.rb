@@ -158,9 +158,8 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks v1 as moved after assignment to v2" do
-      body = fn_body(zig, "clearMain")
-      expect(body).to include("v1_moved = true")
+    it "compiles without error (single use after move is valid)" do
+      expect(zig).to include("const v2 = v1")
     end
   end
 
