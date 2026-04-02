@@ -195,6 +195,10 @@ module EffectTracker
         :large
       elsif effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
         :standard
+      elsif fn_node.needs_rt
+        # needs_rt means the function uses the frame arena (4 KB).
+        # Micro tier (4 KB total) can't hold a frame arena + any stack.
+        :standard
       else
         :micro
       end
@@ -215,6 +219,31 @@ module EffectTracker
       fn_node.stack_tier = tier
       fn_node.stack_vars_bytes = stack_bytes
     end
+  end
+
+  # Compute the maximum stack tier needed by a set of function names,
+  # following the call graph transitively.
+  TIER_ORDER = { micro: 0, standard: 1, large: 2, xl: 3 }.freeze
+
+  def max_tier_for_calls(fn_names)
+    visited = Set.new
+    max = :micro
+    queue = fn_names.to_a.dup
+
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+
+      fn = @fn_nodes[name]
+      if fn&.stack_tier
+        max = fn.stack_tier if TIER_ORDER.fetch(fn.stack_tier, 0) > TIER_ORDER.fetch(max, 0)
+      end
+
+      (@call_graph[name] || []).each { |callee| queue << callee }
+    end
+
+    max
   end
 
   # --- Queries (for future use by #HOT / STRICT mode) ---

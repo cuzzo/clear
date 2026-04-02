@@ -196,6 +196,9 @@ private
     # PASS 7: Compute stack tier recommendations per function.
     compute_stack_tiers!
 
+    # PASS 8: Auto-size fiber spawns (BG/DO blocks) from call-graph analysis.
+    assign_fiber_stack_tiers!(node)
+
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
       node.full_type = node.statements.last.full_type
@@ -2859,6 +2862,67 @@ private
 
   def get_lifetime_path(func_node)
     get_path_to_root(func_node.return_lifetime)&.join(".")
+  end
+
+  # ── Fiber Stack Auto-Sizing ──────────────────────────────────────
+  # Walk the AST to find BG/DO blocks and assign computed stack tiers
+  # based on the functions they call (transitively via call graph).
+
+  def assign_fiber_stack_tiers!(program_node)
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::BgBlock
+        calls = collect_call_names(n.body)
+        n.computed_stack_tier = max_tier_for_calls(calls)
+        n.body.each { |s| traverse.call(s) }
+      when AST::BgStreamBlock
+        calls = collect_call_names(n.body)
+        n.computed_stack_tier = max_tier_for_calls(calls)
+        n.body.each { |s| traverse.call(s) }
+      when AST::DoBlock
+        n.branches.each do |branch|
+          calls = collect_call_names(branch[:body])
+          branch[:computed_stack_tier] = max_tier_for_calls(calls)
+          branch[:body].each { |s| traverse.call(s) }
+        end
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(program_node.statements)
+  end
+
+  # Collect all function names called in a set of AST nodes (non-recursive into FunctionDef).
+  def collect_call_names(nodes)
+    names = Set.new
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef
+        # Don't descend into nested function definitions.
+      when AST::FuncCall
+        names << n.name unless n.fn_var_call
+        n.args&.each { |a| traverse.call(a) }
+      when AST::MethodCall
+        names << n.name
+        traverse.call(n.object)
+        n.args&.each { |a| traverse.call(a) }
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    nodes = [nodes] unless nodes.is_a?(Array)
+    nodes.each { |n| traverse.call(n) }
+    names
   end
 
   # ── Ownership Graph Operations ─────────────────────────────────

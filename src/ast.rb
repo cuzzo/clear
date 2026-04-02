@@ -458,6 +458,7 @@ module AST
   BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode) do
     include Locatable
     attr_accessor :returns_promoted  # true when BG body's result calls a function with returns_promoted
+    attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
@@ -469,7 +470,10 @@ module AST
   # BgStreamBlock: background generator — spawns a fiber that YIELDs values into a Stream.
   # body: Array of statements; YIELD expressions push values. Returns ~T[?] (open stream).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
-  BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) { include Locatable }
+  BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) do
+    include Locatable
+    attr_accessor :computed_stack_tier
+  end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
   # Only valid inside a BgStreamBlock body. expr: the value to yield.

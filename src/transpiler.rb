@@ -1428,7 +1428,7 @@ private
 
         # Default: spawnBest distributes across all schedulers (work-stealing).
         # @pinned: pin to the current thread's scheduler via submitSpawn.
-        task_cfg = task_config_zig(branch[:stack_size])
+        task_cfg = task_config_zig(branch[:stack_size], computed_tier: branch[:computed_stack_tier])
         spawn_call = if pinned
           <<~ZIG.chomp
             try #{wg_var}.sched.submitSpawn(
@@ -1720,7 +1720,7 @@ private
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 #{ctx_var},
-                #{task_config_zig(node.stack_size)},
+                #{task_config_zig(node.stack_size, computed_tier: node.computed_stack_tier)},
             );
             break :#{blk_label} #{stream_var};
         }
@@ -3085,7 +3085,7 @@ private
                 );
       ZIG
     elsif node.pinned
-      task_cfg = task_config_zig(node.stack_size, pinned: true)
+      task_cfg = task_config_zig(node.stack_size, pinned: true, computed_tier: node.computed_stack_tier)
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -3095,7 +3095,7 @@ private
                 );
       ZIG
     else
-      task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
+      task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned, computed_tier: node.computed_stack_tier)
       <<~ZIG.chomp
         try CheatHeader.spawnBest(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -3107,9 +3107,22 @@ private
     end
   end
 
-  def task_config_zig(stack_size, pinned: false)
+  # Tier ordering for max() comparison
+  TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
+
+  def task_config_zig(stack_size, pinned: false, computed_tier: nil)
     default = @default_stack_size || "Standard"
-    variant = stack_size ? STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default) : default
+    if stack_size
+      # User explicitly chose a size - honor it
+      variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
+    elsif computed_tier
+      # Auto-sized: take the MAX of computed tier and build-mode default.
+      # Debug builds use Large default because safety checks inflate frames.
+      computed = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
+      variant = TIER_RANK.fetch(computed, 0) >= TIER_RANK.fetch(default, 0) ? computed : default
+    else
+      variant = default
+    end
     if pinned
       ".{ .stack_size = .#{variant}, .pinned = true }"
     else

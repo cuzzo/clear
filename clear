@@ -158,7 +158,7 @@ when 'build'
 
   # Parse build flags
   remaining = []
-  stack_check = false
+  stack_check = true  # on by default
   i = 0
   while i < args.length
     case args[i]
@@ -180,6 +180,9 @@ when 'build'
       i += 1
     when '--stack-check'
       stack_check = true
+      i += 1
+    when '--no-stack-check'
+      stack_check = false
       i += 1
     else
       remaining << args[i]
@@ -211,7 +214,7 @@ when 'build'
       base_name = File.basename(source, '.cht')
       prefix = "._clear_tmp_#{base_name}"
       verifier = StackVerifier.new(output_path, prefix)
-      report = verifier.analyze(fn_nodes: fn_nodes)
+      report = verifier.analyze(fn_nodes: fn_nodes, source_file: source)
       verifier.print_report(report)
     rescue => e
       $stderr.puts "[stack-check] Analysis failed: #{e.message}"

@@ -447,16 +447,15 @@ pub const Runtime = struct {
         const sched = fp.active_scheduler;
         const task = sched.current_task.?;
 
-        // Skip the first 4KB (Frame)
-        const frame_size = 4 * 1024; // 4kb -> Frame
-
         // 3. Initialize Runtime
-        // Optimization: We carve 1MB off the bottom of the Fiber's OWN stack
-        // to use as the Runtime's scratchpad. No malloc needed!
+        // For standard+ stacks: carve 4 KB off the bottom for the frame arena.
+        // For micro stacks (4 KB): skip the carve-out; arena allocates from heap on first use.
+        const frame_size = 4 * 1024;
         const full_stack_memory = task.base.stack.memory;
-        if (full_stack_memory.len < frame_size + 1024) @panic("Stack too small for Frame!");
-
-        const frame_slice = full_stack_memory[0 .. frame_size];
+        const frame_slice = if (full_stack_memory.len >= frame_size + 1024)
+            full_stack_memory[0..frame_size]
+        else
+            full_stack_memory[0..0]; // empty slice - arena will use heap lazily
 
         var rt = Runtime.initFromSlice(
             frame_slice,

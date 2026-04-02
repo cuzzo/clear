@@ -687,12 +687,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Zig output: DO no-prefix branch emits .Standard task config" do
+    context "Zig output: DO no-prefix branch uses auto-sized tier" do
       let(:code) { preamble + "DO { work() }" }
 
-      it "emits .stack_size = .Standard (the default)" do
+      it "emits a stack_size tier from call-graph analysis" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include(".stack_size = .Standard")
+        expect(zig).to match(/\.stack_size = \.(Micro|Standard|Large|Xl)/)
       end
     end
 
@@ -772,12 +772,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Zig output: BG no prefix emits .Standard task config" do
+    context "Zig output: BG no prefix uses auto-sized tier" do
       let(:code) { work_fn + "FN f() RETURNS Void -> p: ~Void = BG { work(); }; NEXT p; RETURN; END" }
 
-      it "emits .stack_size = .Standard (the default)" do
+      it "emits a stack_size tier from call-graph analysis" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include(".stack_size = .Standard")
+        expect(zig).to match(/\.stack_size = \.(Micro|Standard|Large|Xl)/)
       end
     end
   end
