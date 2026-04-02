@@ -273,11 +273,12 @@ when 'run'
   exec(cmd)
 
 when 'test'
-  source = ARGV[1]
-  error "Usage: clear test <file.cht|directory>" unless source
+  test_args = ARGV[1..] || []
+  profile_mode = test_args.delete('--profile')
+  source = test_args.first
+  error "Usage: clear test <file.cht|directory> [--profile]" unless source
 
   if File.directory?(source)
-    # Directory mode: generate all-tests.zig and run via zig test (like gen.rb)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
     puts "Generating tests..."
     system("ruby #{gen_script}")
@@ -285,7 +286,7 @@ when 'test'
     success = system("cd #{ZIG_DIR} && #{ZIG} test all-tests.zig -lc switch.S onRoot.S")
     exit(success ? 0 : 1)
   else
-    output = do_build(source, module_mode: true)
+    output = do_build(source, module_mode: true, profile: !!profile_mode)
     puts output unless output.strip.empty?
   end
 

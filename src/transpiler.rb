@@ -51,10 +51,12 @@ class ZigTranspiler
     # so call sites can look up callee flags before the callee's definition is visited.
     @fn_needs_rt = {}
     @fn_can_fail = {}
+    @fn_effects = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
       @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
+      @fn_effects[stmt.name] = stmt.effects || Set.new
     end
     body = visit(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
@@ -2437,7 +2439,7 @@ private
       transpile_smash(node)
 
     when AST::ProfileStmt
-      "// PROFILE: not yet wired (commit 9)"
+      transpile_profile(node)
 
     when AST::StubDecl
       transpile_stub(node)
@@ -3313,6 +3315,55 @@ private
       ZIG
     else
       "// SMASH: expression is not a function call, skipping"
+    end
+  end
+
+  # Transpile PROFILE expr to allocation profiling + timing + suggestion output.
+  def transpile_profile(node)
+    rt_name = @do_rt_name || "rt"
+    expr = node.expression
+
+    if expr.is_a?(AST::FuncCall)
+      fn_name = zig_safe_name(expr.name)
+      args_zig = expr.args.map { |a| visit(a) }
+      needs_rt = callee_needs_rt?(expr.name)
+      can_fail = callee_can_fail?(expr.name)
+      all_args = needs_rt ? ["&#{rt_name}"] + args_zig : args_zig
+      call_str = "#{fn_name}(#{all_args.join(', ')})"
+      call_str = can_fail ? "try #{call_str}" : call_str
+
+      # Look up effects for capability-aware suggestions
+      effects = (@fn_effects || {})[expr.name] || Set.new
+      has_blocking = effects.include?(:BLOCKING)
+      has_heap = effects.include?(:HEAP)
+
+      suggestions = []
+      suggestions << 'std.debug.print("  Suggestion: function has BLOCKING effect (lock contention possible).\\n"' \
+                     '  ++ "  Consider @locked instead of @writeLocked for write-heavy workloads.\\n", .{});' if has_blocking
+      suggestions << 'std.debug.print("  Suggestion: function has HEAP effect (dynamic allocation).\\n"' \
+                     '  ++ "  Check alloc-profile output for hotspots.\\n", .{});' if has_heap
+      suggestion_code = suggestions.join("\n")
+
+      <<~ZIG
+        {
+            const __prof_alloc = @import("alloc-profile.zig");
+            const __prof_allocs_before = __prof_alloc.totalAllocs();
+            const __prof_bytes_before = __prof_alloc.totalBytes();
+            var __prof_timer = std.time.Timer.start() catch unreachable;
+            _ = #{call_str};
+            const __prof_elapsed = __prof_timer.read();
+            const __prof_allocs_after = __prof_alloc.totalAllocs();
+            const __prof_bytes_after = __prof_alloc.totalBytes();
+            const __prof_allocs = __prof_allocs_after - __prof_allocs_before;
+            const __prof_bytes = __prof_bytes_after - __prof_bytes_before;
+            std.debug.print("\\nPROFILE #{expr.name}:\\n", .{});
+            std.debug.print("  Time:   {d:.3}ms\\n", .{@as(f64, @floatFromInt(__prof_elapsed)) / 1_000_000.0});
+            std.debug.print("  Allocs: {d} ({d} KB)\\n", .{__prof_allocs, __prof_bytes / 1024});
+            #{suggestion_code}
+        }
+      ZIG
+    else
+      "// PROFILE: expression is not a function call, skipping"
     end
   end
 

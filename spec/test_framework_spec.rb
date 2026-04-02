@@ -375,6 +375,28 @@ RSpec.describe "Test Framework DSL" do
     end
   end
 
+  describe "PROFILE transpilation" do
+    def transpile(source)
+      ZigTranspiler.new.transpile(source, test_mode: true)
+    end
+
+    it "emits timing and alloc profiling for PROFILE" do
+      src = <<~CLEAR
+        FN compute(n: Float64) RETURNS Float64 -> RETURN n * 2.0; END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Prof DO
+          WHEN "profile" DO
+            PROFILE compute(100.0);
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("PROFILE compute")
+      expect(zig).to include("totalAllocs")
+      expect(zig).to include("Timer.start")
+    end
+  end
+
   describe "keyword lexing" do
     %w[TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE].each do |kw|
       it "lexes #{kw} as a keyword" do
