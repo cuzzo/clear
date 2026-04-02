@@ -1,0 +1,35 @@
+-- Test: TEST framework with struct types.
+-- Verifies that struct creation and field access work inside TEST blocks.
+
+STRUCT Point { x: Float64, y: Float64 }
+
+FN distance(p: Point) RETURNS Float64 ->
+    RETURN p.x + p.y;
+END
+
+FN main() RETURNS Void ->
+    RETURN;
+END
+
+TEST PointTests DO
+  WHEN "creation" DO
+    TEST THAT "creates a point" DO
+      p = Point{ x: 1.0, y: 2.0 };
+      ASSERT p.x == 1.0;
+      ASSERT p.y == 2.0;
+    END
+
+    TEST THAT "computes distance" DO
+      p = Point{ x: 3.0, y: 4.0 };
+      d = distance(p);
+      ASSERT d == 7.0;
+    END
+  END
+
+  WHEN "default values" DO
+    TEST THAT "zero point" DO
+      p = Point{ x: 0.0, y: 0.0 };
+      ASSERT distance(p) == 0.0;
+    END
+  END
+END

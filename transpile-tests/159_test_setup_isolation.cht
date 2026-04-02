@@ -1,0 +1,30 @@
+-- Test: Setup isolation between TEST THAT blocks.
+-- Each test gets fresh setup - mutations in one test do not leak to another.
+
+FN main() RETURNS Void ->
+    RETURN;
+END
+
+TEST SetupIsolation DO
+  base = 100.0;
+
+  WHEN "isolation" DO
+    x = base + 1.0;
+
+    TEST THAT "first test sees x = 101" DO
+      ASSERT x == 101.0;
+    END
+
+    TEST THAT "second test also sees x = 101 (not mutated by first)" DO
+      ASSERT x == 101.0;
+    END
+  END
+
+  WHEN "multiple groups" DO
+    y = base * 2.0;
+
+    TEST THAT "sees y from setup" DO
+      ASSERT y == 200.0;
+    END
+  END
+END

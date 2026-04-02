@@ -1,0 +1,43 @@
+-- Test: Basic TEST/WHEN/TEST THAT framework.
+-- Verifies the DSL structure works end-to-end.
+
+FN double(x: Float64) RETURNS Float64 ->
+    RETURN x * 2.0;
+END
+
+FN add(a: Float64, b: Float64) RETURNS Float64 ->
+    RETURN a + b;
+END
+
+FN main() RETURNS Void ->
+    ASSERT double(5.0) == 10.0, "sanity";
+    RETURN;
+END
+
+TEST Arithmetic DO
+  WHEN "double" DO
+    TEST THAT "doubles a number" DO
+      ASSERT double(5.0) == 10.0;
+    END
+
+    TEST THAT "doubles zero" DO
+      ASSERT double(0.0) == 0.0;
+    END
+
+    TEST THAT "doubles negative" DO
+      ASSERT double(-3.0) == -6.0;
+    END
+  END
+
+  WHEN "add" DO
+    TEST THAT "adds positives" DO
+      result = add(2.0, 3.0);
+      ASSERT result == 5.0;
+    END
+
+    TEST THAT "adds negatives" DO
+      result = add(-1.0, -2.0);
+      ASSERT result == -3.0;
+    END
+  END
+END

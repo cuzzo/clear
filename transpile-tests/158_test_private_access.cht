@@ -1,0 +1,28 @@
+-- Test: Private functions are accessible in test mode.
+-- Verifies that PRIVATE FN can be called from TEST THAT blocks.
+
+PRIVATE FN secret() RETURNS Float64 ->
+    RETURN 42.0;
+END
+
+PRIVATE FN internalAdd(a: Float64, b: Float64) RETURNS Float64 ->
+    RETURN a + b;
+END
+
+FN main() RETURNS Void ->
+    RETURN;
+END
+
+TEST PrivateAccess DO
+  WHEN "private functions" DO
+    TEST THAT "can call secret()" DO
+      s = secret();
+      ASSERT s == 42.0;
+    END
+
+    TEST THAT "can call internalAdd()" DO
+      r = internalAdd(10.0, 20.0);
+      ASSERT r == 30.0;
+    END
+  END
+END
