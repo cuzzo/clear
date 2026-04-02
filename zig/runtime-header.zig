@@ -2297,8 +2297,56 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                // Clean up live elements: deinit any StringMap fields.
+                for (self.slots) |*slot| {
+                    if (slot.alive) {
+                        deinitFields(&slot.value);
+                    }
+                }
                 allocator.free(self.slots);
                 allocator.free(self.free_stack);
+            }
+
+            /// Deinit StringMap fields inside a struct value (comptime introspection).
+            fn deinitFields(value: *T) void {
+                const info = @typeInfo(T);
+                if (info != .@"struct") return;
+                inline for (info.@"struct".fields) |field| {
+                    const FT = field.type;
+                    const ft_info = @typeInfo(FT);
+                    // Match StringMap(V) by checking for inner + alloc + put
+                    if (ft_info == .@"struct" and
+                        @hasField(FT, "inner") and
+                        @hasField(FT, "alloc") and
+                        @hasDecl(FT, "put"))
+                    {
+                        var map = &@field(value, field.name);
+                        // Free keys and union string values
+                        var it = map.inner.iterator();
+                        while (it.next()) |entry| {
+                            map.alloc.free(entry.key_ptr.*);
+                            freeUnionStringsGeneric(FT, entry.value_ptr.*, map.alloc);
+                        }
+                        map.inner.deinit(map.alloc);
+                    }
+                }
+            }
+
+            /// Generic freeUnionStrings that works with any V type.
+            fn freeUnionStringsGeneric(comptime MapT: type, value: anytype, alloc_: std.mem.Allocator) void {
+                _ = MapT;
+                const VT = @TypeOf(value);
+                const v_info = @typeInfo(VT);
+                if (v_info != .@"union") return;
+                inline for (v_info.@"union".fields) |field| {
+                    if (field.type == []const u8) {
+                        if (std.meta.activeTag(value) == @field(std.meta.Tag(VT), field.name)) {
+                            const slice = @field(value, field.name);
+                            if (slice.len > 0) alloc_.free(slice);
+                            return;
+                        }
+                    }
+                }
             }
 
             /// Insert a value, returning a stable u64 handle. O(1).
