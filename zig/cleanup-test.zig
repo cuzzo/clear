@@ -223,6 +223,53 @@ test "cleanup: ArrayList of unions frees element slice variants" {
     CheatLib.cleanup(std.ArrayListUnmanaged(TestValue), alloc, &results);
 }
 
+// Minimal union matching scheme's Value pattern: only Num + List (no Map/Array).
+// needsCleanup returns false for this because []MinValue is not recognized.
+const MinValue = union(enum) {
+    Num: f64,
+    List: []MinValue,
+};
+
+test "cleanup: nested MinValue.List freed by cleanup" {
+    // This is the EXACT scheme leak pattern.
+    // MinValue.List contains []MinValue, each element can be MinValue.List.
+    // Currently LEAKS because needsCleanup(MinValue) = false.
+    const alloc = std.testing.allocator;
+
+    const inner = try alloc.alloc(MinValue, 2);
+    inner[0] = MinValue{ .Num = 1.0 };
+    inner[1] = MinValue{ .Num = 2.0 };
+
+    const outer = try alloc.alloc(MinValue, 1);
+    outer[0] = MinValue{ .List = inner };
+
+    var val = MinValue{ .List = outer };
+    CheatLib.cleanup(MinValue, alloc, &val);
+}
+
+test "cleanup: nested List variants recursively freed" {
+    // Reproducer for scheme interpreter leak: Value.List contains []Value,
+    // each element may itself be Value.List with its own heap slice.
+    // cleanup(Value) must recurse into elements and free their slices.
+    const alloc = std.testing.allocator;
+
+    // Build nested structure: outer list of [inner_list_1, inner_list_2]
+    const inner1 = try alloc.alloc(TestValue, 2);
+    inner1[0] = TestValue{ .Num = 1.0 };
+    inner1[1] = TestValue{ .Num = 2.0 };
+
+    const inner2 = try alloc.alloc(TestValue, 1);
+    inner2[0] = TestValue{ .Num = 3.0 };
+
+    const outer = try alloc.alloc(TestValue, 2);
+    outer[0] = TestValue{ .List = inner1 };
+    outer[1] = TestValue{ .List = inner2 };
+
+    var val = TestValue{ .List = outer };
+    // Must free: outer slice + inner1 slice + inner2 slice = 3 allocations
+    CheatLib.cleanup(TestValue, alloc, &val);
+}
+
 test "cleanup: List variant ([]T slice) is freed by cleanup" {
     // Simulates the json_parser leak: promoteList creates a heap slice
     // inside a union List variant. cleanup must free it.

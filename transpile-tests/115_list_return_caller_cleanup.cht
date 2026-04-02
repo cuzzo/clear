@@ -1,0 +1,30 @@
+-- Exact reproducer for scheme leak: Value.List contains []Value,
+-- each element may itself be a Value.List with its own heap slice.
+-- cleanup must recurse into elements.
+
+UNION Value { Num: Float64, List: Value[] }
+
+FN makeNum(n: Float64) RETURNS Value ->
+    RETURN Value{ Num: n };
+END
+
+FN makeInner() RETURNS Value ->
+    MUTABLE inner: Value[]@list = List[];
+    inner.append(makeNum(1.0));
+    inner.append(makeNum(2.0));
+    RETURN Value{ List: inner };
+END
+
+FN makeOuter() RETURNS Value ->
+    MUTABLE items: Value[]@list = List[];
+    items.append(makeInner());
+    items.append(makeInner());
+    RETURN Value{ List: items };
+END
+
+FN main() RETURNS Void ->
+    result = makeOuter();
+    -- result is Value.List containing two Value.List elements.
+    -- cleanup(Value) must free: outer []Value slice + each inner []Value slice.
+    RETURN;
+END

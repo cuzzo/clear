@@ -1909,6 +1909,14 @@ pub const CheatLib = struct {
         if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
             inline for (ft_info.@"union".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
+                // Non-string slice variants: the union cleanup handler frees them.
+                // BUT: enabling this causes over-freeing in ArrayList element recursion
+                // when elements have been moved/extracted. Requires per-element move
+                // tracking or deep-copy on extraction to fix properly.
+                // TODO: enable when per-element ownership is implemented.
+                // const fi = @typeInfo(field.type);
+                // if (fi == .pointer and fi.pointer.size == .slice and
+                //     field.type != []const u8 and field.type != []u8) return true;
             }
         }
         return false;
