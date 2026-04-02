@@ -305,10 +305,7 @@ module AST
   end
   GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
-  ReturnNode   = Struct.new(:token, :value) do
-    include Locatable
-    attr_accessor :collection_return  # true when returning a collection that needs escape promotion
-  end
+  ReturnNode   = Struct.new(:token, :value) { include Locatable }
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
   # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)

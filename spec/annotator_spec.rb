@@ -1320,44 +1320,21 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "ReturnNode collection_return flag" do
-      it "sets collection_return=true when returning a @list from a frame-using function" do
-        # BigS is 130 slots (>128 threshold) → local declaration → uses_frame = true.
-        # Returning a @list from that function is dangerous: the frame mark rewinds on
-        # exit, invalidating the arena buffer.
+    context "Escape marking for returned collections" do
+      it "sets returns_promoted on function returning @list" do
         src = <<~CLEAR
-          STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
-          STRUCT BigS {
-            c1: Chunk5, c2: Chunk5, c3: Chunk5, c4: Chunk5, c5: Chunk5,
-            c6: Chunk5, c7: Chunk5, c8: Chunk5, c9: Chunk5, c10: Chunk5,
-            c11: Chunk5, c12: Chunk5, c13: Chunk5, c14: Chunk5, c15: Chunk5,
-            c16: Chunk5, c17: Chunk5, c18: Chunk5, c19: Chunk5, c20: Chunk5,
-            c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
-            c26: Chunk5
-          }
           FN buildList() RETURNS Float64[]@list ->
-            zero: Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
-            big: BigS = BigS{
-              c1: zero, c2: zero, c3: zero, c4: zero, c5: zero,
-              c6: zero, c7: zero, c8: zero, c9: zero, c10: zero,
-              c11: zero, c12: zero, c13: zero, c14: zero, c15: zero,
-              c16: zero, c17: zero, c18: zero, c19: zero, c20: zero,
-              c21: zero, c22: zero, c23: zero, c24: zero, c25: zero,
-              c26: zero
-            };
             MUTABLE vals: Float64[]@list = [];
-            append(vals, big.c1.a);
+            append(vals, 1.0);
             RETURN vals;
           END
         CLEAR
         annotated = run(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
-        ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
-        expect(fn.uses_frame).to be true
-        expect(ret.collection_return).to be true
+        expect(fn.returns_promoted).to be true
       end
 
-      it "sets collection_return for list returns even without other frame usage" do
+      it "sets escaped_return on @list variable being returned" do
         src = <<~CLEAR
           FN buildList() RETURNS Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
@@ -1368,8 +1345,8 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
         ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
-        # Lists use frameAlloc for append() — always need promotion on escape
-        expect(ret.collection_return).to be true
+        ti = ret.value.type_info
+        expect(ti.escaped_return).to be true
       end
     end
 

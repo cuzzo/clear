@@ -129,7 +129,7 @@ class PromotionPlan
 
     # Struct-level promote: only when per-variable promotion found escaped vars
     # AND the struct has additional promotable fields not covered (e.g., string literals).
-    # Without per-variable escapes, no collection_return → no promotion at all.
+    # Without per-variable escapes, no promotion needed.
     struct_promote = if var_promotes.any?
       compute_struct_promote(ret_type, schema_lookup, handled_fields)
     end
