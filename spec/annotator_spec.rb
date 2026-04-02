@@ -3036,7 +3036,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("__hl0_map.put(rt.frameAlloc(), rt.frameAlloc()")
+        expect(out).to include("__hl0_map.put(rt.heapAlloc(), rt.frameAlloc()")
         expect(out).to include('"a"')
         expect(out).to include('"b"')
       end
@@ -3048,7 +3048,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.StringMap(i64){ .alloc = rt.frameAlloc() }")
+        expect(out).to include("CheatLib.StringMap(i64){ .alloc = rt.heapAlloc() }")
         expect(out).not_to include("mapPut")
       end
     end

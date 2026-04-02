@@ -884,12 +884,11 @@ private
                if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
                  return "try #{map_ref}.putPrehashed(#{@shard_direct_idx}, #{@shard_direct_hash}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
                end
-               # The map stores its own allocator from the first put — the allocator
-               # passed here is captured by the map and used for all subsequent ops.
-               # Frame-local maps get frameAlloc (arena, zero-cost cleanup).
-               # Sharded/promoted maps get heapAlloc (GPA, tracked cleanup).
-               alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
-               return "try #{map_ref}.put(#{alloc}, #{alloc}, #{key_ref}, #{val_ref});"
+               # Keys must use heapAlloc — they outlive the current frame
+               # (frame rewind after function return would dangle key pointers).
+               # Values use frameAlloc for frame-local maps, heapAlloc for sharded.
+               val_alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{val_alloc}, #{key_ref}, #{val_ref});"
              end
           end
           arr_ref = visit(target_node)
@@ -2777,10 +2776,11 @@ private
     # Numeric maps and PartitionedStringMap (shared-nothing) don't have alloc.
     if bare_ft.numeric_map? || (bare_ft.sharded? && !bare_ft.striped?)
       bare_init = "#{bare_ft.zig_type}{}"
-    elsif bare_ft.striped? || map_ft.shared? || map_ft.multiowned?
-      bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
     else
-      bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.frameAlloc() }"
+      # Always use heapAlloc for StringMaps. Frame-allocated keys become
+      # dangling after restoreFrameMark in called functions, causing
+      # use-after-free when the map is accessed later.
+      bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
     end
 
     # Wrap with RwLocked/Locked and Arc/Rc if capabilities require it.
@@ -2821,7 +2821,7 @@ private
       puts_stmts = node.pairs.map do |k, v|
         key_str = visit(k)
         val_str = visit(v)
-        "try #{var}.put(#{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), #{key_str}, #{val_str});"
+        "try #{var}.put(#{rt_name}.heapAlloc(), #{rt_name}.frameAlloc(), #{key_str}, #{val_str});"
       end.join("\n            ")
     end
 
