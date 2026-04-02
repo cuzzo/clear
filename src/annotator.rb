@@ -34,9 +34,10 @@ class SemanticAnnotator
     @function_context_stack.last
   end
 
-  def initialize(importer: nil, compiler: nil, source_dir: nil)
-    @importer   = importer || compiler  # compiler: kept for one-release backward compat
+  def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false)
+    @importer   = importer || compiler
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
+    @strict_test = strict_test
     # We start with a global scope
     @scope_stack = [Scope.new]
     @function_context_stack = [] # Stack of expected return types
@@ -1020,8 +1021,17 @@ private
 
   def visit_WhenBlock(node)
     node.setup.each { |s| visit(s) }
+
+    # Strict test mode: verify all IO functions are stubbed in this WHEN block.
+    if @strict_test
+      stubbed_fns = node.setup
+        .select { |s| s.is_a?(AST::StubDecl) }
+        .map { |s| s.function_name }
+        .to_set
+      node.tests.each { |t| validate_strict_io!(t, stubbed_fns) }
+    end
+
     node.tests.each do |t|
-      # Each TEST THAT gets its own scope for isolation
       with_new_scope(current_scope) do
         visit_TestThat(t)
       end
@@ -2924,6 +2934,47 @@ private
 
   def get_lifetime_path(func_node)
     get_path_to_root(func_node.return_lifetime)&.join(".")
+  end
+
+  # ── Strict Test Mode ─────────────────────────────────────────────
+  # In --strict mode, all IO functions (BLOCKING/EXTERN effects) must be
+  # stubbed in test bodies. Walks the call chain transitively.
+
+  # Known IO builtins that don't appear in @fn_nodes (runtime-level).
+  IO_BUILTINS = %w[tcpRead tcpWrite accept connect readFile writeFile
+                   listDir listAll fileSize socketRead socketWrite socketClose].to_set.freeze
+
+  def validate_strict_io!(test_that, stubbed_fns)
+    calls = scan_for_calls(test_that.body).first
+    visited = Set.new
+    queue = calls.to_a.dup
+
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      next if stubbed_fns.include?(name)
+
+      # Check if it's a known IO builtin
+      if IO_BUILTINS.include?(name)
+        error!(test_that, "Strict test mode: '#{name}' is an IO function that must be " \
+                          "stubbed. Add STUB #{name} RETURNS <value>; to the WHEN block.")
+        next
+      end
+
+      # Check if it's a user function with BLOCKING/EXTERN effects
+      fn = @fn_nodes[name]
+      if fn&.effects
+        has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)
+        if has_io
+          error!(test_that, "Strict test mode: '#{name}' has IO effects (#{fn.effects.to_a.join(', ')}). " \
+                            "Either stub '#{name}' or stub the IO functions it calls.")
+        end
+      end
+
+      # Continue down the call chain
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
   end
 
   # ── Tail Call Validation ─────────────────────────────────────────

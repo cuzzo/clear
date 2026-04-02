@@ -47,7 +47,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -59,6 +59,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # Transpile
   transpile_flag = module_mode ? '--test' : ''
   transpile_flag += " --default-stack #{default_stack}" if default_stack
+  transpile_flag += " --strict" if strict_test
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(ZIG_DIR, tmp_name)
 
@@ -275,8 +276,9 @@ when 'run'
 when 'test'
   test_args = ARGV[1..] || []
   profile_mode = test_args.delete('--profile')
+  strict_mode = test_args.delete('--strict')
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile]" unless source
+  error "Usage: clear test <file.cht|directory> [--profile] [--strict]" unless source
 
   if File.directory?(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
@@ -286,7 +288,7 @@ when 'test'
     success = system("cd #{ZIG_DIR} && #{ZIG} test all-tests.zig -lc switch.S onRoot.S")
     exit(success ? 0 : 1)
   else
-    output = do_build(source, module_mode: true, profile: !!profile_mode)
+    output = do_build(source, module_mode: true, profile: !!profile_mode, strict_test: !!strict_mode)
     puts output unless output.strip.empty?
   end
 

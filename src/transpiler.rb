@@ -36,14 +36,14 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false)
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
     tokens    = Lexer.new(cheat_code).tokenize
     ast       = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
     annotator.annotate!(ast)
 
     @needs_safety_import = false
@@ -3839,6 +3839,9 @@ if __FILE__ == $0
     opts.on('--default-stack SIZE', 'Default fiber stack size (Standard, Large, Xl)') do |s|
       options[:default_stack_size] = s
     end
+    opts.on('--strict', 'Strict test mode: require all IO functions to be stubbed') do
+      options[:strict_test] = true
+    end
   end.parse!
 
   script_file = ARGV.first
@@ -3852,7 +3855,7 @@ if __FILE__ == $0
     when :module
       puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
     when :test
-      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths], test_mode: true)
+      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths], test_mode: true, strict_test: !!options[:strict_test])
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
     end

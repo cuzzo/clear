@@ -397,6 +397,65 @@ RSpec.describe "Test Framework DSL" do
     end
   end
 
+  describe "strict test mode" do
+    def analyze_strict(source)
+      tokens = Lexer.new(source).tokenize
+      ast = Parser.new(tokens, source).parse
+      annotator = SemanticAnnotator.new(strict_test: true)
+      annotator.annotate!(ast)
+    end
+
+    def analyze_normal(source)
+      tokens = Lexer.new(source).tokenize
+      ast = Parser.new(tokens, source).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+    end
+
+    it "errors on un-stubbed IO builtin in strict mode" do
+      src = <<~CLEAR
+        FN main() RETURNS Void -> RETURN; END
+        TEST IO DO
+          WHEN "unstubbed" DO
+            TEST THAT "reads file" DO
+              data = readFile("test.txt");
+            END
+          END
+        END
+      CLEAR
+      expect { analyze_strict(src) }.to raise_error(CompilerError, /Strict test mode.*readFile/)
+    end
+
+    it "passes when IO is stubbed in strict mode" do
+      src = <<~CLEAR
+        FN main() RETURNS Void -> RETURN; END
+        TEST IO DO
+          WHEN "stubbed" DO
+            STUB readFile RETURNS "mock";
+            TEST THAT "reads file" DO
+              data = readFile("test.txt");
+            END
+          END
+        END
+      CLEAR
+      expect { analyze_strict(src) }.not_to raise_error
+    end
+
+    it "does not error in non-strict mode" do
+      src = <<~CLEAR
+        FN main() RETURNS Void -> RETURN; END
+        TEST IO DO
+          WHEN "unstubbed" DO
+            TEST THAT "reads file" DO
+              data = readFile("test.txt");
+            END
+          END
+        END
+      CLEAR
+      expect { analyze_normal(src) }.not_to raise_error
+    end
+  end
+
   describe "keyword lexing" do
     %w[TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE].each do |kw|
       it "lexes #{kw} as a keyword" do
