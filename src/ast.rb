@@ -214,7 +214,7 @@ module AST
   Program      = Struct.new(:token, :statements) { include Locatable }
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
-  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_body, :catch_var, :visibility, :deferred_drops, :uses_frame) do
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
@@ -306,7 +306,11 @@ module AST
     attr_accessor :collection_return  # true when returning a collection that needs escape promotion
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
-  Raise        = Struct.new(:token, :message_expr, :error_context) { include Locatable }
+  # RAISE Kind, ErrorName, "message"
+  # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)
+  # error_name: optional string (user-defined error enum name)
+  # message_expr: optional string expression
+  Raise        = Struct.new(:token, :kind, :error_name, :message_expr) { include Locatable }
   ThrowNode    = Struct.new(:token, :value) { include Locatable }
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }

@@ -1,15 +1,15 @@
--- Error context: RAISE with message, OR EXIT, RECOVER pipeline operator.
+-- Error context: RAISE with kind, OR EXIT, RECOVER, CATCH blocks.
 
 FN riskyParse(input: String) RETURNS !String ->
     IF input == "bad" THEN
-        RAISE "invalid input";
+        RAISE Input, InvalidJson, "failed to parse";
     END
     RETURN "parsed:" + input;
 END
 
 FN riskyFetch(url: String) RETURNS !String ->
     IF url == "" THEN
-        RAISE "empty url", "fetch_context";
+        RAISE Transient, NetworkDown;
     END
     RETURN "data:" + url;
 END
@@ -20,7 +20,6 @@ FN main() RETURNS Void ->
     ASSERT good == "parsed:ok", "OR RAISE passes through";
 
     -- OR EXIT "message" (set error context message + propagate)
-    -- Can't test propagation in main, but can test success path
     good2 = riskyParse("ok") OR EXIT "parse failed";
     ASSERT good2 == "parsed:ok", "OR EXIT passes on success";
 
@@ -35,7 +34,5 @@ FN main() RETURNS Void ->
     result2 = riskyFetch("example.com") s> RECOVER("fallback");
     ASSERT result2 == "data:example.com", "RECOVER passes through on success";
 
-    -- RAISE with context (two-arg RAISE)
-    -- Can't test the context directly without CATCH, but verify it compiles
     RETURN;
 END

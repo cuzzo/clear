@@ -950,21 +950,26 @@ class Parser
     #     body;
     #   END
     catch_block = nil
+    # Parse CATCH clauses:
+    #   CATCH Kind                       -- match on error kind
+    #   CATCH Kind WITH(ErrorName)       -- match on kind + specific error
+    #   DEFAULT                          -- catch-all
+    catch_block = nil
     if match?(:KEYWORD, 'CATCH')
       catch_clauses = []
       default_body = nil
       while match?(:KEYWORD, 'CATCH')
         consume(:KEYWORD, 'CATCH')
-        error_name = consume(:TYPE_ID).value rescue (consume(:VAR_ID).value)
-        with_msg = nil
+        kind = consume(:TYPE_ID).value  # Transient, Input, System, etc.
+        error_name = nil
         if match?(:KEYWORD, 'WITH')
           consume(:KEYWORD, 'WITH')
           consume(:CHAR, '(')
-          with_msg = consume(:STRING).value
+          error_name = consume(:TYPE_ID).value
           consume(:CHAR, ')')
         end
         clause_body = parse_block_body(['CATCH', 'DEFAULT', 'END'])
-        catch_clauses << { error_name: error_name, with_msg: with_msg, body: clause_body }
+        catch_clauses << { kind: kind, error_name: error_name, body: clause_body }
       end
       if match?(:KEYWORD, 'DEFAULT')
         consume(:KEYWORD, 'DEFAULT')
@@ -974,7 +979,8 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body, catch_block ? catch_block.catch_clauses : [], catch_block ? "__error" : nil, visibility)
+    node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body,
+      catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
     node.type_params = type_params unless type_params.empty?
     node.reentrant = reentrant
     node
@@ -1331,20 +1337,52 @@ class Parser
     AST::StructPattern.new(tok, fields, partial)
   end
 
+  ERROR_KINDS = %w[Transient Input System NotFound Permission Canceled].freeze
+
+  # RAISE Kind;
+  # RAISE Kind, ErrorName;
+  # RAISE Kind, ErrorName, "message";
   def parse_raise_stmt
     tok = consume(:KEYWORD, 'RAISE')
+
+    # Legacy: RAISE "string"; (bare string = System error with message)
+    if match?(:STRING)
+      msg = parse_expression
+      consume(:CHAR, ';')
+      return AST::Raise.new(tok, :System, nil, msg)
+    end
+
     if match?(:CHAR, ';')
       consume(:CHAR, ';')
-      return AST::Raise.new(tok, nil, nil)
+      return AST::Raise.new(tok, :System, nil, nil)
     end
-    msg = parse_expression
-    ctx = nil
+
+    # Kind (required TYPE_ID from the 6 error kinds)
+    kind_tok = consume(:TYPE_ID)
+    kind = kind_tok.value.to_sym
+    unless ERROR_KINDS.include?(kind_tok.value)
+      error!(kind_tok, "RAISE expects an error kind: #{ERROR_KINDS.join(', ')}. Got '#{kind_tok.value}'")
+    end
+
+    error_name = nil
+    message = nil
+
     if match?(:CHAR, ',')
       consume(:CHAR, ',')
-      ctx = parse_expression
+      # Next could be a TYPE_ID (error name) or a STRING (message)
+      if match?(:TYPE_ID)
+        error_name = consume(:TYPE_ID).value
+        if match?(:CHAR, ',')
+          consume(:CHAR, ',')
+          message = parse_expression
+        end
+      else
+        message = parse_expression
+      end
     end
+
     consume(:CHAR, ';')
-    AST::Raise.new(tok, msg, ctx)
+    AST::Raise.new(tok, kind, error_name, message)
   end
 
   def parse_while_loop

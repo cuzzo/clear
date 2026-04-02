@@ -56,15 +56,21 @@ pub const ErrorKind = enum(u8) {
 
 pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
+    error_name: []const u8 = "",   // user-defined error enum name
     message: []const u8 = "",
     snapshot: ?[]const u8 = null,
     clear_line: u32 = 0,
 
     pub fn reset(self: *ErrorContext) void {
-        self.kind = .Unknown;
-        self.message = "";
-        self.snapshot = null;
-        self.clear_line = 0;
+        self.* = .{};
+    }
+
+    pub fn matchesKind(self: *const ErrorContext, kind: ErrorKind) bool {
+        return self.kind == kind;
+    }
+
+    pub fn matchesName(self: *const ErrorContext, name: []const u8) bool {
+        return std.mem.eql(u8, self.error_name, name);
     }
 };
 
@@ -253,8 +259,8 @@ pub const Runtime = struct {
     }
 
     // ── Error Context Helpers ─────────────────────────────────────
-    pub fn setError(self: *Runtime, kind: ErrorKind, message: []const u8, clear_line: u32) void {
-        self.__error = .{ .kind = kind, .message = message, .clear_line = clear_line };
+    pub fn setError(self: *Runtime, kind: ErrorKind, error_name: []const u8, message: []const u8, clear_line: u32) void {
+        self.__error = .{ .kind = kind, .error_name = error_name, .message = message, .clear_line = clear_line };
     }
 
     pub fn setErrorSnapshot(self: *Runtime, data: []const u8) void {

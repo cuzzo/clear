@@ -638,33 +638,9 @@ private
       body = transpile_block(node.body)
       @transpiler_context_stack.pop
 
-      # Generate CATCH block if present
-      catch_code = ""
-      if node.catch_body.is_a?(Array) && node.catch_body.any?
-        rt_name = @do_rt_name || "rt"
-        clauses = node.catch_body.map do |clause|
-          error_name = clause[:error_name]
-          with_msg = clause[:with_msg]
-          clause_body = clause[:body].map { |s| visit(s) }.join("\n            ")
+      has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
 
-          cond_parts = []
-          cond_parts << "__catch_err == error.#{error_name}" if error_name && error_name != "Any"
-          cond_parts << "std.mem.eql(u8, #{rt_name}.__error.message, \"#{with_msg}\")" if with_msg
-          cond = cond_parts.any? ? cond_parts.join(" and ") : "true"
-
-          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{clause_body}\n        }"
-        end
-
-        # Chain with else if
-        catch_chain = clauses.join(" else ")
-
-        # Find DEFAULT from the FunctionDef (stored as catch_var when we have a CatchBlock)
-        # Actually we stored default in catch_clauses processing - need to extract it
-        # The catch_var field holds "__error" if we have a catch block
-        catch_code = " catch |__catch_err| {\n        const __error = #{rt_name}.__error;\n        _ = &__error;\n        #{catch_chain}\n    }"
-      end
-
-      if catch_code.empty?
+      if !has_catch
         <<~ZIG
           #{signature} {
               #{prologue}
@@ -672,11 +648,52 @@ private
           }
         ZIG
       else
-        # Wrap the body in a block that catches errors
+        # CATCH blocks: wrap the body so all `return error.X` are caught.
+        # We use errdefer to intercept errors before they leave the function.
+        # For functions that need to return a non-error value from CATCH,
+        # we wrap the body in a helper that we call with catch.
+        rt_name = @do_rt_name || "rt"
+
+        catch_clauses_zig = node.catch_clauses.map do |clause|
+          kind = clause[:kind]
+          error_name = clause[:error_name]
+          clause_body_code = clause[:body].map { |s| visit(s) }.join("\n            ")
+
+          cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
+          cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
+          cond = cond_parts.join(" and ")
+
+          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{clause_body_code}\n        }"
+        end.join(" else ")
+
+        # DEFAULT clause
+        default_code = ""
+        if node.default_catch.is_a?(Array) && node.default_catch.any?
+          default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
+          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{default_body}\n        }"
+        else
+          # No DEFAULT: re-raise the error
+          default_code = " else {\n            return error.CheatError;\n        }"
+        end
+
+        # Use an inner function so the body's errors can be caught.
+        # The inner function has the same signature; the outer catches errors.
+        # Generate call args: rt + user params (matching the inner function signature)
+        call_args = fn_needs_rt ? (["rt"] + node.params.map { |p| p[:name] }) : node.params.map { |p| p[:name] }
+        inner_params = all_params.join(', ')
+        inner_ret = fn_can_fail ? (final_type.start_with?("!") ? "anyerror!#{final_type[1..]}" : "anyerror!#{final_type}") : "!#{final_type}"
+        inner_name = "__#{node.name}_body"
+
         <<~ZIG
-          #{signature} {
+          fn #{inner_name}(#{inner_params}) #{inner_ret} {
               #{prologue}
-              #{catch_code.empty? ? body : body}
+              #{body}
+          }
+
+          #{signature} {
+              return #{inner_name}(#{call_args.join(', ')}) catch {
+                  #{catch_clauses_zig}#{default_code}
+              };
           }
         ZIG
       end
@@ -2367,15 +2384,13 @@ private
       "CheatLib.assert(#{cond}, \"#{node.message}\")"
 
     when AST::Raise
-      # RAISE "message", "context" — set error context + return error
-      # Only set context if the function has a Runtime (fn_needs_rt).
+      # RAISE Kind, ErrorName, "message"
       rt_name = @do_rt_name || "rt"
-      msg_code = node.message_expr ? visit(node.message_expr) : nil
-      ctx_code = node.error_context ? visit(node.error_context) : nil
-      if msg_code && @current_fn_has_rt
-        set_ctx = "#{rt_name}.setError(.Unknown, #{msg_code}, #{node.token.line});"
-        set_ctx += "\n#{rt_name}.__error.snapshot = #{ctx_code};" if ctx_code
-        "#{set_ctx}\nreturn error.CheatError"
+      kind = node.kind || :System
+      error_name = node.error_name || ""
+      msg_code = node.message_expr ? visit(node.message_expr) : "\"\""
+      if @current_fn_has_rt
+        "#{rt_name}.setError(.#{kind}, \"#{error_name}\", #{msg_code}, #{node.token.line});\nreturn error.CheatError"
       else
         "return error.CheatError"
       end
