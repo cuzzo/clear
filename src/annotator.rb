@@ -1503,11 +1503,10 @@ private
 
     if node.is_a?(AST::Identifier)
       ti = node.type_info
-      # Frame-allocated data must be promoted to heap on escape. This covers:
-      # - @list (frame-backed buffer), HashMap (frame-backed keys/buckets),
-      # - strings ([]const u8 slices pointing into the frame arena).
-      # Without promotion, the callee's defer restoreFrameMark rewinds the arena,
-      # leaving the caller with a dangling pointer.
+      # Frame-allocated collections (@list, HashMap) must be promoted to heap on escape.
+      # Strings are excluded at THIS level — bare string returns live in the caller's
+      # frame arena. But strings inside struct/union literals ARE marked (handled below
+      # in the StructLit branch) because the union cleanup path needs to know about them.
       if ti&.needs_escape_promotion? && !ti&.string?
         mark_symbol_escaped!(node, ti)
         return true
