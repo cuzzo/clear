@@ -1,0 +1,33 @@
+-- Test: BENCHMARK inside TEST blocks.
+-- Verifies that BENCHMARK compiles and runs with timing output.
+
+FN compute(n: Float64) RETURNS Float64 ->
+    MUTABLE sum = 0.0;
+    MUTABLE i = 0.0;
+    WHILE i < n DO
+        sum = sum + i;
+        i = i + 1.0;
+    END
+    RETURN sum;
+END
+
+FN main() RETURNS Void ->
+    ASSERT compute(10.0) == 45.0, "sanity";
+    RETURN;
+END
+
+TEST BenchmarkTest DO
+  WHEN "correctness" DO
+    TEST THAT "compute works" DO
+      ASSERT compute(100.0) == 4950.0;
+    END
+  END
+
+  WHEN "performance" DO
+    TEST THAT "compute is correct before bench" DO
+      ASSERT compute(10.0) == 45.0;
+    END
+
+    BENCHMARK compute(100.0) x100;
+  END
+END

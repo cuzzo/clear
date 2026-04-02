@@ -1,0 +1,47 @@
+-- Test: STUB RETURNS replaces function calls with mock values.
+-- Verifies scoping: stubbed in one WHEN, real in another.
+
+FN fetchData() RETURNS String ->
+    RETURN "real network data";
+END
+
+FN getNumber() RETURNS Float64 ->
+    RETURN 99.0;
+END
+
+FN main() RETURNS Void ->
+    ASSERT fetchData() == "real network data";
+    RETURN;
+END
+
+TEST StubReturns DO
+  WHEN "string stub" DO
+    STUB fetchData RETURNS "mock response";
+
+    TEST THAT "returns mock value" DO
+      result = fetchData();
+      ASSERT result == "mock response", "should return mock";
+    END
+  END
+
+  WHEN "number stub" DO
+    STUB getNumber RETURNS 42.0;
+
+    TEST THAT "returns mock number" DO
+      n = getNumber();
+      ASSERT n == 42.0, "should return 42";
+    END
+  END
+
+  WHEN "unstubbed" DO
+    TEST THAT "returns real value" DO
+      result = fetchData();
+      ASSERT result == "real network data", "should return real data";
+    END
+
+    TEST THAT "returns real number" DO
+      n = getNumber();
+      ASSERT n == 99.0, "should return 99";
+    END
+  END
+END

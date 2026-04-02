@@ -1,0 +1,44 @@
+-- Test: STUB CAPTURES counts function calls.
+-- Verifies the call counter increments correctly.
+
+FN sendAlert(msg: String) RETURNS Void ->
+    -- In production this would send a network alert
+    RETURN;
+END
+
+FN logEvent(event: String) RETURNS Void ->
+    RETURN;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST StubCaptures DO
+  WHEN "single stub" DO
+    STUB sendAlert CAPTURES alertCount;
+
+    TEST THAT "counts one call" DO
+      sendAlert("fire");
+      ASSERT alertCount == 1, "one alert sent";
+    END
+
+    TEST THAT "counts multiple calls" DO
+      sendAlert("warning");
+      sendAlert("critical");
+      sendAlert("resolved");
+      ASSERT alertCount == 3, "three alerts sent";
+    END
+  END
+
+  WHEN "multiple stubs" DO
+    STUB sendAlert CAPTURES alerts;
+    STUB logEvent CAPTURES logs;
+
+    TEST THAT "tracks both independently" DO
+      sendAlert("alert1");
+      logEvent("event1");
+      logEvent("event2");
+      ASSERT alerts == 1, "one alert";
+      ASSERT logs == 2, "two log events";
+    END
+  END
+END

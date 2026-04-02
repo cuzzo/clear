@@ -1,0 +1,21 @@
+-- Test: SMASH inside TEST blocks.
+-- Verifies that SMASH compiles and emits advisory output.
+
+FN process(n: Float64) RETURNS Float64 ->
+    RETURN n * 2.0;
+END
+
+FN main() RETURNS Void ->
+    ASSERT process(5.0) == 10.0;
+    RETURN;
+END
+
+TEST SmashTest DO
+  WHEN "adversarial" DO
+    TEST THAT "process works normally" DO
+      ASSERT process(21.0) == 42.0;
+    END
+
+    SMASH process(100.0);
+  END
+END

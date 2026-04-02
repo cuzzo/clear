@@ -1,0 +1,44 @@
+-- Test: Combined TEST THAT + STUB + BENCHMARK in one file.
+-- Verifies all test framework features work together.
+
+FN multiply(a: Float64, b: Float64) RETURNS Float64 ->
+    RETURN a * b;
+END
+
+FN fetchConfig() RETURNS String ->
+    RETURN "production";
+END
+
+FN main() RETURNS Void ->
+    ASSERT multiply(3.0, 4.0) == 12.0;
+    RETURN;
+END
+
+TEST Combined DO
+  WHEN "correctness" DO
+    TEST THAT "multiply works" DO
+      ASSERT multiply(5.0, 6.0) == 30.0;
+    END
+
+    TEST THAT "multiply handles zero" DO
+      ASSERT multiply(0.0, 100.0) == 0.0;
+    END
+
+    TEST THAT "multiply handles negative" DO
+      ASSERT multiply(-2.0, 3.0) == -6.0;
+    END
+  END
+
+  WHEN "with stubs" DO
+    STUB fetchConfig RETURNS "test-mode";
+
+    TEST THAT "config is stubbed" DO
+      cfg = fetchConfig();
+      ASSERT cfg == "test-mode";
+    END
+  END
+
+  WHEN "performance" DO
+    BENCHMARK multiply(100.0, 200.0) x200;
+  END
+END
