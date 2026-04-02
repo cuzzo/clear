@@ -316,11 +316,22 @@ pub const Runtime = struct {
         };
     }
 
-    /// Heap-copy a value as a snapshot. OOM = no snapshot (snapshot_ptr stays 0).
+    /// Heap-copy a value as a snapshot. String fields are deep-copied so the
+    /// snapshot is fully self-contained (both success and error return paths
+    /// produce heap-owned strings, enabling uniform caller-side cleanup).
     pub fn captureSnapshot(self: *Runtime, comptime T: type, value: *const T) void {
         self.freeSnapshot(); // free any previous snapshot
         const copy = self.heap_allocator.create(T) catch return;
         copy.* = value.*;
+        // Deep-copy string fields to heap so snapshot owns them.
+        if (@typeInfo(T) == .@"struct") {
+            inline for (@typeInfo(T).@"struct".fields) |field| {
+                if (field.type == []const u8 or field.type == []u8) {
+                    const orig = @field(copy, field.name);
+                    @field(copy, field.name) = self.heap_allocator.dupe(u8, orig) catch orig;
+                }
+            }
+        }
         self.__error.snapshot_ptr = @intFromPtr(copy);
         self.__error.snapshot_size = @sizeOf(T);
     }

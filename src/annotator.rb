@@ -3059,8 +3059,11 @@ private
   # by walking the AST with full type information available.
 
   def compute_ownership!(program_node)
-    # Phase 1: Determine which functions return heap-promoted union data.
-    # This must be computed before analyzing callers.
+    # Phase 1: Recompute returns_promoted for ALL functions with complete type info.
+    # This catches CATCH wrappers and other cases Pass A missed.
+    recompute_returns_promoted!
+
+    # Phase 2: Determine which functions return heap-promoted union data.
     @fn_returns_heap_union = {}
     @fn_nodes.each do |name, fn|
       ret_type = fn.return_type
@@ -3073,8 +3076,141 @@ private
       end
     end
 
-    # Phase 2: Walk all variable declarations and annotate ownership.
+    # Phase 3: Propagate heap_promoted to caller variables.
+    walk_promote_callers(program_node.statements)
+
+    # Phase 4: Walk all variable declarations and annotate ownership.
     walk_ownership(program_node.statements)
+  end
+
+  # Recompute returns_promoted with complete type information.
+  # Pass A computes it incrementally during visit_ReturnNode, but misses:
+  # - CATCH wrappers (synthetic outer function doesn't visit returns)
+  # - GetField returns from promoted structs (valid.name where valid is promoted)
+  # - Transitive promotion through call chains
+  def recompute_returns_promoted!
+    # Step 1: For each function, check if ANY callee in its body has returns_promoted
+    # and the function returns the callee's result (directly or via field access).
+    @fn_nodes.each do |name, fn|
+      next if fn.returns_promoted  # already set by Pass A
+      # Skip functions with CATCH clauses that return literals (non-promoted).
+      # CATCH clauses that return snapshot fields are OK (deep-copied by captureSnapshot).
+      if fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
+        catch_returns_literal = (fn.catch_clauses + [fn.default_catch].compact).any? { |clause|
+          body = clause.is_a?(Hash) ? clause[:body] : clause
+          next false unless body.is_a?(Array)
+          body.any? { |s| s.is_a?(AST::ReturnNode) && s.value.is_a?(AST::Literal) }
+        }
+        next if catch_returns_literal
+      end
+
+      # Find return nodes in the function body
+      returns = collect_return_nodes(fn.body)
+      returns.each do |ret|
+        next unless ret.value
+
+        # Case 1: RETURN someCall() where someCall has returns_promoted
+        if ret.value.is_a?(AST::FuncCall)
+          callee = @fn_nodes[ret.value.name]
+          if callee&.returns_promoted
+            fn.returns_promoted = true
+            break
+          end
+        end
+
+        # Case 2: RETURN obj.field where obj came from a promoted call
+        if ret.value.is_a?(AST::GetField)
+          root = get_root_object(ret.value)
+          if root.is_a?(AST::Identifier)
+            root_type = root.resolved_type
+            # Check if any function returns this type with promotion
+            if @fn_nodes.any? { |_, cfn| cfn.returns_promoted && cfn.return_type.to_s.delete_prefix("!") == root_type.to_s }
+              ret_type = ret.value.respond_to?(:full_type) ? Type.new(ret.value.full_type) : nil
+              if ret_type&.string? || ret_type&.collection? || ret_type&.map?
+                fn.returns_promoted = true
+                break
+              end
+            end
+          end
+        end
+      end
+    end
+
+    # Step 2: Propagate returns_promoted transitively through call graph.
+    # Skip functions with CATCH clauses - the catch may return non-promoted data.
+    changed = true
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        fn = @fn_nodes[fn_name]
+        next unless fn
+        next if fn.returns_promoted
+        next if fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?  # CATCH can return non-promoted
+        if callees.any? { |c| @fn_nodes[c]&.returns_promoted }
+          returns = collect_return_nodes(fn.body)
+          if returns.any? { |r| r.value.is_a?(AST::FuncCall) && @fn_nodes[r.value.name]&.returns_promoted }
+            fn.returns_promoted = true
+            changed = true
+          end
+        end
+      end
+    end
+
+  end
+
+  def collect_return_nodes(body)
+    returns = []
+    body = [body] unless body.is_a?(Array)
+    body.each do |node|
+      case node
+      when AST::ReturnNode
+        returns << node
+      when AST::IfStatement
+        returns += collect_return_nodes(node.then_branch)
+        returns += collect_return_nodes(node.else_branch)
+      when AST::WhileLoop
+        b = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
+        returns += collect_return_nodes(b)
+      else
+        # Don't descend into nested FunctionDef
+      end
+    end
+    returns
+  end
+
+  def walk_promote_callers(nodes)
+    nodes = [nodes] unless nodes.is_a?(Array)
+    nodes.each do |node|
+      case node
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        node.each { |n| walk_promote_callers([n]) }
+      when AST::FunctionDef
+        walk_promote_callers(node.body)
+      when AST::VarDecl, AST::BindExpr
+        # If value is a FuncCall from a returns_promoted function, set heap_promoted
+        val = node.value
+        if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
+          node.type_info.heap_promoted = true if node.type_info
+        end
+        walk_promote_callers([val]) if val
+      when AST::IfStatement
+        walk_promote_callers(node.then_branch)
+        walk_promote_callers(node.else_branch)
+      when AST::WhileLoop
+        b = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
+        walk_promote_callers(b)
+      when AST::ForRange, AST::ForEach
+        walk_promote_callers(node.body)
+      when AST::BgBlock, AST::BgStreamBlock
+        walk_promote_callers(node.body)
+      when AST::TestBlock
+        walk_promote_callers(node.setup)
+        node.whens&.each { |w| walk_promote_callers(w.setup); w.tests&.each { |t| walk_promote_callers(t.body) } }
+      else
+        node.each_pair { |_, v| walk_promote_callers([v]) if v.is_a?(Array) } if node.respond_to?(:each_pair)
+      end
+    end
   end
 
   def walk_ownership(nodes)
