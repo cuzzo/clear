@@ -200,6 +200,11 @@ private
     # PASS 8: Auto-size fiber spawns (BG/DO blocks) from call-graph analysis.
     assign_fiber_stack_tiers!(node)
 
+    # PASS 9: Ownership analysis — build complete ownership picture in the graph.
+    # Runs after all types are resolved. Determines which variables need cleanup,
+    # which alias shared backing data, and what allocator to use.
+    compute_ownership!(node)
+
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
       node.full_type = node.statements.last.full_type
@@ -3047,6 +3052,88 @@ private
       node.each_pair { |_, v| return true if contains_self_call?(v, fn_name) }
     end
     false
+  end
+
+  # ── Pass B: Ownership Analysis ───────────────────────────────────
+  # Runs after all types are resolved. Builds a complete ownership picture
+  # by walking the AST with full type information available.
+
+  def compute_ownership!(program_node)
+    # Phase 1: Determine which functions return heap-promoted union data.
+    # This must be computed before analyzing callers.
+    @fn_returns_heap_union = {}
+    @fn_nodes.each do |name, fn|
+      ret_type = fn.return_type
+      next unless ret_type
+      ret_sym = ret_type.to_s.delete_prefix("!").to_sym
+      schema = lookup_type_schema(ret_sym)
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        @fn_returns_heap_union[name] = true if has_heap && fn.returns_promoted
+      end
+    end
+
+    # Phase 2: Walk all variable declarations and annotate ownership.
+    walk_ownership(program_node.statements)
+  end
+
+  def walk_ownership(nodes)
+    nodes = [nodes] unless nodes.is_a?(Array)
+    nodes.each do |node|
+      case node
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        node.each { |n| walk_ownership([n]) }
+      when AST::FunctionDef
+        walk_ownership(node.body)
+      when AST::VarDecl, AST::BindExpr
+        annotate_var_ownership(node)
+        walk_ownership([node.value]) if node.value
+      when AST::IfStatement
+        walk_ownership(node.then_branch)
+        walk_ownership(node.else_branch)
+      when AST::WhileLoop
+        body = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
+        walk_ownership(body)
+      when AST::ForRange, AST::ForEach
+        walk_ownership(node.body)
+      when AST::WithBlock
+        walk_ownership(node.body)
+      when AST::BgBlock, AST::BgStreamBlock
+        walk_ownership(node.body)
+      when AST::TestBlock
+        walk_ownership(node.setup)
+        node.whens.each { |w| walk_ownership(w.setup); w.tests.each { |t| walk_ownership(t.body) } }
+      else
+        # Walk child nodes generically
+        if node.respond_to?(:each_pair)
+          node.each_pair { |_, v| walk_ownership([v]) if v.is_a?(Array) || v.respond_to?(:each_pair) }
+        end
+      end
+    end
+  end
+
+  # Annotate a variable declaration with ownership metadata on the graph node.
+  def annotate_var_ownership(decl_node)
+    name = decl_node.name.to_s
+    graph_node = @og[name]
+    return unless graph_node
+
+    ti = decl_node.type_info
+    return unless ti
+
+    value = decl_node.value
+
+    # Check if the value comes from a function that returns heap-promoted union data
+    if value.is_a?(AST::FuncCall) && @fn_returns_heap_union[value.name]
+      graph_node.storage = :heap
+    end
+
+    # Check alias: value extracted from another union/collection via function call
+    if @og.aliases?(name)
+      # Variable shares backing data with another - transpiler should skip cleanup
+      graph_node.kind = :aliased
+    end
   end
 
   # ── Fiber Stack Auto-Sizing ──────────────────────────────────────

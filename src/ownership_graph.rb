@@ -21,6 +21,7 @@ class OwnershipGraph
     def live?;    state == :live; end
     def moved?;   state == :moved; end
     def dropped?; state == :dropped; end
+    def aliased?; kind == :aliased; end
   end
 
   Edge = Struct.new(:from, :to, :kind, keyword_init: true)
@@ -138,6 +139,15 @@ class OwnershipGraph
   # Does this path alias another variable's backing data? (skip cleanup)
   def aliases?(path)
     @edges.any? { |e| e.from == path && e.kind == :aliases }
+  end
+
+  # Does this variable need cleanup? (owns heap data and not aliased)
+  def needs_cleanup?(path)
+    node = @nodes[path]
+    return false unless node
+    return false if node.aliased?
+    return false unless node.live? || node.dropped?
+    node.storage == :heap
   end
 
   # Is the path moved?
