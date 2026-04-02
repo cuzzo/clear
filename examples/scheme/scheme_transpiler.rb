@@ -124,6 +124,12 @@ class SchemeTranspiler
     when AST::MoveNode
       # GIVE transfers ownership - identity in VM (GC handles lifetime)
       emit(node.value)
+    when AST::LambdaLit
+      emit_lambda_lit(node)
+    when AST::WhereOp, AST::SelectOp, AST::ReduceOp, AST::LimitOp,
+         AST::OrderByOp, AST::DistinctOp, AST::UnnestOp, AST::IndexOp
+      # Pipeline ops - handled via SMOOTH in emit_binary
+      ";; pipeline op outside pipe"
     when AST::WithBlock
       # WITH blocks - bind aliases and emit body
       bindings = []
@@ -354,6 +360,12 @@ class SchemeTranspiler
   def emit_binary(node)
     op = node.op
 
+    # SMOOTH pipe: x s> fn -> (fn x), x s> fn(a) -> (fn x a)
+    if op == :SMOOTH
+      left = emit(node.left)
+      return emit_pipe(left, node.right)
+    end
+
     # OR_RESCUE: expr OR fallback
     if op == :OR_RESCUE
       left = emit(node.left)
@@ -387,6 +399,69 @@ class SchemeTranspiler
     else
       ";; unhandled op: #{op}"
     end
+  end
+
+  def emit_pipe(left, right)
+    case right
+    when AST::Identifier
+      # x s> fn -> (fn x)
+      "(#{right.name} #{left})"
+    when AST::FuncCall
+      # x s> fn(a, b) -> (fn x a b)
+      args = right.args.map { |a| emit(a) }.join(" ")
+      "(#{right.name} #{left} #{args})"
+    when AST::WhereOp
+      expr = emit_pipeline_expr(right.expression)
+      "(list-where #{left} #{expr})"
+    when AST::SelectOp
+      expr = emit_pipeline_expr(right.expression)
+      "(list-select #{left} #{expr})"
+    when AST::ReduceOp
+      # REDUCE uses 2-arg lambda (acc, item)
+      expr = emit_pipeline_expr(right.expression, arity: 2)
+      "(list-reduce #{left} #{emit(right.initial_value)} #{expr})"
+    when AST::LimitOp
+      "(list-limit #{left} #{emit(right.count)})"
+    when AST::OrderByOp
+      "(list-orderby #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::DistinctOp
+      "(list-distinct #{left})"
+    when AST::UnnestOp
+      "(list-unnest #{left})"
+    when AST::IndexOp
+      "(list-index #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::BinaryOp
+      # Chained pipe: x s> f s> g -> (g (f x))
+      if right.op == :SMOOTH
+        intermediate = emit_pipe(left, right.left)
+        emit_pipe(intermediate, right.right)
+      else
+        "(#{emit(right)} #{left})"
+      end
+    else
+      "(#{emit(right)} #{left})"
+    end
+  end
+
+  def emit_pipeline_expr(expr, arity: 1)
+    if expr.is_a?(AST::LambdaLit)
+      emit_lambda_lit(expr)
+    else
+      # Bare expression using _ as implicit param. Wrap in lambda.
+      body = emit(expr)
+      if arity == 2
+        "(lambda (acc _) #{body})"
+      else
+        "(lambda (_) #{body})"
+      end
+    end
+  end
+
+  def emit_lambda_lit(node)
+    params = node.params.map { |p| p.is_a?(Hash) ? p[:name] : p.name }.join(" ")
+    body = node.body.map { |n| emit(n) }
+    body_expr = body.length == 1 ? body[0] : "(begin #{body.join(' ')})"
+    "(lambda (#{params}) #{body_expr})"
   end
 
   def emit_raise(node)

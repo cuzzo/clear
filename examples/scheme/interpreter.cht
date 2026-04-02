@@ -518,8 +518,100 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
+    -- Pipeline operations: special forms that call lambdas
+    IF formName == "list-where" THEN
+        -- (list-where list pred) -> filter
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        predVal = eval!(items[2], envId, pool);
+        MUTABLE filtered: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR fi IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE callArgs: Value[]@list = List[];
+                    callArgs.append(predVal);
+                    callArgs.append(srcItems[fi]);
+                    MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
+                    MATCH callResult START Value.Tco AS tco -> callResult = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                    IF isTruthy?(callResult) THEN filtered.append(srcItems[fi]); END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: filtered };
+
+    ELSE_IF formName == "list-select" THEN
+        -- (list-select list fn) -> map
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        fnVal = eval!(items[2], envId, pool);
+        MUTABLE mapped: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR mi IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE callArgs: Value[]@list = List[];
+                    callArgs.append(fnVal);
+                    callArgs.append(srcItems[mi]);
+                    MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
+                    MATCH callResult START Value.Tco AS tco -> callResult = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                    mapped.append(callResult);
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: mapped };
+
+    ELSE_IF formName == "list-reduce" THEN
+        -- (list-reduce list init fn) -> fold
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        MUTABLE acc: Value = eval!(items[2], envId, pool);
+        fnVal = eval!(items[3], envId, pool);
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR ri IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE callArgs: Value[]@list = List[];
+                    callArgs.append(fnVal);
+                    callArgs.append(acc);
+                    callArgs.append(srcItems[ri]);
+                    callResult = evalList!(callArgs, envId, pool);
+                    MATCH callResult START Value.Tco AS tco -> acc = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> acc = callResult; END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN acc;
+
+    ELSE_IF formName == "list-limit" THEN
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        limitN = toInt(getNum(eval!(items[2], envId, pool)));
+        MUTABLE limited: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR li IN (0_i64 ..< srcItems.length()) DO
+                    IF li < limitN THEN limited.append(srcItems[li]); END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: limited };
+
+    ELSE_IF formName == "list-distinct" THEN
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        MUTABLE distinct: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR di IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE found = FALSE;
+                    FOR dj IN (0_i64 ..< distinct.length()) DO
+                        IF valEqual?(srcItems[di], distinct[dj]) THEN found = TRUE; END
+                    END
+                    IF found == FALSE THEN distinct.append(srcItems[di]); END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: distinct };
+
     -- Error introspection: special forms to avoid error propagation
-    IF formName == "error?" THEN
+    ELSE_IF formName == "error?" THEN
         val = eval!(COPY items[1], envId, pool);
         RETURN boolVal(isError?(val));
 

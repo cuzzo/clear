@@ -16,8 +16,10 @@ KNOWN_PASSING = %w[
   05_move_frees
   06_heap_return
   07_loop_scope
+  08_where
   09_array
   10_concat
+  11_smooth_pipe
   12_while_loop
   13_if_else
   20_subfield_move
@@ -25,6 +27,9 @@ KNOWN_PASSING = %w[
   22_heap_subfield_move
   23_optional
   24_error_returns
+  26_reduce
+  28_limit
+  30_distinct
   31_multiowned
   32_multiowned_return
   33_multiowned_param
