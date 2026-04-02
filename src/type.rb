@@ -943,7 +943,10 @@ class Type
   # Used to determine if a union needs cleanup.
   def self.variant_has_heap?(vt)
     return false unless vt
-    return false if vt.is_a?(Hash) # inline struct variant
+    if vt.is_a?(Hash) # inline struct variant
+      # @indirect fields create *T heap pointers — non-Copy
+      return vt[:indirect_fields]&.any? || false
+    end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
     (t.collection? || t.map? || (t.array? && !t.fixed?)) rescue false

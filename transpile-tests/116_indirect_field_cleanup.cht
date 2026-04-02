@@ -1,0 +1,19 @@
+-- Test: @indirect field in union struct variant must be freed on cleanup.
+--
+-- When a union has an inline struct variant with an @indirect field,
+-- constructing that variant heap-allocates a *Value for the field.
+-- cleanup(Value) must free that pointer. Currently it doesn't.
+
+UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+
+FN makeLambda!(MUTABLE out: HashMap<Value>) RETURNS Value ->
+    out["_tmp"] = Value.Nil;
+    RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE scratch: HashMap<Value> = {};
+    v = makeLambda!(scratch);
+    -- v goes out of scope. cleanup(Value) must free the *Value body.
+    RETURN;
+END

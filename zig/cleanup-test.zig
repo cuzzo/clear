@@ -463,3 +463,28 @@ test "BUG: Pool.deinit must free struct variant fields in HashMap values" {
     pool.deinit(alloc);
     // testing.allocator detects leaks.
 }
+
+// --- Bug 6: cleanup() on union struct variant doesn't free *T (@indirect) field ---
+// NOTE: This is blocked by an annotator bug - HashMap.get() returns a by-value
+// copy of a union with @indirect fields, creating shared ownership of the *T
+// pointer. The annotator must prevent this (non-Copy type) before cleanup can
+// safely free *T fields. See annotator specs for the illegal-state test.
+
+test "BUG: cleanup(LamValue.Lambda) must free *MinValue body pointer" {
+    // A union with an inline struct variant containing body: *MinValue
+    // (the @indirect pattern). cleanup() must free the heap-allocated
+    // pointer. Currently cleanup's struct handler only handles RC fields
+    // and nested struct recursion - it skips single-pointer fields.
+    const alloc = std.testing.allocator;
+
+    const body = try alloc.create(MinValue);
+    body.* = MinValue{ .Num = 42.0 };
+
+    var val = LamValue{ .Lambda = .{
+        .params = &.{},  // empty slice, no alloc
+        .body = body,
+        .env_id = 1,
+    } };
+    CheatLib.cleanup(LamValue, alloc, &val);
+    // testing.allocator will report leak if body pointer wasn't freed.
+}
