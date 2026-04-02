@@ -1281,6 +1281,66 @@ FN main() RETURNS Void ->
     ASSERT bcEvalIn!("(define y 100)", TRUE, rootId, pool, penv) == "100", "bc-slot: define y";
     ASSERT bcEvalIn!("(+ x y)", TRUE, rootId, pool, penv) == "107", "bc-slot: x + y via slots";
 
+    -- Benchmark: tree-walk vs bytecode
+    -- Run (+ 1 2) 1000 times in each mode and compare wall-clock time.
+    MUTABLE benchIters: Int64 = 1000;
+
+    treeStart = timestampMs();
+    FOR bi IN (0_i64 ..< benchIters) DO
+        evalIn!("(+ 1 2)", TRUE, rootId, pool, penv);
+    END
+    treeEnd = timestampMs();
+    treeMs = treeEnd - treeStart;
+
+    bcStart = timestampMs();
+    FOR bi IN (0_i64 ..< benchIters) DO
+        bcEvalIn!("(+ 1 2)", TRUE, rootId, pool, penv);
+    END
+    bcEnd = timestampMs();
+    bcMs = bcEnd - bcStart;
+
+    print("Benchmark: (+ 1 2) x " + benchIters.toString());
+    print("  tree-walk: " + treeMs.toString() + "ms");
+    print("  bytecode:  " + bcMs.toString() + "ms");
+
+    -- Benchmark: nested expression
+    treeStart2 = timestampMs();
+    FOR bi IN (0_i64 ..< benchIters) DO
+        evalIn!("(if (< 1 2) (+ 3 4) (- 5 6))", TRUE, rootId, pool, penv);
+    END
+    treeEnd2 = timestampMs();
+    treeMs2 = treeEnd2 - treeStart2;
+
+    bcStart2 = timestampMs();
+    FOR bi IN (0_i64 ..< benchIters) DO
+        bcEvalIn!("(if (< 1 2) (+ 3 4) (- 5 6))", TRUE, rootId, pool, penv);
+    END
+    bcEnd2 = timestampMs();
+    bcMs2 = bcEnd2 - bcStart2;
+
+    print("Benchmark: (if (< 1 2) (+ 3 4) (- 5 6)) x " + benchIters.toString());
+    print("  tree-walk: " + treeMs2.toString() + "ms");
+    print("  bytecode:  " + bcMs2.toString() + "ms");
+
+    -- Benchmark: raw exec! with pre-assembled bytecode (no compile overhead)
+    -- Pre-assemble: loadConst 1, loadConst 2, add, halt
+    MUTABLE rawOps: Int64[]@list = List[];
+    MUTABLE rawConsts: Value[]@list = List[];
+    rawConsts.append(Value{ Number: 1.0 }); rawConsts.append(Value{ Number: 2.0 });
+    rawOps.append(1); rawOps.append(0); rawOps.append(1); rawOps.append(1); rawOps.append(10); rawOps.append(71);
+
+    rawStart = timestampMs();
+    FOR bi IN (0_i64 ..< benchIters) DO
+        exec!(rawOps, rawConsts, rootId, pool);
+    END
+    rawEnd = timestampMs();
+    rawMs = rawEnd - rawStart;
+
+    print("Benchmark: raw exec! (+ 1 2) x " + benchIters.toString());
+    print("  tree-walk:  " + treeMs.toString() + "ms");
+    print("  raw exec!:  " + rawMs.toString() + "ms");
+    IF rawMs > 0 THEN speedup = treeMs / rawMs; print("  speedup:    " + speedup.toString() + "x"); END
+
     print("All 95 interpreter tests PASSED!");
     RETURN;
 END
