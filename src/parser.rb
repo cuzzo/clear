@@ -2078,6 +2078,7 @@ class Parser
     '@service'  => { stack_size: :service  },
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
+    '@canSmash' => { can_smash: true       },
   }.freeze
 
   # Sigils valid at the start of a BG body (stack size + pinned).
@@ -2089,7 +2090,8 @@ class Parser
     '@service'  => { stack_size: :service  },
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
-    '@arena'    => { pinned: true, arena: true },  # :arena implies @pinned
+    '@arena'    => { pinned: true, arena: true },
+    '@canSmash' => { can_smash: true       },
   }.freeze
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
@@ -2099,9 +2101,10 @@ class Parser
   def parse_branch_prefix
     pinned     = false
     parallel   = false
+    can_smash  = false
     stack_size = nil
 
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size } unless
+    return { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash } unless
       current.type == :VAR_ID && DO_BRANCH_SIGILS.key?(current.value)
 
     loop do
@@ -2109,21 +2112,22 @@ class Parser
       cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
       attrs    = DO_BRANCH_SIGILS[cap_name]
       error!(tok, "Unknown branch prefix #{tok.value.inspect}. " \
-                  "Expected @micro, @standard, @large, @xl, @pinned, or @parallel") unless attrs
+                  "Expected @micro, @standard, @large, @xl, @pinned, @parallel, or @canSmash") unless attrs
 
       if attrs[:stack_size]
         error!(tok, "Duplicate stack size in branch prefix") if stack_size
         stack_size = attrs[:stack_size]
       end
-      pinned   = true if attrs[:pinned]
-      parallel = true if attrs[:parallel]
+      pinned    = true if attrs[:pinned]
+      parallel  = true if attrs[:parallel]
+      can_smash = true if attrs[:can_smash]
 
       break unless match?(:CHAR, ':')
       consume(:CHAR, ':')
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size }
+    { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash }
   end
 
   def parse_do_block
@@ -2155,9 +2159,10 @@ class Parser
     pinned     = false
     parallel   = false
     arena      = false
+    can_smash  = false
     stack_size = nil
 
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena } unless
+    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash } unless
       current.type == :VAR_ID && BG_SIGILS.key?(current.value)
 
     loop do
@@ -2170,9 +2175,10 @@ class Parser
         error!(tok, "Duplicate stack size in BG prefix") if stack_size
         stack_size = attrs[:stack_size]
       end
-      pinned   = true if attrs[:pinned]
-      parallel = true if attrs[:parallel]
-      arena    = true if attrs[:arena]
+      pinned    = true if attrs[:pinned]
+      parallel  = true if attrs[:parallel]
+      arena     = true if attrs[:arena]
+      can_smash = true if attrs[:can_smash]
 
       # More sigils chained with ':'?
       break unless match?(:CHAR, ':')
@@ -2180,7 +2186,7 @@ class Parser
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena }
+    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash }
   end
 
   def parse_bg_block
@@ -2192,7 +2198,7 @@ class Parser
     prefix = parse_bg_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena])
+    AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena], prefix[:can_smash])
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.

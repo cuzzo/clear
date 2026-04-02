@@ -59,13 +59,13 @@ FN main() RETURNS Void ->
     baseUrl = "localhost:19876";
 
     -- Fetch 3 pages concurrently using BG fibers
-    home: ~Page = BG { @large ->
+    home: ~Page = BG { @large:canSmash ->
         fetchPage(baseUrl, "/");
     };
-    about: ~Page = BG { @large ->
+    about: ~Page = BG { @large:canSmash ->
         fetchPage(baseUrl, "/about");
     };
-    blog: ~Page = BG { @large ->
+    blog: ~Page = BG { @large:canSmash ->
         fetchPage(baseUrl, "/blog");
     };
 

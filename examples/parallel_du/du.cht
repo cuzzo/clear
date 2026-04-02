@@ -24,7 +24,7 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
             size = fileSize(fullPath);
             IF size > 0 -> total += size;
         ELSE_IF prefix == "d:" THEN
-            append(futures, BG { @large ->
+            append(futures, BG { @large:canSmash ->
                 scanDir(fullPath);
             });
         END

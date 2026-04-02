@@ -159,6 +159,81 @@ RSpec.describe "Stack Tier Recommendations" do
     end
   end
 
+  describe "@canSmash validation" do
+    it "errors when BG calls @reentrant without @canSmash" do
+      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+            "    IF n < 2.0 THEN RETURN n; END\n" \
+            "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
+            "FN main() RETURNS Void ->\n" \
+            "    p: ~Float64 = BG { fib(10.0); };\n" \
+            "    result: Float64 = NEXT p; RETURN;\nEND\n"
+      expect { analyze(src) }.to raise_error(CompilerError, /Stack safety.*reentrant.*canSmash/)
+    end
+
+    it "allows @canSmash to override reentrant check" do
+      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+            "    IF n < 2.0 THEN RETURN n; END\n" \
+            "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
+            "FN main() RETURNS Void ->\n" \
+            "    p: ~Float64 = BG { @canSmash -> fib(10.0); };\n" \
+            "    result: Float64 = NEXT p; RETURN;\nEND\n"
+      expect { analyze(src) }.not_to raise_error
+    end
+
+    it "errors when user picks @micro for a function that needs @standard" do
+      src = <<~CLEAR
+        STRUCT Point { x: Float64, y: Float64 }
+        FN make() RETURNS %Point ->
+            p = Point{ x: 1.0, y: 2.0 };
+            RETURN p;
+        END
+        FN use() RETURNS Float64 ->
+            p = make();
+            RETURN p.x;
+        END
+        FN main() RETURNS Void ->
+            p: ~Float64 = BG { @micro -> use(); };
+            result: Float64 = NEXT p; RETURN;
+        END
+      CLEAR
+      expect { analyze(src) }.to raise_error(CompilerError, /Stack safety.*@micro.*too small/)
+    end
+
+    it "allows @micro:canSmash to override size check" do
+      src = <<~CLEAR
+        STRUCT Point { x: Float64, y: Float64 }
+        FN make() RETURNS %Point ->
+            p = Point{ x: 1.0, y: 2.0 };
+            RETURN p;
+        END
+        FN use() RETURNS Float64 ->
+            p = make();
+            RETURN p.x;
+        END
+        FN main() RETURNS Void ->
+            p: ~Float64 = BG { @micro:canSmash -> use(); };
+            result: Float64 = NEXT p; RETURN;
+        END
+      CLEAR
+      expect { analyze(src) }.not_to raise_error
+    end
+
+    it "does not error for auto-sized (no user override) calls" do
+      src = <<~CLEAR
+        STRUCT Point { x: Float64, y: Float64 }
+        FN make() RETURNS %Point ->
+            p = Point{ x: 1.0, y: 2.0 };
+            RETURN p;
+        END
+        FN main() RETURNS Void ->
+            p: ~Float64 = BG { make().x; };
+            result: Float64 = NEXT p; RETURN;
+        END
+      CLEAR
+      expect { analyze(src) }.not_to raise_error
+    end
+  end
+
   describe "BG block auto-sizing" do
     it "assigns computed_stack_tier to BG blocks" do
       src = <<~CLEAR

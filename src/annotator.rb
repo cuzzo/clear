@@ -2879,6 +2879,7 @@ private
       when AST::BgBlock
         calls = collect_call_names(n.body)
         n.computed_stack_tier = max_tier_for_calls(calls)
+        validate_fiber_stack!(n, calls, n.stack_size, n.can_smash)
         n.body.each { |s| traverse.call(s) }
       when AST::BgStreamBlock
         calls = collect_call_names(n.body)
@@ -2888,6 +2889,7 @@ private
         n.branches.each do |branch|
           calls = collect_call_names(branch[:body])
           branch[:computed_stack_tier] = max_tier_for_calls(calls)
+          validate_fiber_stack!(n, calls, branch[:stack_size], branch[:can_smash])
           branch[:body].each { |s| traverse.call(s) }
         end
       else
@@ -2895,6 +2897,62 @@ private
       end
     end
     traverse.call(program_node.statements)
+  end
+
+  # Validate stack sizing for a fiber spawn.
+  # Errors if:
+  #   1. User picked a size smaller than needed (without @canSmash)
+  #   2. Fiber calls a @reentrant function (without @canSmash)
+  def validate_fiber_stack!(node, call_names, user_size, can_smash)
+    return if can_smash  # user acknowledged the risk
+
+    # Check for reentrant calls (depth unknown = always risky)
+    has_reentrant = calls_reentrant?(call_names)
+    if has_reentrant
+      fn_name = reentrant_callee_name(call_names)
+      error!(node, "Stack safety: this fiber calls @reentrant function '#{fn_name}' " \
+                   "whose stack depth is unknown at compile time. " \
+                   "Add @canSmash to acknowledge the risk: BG { @canSmash -> ... }")
+    end
+
+    # Check user-specified size against computed minimum
+    return unless user_size
+    computed = max_tier_for_calls(call_names)
+    if TIER_ORDER.fetch(user_size, 0) < TIER_ORDER.fetch(computed, 0)
+      error!(node, "Stack safety: @#{user_size} (#{EffectTracker::STACK_TIER_BUDGET[user_size]} bytes) " \
+                   "is too small for this fiber. Call-graph analysis requires at least @#{computed}. " \
+                   "Either use @#{computed} or add @canSmash to override: BG { @#{user_size}:canSmash -> ... }")
+    end
+  end
+
+  # Check if any transitive callee is @reentrant.
+  def calls_reentrant?(call_names)
+    visited = Set.new
+    queue = call_names.to_a.dup
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      fn = @fn_nodes[name]
+      return true if fn&.reentrant == :reentrant
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
+    false
+  end
+
+  # Find the name of the first reentrant callee (for error messages).
+  def reentrant_callee_name(call_names)
+    visited = Set.new
+    queue = call_names.to_a.dup
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      fn = @fn_nodes[name]
+      return name if fn&.reentrant == :reentrant
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
+    nil
   end
 
   # Collect all function names called in a set of AST nodes (non-recursive into FunctionDef).
