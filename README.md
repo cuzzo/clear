@@ -55,11 +55,11 @@ FN myFunc(id: Int64, name: String) ->
    s> parseHeader OR EXIT "Invalid Header"
    s> parseBody OR EXIT "Invalid Body"
    s> fetchUser
-      s> RECOVER(DefaultUser())
+      s> RECOVER(defaultUser())
    s> saveToDb(id, name, _);
 
 CATCH Input WITH(ParseError)
-  IF __error.context = "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
+  IF __error.context == "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
   RETURN defaultPage();
 DEFAULT
   RAISE __error;
