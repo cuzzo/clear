@@ -31,8 +31,7 @@ CLEAR collapses the error space at the point of creation, not the point of handl
 
 You can optionally name a specific error within a kind:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 RAISE Transient, Timeout, "connection timed out after 30s";
 RAISE Transient, DnsFailure;
 RAISE Input, InvalidJson, "expected { at position 0";
@@ -43,8 +42,7 @@ The specific error (`Timeout`, `DnsFailure`, `InvalidJson`) is available in CATC
 
 ## Automatic Error Propagation
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 FN compute(x: Float64) RETURNS !Float64 ->
     half = divide(x, 2.0);
     quarter = divide(half, 2.0);
@@ -58,8 +56,7 @@ You don't need `OR RAISE` on every call. The compiler sees that `divide` can fai
 
 `RAISE` signals an error with a Kind, optional specific name, and optional message:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 RAISE Input, InvalidJson, "expected { at position 0";
 RAISE Transient, Timeout;
 RAISE Input, "bad data";
@@ -71,22 +68,19 @@ RAISE "something went wrong";
 
 ### OR *value* -- Provide a fallback
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 val = divide(10.0, 0.0) OR 0.0;
 ```
 
 ### OR RAISE -- Propagate explicitly
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 half = divide(x, 2.0) OR RAISE;
 ```
 
 ### OR EXIT "message" -- Annotate and propagate
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 parsed = parseHeader(data) OR EXIT "failed at header parsing";
 ```
 
@@ -94,22 +88,19 @@ Sets the error context message, then propagates. Useful in pipelines where you w
 
 ### OR PASS -- Silence the error
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 val = risky_operation() OR PASS;
 ```
 
 ### OR PRUNE -- Filter in concurrent pipelines
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 results = data s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
 ```
 
 ### RECOVER(default) -- Pipeline error recovery
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 result = fetchData(url) s> RECOVER(defaultData());
 ```
 
@@ -129,8 +120,7 @@ result = fetchData(url) s> RECOVER(defaultData());
 
 CATCH blocks go at the bottom of a function, before `END`. They match on error Kind and optionally on specific error names:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 FN fetchAndParse(url: String) RETURNS String ->
     data = fetch(url) OR RAISE;
     parsed = parse(data) OR EXIT "parse step failed";
@@ -157,8 +147,7 @@ Rules:
 
 When an error occurs inside a pipeline, the ErrorContext's `.snapshot` field captures the element that caused the failure:
 
-```clear
--- ILLUSTRATIVE
+```ruby clear illustrative
 data s> WHERE validate(_) OR PRUNE;
 ```
 
