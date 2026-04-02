@@ -676,6 +676,67 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     RETURN rootId;
 END
 
+-- ============================================================================
+-- Bytecode VM
+-- ============================================================================
+
+-- Opcodes: each instruction is an Int64 in the ops array.
+-- Operands follow the opcode inline in ops.
+--
+-- Opcode table:
+--   1  loadConst [idx]       push consts[idx]
+--   2  loadName [idx]        push env lookup of consts[idx] (symbol string)
+--   3  storeName [idx]       pop value, bind consts[idx] in current env
+--   4  pop                   discard top of stack
+--   5  dup                   duplicate top of stack
+--  10  add                   pop b, pop a, push a+b
+--  11  sub                   pop b, pop a, push a-b
+--  12  mul                   pop b, pop a, push a*b
+--  13  div                   pop b, pop a, push a/b
+--  14  neg                   pop a, push -a
+--  20  eq                    pop b, pop a, push a==b
+--  21  lt                    pop b, pop a, push a<b
+--  22  gt                    pop b, pop a, push a>b
+--  23  lte                   pop b, pop a, push a<=b
+--  24  gte                   pop b, pop a, push a>=b
+--  30  not                   pop a, push !a
+--  40  jump [offset]         unconditional jump to offset
+--  41  jumpIfFalse [offset]  pop, jump if falsy
+--  42  call [argc]           call function on stack with argc args
+--  43  tailCall [argc]       tail call (reuse frame)
+--  44  ret                   return top of stack to caller
+--  50  makeList [count]      pop count items, push list
+--  51  makeVec [count]       pop count items, push vector
+--  52  cons                  pop cdr, pop car, push pair
+--  53  car                   pop pair, push car
+--  54  cdr                   pop pair, push cdr
+--  60  makeClosure [idx]     push closure capturing consts[idx] (sub-Chunk index)
+--  61  setName [idx]         pop value, set! consts[idx] in env chain
+--  70  nativeCall [id, argc] call native fn by id with argc args
+--  71  halt                  stop execution, top of stack is result
+--  80  loadSlot [idx]        push slots[idx] (Commit 10)
+--  81  storeSlot [idx]       pop, store in slots[idx] (Commit 10)
+
+-- A compiled bytecode chunk: flat instruction array + constant pool + source lines.
+
+STRUCT Chunk {
+    ops: Int64[]@list,
+    consts: Value[]@list,
+    lines: Int64[]@list
+}
+
+-- A call frame tracks the return point and base pointer for each function call.
+
+STRUCT Frame {
+    chunkIdx: Int64,
+    returnIp: Int64,
+    baseSp: Int64,
+    envId: Id<Env>
+}
+
+-- Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
+-- Build bytecode by appending directly to ops/consts/lines arrays inline.
+
 -- Test helpers: create fresh interpreter, run input, return result string.
 
 FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String ->
@@ -810,6 +871,20 @@ FN main() RETURNS Void ->
     -- Pool capacity: verify 50k pool handles deep programs
     ASSERT evalSeqIn!(["(define deep (lambda (n) (if (= n 0) 0 (+ 1 (deep (- n 1))))))", "(deep 100)"], TRUE, rootId, pool, penv) =="100", "deep non-TCO 100";
 
-    print("All 75 interpreter tests PASSED!");
+    -- Bytecode: verify data structures
+    MUTABLE bcOps: Int64[]@list = List[];
+    MUTABLE bcConsts: Value[]@list = List[];
+    MUTABLE bcLines: Int64[]@list = List[];
+    -- Hand-assemble: loadConst 0, halt  (push 42, stop)
+    bcConsts.append(Value{ Number: 42.0 });
+    bcOps.append(1); bcLines.append(0);   -- loadConst
+    bcOps.append(0); bcLines.append(0);   -- const index 0
+    bcOps.append(71); bcLines.append(0);  -- halt
+    ASSERT bcOps.length() == 3, "ops: 3 entries";
+    ASSERT bcConsts.length() == 1, "consts: 1 entry";
+    ASSERT bcOps[0] == 1, "first op is loadConst (1)";
+    ASSERT bcOps[2] == 71, "last op is halt (71)";
+
+    print("All 79 interpreter tests PASSED!");
     RETURN;
 END
