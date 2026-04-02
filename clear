@@ -123,6 +123,14 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     end
   end
 
+  # For profile builds, copy the transpiled Zig to the profile dir
+  # so `clear doctor` can map Zig lines back to CLEAR lines via // CLR:N.
+  if profile
+    profile_dir_path = output + ".profile"
+    FileUtils.mkdir_p(profile_dir_path) if File.directory?(File.dirname(profile_dir_path))
+    FileUtils.cp(tmp_zig, File.join(profile_dir_path, "transpiled.zig")) rescue nil
+  end
+
   # Cleanup temp files
   FileUtils.rm_f(tmp_zig)
   ffi_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
@@ -286,6 +294,102 @@ when 'profile'
     puts "        View: perf report -i #{perf_data}"
   end
 
+when 'doctor'
+  profile_dir = ARGV[1]
+  error "Usage: clear doctor <profile-dir>" unless profile_dir && Dir.exist?(profile_dir)
+
+  alloc_file = File.join(profile_dir, 'alloc.txt')
+  perf_data  = File.join(profile_dir, 'perf.data')
+
+  # Find the binary (same dir as profile, minus .profile suffix)
+  binary = profile_dir.sub(/\.profile$/, '')
+  binary = nil unless File.exist?(binary.to_s)
+
+  # ── Heap Profile ──
+  if File.exist?(alloc_file)
+    lines = File.readlines(alloc_file).reject { |l| l.start_with?('#') || l.strip.empty? }
+    total_line = File.readlines(alloc_file).find { |l| l.include?('total_allocs') }
+    total = total_line ? total_line.scan(/\d+/).last.to_i : 0
+
+    sites = lines.map do |line|
+      parts = line.strip.split
+      next nil if parts.size < 6
+      addr = parts[0]
+      { addr: addr, allocs: parts[1].to_i, bytes: parts[2].to_i,
+        frees: parts[3].to_i, free_bytes: parts[4].to_i, live: parts[5].to_i }
+    end.compact.sort_by { |s| -s[:bytes] }
+
+    # Resolve addresses to source via addr2line
+    if binary
+      resolved = {}
+      addrs = sites.map { |s| s[:addr] }
+      # Batch addr2line call
+      addr_input = addrs.join("\n")
+      raw = `echo "#{addr_input}" | addr2line -e #{binary} -f 2>/dev/null`
+      lines_out = raw.split("\n")
+      addrs.each_with_index do |addr, i|
+        func = lines_out[i * 2]&.strip || "?"
+        file = lines_out[i * 2 + 1]&.strip || "?"
+        # Map Zig source to CLEAR: use saved transpiled.zig for CLR:N lookup
+        clear_line = nil
+        zig_source = File.join(profile_dir, 'transpiled.zig')
+        if file =~ /:(\d+)/ && File.exist?(zig_source)
+          zig_line = $1.to_i
+          zig_lines = @_zig_lines ||= File.readlines(zig_source)
+          (zig_line - 1).downto(0) do |li|
+            break if li < 0 || li >= zig_lines.size
+            if zig_lines[li] =~ %r{// CLR:(\d+)}
+              clear_line = $1.to_i
+              break
+            end
+          end
+        end
+        # Clean up function names: strip Zig mangling
+        func = func.sub(/.*\./, '').sub(/__anon_\d+/, '')
+        resolved[addr] = { func: func, file: file, clear_line: clear_line }
+      end
+    end
+
+    puts "=== Allocation Profile (#{total.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')} allocs) ==="
+    puts ""
+    puts "Top sites by bytes:"
+    sites.first(10).each_with_index do |s, i|
+      r = resolved&.dig(s[:addr])
+      func = r ? r[:func] : s[:addr]
+      loc = if r&.dig(:clear_line) then "(line #{r[:clear_line]})"
+            elsif r then "(#{r[:file].split('/').last})"
+            else "" end
+      avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
+      kb = s[:bytes] / 1024.0
+      leak = s[:frees] == 0 && s[:allocs] > 0 ? "  ** LEAK **" : ""
+      if kb >= 1.0
+        puts "  #{i + 1}. %-25s %6.1f KB  (%s allocs, %d bytes avg)%s" % [
+          "#{func} #{loc}", kb, s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
+      else
+        puts "  #{i + 1}. %-25s %6d B   (%s allocs, %d bytes avg)%s" % [
+          "#{func} #{loc}", s[:bytes], s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
+      end
+    end
+    puts ""
+  else
+    puts "No heap profile found at #{alloc_file}"
+  end
+
+  # ── CPU Profile ──
+  if File.exist?(perf_data)
+    puts "=== CPU Profile ==="
+    puts ""
+    # Parse perf report for top functions
+    report = `perf report -i #{perf_data} --stdio --no-children 2>/dev/null`
+    top = report.lines.select { |l| l =~ /^\s+\d+\.\d+%/ }.first(10)
+    if top.any?
+      top.each { |l| puts "  #{l.strip}" }
+    else
+      puts "  (no samples collected - program may have run too briefly)"
+    end
+    puts ""
+  end
+
 when 'help', '--help', '-h', nil
   puts <<~HELP
     CLEAR Language Compiler
@@ -295,11 +399,15 @@ when 'help', '--help', '-h', nil
       clear run <file.cht> [-- args...]
       clear test <file.cht>         Test a single file
       clear test <directory>        Test all .cht files in directory
+      clear profile <file.cht>      Build + run with profiling (heap + CPU)
+      clear doctor <profile-dir>    Analyze profile data
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
       run      Build and execute a CLEAR program
       test     Build and run tests (uses test harness with leak detection)
+      profile  Build with allocation tracking, run with perf (if available)
+      doctor   Analyze .profile/ directory, print actionable optimization advice
 
     Build flags:
       -o PATH       Output binary path (default: same dir as source)

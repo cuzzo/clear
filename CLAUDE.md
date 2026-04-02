@@ -18,6 +18,8 @@ This file provides guidance to Claude Code when working with code in this reposi
 ./clear run foo.cht -- --port 8080   # Pass args to program
 ./clear test foo.cht                 # Test single file with leak detection
 ./clear test transpile-tests/        # Test all .cht files in directory (130 tests)
+./clear profile foo.cht              # Build + run with heap/CPU profiling
+./clear doctor foo.profile/          # Analyze profile data, print optimization advice
 
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
