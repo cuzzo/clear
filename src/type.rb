@@ -483,6 +483,10 @@ class Type
     @sync == :local
   end
 
+  def always_mutable?
+    @sync == :always_mutable
+  end
+
   def raw?
     @sync == :raw
   end
@@ -1132,6 +1136,7 @@ class Type
         inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
         inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
+        inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
       end
 
       case @ownership

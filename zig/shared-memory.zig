@@ -149,6 +149,44 @@ pub fn Shared(comptime T: type) type {
 }
 
 // -------------------------------------------------------------------------
+// Interior Mutability (RefCell<T>)
+// -------------------------------------------------------------------------
+// Allows mutation through a const binding. No mutex — single-thread only.
+// In debug mode, tracks borrows and panics on overlapping mutable borrows.
+
+pub fn RefCell(comptime T: type) type {
+    return struct {
+        data: T,
+        borrow_state: i32 = 0, // 0=idle, >0=shared borrows, -1=mutable borrow
+
+        const Self = @This();
+
+        pub fn init(val: T) Self {
+            return .{ .data = val };
+        }
+
+        pub fn get(self: *Self) *T {
+            if (self.borrow_state < 0) @panic("RefCell: mutable borrow already active");
+            return &self.data;
+        }
+
+        pub fn getMut(self: *Self) *T {
+            if (self.borrow_state != 0) @panic("RefCell: borrow already active");
+            self.borrow_state = -1;
+            return &self.data;
+        }
+
+        pub fn releaseMut(self: *Self) void {
+            self.borrow_state = 0;
+        }
+
+        pub fn getConst(self: *const Self) *const T {
+            return &self.data;
+        }
+    };
+}
+
+// -------------------------------------------------------------------------
 // Concurrency Primitives (RwLocked<T>)
 // -------------------------------------------------------------------------
 

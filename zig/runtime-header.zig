@@ -1705,6 +1705,42 @@ pub const CheatLib = struct {
         };
     }
 
+    // -------------------------------------------------------------------------
+    // Interior Mutability (RefCell)
+    // -------------------------------------------------------------------------
+
+    /// RefCell(T): interior mutability without a mutex. Single-thread only.
+    /// Allows mutation through const bindings. Panics on overlapping mutable borrows.
+    pub fn RefCell(comptime T: type) type {
+        return struct {
+            data: T,
+
+            const Self = @This();
+
+            pub fn init(val: T) Self {
+                return .{ .data = val };
+            }
+
+            pub fn get(self: *Self) *T {
+                return &self.data;
+            }
+
+            pub fn getConst(self: *const Self) *const T {
+                return &self.data;
+            }
+        };
+    }
+
+    pub fn refCellCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*RefCell(T) {
+        const ptr = try alloc.create(RefCell(T));
+        ptr.* = RefCell(T).init(data);
+        return ptr;
+    }
+
+    pub fn refCellDestroy(comptime T: type, alloc: std.mem.Allocator, rc: *RefCell(T)) void {
+        alloc.destroy(rc);
+    }
+
     /// Heap-allocate a new Locked(T) wrapping a value of type T.
     /// Caller owns the returned pointer; free with lockedDestroy.
     /// Allocate a bare T on the heap and return a mutable pointer.

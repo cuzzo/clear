@@ -50,6 +50,7 @@ CLEAR has three orthogonal capability dimensions. They can be combined in any or
 | Capability | Mechanism | Cost | Use when |
 |---|---|---|---|
 | *(none)* | Affine ownership (single owner) | Zero | Default. One fiber owns the data. |
+| `@alwaysMutable` | RefCell (`*RefCell(T)`) | ~1ns (pointer deref) | Interior mutability. Mutate through const bindings. |
 | `@local` | Bare heap pointer (`*T`) | ~1ns (pointer deref) | Multiple fibers, same scheduler. No lock needed. |
 | `@locked` | Mutex (`*Locked(T)`) | ~20ns (acquire/release) | Cross-scheduler mutable access. |
 | `@writeLocked` | RwLock (`*RwLocked(T)`) | ~20ns write, ~5ns read | Cross-scheduler, read-heavy workloads. |
@@ -85,6 +86,41 @@ Invalid same-dimension combinations are compile errors:
 x = Foo{} @locked:writeLocked;    -- ERROR: duplicate sync
 x = Foo{} @shared:multiowned;     -- ERROR: duplicate ownership
 ```
+
+## Interior Mutability (@alwaysMutable)
+
+`@alwaysMutable` is CLEAR's equivalent of Rust's `RefCell<T>`. It allows field mutation through const bindings - the binding itself doesn't change, but the data it points to can be modified.
+
+```clear
+STRUCT Config { theme: String, retries: Int64 }
+
+-- const binding, mutable data
+cfg = Config{ theme: "dark", retries: 3 } @alwaysMutable;
+
+-- borrow, write, release (compiler auto-generates)
+cfg.theme = "light";
+cfg.retries = 5;
+
+-- borrow, read, release, COPY
+y = cfg.retries;
+```
+
+For scoped access (multiple mutations without repeated borrow/release):
+
+```clear
+-- ILLUSTRATIVE
+WITH cfg AS c {
+    c.theme = "light";
+    c.retries = 10;
+    update!(c);
+}
+```
+
+| Rust | CLEAR |
+|---|---|
+| `RefCell<T>` | `T @alwaysMutable` |
+| `Rc<RefCell<T>>` | `T @multiowned:alwaysMutable` |
+| `Arc<Mutex<T>>` | `T @shared:locked` |
 
 ## Why This Design Matters
 

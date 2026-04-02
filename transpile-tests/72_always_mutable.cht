@@ -1,0 +1,25 @@
+-- @alwaysMutable: interior mutability (RefCell pattern).
+-- Allows field mutation through const bindings.
+
+STRUCT Config { theme: String, retries: Int64 }
+
+FN main() RETURNS Void ->
+    -- @alwaysMutable: const binding, mutable data
+    cfg = Config{ theme: "dark", retries: 3 } @alwaysMutable;
+
+    -- Read through const binding
+    ASSERT cfg.theme == "dark", "initial read";
+    ASSERT cfg.retries == 3, "initial retries";
+
+    -- Write through const binding (interior mutability)
+    cfg.theme = "light";
+    cfg.retries = 5;
+    ASSERT cfg.theme == "light", "mutated theme";
+    ASSERT cfg.retries == 5, "mutated retries";
+
+    -- Copy a value out
+    r = cfg.retries;
+    ASSERT r == 5, "copied value";
+
+    RETURN;
+END

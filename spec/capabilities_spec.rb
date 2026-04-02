@@ -389,6 +389,48 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # @alwaysMutable (RefCell — interior mutability)
+  # ===========================================================================
+  describe "@alwaysMutable (interior mutability RefCell(T) wrapper)" do
+    it "allows field mutation through const binding" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT Cfg { val: Int64 }
+          FN f() RETURNS Void ->
+              cfg = Cfg{ val: 1 } @alwaysMutable;
+              cfg.val = 2;
+              RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "generates RefCell Zig type" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        STRUCT Cfg { val: Int64 }
+        FN f() RETURNS Void ->
+            cfg = Cfg{ val: 1 } @alwaysMutable;
+            RETURN;
+        END
+      CLEAR
+      expect(zig).to include("CheatLib.refCellCreate")
+    end
+
+    it "rejects field mutation on non-alwaysMutable const binding" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT Cfg { val: Int64 }
+          FN f() RETURNS Void ->
+              cfg = Cfg{ val: 1 };
+              cfg.val = 2;
+              RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot modify field of immutable/)
+    end
+  end
+
   describe "@writeLocked (readers-writer RwLocked(T) wrapper)" do
     def write_locked_decl(source)
       run(source).statements.find { |s| s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr) }

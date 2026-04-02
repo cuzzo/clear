@@ -843,7 +843,7 @@ private
         elsif node.name.is_a?(AST::Identifier)
           node.name.name
         elsif node.name.is_a?(AST::GetField)
-          # Auto-lock: emit inline mutex guard for one-line mutations on @locked/@writeLocked vars.
+          # Auto-lock/auto-borrow: emit inline guard for one-line mutations.
           if node.auto_lock
             var_name  = node.auto_lock[:var]
             sync      = node.auto_lock[:sync]
@@ -851,6 +851,16 @@ private
             alias_var = "__#{var_name}_inner"
             zig_var   = @do_capture_map&.dig(var_name) || var_name
             lock_expr = zig_var
+
+            if sync == :always_mutable
+              # RefCell: direct access through .data, no mutex guard
+              field = node.name.field
+              prev_locked_map = @locked_unwrap_map || {}
+              @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
+              value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
+              @locked_unwrap_map = prev_locked_map
+              return "#{zig_var}.get().#{field} = #{value};"
+            end
 
             acquire = sync == :write_locked ? "#{lock_expr}.write()" : "#{lock_expr}.acquire()"
             # Install locked unwrap map so RHS field reads also use the dereferenced pointer.
@@ -2003,6 +2013,9 @@ private
       elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
         # *Locked(T) / *RwLocked(T): auto-deref pointer, then access .data field
         "#{target_code}.ctrl.data.#{node.field}"
+      elsif ti&.always_mutable? && !is_locked_unwrapped
+        # *RefCell(T): access through .data field
+        "#{target_code}.data.#{node.field}"
       elsif @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         # SOA field-slice rewrite: _.field → __soa_field[__soa_i]
         @soa_needed_fields << node.field
@@ -2025,12 +2038,14 @@ private
       # Build from the inside out: sync layer first, then ownership layer.
       # This handles all 9 legal (ownership × sync) combinations generically.
       sync_fn   = case node.sync
-                  when :locked      then "lockedCreate"
-                  when :write_locked then "rwLockedCreate"
+                  when :locked         then "lockedCreate"
+                  when :write_locked   then "rwLockedCreate"
+                  when :always_mutable then "refCellCreate"
                   end
       sync_type = case node.sync
-                  when :locked      then "CheatLib.Locked(#{zig_base})"
-                  when :write_locked then "CheatLib.RwLocked(#{zig_base})"
+                  when :locked         then "CheatLib.Locked(#{zig_base})"
+                  when :write_locked   then "CheatLib.RwLocked(#{zig_base})"
+                  when :always_mutable then "CheatLib.RefCell(#{zig_base})"
                   end
       own_fn    = case node.ownership
                   when :shared     then "arcCreate"

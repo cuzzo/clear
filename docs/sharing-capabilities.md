@@ -57,6 +57,7 @@ WITH node AS val { print(val.left); }
 **Read-only access**: `WITH node AS val` provides **read-only** access to the inner value. `@multiowned` does not support mutation — it's shared ownership, not shared mutation. This is analogous to Rust's `Rc<T>` (not `Rc<RefCell<T>>`).
 
 **For shared mutation**, use:
+- `@alwaysMutable` — interior mutability (`RefCell`), mutate through const bindings
 - `@local` — zero-cost, single-scheduler, direct field writes
 - `@locked` — mutex-protected, cross-scheduler safe
 

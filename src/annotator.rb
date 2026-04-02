@@ -1569,9 +1569,11 @@ private
     visit(field_node)
 
     # 2. Check Mutability of the owner
+    # @alwaysMutable (RefCell) allows field mutation through const bindings.
     if field_node.target.is_a?(AST::Identifier)
       var_name = field_node.target.name
-      if current_scope.is_immutable?(var_name)
+      syn = field_node.target.symbol&.sync
+      if current_scope.is_immutable?(var_name) && syn != :always_mutable
         error!(assignment_node, "Cannot modify field of immutable struct '#{var_name}'")
       end
       mark_var_mutated(var_name)
@@ -1580,7 +1582,7 @@ private
       # assignment for inline guard emission. The borrow cannot escape because
       # field assignments are statements (not expressions).
       syn = field_node.target.symbol&.sync
-      if syn == :locked || syn == :write_locked
+      if syn == :locked || syn == :write_locked || syn == :always_mutable
         assignment_node.auto_lock = { var: var_name, sync: syn }
       end
     end

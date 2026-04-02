@@ -237,12 +237,13 @@ class Parser
   #   sync:      :locked | :write_locked | :local  (how it's synchronized)
   #   layout:    :indirect                      (where it lives — heap pointer)
   CAP_SIGIL_ATTRS = {
-    '@multiowned'  => { dim: :ownership, val: :multiowned  },
-    '@shared'      => { dim: :ownership, val: :shared      },
-    '@locked'      => { dim: :sync,      val: :locked      },
-    '@writeLocked' => { dim: :sync,      val: :write_locked },
-    '@local'       => { dim: :sync,      val: :local       },
-    '@indirect'    => { dim: :layout,    val: :indirect    },
+    '@multiowned'     => { dim: :ownership, val: :multiowned  },
+    '@shared'         => { dim: :ownership, val: :shared      },
+    '@locked'         => { dim: :sync,      val: :locked      },
+    '@writeLocked'    => { dim: :sync,      val: :write_locked },
+    '@local'          => { dim: :sync,      val: :local       },
+    '@indirect'       => { dim: :layout,    val: :indirect    },
+    '@alwaysMutable'  => { dim: :sync,      val: :always_mutable },
   }.freeze
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
@@ -270,6 +271,12 @@ class Parser
   end
 
   suffix(:VAR_ID, '@local') do |lhs|
+    token = consume(:VAR_ID)
+    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+  end
+
+  suffix(:VAR_ID, '@alwaysMutable') do |lhs|
     token = consume(:VAR_ID)
     ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
