@@ -80,26 +80,17 @@ The comparison demonstrates CLEAR's raw multi-core I/O and sharded HashMap perfo
 
 ### KV Store (Benchmark 17)
 
-`@shared:sharded(128):writeLocked` HashMap, zipfian distribution.
+`@shared:sharded(128):locked` HashMap, zipfian distribution. Mutex-based locking (not RwLock) - `clear profile` showed 15% CPU in `pthread_rwlock` overhead; switching to `@locked` (Mutex) cut total time by 20% (see [profiling case study](profiling.md)).
 
-| Workload | Rust | Go | CLEAR | vs Rust |
+| Workload | Rust (DashMap) | Go | CLEAR | vs Rust |
 |----------|------|----|-------|---------|
-| SET (1M keys) | 104ms | 1165ms | **93ms** | **-11%** |
-| GET (1M keys) | 21ms | 585ms | **16ms** | **-24%** |
-| Zipf GET | 18ms | 28ms | 17ms | -6% |
-| Mixed 80/20 | 23ms | 29ms | 72ms | +213% |
-| **Total** | **273ms** | **1821ms** | **261ms** | **-4%** |
+| SET (1M keys) | 75ms | 1217ms | **58ms** | **-22%** |
+| GET (1M keys) | 14ms | 529ms | 20ms | +43% |
+| Zipf GET | 13ms | 17ms | 24ms | +79% |
+| Mixed 80/20 | 19ms | 26ms | 26ms | +39% |
+| **Total** | **237ms** | **1806ms** | **198ms** | **-17%** |
 
-Scaling (CLEAR):
-
-| Cores | SET | GET | Zipf |
-|-------|-----|-----|------|
-| 1 | 361ms | 175ms | 186ms |
-| 2 | 365ms | 182ms | 184ms |
-| 8 | 150ms | 32ms | 50ms |
-| 32 | 179ms | **16ms** | **16ms** |
-
-GET scales 10.9x (1->32). SET scales 2x. Zipf scales 11.6x.
+CLEAR beats Rust (DashMap) by 17% total. SET is 22% faster. Mixed workloads match Go. GET/Zipf are slower than DashMap (Mutex blocks concurrent readers that DashMap's sharded RwLock allows).
 
 ### TCP KV Store (Benchmark 20) vs DragonflyDB
 
@@ -119,6 +110,6 @@ The benchmark tests I/O efficiency, not CPU parallelism.
 
 | Issue | Impact | Workaround |
 |-------|--------|------------|
-| `pthread_rwlock_t` writer starvation | Mixed workloads 3x slower | Use `:locked` (Mutex) |
+| `@writeLocked` (RwLock) overhead | 15% CPU in lock ops for write-heavy workloads | Use `@locked` (Mutex) - 20% faster total on KV store |
 | `onRootStack` FFI overhead | 400x for hot FFI loops | Use `:safe` effect for lightweight FFI |
 | LLVM inlining across yield points | Corruption when fiber stolen mid-yield | `noinline` on socket I/O and onRootStack functions |

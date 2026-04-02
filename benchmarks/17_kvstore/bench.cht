@@ -1,6 +1,6 @@
--- KV Store Benchmark — CLEAR (HashMap@shared:sharded(8):writeLocked, DashMap)
+-- KV Store Benchmark — CLEAR (HashMap@shared:sharded(128):locked, DashMap)
 --
--- Uses @shared:sharded(8):writeLocked — Arc-wrapped lock-striped HashMap.
+-- Uses @shared:sharded(128):locked — Arc-wrapped lock-striped HashMap.
 -- Each of 8 shards has its own RwLock: readers are concurrent within a shard,
 -- writers are exclusive per-shard. No WITH blocks needed — methods handle
 -- shard selection and locking internally.
@@ -56,7 +56,7 @@ END
 -- =========================================================================
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@shared:sharded(128):writeLocked = {};
+    MUTABLE map: HashMap<String>@shared:sharded(128):locked = {};
     n = 1000000;
     workers = threadCount();
     chunk = n / workers;
