@@ -1015,7 +1015,20 @@ private
       # mark restore for string-returning functions), so no heap dupe is needed.
       ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
       ret_type = Type.new(ret_type) if ret_type && !ret_type.is_a?(Type)
-      if ret_type&.needs_escape_promotion? && !ret_type&.string? && current_fn_ctx&.frame_count&.positive?
+      needs_promo = ret_type&.needs_escape_promotion? && !ret_type&.string?
+      # Union types containing string/collection variants always need promotion.
+      # The string payload could be frame-allocated by the caller.
+      is_union_with_strings = false
+      if !needs_promo && ret_type
+        union_schema = lookup_type_schema(ret_type.resolved)
+        if union_schema.is_a?(Hash) && union_schema[:kind] == :union
+          is_union_with_strings = union_schema[:variants]&.any? do |_, vt|
+            vt && Type.new(vt).string?
+          end
+          needs_promo = is_union_with_strings
+        end
+      end
+      if needs_promo && (is_union_with_strings || current_fn_ctx&.frame_count&.positive?)
         node.collection_return = true
         fn_node = @fn_nodes[current_fn_ctx&.name]
         fn_node.returns_promoted = true if fn_node
