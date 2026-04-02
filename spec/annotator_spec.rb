@@ -27,25 +27,25 @@ RSpec.describe SemanticAnnotator do
     context "when piping to a Function Call: x s> f()" do
       let(:code) {
         <<~FLUX
-          -- Define function that returns a Number
-          FN identity(n: Number) RETURNS Number ->
+          -- Define function that returns a Float64
+          FN identity(n: Float64) RETURNS Float64 ->
             RETURN n;
           END
 
-          -- Pipe 1 (Number) into identity()
+          -- Pipe 1 (Float64) into identity()
           result = 1 s> identity();
         FLUX
       }
 
       it "resolves the return type correctly based on the function signature" do
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Float64)
       end
    end
 
    context "when piping to a Function Call: x s> f()" do
      let(:code) {
         <<~FLUX
-          FN add(a: Number, b: Number) RETURNS Number ->
+          FN add(a: Float64, b: Float64) RETURNS Float64 ->
             RETURN a + b;
           END
 
@@ -55,7 +55,7 @@ RSpec.describe SemanticAnnotator do
      }
 
      it "validates arity correctly (1 implicit + 1 explicit)" do
-       expect(result).to eq(:Number)
+       expect(result).to eq(:Float64)
      end
    end
 
@@ -66,7 +66,7 @@ RSpec.describe SemanticAnnotator do
             RETURN TRUE;
           END
 
-          -- Passing Number (1) into String expectation
+          -- Passing Float64 (1) into String expectation
           result = 1 s> require_string();
         FLUX
       }
@@ -79,7 +79,7 @@ RSpec.describe SemanticAnnotator do
     context "when piping to an Identifier: x s> f" do
       let(:code) {
         <<~FLUX
-          FN identity(n: Number) RETURNS Number ->
+          FN identity(n: Float64) RETURNS Float64 ->
             RETURN n;
           END
 
@@ -89,7 +89,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "resolves the return type correctly" do
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Float64)
       end
     end
 
@@ -97,7 +97,7 @@ RSpec.describe SemanticAnnotator do
     context "when piping to an Identifier: x s> f" do
       let(:code) {
         <<~FLUX
-          FN add(a: Number, b: Number) RETURNS Number ->
+          FN add(a: Float64, b: Float64) RETURNS Float64 ->
             RETURN a + b;
           END
 
@@ -127,10 +127,10 @@ RSpec.describe SemanticAnnotator do
     context "Chained Pipelines" do
       let(:code) {
         <<~FLUX
-          FN double(n: Number) RETURNS Number -> RETURN n * 2; END
-          FN to_bool(n: Number) RETURNS Bool -> RETURN n > 10; END
+          FN double(n: Float64) RETURNS Float64 -> RETURN n * 2; END
+          FN to_bool(n: Float64) RETURNS Bool -> RETURN n > 10; END
 
-          -- Number -> Number -> Bool
+          -- Float64 -> Float64 -> Bool
           result = 5
             s> double()
             s> to_bool();
@@ -146,8 +146,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           FN s1() -> RETURN 10; END
-          FN s2(n: Number) -> RETURN n * 2; END
-          FN s3(n: Number) -> RETURN n + 5; END
+          FN s2(n: Float64) -> RETURN n * 2; END
+          FN s3(n: Float64) -> RETURN n + 5; END
 
           result = s1() s> s2 s> s3;
         FLUX
@@ -155,7 +155,7 @@ RSpec.describe SemanticAnnotator do
 
       it "resolves the entire chain correctly" do
         # This will fail if the middle step doesn't resolve/propagate its type
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Float64)
       end
     end
   end
@@ -164,7 +164,7 @@ RSpec.describe SemanticAnnotator do
     context "Exact Matches" do
       let(:code) {
         <<~FLUX
-          FN get_num() RETURNS Number ->
+          FN get_num() RETURNS Float64 ->
             RETURN 10;
           END
           x = get_num();
@@ -183,40 +183,40 @@ RSpec.describe SemanticAnnotator do
           END
         FLUX
       }
-      it "raises error when returning Number instead of String" do
+      it "raises error when returning Float64 instead of String" do
         expect { ast }.to raise_error(/Function expected/i)
       end
     end
 
     context "Safe Autocasting" do
-      context "Int64 to Number" do
+      context "Int64 to Float64" do
         let(:code) {
           <<~FLUX
-            FN get_number() RETURNS Number ->
+            FN get_number() RETURNS Float64 ->
               i : Int64 = 10;
               RETURN i;
             END
           FLUX
         }
-        it "allows returning Int64 where Number is expected" do
+        it "allows returning Int64 where Float64 is expected" do
           func_def = ast.statements.first
           return_node = func_def.body.last
 
           expect(return_node).to be_a(AST::ReturnNode) # Sanity check
-          expect(return_node.value.coerced_type).to eq(:Number)
+          expect(return_node.value.coerced_type).to eq(:Float64)
         end
       end
 
-      context "Byte to Number" do
+      context "Byte to Float64" do
         let(:code) {
           <<~FLUX
-            FN get_number() RETURNS Number ->
+            FN get_number() RETURNS Float64 ->
               b : Byte = 255;
               RETURN b;
             END
           FLUX
         }
-        it "allows returning Byte where Number is expected" do
+        it "allows returning Byte where Float64 is expected" do
           expect { ast }.not_to raise_error
         end
       end
@@ -224,8 +224,8 @@ RSpec.describe SemanticAnnotator do
       context "Fixed Array to Dynamic Array (Slice/View)" do
         let(:code) {
           <<~FLUX
-            FN get_list() RETURNS Number[] ->
-              -- [1, 2, 3] is Number[3] (Fixed)
+            FN get_list() RETURNS Float64[] ->
+              -- [1, 2, 3] is Float64[3] (Fixed)
               RETURN [1, 2, 3];
             END
           FLUX
@@ -234,7 +234,7 @@ RSpec.describe SemanticAnnotator do
           func_def = ast.statements.first
           return_node = func_def.body.last
 
-          expect(return_node.value.coerced_type).to eq(:"Number[]")
+          expect(return_node.value.coerced_type).to eq(:"Float64[]")
         end
       end
     end
@@ -280,7 +280,7 @@ RSpec.describe SemanticAnnotator do
       context "Matching Types" do
         let(:code) {
           <<~FLUX
-            FN increment(n: Number = 1) -> RETURN n + 1; END
+            FN increment(n: Float64 = 1) -> RETURN n + 1; END
           FLUX
         }
         it "allows correct default values" do
@@ -291,8 +291,8 @@ RSpec.describe SemanticAnnotator do
       context "Mismatching Types" do
         let(:code) {
           <<~FLUX
-            -- n expects Number, default is String
-            FN increment(n: Number = "1") -> RETURN n; END
+            -- n expects Float64, default is String
+            FN increment(n: Float64 = "1") -> RETURN n; END
           FLUX
         }
         it "raises error when default value type mismatch" do
@@ -305,9 +305,9 @@ RSpec.describe SemanticAnnotator do
       context "implicit Return" do
         let(:code) {
           <<~FLUX
-            FN ambig(n: Number) ->
+            FN ambig(n: Float64) ->
               IF n > 10 THEN
-                RETURN 1;      -- Number
+                RETURN 1;      -- Float64
               ELSE
                 RETURN "Low";  -- String
               END
@@ -323,7 +323,7 @@ RSpec.describe SemanticAnnotator do
       context "explicit Any Return" do
         let(:code) {
           <<~FLUX
-            FN generic(n: Number) RETURNS Any ->
+            FN generic(n: Float64) RETURNS Any ->
               IF n > 10 THEN RETURN 1; ELSE RETURN "Low"; END
             END
           FLUX
@@ -338,7 +338,7 @@ RSpec.describe SemanticAnnotator do
       context "missing suffix" do
         let(:code) {
           <<~FLUX
-            FN update(MUTABLE x: Number) ->
+            FN update(MUTABLE x: Float64) ->
               x = x + 1;
               RETURN x;
             END
@@ -352,7 +352,7 @@ RSpec.describe SemanticAnnotator do
       context "matching suffix" do
         let(:code) {
           <<~FLUX
-            FN update!(MUTABLE x: Number) ->
+            FN update!(MUTABLE x: Float64) ->
               x = x + 1;
               RETURN x;
             END
@@ -392,7 +392,7 @@ RSpec.describe SemanticAnnotator do
     context "Arity Checks" do
       let(:base_code) {
         <<~FLUX
-          FN add(a: Number, b: Number) RETURNS Number ->
+          FN add(a: Float64, b: Float64) RETURNS Float64 ->
             RETURN a + b;
           END
         FLUX
@@ -410,14 +410,14 @@ RSpec.describe SemanticAnnotator do
 
       it "succeeds with the exact number of arguments" do
         code = base_code + "add(1, 2);"
-        expect(get_last_type(code)).to eq(:Number)
+        expect(get_last_type(code)).to eq(:Float64)
       end
     end
 
     context "Default Arguments" do
       let(:base_code) {
         <<~FLUX
-          FN increment(n: Number, by: Number = 1) RETURNS Number ->
+          FN increment(n: Float64, by: Float64 = 1) RETURNS Float64 ->
             RETURN n + by;
           END
         FLUX
@@ -426,27 +426,27 @@ RSpec.describe SemanticAnnotator do
       it "accepts call using the default value (arity lower bound)" do
         code = base_code + "increment(10);"
         expect { run(code) }.not_to raise_error
-        expect(get_last_type(code)).to eq(:Number)
+        expect(get_last_type(code)).to eq(:Float64)
       end
 
       it "accepts call overriding the default value (arity upper bound)" do
         code = base_code + "increment(10, 5);"
         expect { run(code) }.not_to raise_error
-        expect(get_last_type(code)).to eq(:Number)
+        expect(get_last_type(code)).to eq(:Float64)
       end
     end
 
     context "Auto-casting Arguments" do
-      context "Number -> Int64" do
+      context "Float64 -> Int64" do
         let(:code) {
           <<~FLUX
             FN process_int(i: Int64) RETURNS Int64 -> RETURN i; END
-            n : Number = 100;
+            n : Float64 = 100;
             process_int(n);
           FLUX
         }
 
-        it "accepts a Number passed into an Int64 parameter" do
+        it "accepts a Float64 passed into an Int64 parameter" do
           expect(result).to eq(:Int64)
 
           # TODO: Not yet supported
@@ -457,16 +457,16 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "Byte -> Number" do
+      context "Byte -> Float64" do
         let(:code) {
           <<~FLUX
-            FN process_num(n: Number) RETURNS Number -> RETURN n; END
+            FN process_num(n: Float64) RETURNS Float64 -> RETURN n; END
             b : Byte = 255;
             process_num(b);
           FLUX
         }
 
-        it "accepts a Byte passed into a Number parameter" do
+        it "accepts a Byte passed into a Float64 parameter" do
           expect { ast }.not_to raise_error
         end
       end
@@ -474,8 +474,8 @@ RSpec.describe SemanticAnnotator do
       context "Fixed Array -> Dynamic Array" do
         let(:code) {
           <<~FLUX
-            FN sum_list(list: Number[]) RETURNS Number -> RETURN 0; END
-            fixed : Number[3] = [1, 2, 3];
+            FN sum_list(list: Float64[]) RETURNS Float64 -> RETURN 0; END
+            fixed : Float64[3] = [1, 2, 3];
             sum_list(fixed);
           FLUX
         }
@@ -484,14 +484,14 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "Incompat types: String -> Number" do
+      context "Incompat types: String -> Float64" do
         let(:code) {
           <<~FLUX
-            FN calc(n: Number) -> RETURN n; END
+            FN calc(n: Float64) -> RETURN n; END
             calc("hello");
           FLUX
         }
-        it "errors when types are incompatible (e.g. String -> Number)" do
+        it "errors when types are incompatible (e.g. String -> Float64)" do
           expect { ast }.to raise_error(/argument \d+ expects/)
         end
       end
@@ -500,8 +500,8 @@ RSpec.describe SemanticAnnotator do
     context "String Handling (Heap vs Stack)" do
       let(:base_code) {
         <<~FLUX
-          -- expects Number[]
-          FN print_args(args: Number[]) RETURNS Number ->
+          -- expects Float64[]
+          FN print_args(args: Float64[]) RETURNS Float64 ->
              RETURN 1;
           END
         FLUX
@@ -528,7 +528,7 @@ RSpec.describe SemanticAnnotator do
     context "Mutability Safety" do
       let(:mutable_func) {
         <<~FLUX
-          FN modify!(MUTABLE x: Number) ->
+          FN modify!(MUTABLE x: Float64) ->
             x = x + 1;
           END
         FLUX
@@ -560,7 +560,7 @@ RSpec.describe SemanticAnnotator do
     context "Alias Overlap" do
       let(:mutable_func) {
         <<~FLUX
-          STRUCT User { id: Number }
+          STRUCT User { id: Float64 }
 
           -- This doesn't actually work, but it's just for testing aliasing...
           FN swap!(MUTABLE u1: User, MUTABLE u2: User) ->
@@ -599,7 +599,7 @@ RSpec.describe SemanticAnnotator do
 
       it "resolves to the inferred return type" do
         code = <<~FLUX
-          FN get_inferred() -> RETURN 10; END -- Infers Number
+          FN get_inferred() -> RETURN 10; END -- Infers Float64
           get_inferred();
         FLUX
         expect(get_last_type(code)).to eq(:Int64)
@@ -620,8 +620,8 @@ RSpec.describe SemanticAnnotator do
     let(:struct_def) {
       <<~FLUX
         STRUCT Point {
-          x: Number,
-          y: Number
+          x: Float64,
+          y: Float64
         }
       FLUX
     }
@@ -667,7 +667,7 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "when types mismatch (Number = String)" do
+      context "when types mismatch (Float64 = String)" do
         let(:code) {
           <<~FLUX
             MUTABLE x = 10;
@@ -680,10 +680,10 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
-      context "when autocasting is safe (Number = Byte)" do
+      context "when autocasting is safe (Float64 = Byte)" do
         let(:code) {
           <<~FLUX
-            MUTABLE x : Number = 10;
+            MUTABLE x : Float64 = 10;
             b : Byte = 255;
             x = b;
           FLUX
@@ -691,7 +691,7 @@ RSpec.describe SemanticAnnotator do
 
         it "succeeds" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:Number)
+          expect(result).to eq(:Float64)
         end
       end
     end
@@ -810,10 +810,10 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Autocasting Assignments" do
-      context "when assigning Byte to Number variable" do
+      context "when assigning Byte to Float64 variable" do
         let(:code) {
           <<~FLUX
-            MUTABLE n : Number = 0;
+            MUTABLE n : Float64 = 0;
             b : Byte = 255;
             n = b;
           FLUX
@@ -824,21 +824,21 @@ RSpec.describe SemanticAnnotator do
           assignment = ast.statements.last
 
           # Assuming AssignmentNode has a .value accessor for the RHS
-          expect(assignment.value.coerced_type).to eq(:Number)
+          expect(assignment.value.coerced_type).to eq(:Float64)
         end
       end
 
       context "when assigning Fixed Array to Dynamic Array variable" do
          let(:code) {
            <<~FLUX
-             MUTABLE list : Number[] = [];
-             list = [1, 2, 3]; -- Literal is Number[3]
+             MUTABLE list : Float64[] = [];
+             list = [1, 2, 3]; -- Literal is Float64[3]
            FLUX
          }
 
          it "tags the array literal with the coerced slice type" do
            assignment = ast.statements.last
-           expect(assignment.value.coerced_type).to eq(:"Number[]")
+           expect(assignment.value.coerced_type).to eq(:"Float64[]")
          end
       end
     end
@@ -846,39 +846,39 @@ RSpec.describe SemanticAnnotator do
 
   describe "Variable Declarations (visit_VarDecl)" do
     context "Implicit Autocasting (Primitives)" do
-      context "when assigning Int64 to Number" do
+      context "when assigning Int64 to Float64" do
         let(:code) {
           <<~FLUX
-            -- 100 is treated as Number or Int64 depending on context
+            -- 100 is treated as Float64 or Int64 depending on context
             -- Here we test explicit Int64 literal if supported, or just flow
-            x : Number = 100;
+            x : Float64 = 100;
           FLUX
         }
         it "succeeds" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:Number)
+          expect(result).to eq(:Float64)
         end
       end
 
-      context "when assigning Byte to Number" do
+      context "when assigning Byte to Float64" do
         let(:code) {
           <<~FLUX
             b : Byte = 255;
-            x : Number = b;
+            x : Float64 = b;
           FLUX
         }
         it "succeeds" do
           var_decl = ast.statements.last
           value_node = var_decl.value # This is the VarAccess('b')
 
-          expect(value_node.coerced_type).to eq(:Number)
+          expect(value_node.coerced_type).to eq(:Float64)
         end
       end
 
-      context "when types are incompatible (String -> Number)" do
+      context "when types are incompatible (String -> Float64)" do
         let(:code) {
           <<~FLUX
-            x : Number = "hello";
+            x : Float64 = "hello";
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -891,13 +891,13 @@ RSpec.describe SemanticAnnotator do
       context "Exact Size Match" do
         let(:code) {
           <<~FLUX
-            -- [1, 2, 3] is inferred as Number[3]
-            list : Number[3] = [1, 2, 3];
+            -- [1, 2, 3] is inferred as Float64[3]
+            list : Float64[3] = [1, 2, 3];
           FLUX
         }
         it "succeeds" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:"Number[3]")
+          expect(result).to eq(:"Float64[3]")
         end
       end
 
@@ -905,7 +905,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Assigning size 2 to capacity 3
-            list : Number[3] = [1, 2];
+            list : Float64[3] = [1, 2];
           FLUX
         }
         it "succeeds (fills remaining with default/garbage)" do
@@ -916,7 +916,7 @@ RSpec.describe SemanticAnnotator do
       context "Oversized Assignment (Size > Capacity)" do
         let(:code) {
           <<~FLUX
-            list : Number[1] = [1.0, 2.0, 3.0];
+            list : Float64[1] = [1.0, 2.0, 3.0];
           FLUX
         }
         it "raises a Fixed Array Size Mismatch error" do
@@ -927,8 +927,8 @@ RSpec.describe SemanticAnnotator do
       context "Empty List to Fixed Array" do
         let(:code) {
           <<~FLUX
-            -- Any[] -> Number[5]
-            list : Number[5] = [];
+            -- Any[] -> Float64[5]
+            list : Float64[5] = [];
           FLUX
         }
         it "succeeds (safe autocast from empty)" do
@@ -939,21 +939,21 @@ RSpec.describe SemanticAnnotator do
       context "Fixed Stack Array to Dynamic View (Slice)" do
         let(:code) {
           <<~FLUX
-            -- Number[3] -> Number[]
-            list : Number[] = [1, 2, 3];
+            -- Float64[3] -> Float64[]
+            list : Float64[] = [1, 2, 3];
           FLUX
         }
         it "succeeds (Slice Coercion)" do
           var_decl = ast.statements.last
-          expect(var_decl.value.coerced_type).to eq(:"Number[]")
+          expect(var_decl.value.coerced_type).to eq(:"Float64[]")
         end
       end
 
       context "Fixed Stack Array to Wildcard View" do
         let(:code) {
           <<~FLUX
-            -- Number[3] -> Number[*]
-            list : Number[*] = [1, 2, 3];
+            -- Float64[3] -> Float64[*]
+            list : Float64[*] = [1, 2, 3];
           FLUX
         }
         it "succeeds" do
@@ -964,8 +964,8 @@ RSpec.describe SemanticAnnotator do
       context "Heap Array to Dynamic View" do
         let(:code) {
           <<~FLUX
-            -- %[...] creates Heap Array (Number[])
-            list : Number[] = %[1, 2, 3];
+            -- %[...] creates Heap Array (Float64[])
+            list : Float64[] = %[1, 2, 3];
           FLUX
         }
         it "succeeds" do
@@ -976,8 +976,8 @@ RSpec.describe SemanticAnnotator do
       context "Array Content Type Mismatch" do
         let(:code) {
           <<~FLUX
-            -- String[3] -> Number[3]
-            list : Number[3] = ["a", "b", "c"];
+            -- String[3] -> Float64[3]
+            list : Float64[3] = ["a", "b", "c"];
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -988,8 +988,8 @@ RSpec.describe SemanticAnnotator do
       context "Nested Array Mismatch" do
         let(:code) {
           <<~FLUX
-            -- Trying to assign Number[][1] to Number[]
-            list : Number[] = [[1]];
+            -- Trying to assign Float64[][1] to Float64[]
+            list : Float64[] = [[1]];
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -1003,8 +1003,8 @@ RSpec.describe SemanticAnnotator do
     let(:struct_def) {
       <<~FLUX
         STRUCT Point {
-          x: Number,
-          y: Number
+          x: Float64,
+          y: Float64
         }
 
         STRUCT User {
@@ -1033,7 +1033,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       context "Safe Autocasting" do
-        context "Byte/Int64 -> Number Field" do
+        context "Byte/Int64 -> Float64 Field" do
           let(:code) {
             struct_def + <<~FLUX
               b : Byte = 255;
@@ -1052,10 +1052,10 @@ RSpec.describe SemanticAnnotator do
             #x_field = struct_lit.fields["x"]
             #y_field = struct_lit.fields["y"]
 
-            ## 10 (Int64) -> Number
-            #expect(x_field.value.coerced_type).to eq(:Number)
-            ## b (Byte) -> Number
-            #expect(y_field.value.coerced_type).to eq(:Number)
+            ## 10 (Int64) -> Float64
+            #expect(x_field.value.coerced_type).to eq(:Float64)
+            ## b (Byte) -> Float64
+            #expect(y_field.value.coerced_type).to eq(:Float64)
           end
         end
       end
@@ -1107,13 +1107,13 @@ RSpec.describe SemanticAnnotator do
       context "Type Mismatch on Field" do
         let(:code) {
           struct_def + <<~FLUX
-            -- 'x' expects Number, got String
+            -- 'x' expects Float64, got String
             p = Point{ x: "bad", y: 2 };
           FLUX
         }
 
         it "raises a Type Mismatch error" do
-          expect { ast }.to raise_error(/Field 'x' expected Number/i)
+          expect { ast }.to raise_error(/Field 'x' expected Float64/i)
         end
       end
 
@@ -1139,7 +1139,7 @@ RSpec.describe SemanticAnnotator do
             list = [1, 2, 3];
           FLUX
         }
-        it "infers the type based on the first element (Number[3])" do
+        it "infers the type based on the first element (Float64[3])" do
           expect { ast }.not_to raise_error
           expect(result).to eq(:"Int64[3]")
         end
@@ -1148,8 +1148,8 @@ RSpec.describe SemanticAnnotator do
       context "Nested Lists (Matrix)" do
         let(:code) {
           <<~FLUX
-            -- [1, 2] is Number[2]
-            -- So outer list is Number[2] of size 2 -> Number[2][2]
+            -- [1, 2] is Float64[2]
+            -- So outer list is Float64[2] of size 2 -> Float64[2][2]
             matrix = [[1, 2], [3, 4]];
           FLUX
         }
@@ -1188,7 +1188,7 @@ RSpec.describe SemanticAnnotator do
       context "Mixed Nested Types" do
         let(:code) {
           <<~FLUX
-            -- First item is Number[1], Second is String[1]
+            -- First item is Float64[1], Second is String[1]
             list = [[1], ["A"]];
           FLUX
         }
@@ -1200,12 +1200,12 @@ RSpec.describe SemanticAnnotator do
       context "Nested Array Size Mismatch (Ragged Arrays)" do
         let(:code) {
           <<~FLUX
-            -- First item is Number[2], Second is Number[1]
-            -- In CHEAT, arrays are rectangular. Types Number[2] and Number[1] are distinct.
+            -- First item is Float64[2], Second is Float64[1]
+            -- In CHEAT, arrays are rectangular. Types Float64[2] and Float64[1] are distinct.
             list = [[1, 2], [3]];
           FLUX
         }
-        it "raises error because Number[2] != Number[1]" do
+        it "raises error because Float64[2] != Float64[1]" do
           expect { ast }.to raise_error(/List literal contains mixed types/)
         end
       end
@@ -1265,7 +1265,7 @@ RSpec.describe SemanticAnnotator do
           FN foo() RETURNS Void ->
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
-              MUTABLE vals: Number[]@list = [];
+              MUTABLE vals: Float64[]@list = [];
               append(vals, 1.0);
               i = i + 1_i64;
             END
@@ -1281,7 +1281,7 @@ RSpec.describe SemanticAnnotator do
       it "does NOT mark loop as safe when outer-scope list is appended" do
         src = <<~CLEAR
           FN foo() RETURNS Void ->
-            MUTABLE all: Number[]@list = [];
+            MUTABLE all: Float64[]@list = [];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
               append(all, 1.0);
@@ -1326,7 +1326,7 @@ RSpec.describe SemanticAnnotator do
         # Returning a @list from that function is dangerous: the frame mark rewinds on
         # exit, invalidating the arena buffer.
         src = <<~CLEAR
-          STRUCT Chunk5 { a: Number, b: Number, c: Number, d: Number, e: Number }
+          STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
           STRUCT BigS {
             c1: Chunk5, c2: Chunk5, c3: Chunk5, c4: Chunk5, c5: Chunk5,
             c6: Chunk5, c7: Chunk5, c8: Chunk5, c9: Chunk5, c10: Chunk5,
@@ -1335,7 +1335,7 @@ RSpec.describe SemanticAnnotator do
             c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
             c26: Chunk5
           }
-          FN buildList() RETURNS Number[]@list ->
+          FN buildList() RETURNS Float64[]@list ->
             zero: Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
             big: BigS = BigS{
               c1: zero, c2: zero, c3: zero, c4: zero, c5: zero,
@@ -1345,7 +1345,7 @@ RSpec.describe SemanticAnnotator do
               c21: zero, c22: zero, c23: zero, c24: zero, c25: zero,
               c26: zero
             };
-            MUTABLE vals: Number[]@list = [];
+            MUTABLE vals: Float64[]@list = [];
             append(vals, big.c1.a);
             RETURN vals;
           END
@@ -1359,8 +1359,8 @@ RSpec.describe SemanticAnnotator do
 
       it "sets collection_return for list returns even without other frame usage" do
         src = <<~CLEAR
-          FN buildList() RETURNS Number[]@list ->
-            MUTABLE vals: Number[]@list = [];
+          FN buildList() RETURNS Float64[]@list ->
+            MUTABLE vals: Float64[]@list = [];
             append(vals, 1.0);
             RETURN vals;
           END
@@ -1431,8 +1431,8 @@ RSpec.describe SemanticAnnotator do
     let(:base_funcs) {
       <<~FLUX
         STRUCT Point {
-          x: Number,
-          y: Number
+          x: Float64,
+          y: Float64
         }
 
         -- "Method" to add two points: add(p1, p2)
@@ -1441,12 +1441,12 @@ RSpec.describe SemanticAnnotator do
         END
 
         -- "Method" to get X coordinate: get_x(p)
-        FN get_x(p: Point) RETURNS Number ->
+        FN get_x(p: Point) RETURNS Float64 ->
           RETURN p.x;
         END
 
-        -- "Method" to convert Number to List: to_list(n)
-        FN to_list(n: Number) RETURNS Number[] ->
+        -- "Method" to convert Float64 to List: to_list(n)
+        FN to_list(n: Float64) RETURNS Float64[] ->
           RETURN [n];
         END
       FLUX
@@ -1477,15 +1477,15 @@ RSpec.describe SemanticAnnotator do
             p2 = Point{ x: 3, y: 4 };
 
             -- 1. p1.add(p2)    -> Point
-            -- 2. .get_x()      -> Number
-            -- 3. .to_list()    -> Number[]
+            -- 2. .get_x()      -> Float64
+            -- 3. .to_list()    -> Float64[]
             res = p1.add(p2).get_x().to_list();
           FLUX
         }
 
         it "resolves chains by propagating types" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:"Number[]")  # to_list returns dynamic array, always of size 1
+          expect(result).to eq(:"Float64[]")  # to_list returns dynamic array, always of size 1
         end
       end
     end
@@ -1507,7 +1507,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           base_funcs + <<~FLUX
             p1 = Point{ x: 1, y: 2 };
-            -- add expects (Point, Point). We pass (Point, Number)
+            -- add expects (Point, Point). We pass (Point, Float64)
             p1.add(5);
           FLUX
         }
@@ -1555,7 +1555,7 @@ RSpec.describe SemanticAnnotator do
           x = 100;
 
           -- Define a lambda that explicitly captures 'x'
-          FN getter() USE(x) RETURNS Number ->
+          FN getter() USE(x) RETURNS Float64 ->
             RETURN x;
           END
 
@@ -1565,7 +1565,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "resolves the return type correctly via the captured variable" do
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Float64)
       end
     end
 
@@ -1576,7 +1576,7 @@ RSpec.describe SemanticAnnotator do
           b = 20;
 
           -- Capture both 'a' and 'b'
-          FN adder() USE(a, b) RETURNS Number ->
+          FN adder() USE(a, b) RETURNS Float64 ->
             RETURN a + b;
           END
 
@@ -1585,7 +1585,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "successfully resolves types for all captured variables" do
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Float64)
       end
     end
 
@@ -1595,7 +1595,7 @@ RSpec.describe SemanticAnnotator do
           scalar = 5;
 
           -- 'n' is a parameter, 'scalar' is an upvalue
-          FN multiplier(n: Number) USE(scalar) RETURNS Number ->
+          FN multiplier(n: Float64) USE(scalar) RETURNS Float64 ->
             RETURN n * scalar;
           END
 
@@ -1604,7 +1604,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "resolves operations between parameters and upvalues" do
-        expect(result).to eq(:Number)
+        expect(result).to eq(:Float64)
       end
     end
 
@@ -1629,7 +1629,7 @@ RSpec.describe SemanticAnnotator do
           secret = 42;
 
           -- We forgot USE(secret)
-          FN leak() RETURNS Number ->
+          FN leak() RETURNS Float64 ->
             RETURN secret;
           END
         FLUX
@@ -1704,8 +1704,8 @@ RSpec.describe SemanticAnnotator do
 
     context "Polymorphic Conversion (toFloat)" do
       let(:code) { 'f = "12.5".toFloat();' }
-      it "resolves to Number" do
-        expect(result).to eq(:Number)
+      it "resolves to Float64" do
+        expect(result).to eq(:Float64)
       end
     end
 
@@ -1759,7 +1759,7 @@ RSpec.describe SemanticAnnotator do
       it "promotes a variable when it is returned (Pass-by-Reference requirement)" do
         expect_escape("x")
         run(<<~FLUX)
-          STRUCT Config { id: Number }
+          STRUCT Config { id: Float64 }
           FN create() RETURNS %Config ->
             x = Config { id: 1 };
             RETURN x; -- x must be on heap to survive return
@@ -1767,14 +1767,14 @@ RSpec.describe SemanticAnnotator do
         FLUX
       end
 
-      it "does NOT promote primitives (Number)" do
+      it "does NOT promote primitives (Float64)" do
         # Primitives are copied, so mark_escaped guards against them,
         # or the annotator shouldn't even call it.
         # Your Scope code handles the guard, so we can expect the call OR check the logic.
         # But generally, we expect NO promotion to heap storage.
         expect_no_escape
         run(<<~FLUX)
-          FN get_num() RETURNS Number ->
+          FN get_num() RETURNS Float64 ->
             x = 10;
             RETURN x;
           END
@@ -1786,7 +1786,7 @@ RSpec.describe SemanticAnnotator do
       it "promotes a variable assigned to a Global" do
         expect_escape("local")
         run(<<~FLUX)
-          STRUCT Item { id: Number, name: Byte[100] }
+          STRUCT Item { id: Float64, name: Byte[100] }
           STRUCT Container { item: %Item }
 
           MUTABLE g: %Container = Container { item: Item{id:0, name: [0]} }; -- Global Heap
@@ -1801,7 +1801,7 @@ RSpec.describe SemanticAnnotator do
       it "does NOT promote when assigning to a local stack variable" do
         expect_no_escape
         run(<<~FLUX)
-          STRUCT Item { id: Number }
+          STRUCT Item { id: Float64 }
           FN test() ->
             MUTABLE a = Item { id: 1 };
             b = Item { id: 2 };
@@ -1815,11 +1815,11 @@ RSpec.describe SemanticAnnotator do
       it "promotes a variable when it is captured by USE" do
         expect_escape("x")
         run(<<~FLUX)
-          STRUCT Node { id: Number }
+          STRUCT Node { id: Float64 }
           FN main() ->
             x = Node { id: 1 };
             -- x is captured by lambda, must be on heap
-            f = %(n: Number) USE(x) -> x.id + n;
+            f = %(n: Float64) USE(x) -> x.id + n;
             RETURN;
           END
         FLUX
@@ -1828,21 +1828,21 @@ RSpec.describe SemanticAnnotator do
 
     context "Multi-dimensional Arrays" do
       it "resolves a 2D array literal correctly" do
-        code = "MUTABLE matrix: Number[][] = [[1.0, 2.0], [3.0, 4.0]];"
+        code = "MUTABLE matrix: Float64[][] = [[1.0, 2.0], [3.0, 4.0]];"
         local_ast = run(code)
-        expect(local_ast.statements.last.value.full_type.to_s).to eq("Number[2][2]")
+        expect(local_ast.statements.last.value.full_type.to_s).to eq("Float64[2][2]")
       end
 
       it "resolves a 3D array literal correctly" do
-        code = "MUTABLE cube: Number[][][] = [[[1.0]]];"
+        code = "MUTABLE cube: Float64[][][] = [[[1.0]]];"
         local_ast = run(code)
-        expect(local_ast.statements.last.value.full_type.to_s).to eq("Number[1][1][1]")
+        expect(local_ast.statements.last.value.full_type.to_s).to eq("Float64[1][1][1]")
       end
 
       it "fails when nested array types are inconsistent" do
         expect {
           run(<<~FLUX)
-            MUTABLE x: Number[][] = [[1, 2], ["a", "b"]];
+            MUTABLE x: Float64[][] = [[1, 2], ["a", "b"]];
           FLUX
         }.to raise_error(/List literal contains mixed types/i)
       end
@@ -1862,12 +1862,12 @@ RSpec.describe SemanticAnnotator do
       signature[:return_strategy]
     end
 
-    let(:preamble) { "STRUCT Config { id: Number }" }
+    let(:preamble) { "STRUCT Config { id: Float64 }" }
 
     context "Register Return (Fast)" do
-      it "uses :register for Primitives (Number)" do
+      it "uses :register for Primitives (Float64)" do
         code = <<~FLUX
-          FN get_num() RETURNS Number -> RETURN 1; END
+          FN get_num() RETURNS Float64 -> RETURN 1; END
         FLUX
         expect(get_strategy(code)).to eq(:register)
       end
@@ -1906,7 +1906,7 @@ RSpec.describe SemanticAnnotator do
 
       it "uses :destination_pass for Fixed Arrays" do
         code = <<~FLUX
-          FN get_vec() RETURNS Number[3] -> RETURN [1, 2, 3]; END
+          FN get_vec() RETURNS Float64[3] -> RETURN [1, 2, 3]; END
         FLUX
         expect(get_strategy(code)).to eq(:destination_pass)
       end
@@ -1966,18 +1966,18 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "resolves .start to Number" do
+      it "resolves .start to Float64" do
         start_decl = ast.statements[-2]
-        expect(start_decl.resolved_type).to eq(:Number)
+        expect(start_decl.resolved_type).to eq(:Float64)
       end
 
-      it "resolves .end to Number" do
+      it "resolves .end to Float64" do
         end_decl = ast.statements.last
-        expect(end_decl.resolved_type).to eq(:Number)
+        expect(end_decl.resolved_type).to eq(:Float64)
       end
     end
 
-    context "range with Int64 bounds (auto-coerced to Number)" do
+    context "range with Int64 bounds (auto-coerced to Float64)" do
       let(:code) { "r = (0_i64..<5_i64);" }
 
       it "resolves to :Range without error" do
@@ -1985,9 +1985,9 @@ RSpec.describe SemanticAnnotator do
         expect(result).to eq(:Range)
       end
 
-      it "coerces Int64 start to Number" do
+      it "coerces Int64 start to Float64" do
         range_node = ast.statements.last.value
-        expect(range_node.start.coerced_type).to eq(:Number)
+        expect(range_node.start.coerced_type).to eq(:Float64)
       end
     end
 
@@ -2030,7 +2030,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "PUB FN" do
-      let(:code) { "PUB FN foo() RETURNS Number -> RETURN 1; END" }
+      let(:code) { "PUB FN foo() RETURNS Float64 -> RETURN 1; END" }
 
       it "sets :pub visibility on the FunctionDef node" do
         expect(ast.statements.first.visibility).to eq(:pub)
@@ -2044,7 +2044,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "PRIVATE FN" do
-      let(:code) { "PRIVATE FN foo() RETURNS Number -> RETURN 1; END" }
+      let(:code) { "PRIVATE FN foo() RETURNS Float64 -> RETURN 1; END" }
 
       it "sets :private visibility on the FunctionDef node" do
         expect(ast.statements.first.visibility).to eq(:private)
@@ -2058,7 +2058,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "FN (no modifier)" do
-      let(:code) { "FN foo() RETURNS Number -> RETURN 1; END" }
+      let(:code) { "FN foo() RETURNS Float64 -> RETURN 1; END" }
 
       it "defaults to :package visibility on the FunctionDef node" do
         expect(ast.statements.first.visibility).to eq(:package)
@@ -2073,17 +2073,17 @@ RSpec.describe SemanticAnnotator do
 
     context "STRUCT visibility" do
       it "PUB STRUCT sets :pub visibility" do
-        result = run("PUB STRUCT Point { x: Number, y: Number }")
+        result = run("PUB STRUCT Point { x: Float64, y: Float64 }")
         expect(result.statements.first.visibility).to eq(:pub)
       end
 
       it "PRIVATE STRUCT sets :private visibility" do
-        result = run("PRIVATE STRUCT Point { x: Number, y: Number }")
+        result = run("PRIVATE STRUCT Point { x: Float64, y: Float64 }")
         expect(result.statements.first.visibility).to eq(:private)
       end
 
       it "STRUCT (no modifier) defaults to :package visibility" do
-        result = run("STRUCT Point { x: Number, y: Number }")
+        result = run("STRUCT Point { x: Float64, y: Float64 }")
         expect(result.statements.first.visibility).to eq(:package)
       end
     end
@@ -2091,9 +2091,9 @@ RSpec.describe SemanticAnnotator do
     context "mixed visibility in same file" do
       let(:code) {
         <<~FLUX
-          PUB FN exported() RETURNS Number -> RETURN 1; END
-          FN internal() RETURNS Number -> RETURN 2; END
-          PRIVATE FN hidden() RETURNS Number -> RETURN 3; END
+          PUB FN exported() RETURNS Float64 -> RETURN 1; END
+          FN internal() RETURNS Float64 -> RETURN 2; END
+          PRIVATE FN hidden() RETURNS Float64 -> RETURN 3; END
         FLUX
       }
 
@@ -2131,11 +2131,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "importing a PUB function" do
-      let(:helper) { "PUB FN add(a: Number, b: Number) RETURNS Number -> RETURN a + b; END" }
+      let(:helper) { "PUB FN add(a: Float64, b: Float64) RETURNS Float64 -> RETURN a + b; END" }
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Number ->
+          FN caller() RETURNS Float64 ->
             RETURN add(1, 2);
           END
         FLUX
@@ -2149,7 +2149,7 @@ RSpec.describe SemanticAnnotator do
         ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
         fn_node = ast.statements.last
         return_node = fn_node.body.last
-        expect(return_node.value.full_type).to eq(:Number)
+        expect(return_node.value.full_type).to eq(:Float64)
       end
 
       it "tags the FuncCall node with the module namespace alias" do
@@ -2161,11 +2161,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "importing a package-private function from the same directory" do
-      let(:helper) { "FN multiply(x: Number, y: Number) RETURNS Number -> RETURN x * y; END" }
+      let(:helper) { "FN multiply(x: Float64, y: Float64) RETURNS Float64 -> RETURN x * y; END" }
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Number ->
+          FN caller() RETURNS Float64 ->
             RETURN multiply(3, 4);
           END
         FLUX
@@ -2177,11 +2177,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "attempting to call a PRIVATE function from a required file" do
-      let(:helper) { "PRIVATE FN secret(x: Number) RETURNS Number -> RETURN x; END" }
+      let(:helper) { "PRIVATE FN secret(x: Float64) RETURNS Float64 -> RETURN x; END" }
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Number ->
+          FN caller() RETURNS Float64 ->
             RETURN secret(1);
           END
         FLUX
@@ -2195,11 +2195,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "REQUIRE with AS alias" do
-      let(:helper) { "PUB FN greet() RETURNS Number -> RETURN 42; END" }
+      let(:helper) { "PUB FN greet() RETURNS Float64 -> RETURN 42; END" }
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht" AS myLib;
-          FN caller() RETURNS Number ->
+          FN caller() RETURNS Float64 ->
             RETURN greet();
           END
         FLUX
@@ -2249,8 +2249,8 @@ RSpec.describe SemanticAnnotator do
     context "importing struct types from a required file" do
       let(:helper) {
         <<~FLUX
-          PUB STRUCT Point { x: Number, y: Number }
-          PUB FN makePoint(x: Number, y: Number) RETURNS Point ->
+          PUB STRUCT Point { x: Float64, y: Float64 }
+          PUB FN makePoint(x: Float64, y: Float64) RETURNS Point ->
             RETURN %Point{ x: x, y: y };
           END
         FLUX
@@ -2258,7 +2258,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Number ->
+          FN caller() RETURNS Float64 ->
             p = makePoint(1, 2);
             RETURN p.x;
           END
@@ -2284,8 +2284,8 @@ RSpec.describe SemanticAnnotator do
     context "EXTERN FN declaration" do
       let(:code) {
         <<~CLEAR
-          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
-          FN caller() RETURNS Number ->
+          EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
+          FN caller() RETURNS Float64 ->
             RETURN native_add(1, 2);
           END
         CLEAR
@@ -2307,7 +2307,7 @@ RSpec.describe SemanticAnnotator do
         ast = annotate_extern(code)
         caller_fn = ast.statements.last
         ret_node  = caller_fn.body.last
-        expect(ret_node.value.resolved_type).to eq(:Number)
+        expect(ret_node.value.resolved_type).to eq(:Float64)
       end
 
       it "marks the FuncCall node as an extern call" do
@@ -2331,9 +2331,9 @@ RSpec.describe SemanticAnnotator do
     context "multiple EXTERN FN declarations from the same module" do
       let(:code) {
         <<~CLEAR
-          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
-          EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math";
-          FN caller() RETURNS Number ->
+          EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
+          EXTERN FN native_multiply(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
+          FN caller() RETURNS Float64 ->
             RETURN native_add(native_multiply(2, 3), 1);
           END
         CLEAR
@@ -2357,7 +2357,7 @@ RSpec.describe SemanticAnnotator do
     context "EXTERN FN with no return type" do
       let(:code) {
         <<~CLEAR
-          EXTERN FN native_log(val: Number) FROM "native_io";
+          EXTERN FN native_log(val: Float64) FROM "native_io";
           FN caller() RETURNS Void ->
             native_log(42);
           END
@@ -2372,8 +2372,8 @@ RSpec.describe SemanticAnnotator do
     context "EXTERN STRUCT declaration" do
       let(:code) {
         <<~CLEAR
-          EXTERN STRUCT Vec2 { x: Number, y: Number } FROM "native_math";
-          FN use_vec() RETURNS Number ->
+          EXTERN STRUCT Vec2 { x: Float64, y: Float64 } FROM "native_math";
+          FN use_vec() RETURNS Float64 ->
             v = Vec2{ x: 1, y: 2 };
             RETURN v.x;
           END
@@ -2388,7 +2388,7 @@ RSpec.describe SemanticAnnotator do
         ast = annotate_extern(code)
         fn  = ast.statements.last
         ret = fn.body.last
-        expect(ret.value.resolved_type).to eq(:Number)
+        expect(ret.value.resolved_type).to eq(:Float64)
       end
     end
 
@@ -2432,7 +2432,7 @@ RSpec.describe SemanticAnnotator do
     context "calling an undefined extern function" do
       it "raises an Undefined function error" do
         code = <<~CLEAR
-          FN bad() RETURNS Number ->
+          FN bad() RETURNS Float64 ->
             RETURN nonexistent_native(1, 2);
           END
         CLEAR
@@ -2443,8 +2443,8 @@ RSpec.describe SemanticAnnotator do
     context "EXTERN FN transpilation" do
       it "emits @import once per native module (deduplication)" do
         code = <<~CLEAR
-          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
-          EXTERN FN native_multiply(a: Number, b: Number) RETURNS Number FROM "native_math";
+          EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
+          EXTERN FN native_multiply(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
             x = native_add(1, 2);
           END
@@ -2461,7 +2461,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits onRootStack by default for EXTERN FN (no :safe effect)" do
         code = <<~CLEAR
-          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
             x = native_add(3.0, 4.0);
           END
@@ -2473,7 +2473,7 @@ RSpec.describe SemanticAnnotator do
 
       it "skips onRootStack for EXTERN FN with :safe effect" do
         code = <<~CLEAR
-          EXTERN FN fast_add(a: Number, b: Number) RETURNS Number EFFECTS :safe FROM "native_math";
+          EXTERN FN fast_add(a: Float64, b: Float64) RETURNS Float64 EFFECTS :safe FROM "native_math";
           FN main() RETURNS Void ->
             x = fast_add(3.0, 4.0);
           END
@@ -2486,7 +2486,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a type alias for EXTERN STRUCT" do
         code = <<~CLEAR
-          EXTERN STRUCT Vec2 { x: Number, y: Number } FROM "native_math";
+          EXTERN STRUCT Vec2 { x: Float64, y: Float64 } FROM "native_math";
           FN main() RETURNS Void ->
           END
         CLEAR
@@ -2496,7 +2496,7 @@ RSpec.describe SemanticAnnotator do
 
       it "uses onRootStack for EXTERN FN without :safe (default)" do
         code = <<~CLEAR
-          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
             x = native_add(3.0, 4.0);
           END
@@ -2507,7 +2507,7 @@ RSpec.describe SemanticAnnotator do
 
       it "skips onRootStack for :safe EXTERN FN (void return)" do
         code = <<~CLEAR
-          EXTERN FN fast_log(val: Number) RETURNS Void EFFECTS :safe FROM "native_io";
+          EXTERN FN fast_log(val: Float64) RETURNS Void EFFECTS :safe FROM "native_io";
           FN main() RETURNS Void ->
             fast_log(42.0);
           END
@@ -2519,7 +2519,7 @@ RSpec.describe SemanticAnnotator do
 
       it "passes arguments through the trampoline struct" do
         code = <<~CLEAR
-          EXTERN FN native_add(a: Number, b: Number) RETURNS Number FROM "native_math";
+          EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
             x = native_add(3.0, 4.0);
           END
@@ -3072,10 +3072,10 @@ RSpec.describe SemanticAnnotator do
   # Frame Allocation & SROA Optimization
   # ---------------------------------------------------------------------------
   describe "frame allocation — large structs (> 128 slots)" do
-    # Chunk5 = 5 Number fields = 5 slots.
+    # Chunk5 = 5 Float64 fields = 5 slots.
     # BigS   = 26 × Chunk5   = 130 slots → should be classified :frame.
     let(:large_struct_preamble) do
-      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      chunk_fields = "a: Float64, b: Float64, c: Float64, d: Float64, e: Float64"
       big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
       <<~CLEAR
         STRUCT Chunk5 { #{chunk_fields} }
@@ -3132,7 +3132,7 @@ RSpec.describe SemanticAnnotator do
 
     it "keeps small structs on the stack (≤ 128 slots) — no frameAlloc.create" do
       small_code = <<~CLEAR
-        STRUCT Tiny { x: Number, y: Number }
+        STRUCT Tiny { x: Float64, y: Float64 }
         FN use_tiny() RETURNS Void ->
           t: Tiny = Tiny{ x: 1.0, y: 2.0 };
           _ = t.x;
@@ -3148,12 +3148,12 @@ RSpec.describe SemanticAnnotator do
     # BigS (130 slots) declared inside a WHILE loop should be :stack, not :frame.
     # The OS stack reclaims it each iteration; no frame-arena growth.
     let(:preamble) do
-      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      chunk_fields = "a: Float64, b: Float64, c: Float64, d: Float64, e: Float64"
       big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
       <<~CLEAR
         STRUCT Chunk5 { #{chunk_fields} }
         STRUCT BigS   { #{big_fields}   }
-        FN first_a(s: BigS) RETURNS Number @reentrant ->
+        FN first_a(s: BigS) RETURNS Float64 @reentrant ->
           RETURN s.c1.a;
         END
       CLEAR
@@ -3165,7 +3165,7 @@ RSpec.describe SemanticAnnotator do
       preamble + <<~CLEAR
         FN bench() RETURNS Void ->
           MUTABLE i = 0_i64;
-          MUTABLE acc: Number = 0.0;
+          MUTABLE acc: Float64 = 0.0;
           WHILE i < 100 DO
             s = BigS{ #{big_fields} };
             acc = acc + first_a(s);
@@ -3210,17 +3210,17 @@ RSpec.describe SemanticAnnotator do
 
   describe "frame allocation — passing frame variables to functions" do
     let(:code) do
-      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      chunk_fields = "a: Float64, b: Float64, c: Float64, d: Float64, e: Float64"
       big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
       chunk_init   = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
       big_init     = "BigS{ #{(1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")} }"
       <<~CLEAR
         STRUCT Chunk5 { #{chunk_fields} }
         STRUCT BigS   { #{big_fields}   }
-        FN consume(s: BigS) RETURNS Number ->
+        FN consume(s: BigS) RETURNS Float64 ->
           RETURN s.c1.a;
         END
-        FN caller() RETURNS Number ->
+        FN caller() RETURNS Float64 ->
           s: BigS = #{big_init};
           RETURN consume(s);
         END
@@ -3238,7 +3238,7 @@ RSpec.describe SemanticAnnotator do
 
   describe "frame allocation — returning frame variables" do
     let(:code) do
-      chunk_fields = "a: Number, b: Number, c: Number, d: Number, e: Number"
+      chunk_fields = "a: Float64, b: Float64, c: Float64, d: Float64, e: Float64"
       big_fields   = (1..26).map { |i| "c#{i}: Chunk5" }.join(", ")
       chunk_init   = "Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 }"
       big_init     = "BigS{ #{(1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")} }"
@@ -3266,7 +3266,7 @@ RSpec.describe SemanticAnnotator do
     let(:code) do
       <<~CLEAR
         FN use_fixed_array() RETURNS Void ->
-          vals: Number[3] = [1.0, 2.0, 3.0];
+          vals: Float64[3] = [1.0, 2.0, 3.0];
           _ = vals;
         END
       CLEAR
@@ -3286,10 +3286,10 @@ RSpec.describe SemanticAnnotator do
       expect(zig).not_to include("frameAlloc")
     end
 
-    it "works for a two-element Number array" do
+    it "works for a two-element Float64 array" do
       two_code = <<~CLEAR
         FN use_two_array() RETURNS Void ->
-          ns: Number[2] = [10.0, 20.0];
+          ns: Float64[2] = [10.0, 20.0];
           _ = ns;
         END
       CLEAR
@@ -3301,7 +3301,7 @@ RSpec.describe SemanticAnnotator do
     it "still emits makeList for dynamic arrays without fixed annotation" do
       dyn_code = <<~CLEAR
         FN use_dyn() RETURNS Void ->
-          vals: Number[] = [1.0, 2.0, 3.0];
+          vals: Float64[] = [1.0, 2.0, 3.0];
           _ = vals;
         END
       CLEAR

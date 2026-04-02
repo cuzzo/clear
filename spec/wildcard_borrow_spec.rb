@@ -14,7 +14,7 @@ RSpec.describe "Wildcard Borrows" do
 
   let(:base_code) {
     <<~FLUX
-      STRUCT Bar { val: Number }
+      STRUCT Bar { val: Float64 }
       STRUCT Foo { b1: Bar, b2: Bar }
     FLUX
   }

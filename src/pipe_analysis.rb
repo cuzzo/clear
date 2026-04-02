@@ -175,7 +175,7 @@ module PipeAnalysis
     # Validate the size argument is numeric
     visit(node.right.size)
     size_type = node.right.size.resolved_type
-    unless [:Int64, :Number].include?(size_type)
+    unless [:Int64, :Float64].include?(size_type)
       error!(node.right.size, "WINDOW size must be a number, got #{size_type}")
     end
 
@@ -282,7 +282,7 @@ module PipeAnalysis
     # Analyze the count expression
     visit(node.right.count)
     count_type = node.right.count.resolved_type
-    unless [:Int64, :Number].include?(count_type)
+    unless [:Int64, :Float64].include?(count_type)
       error!(node.right.count, "LIMIT count must be a number, got #{count_type}")
     end
 
@@ -439,7 +439,7 @@ module PipeAnalysis
 
     visit(node.right.count)
     count_type = node.right.count.resolved_type
-    unless [:Int64, :Number].include?(count_type)
+    unless [:Int64, :Float64].include?(count_type)
       error!(node.right.count, "SKIP count must be a number, got #{count_type}")
     end
 
@@ -555,7 +555,7 @@ module PipeAnalysis
   # =========================================================
 
   # Use Type#numeric? for consistency with the type system.
-  # Covers :Number, :Int64, :Byte, :Float64.
+  # Covers :Float64, :Int64, :Byte, :Float64.
 
   def analyze_sum_op(node)
     # SUM: list s> SUM _.field  → Number (sum of numeric projection; 0 for empty list)
@@ -572,7 +572,7 @@ module PipeAnalysis
       error!(node.right, "SUM requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Number
+    node.full_type = :Float64
     node.storage   = :stack
   end
 
@@ -591,7 +591,7 @@ module PipeAnalysis
       error!(node.right, "AVERAGE requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Number
+    node.full_type = :Float64
     node.storage   = :stack
   end
 
@@ -610,7 +610,7 @@ module PipeAnalysis
       error!(node.right, "MIN requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Number
+    node.full_type = :Float64
     node.storage   = :stack
   end
 
@@ -629,7 +629,7 @@ module PipeAnalysis
       error!(node.right, "MAX requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Number
+    node.full_type = :Float64
     node.storage   = :stack
   end
 
@@ -902,7 +902,7 @@ module PipeAnalysis
     # Validate workers option if present
     if (ps = options["workers"])
       visit(ps)
-      unless [:Number, :Int64].include?(ps.resolved_type)
+      unless [:Float64, :Int64].include?(ps.resolved_type)
         error!(ps, "CONCURRENT workers must be a number, got #{ps.resolved_type}")
       end
       # Validate workers > 0 for literal values (including negated literals like -1)

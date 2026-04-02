@@ -3255,7 +3255,7 @@ private
 
     # 3. Handle Primitives
     case t
-    when "Number", "Int64", "Byte" then "{d}" # Decimal
+    when "Float64", "Int64", "Byte" then "{d}" # Decimal
     when "Bool"                    then "{}"  # Auto (true/false)
     when "Void"                    then "{}"  # Void
     else

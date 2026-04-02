@@ -77,7 +77,7 @@ private
     current_scope.declare("argv", nil, Type::STRING_TYPE, false, false, nil, :heap)
 
     # Built-in Range type: fields accessible via dot access
-    current_scope.declare_type(:Range, {"start" => :Number, "end" => :Number})
+    current_scope.declare_type(:Range, {"start" => :Float64, "end" => :Float64})
 
     # Built-in File resource type
     current_scope.declare_type(:File, {
@@ -564,7 +564,7 @@ private
   # Verifies field names exist and value types match the struct schema.
   def annotate_struct_pattern!(match_node, pat)
     expr_type = match_node.expr.resolved_type
-    primitives = [:Number, :Bool, :Byte, :Int64, :Float64, :String, :NIL, :BOOLEAN, :Any, :Void]
+    primitives = [:Float64, :Bool, :Byte, :Int64, :Float64, :String, :NIL, :BOOLEAN, :Any, :Void]
 
     if primitives.include?(expr_type)
       error!(match_node, "MATCH struct pattern requires a struct type, got #{expr_type}")
@@ -597,7 +597,7 @@ private
           field_def = schema[f[:name]]
           field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(Hash) ? field_def[:type]&.resolved : field_def&.resolved)
           val_type   = f[:value].resolved_type
-          is_numeric_promo = (val_type == :Int64 && (field_type == :Number || field_type == :Float64))
+          is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
           unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
             error!(match_node, "MATCH struct pattern: field '#{f[:name]}' has type #{field_type}, but pattern value has type #{val_type}")
           end
@@ -621,7 +621,7 @@ private
     is_union  = schema.is_a?(Hash) && schema[:kind] == :union
 
     # Build type-param substitution for generic union payload capture
-    # e.g. Option<Number> → { T: :Number }
+    # e.g. Option<Number> → { T: :Float64 }
     union_subst = {}
     if is_union && expr_t.generic_instance? && schema[:type_params]&.any?
       schema[:type_params].zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
@@ -1671,7 +1671,7 @@ private
     elsif target_type_info.string? && target_type_info.raw?
       node.full_type = :String
 
-    # Case 3: Array Access "Number[]" -> :Number, "Number[][]" -> "Number[]"
+    # Case 3: Array Access "Number[]" -> :Float64, "Number[][]" -> "Number[]"
     elsif target_type_info.array? || node.target.metatype == :struct
       node.full_type = target_type_info.element_type
 
@@ -1847,7 +1847,7 @@ private
     end
 
     # Build type param substitution map for generic struct instantiation.
-    # e.g. Pair<Number>{ first: 1.0 } → { :T => :Number }
+    # e.g. Pair<Number>{ first: 1.0 } → { :T => :Float64 }
     type_params = schema[:type_params]
     type_subst = {}
     if node.type_args&.any?
@@ -1976,8 +1976,8 @@ private
     end
 
     # Coerce integer types to Number (f64) for uniform Range representation
-    node.start.coerced_type = :Number if start_type != :Number && Type.new(start_type).numeric?
-    node.finish.coerced_type = :Number if finish_type != :Number && Type.new(finish_type).numeric?
+    node.start.coerced_type = :Float64 if start_type != :Float64 && Type.new(start_type).numeric?
+    node.finish.coerced_type = :Float64 if finish_type != :Float64 && Type.new(finish_type).numeric?
 
     node.full_type = :Range
   end
@@ -1985,7 +1985,7 @@ private
   def visit_Literal(node)
     node.full_type =
       case node.type
-      when :NUMBER then :Number
+      when :NUMBER then :Float64
       when :INT64 then :Int64
       when :STRING
         if node.storage == :stack

@@ -34,53 +34,53 @@ RSpec.describe SemanticAnnotator do
     # Type system
     # ------------------------------------------------------------------
     describe "Type predicates" do
-      it "shared_promise? is true for ~Number@shared" do
-        tokens = Lexer.new("~Number @shared").tokenize
-        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+      it "shared_promise? is true for ~Float64@shared" do
+        tokens = Lexer.new("~Float64 @shared").tokenize
+        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.shared_promise?).to be true
       end
 
-      it "shared_promise? is false for plain ~Number" do
-        expect(Type.new(:"~Number").shared_promise?).to be false
+      it "shared_promise? is false for plain ~Float64" do
+        expect(Type.new(:"~Float64").shared_promise?).to be false
       end
 
-      it "shared_promise? is false for ~Number[3] (bounded stream)" do
-        expect(Type.new(:"~Number[3]").shared_promise?).to be false
+      it "shared_promise? is false for ~Float64[3] (bounded stream)" do
+        expect(Type.new(:"~Float64[3]").shared_promise?).to be false
       end
 
-      it "shared_promise? is false for plain Number@shared" do
-        tokens = Lexer.new("Number @shared").tokenize
-        t = Parser.new(tokens, "Number @shared").send(:parse_type_annotation)
+      it "shared_promise? is false for plain Float64@shared" do
+        tokens = Lexer.new("Float64 @shared").tokenize
+        t = Parser.new(tokens, "Float64 @shared").send(:parse_type_annotation)
         expect(t.shared_promise?).to be false
       end
 
       it "requires_move? is false for shared promises (non-affine)" do
-        tokens = Lexer.new("~Number @shared").tokenize
-        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+        tokens = Lexer.new("~Float64 @shared").tokenize
+        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.requires_move?).to be false
       end
 
-      it "requires_move? is still true for plain ~Number" do
-        expect(Type.new(:"~Number").requires_move?).to be true
+      it "requires_move? is still true for plain ~Float64" do
+        expect(Type.new(:"~Float64").requires_move?).to be true
       end
 
       it "any_rc? is false for shared promises (SharedPromise is not Rc/Arc)" do
-        tokens = Lexer.new("~Number @shared").tokenize
-        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+        tokens = Lexer.new("~Float64 @shared").tokenize
+        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.any_rc?).to be false
       end
 
-      it "any_rc? is still true for plain Number@shared (Arc wrapper)" do
-        tokens = Lexer.new("Number @shared").tokenize
-        t = Parser.new(tokens, "Number @shared").send(:parse_type_annotation)
+      it "any_rc? is still true for plain Float64@shared (Arc wrapper)" do
+        tokens = Lexer.new("Float64 @shared").tokenize
+        t = Parser.new(tokens, "Float64 @shared").send(:parse_type_annotation)
         expect(t.any_rc?).to be true
       end
     end
 
     describe "Zig type emission" do
-      it "emits CheatLib.SharedPromise(f64) for ~Number@shared" do
-        tokens = Lexer.new("~Number @shared").tokenize
-        t = Parser.new(tokens, "~Number @shared").send(:parse_type_annotation)
+      it "emits CheatLib.SharedPromise(f64) for ~Float64@shared" do
+        tokens = Lexer.new("~Float64 @shared").tokenize
+        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.zig_type).to eq("CheatLib.SharedPromise(f64)")
       end
 
@@ -90,13 +90,13 @@ RSpec.describe SemanticAnnotator do
         expect(t.zig_type).to eq("CheatLib.SharedPromise(bool)")
       end
 
-      it "still emits CheatLib.Promise(f64) for plain ~Number" do
-        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      it "still emits CheatLib.Promise(f64) for plain ~Float64" do
+        expect(Type.new(:"~Float64").zig_type).to eq("CheatLib.Promise(f64)")
       end
 
-      it "still emits CheatLib.Rc(f64) for Number@multiOwned" do
-        tokens = Lexer.new("Number @multiowned").tokenize
-        t = Parser.new(tokens, "Number @multiowned").send(:parse_type_annotation)
+      it "still emits CheatLib.Rc(f64) for Float64@multiOwned" do
+        tokens = Lexer.new("Float64 @multiowned").tokenize
+        t = Parser.new(tokens, "Float64 @multiowned").send(:parse_type_annotation)
         expect(t.zig_type).to eq("CheatLib.Rc(f64)")
       end
     end
@@ -108,7 +108,7 @@ RSpec.describe SemanticAnnotator do
       it "raises a directed error when a binding declares ~T@multiOwned" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @multiowned = BG { 1.0; };
+            sp: ~Float64 @multiowned = BG { 1.0; };
             RETURN;
           END
         CLEAR
@@ -123,7 +123,7 @@ RSpec.describe SemanticAnnotator do
       it "annotates the BgBlock as shared when the declared type is ~T@shared" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 42.0; };
+            sp: ~Float64 @shared = BG { 42.0; };
             RETURN;
           END
         CLEAR
@@ -139,8 +139,8 @@ RSpec.describe SemanticAnnotator do
       it "does not mark a plain ~T BgBlock as shared" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            p: ~Number = BG { 1.0; };
-            r: Number = NEXT p;
+            p: ~Float64 = BG { 1.0; };
+            r: Float64 = NEXT p;
             RETURN;
           END
         CLEAR
@@ -157,11 +157,11 @@ RSpec.describe SemanticAnnotator do
     # Annotator: visit_NextExpr on shared promises
     # ------------------------------------------------------------------
     describe "visit_NextExpr on shared promises" do
-      it "returns the inner type T when NEXT is applied to ~Number@shared" do
+      it "returns the inner type T when NEXT is applied to ~Float64@shared" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 1.0; };
-            r: Number = NEXT sp;
+            sp: ~Float64 @shared = BG { 1.0; };
+            r: Float64 = NEXT sp;
             RETURN;
           END
         CLEAR
@@ -171,10 +171,10 @@ RSpec.describe SemanticAnnotator do
       it "allows NEXT to be called multiple times on the same shared promise" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 10.0; };
-            a: Number = NEXT sp;
-            b: Number = NEXT sp;
-            c: Number = NEXT sp;
+            sp: ~Float64 @shared = BG { 10.0; };
+            a: Float64 = NEXT sp;
+            b: Float64 = NEXT sp;
+            c: Float64 = NEXT sp;
             RETURN;
           END
         CLEAR
@@ -185,9 +185,9 @@ RSpec.describe SemanticAnnotator do
         # If it were moved, the second NEXT would raise 'Use of moved value'.
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 5.0; };
-            x: Number = NEXT sp;
-            y: Number = NEXT sp;
+            sp: ~Float64 @shared = BG { 5.0; };
+            x: Float64 = NEXT sp;
+            y: Float64 = NEXT sp;
             RETURN;
           END
         CLEAR
@@ -202,7 +202,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.SharedPromise in the BG block spawn" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 1.0; };
+            sp: ~Float64 @shared = BG { 1.0; };
             RETURN;
           END
         CLEAR
@@ -213,7 +213,7 @@ RSpec.describe SemanticAnnotator do
       it "emits var (not const) for shared promise declarations" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 1.0; };
+            sp: ~Float64 @shared = BG { 1.0; };
             RETURN;
           END
         CLEAR
@@ -224,8 +224,8 @@ RSpec.describe SemanticAnnotator do
       it "emits .next() for NEXT on a shared promise" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 1.0; };
-            r: Number = NEXT sp;
+            sp: ~Float64 @shared = BG { 1.0; };
+            r: Float64 = NEXT sp;
             RETURN;
           END
         CLEAR
@@ -236,9 +236,9 @@ RSpec.describe SemanticAnnotator do
       it "emits .next() twice when NEXT is called twice on the same handle" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 1.0; };
-            a: Number = NEXT sp;
-            b: Number = NEXT sp;
+            sp: ~Float64 @shared = BG { 1.0; };
+            a: Float64 = NEXT sp;
+            b: Float64 = NEXT sp;
             RETURN;
           END
         CLEAR
@@ -249,7 +249,7 @@ RSpec.describe SemanticAnnotator do
       it "emits SharedPromise Inner type in the BG context struct" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            sp: ~Number @shared = BG { 99.0; };
+            sp: ~Float64 @shared = BG { 99.0; };
             RETURN;
           END
         CLEAR
@@ -260,8 +260,8 @@ RSpec.describe SemanticAnnotator do
       it "plain BG block still emits Promise (not SharedPromise)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            p: ~Number = BG { 1.0; };
-            r: Number = NEXT p;
+            p: ~Float64 = BG { 1.0; };
+            r: Float64 = NEXT p;
             RETURN;
           END
         CLEAR
@@ -284,26 +284,26 @@ RSpec.describe SemanticAnnotator do
     # Type system
     # ------------------------------------------------------------------
     describe "Type predicates" do
-      it "bounded_stream? is true for ~Number[3]" do
-        t = Type.new(:"~Number[3]")
+      it "bounded_stream? is true for ~Float64[3]" do
+        t = Type.new(:"~Float64[3]")
         expect(t.bounded_stream?).to be true
       end
 
-      it "bounded_stream? is false for plain ~Number" do
-        expect(Type.new(:"~Number").bounded_stream?).to be false
+      it "bounded_stream? is false for plain ~Float64" do
+        expect(Type.new(:"~Float64").bounded_stream?).to be false
       end
 
-      it "bounded_stream? is false for ~Number[] (dynamic)" do
-        expect(Type.new(:"~Number[]").bounded_stream?).to be false
+      it "bounded_stream? is false for ~Float64[] (dynamic)" do
+        expect(Type.new(:"~Float64[]").bounded_stream?).to be false
       end
 
-      it "stream_element_type returns the inner T for ~Number[3]" do
-        t = Type.new(:"~Number[3]")
-        expect(t.stream_element_type.to_sym).to eq(:Number)
+      it "stream_element_type returns the inner T for ~Float64[3]" do
+        t = Type.new(:"~Float64[3]")
+        expect(t.stream_element_type.to_sym).to eq(:Float64)
       end
 
-      it "stream_capacity returns N for ~Number[3]" do
-        expect(Type.new(:"~Number[3]").stream_capacity).to eq(3)
+      it "stream_capacity returns N for ~Float64[3]" do
+        expect(Type.new(:"~Float64[3]").stream_capacity).to eq(3)
       end
 
       it "stream_capacity returns 1 for ~Bool[1]" do
@@ -311,25 +311,25 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "requires_move? is false for bounded streams (incremental consumption)" do
-        expect(Type.new(:"~Number[3]").requires_move?).to be false
+        expect(Type.new(:"~Float64[3]").requires_move?).to be false
       end
 
       it "requires_move? is still true for single promises" do
-        expect(Type.new(:"~Number").requires_move?).to be true
+        expect(Type.new(:"~Float64").requires_move?).to be true
       end
     end
 
     describe "Zig type emission" do
-      it "emits CheatLib.BoundedStream(f64, 3) for ~Number[3]" do
-        expect(Type.new(:"~Number[3]").zig_type).to eq("CheatLib.BoundedStream(f64, 3)")
+      it "emits CheatLib.BoundedStream(f64, 3) for ~Float64[3]" do
+        expect(Type.new(:"~Float64[3]").zig_type).to eq("CheatLib.BoundedStream(f64, 3)")
       end
 
       it "emits CheatLib.BoundedStream(bool, 1) for ~Bool[1]" do
         expect(Type.new(:"~Bool[1]").zig_type).to eq("CheatLib.BoundedStream(bool, 1)")
       end
 
-      it "still emits CheatLib.Promise(f64) for plain ~Number" do
-        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      it "still emits CheatLib.Promise(f64) for plain ~Float64" do
+        expect(Type.new(:"~Float64").zig_type).to eq("CheatLib.Promise(f64)")
       end
     end
 
@@ -337,12 +337,12 @@ RSpec.describe SemanticAnnotator do
     # Parser
     # ------------------------------------------------------------------
     describe "Parser: parse_type_annotation" do
-      it "parses ~Number[3] as a bounded stream type" do
-        tokens = Lexer.new("~Number[3]").tokenize
-        t = Parser.new(tokens, "~Number[3]").send(:parse_type_annotation)
+      it "parses ~Float64[3] as a bounded stream type" do
+        tokens = Lexer.new("~Float64[3]").tokenize
+        t = Parser.new(tokens, "~Float64[3]").send(:parse_type_annotation)
         expect(t.bounded_stream?).to be true
         expect(t.stream_capacity).to eq(3)
-        expect(t.stream_element_type.to_sym).to eq(:Number)
+        expect(t.stream_element_type.to_sym).to eq(:Float64)
       end
 
       it "parses ~Bool[1] as a bounded stream type" do
@@ -357,20 +357,20 @@ RSpec.describe SemanticAnnotator do
     # Annotator: visit_ListLit (bounded stream literal)
     # ------------------------------------------------------------------
     describe "visit_ListLit with tense items" do
-      it "infers ~Number[3] when all 3 items are ~Number promises" do
+      it "infers ~Float64[3] when all 3 items are ~Float64 promises" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             RETURN;
           END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
 
-      it "infers ~Number[1] for a single-element promise list" do
+      it "infers ~Float64[1] for a single-element promise list" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[1] = [BG { 42.0; }];
+            s: ~Float64[1] = [BG { 42.0; }];
             RETURN;
           END
         CLEAR
@@ -380,7 +380,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when promise list items produce different types" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 1.0; }, BG { TRUE; }];
+            s: ~Float64[2] = [BG { 1.0; }, BG { TRUE; }];
             RETURN;
           END
         CLEAR
@@ -392,11 +392,11 @@ RSpec.describe SemanticAnnotator do
     # Annotator: visit_NextExpr on bounded streams
     # ------------------------------------------------------------------
     describe "visit_NextExpr on bounded streams" do
-      it "returns the element type T when NEXT is applied to ~Number[3]" do
+      it "returns the element type T when NEXT is applied to ~Float64[3]" do
         src = <<~CLEAR
-          FN f() RETURNS Number ->
-            s: ~Number[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
-            r: Number = NEXT s;
+          FN f() RETURNS Float64 ->
+            s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            r: Float64 = NEXT s;
             RETURN r;
           END
         CLEAR
@@ -406,9 +406,9 @@ RSpec.describe SemanticAnnotator do
       it "allows NEXT to be called multiple times on the same bounded stream" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 10.0; }, BG { 20.0; }];
-            a: Number = NEXT s;
-            b: Number = NEXT s;
+            s: ~Float64[2] = [BG { 10.0; }, BG { 20.0; }];
+            a: Float64 = NEXT s;
+            b: Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -419,10 +419,10 @@ RSpec.describe SemanticAnnotator do
         # If the stream were marked :moved, the second NEXT would raise 'Use of moved value'.
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
-            a: Number = NEXT s;
-            b: Number = NEXT s;
-            c: Number = NEXT s;
+            s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            a: Float64 = NEXT s;
+            b: Float64 = NEXT s;
+            c: Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -432,8 +432,8 @@ RSpec.describe SemanticAnnotator do
       it "still raises when NEXT is applied to a non-tense value" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            x: Number = 5.0;
-            r: Number = NEXT x;
+            x: Float64 = 5.0;
+            r: Float64 = NEXT x;
             RETURN;
           END
         CLEAR
@@ -450,7 +450,7 @@ RSpec.describe SemanticAnnotator do
         # to simulate someone bypassing the parse_type_annotation guard.
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
         CLEAR
@@ -466,7 +466,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.BoundedStream in the variable declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
         CLEAR
@@ -477,7 +477,7 @@ RSpec.describe SemanticAnnotator do
       it "emits var (not const) for bounded stream declarations" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
         CLEAR
@@ -488,9 +488,9 @@ RSpec.describe SemanticAnnotator do
       it "emits .next() for NEXT on a bounded stream" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
-            a: Number = NEXT s;
-            b: Number = NEXT s;
+            s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
+            a: Float64 = NEXT s;
+            b: Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -501,7 +501,7 @@ RSpec.describe SemanticAnnotator do
       it "emits pre-declared promise items for bounded stream literal" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 10.0; }, BG { 20.0; }];
+            s: ~Float64[2] = [BG { 10.0; }, BG { 20.0; }];
             RETURN;
           END
         CLEAR
@@ -514,7 +514,7 @@ RSpec.describe SemanticAnnotator do
       it "emits a Promise array in the BoundedStream items field" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[2] = [BG { 1.0; }, BG { 2.0; }];
+            s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
         CLEAR
@@ -525,8 +525,8 @@ RSpec.describe SemanticAnnotator do
       it "emits two independent stream labels for two streams in the same function" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s1: ~Number[1] = [BG { 1.0; }];
-            s2: ~Number[1] = [BG { 2.0; }];
+            s1: ~Float64[1] = [BG { 1.0; }];
+            s2: ~Float64[1] = [BG { 2.0; }];
             RETURN;
           END
         CLEAR
@@ -549,29 +549,29 @@ RSpec.describe SemanticAnnotator do
     # Type predicates
     # -------------------------------------------------------------------
     describe "Type predicates" do
-      it "open_stream? is true for ~Number[?]" do
-        t = Type.new(:"~Number[?]")
+      it "open_stream? is true for ~Float64[?]" do
+        t = Type.new(:"~Float64[?]")
         expect(t.open_stream?).to be true
       end
 
-      it "open_stream? is false for plain ~Number" do
-        t = Type.new(:"~Number")
+      it "open_stream? is false for plain ~Float64" do
+        t = Type.new(:"~Float64")
         expect(t.open_stream?).to be false
       end
 
-      it "open_stream? is false for ~Number[3] (bounded stream)" do
-        t = Type.new(:"~Number[3]")
+      it "open_stream? is false for ~Float64[3] (bounded stream)" do
+        t = Type.new(:"~Float64[3]")
         expect(t.open_stream?).to be false
       end
 
-      it "open_stream? is false for ~Number@shared" do
-        t = Type.new(:"~Number", ownership: :shared)
+      it "open_stream? is false for ~Float64@shared" do
+        t = Type.new(:"~Float64", ownership: :shared)
         expect(t.open_stream?).to be false
       end
 
-      it "open_stream_element_type returns Number for ~Number[?]" do
-        t = Type.new(:"~Number[?]")
-        expect(t.open_stream_element_type.resolved).to eq :Number
+      it "open_stream_element_type returns Float64 for ~Float64[?]" do
+        t = Type.new(:"~Float64[?]")
+        expect(t.open_stream_element_type.resolved).to eq :Float64
       end
 
       it "open_stream_element_type returns Bool for ~Bool[?]" do
@@ -580,27 +580,27 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "requires_move? is false for open streams (resource semantics)" do
-        t = Type.new(:"~Number[?]")
+        t = Type.new(:"~Float64[?]")
         expect(t.requires_move?).to be false
       end
 
-      it "open_stream_marker? is true for Number[?]" do
-        t = Type.new(:"Number[?]")
+      it "open_stream_marker? is true for Float64[?]" do
+        t = Type.new(:"Float64[?]")
         expect(t.open_stream_marker?).to be true
       end
 
-      it "open_stream_marker? is false for Number[3]" do
-        t = Type.new(:"Number[3]")
+      it "open_stream_marker? is false for Float64[3]" do
+        t = Type.new(:"Float64[3]")
         expect(t.open_stream_marker?).to be false
       end
 
-      it "fixed? is false for Number[?]" do
-        t = Type.new(:"Number[?]")
+      it "fixed? is false for Float64[?]" do
+        t = Type.new(:"Float64[?]")
         expect(t.fixed?).to be false
       end
 
-      it "dynamic? is false for Number[?] (it is not dynamic — it is open-stream)" do
-        t = Type.new(:"Number[?]")
+      it "dynamic? is false for Float64[?] (it is not dynamic — it is open-stream)" do
+        t = Type.new(:"Float64[?]")
         expect(t.dynamic?).to be false
       end
     end
@@ -609,8 +609,8 @@ RSpec.describe SemanticAnnotator do
     # Zig type emission
     # -------------------------------------------------------------------
     describe "zig_type" do
-      it "emits CheatLib.Stream(f64) for ~Number[?]" do
-        t = Type.new(:"~Number[?]")
+      it "emits CheatLib.Stream(f64) for ~Float64[?]" do
+        t = Type.new(:"~Float64[?]")
         expect(t.zig_type).to eq "CheatLib.Stream(f64)"
       end
 
@@ -624,10 +624,10 @@ RSpec.describe SemanticAnnotator do
     # Parser: [?] in type annotations
     # -------------------------------------------------------------------
     describe "parser" do
-      it "parses ~Number[?] as a type annotation" do
+      it "parses ~Float64[?] as a type annotation" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -639,10 +639,10 @@ RSpec.describe SemanticAnnotator do
     # Annotator: BgStreamBlock
     # -------------------------------------------------------------------
     describe "BgStreamBlock annotation" do
-      it "infers ~Number[?] type from YIELD Number" do
+      it "infers ~Float64[?] type from YIELD Float64" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -650,7 +650,7 @@ RSpec.describe SemanticAnnotator do
         fn_node = ast.statements.first
         decl = fn_node.body.first
         expect(decl.value.full_type.open_stream?).to be true
-        expect(decl.value.full_type.open_stream_element_type.resolved).to eq :Number
+        expect(decl.value.full_type.open_stream_element_type.resolved).to eq :Float64
       end
 
       it "infers ~Bool[?] from YIELD Bool" do
@@ -669,7 +669,7 @@ RSpec.describe SemanticAnnotator do
       it "errors when BG STREAM has no YIELD statements" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { RETURN; };
+            s: ~Float64[?] = BG STREAM { RETURN; };
             RETURN;
           END
         CLEAR
@@ -689,7 +689,7 @@ RSpec.describe SemanticAnnotator do
       it "errors when YIELD types are inconsistent" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; YIELD TRUE; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; YIELD TRUE; };
             RETURN;
           END
         CLEAR
@@ -701,11 +701,11 @@ RSpec.describe SemanticAnnotator do
     # Annotator: NextExpr on open streams
     # -------------------------------------------------------------------
     describe "NextExpr on ~T[?]" do
-      it "NEXT on ~Number[?] returns ?Number" do
+      it "NEXT on ~Float64[?] returns ?Float64" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
-            v: ?Number = NEXT s;
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            v: ?Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -713,7 +713,7 @@ RSpec.describe SemanticAnnotator do
         fn_node = ast.statements.first
         next_decl = fn_node.body[1]
         expect(next_decl.value.full_type.optional?).to be true
-        expect(next_decl.value.full_type.wrapped_type.resolved).to eq :Number
+        expect(next_decl.value.full_type.wrapped_type.resolved).to eq :Float64
       end
 
       it "NEXT on ~Bool[?] returns ?Bool" do
@@ -736,10 +736,10 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits defer with move-guarded s.deinit() for ~Number[?] declaration" do
+      it "emits defer with move-guarded s.deinit() for ~Float64[?] declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -755,7 +755,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.Stream(f64) in the var declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -766,7 +766,7 @@ RSpec.describe SemanticAnnotator do
       it "emits var (not const) for the stream binding" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -777,7 +777,7 @@ RSpec.describe SemanticAnnotator do
       it "emits spawnNew in the BG STREAM block" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -788,7 +788,7 @@ RSpec.describe SemanticAnnotator do
       it "emits push() calls for each YIELD" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; YIELD 2.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; YIELD 2.0; };
             RETURN;
           END
         CLEAR
@@ -799,7 +799,7 @@ RSpec.describe SemanticAnnotator do
       it "emits defer close() inside generator fiber" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -810,8 +810,8 @@ RSpec.describe SemanticAnnotator do
       it "emits .next() for NEXT on open stream" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
-            v: ?Number = NEXT s;
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            v: ?Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -822,8 +822,8 @@ RSpec.describe SemanticAnnotator do
       it "emits independent labels for two open streams in same function" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s1: ~Number[?] = BG STREAM { YIELD 1.0; };
-            s2: ~Number[?] = BG STREAM { YIELD 2.0; };
+            s1: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s2: ~Float64[?] = BG STREAM { YIELD 2.0; };
             RETURN;
           END
         CLEAR
@@ -846,26 +846,26 @@ RSpec.describe SemanticAnnotator do
     # Type predicates
     # -------------------------------------------------------------------
     describe "Type predicates" do
-      it "inf_stream? is true for ~Number[INF]" do
-        t = Type.new(:"~Number[INF]")
+      it "inf_stream? is true for ~Float64[INF]" do
+        t = Type.new(:"~Float64[INF]")
         expect(t.inf_stream?).to be true
       end
 
-      it "inf_stream? is false for plain ~Number" do
-        expect(Type.new(:"~Number").inf_stream?).to be false
+      it "inf_stream? is false for plain ~Float64" do
+        expect(Type.new(:"~Float64").inf_stream?).to be false
       end
 
-      it "inf_stream? is false for ~Number[3] (bounded stream)" do
-        expect(Type.new(:"~Number[3]").inf_stream?).to be false
+      it "inf_stream? is false for ~Float64[3] (bounded stream)" do
+        expect(Type.new(:"~Float64[3]").inf_stream?).to be false
       end
 
-      it "inf_stream? is false for ~Number[?] (open stream)" do
-        expect(Type.new(:"~Number[?]").inf_stream?).to be false
+      it "inf_stream? is false for ~Float64[?] (open stream)" do
+        expect(Type.new(:"~Float64[?]").inf_stream?).to be false
       end
 
-      it "inf_stream_element_type returns Number for ~Number[INF]" do
-        t = Type.new(:"~Number[INF]")
-        expect(t.inf_stream_element_type.resolved).to eq :Number
+      it "inf_stream_element_type returns Float64 for ~Float64[INF]" do
+        t = Type.new(:"~Float64[INF]")
+        expect(t.inf_stream_element_type.resolved).to eq :Float64
       end
 
       it "inf_stream_element_type returns Bool for ~Bool[INF]" do
@@ -874,24 +874,24 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "requires_move? is false for infinite streams (resource semantics)" do
-        expect(Type.new(:"~Number[INF]").requires_move?).to be false
+        expect(Type.new(:"~Float64[INF]").requires_move?).to be false
       end
 
-      it "inf_stream_marker? is true for Number[INF]" do
-        t = Type.new(:"Number[INF]")
+      it "inf_stream_marker? is true for Float64[INF]" do
+        t = Type.new(:"Float64[INF]")
         expect(t.inf_stream_marker?).to be true
       end
 
-      it "inf_stream_marker? is false for Number[3]" do
-        expect(Type.new(:"Number[3]").inf_stream_marker?).to be false
+      it "inf_stream_marker? is false for Float64[3]" do
+        expect(Type.new(:"Float64[3]").inf_stream_marker?).to be false
       end
 
-      it "fixed? is false for Number[INF]" do
-        expect(Type.new(:"Number[INF]").fixed?).to be false
+      it "fixed? is false for Float64[INF]" do
+        expect(Type.new(:"Float64[INF]").fixed?).to be false
       end
 
-      it "dynamic? is false for Number[INF]" do
-        expect(Type.new(:"Number[INF]").dynamic?).to be false
+      it "dynamic? is false for Float64[INF]" do
+        expect(Type.new(:"Float64[INF]").dynamic?).to be false
       end
     end
 
@@ -899,8 +899,8 @@ RSpec.describe SemanticAnnotator do
     # Zig type emission
     # -------------------------------------------------------------------
     describe "zig_type" do
-      it "emits CheatLib.InfStream(f64) for ~Number[INF]" do
-        expect(Type.new(:"~Number[INF]").zig_type).to eq "CheatLib.InfStream(f64)"
+      it "emits CheatLib.InfStream(f64) for ~Float64[INF]" do
+        expect(Type.new(:"~Float64[INF]").zig_type).to eq "CheatLib.InfStream(f64)"
       end
 
       it "emits CheatLib.InfStream(bool) for ~Bool[INF]" do
@@ -912,10 +912,10 @@ RSpec.describe SemanticAnnotator do
     # Parser: [INF] in type annotations
     # -------------------------------------------------------------------
     describe "parser" do
-      it "parses ~Number[INF] as a type annotation" do
+      it "parses ~Float64[INF] as a type annotation" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -927,10 +927,10 @@ RSpec.describe SemanticAnnotator do
     # Annotator: BgStreamBlock with ~T[INF] declared type
     # -------------------------------------------------------------------
     describe "BgStreamBlock annotation with ~T[INF]" do
-      it "infers ~Number[INF] type when declared as ~Number[INF]" do
+      it "infers ~Float64[INF] type when declared as ~Float64[INF]" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -938,7 +938,7 @@ RSpec.describe SemanticAnnotator do
         fn_node = ast.statements.first
         decl = fn_node.body.first
         expect(decl.value.full_type.inf_stream?).to be true
-        expect(decl.value.full_type.inf_stream_element_type.resolved).to eq :Number
+        expect(decl.value.full_type.inf_stream_element_type.resolved).to eq :Float64
       end
 
       it "infers ~Bool[INF] when YIELD produces Bool" do
@@ -960,11 +960,11 @@ RSpec.describe SemanticAnnotator do
     # NextExpr on ~T[INF] returns T (not ?T)
     # -------------------------------------------------------------------
     describe "NextExpr on ~T[INF]" do
-      it "NEXT on ~Number[INF] returns Number (not ?Number)" do
+      it "NEXT on ~Float64[INF] returns Float64 (not ?Float64)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
-            v: Number = NEXT s;
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            v: Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -972,7 +972,7 @@ RSpec.describe SemanticAnnotator do
         fn_node = ast.statements.first
         next_decl = fn_node.body[1]
         expect(next_decl.value.full_type.optional?).to be false
-        expect(next_decl.value.full_type.resolved).to eq :Number
+        expect(next_decl.value.full_type.resolved).to eq :Float64
       end
 
       it "NEXT on ~Bool[INF] returns Bool (not ?Bool)" do
@@ -995,10 +995,10 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits defer with move-guarded s.deinit() for ~Number[INF] declaration" do
+      it "emits defer with move-guarded s.deinit() for ~Float64[INF] declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1014,7 +1014,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.InfStream(f64) in the var declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1025,7 +1025,7 @@ RSpec.describe SemanticAnnotator do
       it "emits var (not const) for the stream binding" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1036,7 +1036,7 @@ RSpec.describe SemanticAnnotator do
       it "emits spawnNew in the BG STREAM block" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1047,7 +1047,7 @@ RSpec.describe SemanticAnnotator do
       it "emits push() calls for YIELD inside the generator" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1058,7 +1058,7 @@ RSpec.describe SemanticAnnotator do
       it "emits defer close() for infinite stream generators (signals WaitGroup on error)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1072,8 +1072,8 @@ RSpec.describe SemanticAnnotator do
       it "emits .next() for NEXT on infinite stream" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
-            v: Number = NEXT s;
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            v: Float64 = NEXT s;
             RETURN;
           END
         CLEAR
@@ -1091,7 +1091,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when a plain promise is declared @multiowned (BindExpr path)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            p: ~Number @multiowned = BG { 1.0; };
+            p: ~Float64 @multiowned = BG { 1.0; };
             RETURN;
           END
         CLEAR
@@ -1101,7 +1101,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when an open stream is declared @multiowned (BindExpr path)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] @multiowned = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] @multiowned = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1111,7 +1111,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when an infinite stream is declared @multiowned (BindExpr path)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] @multiowned = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] @multiowned = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1124,7 +1124,7 @@ RSpec.describe SemanticAnnotator do
         # Test via BindExpr path instead (same error message).
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            p: ~Number @multiowned = BG { 1.0; };
+            p: ~Float64 @multiowned = BG { 1.0; };
             RETURN;
           END
         CLEAR
@@ -1134,7 +1134,7 @@ RSpec.describe SemanticAnnotator do
       it "suggests @shared as the correct alternative" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            p: ~Number @multiowned = BG { 1.0; };
+            p: ~Float64 @multiowned = BG { 1.0; };
             RETURN;
           END
         CLEAR
@@ -1146,7 +1146,7 @@ RSpec.describe SemanticAnnotator do
       it "raises a directed error on bare ~T[] in BindExpr declaration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1157,7 +1157,7 @@ RSpec.describe SemanticAnnotator do
         # VarDecl path: MUTABLE declarations
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            MUTABLE s: ~Number[] = BG STREAM { YIELD 1.0; };
+            MUTABLE s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1167,7 +1167,7 @@ RSpec.describe SemanticAnnotator do
       it "error message mentions ~T[N] as an alternative" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1177,7 +1177,7 @@ RSpec.describe SemanticAnnotator do
       it "error message mentions ~T[INF] as an alternative" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1187,7 +1187,7 @@ RSpec.describe SemanticAnnotator do
       it "error message mentions ~T[?] as an alternative" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1197,7 +1197,7 @@ RSpec.describe SemanticAnnotator do
       it "does NOT raise when ~T[?] is used (valid open stream)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[?] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1207,7 +1207,7 @@ RSpec.describe SemanticAnnotator do
       it "does NOT raise when ~T[INF] is used (valid infinite stream)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
+            s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
         CLEAR
@@ -1223,7 +1223,7 @@ RSpec.describe SemanticAnnotator do
         # The declaration guard now fires first, so we test via the message content directly.
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Number[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1285,8 +1285,8 @@ RSpec.describe SemanticAnnotator do
         expect(t.zig_type).to eq("std.ArrayListUnmanaged(CheatLib.Promise(i64))")
       end
 
-      it "emits std.ArrayListUnmanaged(CheatLib.Promise(f64)) for ~Number[]@list" do
-        t = Type.new(:"~Number[]", collection: :list)
+      it "emits std.ArrayListUnmanaged(CheatLib.Promise(f64)) for ~Float64[]@list" do
+        t = Type.new(:"~Float64[]", collection: :list)
         expect(t.zig_type).to eq("std.ArrayListUnmanaged(CheatLib.Promise(f64))")
       end
     end

@@ -66,13 +66,13 @@ pool s> EACH { _.health = _.health - damage; };
 
 | Operator | Syntax | Returns | Empty list |
 |---|---|---|---|
-| **SUM** | `list s> SUM expr` | `Number` | 0 |
-| **AVERAGE** | `list s> AVERAGE expr` | `Number` | 0 |
-| **MIN** | `list s> MIN expr` | `Number` | panics |
-| **MAX** | `list s> MAX expr` | `Number` | panics |
+| **SUM** | `list s> SUM expr` | `Float64` | 0 |
+| **AVERAGE** | `list s> AVERAGE expr` | `Float64` | 0 |
+| **MIN** | `list s> MIN expr` | `Float64` | panics |
+| **MAX** | `list s> MAX expr` | `Float64` | panics |
 | **REDUCE** | `list s> REDUCE(init) expr` | type of init | init |
 
-Aggregate expressions must be numeric (Number or Int64). REDUCE is the general fold — `acc` is the mutable accumulator, `_` is the current element:
+Aggregate expressions must be numeric (Float64 or Int64). REDUCE is the general fold — `acc` is the mutable accumulator, `_` is the current element:
 
 ```ruby clear
 nums: Float64[] = [2.0, 3.0, 4.0];

@@ -40,7 +40,7 @@ In CLEAR, variables have types to ensure safety and speed.
 
 ```ruby
 MUTABLE name = "Bob";
-name = 1;                   -- COMPILER ERROR: `name` is a String, cannot assign a Number.
+name = 1;                   -- COMPILER ERROR: `name` is a String, cannot assign a Float64.
 ```
 
 ### 3. Physics of Size: FIXED vs. DYNAMIC

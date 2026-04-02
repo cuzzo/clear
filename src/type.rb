@@ -95,9 +95,9 @@ class Type
 
     # Both floats: promote to f64
     if lt.float? && rt.float?
-      return BinaryOpResult.new(type: :Number,
-        left_coercion: t_left == :Number ? nil : :Number,
-        right_coercion: t_right == :Number ? nil : :Number)
+      return BinaryOpResult.new(type: :Float64,
+        left_coercion: t_left == :Float64 ? nil : :Float64,
+        right_coercion: t_right == :Float64 ? nil : :Float64)
     end
 
     # Mixed int/float: promote integer operand to the float type
@@ -108,7 +108,7 @@ class Type
       return BinaryOpResult.new(type: t_left, right_coercion: t_left)
     end
 
-    BinaryOpResult.new(type: :Number)
+    BinaryOpResult.new(type: :Float64)
   end
 
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
@@ -143,7 +143,7 @@ class Type
     # Any numeric -> any numeric (implicit promotion/narrowing handled by Zig casts)
     return true if from_t.numeric? && to_t.numeric?
     # Original types that can auto-cast to strings
-    [:Number, :Int64, :Bool, :Byte].include?(from_t.resolved)
+    [:Float64, :Int64, :Bool, :Byte].include?(from_t.resolved)
   end
 
   public
@@ -213,7 +213,7 @@ class Type
   # -----------------------------------------------
 
   # Allow code to compare this object directly to symbols/strings
-  # e.g. if node.type == :Number
+  # e.g. if node.type == :Float64
   def ==(other)
     # fn_types must never compare equal to a plain symbol (resolved returns the return type,
     # not a unique identity). Two fn_types are equal only when their raw hashes match.
@@ -372,7 +372,7 @@ class Type
   SIGNED_INT_TYPES   = [:Int8, :Int16, :Int32, :Int64].freeze
   UNSIGNED_INT_TYPES = [:UInt8, :Byte, :UInt16, :UInt32, :UInt64].freeze
   INT_TYPES          = (SIGNED_INT_TYPES + UNSIGNED_INT_TYPES).freeze
-  FLOAT_TYPES        = [:Float32, :Number, :Float64].freeze
+  FLOAT_TYPES        = [:Float32, :Float64].freeze
   NUMERIC_TYPES      = (INT_TYPES + FLOAT_TYPES).freeze
 
   def numeric?
@@ -600,7 +600,7 @@ class Type
   # Canonical mapping from CLEAR type symbols to Zig type strings.
   # User-defined types (structs, enums, unions) pass through as-is.
   ZIG_TYPE_MAP = {
-    Number:    "f64",
+    Float64:   "f64",
     Int64:     "i64",
     String:    "[]const u8",
     Void:      "void",
@@ -665,7 +665,7 @@ class Type
     @generic_base_raw
   end
 
-  # The type arguments as Type objects: [Type(:Number), Type(:String)]
+  # The type arguments as Type objects: [Type(:Float64), Type(:String)]
   def generic_args
     return nil unless @is_generic_instance
     @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
@@ -757,7 +757,7 @@ class Type
 
   def element_type
     return nil unless array?
-    # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Number"
+    # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
     @element_type_obj ||= begin
       t = Type.new(@element_type_raw || :Any)
       t.ownership = @elem_ownership if @elem_ownership
@@ -933,9 +933,9 @@ class Type
 
     str = @raw.to_s
 
-    # Type alias: Float64 → Number (canonical internal name for f64).
-    # Users write Float64; the type system uses :Number everywhere.
-    str = str.gsub(/\bFloat64\b/, 'Number')
+    # Type alias: Number → Float64 (canonical internal name for f64).
+    # Both Number and Float64 are accepted; the type system uses :Float64 everywhere.
+    str = str.gsub(/\bNumber\b/, 'Float64')
     @raw = str.to_sym
 
     # A0. Detect Tense prefix: ~T (Future/Promise — a BG task producing T)
@@ -994,7 +994,7 @@ class Type
     # D. Detect Array Structure
     # Regex Breakdown:
     #   ^       Start of string
-    #   (.+)    Capture Group 1: Base Type (e.g. "Number")
+    #   (.+)    Capture Group 1: Base Type (e.g. "Float64")
     #   \[      Literal opening bracket
     #   (\d+)?  Capture Group 2: Optional Digits (Capacity).
     #           If this is missing, it matches "[]", meaning Dynamic.
@@ -1002,7 +1002,7 @@ class Type
     #   $       End of string
     if match = str.match(/^(.+)\[(\d+|INF|\?)?\]$/)
       @is_array = true
-      @element_type_raw = match[1].to_sym # Store "Number"
+      @element_type_raw = match[1].to_sym # Store "Float64"
 
       # Capacity: nil = dynamic, :STREAM_OPEN = open stream [?], :INF = infinite [INF], Integer = fixed [N]
       @capacity = case match[2]

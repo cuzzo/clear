@@ -61,7 +61,7 @@ RSpec.describe SemanticAnnotator do
 
       it "raises when @list is applied to a non-array type" do
         expect {
-          run('FN f() RETURNS Void -> x: Number@list = 1; RETURN; END')
+          run('FN f() RETURNS Void -> x: Float64@list = 1; RETURN; END')
         }.to raise_error(ParserError, /@list requires an array type/)
       end
 
@@ -84,7 +84,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts User[100]@pool as a valid type annotation" do
         expect {
           run(<<~CLEAR)
-            STRUCT User { name: String, score: Number }
+            STRUCT User { name: String, score: Float64 }
             FN f() RETURNS Void ->
               MUTABLE pool: User[100]@pool = [];
               RETURN;
@@ -95,7 +95,7 @@ RSpec.describe SemanticAnnotator do
 
       it "resolves User[100]@pool full_type to a pool? Type" do
         tree = run(<<~CLEAR)
-          STRUCT User { name: String, score: Number }
+          STRUCT User { name: String, score: Float64 }
           FN f() RETURNS Void ->
             MUTABLE pool: User[100]@pool = [];
             RETURN;
@@ -108,7 +108,7 @@ RSpec.describe SemanticAnnotator do
 
       it "raises when @pool is applied to a non-array type" do
         expect {
-          run('FN f() RETURNS Void -> x: Number@pool = 1; RETURN; END')
+          run('FN f() RETURNS Void -> x: Float64@pool = 1; RETURN; END')
         }.to raise_error(ParserError, /@pool requires an array type/)
       end
 

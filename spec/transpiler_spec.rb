@@ -16,7 +16,7 @@ RSpec.describe ZigTranspiler do
     it "uses frameAlloc for append" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE vals: Number[]@list = [];
+          MUTABLE vals: Float64[]@list = [];
           append(vals, 1.0);
           RETURN;
         END
@@ -29,7 +29,7 @@ RSpec.describe ZigTranspiler do
     it "uses frameAlloc for deinit" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE vals: Number[]@list = [];
+          MUTABLE vals: Float64[]@list = [];
           append(vals, 1.0);
           RETURN;
         END
@@ -41,7 +41,7 @@ RSpec.describe ZigTranspiler do
     it "sharded list still uses heapAlloc" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE vals: Number[]@list:sharded(4) = [];
+          MUTABLE vals: Float64[]@list:sharded(4) = [];
           RETURN;
         END
       CLEAR
@@ -58,7 +58,7 @@ RSpec.describe ZigTranspiler do
     # The frame mark rewinds on function exit, which would invalidate the list's arena buffer.
     # CLEAR must emit promoteList before the return and the caller uses heapAlloc for deinit.
     let(:frame_list_src) { <<~CLEAR }
-      STRUCT Chunk5 { a: Number, b: Number, c: Number, d: Number, e: Number }
+      STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
       STRUCT BigS {
         c1: Chunk5, c2: Chunk5, c3: Chunk5, c4: Chunk5, c5: Chunk5,
         c6: Chunk5, c7: Chunk5, c8: Chunk5, c9: Chunk5, c10: Chunk5,
@@ -67,7 +67,7 @@ RSpec.describe ZigTranspiler do
         c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
         c26: Chunk5
       }
-      FN buildList() RETURNS Number[]@list ->
+      FN buildList() RETURNS Float64[]@list ->
         zero: Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
         big: BigS = BigS{
           c1: zero, c2: zero, c3: zero, c4: zero, c5: zero,
@@ -77,7 +77,7 @@ RSpec.describe ZigTranspiler do
           c21: zero, c22: zero, c23: zero, c24: zero, c25: zero,
           c26: zero
         };
-        MUTABLE vals: Number[]@list = [];
+        MUTABLE vals: Float64[]@list = [];
         append(vals, big.c1.a);
         RETURN vals;
       END
@@ -167,7 +167,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
-            MUTABLE vals: Number[]@list = [];
+            MUTABLE vals: Float64[]@list = [];
             append(vals, 1.0);
             i = i + 1_i64;
           END
@@ -182,7 +182,7 @@ RSpec.describe ZigTranspiler do
     it "does NOT emit loop marks when loop body has no frame allocations" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE all: Number[]@list = [];
+          MUTABLE all: Float64[]@list = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             append(all, 1.0);
@@ -219,7 +219,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
-            MUTABLE vals: Number[]@list = [];
+            MUTABLE vals: Float64[]@list = [];
             append(vals, 1.0);
             i = i + 1_i64;
           END
@@ -235,7 +235,7 @@ RSpec.describe ZigTranspiler do
       # A pure function that calls no alloc helpers and has no frame vars
       # will not have rt, so no yield injection possible.
       src = <<~CLEAR
-        FN addTwo(a: Number, b: Number) RETURNS Number ->
+        FN addTwo(a: Float64, b: Float64) RETURNS Float64 ->
           RETURN a + b;
         END
         FN main() RETURNS Void ->
@@ -273,7 +273,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 10 DO
-            MUTABLE vals: Number[]@list = [];
+            MUTABLE vals: Float64[]@list = [];
             append(vals, 1.0);
             i = i + 1_i64;
           END
@@ -287,7 +287,7 @@ RSpec.describe ZigTranspiler do
 
     it "raises a compile error when TIGHT loop calls an EXTERN FN directly" do
       src = <<~CLEAR
-        EXTERN FN native_sqrt(x: Number) RETURNS Number FROM "math";
+        EXTERN FN native_sqrt(x: Float64) RETURNS Float64 FROM "math";
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 100 DO
@@ -340,7 +340,7 @@ RSpec.describe ZigTranspiler do
 
     it "allows normal (non-reentrant, non-extern) CLEAR calls inside TIGHT" do
       src = <<~CLEAR
-        FN square(x: Number) RETURNS Number ->
+        FN square(x: Float64) RETURNS Float64 ->
           RETURN x * x;
         END
         FN main() RETURNS Void ->
@@ -365,7 +365,7 @@ RSpec.describe ZigTranspiler do
     it "omits _ = &name for a mutable scalar that is read AND reassigned" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE sum: Number = 0.0;
+          MUTABLE sum: Float64 = 0.0;
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             sum = sum + 1.0;
@@ -383,7 +383,7 @@ RSpec.describe ZigTranspiler do
 
     it "omits _ = &name for a mutable struct that is reassigned" do
       src = <<~CLEAR
-        STRUCT Vec2 { x: Number, y: Number }
+        STRUCT Vec2 { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
           MUTABLE v: Vec2 = Vec2{ x: 0.0, y: 0.0 };
           MUTABLE i = 0_i64;
@@ -402,7 +402,7 @@ RSpec.describe ZigTranspiler do
 
     it "omits _ = &name for a mutable struct with field mutation" do
       src = <<~CLEAR
-        STRUCT Point { x: Number, y: Number }
+        STRUCT Point { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
           MUTABLE p: Point = Point{ x: 1.0, y: 2.0 };
           p.x = 99.0;

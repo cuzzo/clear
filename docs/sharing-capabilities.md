@@ -123,7 +123,7 @@ Stable heap address needed (graph edges, self-referential)?
 └── @indirect (combinable with any of the above)
 ```
 
-**Note on primitives**: Capabilities cannot be applied to primitive types (`Int64`, `Number`, `Bool`, `Byte`, `Float64`). Wrap in a `STRUCT` first — this makes the intent explicit and gives you named fields.
+**Note on primitives**: Capabilities cannot be applied to primitive types (`Int64`, `Float64`, `Bool`, `Byte`, `Float32`). Wrap in a `STRUCT` first — this makes the intent explicit and gives you named fields.
 
 ## Auto-Pinning
 

@@ -25,7 +25,7 @@ RSpec.describe SemanticAnnotator do
   describe "Affine Ownership & Move Semantics" do
     let(:preamble) {
       <<~FLUX
-        STRUCT Config { id: Number }
+        STRUCT Config { id: Float64 }
       FLUX
     }
 
@@ -39,7 +39,7 @@ RSpec.describe SemanticAnnotator do
             END
           FLUX
         }
-        it "allows multiple uses of a primitive (Number)" do
+        it "allows multiple uses of a primitive (Float64)" do
           expect { ast }.not_to raise_error
         end
       end
@@ -208,7 +208,7 @@ RSpec.describe SemanticAnnotator do
     context "Function Calls" do
       context "Passing by Value (Explicit TAKES)" do
         let(:code) { preamble + <<~FLUX
-            FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+            FN consume(TAKES c: Config) RETURNS Float64 -> RETURN 0; END
 
             FN test() ->
               x = Config { id: 1 };
@@ -230,9 +230,9 @@ RSpec.describe SemanticAnnotator do
     context "Control Flow (Branching)" do
       context "Move in one branch, Use in parent" do
         let(:code) { preamble + <<~FLUX
-            FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+            FN consume(TAKES c: Config) RETURNS Float64 -> RETURN 0; END
 
-            FN test(n: Number) ->
+            FN test(n: Float64) ->
               x = Config { id: 1 };
 
               IF n > 10 THEN
@@ -253,9 +253,9 @@ RSpec.describe SemanticAnnotator do
 
       context "Move in both branches" do
         let(:code) { preamble + <<~FLUX
-            FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+            FN consume(TAKES c: Config) RETURNS Float64 -> RETURN 0; END
 
-            FN test(n: Number) ->
+            FN test(n: Float64) ->
               x = Config { id: 1 };
 
               IF n > 10 THEN
@@ -342,7 +342,7 @@ RSpec.describe SemanticAnnotator do
     context "Loops (While)" do
       # Assuming you implement similar logic for While loops
       let(:code) { preamble + <<~FLUX
-          FN consume(TAKES c: Config) RETURNS Number -> RETURN 0; END
+          FN consume(TAKES c: Config) RETURNS Float64 -> RETURN 0; END
 
           FN test() ->
             x = Config { id: 1 };

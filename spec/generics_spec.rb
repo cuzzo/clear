@@ -48,7 +48,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "a non-generic struct has empty type_params" do
-        ast = run("STRUCT User { id: Number }")
+        ast = run("STRUCT User { id: Float64 }")
         expect(ast.statements.first.type_params).to be_nil.or(be_empty)
       end
     end
@@ -62,8 +62,8 @@ RSpec.describe SemanticAnnotator do
 
       it "raises an error when a type parameter shadows a built-in type" do
         expect {
-          run("STRUCT Foo<Number> { value: Number }")
-        }.to raise_error(CompilerError, /Type Error: Type parameter 'Number' shadows built-in type/)
+          run("STRUCT Foo<Float64> { value: Float64 }")
+        }.to raise_error(CompilerError, /Type Error: Type parameter 'Float64' shadows built-in type/)
       end
 
       it "raises an error when a type parameter shadows Bool" do
@@ -74,7 +74,7 @@ RSpec.describe SemanticAnnotator do
 
       # NOTE: The following validations are Phase 2 (type annotation instantiation):
       #   - Using a generic type without type args: `x: Pair` should error
-      #   - Wrong number of type args: `x: Pair<Number, String>` when Pair<T> expects 1
+      #   - Wrong number of type args: `x: Pair<Float64, String>` when Pair<T> expects 1
       #   - Value supplied instead of type: `x: Pair<42>` (parser-level check)
     end
 
@@ -83,14 +83,14 @@ RSpec.describe SemanticAnnotator do
     # --------------------------------------------------
     describe "generic type annotations" do
       # Helpers: use function params/returns to test annotations without needing struct literals.
-      # (Phase 3 adds struct literal instantiation: Pair<Number>{ first: 1, second: 2 })
+      # (Phase 3 adds struct literal instantiation: Pair<Float64>{ first: 1, second: 2 })
 
       def fn_with_param(param_annotation)
         <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
           STRUCT Map<K, V> { key: K, value: V }
-          STRUCT User { id: Number }
-          FN use(p: #{param_annotation}) RETURNS Number ->
+          STRUCT User { id: Float64 }
+          FN use(p: #{param_annotation}) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -101,26 +101,26 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
           STRUCT Map<K, V> { key: K, value: V }
-          STRUCT User { id: Number }
-          FN bad(p: #{param_annotation}) RETURNS Number ->
+          STRUCT User { id: Float64 }
+          FN bad(p: #{param_annotation}) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
         CLEAR
       end
 
-      it "allows Pair<Number> as a function parameter type" do
-        expect { run(fn_with_param("Pair<Number>")) }.not_to raise_error
+      it "allows Pair<Float64> as a function parameter type" do
+        expect { run(fn_with_param("Pair<Float64>")) }.not_to raise_error
       end
 
       it "stores the generic type on the param" do
-        ast = run(fn_with_param("Pair<Number>"))
+        ast = run(fn_with_param("Pair<Float64>"))
         fn = ast.statements[3]  # FunctionDef for 'use'
-        expect(fn.params.first[:type].to_s).to eq("Pair<Number>")
+        expect(fn.params.first[:type].to_s).to eq("Pair<Float64>")
       end
 
-      it "allows multi-param generic Map<String, Number> as a param type" do
-        expect { run(fn_with_param("Map<String, Number>")) }.not_to raise_error
+      it "allows multi-param generic Map<String, Float64> as a param type" do
+        expect { run(fn_with_param("Map<String, Float64>")) }.not_to raise_error
       end
 
       it "allows other built-in type args: Pair<Bool>" do
@@ -137,9 +137,9 @@ RSpec.describe SemanticAnnotator do
 
       it "allows a user-defined struct as a type argument: Pair<User>" do
         src = <<~CLEAR
-          STRUCT User { id: Number }
+          STRUCT User { id: Float64 }
           STRUCT Pair<T> { first: T, second: T }
-          FN use(p: Pair<User>) RETURNS Number ->
+          FN use(p: Pair<User>) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -147,16 +147,16 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "allows ?Pair<Number> as an optional generic param type" do
-        expect { run(fn_with_param("?Pair<Number>")) }.not_to raise_error
+      it "allows ?Pair<Float64> as an optional generic param type" do
+        expect { run(fn_with_param("?Pair<Float64>")) }.not_to raise_error
       end
 
       it "allows a generic type as a function return type annotation" do
-        # The return type annotation Pair<Number> is valid even without a body that returns one.
+        # The return type annotation Pair<Float64> is valid even without a body that returns one.
         # Full round-trip (function body returning a struct literal) is Phase 3.
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN make() RETURNS Pair<Number> ->
+          FN make() RETURNS Pair<Float64> ->
             PASS
           END
           FN main() RETURNS Void -> PASS END
@@ -168,11 +168,11 @@ RSpec.describe SemanticAnnotator do
         # Define make() with implicit return (avoids needing a struct literal for now)
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN make() RETURNS Pair<Number> ->
+          FN make() RETURNS Pair<Float64> ->
             PASS
           END
           FN main() RETURNS Void ->
-            p: Pair<Number> = make();
+            p: Pair<Float64> = make();
           END
         CLEAR
         expect { run(src) }.not_to raise_error
@@ -208,19 +208,19 @@ RSpec.describe SemanticAnnotator do
 
         it "raises 'wrong arg count' for too many type arguments" do
           expect {
-            run(fn_with_bad_param("Pair<Number, Bool>"))
+            run(fn_with_bad_param("Pair<Float64, Bool>"))
           }.to raise_error(CompilerError, /Type Error: 'Pair' expects 1 type argument\(s\), got 2/)
         end
 
         it "raises 'wrong arg count' for too few type arguments" do
           expect {
-            run(fn_with_bad_param("Map<Number>"))
+            run(fn_with_bad_param("Map<Float64>"))
           }.to raise_error(CompilerError, /Type Error: 'Map' expects 2 type argument\(s\), got 1/)
         end
 
         it "raises 'not generic' when a non-generic struct is given type args" do
           expect {
-            run(fn_with_bad_param("User<Number>"))
+            run(fn_with_bad_param("User<Float64>"))
           }.to raise_error(CompilerError, /Type Error: 'User' is not a generic type — remove the type arguments/)
         end
 
@@ -238,11 +238,11 @@ RSpec.describe SemanticAnnotator do
 
         it "raises 'missing type args' when a generic type is used as a type arg without its own args" do
           # Pair<Pair> — the inner 'Pair' is itself generic and needs args
-          # Note: nested generics Pair<Pair<Number>> are not yet supported by the parser (Phase 4+).
+          # Note: nested generics Pair<Pair<Float64>> are not yet supported by the parser (Phase 4+).
           # This test documents that the bare Pair inside <> is caught as missing args.
           src = <<~CLEAR
             STRUCT Pair<T> { first: T, second: T }
-            FN bad(p: Pair<Pair>) RETURNS Number ->
+            FN bad(p: Pair<Pair>) RETURNS Float64 ->
               RETURN 0.0;
             END
             FN main() RETURNS Void -> PASS END
@@ -253,10 +253,10 @@ RSpec.describe SemanticAnnotator do
     end
 
     describe "Phase 2 Zig code generation" do
-      it "emits Pair(f64) for Pair<Number> in a function param" do
+      it "emits Pair(f64) for Pair<Float64> in a function param" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN use(p: Pair<Number>) RETURNS Number ->
+          FN use(p: Pair<Float64>) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -265,10 +265,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("Pair(f64)")
       end
 
-      it "emits Map([]const u8, f64) for Map<String, Number>" do
+      it "emits Map([]const u8, f64) for Map<String, Float64>" do
         src = <<~CLEAR
           STRUCT Map<K, V> { key: K, value: V }
-          FN use(m: Map<String, Number>) RETURNS Number ->
+          FN use(m: Map<String, Float64>) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -277,10 +277,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("Map([]const u8, f64)")
       end
 
-      it "emits Pair(f64) as the Zig return type for RETURNS Pair<Number>" do
+      it "emits Pair(f64) as the Zig return type for RETURNS Pair<Float64>" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN make() RETURNS Pair<Number> ->
+          FN make() RETURNS Pair<Float64> ->
             PASS
           END
           FN main() RETURNS Void -> PASS END
@@ -292,7 +292,7 @@ RSpec.describe SemanticAnnotator do
       it "emits Pair(bool) for Pair<Bool>" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN use(p: Pair<Bool>) RETURNS Number ->
+          FN use(p: Pair<Bool>) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -303,9 +303,9 @@ RSpec.describe SemanticAnnotator do
 
       it "emits Pair(User) for Pair<User> where User is a plain struct" do
         src = <<~CLEAR
-          STRUCT User { id: Number }
+          STRUCT User { id: Float64 }
           STRUCT Pair<T> { first: T, second: T }
-          FN use(p: Pair<User>) RETURNS Number ->
+          FN use(p: Pair<User>) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -317,7 +317,7 @@ RSpec.describe SemanticAnnotator do
       it "emits ?Pair(f64) for an optional generic param" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
-          FN use(p: ?Pair<Number>) RETURNS Number ->
+          FN use(p: ?Pair<Float64>) RETURNS Float64 ->
             RETURN 0.0;
           END
           FN main() RETURNS Void -> PASS END
@@ -341,7 +341,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "emits a plain const struct for a non-generic struct" do
-        out = ZigTranspiler.new.transpile("STRUCT User { id: Number }\nFN main() RETURNS Void -> PASS END")
+        out = ZigTranspiler.new.transpile("STRUCT User { id: Float64 }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("const User = struct")
         expect(out).not_to include("comptime")
       end
@@ -405,7 +405,7 @@ RSpec.describe SemanticAnnotator do
         "FN main() RETURNS Void ->\n#{call_code}\nEND"
       end
 
-      it "infers T=Number when calling identity(42.0)" do
+      it "infers T=Float64 when calling identity(42.0)" do
         src = call_src(
           "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
           "n = identity(42.0);"
@@ -421,7 +421,7 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "sets generic_type_args to [:Number] on the FuncCall node for identity(42.0)" do
+      it "sets generic_type_args to [:Float64] on the FuncCall node for identity(42.0)" do
         src = call_src(
           "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
           "n = identity(42.0);"
@@ -431,10 +431,10 @@ RSpec.describe SemanticAnnotator do
         bind = fn.body.first
         call = bind.value
         expect(call).to be_a(AST::FuncCall)
-        expect(call.generic_type_args).to eq([:Number])
+        expect(call.generic_type_args).to eq([:Float64])
       end
 
-      it "sets full_type to :Number on the FuncCall result of identity(42.0)" do
+      it "sets full_type to :Float64 on the FuncCall result of identity(42.0)" do
         src = call_src(
           "FN identity<T>(x: T) RETURNS T -> RETURN x; END",
           "n = identity(42.0);"
@@ -442,13 +442,13 @@ RSpec.describe SemanticAnnotator do
         ast = run(src)
         fn = ast.statements.last
         bind = fn.body.first
-        expect(bind.value.resolved_type).to eq(:Number)
+        expect(bind.value.resolved_type).to eq(:Float64)
       end
 
-      it "infers T from a generic struct parameter: unbox(Box<Number>{ value: 1.0 })" do
+      it "infers T from a generic struct parameter: unbox(Box<Float64>{ value: 1.0 })" do
         src = call_src(
           "FN unbox<T>(b: Box<T>) RETURNS T -> RETURN b.value; END",
-          'b = Box<Number>{ value: 1.0 }; v = unbox(b);'
+          'b = Box<Float64>{ value: 1.0 }; v = unbox(b);'
         )
         expect { run(src) }.not_to raise_error
       end
@@ -478,10 +478,10 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /Duplicate type parameter 'T' in generic function 'bad'/)
       end
 
-      it "raises GENERIC_FN_PARAM_SHADOWS_BUILTIN for shadowing Number" do
+      it "raises GENERIC_FN_PARAM_SHADOWS_BUILTIN for shadowing Float64" do
         expect {
-          run(fn_err_src("FN bad<Number>(x: Number) RETURNS Number -> RETURN x; END"))
-        }.to raise_error(CompilerError, /Type parameter 'Number'.*shadows built-in type/)
+          run(fn_err_src("FN bad<Float64>(x: Float64) RETURNS Float64 -> RETURN x; END"))
+        }.to raise_error(CompilerError, /Type parameter 'Float64'.*shadows built-in type/)
       end
 
       it "raises GENERIC_FN_PARAM_SHADOWS_BUILTIN for shadowing Bool" do
@@ -493,7 +493,7 @@ RSpec.describe SemanticAnnotator do
       it "raises GENERIC_FN_CANNOT_INFER when type param T is not used in any param" do
         expect {
           run(fn_err_src(
-            "FN bad<T>(x: Number) RETURNS Number -> RETURN x; END",
+            "FN bad<T>(x: Float64) RETURNS Float64 -> RETURN x; END",
             "r = bad(1.0);"
           ))
         }.to raise_error(CompilerError, /Cannot infer type argument 'T' for 'bad'/)
@@ -509,7 +509,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "raises an argument type error when wrong type is passed after inference" do
-        # T inferred as Number from first arg; second arg should also be Number
+        # T inferred as Float64 from first arg; second arg should also be Float64
         src = fn_err_src(
           "FN same<T>(a: T, b: T) RETURNS T -> RETURN a; END",
           'r = same(1.0, "hello");'
@@ -566,32 +566,32 @@ RSpec.describe SemanticAnnotator do
         CLEAR
       end
 
-      it "parses and annotates Pair<Number>{ first: 1.0, second: 2.0 } without error" do
+      it "parses and annotates Pair<Float64>{ first: 1.0, second: 2.0 } without error" do
         expect {
-          run(generic_lit_src("p = Pair<Number>{ first: 1.0, second: 2.0 };"))
+          run(generic_lit_src("p = Pair<Float64>{ first: 1.0, second: 2.0 };"))
         }.not_to raise_error
       end
 
-      it "sets full_type to :\"Pair<Number>\" on the StructLit node" do
-        ast = run(generic_lit_src("p = Pair<Number>{ first: 1.0, second: 2.0 };"))
+      it "sets full_type to :\"Pair<Float64>\" on the StructLit node" do
+        ast = run(generic_lit_src("p = Pair<Float64>{ first: 1.0, second: 2.0 };"))
         fn = ast.statements.last
         bind = fn.body.first
         lit = bind.value
         expect(lit).to be_a(AST::StructLit)
-        expect(lit.resolved_type).to eq(:"Pair<Number>")
+        expect(lit.resolved_type).to eq(:"Pair<Float64>")
       end
 
       it "stores type_args on the StructLit AST node" do
-        ast = run(generic_lit_src("p = Pair<Number>{ first: 1.0, second: 2.0 };"))
+        ast = run(generic_lit_src("p = Pair<Float64>{ first: 1.0, second: 2.0 };"))
         fn = ast.statements.last
         bind = fn.body.first
         lit = bind.value
-        expect(lit.type_args).to eq(["Number"])
+        expect(lit.type_args).to eq(["Float64"])
       end
 
-      it "accepts KeyValue<String, Number>{ key: \"x\", value: 42.0 }" do
+      it "accepts KeyValue<String, Float64>{ key: \"x\", value: 42.0 }" do
         expect {
-          run(generic_lit_src('kv = KeyValue<String, Number>{ key: "x", value: 42.0 };'))
+          run(generic_lit_src('kv = KeyValue<String, Float64>{ key: "x", value: 42.0 };'))
         }.not_to raise_error
       end
 
@@ -599,18 +599,18 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
           FN main() RETURNS Void ->
-            p = Pair<Number>{ first: 1.0, second: 2.0 };
+            p = Pair<Float64>{ first: 1.0, second: 2.0 };
             x = p.first;
           END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
 
-      it "infers field type as Number when accessing .first on Pair<Number>" do
+      it "infers field type as Float64 when accessing .first on Pair<Float64>" do
         src = <<~CLEAR
           STRUCT Pair<T> { first: T, second: T }
           FN main() RETURNS Void ->
-            p = Pair<Number>{ first: 1.0, second: 2.0 };
+            p = Pair<Float64>{ first: 1.0, second: 2.0 };
             x = p.first;
           END
         CLEAR
@@ -619,27 +619,27 @@ RSpec.describe SemanticAnnotator do
         bind_x = fn.body[1]
         get_field = bind_x.value
         expect(get_field).to be_a(AST::GetField)
-        expect(get_field.resolved_type).to eq(:Number)
+        expect(get_field.resolved_type).to eq(:Float64)
       end
 
       describe "error messages" do
         it "raises a type error when a field value has the wrong type" do
           expect {
-            run(generic_lit_src('p = Pair<Number>{ first: "oops", second: 2.0 };'))
-          }.to raise_error(CompilerError, /expected.*Number|got.*String/i)
+            run(generic_lit_src('p = Pair<Float64>{ first: "oops", second: 2.0 };'))
+          }.to raise_error(CompilerError, /expected.*Float64|got.*String/i)
         end
 
         it "raises a type error when wrong number of type args in literal" do
           expect {
-            run(generic_lit_src("p = Pair<Number, Bool>{ first: 1.0, second: true };"))
+            run(generic_lit_src("p = Pair<Float64, Bool>{ first: 1.0, second: true };"))
           }.to raise_error(CompilerError, /expects 1 type argument/)
         end
 
         it "raises a type error when a non-generic struct gets type args in literal" do
           src = <<~CLEAR
-            STRUCT User { id: Number }
+            STRUCT User { id: Float64 }
             FN main() RETURNS Void ->
-              u = User<Number>{ id: 1.0 };
+              u = User<Float64>{ id: 1.0 };
             END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError, /not a generic type/)
@@ -685,32 +685,32 @@ RSpec.describe SemanticAnnotator do
 
         it "raises when type parameter shadows a builtin" do
           src = <<~CLEAR
-            UNION Bad<Number> { A: Number }
+            UNION Bad<Float64> { A: Float64 }
             FN main() RETURNS Void -> END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError,
-            /Type parameter 'Number' shadows built-in type 'Number'/)
+            /Type parameter 'Float64' shadows built-in type 'Float64'/)
         end
 
-        it "accepts Option<Number>{ Some: 42.0 } without error" do
-          expect { run(union_src("opt = Option<Number>{ Some: 42.0 };")) }.not_to raise_error
+        it "accepts Option<Float64>{ Some: 42.0 } without error" do
+          expect { run(union_src("opt = Option<Float64>{ Some: 42.0 };")) }.not_to raise_error
         end
 
-        it "sets full_type to :\"Option<Number>\" on the union literal" do
-          ast = run(union_src("opt = Option<Number>{ Some: 42.0 };"))
+        it "sets full_type to :\"Option<Float64>\" on the union literal" do
+          ast = run(union_src("opt = Option<Float64>{ Some: 42.0 };"))
           fn = ast.statements.last
           bind = fn.body.first
           lit = bind.value
           expect(lit).to be_a(AST::StructLit)
-          expect(lit.resolved_type).to eq(:"Option<Number>")
+          expect(lit.resolved_type).to eq(:"Option<Float64>")
         end
 
-        it "accepts Option<Number>{ Some: 0.0 } (second Some variant) without error" do
-          expect { run(union_src("n = Option<Number>{ Some: 0.0 };")) }.not_to raise_error
+        it "accepts Option<Float64>{ Some: 0.0 } (second Some variant) without error" do
+          expect { run(union_src("n = Option<Float64>{ Some: 0.0 };")) }.not_to raise_error
         end
 
-        it "accepts Result<Number, Bool>{ Err: TRUE } without error" do
-          expect { run(union_src("r = Result<Number, Bool>{ Err: TRUE };")) }.not_to raise_error
+        it "accepts Result<Float64, Bool>{ Err: TRUE } without error" do
+          expect { run(union_src("r = Result<Float64, Bool>{ Err: TRUE };")) }.not_to raise_error
         end
 
         it "raises when instantiating a generic union without type args" do
@@ -728,15 +728,15 @@ RSpec.describe SemanticAnnotator do
           src = <<~CLEAR
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
-              bad = Option<Number>{ Some: TRUE };
+              bad = Option<Float64>{ Some: TRUE };
             END
           CLEAR
           expect { run(src) }.to raise_error(CompilerError, /Type Error/)
         end
 
-        it "allows MATCH on Option<Number> without type error" do
+        it "allows MATCH on Option<Float64> without type error" do
           src = union_src(<<~BODY)
-            opt = Option<Number>{ Some: 42.0 };
+            opt = Option<Float64>{ Some: 42.0 };
             MUTABLE got = 0.0;
             MATCH opt START
               Option.Some -> got = 1.0;,
@@ -775,11 +775,11 @@ RSpec.describe SemanticAnnotator do
           expect(out).to include("Err: E")
         end
 
-        it "emits Option(f64){ .Some = 42 } for Option<Number>{ Some: 42.0 }" do
+        it "emits Option(f64){ .Some = 42 } for Option<Float64>{ Some: 42.0 }" do
           src = <<~CLEAR
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
-              opt = Option<Number>{ Some: 42.0 };
+              opt = Option<Float64>{ Some: 42.0 };
             END
           CLEAR
           out = union_zig(src)
@@ -791,7 +791,7 @@ RSpec.describe SemanticAnnotator do
           src = <<~CLEAR
             UNION Result<T, E> { Ok: T, Err: E }
             FN main() RETURNS Void ->
-              r = Result<Number, Bool>{ Err: TRUE };
+              r = Result<Float64, Bool>{ Err: TRUE };
             END
           CLEAR
           out = union_zig(src)
@@ -801,11 +801,11 @@ RSpec.describe SemanticAnnotator do
       end
 
       describe "Phase 3 Zig code generation" do
-        it "emits Pair(f64){ .first = ..., .second = ... } for Pair<Number>" do
+        it "emits Pair(f64){ .first = ..., .second = ... } for Pair<Float64>" do
           src = <<~CLEAR
             STRUCT Pair<T> { first: T, second: T }
             FN main() RETURNS Void ->
-              p = Pair<Number>{ first: 1.0, second: 2.0 };
+              p = Pair<Float64>{ first: 1.0, second: 2.0 };
             END
           CLEAR
           out = ZigTranspiler.new.transpile(src)
@@ -814,11 +814,11 @@ RSpec.describe SemanticAnnotator do
           expect(out).to include(".second =")
         end
 
-        it "emits KeyValue([]const u8, f64){ ... } for KeyValue<String, Number>" do
+        it "emits KeyValue([]const u8, f64){ ... } for KeyValue<String, Float64>" do
           src = <<~CLEAR
             STRUCT KeyValue<K, V> { key: K, value: V }
             FN main() RETURNS Void ->
-              kv = KeyValue<String, Number>{ key: "x", value: 42.0 };
+              kv = KeyValue<String, Float64>{ key: "x", value: 42.0 };
             END
           CLEAR
           out = ZigTranspiler.new.transpile(src)

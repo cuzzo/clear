@@ -109,7 +109,7 @@ DO {
 Block until a promise resolves:
 
 ```clear
-p: ~Number = BG { 42.0; };
+p: ~Float64 = BG { 42.0; };
 result: Float64 = NEXT p;
 ```
 

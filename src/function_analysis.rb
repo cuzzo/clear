@@ -30,7 +30,7 @@ module FunctionAnalysis
   # Example output:
   #   {
   #     params: [
-  #       { name: "x", type: :Number, required: true, mutable: false, takes: false }
+  #       { name: "x", type: :Float64, required: true, mutable: false, takes: false }
   #     ],
   #     return: { type: :Bool },
   #     lambda: true
@@ -423,7 +423,7 @@ module FunctionAnalysis
       field_name = field_sym.to_s
 
       # Stop if we hit an Array index wildcard (we can't verify types past a dynamic index easily yet)
-      break if field_sym == :* # Look up the definition (e.g. { index: :Number })
+      break if field_sym == :* # Look up the definition (e.g. { index: :Float64 })
       # You added this method to Scope earlier!
       schema = current_scope.resolve_type_definition(current_type_name)
 

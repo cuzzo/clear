@@ -34,7 +34,7 @@ RSpec.describe SemanticAnnotator do
     context "creating a @multiowned variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @multiowned;
         FLUX
       }
@@ -51,7 +51,7 @@ RSpec.describe SemanticAnnotator do
     context "direct field access on a @multiowned variable (no WITH needed)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 10 } @multiowned;
           v = c.value;
         FLUX
@@ -65,7 +65,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH on a plain (non-@multiowned) variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 };
           WITH c { }
         FLUX
@@ -79,7 +79,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE on a @multiowned variable (wrong capability for mutex)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @multiowned;
           WITH EXCLUSIVE c AS inner { }
         FLUX
@@ -93,8 +93,8 @@ RSpec.describe SemanticAnnotator do
     context "capability annotation on a function parameter" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN bad(c: Counter @multiowned) RETURNS Number -> RETURN 0; END
+          STRUCT Counter { value: Float64 }
+          FN bad(c: Counter @multiowned) RETURNS Float64 -> RETURN 0; END
         FLUX
       }
 
@@ -112,7 +112,7 @@ RSpec.describe SemanticAnnotator do
     context "creating a @shared variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number }
+          STRUCT Point { x: Float64 }
           p = Point{ x: 1 } @shared;
         FLUX
       }
@@ -129,7 +129,7 @@ RSpec.describe SemanticAnnotator do
     context "direct field access on a @shared variable (no WITH needed)" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number }
+          STRUCT Point { x: Float64 }
           p = Point{ x: 5 } @shared;
           v = p.x;
         FLUX
@@ -143,7 +143,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH on a plain (non-@shared) variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number }
+          STRUCT Point { x: Float64 }
           p = Point{ x: 1 };
           WITH p { }
         FLUX
@@ -157,8 +157,8 @@ RSpec.describe SemanticAnnotator do
     context "capability annotation on a function parameter" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number }
-          FN bad(p: Point @shared) RETURNS Number -> RETURN 0; END
+          STRUCT Point { x: Float64 }
+          FN bad(p: Point @shared) RETURNS Float64 -> RETURN 0; END
         FLUX
       }
 
@@ -176,7 +176,7 @@ RSpec.describe SemanticAnnotator do
     context "creating a @locked variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @locked;
         FLUX
       }
@@ -193,8 +193,8 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE acquires the mutex and binds an alias" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          STRUCT Counter { value: Float64 }
+          FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
           c = Counter{ value: 42 } @locked;
           WITH EXCLUSIVE c AS inner {
             getVal(inner);
@@ -210,8 +210,8 @@ RSpec.describe SemanticAnnotator do
     context "WITH (implicit) on a @locked variable infers EXCLUSIVE" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          STRUCT Counter { value: Float64 }
+          FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
           c = Counter{ value: 0 } @locked;
           WITH c AS inner {
             getVal(inner);
@@ -227,7 +227,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE on a plain (non-locked) variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 };
           WITH EXCLUSIVE c AS inner { }
         FLUX
@@ -334,7 +334,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE on a @shared variable (not a mutex)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @shared;
           WITH EXCLUSIVE c AS inner { }
         FLUX
@@ -348,7 +348,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH (implicit) on a plain (non-locked, non-owned) variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 };
           WITH c { }
         FLUX
@@ -362,7 +362,7 @@ RSpec.describe SemanticAnnotator do
     context "mutation through the EXCLUSIVE alias" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @locked;
           WITH EXCLUSIVE c AS inner {
             inner.value = 99;
@@ -378,8 +378,8 @@ RSpec.describe SemanticAnnotator do
     context "capability annotation on a function parameter" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN bad(c: Counter @locked) RETURNS Number -> RETURN 0; END
+          STRUCT Counter { value: Float64 }
+          FN bad(c: Counter @locked) RETURNS Float64 -> RETURN 0; END
         FLUX
       }
 
@@ -397,7 +397,7 @@ RSpec.describe SemanticAnnotator do
     context "creating a @writeLocked variable" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @writeLocked;
         FLUX
       }
@@ -414,8 +414,8 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE acquires the write lock and binds an alias" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          STRUCT Counter { value: Float64 }
+          FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
           c = Counter{ value: 7 } @writeLocked;
           WITH EXCLUSIVE c AS inner {
             getVal(inner);
@@ -431,8 +431,8 @@ RSpec.describe SemanticAnnotator do
     context "WITH (implicit) on a @writeLocked variable acquires a read lock" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          STRUCT Counter { value: Float64 }
+          FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
           c = Counter{ value: 3 } @writeLocked;
           WITH c AS inner {
             getVal(inner);
@@ -448,7 +448,7 @@ RSpec.describe SemanticAnnotator do
     context "mutation through the EXCLUSIVE (write) alias" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @writeLocked;
           WITH EXCLUSIVE c AS inner {
             inner.value = 100;
@@ -464,7 +464,7 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE on a plain variable (not write-locked)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 };
           WITH EXCLUSIVE c AS inner { }
         FLUX
@@ -478,8 +478,8 @@ RSpec.describe SemanticAnnotator do
     context "capability annotation on a function parameter" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN bad(c: Counter @writeLocked) RETURNS Number -> RETURN 0; END
+          STRUCT Counter { value: Float64 }
+          FN bad(c: Counter @writeLocked) RETURNS Float64 -> RETURN 0; END
         FLUX
       }
 
@@ -501,7 +501,7 @@ RSpec.describe SemanticAnnotator do
     context "@shared:locked join (ownership then sync)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @shared:locked;
         FLUX
       }
@@ -522,7 +522,7 @@ RSpec.describe SemanticAnnotator do
     context "@locked:shared join (sync then ownership, order-independent)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @locked:shared;
         FLUX
       }
@@ -543,7 +543,7 @@ RSpec.describe SemanticAnnotator do
     context "@multiowned:writeLocked join" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @multiowned:writeLocked;
         FLUX
       }
@@ -564,7 +564,7 @@ RSpec.describe SemanticAnnotator do
     context "duplicate ownership join error (@shared:multiowned)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @shared:multiowned;
         FLUX
       }
@@ -577,7 +577,7 @@ RSpec.describe SemanticAnnotator do
     context "duplicate sync join error (@locked:writeLocked)" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @locked:writeLocked;
         FLUX
       }
@@ -640,7 +640,7 @@ RSpec.describe SemanticAnnotator do
   # ---------------------------------------------------------------------------
 
   describe "capability `:` join — transpiler output (all 4 two-layer combos)" do
-    let(:preamble) { "STRUCT Counter { value: Number }\n" }
+    let(:preamble) { "STRUCT Counter { value: Float64 }\n" }
 
     context "@shared:locked → Arc(Locked(T))" do
       let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @shared:locked;") }
@@ -719,8 +719,8 @@ RSpec.describe SemanticAnnotator do
   describe "capability `:` join — WITH block dereferences through ownership wrapper" do
     let(:preamble) {
       <<~FLUX
-        STRUCT Counter { value: Number }
-        FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+        STRUCT Counter { value: Float64 }
+        FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
       FLUX
     }
 
@@ -773,8 +773,8 @@ RSpec.describe SemanticAnnotator do
     context "WITH c (implicit) on @shared:locked infers EXCLUSIVE" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          STRUCT Counter { value: Float64 }
+          FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
           c = Counter{ value: 0 } @shared:locked;
           WITH c AS inner { getVal(inner); }
         FLUX
@@ -788,8 +788,8 @@ RSpec.describe SemanticAnnotator do
     context "WITH c (implicit) on @multiowned:writeLocked infers write_locked_read" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
-          FN getVal(c: Counter) RETURNS Number -> RETURN c.value; END
+          STRUCT Counter { value: Float64 }
+          FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
           c = Counter{ value: 0 } @multiowned:writeLocked;
           WITH c AS inner { getVal(inner); }
         FLUX

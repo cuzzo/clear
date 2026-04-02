@@ -112,7 +112,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "raises on non-resource type used with ::" do
-        src = 'STRUCT Point { x: Number } FN f() RETURNS Void -> p = Point::new(); RETURN; END'
+        src = 'STRUCT Point { x: Float64 } FN f() RETURNS Void -> p = Point::new(); RETURN; END'
         expect { run(src) }.to raise_error(SourceError, /does not support '::' static method calls/)
       end
 

@@ -30,7 +30,7 @@ RSpec.describe SemanticAnnotator do
     context "simple expression branches" do
       let(:code) {
         <<~FLUX
-          STRUCT Task { id: Number }
+          STRUCT Task { id: Float64 }
           FN process(t: Task) RETURNS Void -> RETURN; END
           a = Task{ id: 1 };
           b = Task{ id: 2 };
@@ -53,7 +53,7 @@ RSpec.describe SemanticAnnotator do
     context "block branches with @locked shared state" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @locked;
           DO {
             WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
@@ -74,7 +74,7 @@ RSpec.describe SemanticAnnotator do
     context "block branches with @writeLocked shared state" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @writeLocked;
           DO {
             WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
@@ -107,7 +107,7 @@ RSpec.describe SemanticAnnotator do
     context "type error inside a DO branch" do
       let(:code) {
         <<~FLUX
-          FN add(a: Number, b: Number) RETURNS Number -> RETURN a + b; END
+          FN add(a: Float64, b: Float64) RETURNS Float64 -> RETURN a + b; END
           x = "not-a-number";
           DO {
             add(x, 1)
@@ -183,7 +183,7 @@ RSpec.describe SemanticAnnotator do
     context "type error inside @pinned branch is still reported" do
       let(:code) {
         <<~FLUX
-          FN add(x: Number, y: Number) RETURNS Number -> RETURN x + y; END
+          FN add(x: Float64, y: Float64) RETURNS Float64 -> RETURN x + y; END
           bad = "not-a-number";
           DO { @pinned -> add(bad, 1) }
         FLUX
@@ -293,8 +293,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           FN f() RETURNS Void ->
-              p: ~Number = BG { 42.0; };
-              r: Number = NEXT p;
+              p: ~Float64 = BG { 42.0; };
+              r: Float64 = NEXT p;
               RETURN;
           END
         FLUX
@@ -748,8 +748,8 @@ RSpec.describe SemanticAnnotator do
 
     context "BG with @xl prefix" do
       let(:code) {
-        "FN add(x: Number, y: Number) RETURNS Number -> RETURN x + y; END\n" \
-        "FN f() RETURNS Void -> p: ~Number = BG { @xl -> add(1.0, 2.0); }; r: Number = NEXT p; RETURN; END"
+        "FN add(x: Float64, y: Float64) RETURNS Float64 -> RETURN x + y; END\n" \
+        "FN f() RETURNS Void -> p: ~Float64 = BG { @xl -> add(1.0, 2.0); }; r: Float64 = NEXT p; RETURN; END"
       }
 
       it "parses and type-checks correctly" do
@@ -785,13 +785,13 @@ RSpec.describe SemanticAnnotator do
   describe "CONCURRENT — size option parsing" do
     subject(:ast) { run(code) }
     let(:preamble) {
-      "FN double(x: Number) RETURNS Number -> RETURN x * 2.0; END\n"
+      "FN double(x: Float64) RETURNS Float64 -> RETURN x * 2.0; END\n"
     }
 
     context "CONCURRENT(size: LARGE) SELECT" do
       let(:code) {
         preamble +
-        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0, 2.0]; " \
         "r = items s> CONCURRENT(size: LARGE) SELECT double(_); RETURN; END"
       }
 
@@ -815,8 +815,8 @@ RSpec.describe SemanticAnnotator do
     context "CONCURRENT(workers: 4, size: MICRO) WHERE" do
       let(:code) {
         preamble +
-        "FN big(x: Number) RETURNS Bool -> RETURN x > 1.0; END\n" \
-        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0, 2.0]; " \
         "r = items s> CONCURRENT(workers: 4, size: MICRO) WHERE big(_); RETURN; END"
       }
 
@@ -835,7 +835,7 @@ RSpec.describe SemanticAnnotator do
     context "CONCURRENT(size: STANDARD) EACH" do
       let(:code) {
         preamble +
-        "FN f() RETURNS Void -> items: Number[] = [1.0]; " \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0]; " \
         "items s> CONCURRENT(size: STANDARD) EACH { double(_); }; RETURN; END"
       }
 
@@ -847,7 +847,7 @@ RSpec.describe SemanticAnnotator do
     context "CONCURRENT(size: XL) SELECT" do
       let(:code) {
         preamble +
-        "FN f() RETURNS Void -> items: Number[] = [1.0]; " \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0]; " \
         "r = items s> CONCURRENT(size: XL) SELECT double(_); RETURN; END"
       }
 
@@ -859,7 +859,7 @@ RSpec.describe SemanticAnnotator do
     context "CONCURRENT(size: HUGE) — invalid size" do
       let(:code) {
         preamble +
-        "FN f() RETURNS Void -> items: Number[] = [1.0]; " \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0]; " \
         "r = items s> CONCURRENT(size: HUGE) SELECT double(_); RETURN; END"
       }
 
@@ -871,7 +871,7 @@ RSpec.describe SemanticAnnotator do
     context "Zig output: CONCURRENT(size: MICRO) emits .Micro task config" do
       let(:code) {
         preamble +
-        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0, 2.0]; " \
         "r = items s> CONCURRENT(size: MICRO) SELECT double(_); RETURN; END"
       }
 
@@ -884,7 +884,7 @@ RSpec.describe SemanticAnnotator do
     context "Zig output: CONCURRENT with no size emits .Standard" do
       let(:code) {
         preamble +
-        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0, 2.0]; " \
         "r = items s> CONCURRENT SELECT double(_); RETURN; END"
       }
 
@@ -897,8 +897,8 @@ RSpec.describe SemanticAnnotator do
     context "Zig output: CONCURRENT(size: LARGE) WHERE emits .Large" do
       let(:code) {
         preamble +
-        "FN big(x: Number) RETURNS Bool -> RETURN x > 1.0; END\n" \
-        "FN f() RETURNS Void -> items: Number[] = [1.0, 2.0]; " \
+        "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS Void -> items: Float64[] = [1.0, 2.0]; " \
         "r = items s> CONCURRENT(size: LARGE) WHERE big(_); RETURN; END"
       }
 
@@ -922,23 +922,23 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------------
     it "CONCURRENT SELECT resolves to element_type[]" do
       tree = run(<<~CLEAR)
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0, 3.0];
+          items: Float64[] = [1.0, 2.0, 3.0];
           results = items s> CONCURRENT SELECT double(_);
           RETURN;
         END
       CLEAR
       fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
       bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "results" }
-      expect(bind.resolved_type).to eq(:"Number[]")
+      expect(bind.resolved_type).to eq(:"Float64[]")
     end
 
     it "CONCURRENT WHERE resolves to item_type[]" do
       tree = run(<<~CLEAR)
-        STRUCT Item { value: Number }
+        STRUCT Item { value: Float64 }
         FN f() RETURNS Void ->
           items: Item[] = [];
           evens = items s> CONCURRENT WHERE _.value > 0.0;
@@ -952,7 +952,7 @@ RSpec.describe SemanticAnnotator do
 
     it "CONCURRENT EACH resolves to Void" do
       tree = run(<<~CLEAR)
-        STRUCT Score { value: Number }
+        STRUCT Score { value: Float64 }
         FN f() RETURNS Void ->
           items: Score[] = [];
           items s> CONCURRENT EACH { _.value = 0.0; };
@@ -969,7 +969,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           FN f() RETURNS Void ->
-            items: Number[] = [1.0, 2.0];
+            items: Float64[] = [1.0, 2.0];
             results = items s> CONCURRENT(workers: 4) SELECT _ * 2.0;
             RETURN;
           END
@@ -984,7 +984,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           FN f() RETURNS Void ->
-            x: Number = 42.0;
+            x: Float64 = 42.0;
             r = x s> CONCURRENT SELECT _ * 2.0;
             RETURN;
           END
@@ -996,7 +996,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           FN f() RETURNS Void ->
-            items: Number[] = [1.0, 2.0];
+            items: Float64[] = [1.0, 2.0];
             r = items s> CONCURRENT WHERE _ * 2.0;
             RETURN;
           END
@@ -1010,7 +1010,7 @@ RSpec.describe SemanticAnnotator do
     it "CONCURRENT SELECT emits WaitGroup and persistent worker pool" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0, 3.0];
+          items: Float64[] = [1.0, 2.0, 3.0];
           results = items s> CONCURRENT(workers: 3) SELECT _ * 2.0;
           RETURN;
         END
@@ -1024,7 +1024,7 @@ RSpec.describe SemanticAnnotator do
     it "CONCURRENT WHERE emits WaitGroup and persistent worker pool" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0, 3.0];
+          items: Float64[] = [1.0, 2.0, 3.0];
           evens = items s> CONCURRENT WHERE _ > 1.0;
           RETURN;
         END
@@ -1037,7 +1037,7 @@ RSpec.describe SemanticAnnotator do
 
     it "CONCURRENT EACH emits WaitGroup and persistent worker pool" do
       out = transpile_fn(<<~CLEAR)
-        STRUCT Score { value: Number }
+        STRUCT Score { value: Float64 }
         FN f() RETURNS Void ->
           items: Score[] = [];
           items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
@@ -1053,7 +1053,7 @@ RSpec.describe SemanticAnnotator do
     it "CONCURRENT SELECT uses threadCount as default workers when omitted" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0];
+          items: Float64[] = [1.0, 2.0];
           results = items s> CONCURRENT SELECT _ * 2.0;
           RETURN;
         END
@@ -1063,30 +1063,30 @@ RSpec.describe SemanticAnnotator do
 
     it "CONCURRENT SELECT fn OR PRUNE — expression type is unwrapped T (not !T)" do
       src = <<~CLEAR
-        FN mayFail(x: Number) RETURNS !Number ->
+        FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0];
+          items: Float64[] = [1.0, 2.0];
           results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
           RETURN;
         END
       CLEAR
-      # Should not raise; resolved type is Number[] not !Number[]
+      # Should not raise; resolved type is Float64[] not !Float64[]
       expect { transpile_fn(src) }.not_to raise_error
       out = transpile_fn(src)
       expect(out).to include("__CcsWorker0")
-      # result type should be Number (not error union)
+      # result type should be Float64 (not error union)
       expect(out).to include("?f64")
     end
 
     it "CONCURRENT SELECT fn OR RAISE — expression type is unwrapped T" do
       src = <<~CLEAR
-        FN mayFail(x: Number) RETURNS !Number ->
+        FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0];
+          items: Float64[] = [1.0, 2.0];
           results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
           RETURN;
         END
@@ -1100,7 +1100,7 @@ RSpec.describe SemanticAnnotator do
     it "CONCURRENT default uses submitSpawn (local scheduler, deterministic)" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0, 3.0];
+          items: Float64[] = [1.0, 2.0, 3.0];
           results = items s> CONCURRENT(workers: 2) SELECT _ * 2.0;
           RETURN;
         END
@@ -1112,7 +1112,7 @@ RSpec.describe SemanticAnnotator do
     it "CONCURRENT(parallel: TRUE) distributes via spawnBest (multi-core parallel)" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0, 3.0];
+          items: Float64[] = [1.0, 2.0, 3.0];
           results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT _ * 2.0;
           RETURN;
         END
@@ -1123,11 +1123,11 @@ RSpec.describe SemanticAnnotator do
 
     it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do
       src = <<~CLEAR
-        FN mayFail(x: Number) RETURNS !Number ->
+        FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0];
+          items: Float64[] = [1.0, 2.0];
           results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
           RETURN;
         END
@@ -1138,11 +1138,11 @@ RSpec.describe SemanticAnnotator do
 
     it "CONCURRENT SELECT fn OR RAISE emits cmpxchgStrong and @errorFromInt" do
       src = <<~CLEAR
-        FN mayFail(x: Number) RETURNS !Number ->
+        FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS Void ->
-          items: Number[] = [1.0, 2.0];
+          items: Float64[] = [1.0, 2.0];
           results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
           RETURN;
         END
@@ -1159,7 +1159,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects workers of 0" do
         code = <<~CLEAR
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0, 2.0];
+            nums: Float64[] = [1.0, 2.0];
             result = nums s> CONCURRENT(workers: 0) SELECT _ * 2.0;
             RETURN;
           END
@@ -1170,7 +1170,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects negative workers" do
         code = <<~CLEAR
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0];
+            nums: Float64[] = [1.0];
             result = nums s> CONCURRENT(workers: -1) SELECT _ * 2.0;
             RETURN;
           END
@@ -1181,7 +1181,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects unknown options" do
         code = <<~CLEAR
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0];
+            nums: Float64[] = [1.0];
             result = nums s> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
             RETURN;
           END
@@ -1192,7 +1192,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects non-Bool pin value" do
         code = <<~CLEAR
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0];
+            nums: Float64[] = [1.0];
             result = nums s> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
             RETURN;
           END
@@ -1207,11 +1207,11 @@ RSpec.describe SemanticAnnotator do
     context "CONCURRENT OR PRUNE / OR RAISE validation" do
       it "rejects OR PRUNE when expression is not error-returning" do
         code = <<~CLEAR
-          FN double(x: Number) RETURNS Number ->
+          FN double(x: Float64) RETURNS Float64 ->
             RETURN x * 2.0;
           END
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0, 2.0];
+            nums: Float64[] = [1.0, 2.0];
             result = nums s> CONCURRENT SELECT double(_) OR PRUNE;
             RETURN;
           END
@@ -1221,11 +1221,11 @@ RSpec.describe SemanticAnnotator do
 
       it "rejects OR RAISE when expression is not error-returning" do
         code = <<~CLEAR
-          FN double(x: Number) RETURNS Number ->
+          FN double(x: Float64) RETURNS Float64 ->
             RETURN x * 2.0;
           END
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0, 2.0];
+            nums: Float64[] = [1.0, 2.0];
             result = nums s> CONCURRENT SELECT double(_) OR RAISE;
             RETURN;
           END
@@ -1235,11 +1235,11 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts OR PRUNE when expression returns !T" do
         code = <<~CLEAR
-          FN mayFail(x: Number) RETURNS !Number ->
+          FN mayFail(x: Float64) RETURNS !Float64 ->
             RETURN x * 2.0;
           END
           FN main() RETURNS Void ->
-            nums: Number[] = [1.0, 2.0];
+            nums: Float64[] = [1.0, 2.0];
             result = nums s> CONCURRENT SELECT mayFail(_) OR PRUNE;
             RETURN;
           END
@@ -1255,7 +1255,7 @@ RSpec.describe SemanticAnnotator do
   describe "BG THEN chains" do
     it "two-step THEN chain resolves to the last step's type" do
       code = <<~CLEAR
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
@@ -1267,15 +1267,15 @@ RSpec.describe SemanticAnnotator do
       tree = run(code)
       bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
-      expect(bg.full_type.to_s).to eq("~Number")
+      expect(bg.full_type.to_s).to eq("~Float64")
     end
 
     it "three-step THEN chain resolves to the last step's type" do
       code = <<~CLEAR
-        FN add_one(x: Number) RETURNS Number ->
+        FN add_one(x: Float64) RETURNS Float64 ->
           RETURN x + 1.0;
         END
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
@@ -1287,12 +1287,12 @@ RSpec.describe SemanticAnnotator do
       tree = run(code)
       bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
-      expect(bg.full_type.to_s).to eq("~Number")
+      expect(bg.full_type.to_s).to eq("~Float64")
     end
 
     it "THEN without AS binding resolves to last step's type" do
       code = <<~CLEAR
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
@@ -1304,12 +1304,12 @@ RSpec.describe SemanticAnnotator do
       tree = run(code)
       bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
-      expect(bg.full_type.to_s).to eq("~Number")
+      expect(bg.full_type.to_s).to eq("~Float64")
     end
 
     it "AS binding is accessible to subsequent THEN steps" do
       code = <<~CLEAR
-        FN add(a: Number, b: Number) RETURNS Number ->
+        FN add(a: Float64, b: Float64) RETURNS Float64 ->
           RETURN a + b;
         END
         FN main() RETURNS Void ->
@@ -1323,7 +1323,7 @@ RSpec.describe SemanticAnnotator do
 
     it "raises a parse error when AS appears without THEN" do
       code = <<~CLEAR
-        FN foo() RETURNS Number ->
+        FN foo() RETURNS Float64 ->
           RETURN 1.0;
         END
         FN main() RETURNS Void ->
@@ -1336,7 +1336,7 @@ RSpec.describe SemanticAnnotator do
 
     it "ThenChain node is produced in BG block body" do
       code = <<~CLEAR
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
@@ -1353,7 +1353,7 @@ RSpec.describe SemanticAnnotator do
 
     it "THEN chain mixed with a setup statement resolves correctly" do
       code = <<~CLEAR
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
@@ -1368,16 +1368,16 @@ RSpec.describe SemanticAnnotator do
       tree = run(code)
       bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
              .body.first.value
-      expect(bg.full_type.to_s).to eq("~Number")
+      expect(bg.full_type.to_s).to eq("~Float64")
     end
 
     it "unwraps error union in AS binding (!T -> T)" do
       code = <<~CLEAR
-        FN might_fail(x: Number) RETURNS !Number ->
+        FN might_fail(x: Float64) RETURNS !Float64 ->
           IF x < 0.0 THEN RAISE "negative"; END
           RETURN x * 2.0;
         END
-        FN add_one(x: Number) RETURNS Number ->
+        FN add_one(x: Float64) RETURNS Float64 ->
           RETURN x + 1.0;
         END
         FN main() RETURNS Void ->
@@ -1386,7 +1386,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       tree = run(code)
-      # Should compile without error - r is Number, not !Number
+      # Should compile without error - r is Float64, not !Float64
       main_fn = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
       expect(main_fn).not_to be_nil
     end
@@ -1407,7 +1407,7 @@ RSpec.describe SemanticAnnotator do
       AST::NextExpr.new(token, expr_node)
     end
 
-    # Helper: AST::Literal for a Number value (no scope lookup required by visit_Literal)
+    # Helper: AST::Literal for a Float64 value (no scope lookup required by visit_Literal)
     def make_num_lit(val = 42.0)
       tok = Lexer::Token.new(:NUMBER, val, 1, 1)
       AST::Literal.new(tok, :NUMBER, val, nil)
@@ -1421,16 +1421,16 @@ RSpec.describe SemanticAnnotator do
         expect(node.full_type).to eq(:"~Void")
       end
 
-      it "wraps the last expression's type in ~ (Number literal body)" do
+      it "wraps the last expression's type in ~ (Float64 literal body)" do
         annotator = SemanticAnnotator.new
         bg = make_bg_block([make_num_lit])
         annotator.send(:visit_BgBlock, bg)
-        expect(bg.full_type).to eq(:"~Number")
+        expect(bg.full_type).to eq(:"~Float64")
       end
     end
 
     describe "visit_NextExpr" do
-      it "raises when NEXT is called on a Number literal (non-tense)" do
+      it "raises when NEXT is called on a Float64 literal (non-tense)" do
         annotator = SemanticAnnotator.new
         next_node = make_next_expr(make_num_lit)
         expect { annotator.send(:visit_NextExpr, next_node) }
@@ -1440,24 +1440,24 @@ RSpec.describe SemanticAnnotator do
 
     describe "~T in type annotations (lexer + parser)" do
       it "tokenises ~ as a CHAR token" do
-        tokens = Lexer.new("~Number").tokenize
+        tokens = Lexer.new("~Float64").tokenize
         expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
-        expect(tokens[1]).to have_attributes(type: :TYPE_ID, value: 'Number')
+        expect(tokens[1]).to have_attributes(type: :TYPE_ID, value: 'Float64')
       end
 
-      it "tokenises ~!Number with tilde, bang, type" do
-        tokens = Lexer.new("~!Number").tokenize
+      it "tokenises ~!Float64 with tilde, bang, type" do
+        tokens = Lexer.new("~!Float64").tokenize
         expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
         expect(tokens[1]).to have_attributes(type: :CHAR, value: '!')
-        expect(tokens[2]).to have_attributes(type: :TYPE_ID, value: 'Number')
+        expect(tokens[2]).to have_attributes(type: :TYPE_ID, value: 'Float64')
       end
 
-      it "parse_type_annotation produces a tense Type for ~Number" do
-        tokens = Lexer.new("~Number").tokenize
-        parser = Parser.new(tokens, "~Number")
+      it "parse_type_annotation produces a tense Type for ~Float64" do
+        tokens = Lexer.new("~Float64").tokenize
+        parser = Parser.new(tokens, "~Float64")
         t = parser.send(:parse_type_annotation)
         expect(t.tense?).to be true
-        expect(t.tense_type).to eq(:Number)
+        expect(t.tense_type).to eq(:Float64)
         expect(t.zig_type).to eq("CheatLib.Promise(f64)")
       end
     end
@@ -1471,7 +1471,7 @@ RSpec.describe SemanticAnnotator do
         # with_new_scope yields and then pops — we call finalize_scope inside the block
         expect {
           annotator.send(:with_new_scope) do
-            annotator.send(:current_scope).declare('p', nil, :"~Number", false, false, nil, :stack)
+            annotator.send(:current_scope).declare('p', nil, :"~Float64", false, false, nil, :stack)
             annotator.send(:current_scope).set_state('p', :live)
             annotator.send(:finalize_scope, dummy_node)
           end
@@ -1485,7 +1485,7 @@ RSpec.describe SemanticAnnotator do
 
         expect {
           annotator.send(:with_new_scope) do
-            annotator.send(:current_scope).declare('p', nil, :"~Number", false, false, nil, :stack)
+            annotator.send(:current_scope).declare('p', nil, :"~Float64", false, false, nil, :stack)
             annotator.send(:current_scope).set_state('p', :moved)
             annotator.send(:finalize_scope, dummy_node)
           end
@@ -1499,10 +1499,10 @@ RSpec.describe SemanticAnnotator do
   # ===================================================================
   describe "~T (tense/promise) type system" do
     describe "Type parsing" do
-      it "recognises ~Number as a tense type" do
-        t = Type.new(:"~Number")
+      it "recognises ~Float64 as a tense type" do
+        t = Type.new(:"~Float64")
         expect(t.tense?).to be true
-        expect(t.tense_type).to eq(:Number)
+        expect(t.tense_type).to eq(:Float64)
       end
 
       it "recognises ~Void as a tense type" do
@@ -1511,15 +1511,15 @@ RSpec.describe SemanticAnnotator do
         expect(t.tense_type).to eq(:Void)
       end
 
-      it "recognises ~!Number as a promise of a failable Number" do
-        t = Type.new(:"~!Number")
+      it "recognises ~!Float64 as a promise of a failable Float64" do
+        t = Type.new(:"~!Float64")
         expect(t.tense?).to be true
         expect(t.tense_type.error_union?).to be true
-        expect(t.tense_type.payload_type).to eq(:Number)
+        expect(t.tense_type.payload_type).to eq(:Float64)
       end
 
       it "is not a struct, primitive, optional, or error_union" do
-        t = Type.new(:"~Number")
+        t = Type.new(:"~Float64")
         expect(t.struct?).to be false
         expect(t.primitive?).to be false
         expect(t.optional?).to be false
@@ -1529,36 +1529,36 @@ RSpec.describe SemanticAnnotator do
 
     describe "Type#requires_move?" do
       it "returns true for tense types — promises are linear" do
-        expect(Type.new(:"~Number").requires_move?).to be true
+        expect(Type.new(:"~Float64").requires_move?).to be true
         expect(Type.new(:"~Void").requires_move?).to be true
       end
     end
 
     describe "Type#accepts?" do
       it "accepts the same tense type" do
-        expect(Type.new(:"~Number").accepts?(Type.new(:"~Number"))).to be true
+        expect(Type.new(:"~Float64").accepts?(Type.new(:"~Float64"))).to be true
       end
 
       it "does not accept a non-tense type" do
-        expect(Type.new(:"~Number").accepts?(Type.new(:Number))).to be false
+        expect(Type.new(:"~Float64").accepts?(Type.new(:Float64))).to be false
       end
 
       it "does not accept a different tense type" do
-        expect(Type.new(:"~Number").accepts?(Type.new(:"~Bool"))).to be false
+        expect(Type.new(:"~Float64").accepts?(Type.new(:"~Bool"))).to be false
       end
     end
 
     describe "Type#zig_type" do
-      it "emits CheatLib.Promise(f64) for ~Number" do
-        expect(Type.new(:"~Number").zig_type).to eq("CheatLib.Promise(f64)")
+      it "emits CheatLib.Promise(f64) for ~Float64" do
+        expect(Type.new(:"~Float64").zig_type).to eq("CheatLib.Promise(f64)")
       end
 
       it "emits CheatLib.Promise(void) for ~Void" do
         expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
       end
 
-      it "emits CheatLib.Promise(!f64) for ~!Number" do
-        expect(Type.new(:"~!Number").zig_type).to eq("CheatLib.Promise(!f64)")
+      it "emits CheatLib.Promise(!f64) for ~!Float64" do
+        expect(Type.new(:"~!Float64").zig_type).to eq("CheatLib.Promise(!f64)")
       end
     end
 
@@ -1594,9 +1594,9 @@ RSpec.describe SemanticAnnotator do
       # If 'step1' is declared inside BG, it must NOT appear as a capture field.
       src = <<~CLEAR
         FN f() RETURNS Void ->
-          x: Number = 5.0;
-          q: ~Number = BG { x + 1.0; };
-          r: Number = NEXT q;
+          x: Float64 = 5.0;
+          q: ~Float64 = BG { x + 1.0; };
+          r: Float64 = NEXT q;
           RETURN;
         END
       CLEAR
@@ -1610,10 +1610,10 @@ RSpec.describe SemanticAnnotator do
     it "multiple concurrent BG blocks get independent context structs" do
       src = <<~CLEAR
         FN f() RETURNS Void ->
-          a: ~Number = BG { 10.0; };
-          b: ~Number = BG { 20.0; };
-          ra: Number = NEXT a;
-          rb: Number = NEXT b;
+          a: ~Float64 = BG { 10.0; };
+          b: ~Float64 = BG { 20.0; };
+          ra: Float64 = NEXT a;
+          rb: Float64 = NEXT b;
           RETURN;
         END
       CLEAR
@@ -1631,13 +1631,13 @@ RSpec.describe SemanticAnnotator do
 
     it "BG with function call inside captures its args by value" do
       src = <<~CLEAR
-        FN double(x: Number) RETURNS Number ->
+        FN double(x: Float64) RETURNS Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS Void ->
-          base: Number = 5.0;
-          p: ~Number = BG { double(base); };
-          r: Number = NEXT p;
+          base: Float64 = 5.0;
+          p: ~Float64 = BG { double(base); };
+          r: Float64 = NEXT p;
           RETURN;
         END
       CLEAR
@@ -1681,7 +1681,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "parses BG { expr; } as the RHS of a bind expression" do
-        src    = "FN f() RETURNS Void -> p: ~Number = BG { 1.0; }; RETURN; END"
+        src    = "FN f() RETURNS Void -> p: ~Float64 = BG { 1.0; }; RETURN; END"
         tokens = Lexer.new(src).tokenize
         ast    = Parser.new(tokens, src).parse
         fn_node = ast.statements.first
@@ -1690,7 +1690,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "parses NEXT as an expression in a bind" do
-        src    = "FN f() RETURNS Void -> p: ~Number = BG { 1.0; }; r: Number = NEXT p; RETURN; END"
+        src    = "FN f() RETURNS Void -> p: ~Float64 = BG { 1.0; }; r: Float64 = NEXT p; RETURN; END"
         tokens = Lexer.new(src).tokenize
         ast    = Parser.new(tokens, src).parse
         fn_node = ast.statements.first
@@ -1701,7 +1701,7 @@ RSpec.describe SemanticAnnotator do
 
     describe "Transpiler" do
       it "BgBlock emits a labeled block with Promise spawn and spawnBest (default)" do
-        src = "FN f() RETURNS Void -> p: ~Number = BG { 42.0; }; r: Number = NEXT p; RETURN; END"
+        src = "FN f() RETURNS Void -> p: ~Float64 = BG { 42.0; }; r: Float64 = NEXT p; RETURN; END"
         out = transpile_fn(src)
         expect(out).to include("CheatLib.Promise(f64).spawn(")
         expect(out).to include("spawnBest(")
@@ -1710,7 +1710,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "BgBlock captures outer variable by value (no pointer)" do
-        src = "FN f() RETURNS Void -> x: Number = 7.0; q: ~Number = BG { x + 1.0; }; r: Number = NEXT q; RETURN; END"
+        src = "FN f() RETURNS Void -> x: Float64 = 7.0; q: ~Float64 = BG { x + 1.0; }; r: Float64 = NEXT q; RETURN; END"
         out = transpile_fn(src)
         # Captured as value field, not pointer
         expect(out).to include("x: f64,")
@@ -1722,7 +1722,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "NextExpr emits .next() on the promise" do
-        src = "FN f() RETURNS Void -> p: ~Number = BG { 99.0; }; r: Number = NEXT p; RETURN; END"
+        src = "FN f() RETURNS Void -> p: ~Float64 = BG { 99.0; }; r: Float64 = NEXT p; RETURN; END"
         out = transpile_fn(src)
         expect(out).to include("p.next()")
       end
@@ -1732,7 +1732,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "NEXT on a non-tense type raises an annotator error" do
-        src = "FN f() RETURNS Void -> x: Number = 1.0; r: Number = NEXT x; RETURN; END"
+        src = "FN f() RETURNS Void -> x: Float64 = 1.0; r: Float64 = NEXT x; RETURN; END"
         expect { transpile_fn(src) }.to raise_error(SourceError, /NEXT requires a Promise/)
       end
     end
@@ -1797,7 +1797,7 @@ RSpec.describe SemanticAnnotator do
     context "three concurrent branches accessing the same @locked counter" do
       let(:code) {
         <<~FLUX
-          STRUCT Counter { value: Number }
+          STRUCT Counter { value: Float64 }
           c = Counter{ value: 0 } @locked;
           DO {
             WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },

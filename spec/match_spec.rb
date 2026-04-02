@@ -145,7 +145,7 @@ RSpec.describe SemanticAnnotator do
     context "partial match with ..." do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number, y: Number }
+          STRUCT Point { x: Float64, y: Float64 }
           p = Point{ x: 10.0, y: 5.0 };
           MUTABLE result = 0;
           MATCH p START
@@ -165,7 +165,7 @@ RSpec.describe SemanticAnnotator do
     context "wildcard field with _" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number, y: Number, z: Number }
+          STRUCT Point { x: Float64, y: Float64, z: Float64 }
           p = Point{ x: 1.0, y: 99.0, z: 3.0 };
           MUTABLE result = 0;
           MATCH p START
@@ -184,7 +184,7 @@ RSpec.describe SemanticAnnotator do
     context "mixed eq and struct pattern arms" do
       let(:code) {
         <<~FLUX
-          STRUCT Msg { code: Number }
+          STRUCT Msg { code: Float64 }
           MUTABLE x = 0;
           m = Msg{ code: 5.0 };
           MATCH m START
@@ -218,7 +218,7 @@ RSpec.describe SemanticAnnotator do
     context "struct pattern field not on struct" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number, y: Number }
+          STRUCT Point { x: Float64, y: Float64 }
           p = Point{ x: 1, y: 2 };
           MUTABLE result = 0;
           MATCH p START
@@ -235,7 +235,7 @@ RSpec.describe SemanticAnnotator do
     context "struct pattern field type mismatch" do
       let(:code) {
         <<~FLUX
-          STRUCT Point { x: Number, y: Number }
+          STRUCT Point { x: Float64, y: Float64 }
           p = Point{ x: 1, y: 2 };
           MUTABLE result = 0;
           MATCH p START
@@ -245,7 +245,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "raises an error for wrong field value type" do
-        expect { ast }.to raise_error(/MATCH struct pattern: field 'x' has type Number, but pattern value has type/)
+        expect { ast }.to raise_error(/MATCH struct pattern: field 'x' has type Float64, but pattern value has type/)
       end
     end
 
@@ -272,7 +272,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts a partial union MATCH with no DEFAULT" do
         expect {
           run(<<~CLEAR)
-            UNION Result { Ok: Number, Err: Number, Empty }
+            UNION Result { Ok: Float64, Err: Float64, Empty }
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
@@ -409,7 +409,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts a fully exhaustive MATCH IFF on a union" do
         expect {
           run(<<~CLEAR)
-            UNION Shape { Circle: Number, Point }
+            UNION Shape { Circle: Float64, Point }
             FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
@@ -425,7 +425,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when MATCH IFF on union is non-exhaustive" do
         expect {
           run(<<~CLEAR)
-            UNION Result { Ok: Number, Err: Number, Empty }
+            UNION Result { Ok: Float64, Err: Float64, Empty }
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
@@ -440,7 +440,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts a partial union MATCH (not IFF) with DEFAULT" do
         expect {
           run(<<~CLEAR)
-            UNION Result { Ok: Number, Err: Number }
+            UNION Result { Ok: Float64, Err: Float64 }
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
@@ -458,7 +458,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
-              opt = Option<Number>{ Some: 1.0 };
+              opt = Option<Float64>{ Some: 1.0 };
               MUTABLE n = 0.0;
               MATCH IFF opt START
                 Option.Some -> n = 1.0;,
@@ -474,7 +474,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
-              opt = Option<Number>{ Some: 1.0 };
+              opt = Option<Float64>{ Some: 1.0 };
               MUTABLE n = 0.0;
               MATCH IFF opt START
                 Option.Some -> n = 1.0;
@@ -492,7 +492,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts payload capture from a payload variant" do
         expect {
           run(<<~CLEAR)
-            UNION Shape { Circle: Number, Point }
+            UNION Shape { Circle: Float64, Point }
             FN main() RETURNS Void ->
               s: Shape = Shape{ Circle: 5.0 };
               MUTABLE a = 0.0;
@@ -507,7 +507,7 @@ RSpec.describe SemanticAnnotator do
 
       it "resolves the captured binding to the variant's payload type" do
         ast = run(<<~CLEAR)
-          UNION Result { Ok: Number, Err: Number, Empty }
+          UNION Result { Ok: Float64, Err: Float64, Empty }
           FN main() RETURNS Void ->
             r: Result = Result{ Ok: 42.0 };
             MUTABLE got = 0.0;
@@ -526,7 +526,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when capturing from a unit variant" do
         expect {
           run(<<~CLEAR)
-            UNION Maybe { Some: Number, None }
+            UNION Maybe { Some: Float64, None }
             FN main() RETURNS Void ->
               m: Maybe = Maybe.None;
               MUTABLE n = 0.0;
@@ -560,7 +560,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
-              opt = Option<Number>{ Some: 3.14 };
+              opt = Option<Float64>{ Some: 3.14 };
               MUTABLE got = 0.0;
               MATCH opt START
                 Option.Some AS x -> got = x;,
@@ -574,7 +574,7 @@ RSpec.describe SemanticAnnotator do
       it "raises a type mismatch when using the captured binding with a wrong type" do
         expect {
           run(<<~CLEAR)
-            UNION Result { Ok: Number, Err: Number }
+            UNION Result { Ok: Float64, Err: Float64 }
             FN need_str(s: String) RETURNS Void ->
             END
             FN main() RETURNS Void ->
@@ -600,7 +600,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits 'const r = subject.Circle;' for payload capture" do
         out = transpile(<<~CLEAR)
-          UNION Shape { Circle: Number, Point }
+          UNION Shape { Circle: Float64, Point }
           FN main() RETURNS Void ->
             s: Shape = Shape{ Circle: 2.0 };
             MUTABLE a = 0.0;
@@ -635,7 +635,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile(<<~CLEAR)
           UNION Option<T> { Some: T, None }
           FN main() RETURNS Void ->
-            opt = Option<Number>{ Some: 7.0 };
+            opt = Option<Float64>{ Some: 7.0 };
             MUTABLE got = 0.0;
             MATCH IFF opt START
               Option.Some AS x -> got = x;,
@@ -649,7 +649,7 @@ RSpec.describe SemanticAnnotator do
 
       it "MATCH IFF and MATCH produce identical Zig output for the same exhaustive case" do
         src_iff = <<~CLEAR
-          UNION Shape { Circle: Number, Point }
+          UNION Shape { Circle: Float64, Point }
           FN main() RETURNS Void ->
             s: Shape = Shape.Point;
             MUTABLE n = 0_i64;
