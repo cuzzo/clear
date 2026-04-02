@@ -236,15 +236,35 @@ pub const CheatLib = struct {
 
             /// All operations use self.alloc — set at construction by transpiler.
             /// The key_alloc/bucket_alloc params are kept for backward compat but ignored.
+            /// For tagged union values with []const u8 fields, the string data is
+            /// heap-duped so it survives loop-mark arena rewinds.
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 _ = key_alloc;
                 _ = bucket_alloc;
+                const stored_value = dupeUnionStrings(value, self.alloc) catch value;
                 if (self.inner.getPtr(key)) |val_ptr| {
-                    val_ptr.* = value;
+                    val_ptr.* = stored_value;
                     return;
                 }
                 const key_copy = try self.alloc.dupe(u8, key);
-                try self.inner.put(self.alloc, key_copy, value);
+                try self.inner.put(self.alloc, key_copy, stored_value);
+            }
+
+            /// If V is a tagged union with []const u8 fields, dupe the active
+            /// variant's string to the given allocator. Otherwise return as-is.
+            fn dupeUnionStrings(value: V, alloc: std.mem.Allocator) !V {
+                const info = @typeInfo(V);
+                if (info != .@"union") return value;
+                var result = value;
+                inline for (info.@"union".fields) |field| {
+                    if (field.type == []const u8) {
+                        if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
+                            @field(result, field.name) = try alloc.dupe(u8, @field(value, field.name));
+                            return result;
+                        }
+                    }
+                }
+                return value;
             }
 
             pub fn get(self: anytype, key: []const u8) ?V {
