@@ -62,21 +62,18 @@ class StackVerifier
         entry[:tier] = fn.stack_tier
         entry[:estimated_bytes] = fn.stack_vars_bytes
         entry[:line] = fn.respond_to?(:line) ? fn.line : nil
-        is_reentrant = fn.respond_to?(:reentrant) && fn.reentrant == :reentrant
-        entry[:reentrant] = is_reentrant
+        is_unbounded = fn.stack_tier == :unbounded
+        entry[:unbounded] = is_unbounded
         budget = TIER_BUDGET[fn.stack_tier] || 12288
         entry[:budget] = budget
         entry[:usage_pct] = (f[:stack_bytes].to_f / budget * 100).round(1)
 
-        if is_reentrant
-          # Reentrant functions have unknown total stack usage (depth-dependent).
-          # Report per-frame size and flag as unbounded.
+        if is_unbounded
           loc = format_location(source_file, entry[:line])
           report[:warnings] << {
             level: :info,
-            message: "#{loc}'#{f[:name]}' is @reentrant: #{f[:stack_bytes]} bytes/frame, " \
-                     "depth unknown. Total = #{f[:stack_bytes]} * depth. " \
-                     "Use @onSmash on BG blocks calling this function."
+            message: "#{loc}'#{f[:name]}' is unbounded: #{f[:stack_bytes]} bytes/frame * unknown depth. " \
+                     "Requires @canSmash on BG/DO blocks."
           }
         elsif f[:stack_bytes] > budget
           entry[:overflow] = true
@@ -114,7 +111,7 @@ class StackVerifier
       tier_str = f[:tier] != :unknown ? " [#{f[:tier]}]" : ""
       pct_str = f[:usage_pct] ? " (#{f[:usage_pct]}%)" : ""
       marker = f[:overflow] ? " <<<" : ""
-      marker = " (per frame, depth unknown)" if f[:reentrant]
+      marker = " (per frame, depth unknown)" if f[:unbounded]
       io.puts "  %6d bytes  %-40s%s%s%s" % [f[:stack_bytes], f[:name], tier_str, pct_str, marker]
     end
 

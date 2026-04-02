@@ -3063,12 +3063,13 @@ private
   # Maps a CLEAR stack_size symbol (or nil) to a Zig TaskConfig struct literal.
   # nil / :standard → Standard (16 KB); :micro → Micro (4 KB); :large → Large (64 KB); :xl → Xl (256 KB)
   STACK_SIZE_ZIG_VARIANT = {
-    nil       => "Standard",
-    :micro    => "Micro",
-    :standard => "Standard",
-    :large    => "Large",
-    :xl       => "Xl",
-    :service  => "Huge",
+    nil        => "Standard",
+    :micro     => "Micro",
+    :standard  => "Standard",
+    :large     => "Large",
+    :xl        => "Xl",
+    :unbounded => "Xl",      # best-effort: runtime control plane upsizes if needed
+    :service   => "Huge",
   }.freeze
 
   # BG spawn call: spawnBest by default, spawnPinned when @pinned.

@@ -185,26 +185,27 @@ module EffectTracker
   STACK_TIER_BUDGET = { micro: 4096, standard: 16384, large: 65536, xl: 262144 }.freeze
 
   def compute_stack_tiers!
+    # Phase 1: assign base tier per function from its own effects.
     @fn_nodes.each do |name, fn_node|
       effs = fn_node.effects || Set.new
       stack_bytes = fn_node.stack_vars_bytes || 0
 
-      tier = if effs.include?(REENTRANT) && effs.include?(HEAP)
-        :xl
-      elsif effs.include?(REENTRANT)
-        :large
-      elsif effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
+      # Reentrant functions are :unbounded - their total stack is depth * frame_size.
+      if fn_node.reentrant == :reentrant
+        fn_node.stack_tier = :unbounded
+        fn_node.stack_vars_bytes = stack_bytes
+        next
+      end
+
+      tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
         :standard
       elsif fn_node.needs_rt
-        # needs_rt means the function uses the frame arena (4 KB).
-        # Micro tier (4 KB total) can't hold a frame arena + any stack.
         :standard
       else
         :micro
       end
 
       # Promote tier if stack-local variables alone exceed the tier budget.
-      # Leave headroom: use 50% of tier for locals (rest for Zig frames, alignment, spills).
       budget = STACK_TIER_BUDGET[tier]
       while stack_bytes > budget / 2 && tier != :xl
         tier = case tier
@@ -219,11 +220,27 @@ module EffectTracker
       fn_node.stack_tier = tier
       fn_node.stack_vars_bytes = stack_bytes
     end
+
+    # Phase 2: propagate :unbounded through call graph.
+    # Any function that transitively calls an :unbounded function is also :unbounded.
+    changed = true
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        fn = @fn_nodes[fn_name]
+        next unless fn
+        next if fn.stack_tier == :unbounded
+        if callees.any? { |c| @fn_nodes[c]&.stack_tier == :unbounded }
+          fn.stack_tier = :unbounded
+          changed = true
+        end
+      end
+    end
   end
 
   # Compute the maximum stack tier needed by a set of function names,
-  # following the call graph transitively.
-  TIER_ORDER = { micro: 0, standard: 1, large: 2, xl: 3 }.freeze
+  # following the call graph transitively. :unbounded propagates.
+  TIER_ORDER = { micro: 0, standard: 1, large: 2, xl: 3, unbounded: 4 }.freeze
 
   def max_tier_for_calls(fn_names)
     visited = Set.new

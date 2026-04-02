@@ -43,11 +43,20 @@ RSpec.describe "Stack Tier Recommendations" do
       expect(tier_for(src, "make")).to eq(:standard)
     end
 
-    it "assigns :large to @reentrant functions" do
+    it "assigns :unbounded to @reentrant functions" do
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n"
-      expect(tier_for(src, "fib")).to eq(:large)
+      expect(tier_for(src, "fib")).to eq(:unbounded)
+    end
+
+    it "propagates :unbounded to callers of @reentrant functions" do
+      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+            "    IF n < 2.0 THEN RETURN n; END\n" \
+            "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
+            "FN wrapper(n: Float64) RETURNS Float64 ->\n" \
+            "    RETURN fib(n);\nEND\n"
+      expect(tier_for(src, "wrapper")).to eq(:unbounded)
     end
 
     it "assigns :standard to functions calling heap-using functions" do
