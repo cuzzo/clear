@@ -1736,17 +1736,16 @@ private
 
     visit(node.target)
 
-    # Check if this path has been moved
+    # Check if this path or any ancestor has been moved (graph handles both)
     path = get_path_to_root(node)
     if path
-      root_name = path.first.to_s
-      if @og&.moved?(root_name)
-        error!(node, "Use of moved value '#{path.join(".")}'")
-      elsif path.size > 1
-        # Check sub-paths (e.g. x.child when x.child was moved)
-        scope = lookup_scope_for(root_name)
-        if scope&.is_path_moved?(path)
-          error!(node, "Use of moved value '#{path.join(".")}'")
+      # Check root, then progressively longer sub-paths
+      check = ""
+      path.each do |seg|
+        check = check.empty? ? seg.to_s : "#{check}.#{seg}"
+        if @og.moved?(check)
+          error!(node, "Use of moved value '#{path.map(&:to_s).join(".")}'")
+          break
         end
       end
     end
@@ -2408,6 +2407,13 @@ private
       finalize_scope(node)
     end
 
+    # Release RESTRICT borrows after the WITH block exits
+    expanded_capabilities.each do |cap|
+      if cap[:capability] == :RESTRICT
+        @og.release_borrow("__restrict_#{cap[:var_node].name}")
+      end
+    end
+
     node.full_type = :Void
   end
 
@@ -2653,9 +2659,9 @@ private
       path = get_path_to_root(node.value)
       return if path.nil?
       if Type.new(node.value.resolved_type).requires_move?
-        root_name = path.first.to_s
-        scope = lookup_scope_for(root_name)
-        scope&.mark_path_moved(path) if scope
+        graph_path = path.map(&:to_s).join(".")
+        @og.declare(graph_path, kind: :affine, scope_depth: @og_scope_depth) unless @og[graph_path]
+        og_set_moved(graph_path)
       end
       return
     end
@@ -2690,8 +2696,7 @@ private
     end
 
     if target_is_heap && rhs_scope && Type.new(rhs_scope.resolve_type(rhs_name)).requires_move?
-      rhs_scope.mark_escaped(rhs_name)
-      og_escape(rhs_name)
+      promote_to_heap(rhs_name, rhs_scope)
     end
   end
 
@@ -2725,11 +2730,9 @@ private
     error!(node, "Variable not found") if borrowed_scope.nil?
     return if borrowed_scope.is_immutable?(root_var)
 
-    borrow_type = node.mutable ? :mutable : :immutable
-    unless borrowed_scope.can_borrow?(root_var, path, borrow_type)
-      error!(node, "Lifetime Error: '#{root_var}' (or part of it) is already borrowed.")
-    end
-    current_scope.mark_borrowed(root_var, path, borrow_type)
+    lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
+    err = @og.borrow(lhs_name, root_var, mutable: node.mutable)
+    error!(node, "Lifetime Error: '#{root_var}' (or part of it) is already borrowed.") if err
   end
 
   def handle_return_escape(value_node, expected_type = nil)
@@ -2753,21 +2756,16 @@ private
     type = owner_scope.resolve_type(var_name)
     return false unless Type.new(type).requires_move?
 
-    is_frame_dec = owner_scope.mark_escaped(var_name)
-    og_escape(var_name)
-    if owner_scope.is_on_heap?(var_name) && root.respond_to?(:storage=)
-      root.storage = :heap
-    end
-    is_frame_dec
+    result = promote_to_heap(var_name, owner_scope)
+    root.storage = :heap if owner_scope.is_on_heap?(var_name) && root.respond_to?(:storage=)
+    result
   end
 
   def verify_unrestricted!(node)
     path = get_path_to_root(node.name)
     return if path.nil?
     root_name = path.first.to_s
-    scope = lookup_scope_for(root_name)
-    return if scope.nil?
-    unless scope.can_borrow?(root_name, path, :mutable)
+    unless @og.can_write?(root_name)
       error!(node, "Lifetime Error: Cannot assign to '#{root_name}' because it is currently borrowed.")
     end
   end
@@ -2867,6 +2865,24 @@ private
   def og_fork            = @og.fork
   def og_push_scope      = (@og_scope_depth += 1)
   def og_pop_scope       = (@og_scope_depth -= 1)
+
+  # Unified escape: updates graph + scope storage + AST node.
+  # Returns true if the variable was promoted from frame (for frame counter tracking).
+  def promote_to_heap(name, scope = nil)
+    og_escape(name)
+    scope ||= lookup_scope_for(name)
+    return false unless scope
+    entry = scope.locals[name]
+    return false unless entry
+    was_frame = entry.storage == :frame || entry.storage == :stack
+    return false if [:multiowned, :shared, :heap].include?(entry.storage)
+    entry.storage = :heap
+    if entry.reg&.respond_to?(:storage=)
+      entry.reg.storage = :heap
+      entry.reg.value.storage = :heap if entry.reg.respond_to?(:value) && entry.reg.value&.respond_to?(:storage=)
+    end
+    was_frame
+  end
 
   def og_merge(snapshot)
     @og.merge(snapshot) if snapshot

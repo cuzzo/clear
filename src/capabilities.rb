@@ -189,6 +189,10 @@ module CapabilityHelper
     else
       current_scope.declare_with_new_capability(cap)
     end
+    # RESTRICT borrows the variable in the graph so verify_unrestricted! detects conflicts.
+    if cap[:capability] == :RESTRICT
+      @og.borrow("__restrict_#{var_name}", var_name, mutable: true)
+    end
   end
 
   # --- Fiber capture analysis (shared by BG and DO blocks) ---

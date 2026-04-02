@@ -2,14 +2,13 @@ require "set"
 require_relative "./symbol_entry"
 
 class Scope
-  attr_accessor :locals, :dependencies, :moved_paths, :owned_names
+  attr_accessor :locals, :dependencies, :owned_names
   attr_reader   :types
 
   def initialize
     @locals = {}
     @dependencies = {}
     @types = {}
-    @moved_paths = []  # Track moved sub-paths like [:foo, :child]
     @owned_names = Set.new  # Variables declared in THIS scope (not inherited from parent)
   end
 
@@ -49,7 +48,6 @@ class Scope
 
     # 2. Copy State Maps (var state lives on entries, already duped above)
     @dependencies = original.dependencies.dup
-    @moved_paths = original.moved_paths.map(&:dup)
     # Child scopes inherit variables but don't own them — start with empty owned_names.
     # Only variables declared in this scope (via `declare`) are in @owned_names.
     @owned_names = Set.new
@@ -183,22 +181,6 @@ class Scope
     @locals[name]&.borrowed_paths&.push({ path: path, type: type })
   end
 
-  # Mark a sub-path as moved (e.g., [:foo, :child] for foo.child)
-  def mark_path_moved(path)
-    @moved_paths << path
-  end
-
-  # Check if a path or any of its ancestors has been moved
-  # e.g., if [:foo, :child] is moved, then [:foo, :child, :value] is also dead
-  def is_path_moved?(path)
-    @moved_paths.any? do |moved|
-      # Check if 'moved' is a prefix of 'path' (or equal)
-      # e.g., moved=[:foo, :child], path=[:foo, :child, :value] -> true
-      # e.g., moved=[:foo, :child], path=[:foo] -> false (parent is still valid)
-      path.size >= moved.size && path[0...moved.size] == moved
-    end
-  end
-
   def is_on_heap?(name)
     entry = @locals[name]
     entry ? [:heap, :multiowned, :shared].include?(entry.storage) : false
@@ -212,36 +194,18 @@ class Scope
     entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
   end
 
+  # DEPRECATED: use annotator's promote_to_heap instead.
+  # Kept only for declare_with_new_capability which still reads entry.storage.
   def mark_escaped(name)
     entry = @locals[name]
-    return unless entry
-
-    # Optimization: Don't promote primitives (Int, Bool, etc).
-    # They copy cheaply and don't suffer from "dangling pointer" issues
-    # in the same way (unless you support pointers to stack ints).
-    type = entry.type
-    return if !Type.new(type).requires_move?
-
-    # Only promote if currently on Frame or Stack
-    if entry.storage == :frame || entry.storage == :stack
-      is_frame_decrement = (entry.storage == :frame)
-      entry.storage = :heap
-
-      # Update AST Node
-      if entry.reg && entry.reg.respond_to?(:storage=)
-         entry.reg.storage = :heap
-
-         # Propagate promotion to the value node (e.g. for Assignment or VarDecl)
-         # This ensures that StructLit/ListLit initializers are also marked as :heap
-         if entry.reg.respond_to?(:value) && entry.reg.value.respond_to?(:storage=)
-            entry.reg.value.storage = :heap
-         end
-
-         # Only return true (to decrement counter) if it was actually on the Frame
-         return is_frame_decrement
-      end
-    end
-    return false
+    return false unless entry
+    return false if !Type.new(entry.type).requires_move?
+    return false unless entry.storage == :frame || entry.storage == :stack
+    was_frame = entry.storage == :frame
+    entry.storage = :heap
+    entry.reg.storage = :heap if entry.reg&.respond_to?(:storage=)
+    entry.reg.value.storage = :heap if entry.reg&.respond_to?(:value) && entry.reg.value&.respond_to?(:storage=)
+    was_frame
   end
 
   def declare_with_new_capability(capability)

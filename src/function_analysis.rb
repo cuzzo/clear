@@ -384,7 +384,7 @@ module FunctionAnalysis
   def verify_param_lifetime!(arg_node, param, signature)
     return true if !arg_node.is_a?(AST::Identifier)
 
-    if param[:mutable] && !current_scope.can_borrow?(arg_node.name, [arg_node.name.to_sym], :mutable)
+    if param[:mutable] && !@og.can_write?(arg_node.name)
       error!(arg_node, "Lifetime Error: Cannot pass '#{arg_node.name}' as mutable argument because it is currently RESTRICTed.")
     end
 
@@ -496,7 +496,7 @@ module FunctionAnalysis
       # If captured by a closure, it must be on the heap so it outlives its stack frame.
       entry = owner_scope.locals[cap_name]
       if (entry.storage == :frame || entry.storage == :stack) && Type.new(entry.type).requires_move?
-        owner_scope.mark_escaped(cap_name)
+        promote_to_heap(cap_name, owner_scope)
       end
 
       # SAVE TYPE AND STORAGE (Re-fetch entry after potential promotion)

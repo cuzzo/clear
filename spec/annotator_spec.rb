@@ -11,8 +11,8 @@ RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
     ast = Parser.new(tokens, source).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
+    @annotator = SemanticAnnotator.new
+    @annotator.annotate!(ast)
     return ast
   end
 
@@ -1738,21 +1738,34 @@ RSpec.describe SemanticAnnotator do
   # Higher-Order specs moved to spec/higher_order_spec.rb
 
   describe "Escape Analysis (Heap Promotion)" do
-    # Helper to check if a specific variable was promoted
+    # Check that a variable was promoted to heap via the ownership graph.
     def expect_escape(var_name)
-      # We verify that mark_escaped is called with the target variable.
-      # We allow other calls (like for captured variables) to avoid strict arity/argument failures.
-      expect_any_instance_of(Scope).to receive(:mark_escaped).with(var_name).and_call_original
-      allow_any_instance_of(Scope).to receive(:mark_escaped).and_call_original
+      @_escape_check = var_name
     end
 
     def expect_no_escape(var_name = nil)
-      if var_name
-        expect_any_instance_of(Scope).not_to receive(:mark_escaped).with(var_name)
-      else
-        expect_any_instance_of(Scope).not_to receive(:mark_escaped)
+      @_no_escape_check = var_name || :any
+    end
+
+    after do
+      if @_escape_check
+        og = @annotator.send(:instance_variable_get, :@og)
+        node = og[@_escape_check]
+        expect(node&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
       end
-      allow_any_instance_of(Scope).to receive(:mark_escaped).and_call_original
+      if @_no_escape_check
+        og = @annotator.send(:instance_variable_get, :@og)
+        if @_no_escape_check == :any
+          # All nodes should be stack/frame (not heap)
+          og.nodes.each do |name, n|
+            next if name == "argv" # global
+            expect(n.storage).not_to eq(:heap), "expected no escapes but '#{name}' is on heap"
+          end
+        else
+          node = og[@_no_escape_check]
+          expect(node&.storage).not_to eq(:heap), "expected '#{@_no_escape_check}' not to be on heap" if node
+        end
+      end
     end
 
     context "Return Statements" do
