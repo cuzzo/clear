@@ -14,6 +14,7 @@ const TestValue = union(enum) {
     Null: void,
     Num: f64,
     Str: []const u8,
+    List: []TestValue,
     Array: std.ArrayListUnmanaged(TestValue),
     Map: CheatLib.StringMap(TestValue),
 };
@@ -194,6 +195,29 @@ test "full cycle: promote then cleanup Array of mixed values" {
     var val = TestValue{ .Array = list };
     try CheatLib.promote(TestValue, &rt, &val);
     CheatLib.cleanup(TestValue, alloc, &val);
+}
+
+test "cleanup: List variant ([]T slice) is freed by cleanup" {
+    // Simulates the json_parser leak: promoteList creates a heap slice
+    // inside a union List variant. cleanup must free it.
+    const alloc = std.testing.allocator;
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(alloc);
+    var arena_buf: [4096]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    // Build a List variant: ArrayList promoted to heap slice.
+    var list = std.ArrayListUnmanaged(TestValue){};
+    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
+    try list.append(rt.frameAlloc(), TestValue{ .Num = 2.0 });
+    try CheatLib.promoteList(TestValue, &rt, &list);
+    // Now list.items is heap-backed. Extract slice into union.
+    var val = TestValue{ .List = list.items };
+    // cleanup should free the List slice (and any nested union elements).
+    CheatLib.cleanup(TestValue, alloc, &val);
+    // If we get here without leak/double-free, the test passes.
 }
 
 test "promote: Array variant promotes backing" {

@@ -1763,6 +1763,9 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Note: generic slice cleanup removed — slices may be borrowed views.
+        // Heap-promoted slices inside unions are cleaned up by freeUnionPayload.
+
         // 3. StringMap(V) — string-keyed hashmap wrapper
         if (comptime isStringMap(T)) {
             ptr.deinit(alloc, alloc);
@@ -1852,12 +1855,29 @@ pub const CheatLib = struct {
         // 9. Tagged unions: check active variant and clean up its payload.
         if (info == .@"union" and info.@"union".tag_type != null) {
             inline for (info.@"union".fields) |field| {
-                if (comptime needsCleanup(field.type)) {
-                    if (std.meta.activeTag(ptr.*) == @field(std.meta.Tag(T), field.name)) {
-                        var payload = @field(ptr, field.name);
-                        cleanup(field.type, alloc, &payload);
-                        return;
+                if (std.meta.activeTag(ptr.*) == @field(std.meta.Tag(T), field.name)) {
+                    const FT = field.type;
+                    const f_info = @typeInfo(FT);
+                    // Slice variant ([]T): recursively cleanup elements then free buffer.
+                    // Handles heap-promoted arrays (from promoteList).
+                    if (f_info == .pointer and f_info.pointer.size == .slice) {
+                        if (FT == []const u8 or FT == []u8) {
+                            // Strings: no-op. String cleanup is handled by
+                            // freeUnionPayload (inside StringMap.deinit) or
+                            // by the caller's explicit string free.
+                        } else {
+                            const payload = @field(ptr, field.name);
+                            if (comptime needsCleanup(f_info.pointer.child)) {
+                                for (payload) |*elem| {
+                                    cleanup(f_info.pointer.child, alloc, elem);
+                                }
+                            }
+                            if (payload.len > 0) alloc.free(payload);
+                        }
+                    } else if (comptime needsCleanup(FT)) {
+                        cleanup(FT, alloc, &@field(ptr, field.name));
                     }
+                    return;
                 }
             }
             return;
@@ -1877,6 +1897,8 @@ pub const CheatLib = struct {
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
         const ft_info = @typeInfo(FT);
+        // Note: generic slice cleanup removed — slices may be borrowed views.
+        // Heap-promoted slices inside unions are cleaned up by freeUnionPayload.
         if (ft_info == .@"struct") {
             // Check if any field needs cleanup
             inline for (ft_info.@"struct".fields) |field| {
