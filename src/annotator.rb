@@ -410,9 +410,6 @@ private
     @fn_has_fnptr[node.name] = has_fnptr
 
     if directly_recursive
-      # TODO(v0.2): Detect tail-recursive calls and either transform to loops
-      # (eliminating REENTRANT effect) or emit Zig @call(.always_tail, ...) for TCO.
-      # Until then, tail recursion is treated as general recursion.
       record_effect(EffectTracker::REENTRANT)
       case node.reentrant
       when :non_reentrant
@@ -422,7 +419,11 @@ private
         error!(node, "Reentrancy Error: '#{node.name}' calls itself recursively. " \
                      "Add @reentrant to the function signature to allow this.")
       end
-      # :reentrant → OK
+
+      # Tail call validation: if @reentrant:tailCall, verify the self-call is in tail position.
+      if node.tail_call
+        validate_tail_call!(node)
+      end
     end
 
     # Note: calling through a fn-type variable (parameter or local lambda) does NOT
@@ -2862,6 +2863,40 @@ private
 
   def get_lifetime_path(func_node)
     get_path_to_root(func_node.return_lifetime)&.join(".")
+  end
+
+  # ── Tail Call Validation ─────────────────────────────────────────
+
+  # Verify that @reentrant:tailCall functions have the self-recursive call
+  # in tail position: the RETURN expression must be a direct call to self
+  # with no wrapping operations (no +, -, etc.).
+  def validate_tail_call!(fn_node)
+    fn_name = fn_node.name
+    returns = fn_node.body.select { |s| s.is_a?(AST::ReturnNode) }
+    has_tail = returns.any? { |r| r.value.is_a?(AST::FuncCall) && r.value.name == fn_name }
+    unless has_tail
+      error!(fn_node, "@reentrant:tailCall requires at least one RETURN that directly " \
+                       "calls '#{fn_name}' in tail position (e.g., RETURN #{fn_name}(...)). " \
+                       "The recursive call cannot be wrapped in an expression.")
+    end
+
+    # Check that no RETURN has a non-tail self-call (e.g., RETURN fib(n) + fib(n))
+    returns.each do |r|
+      next if r.value.is_a?(AST::FuncCall) && r.value.name == fn_name  # direct tail call - OK
+      if contains_self_call?(r.value, fn_name)
+        error!(r, "@reentrant:tailCall: RETURN expression contains '#{fn_name}' in " \
+                   "non-tail position. The recursive call must be the ENTIRE return expression.")
+      end
+    end
+  end
+
+  def contains_self_call?(node, fn_name)
+    return false unless node
+    return true if node.is_a?(AST::FuncCall) && node.name == fn_name
+    if node.respond_to?(:each_pair)
+      node.each_pair { |_, v| return true if contains_self_call?(v, fn_name) }
+    end
+    false
   end
 
   # ── Fiber Stack Auto-Sizing ──────────────────────────────────────

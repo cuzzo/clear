@@ -135,6 +135,53 @@ class StackVerifier
     report[:warnings]&.any? { |w| w[:level] == :error }
   end
 
+  # Verify that @reentrant:tailCall functions were actually TCO'd in the binary.
+  # A TCO'd function should NOT contain a `call <self>` instruction - only `jmp`.
+  # Returns array of { name:, tco_verified: bool, has_self_call: bool }
+  def verify_tail_calls(fn_nodes)
+    output = `objdump -d #{@binary_path} 2>/dev/null`
+    return [] if output.empty?
+
+    tail_call_fns = fn_nodes.select { |_, fn| fn.tail_call }.map { |name, _| name }
+    return [] if tail_call_fns.empty?
+
+    results = []
+    current_fn = nil
+    current_fn_clear = nil
+    instructions = []
+
+    output.each_line do |line|
+      if line =~ /^[0-9a-f]+\s+<(#{Regexp.escape(@module_prefix)}\..+)>:/
+        # Process previous function
+        if current_fn_clear && tail_call_fns.include?(current_fn_clear)
+          has_self_call = instructions.any? { |inst| inst =~ /\bcall\b.*<#{Regexp.escape(current_fn)}>/ }
+          results << { name: current_fn_clear, tco_verified: !has_self_call, has_self_call: has_self_call }
+        end
+        current_fn = $1
+        current_fn_clear = zig_to_clear_name(current_fn)
+        instructions = []
+      elsif line =~ /^[0-9a-f]+\s+</
+        if current_fn_clear && tail_call_fns.include?(current_fn_clear)
+          has_self_call = instructions.any? { |inst| inst =~ /\bcall\b.*<#{Regexp.escape(current_fn)}>/ }
+          results << { name: current_fn_clear, tco_verified: !has_self_call, has_self_call: has_self_call }
+        end
+        current_fn = nil
+        current_fn_clear = nil
+        instructions = []
+      elsif current_fn
+        instructions << line
+      end
+    end
+
+    # Process last function
+    if current_fn_clear && tail_call_fns.include?(current_fn_clear)
+      has_self_call = instructions.any? { |inst| inst =~ /\bcall\b.*<#{Regexp.escape(current_fn)}>/ }
+      results << { name: current_fn_clear, tco_verified: !has_self_call, has_self_call: has_self_call }
+    end
+
+    results
+  end
+
   private
 
   def detect_prefix(path)

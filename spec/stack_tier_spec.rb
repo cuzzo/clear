@@ -243,6 +243,45 @@ RSpec.describe "Stack Tier Recommendations" do
     end
   end
 
+  describe "@reentrant:tailCall" do
+    it "parses the annotation" do
+      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+            "    IF n < 1.0 THEN RETURN a; END\n" \
+            "    RETURN fib(n - 1.0, b, a + b);\nEND\n"
+      _, fn_nodes = analyze(src)
+      expect(fn_nodes["fib"].tail_call).to be true
+      expect(fn_nodes["fib"].reentrant).to eq(:reentrant)
+    end
+
+    it "errors when tail call is not in tail position" do
+      src = "FN bad(n: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+            "    IF n < 1.0 THEN RETURN 1.0; END\n" \
+            "    RETURN bad(n - 1.0) + 1.0;\nEND\n"
+      expect { analyze(src) }.to raise_error(CompilerError, /tailCall/)
+    end
+
+    it "emits @call(.always_tail) in release mode" do
+      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+            "    IF n < 1.0 THEN RETURN a; END\n" \
+            "    RETURN fib(n - 1.0, b, a + b);\nEND\n"
+      # Simulate release mode (no default stack override)
+      t = ZigTranspiler.new
+      zig = t.transpile(src)
+      expect(zig).to include("@call(.always_tail, fib,")
+    end
+
+    it "emits regular call in debug mode (stage2 backend)" do
+      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+            "    IF n < 1.0 THEN RETURN a; END\n" \
+            "    RETURN fib(n - 1.0, b, a + b);\nEND\n"
+      t = ZigTranspiler.new
+      t.instance_variable_set(:@default_stack_size, "Large")
+      zig = t.transpile(src)
+      expect(zig).not_to include("@call(.always_tail")
+      expect(zig).to include("fib(")
+    end
+  end
+
   describe "BG block auto-sizing" do
     it "assigns computed_stack_tier to BG blocks" do
       src = <<~CLEAR

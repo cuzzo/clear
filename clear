@@ -216,6 +216,16 @@ when 'build'
       verifier = StackVerifier.new(output_path, prefix)
       report = verifier.analyze(fn_nodes: fn_nodes, source_file: source)
       verifier.print_report(report)
+
+      # Verify tail calls in release builds
+      tco_results = verifier.verify_tail_calls(fn_nodes)
+      tco_results.each do |r|
+        if r[:tco_verified]
+          $stderr.puts "\e[32m[tco verified]\e[0m '#{r[:name]}' - no self-call instructions (tail call optimized)"
+        else
+          $stderr.puts "\e[31m[tco FAILED]\e[0m '#{r[:name]}' - contains call-to-self (NOT tail-call optimized)"
+        end
+      end
     rescue => e
       $stderr.puts "[stack-check] Analysis failed: #{e.message}"
     end

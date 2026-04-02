@@ -929,12 +929,18 @@ class Parser
       return_type = parse_type_annotation()
     end
 
-    # 4. Parse optional @reentrant / @nonReentrant function-level capability.
-    # These are separate from type capabilities and must appear after the return type.
+    # 4. Parse optional @reentrant / @nonReentrant / @reentrant:tailCall function annotation.
     reentrant = nil
+    tail_call = false
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       cap_tok = consume(:VAR_ID)
       reentrant = cap_tok.value == '@reentrant' ? :reentrant : :non_reentrant
+      # Check for :tailCall suffix
+      if reentrant == :reentrant && match?(:CHAR, ':') && @tokens[@pos + 1]&.value == 'tailCall'
+        consume(:CHAR, ':')
+        consume(:VAR_ID)
+        tail_call = true
+      end
     end
 
     consume(:ARROW, '->')
@@ -983,6 +989,7 @@ class Parser
       catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
     node.type_params = type_params unless type_params.empty?
     node.reentrant = reentrant
+    node.tail_call = tail_call
     node
   end
 

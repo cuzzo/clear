@@ -218,6 +218,7 @@ module AST
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
+    attr_accessor :tail_call     # true if @reentrant:tailCall — compiler emits @call(.always_tail, ...)
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)

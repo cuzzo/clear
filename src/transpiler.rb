@@ -639,7 +639,10 @@ private
       @current_fn_has_catch = has_catch
       @current_fn_snapshot_types = Set.new if has_catch
 
+      prev_tail_call_fn = @current_tail_call_fn
+      @current_tail_call_fn = node.tail_call ? node.name : nil
       body = transpile_block(node.body)
+      @current_tail_call_fn = prev_tail_call_fn
       @transpiler_context_stack.pop
 
       if !has_catch
@@ -1989,8 +1992,20 @@ private
         needs_rt = callee_needs_rt?(node.name)
         can_fail  = callee_can_fail?(node.name)
         args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
-        call = "#{mod_prefix}#{zig_safe_name(node.name)}(#{args.join(', ')})"
-        call_code = can_fail ? "try #{call}" : call
+        fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
+
+        # Tail call: emit @call(.always_tail, ...) for self-recursive calls in @reentrant:tailCall functions.
+        # Only works with LLVM backend (release builds). Stage2 x86_64 doesn't support tail calls.
+        # In debug mode (default_stack = Large), we emit a regular call — the 64KB stack gives headroom.
+        is_tail_self_call = @current_tail_call_fn == node.name
+        llvm_backend = !(@default_stack_size == "Large")  # debug mode uses stage2, no tail calls
+        if is_tail_self_call && llvm_backend
+          call = "@call(.always_tail, #{fn_zig}, .{#{args.join(', ')}})"
+          call_code = call
+        else
+          call = "#{fn_zig}(#{args.join(', ')})"
+          call_code = can_fail ? "try #{call}" : call
+        end
 
         # Heap-promoted returns used as temporaries (not assigned to a variable)
         # must be captured with defer-free to prevent leaks.
