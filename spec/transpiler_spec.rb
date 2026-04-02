@@ -86,14 +86,14 @@ RSpec.describe ZigTranspiler do
       END
     CLEAR
 
-    it "emits CheatLib.promoteList before returning a @list from a frame-using function" do
+    it "emits promoteList before return" do
       zig = transpile(frame_list_src)
-      expect(zig).to include("CheatLib.promoteList(f64, rt, &__ret)")
+      expect(zig).to include("CheatLib.promoteList(f64, rt, &vals)")
     end
 
     it "emits promoteList before the return statement" do
       zig = transpile(frame_list_src)
-      promote_pos = zig.index("CheatLib.promoteList")
+      promote_pos = zig.index("CheatLib.promoteList(")
       return_pos  = zig.index("return __ret")
       expect(promote_pos).to be < return_pos
     end
@@ -547,7 +547,7 @@ RSpec.describe ZigTranspiler do
   end
 
   describe "@list frame-escape through struct returns" do
-    it "emits promoteList for @list nested in returned struct" do
+    it "emits promote(ArrayList) for @list nested in returned struct" do
       src = <<~CLEAR
         STRUCT Pair { items: Int64[], count: Int64 }
         FN build() RETURNS Pair ->
@@ -561,8 +561,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("promoteList")
-      promote_pos = zig.index("promoteList")
+      expect(zig).to include("CheatLib.promoteList(i64, rt, &vals)")
+      promote_pos = zig.index("CheatLib.promoteList(")
       return_pos  = zig.index("return __ret")
       expect(promote_pos).to be < return_pos
     end

@@ -14,6 +14,7 @@ require_relative "./pipeline_generator"
 require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
 require_relative "./importer"
+require_relative "./promotion_plan"
 require_relative "./transpiler_context"
 
 class ZigTranspiler
@@ -46,6 +47,14 @@ class ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
     annotator.annotate!(ast)
     @ownership_graph = annotator.instance_variable_get(:@og)
+
+    # Pass C: compute promotion plans for all functions.
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    @promotion_plans = {}
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      @promotion_plans[stmt.name] = PromotionPlan.compute(stmt, schema_lookup: schema_lookup)
+    end
 
     @needs_safety_import = false
     # Pre-populate needs_rt/can_fail lookup tables from annotated FunctionDef nodes
@@ -560,6 +569,7 @@ private
       @transpiler_context_stack.push(TranspilerContext.new(
         uses_frame: node.uses_frame,
         has_rt: fn_needs_rt,
+        fn_name: node.name,
         collection_params: node.params.select { |p|
           pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
           pt.needs_pointer_passing?
@@ -2101,14 +2111,13 @@ private
         visit(node.value)
       end
 
-      # 3. Unified escape promotion — one path for all return shapes.
-      # Driven by return TYPE, not AST node kind.
-      if node.collection_return
-        ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
-        emit_return_with_promotion(val_code, ret_type, rt_name, suppress, node: node.value)
+      # 3. Escape promotion — driven by PromotionPlan (Pass C).
+      plan = @promotion_plans&.dig(current_tp_ctx&.fn_name)
+      if plan && !plan.empty?
+        # Filter plan to only promote variables referenced in THIS return expression.
+        filtered = plan.filter_for_return(node.value)
+        emit_return_from_plan(val_code, filtered, rt_name, suppress)
       elsif @catch_dupe_string_returns && node.value
-        # CATCH clause in a promoted function: dupe string returns to heap
-        # so both success and error paths return heap-owned data.
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
           [suppress, "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"].reject(&:empty?).join("\n")
@@ -2935,6 +2944,43 @@ private
     else
       [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
     end
+  end
+
+  # Emit return code from a PromotionPlan. Zero decisions here — the plan
+  # already decided what to promote.
+  def emit_return_from_plan(val_code, plan, rt_name, suppress)
+    parts = [suppress]
+
+    # 1. Per-variable promotes (before struct construction)
+    # ArrayList: promoteList (avoids recursive element promotion that dupes heap strings).
+    # StringMap: inline .alloc swap (O(1), avoids GPA tracking issues with promote(&map)).
+    # Others: generic promote.
+    plan.var_promotes.each do |vp|
+      vname = zig_safe_name(vp[:var])
+      if vp[:zig_type].include?("ArrayListUnmanaged")
+        elem = vp[:zig_type][/ArrayListUnmanaged\((.+)\)/, 1]
+        parts << "try CheatLib.promoteList(#{elem}, #{rt_name}, &#{vname});"
+      elsif vp[:zig_type].include?("StringMap")
+        parts << "#{vname}.alloc = #{rt_name}.heapAlloc();"
+      else
+        parts << "try CheatLib.promote(#{vp[:zig_type]}, #{rt_name}, &#{vname});"
+      end
+    end
+
+    # 2. Struct-level promote (after construction, for remaining fields)
+    if plan.struct_promote
+      zig_type = transpile_type(plan.struct_promote)
+      parts << "var __ret = #{val_code};"
+      parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
+      parts << "return __ret;"
+    elsif plan.var_promotes.any?
+      parts << "const __ret = #{val_code};"
+      parts << "return __ret;"
+    else
+      parts << "return #{val_code};"
+    end
+
+    parts.reject(&:empty?).join("\n")
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).

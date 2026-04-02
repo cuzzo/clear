@@ -18,14 +18,16 @@ class TestGenerator < ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
-    # 2. Pre-populate needs_rt/can_fail tables (normally done in transpile; gen.rb
-    #    calls visit directly so we must do it here to get correct rt injection).
+    # 2. Pre-populate needs_rt/can_fail tables and promotion plans.
     @fn_needs_rt = {}
     @fn_can_fail = {}
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    @promotion_plans = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
       @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
+      @promotion_plans[stmt.name] = PromotionPlan.compute(stmt, schema_lookup: schema_lookup)
     end
 
     # 3. Get Raw Zig Body

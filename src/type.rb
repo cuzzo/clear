@@ -855,6 +855,80 @@ class Type
     false
   end
 
+  # ── Recursive type analysis (mirrors Zig comptime functions) ──────
+
+  # Mirror of Zig's needsPromotion. Returns true if this type contains
+  # frame-allocated data that must be duped to heap on escape.
+  # Recurses into struct fields and union variants.
+  # Mirror of Zig's needsPromotion comptime predicate.
+  # Returns true if this type contains frame-arena data that must be
+  # duped to heap before returning from a function.
+  def needs_promotion?(schema_lookup = nil)
+    return true if string?                  # Zig: FT == []const u8
+    return true if list_collection?         # Zig: isArrayList(FT)
+    return true if map? && !numeric_map?    # Zig: isStringMap(FT); NumericMap uses heapAlloc
+    if schema_lookup
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash)
+        if schema[:kind] == :union
+          return (schema[:variants] || {}).any? { |_, vt|
+            next false unless vt
+            next false if vt.is_a?(Hash) # inline struct
+            t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
+            next false unless t
+            t.needs_promotion?(schema_lookup) rescue false
+          }
+        elsif !schema[:kind]
+          # struct: recurse fields
+          return schema.any? { |k, v|
+            next false if k.is_a?(Symbol)
+            ft = v.is_a?(Hash) ? v[:type] : v
+            t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
+            next false unless t
+            t.needs_promotion?(schema_lookup) rescue false
+          }
+        end
+      end
+    end
+    false
+  end
+
+  # Mirror of Zig's needsCleanup. Returns true if this type owns
+  # heap-allocated data that must be freed at scope exit.
+  # Same as needs_promotion? but excludes bare strings (freed by
+  # StringMap.freeUnionPayload inside collections, not at top level).
+  # Plus: RC, NumericMap, Pool, Set.
+  def needs_cleanup?(schema_lookup = nil)
+    return true if any_rc? || link?
+    return true if list_collection?
+    return true if map?  # includes numeric_map
+    return true if pool?
+    return true if set_collection?
+    if schema_lookup
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash)
+        if schema[:kind] == :union
+          return (schema[:variants] || {}).any? { |_, vt|
+            next false unless vt
+            next false if vt.is_a?(Hash)
+            t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
+            next false unless t
+            t.needs_cleanup?(schema_lookup) rescue false
+          }
+        elsif !schema[:kind]
+          return schema.any? { |k, v|
+            next false if k.is_a?(Symbol)
+            ft = v.is_a?(Hash) ? v[:type] : v
+            t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
+            next false unless t
+            t.needs_cleanup?(schema_lookup) rescue false
+          }
+        end
+      end
+    end
+    false
+  end
+
   # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).
   # Used to determine if a union needs cleanup.
   def self.variant_has_heap?(vt)
