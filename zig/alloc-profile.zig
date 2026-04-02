@@ -34,12 +34,23 @@ fn findSlot(addr: usize) ?*Site {
     return null; // table full
 }
 
+var total_bytes: u64 = 0;
+
+pub fn totalAllocs() u64 {
+    return total_allocs;
+}
+
+pub fn totalBytes() u64 {
+    return total_bytes;
+}
+
 pub fn recordAlloc(ret_addr: usize, size: usize) void {
     if (findSlot(ret_addr)) |site| {
         site.alloc_count += 1;
         site.alloc_bytes += size;
     }
     total_allocs += 1;
+    total_bytes += size;
 }
 
 pub fn recordFree(ret_addr: usize, size: usize) void {

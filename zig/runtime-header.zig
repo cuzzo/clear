@@ -3720,6 +3720,147 @@ pub const CheatLib = struct {
 
         return frame.ret;
     }
+
+    // =====================================================================
+    // Benchmark / Profile / Smash Infrastructure
+    // =====================================================================
+
+    pub const BenchmarkResult = struct {
+        iterations: u64,
+        total_ns: u64,
+        min_ns: u64,
+        max_ns: u64,
+        avg_ns: u64,
+        p50_ns: u64,
+        p99_ns: u64,
+        alloc_count: u64,
+        alloc_bytes: u64,
+        arena_high_water: usize,
+    };
+
+    /// Run a function N times, measuring wall-clock time, allocations, and arena usage.
+    pub fn benchmark(
+        comptime func: anytype,
+        rt: *Runtime,
+        args: anytype,
+        iterations: u64,
+    ) BenchmarkResult {
+        const alloc_profile = @import("alloc-profile.zig");
+        const timer = std.time.Timer;
+
+        const max_samples = @min(iterations, 10_000);
+        var samples: [10_000]u64 = undefined;
+        var sample_count: u64 = 0;
+
+        const alloc_before = alloc_profile.totalAllocs();
+        const bytes_before = alloc_profile.totalBytes();
+
+        var total_ns: u64 = 0;
+        var min_ns: u64 = std.math.maxInt(u64);
+        var max_ns: u64 = 0;
+        var arena_hw: usize = 0;
+
+        var i: u64 = 0;
+        while (i < iterations) : (i += 1) {
+            const mark = rt.saveFrameMark();
+            var t = timer.start() catch continue;
+
+            const ResultType = @typeInfo(@TypeOf(func)).@"fn".return_type.?;
+            if (@typeInfo(ResultType) == .error_union) {
+                _ = @call(.auto, func, .{rt} ++ args) catch {};
+            } else {
+                _ = @call(.auto, func, .{rt} ++ args);
+            }
+            const elapsed = t.read();
+
+            const cursor = rt.overflow_arena.cursor;
+            if (cursor > arena_hw) arena_hw = cursor;
+            rt.restoreFrameMark(mark);
+
+            total_ns += elapsed;
+            if (elapsed < min_ns) min_ns = elapsed;
+            if (elapsed > max_ns) max_ns = elapsed;
+            if (sample_count < max_samples) {
+                samples[sample_count] = elapsed;
+                sample_count += 1;
+            }
+        }
+
+        const alloc_after = alloc_profile.totalAllocs();
+        const bytes_after = alloc_profile.totalBytes();
+
+        if (sample_count > 0) {
+            std.mem.sort(u64, samples[0..sample_count], {}, std.sort.asc(u64));
+        }
+        const p50_idx = if (sample_count > 0) sample_count / 2 else 0;
+        const p99_idx = if (sample_count > 0) (sample_count * 99) / 100 else 0;
+
+        return BenchmarkResult{
+            .iterations = iterations,
+            .total_ns = total_ns,
+            .min_ns = if (min_ns == std.math.maxInt(u64)) 0 else min_ns,
+            .max_ns = max_ns,
+            .avg_ns = if (iterations > 0) total_ns / iterations else 0,
+            .p50_ns = if (sample_count > 0) samples[p50_idx] else 0,
+            .p99_ns = if (sample_count > 0) samples[p99_idx] else 0,
+            .alloc_count = alloc_after - alloc_before,
+            .alloc_bytes = bytes_after - bytes_before,
+            .arena_high_water = arena_hw,
+        };
+    }
+
+    /// Print a BenchmarkResult to stderr.
+    pub fn printBenchmarkResult(name: []const u8, r: BenchmarkResult) void {
+        std.debug.print("\nBENCHMARK {s} x{d}:\n", .{ name, r.iterations });
+        std.debug.print("  Time:    {d:.1}ms avg ({d:.1}ms min, {d:.1}ms max)\n", .{
+            @as(f64, @floatFromInt(r.avg_ns)) / 1_000_000.0,
+            @as(f64, @floatFromInt(r.min_ns)) / 1_000_000.0,
+            @as(f64, @floatFromInt(r.max_ns)) / 1_000_000.0,
+        });
+        std.debug.print("  Latency: {d:.1}ms p50, {d:.1}ms p99\n", .{
+            @as(f64, @floatFromInt(r.p50_ns)) / 1_000_000.0,
+            @as(f64, @floatFromInt(r.p99_ns)) / 1_000_000.0,
+        });
+        if (r.alloc_count > 0) {
+            const per_call = if (r.iterations > 0) r.alloc_count / r.iterations else 0;
+            std.debug.print("  Allocs:  {d} total ({d} per call, {d} KB)\n", .{
+                r.alloc_count, per_call, r.alloc_bytes / 1024,
+            });
+        }
+        if (r.arena_high_water > 0) {
+            std.debug.print("  Arena:   {d} KB high-water\n", .{r.arena_high_water / 1024});
+        }
+    }
+
+    /// Generate keys that all route to the same shard in a sharded map.
+    pub fn generateSkewKeys(
+        comptime N: usize,
+        target_shard: usize,
+        count: usize,
+        allocator: std.mem.Allocator,
+    ) ![][]const u8 {
+        var keys = try allocator.alloc([]const u8, count);
+        var found: usize = 0;
+        var candidate: u64 = 0;
+
+        while (found < count) : (candidate += 1) {
+            var buf: [20]u8 = undefined;
+            const key_str = std.fmt.bufPrint(&buf, "sk{d}", .{candidate}) catch continue;
+            const h = std.hash_map.hashString(key_str);
+            if (@as(usize, h) % N == target_shard) {
+                const duped = try allocator.dupe(u8, key_str);
+                keys[found] = duped;
+                found += 1;
+            }
+        }
+        return keys;
+    }
+
+    /// Free keys generated by generateSkewKeys.
+    pub fn freeSkewKeys(keys: [][]const u8, allocator: std.mem.Allocator) void {
+        for (keys) |k| allocator.free(k);
+        allocator.free(keys);
+    }
 };
 
 /// Module-level spawnPinned: distribute a pinned fiber round-robin across
@@ -3794,5 +3935,4 @@ pub fn spawnOsThread(user_fn: TaskFn, args: ?*anyopaque) !void {
         }
     }.run, .{ user_fn, args }) catch return error.ThreadSpawnFailed;
 }
-
 
