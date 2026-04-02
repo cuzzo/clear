@@ -1531,14 +1531,15 @@ private
       # Strings need explicit free (duped to heap); collections are freed
       # via their own deinit in the fiber's normal cleanup path.
       # Resources use the schema-driven close_zig pattern from the symbol entry.
+      # SKIP free for strings whose ownership transfers to the caller as the
+      # BG result (result_line references ctx.<name> directly).
       capture_close_zig = @_capture_close_zig || {}
       capture_frees = captured.filter_map do |name, type_obj|
         t = type_obj.is_a?(Type) ? type_obj : (type_obj ? Type.new(type_obj) : nil)
         if t&.string?
+          next nil if result_line.strip == "ctx.inner.result = ctx.#{name};"  # ownership transfers to caller
           "defer ctx.alloc.free(ctx.#{name});"
         elsif capture_close_zig[name]
-          # Resource: use the close_zig pattern from the type schema.
-          # {0} is replaced with the context field access.
           "defer #{capture_close_zig[name].gsub('{0}', "ctx.#{name}")};"
         end
       end.compact.join("\n                    ")
