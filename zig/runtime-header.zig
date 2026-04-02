@@ -1909,10 +1909,9 @@ pub const CheatLib = struct {
         if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
             inline for (ft_info.@"union".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
-                // Non-string slice variants need cleanup (freed by union cleanup handler).
-                const fi = @typeInfo(field.type);
-                if (fi == .pointer and fi.pointer.size == .slice and
-                    field.type != []const u8 and field.type != []u8) return true;
+                // TODO: Non-string slice variants need cleanup but require MATCH
+                // destructure to be a move first (to prevent double-free from
+                // shared pointers). Enable after MATCH move semantics implemented.
             }
         }
         return false;
