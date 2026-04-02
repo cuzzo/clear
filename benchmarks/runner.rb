@@ -431,8 +431,11 @@ def run_server_bench(dir, mode_cfg, cores)
     puts "Transpiling CLEAR server..."
     `ruby src/transpiler.rb #{dir}/server.cht 2>/dev/null > zig/bench.zig`
 
-    # Detect FFI modules: any .zig files in the benchmark dir
-    ffi_modules = Dir.glob("#{dir}/*.zig").map { |f| File.basename(f, ".zig") }
+    # Detect FFI modules: only .zig files the transpiled code actually imports.
+    bench_code = File.read("zig/bench.zig")
+    ffi_modules = Dir.glob("#{dir}/*.zig")
+      .map { |f| File.basename(f, ".zig") }
+      .select { |m| bench_code.include?("@import(\"#{m}\")") }
 
     Dir.chdir("zig") do
       ffi_modules.each { |m| FileUtils.cp("../#{dir}/#{m}.zig", "#{m}.zig") }
