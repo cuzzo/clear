@@ -296,7 +296,7 @@ when 'profile'
   puts "Collecting syscall profile..."
   system("strace -c -o #{strace_file} env #{target_env} #{output} #{run_args.join(' ')} > /dev/null 2>&1")
   if has_perf
-    system("perf stat -o #{perf_stat_file} env #{target_env} #{output} #{run_args.join(' ')} > /dev/null 2>&1")
+    system("perf stat -e cycles,instructions,branches,branch-misses,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,page-faults -o #{perf_stat_file} env #{target_env} #{output} #{run_args.join(' ')} > /dev/null 2>&1")
   end
 
   puts ""
