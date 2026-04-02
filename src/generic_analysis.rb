@@ -5,7 +5,7 @@ require_relative "./ast"
 # ==========================================
 # Shared helpers for generic type validation, type-param substitution,
 # and call-site inference. Included into SemanticAnnotator alongside
-# FunctionAnalysis, OwnershipTracker, and PipeAnalysis.
+# FunctionAnalysis, EffectTracker, and PipeAnalysis.
 #
 # Requires host class to provide:
 #   error!(node, msg, *args)       — raise CompilerError

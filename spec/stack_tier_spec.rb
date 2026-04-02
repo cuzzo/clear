@@ -241,6 +241,30 @@ RSpec.describe "Stack Tier Recommendations" do
       CLEAR
       expect { analyze(src) }.not_to raise_error
     end
+
+    it "errors when DO block calls @reentrant without @canSmash" do
+      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+            "    IF n < 2.0 THEN RETURN n; END\n" \
+            "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
+            "FN work() RETURNS Float64 ->\n" \
+            "    RETURN fib(10.0);\nEND\n" \
+            "FN main() RETURNS Void ->\n" \
+            "    DO { work() }\n" \
+            "    RETURN;\nEND\n"
+      expect { analyze(src) }.to raise_error(CompilerError, /unbounded.*canSmash/)
+    end
+
+    it "allows @canSmash on DO block branches" do
+      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+            "    IF n < 2.0 THEN RETURN n; END\n" \
+            "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
+            "FN work() RETURNS Float64 ->\n" \
+            "    RETURN fib(10.0);\nEND\n" \
+            "FN main() RETURNS Void ->\n" \
+            "    DO { @canSmash -> work() }\n" \
+            "    RETURN;\nEND\n"
+      expect { analyze(src) }.not_to raise_error
+    end
   end
 
   describe "@reentrant:tailCall" do

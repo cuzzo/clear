@@ -2152,7 +2152,7 @@ class Parser
       else
         parse_expression
       end
-      branches << { body: [stmt].compact, pinned: prefix[:pinned], parallel: prefix[:parallel], stack_size: prefix[:stack_size] }
+      branches << { body: [stmt].compact, pinned: prefix[:pinned], parallel: prefix[:parallel], stack_size: prefix[:stack_size], can_smash: prefix[:can_smash] }
       break unless match!(:CHAR, ',')
     end
 

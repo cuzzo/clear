@@ -63,14 +63,14 @@ RSpec.describe OwnershipGraph do
       it "succeeds on live variable" do
         err = graph.borrow("y", "x", mutable: false)
         expect(err).to be_nil
-        expect(graph.borrows_on("x").size).to eq(1)
+        expect(graph.edges.count { |e| e.to == "x" && (e.kind == :borrows || e.kind == :borrows_mut) }).to eq(1)
       end
 
       it "allows multiple immutable borrows" do
         graph.borrow("y", "x", mutable: false)
         err = graph.borrow("z", "x", mutable: false)
         expect(err).to be_nil
-        expect(graph.borrows_on("x").size).to eq(2)
+        expect(graph.edges.count { |e| e.to == "x" && (e.kind == :borrows || e.kind == :borrows_mut) }).to eq(2)
       end
 
       it "fails if mutable borrow exists" do
@@ -115,10 +115,10 @@ RSpec.describe OwnershipGraph do
     it "removes borrow edges from a borrower" do
       graph.declare("x")
       graph.borrow("y", "x", mutable: false)
-      expect(graph.borrows_on("x").size).to eq(1)
+      expect(graph.edges.count { |e| e.to == "x" && (e.kind == :borrows || e.kind == :borrows_mut) }).to eq(1)
 
       graph.release_borrow("y")
-      expect(graph.borrows_on("x")).to be_empty
+      expect(graph.edges.select { |e| e.to == "x" && (e.kind == :borrows || e.kind == :borrows_mut) }).to be_empty
     end
 
     it "allows new mutable borrow after release" do
@@ -210,26 +210,6 @@ RSpec.describe OwnershipGraph do
     end
   end
 
-  describe "#live_nodes_in_scope" do
-    it "returns nodes at or deeper than min_depth" do
-      graph.declare("a", scope_depth: 0)
-      graph.declare("b", scope_depth: 1)
-      graph.declare("c", scope_depth: 2)
-      nodes = graph.live_nodes_in_scope(1)
-      expect(nodes.map(&:path)).to contain_exactly("b", "c")
-    end
-
-    it "excludes moved nodes" do
-      graph.declare("a", scope_depth: 1)
-      graph.declare("b", scope_depth: 1)
-      graph.transfer("a", "x")
-      nodes = graph.live_nodes_in_scope(1)
-      paths = nodes.map(&:path)
-      expect(paths).to include("b")
-      expect(paths).to include("x")  # x inherits a's scope_depth
-      expect(paths).not_to include("a")  # a is moved
-    end
-  end
 
   describe "#fork and #merge" do
     it "creates an independent snapshot" do

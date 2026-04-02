@@ -133,5 +133,21 @@ RSpec.describe StackVerifier do
       v = StackVerifier.new("/dev/null", "._clear_tmp_foo")
       expect(v.send(:zig_to_clear_name, "._clear_tmp_foo.eval__anon_12345")).to eq("eval")
     end
+
+    it "strips Env suffix (recursive function wrappers)" do
+      v = StackVerifier.new("/dev/null", "._clear_tmp_foo")
+      expect(v.send(:zig_to_clear_name, "._clear_tmp_foo.readFormEnv")).to eq("readForm")
+    end
+
+    it "handles nested struct names (BG context runs)" do
+      v = StackVerifier.new("/dev/null", "._clear_tmp_foo")
+      # clearMain -> main only when it's the full name, not a prefix
+      expect(v.send(:zig_to_clear_name, "._clear_tmp_foo.clearMain.__BgCtx0.run")).to eq("clearMain.__BgCtx0.run")
+    end
+
+    it "handles double suffix (__anon + Env)" do
+      v = StackVerifier.new("/dev/null", "._clear_tmp_foo")
+      expect(v.send(:zig_to_clear_name, "._clear_tmp_foo.tokenizeToEnv__anon_28318")).to eq("tokenizeTo")
+    end
   end
 end

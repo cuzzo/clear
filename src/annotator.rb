@@ -2915,17 +2915,17 @@ private
       when Hash
         n.each_value { |v| traverse.call(v) }
       when AST::BgBlock
-        calls = collect_call_names(n.body)
+        calls = scan_for_calls(n.body).first
         n.computed_stack_tier = max_tier_for_calls(calls)
         validate_fiber_stack!(n, calls, n.stack_size, n.can_smash)
         n.body.each { |s| traverse.call(s) }
       when AST::BgStreamBlock
-        calls = collect_call_names(n.body)
+        calls = scan_for_calls(n.body).first
         n.computed_stack_tier = max_tier_for_calls(calls)
         n.body.each { |s| traverse.call(s) }
       when AST::DoBlock
         n.branches.each do |branch|
-          calls = collect_call_names(branch[:body])
+          calls = scan_for_calls(branch[:body]).first
           branch[:computed_stack_tier] = max_tier_for_calls(calls)
           validate_fiber_stack!(n, calls, branch[:stack_size], branch[:can_smash])
           branch[:body].each { |s| traverse.call(s) }
@@ -2973,34 +2973,6 @@ private
       (@call_graph[name] || []).each { |c| queue << c }
     end
     nil
-  end
-
-  # Collect all function names called in a set of AST nodes (non-recursive into FunctionDef).
-  def collect_call_names(nodes)
-    names = Set.new
-    traverse = lambda do |n|
-      case n
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      when Array
-        n.each { |item| traverse.call(item) }
-      when Hash
-        n.each_value { |v| traverse.call(v) }
-      when AST::FunctionDef
-        # Don't descend into nested function definitions.
-      when AST::FuncCall
-        names << n.name unless n.fn_var_call
-        n.args&.each { |a| traverse.call(a) }
-      when AST::MethodCall
-        names << n.name
-        traverse.call(n.object)
-        n.args&.each { |a| traverse.call(a) }
-      else
-        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
-      end
-    end
-    nodes = [nodes] unless nodes.is_a?(Array)
-    nodes.each { |n| traverse.call(n) }
-    names
   end
 
   # ── Ownership Graph Operations ─────────────────────────────────

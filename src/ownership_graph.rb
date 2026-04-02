@@ -139,16 +139,6 @@ class OwnershipGraph
     @nodes[path]&.moved? || false
   end
 
-  # Get all live nodes at a given scope depth or deeper.
-  def live_nodes_in_scope(min_depth)
-    @nodes.values.select { |n| n.live? && n.scope_depth >= min_depth }
-  end
-
-  # Get all active borrows on a path.
-  def borrows_on(path)
-    @edges.select { |e| e.to == path && (e.kind == :borrows || e.kind == :borrows_mut) }
-  end
-
   # ── Branch Analysis ───────────────────────────────────────────────
 
   # Snapshot the graph state for branching (IF/ELSE).
