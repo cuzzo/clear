@@ -108,7 +108,9 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     else
       cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
     end
-    cmd_parts += ['-O', opt_level] + extra_flags + ['--name', File.basename(output)]
+    cmd_parts += ['-O', opt_level] + extra_flags
+    cmd_parts += ['-fno-strip'] if profile  # keep debug info for addr2line
+    cmd_parts += ['--name', File.basename(output)]
   end
 
   cmd = cmd_parts.join(' ')
@@ -301,8 +303,8 @@ when 'doctor'
   alloc_file = File.join(profile_dir, 'alloc.txt')
   perf_data  = File.join(profile_dir, 'perf.data')
 
-  # Find the binary (same dir as profile, minus .profile suffix)
-  binary = profile_dir.sub(/\.profile$/, '')
+  # Find the binary (same dir as profile, minus .profile/ suffix)
+  binary = profile_dir.chomp('/').sub(/\.profile$/, '')
   binary = nil unless File.exist?(binary.to_s)
 
   # ── Heap Profile ──
@@ -324,8 +326,7 @@ when 'doctor'
       resolved = {}
       addrs = sites.map { |s| s[:addr] }
       # Batch addr2line call
-      addr_input = addrs.join("\n")
-      raw = `echo "#{addr_input}" | addr2line -e #{binary} -f 2>/dev/null`
+      raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
       lines_out = raw.split("\n")
       addrs.each_with_index do |addr, i|
         func = lines_out[i * 2]&.strip || "?"
