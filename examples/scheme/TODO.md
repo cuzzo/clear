@@ -82,6 +82,29 @@ These are standard Scheme/Mal features that the transpiler will never emit:
 - File I/O (`slurp`, `read-string`)
 - Hygienic macro expansion
 
+## Compiler Bugs (blocking clean implementation)
+
+1. **@list param passing** - transpiler extracts `.items` from ArrayList when passing
+   `MUTABLE x: Value[]@list` to a function, turning it into a slice. `.append()` fails.
+   Workaround: inline all @list operations, never pass @list between functions.
+
+2. **@list arena lifetime** - @list arrays allocated in a function's frame arena are freed
+   when the function returns. Storing them in HashMap entries or returning them as
+   Value.List causes use-after-free. PromotionPlan should promote these to the heap
+   when they escape through assignment or return.
+   Workaround: `compile!` stores bytecode entry-by-entry as Value.Number in the pool
+   env (inline values, no pointers). Undo this when the promotion bug is fixed -
+   compile! should return `Value.Pair{ List[ops], List[consts] }` directly.
+
+3. **MATCH AS payload return** - returning a MATCH-extracted array from a helper function
+   generates `items_moved = true` without declaring the tracking variable.
+
+4. **TEST THAT runtime pointer** - test framework passes `rt` by value instead of `&rt`
+   when calling functions that need the runtime from TEST THAT blocks.
+
+5. **Struct literal with @list fields** - `Chunk{ ops: List[], ... }` fails because the
+   transpiler tries to access `.items` on the error union from `makeList`.
+
 ## Future (Post-VM)
 
 - Bytecode compilation (transpiler emits bytecode directly, dispatch loop replaces tree-walker)

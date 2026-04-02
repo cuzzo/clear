@@ -766,8 +766,18 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
     MUTABLE consts: Value[]@list = List[];
 
     IF isSymbol?(ast) THEN
-        cidx = consts.length(); consts.append(ast);
-        ops.append(Value{ Number: 2.0 }); ops.append(Value{ Number: toFloat(cidx) });
+        symName = getSymName(ast);
+        -- Check if this symbol has a slot assignment
+        slotLookup = pool[envId]?.vars["__slot_" + symName] OR Value{ Number: 0.0 - 1.0 };
+        slotNum = toInt(getNum(slotLookup));
+        IF slotNum >= 0 THEN
+            -- Slot-based load
+            ops.append(Value{ Number: 80.0 }); ops.append(Value{ Number: toFloat(slotNum) });
+        ELSE
+            -- Name-based load (fallback for builtins/unslotted)
+            cidx = consts.length(); consts.append(ast);
+            ops.append(Value{ Number: 2.0 }); ops.append(Value{ Number: toFloat(cidx) });
+        END
     ELSE_IF isList?(ast) == FALSE THEN
         cidx = consts.length(); consts.append(ast);
         ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
@@ -809,7 +819,15 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
                 ev1 = eval!(items[2], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
-                cidx = consts.length(); consts.append(Value{ Symbol: getSymName(items[1]) });
+                -- Assign a slot for this variable
+                defName = getSymName(items[1]);
+                slotCounter = pool[envId]?.vars["__slotN"] OR Value{ Number: 0.0 };
+                nextSlot = toInt(getNum(slotCounter));
+                pool[envId]?.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
+                pool[envId]?.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
+                ops.append(Value{ Number: 81.0 }); ops.append(Value{ Number: toFloat(nextSlot) });
+                -- Also storeName for env compatibility (tree-walker interop)
+                cidx = consts.length(); consts.append(Value{ Symbol: defName });
                 ops.append(Value{ Number: 3.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
             ELSE_IF formName == "if" THEN
@@ -1002,6 +1020,17 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             pv = applyNative(nid, nArgs);
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
+        ELSE_IF op == 80 THEN
+            -- loadSlot [idx]: push slots[idx] from current env
+            slotIdx = ops[ip]; ip += 1;
+            slotVal = pool[curEnv]?.vars["__s" + slotIdx.toString()] OR Value.Nil;
+            pv = slotVal;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 81 THEN
+            -- storeSlot [idx]: peek top, store in slots[idx]
+            slotIdx = ops[ip]; ip += 1;
+            pool[curEnv]?.vars["__s" + slotIdx.toString()] = stack[sp - 1];
         ELSE_IF op == 71 THEN
             running = FALSE;
         END
@@ -1246,6 +1275,12 @@ FN main() RETURNS Void ->
     ASSERT bcEvalIn!("(= 5 5)", TRUE, rootId, pool, penv) == "true", "bc-c: eq";
     ASSERT bcEvalIn!("(quote hello)", TRUE, rootId, pool, penv) == "hello", "bc-c: quote";
 
-    print("All 91 interpreter tests PASSED!");
+    -- Slot-based variable tests (define uses storeSlot, lookup uses loadSlot)
+    ASSERT bcEvalIn!("(define x 7)", TRUE, rootId, pool, penv) == "7", "bc-slot: define x";
+    ASSERT bcEvalIn!("(+ x 3)", TRUE, rootId, pool, penv) == "10", "bc-slot: x + 3 via slot";
+    ASSERT bcEvalIn!("(define y 100)", TRUE, rootId, pool, penv) == "100", "bc-slot: define y";
+    ASSERT bcEvalIn!("(+ x y)", TRUE, rootId, pool, penv) == "107", "bc-slot: x + y via slots";
+
+    print("All 95 interpreter tests PASSED!");
     RETURN;
 END
