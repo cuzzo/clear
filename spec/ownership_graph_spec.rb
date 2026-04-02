@@ -283,3 +283,77 @@ RSpec.describe OwnershipGraph do
     end
   end
 end
+
+# Integration tests: verify the graph is populated when the annotator runs.
+RSpec.describe "OwnershipGraph integration" do
+  require_relative "../src/transpiler"
+
+  def annotate(source)
+    tokens = Lexer.new(source).tokenize
+    ast = Parser.new(tokens, source).parse
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+    [ast, annotator]
+  end
+
+  def graph_for(source)
+    _, annotator = annotate(source)
+    annotator.instance_variable_get(:@og)
+  end
+
+  it "declares variables in the graph" do
+    og = graph_for(<<~CLEAR)
+      FN test() ->
+        x = 42;
+      END
+    CLEAR
+    # x should have been declared (and dropped at scope end)
+    expect(og.nodes.keys).to include("x")
+  end
+
+  it "declares function parameters in the graph" do
+    og = graph_for(<<~CLEAR)
+      FN test(a: Float64, b: Float64) RETURNS Float64 ->
+        RETURN a;
+      END
+    CLEAR
+    expect(og.nodes.keys).to include("a")
+    expect(og.nodes.keys).to include("b")
+  end
+
+  it "marks moved struct variables in the graph" do
+    og = graph_for(<<~CLEAR)
+      STRUCT Point { x: Float64, y: Float64 }
+      FN test() ->
+        p = Point { x: 1, y: 2 };
+        q = p;
+      END
+    CLEAR
+    expect(og["p"]&.moved?).to be true
+    expect(og["q"]).not_to be_nil
+  end
+
+  it "tracks GIVE as a move" do
+    og = graph_for(<<~CLEAR)
+      STRUCT Data { value: Float64 }
+      FN consume(TAKES d: Data) RETURNS Float64 ->
+        RETURN d.value;
+      END
+      FN test() RETURNS Float64 ->
+        d = Data { value: 42 };
+        RETURN consume(GIVE d);
+      END
+    CLEAR
+    expect(og["d"]&.moved?).to be true
+  end
+
+  it "drops variables at scope exit" do
+    og = graph_for(<<~CLEAR)
+      STRUCT Obj { v: Float64 }
+      FN test() ->
+        o = Obj { v: 1 };
+      END
+    CLEAR
+    expect(og["o"]&.dropped?).to be true
+  end
+end

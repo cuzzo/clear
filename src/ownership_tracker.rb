@@ -34,6 +34,8 @@ module OwnershipTracker
     # Primitives COPY, everything else MOVES (including resources)
     if Type.new(rhs_type).requires_move? || rhs_info&.resource
       current_scope.set_state(rhs_name, :moved)
+      lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
+      og_move(rhs_name, lhs_name) if respond_to?(:og_move, true)
     end
   end
 
@@ -83,6 +85,7 @@ module OwnershipTracker
       # Optimization: Only promote if it requires a move (i.e. not a primitive Number)
       if Type.new(rhs_type).requires_move?
         rhs_scope.mark_escaped(rhs_name)
+        og_escape(rhs_name) if respond_to?(:og_escape, true)
       end
     end
   end
@@ -181,6 +184,7 @@ module OwnershipTracker
 
     # Mark as escaped and return whether it was promoted from frame
     is_frame_dec = owner_scope.mark_escaped(var_name)
+    og_escape(var_name) if respond_to?(:og_escape, true)
     if owner_scope.is_on_heap?(var_name) && root.respond_to?(:storage=)
       root.storage = :heap
     end
@@ -225,10 +229,12 @@ module OwnershipTracker
       when :resource
         drops << { name: name, type: info.type, resource: true }
         current_scope.set_state(name, :dropped)
+        og_drop(name) if respond_to?(:og_drop, true)
       when :affine
         check_tense_linear!(node, name, info)
         drops << { name: name, type: info.type }
         current_scope.set_state(name, :dropped)
+        og_drop(name) if respond_to?(:og_drop, true)
       # :value, :collection, :rc, :sync — no drop needed
       end
     end
@@ -272,10 +278,12 @@ module OwnershipTracker
       when :resource
         drops << { name: name, type: info.type, resource: true }
         current_scope.set_state(name, :dropped)
+        og_drop(name) if respond_to?(:og_drop, true)
       when :affine
         check_tense_linear!(node, name, info) if node
         drops << { name: name, type: info.type }
         current_scope.set_state(name, :dropped)
+        og_drop(name) if respond_to?(:og_drop, true)
       end
     end
     drops

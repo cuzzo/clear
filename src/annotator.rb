@@ -6,6 +6,7 @@ require_relative "./function_context"
 require_relative "./function_analysis"
 require_relative "./pipe_analysis"
 require_relative "./ownership_tracker"
+require_relative "./ownership_graph"
 require_relative "./generic_analysis"
 require_relative "./capabilities"
 require_relative "./effects"
@@ -56,6 +57,9 @@ class SemanticAnnotator
     @pipeline_accessed_fields = nil
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = false
+    # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
+    @og = OwnershipGraph.new
+    @og_scope_depth = 0
     effects_init!
     capability_audit_init!
     setup_builtins
@@ -561,14 +565,20 @@ private
   # @return [Array<Array<Hash>>] Array of drops for each branch
   def analyze_control_flow_branches(branches, merge_to_parent: true)
     initial_state = current_scope.clone_states
+    og_snapshot = og_fork
     branch_states = []
+    og_branch_snapshots = []
     all_drops = []
 
     branches.each do |branch_logic|
       current_scope.restore_states(initial_state)
+      og_branch = og_snapshot&.dup
       with_new_scope(current_scope) do
+        og_push_scope
         all_drops << branch_logic.call
         branch_states << current_scope.clone_states
+        og_branch_snapshots << (@og&.fork)
+        og_pop_scope
       end
     end
 
@@ -582,6 +592,7 @@ private
           current_scope.set_state(var, :moved) unless entry&.ownership_kind == :value
         end
       end
+      og_branch_snapshots.each { |snap| og_merge(snap) }
     else
       # Just restore the initial state if merging is disabled (e.g. for WHILE loops)
       current_scope.restore_states(initial_state)
@@ -1302,6 +1313,7 @@ private
       node.symbol.link_source = link_src if link_src
     end
     classify_ownership!(node.symbol)
+    og_declare(node.name, node, node.type_info || final_type, storage)
     record_capability_binding(node.name, node, final_type, storage)
   end
 
@@ -1361,6 +1373,7 @@ private
         node.symbol.link_source = link_src if link_src
       end
       classify_ownership!(node.symbol)
+      og_declare(node.name, node, node.type_info || final_type, storage)
       record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
@@ -2306,6 +2319,7 @@ private
 
     # Consume the source variable — it is affinely transferred
     current_scope.set_state(node.value.name, :moved)
+    og_set_moved(node.value.name)
   end
 
   def visit_LinkNode(node)
@@ -2355,6 +2369,7 @@ private
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier)
       current_scope.set_state(root.name, :moved)
+      og_set_moved(root.name)
     end
 
     node.full_type = node.value.resolved_type
@@ -2590,6 +2605,7 @@ private
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)
         node.expr.symbol&.scope&.set_state(node.expr.name, :moved)
+        og_set_moved(node.expr.name)
       end
       node.full_type = promise_type.tense_type.to_sym
     end
@@ -2642,6 +2658,73 @@ private
     names
   end
 
+  # ── Ownership Graph Bridge ──────────────────────────────────────
+  # Shadow calls that populate @og alongside the scope-based tracker.
+  # These are no-ops if @og is nil (e.g., in tests that don't init it).
+
+  def og_declare(name, node, type_info, storage)
+    return unless @og
+    kind = classify_og_kind(type_info)
+    ti = type_info.is_a?(Type) ? type_info : (type_info ? Type.new(type_info) : nil)
+    @og.declare(name, kind: kind, type_info: ti, storage: storage,
+                scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
+  end
+
+  def og_move(from, to)
+    return unless @og
+    @og.transfer(from, to)
+  end
+
+  def og_set_moved(name)
+    return unless @og
+    node = @og[name]
+    return unless node
+    node.state = :moved
+  end
+
+  def og_escape(name)
+    return unless @og
+    @og.escape(name)
+  end
+
+  def og_drop(name)
+    return unless @og
+    @og.drop(name)
+  end
+
+  def og_fork
+    return nil unless @og
+    @og.fork
+  end
+
+  def og_merge(snapshot)
+    return unless @og && snapshot
+    @og.merge(snapshot)
+  end
+
+  def og_push_scope
+    @og_scope_depth += 1 if @og
+  end
+
+  def og_pop_scope
+    @og_scope_depth -= 1 if @og
+  end
+
+  def classify_og_kind(type_info)
+    return :affine unless type_info
+    t = type_info.is_a?(Type) ? type_info : Type.new(type_info)
+    if t.multiowned? || t.shared?
+      :rc
+    elsif t.any_sync?
+      :sync
+    elsif t.implicitly_copyable? { |name| lookup_type_schema(name) }
+      :value
+    else
+      :affine
+    end
+  rescue
+    :affine
+  end
 
 end
 

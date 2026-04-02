@@ -47,6 +47,7 @@ module FunctionAnalysis
 
     # 2. Body Analysis (Inside Scope)
     with_new_scope do
+      og_push_scope if respond_to?(:og_push_scope, true)
       declare_and_verify_params(node)
       declare_captures(node)
 
@@ -57,6 +58,7 @@ module FunctionAnalysis
       end
 
       finalize_scope(node)
+      og_pop_scope if respond_to?(:og_pop_scope, true)
     end
 
     # 3. Routine Epilogue (Process Returns)
@@ -467,6 +469,7 @@ module FunctionAnalysis
       # TAKES parameters own the data — force :affine so cleanup is emitted.
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])
+      og_declare(param[:name], nil, param[:type], :stack) if respond_to?(:og_declare, true)
       param[:type]
     end
   end
