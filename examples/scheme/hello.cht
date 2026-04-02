@@ -1,0 +1,4 @@
+FN main() RETURNS Void ->
+    print("Hello, World!");
+    RETURN;
+END

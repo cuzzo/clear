@@ -1,0 +1,7 @@
+FN main() RETURNS Void ->
+    x = 10 + 20;
+    print(x.toString());
+    y = x * 2;
+    print(y.toString());
+    RETURN;
+END
