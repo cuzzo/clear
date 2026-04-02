@@ -15,8 +15,10 @@ require "ast"
 class SchemeTranspiler
   def initialize
     @output = []
-    @structs = {}  # name -> [field_name, field_name, ...] (ordered)
-    @mutables = Set.new  # names declared as MUTABLE
+    @structs = {}  # name -> [field_name, ...] (ordered)
+    @enums = Set.new    # enum type names
+    @unions = {}  # name -> {variant_name -> has_payload}
+    @mutable_stack = [Set.new]  # stack of per-function mutable sets
   end
 
   def transpile(source)
@@ -29,21 +31,26 @@ class SchemeTranspiler
 
   private
 
+  def mutables; @mutable_stack.last; end
+
   def emit_program(program)
     program.statements.each do |stmt|
       case stmt
       when AST::StructDef
-        # Register struct schema (field order matters for vector indexing)
         @structs[stmt.name.to_s] = stmt.fields.keys
+      when AST::EnumDef
+        @enums.add(stmt.name.to_s)
+      when AST::UnionDef
+        @unions[stmt.name.to_s] = {}
+        stmt.variants.each { |name, type| @unions[stmt.name.to_s][name] = !type.nil? }
       when AST::FunctionDef
+        @mutable_stack.push(Set.new)
         if stmt.name == "main"
-          # Emit main body as top-level expressions (skip bare returns)
           stmt.body.each do |node|
             next if node.is_a?(AST::ReturnNode) && node.value.nil?
             @output << emit(node)
           end
         else
-          # Emit as (define name (lambda (params) body))
           params = stmt.params.map { |p| p.is_a?(Hash) ? p[:name] : p.name }.join(" ")
           body = stmt.body.map { |n| emit(n) }.reject { |s| s == "nil" && stmt.body.last.is_a?(AST::ReturnNode) && stmt.body.last.value.nil? }
           body = ["nil"] if body.empty?
@@ -53,6 +60,7 @@ class SchemeTranspiler
             @output << "(define #{stmt.name} (lambda (#{params}) (begin #{body.join(' ')})))"
           end
         end
+        @mutable_stack.pop
       else
         @output << emit(stmt)
       end
@@ -77,14 +85,16 @@ class SchemeTranspiler
       emit_struct_lit(node)
     when AST::GetField
       emit_get_field(node)
+    when AST::MatchStatement
+      emit_match(node)
     when AST::BindExpr
-      if @mutables.include?(node.name.to_s)
+      if mutables.include?(node.name.to_s)
         "(set! #{node.name} #{emit(node.value)})"
       else
         "(define #{node.name} #{emit(node.value)})"
       end
     when AST::VarDecl
-      @mutables.add(node.name.to_s) if node.mutable
+      mutables.add(node.name.to_s) if node.mutable
       "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
     when AST::Assignment
       emit_assignment(node)
@@ -120,18 +130,35 @@ class SchemeTranspiler
 
   def emit_struct_lit(node)
     name = node.name.to_s
+    # Union construction: Shape{ Circle: 5.0 } -> (cons 'Circle 5.0)
+    if @unions[name]
+      variant = node.fields.keys.first
+      payload = emit(node.fields.values.first)
+      return "(cons (quote #{variant}) #{payload})"
+    end
+    # Struct construction: Point{ x: 10, y: 20 } -> (vector 10 20)
     fields = @structs[name]
     return ";; unknown struct: #{name}" unless fields
-    # Emit fields in schema order as a vector
     vals = fields.map { |f| node.fields[f] ? emit(node.fields[f]) : "nil" }
     "(vector #{vals.join(' ')})"
   end
 
   def emit_get_field(node)
-    target = emit(node.target)
+    target_name = node.target.is_a?(AST::Identifier) ? node.target.name.to_s : nil
     field = node.field.to_s
-    # Look up field index from struct schema
-    # We need to know the struct type of the target - for now, search all schemas
+
+    # Enum variant: Direction.North -> (quote North)
+    if target_name && @enums.include?(target_name)
+      return "(quote #{field})"
+    end
+
+    # Union unit variant: Shape.Point -> (cons 'Point nil)
+    if target_name && @unions[target_name]
+      return "(cons (quote #{field}) nil)"
+    end
+
+    # Struct field access: p.x -> (vector-ref p idx)
+    target = emit(node.target)
     @structs.each do |_name, fields|
       idx = fields.index(field)
       return "(vector-ref #{target} #{idx})" if idx
@@ -160,6 +187,56 @@ class SchemeTranspiler
     msg = node.message || "assertion failed"
     # Emit as: if not cond, raise error
     "(if (not #{cond}) (raise \"#{msg}\" \"Assert\") nil)"
+  end
+
+  def emit_match(node)
+    subject = emit(node.expr)
+    # Build nested if/else chain from cases
+    emit_match_cases(subject, node.cases, node.default_case)
+  end
+
+  def emit_match_cases(subject, cases, default_case, idx = 0)
+    if idx >= cases.length
+      # Default case
+      if default_case && !default_case.empty?
+        body = default_case.map { |n| emit(n) }
+        return body.length == 1 ? body[0] : "(begin #{body.join(' ')})"
+      end
+      return "nil"
+    end
+
+    c = cases[idx]
+    pattern = c[:value]
+    binding = c[:binding]
+    body = c[:body].map { |n| emit(n) }
+    body_expr = body.length == 1 ? body[0] : "(begin #{body.join(' ')})"
+    rest = emit_match_cases(subject, cases, default_case, idx + 1)
+
+    # Determine match condition based on pattern type
+    if pattern.is_a?(AST::GetField)
+      type_name = pattern.target.name.to_s
+      variant = pattern.field.to_s
+
+      if @enums.include?(type_name)
+        # Enum match: (eq? subject 'Variant)
+        cond = "(eq? #{subject} (quote #{variant}))"
+      elsif @unions[type_name]
+        # Union match: (eq? (car subject) 'Variant)
+        cond = "(eq? (car #{subject}) (quote #{variant}))"
+        if binding
+          # AS binding: bind payload to variable
+          body_expr = "(begin (define #{binding} (cdr #{subject})) #{body_expr})"
+        end
+      else
+        cond = "(= #{subject} #{emit(pattern)})"
+      end
+    elsif pattern.is_a?(AST::Literal)
+      cond = "(= #{subject} #{emit(pattern)})"
+    else
+      cond = "(= #{subject} #{emit(pattern)})"
+    end
+
+    "(if #{cond} #{body_expr} #{rest})"
   end
 
   def emit_func_call(node)
