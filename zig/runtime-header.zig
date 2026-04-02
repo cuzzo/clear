@@ -327,6 +327,16 @@ pub const CheatLib = struct {
                                 }
                             }
                             if (slice.len > 0) alloc_.free(slice);
+                        } else if (comptime isArrayList(FT)) {
+                            // ArrayList (e.g. ArrayListUnmanaged(JsonValue)): free elements recursively, then deinit
+                            var list = @field(value, field.name);
+                            const ElemT = comptime arrayListElemType(FT).?;
+                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
+                                for (list.items) |elem| {
+                                    freeUnionPayloadGeneric(ElemT, elem, alloc_);
+                                }
+                            }
+                            list.deinit(alloc_);
                         } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
                             // Nested StringMap: deinit it
                             var map = @field(value, field.name);
