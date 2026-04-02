@@ -572,8 +572,9 @@ class Type
       elem_zig = element_type&.zig_type || "u8"
       "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
     elsif map? && !numeric_map?
-      val_zig = value_type&.zig_type || "void"
-      "try CheatLib.mapPromote(#{val_zig}, #{rt_name}.heapAlloc(), &#{var_name}.inner);\n#{var_name}.alloc = #{rt_name}.heapAlloc();"
+      # StringMap wrapper already uses heapAlloc for all operations (put dupes keys,
+      # grows backing via self.alloc). No promotion needed — just ensure alloc is set.
+      "#{var_name}.alloc = #{rt_name}.heapAlloc();"
     elsif string?
       alloc = alloc_expr || "#{rt_name}.heapAlloc()"
       "try #{alloc}.dupe(u8, #{var_name})"

@@ -1802,7 +1802,24 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 8. Structs: recursively clean up RC/link fields
+        // 8. Structs with a deinit method (ShardedList, ShardedMap, etc.)
+        //    Detect deinit arity: 1 alloc (ShardedList) vs 2 allocs (ShardedMap).
+        if (@typeInfo(T) == .@"struct" and @hasDecl(T, "deinit") and
+            !isStringMap(T) and !isPool(T) and !isNumericMap(T))
+        {
+            const deinit_info = @typeInfo(@TypeOf(T.deinit));
+            const param_count = deinit_info.@"fn".params.len;
+            if (param_count == 3) {
+                // deinit(self, key_alloc, bucket_alloc)
+                ptr.deinit(alloc, alloc);
+            } else {
+                // deinit(self, alloc)
+                ptr.deinit(alloc);
+            }
+            return;
+        }
+
+        // 9. Structs: recursively clean up RC/link fields
         const info = @typeInfo(T);
         if (info == .@"struct") {
             // Walk fields for any that are ref-counted

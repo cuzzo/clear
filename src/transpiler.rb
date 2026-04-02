@@ -677,20 +677,20 @@ private
           cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
           cond = cond_parts.join(" and ")
 
-          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            #{clause_body_code}\n        }"
+          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            #{rt_name}.freeSnapshot();\n            #{clause_body_code}\n        }"
         end.join(" else ")
 
         # DEFAULT clause
         default_code = ""
         if node.default_catch.is_a?(Array) && node.default_catch.any?
           default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
-          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{default_body}\n        }"
+          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
         else
           # No DEFAULT: re-raise if function returns error union, else unreachable
           if fn_can_fail
-            default_code = " else {\n            return error.CheatError;\n        }"
+            default_code = " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
           else
-            default_code = " else {\n            unreachable;\n        }"
+            default_code = " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
           end
         end
 

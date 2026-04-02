@@ -123,16 +123,19 @@ RSpec.describe ZigTranspiler do
       END
     CLEAR
 
-    it "emits CheatLib.mapPromote before returning a String HashMap" do
+    it "sets heapAlloc on returned StringMap (no mapPromote needed)" do
       zig = transpile(map_return_src)
-      expect(zig).to include("CheatLib.mapPromote(i64, rt.heapAlloc(), &__ret.inner)")
+      # StringMap already uses heapAlloc for all ops, so mapPromote is not needed.
+      # The escape path just ensures .alloc is set.
+      expect(zig).not_to include("CheatLib.mapPromote")
+      expect(zig).to include(".alloc = rt.heapAlloc()")
     end
 
-    it "emits mapPromote before the return statement" do
+    it "sets alloc before the return statement" do
       zig = transpile(map_return_src)
-      promote_pos = zig.index("CheatLib.mapPromote")
-      return_pos  = zig.index("return __ret")
-      expect(promote_pos).to be < return_pos
+      alloc_pos  = zig.index(".alloc = rt.heapAlloc()")
+      return_pos = zig.index("return __ret")
+      expect(alloc_pos).to be < return_pos
     end
 
     it "uses heapAlloc for mapPut keys (keys must outlive frame rewind)" do

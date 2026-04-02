@@ -59,6 +59,7 @@ pub const ErrorContext = struct {
     error_name: []const u8 = "",
     message: []const u8 = "",
     snapshot_ptr: usize = 0,       // @intFromPtr of heap-copied element, 0 = no snapshot
+    snapshot_size: usize = 0,      // byte size of snapshot allocation (for generic free)
     clear_line: u32 = 0,
 
     pub fn reset(self: *ErrorContext) void {
@@ -317,12 +318,29 @@ pub const Runtime = struct {
 
     /// Heap-copy a value as a snapshot. OOM = no snapshot (snapshot_ptr stays 0).
     pub fn captureSnapshot(self: *Runtime, comptime T: type, value: *const T) void {
+        self.freeSnapshot(); // free any previous snapshot
         const copy = self.heap_allocator.create(T) catch return;
         copy.* = value.*;
         self.__error.snapshot_ptr = @intFromPtr(copy);
+        self.__error.snapshot_size = @sizeOf(T);
+    }
+
+    /// Free the current snapshot allocation (if any).
+    /// Snapshot was allocated via create(T) which uses @alignOf(T). Since T is unknown
+    /// here, we use rawFree with the alignment that create() used (max of type alignment
+    /// and allocator min alignment, but at least @alignOf(usize) for any struct).
+    pub fn freeSnapshot(self: *Runtime) void {
+        if (self.__error.snapshot_ptr != 0 and self.__error.snapshot_size > 0) {
+            const alignment = @alignOf(usize);
+            const raw: [*]align(alignment) u8 = @ptrFromInt(self.__error.snapshot_ptr);
+            self.heap_allocator.free(raw[0..self.__error.snapshot_size]);
+            self.__error.snapshot_ptr = 0;
+            self.__error.snapshot_size = 0;
+        }
     }
 
     pub fn clearError(self: *Runtime) void {
+        self.freeSnapshot();
         self.__error.reset();
     }
 
