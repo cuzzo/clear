@@ -252,16 +252,17 @@ when 'profile'
 
   alloc_file = File.join(profile_dir, 'alloc.txt')
   perf_data = File.join(profile_dir, 'perf.data')
+  callgrind_file = File.join(profile_dir, 'callgrind.out')
 
   # Build optimized with profiling enabled (comptime CLEAR_PROFILE flag)
   do_build(source, output: output, opt_level: 'ReleaseFast', profile: true)
   puts "Built: #{output} (ReleaseFast + alloc profiling)"
 
-  # Check if perf is available for CPU profiling
+  # CPU profiling: perf (best) > callgrind (fallback) > none
   has_perf = system('which perf > /dev/null 2>&1') &&
     File.readable?('/proc/sys/kernel/perf_event_paranoid') &&
     File.read('/proc/sys/kernel/perf_event_paranoid').strip.to_i <= 2
-  hint "perf unavailable. CPU profiling skipped." unless has_perf
+  has_callgrind = !has_perf && system('which valgrind > /dev/null 2>&1')
 
   # Build the run command
   env_parts = ["CLEAR_ALLOC_PROFILE=#{alloc_file}"]
@@ -270,17 +271,27 @@ when 'profile'
 
   if has_perf
     cmd = "perf record -g -o #{perf_data} -- env #{target_env} #{output} #{run_args.join(' ')}".strip
+  elsif has_callgrind
+    cmd = "valgrind --tool=callgrind --callgrind-out-file=#{callgrind_file} -- env #{target_env} #{output} #{run_args.join(' ')} 2>/dev/null".strip
   else
     cmd = "env #{target_env} #{output} #{run_args.join(' ')}".strip
   end
 
-  puts "Profiling: #{cmd}"
+  cpu_tool = has_perf ? "perf" : (has_callgrind ? "callgrind" : "none")
+  puts "Profiling (CPU: #{cpu_tool}): #{cmd}"
   system(cmd)
 
   puts ""
   puts "Profile data: #{profile_dir}/"
   puts "  Heap: #{alloc_file} (#{File.exist?(alloc_file) ? "#{(File.size(alloc_file) / 1024.0).round(1)} KB" : 'not generated'})"
-  puts "  CPU:  #{perf_data} (#{File.exist?(perf_data) ? "#{(File.size(perf_data) / 1024.0).round(1)} KB" : 'skipped'})" if has_perf
+  if has_perf
+    puts "  CPU:  #{perf_data} (#{File.exist?(perf_data) ? "#{(File.size(perf_data) / 1024.0).round(1)} KB" : 'skipped'})"
+  elsif has_callgrind && File.exist?(callgrind_file)
+    puts "  CPU:  #{callgrind_file} (#{(File.size(callgrind_file) / 1024.0).round(1)} KB)"
+    puts "        View: callgrind_annotate #{callgrind_file} | head -40"
+  else
+    hint "No CPU profiler available. Install perf or valgrind."
+  end
 
 when 'help', '--help', '-h', nil
   puts <<~HELP
