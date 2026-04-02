@@ -286,16 +286,27 @@ when 'profile'
     cmd = "env #{target_env} #{output} #{run_args.join(' ')}".strip
   end
 
+  strace_file = File.join(profile_dir, 'syscalls.txt')
+  perf_stat_file = File.join(profile_dir, 'perf-stat.txt')
+
   puts "Profiling: #{cmd}"
   system(cmd)
 
+  # Collect syscall summary and hardware counters (separate quick runs)
+  puts "Collecting syscall profile..."
+  system("strace -c -o #{strace_file} env #{target_env} #{output} #{run_args.join(' ')} > /dev/null 2>&1")
+  if has_perf
+    system("perf stat -o #{perf_stat_file} env #{target_env} #{output} #{run_args.join(' ')} > /dev/null 2>&1")
+  end
+
   puts ""
   puts "Profile data: #{profile_dir}/"
-  puts "  Heap: #{alloc_file} (#{File.exist?(alloc_file) ? "#{(File.size(alloc_file) / 1024.0).round(1)} KB" : 'not generated'})"
+  puts "  Heap:     #{alloc_file} (#{File.exist?(alloc_file) ? "#{(File.size(alloc_file) / 1024.0).round(1)} KB" : 'not generated'})"
   if has_perf && File.exist?(perf_data)
-    puts "  CPU:  #{perf_data} (#{(File.size(perf_data) / 1024.0).round(1)} KB)"
-    puts "        View: perf report -i #{perf_data}"
+    puts "  CPU:      #{perf_data} (#{(File.size(perf_data) / 1024.0).round(1)} KB)"
   end
+  puts "  Syscalls: #{strace_file}" if File.exist?(strace_file)
+  puts "  Counters: #{perf_stat_file}" if File.exist?(perf_stat_file)
 
 when 'doctor'
   profile_dir = ARGV[1]
@@ -381,13 +392,36 @@ when 'doctor'
   if File.exist?(perf_data)
     puts "=== CPU Profile ==="
     puts ""
-    # Parse perf report for top functions
     report = `perf report -i #{perf_data} --stdio --no-children 2>/dev/null`
     top = report.lines.select { |l| l =~ /^\s+\d+\.\d+%/ }.first(10)
     if top.any?
       top.each { |l| puts "  #{l.strip}" }
     else
       puts "  (no samples collected - program may have run too briefly)"
+    end
+    puts ""
+  end
+
+  # ── Syscalls ──
+  strace_file = File.join(profile_dir, 'syscalls.txt')
+  if File.exist?(strace_file)
+    puts "=== Syscalls ==="
+    puts ""
+    lines = File.readlines(strace_file).select { |l| l =~ /^\s+[\d.]+\s+[\d.]+/ }
+    lines.first(10).each { |l| puts "  #{l.rstrip}" }
+    total = File.readlines(strace_file).find { |l| l.include?('total') }
+    puts "  #{total.rstrip}" if total
+    puts ""
+  end
+
+  # ── Hardware Counters ──
+  perf_stat_file = File.join(profile_dir, 'perf-stat.txt')
+  if File.exist?(perf_stat_file)
+    puts "=== Hardware Counters ==="
+    puts ""
+    File.readlines(perf_stat_file).each do |l|
+      next if l.strip.empty? || l.start_with?('#') || l.start_with?('Performance')
+      puts "  #{l.rstrip}" if l =~ /\d/
     end
     puts ""
   end
