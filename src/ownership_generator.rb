@@ -19,6 +19,12 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
     end
 
+    # Heap-promoted list/slice (from promoteList): cleanup with heapAlloc.
+    if type_info&.heap_promoted && type_info&.array? && !type_info&.collection?
+      zig_type = type_info.zig_type
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+    end
+
     # Heap-promoted struct/union: emit cleanup so heap data is freed.
     if type_info&.heap_promoted && !type_info&.collection?
       resolved = type_info&.resolved
