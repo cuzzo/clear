@@ -271,6 +271,44 @@ RSpec.describe "Test Framework DSL" do
     end
   end
 
+  describe "BENCHMARK transpilation" do
+    def transpile(source)
+      ZigTranspiler.new.transpile(source, test_mode: true)
+    end
+
+    it "emits CheatLib.benchmark wrapper for BENCHMARK in test blocks" do
+      src = <<~CLEAR
+        FN compute(n: Float64) RETURNS Float64 ->
+            RETURN n * 2.0;
+        END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Perf DO
+          WHEN "bench" DO
+            BENCHMARK compute(100.0) x500;
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.benchmark(")
+      expect(zig).to include("CheatLib.printBenchmarkResult(")
+      expect(zig).to include("500")
+    end
+
+    it "emits SMASH stub for SMASH in test blocks" do
+      src = <<~CLEAR
+        FN process(n: Float64) RETURNS Float64 -> RETURN n; END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Smash DO
+          WHEN "adversarial" DO
+            SMASH process(100.0);
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("SMASH process")
+    end
+  end
+
   describe "keyword lexing" do
     %w[TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE].each do |kw|
       it "lexes #{kw} as a keyword" do

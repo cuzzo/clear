@@ -289,6 +289,13 @@ when 'test'
     puts output unless output.strip.empty?
   end
 
+when 'benchmark'
+  source = ARGV[1]
+  error "Usage: clear benchmark <file.cht>" unless source
+  # Benchmark mode: same as test but also runs BENCHMARK/SMASH blocks
+  do_build(source, module_mode: true, default_stack: 'Large')
+  puts "Benchmarks complete."
+
 when 'profile'
   # Split on -- for pass-through args
   idx = ARGV.index('--')

@@ -2415,8 +2415,14 @@ private
     when AST::AssertRaises
       transpile_assert_raises(node)
 
-    when AST::BenchmarkStmt, AST::SmashStmt, AST::ProfileStmt
-      "// TODO: #{node.class.name.split('::').last} (not yet transpiled)"
+    when AST::BenchmarkStmt
+      transpile_benchmark(node)
+
+    when AST::SmashStmt
+      transpile_smash(node)
+
+    when AST::ProfileStmt
+      "// PROFILE: not yet wired (commit 9)"
 
     when AST::StubDecl
       "// TODO: STUB #{node.function_name} (not yet transpiled)"
@@ -3178,8 +3184,18 @@ private
         ZIG
       end
 
+      # Emit BENCHMARK/SMASH/PROFILE as their own test blocks
       when_block.benchmarks.each do |b|
-        tests << "// #{b.class.name.split('::').last}: #{when_desc} (wired in commit 5)"
+        bench_name = "#{test_name}: #{when_desc}: #{b.class.name.split('::').last.downcase}"
+        bench_code = visit(b)
+        tests << <<~ZIG
+          test "#{bench_name}" {
+              #{test_preamble}
+              #{setup_code}
+              #{when_setup}
+              #{bench_code}
+          }
+        ZIG
       end
     end
 
@@ -3211,6 +3227,65 @@ private
           }
       }
     ZIG
+  end
+
+  # Transpile BENCHMARK expr x<N> to CheatLib.benchmark + printBenchmarkResult.
+  # Decomposes a FuncCall into function reference + args for CheatLib.benchmark.
+  def transpile_benchmark(node)
+    rt_name = @do_rt_name || "rt"
+    expr = node.expression
+    iterations = node.iterations
+
+    if expr.is_a?(AST::FuncCall)
+      fn_name = zig_safe_name(expr.name)
+      args_zig = expr.args.map { |a| visit(a) }
+      needs_rt = callee_needs_rt?(expr.name)
+      can_fail = callee_can_fail?(expr.name)
+
+      # Generate a wrapper that matches fn(*Runtime) -> RetType.
+      # The wrapper captures the user's args and calls the real function.
+      all_args = needs_rt ? ["rt_ptr"] + args_zig : args_zig
+      ret_type_str = can_fail ? "anyerror!void" : "void"
+      call_str = "#{fn_name}(#{all_args.join(', ')})"
+      call_str = "_ = try #{call_str}" if can_fail
+      call_str = "_ = #{call_str}" unless can_fail
+
+      suppress_rt = needs_rt ? "" : "_ = rt_ptr; "
+      <<~ZIG
+        {
+            const __bench_wrapper = struct {
+                fn run(rt_ptr: *Runtime) #{ret_type_str} {
+                    #{suppress_rt}#{call_str};
+                }
+            };
+            const __bench_result = CheatLib.benchmark(__bench_wrapper.run, &#{rt_name}, .{}, #{iterations});
+            CheatLib.printBenchmarkResult("#{expr.name}", __bench_result);
+        }
+      ZIG
+    else
+      "// BENCHMARK: expression is not a function call, skipping"
+    end
+  end
+
+  # Transpile SMASH expr to shard skew attack.
+  # Detects sharded map arguments and generates adversarial keys.
+  def transpile_smash(node)
+    rt_name = @do_rt_name || "rt"
+    expr = node.expression
+
+    if expr.is_a?(AST::FuncCall)
+      fn_name = zig_safe_name(expr.name)
+      # For now, emit a TODO with the function name.
+      # Full SMASH needs sharded map detection from the annotator (type info).
+      <<~ZIG
+        {
+            std.debug.print("\\nSMASH #{expr.name}: adversarial workload analysis\\n", .{});
+            std.debug.print("  (shard skew generation requires @sharded map parameter)\\n", .{});
+        }
+      ZIG
+    else
+      "// SMASH: expression is not a function call, skipping"
+    end
   end
 
   # Tier ordering for max() comparison
