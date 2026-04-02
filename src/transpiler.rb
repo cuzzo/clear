@@ -2625,7 +2625,9 @@ private
         return [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       else
         promo = ret_type.escape_promote_code("__ret", rt_name)
-        return [suppress, "var __ret = #{val_code};", promo, "return __ret;"].compact.reject(&:empty?).join("\n")
+        needs_mut = promo && promo.include?("__ret")
+        decl = needs_mut ? "var __ret" : "const __ret"
+        return [suppress, "#{decl} = #{val_code};", promo, "return __ret;"].compact.reject(&:empty?).join("\n")
       end
     end
 
@@ -2675,7 +2677,8 @@ private
     end
 
     if pre_promos.any? || post_promos.any?
-      return [suppress, *pre_promos.compact, "var __ret = #{val_code};", *post_promos.compact, "return __ret;"].reject(&:empty?).join("\n")
+      decl = post_promos.any? ? "var __ret" : "const __ret"
+      return [suppress, *pre_promos.compact, "#{decl} = #{val_code};", *post_promos.compact, "return __ret;"].reject(&:empty?).join("\n")
     end
 
     # No promotion needed.
