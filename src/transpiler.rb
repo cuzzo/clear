@@ -569,9 +569,21 @@ private
       # types: primitives, Void, enums, unions (returned by copy, not pointer).
       uses_frame_or_alloc = node.uses_frame || node.uses_alloc
       ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
+      # Unions with string/collection variants must NOT rewind the frame —
+      # frame-allocated string payloads would be destroyed before the caller reads them.
+      union_has_strings = if @union_schemas&.key?(ret_type_obj.resolved)
+        @union_schemas[ret_type_obj.resolved]&.any? { |_, vt| vt && Type.new(vt).string? }
+      end
       returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
                            @enum_schemas&.key?(ret_type_obj.resolved) ||
-                           @union_schemas&.key?(ret_type_obj.resolved)
+                           (@union_schemas&.key?(ret_type_obj.resolved) && !union_has_strings)
+      # Don't rewind frame for functions that mutate reference parameters
+      # (e.g., HashMap passed as MUTABLE). Frame-allocated data stored through
+      # the parameter would be destroyed on rewind.
+      has_mutable_ref_param = node.params&.any? { |p|
+        p[:mutable] && (p[:type].to_s.include?("HashMap") || p[:type].to_s.include?("@pool") || p[:type].to_s.include?("@list"))
+      }
+      returns_value_type = false if has_mutable_ref_param
       prologue = if fn_needs_rt
         (uses_frame_or_alloc && returns_value_type) ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
       else
