@@ -1056,9 +1056,15 @@ private
   end
 
   def visit_StubDecl(node)
-    # Stubs are processed at transpile time, not during annotation.
-    # Just visit the value for type checking if it's an expression.
+    # Visit the value for type checking if it's an expression.
     visit(node.value) if node.value.respond_to?(:full_type)
+    # CAPTURES stubs declare a variable in the current scope.
+    if node.kind == :captures
+      cap_name = node.value  # the variable name string
+      # Declare as Int64 counter (tracks number of calls captured)
+      current_scope.declare(cap_name, node, :Int64, true, false, nil, :stack)
+      og_declare(cap_name, node, :Int64, :stack)
+    end
     node.full_type = :Void
   end
 

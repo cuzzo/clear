@@ -1989,23 +1989,38 @@ private
         else
           []
         end
-        # Only inject rt / emit try if the callee actually needs them.
-        needs_rt = callee_needs_rt?(node.name)
-        can_fail  = callee_can_fail?(node.name)
-        args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
-        fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
-
-        # Tail call: emit @call(.always_tail, ...) for self-recursive calls in @reentrant:tailCall functions.
-        # Only works with LLVM backend (release builds). Stage2 x86_64 doesn't support tail calls.
-        # In debug mode (default_stack = Large), we emit a regular call — the 64KB stack gives headroom.
-        is_tail_self_call = @current_tail_call_fn == node.name
-        llvm_backend = !(@default_stack_size == "Large")  # debug mode uses stage2, no tail calls
-        if is_tail_self_call && llvm_backend
-          call = "@call(.always_tail, #{fn_zig}, .{#{args.join(', ')}})"
-          call_code = call
+        # STUB interception: if this function is stubbed, emit stub value instead of real call.
+        stub_info = (@active_stubs || {})[node.name]
+        if stub_info
+          stub_code = case stub_info[:kind]
+          when :returns
+            stub_info[:var]
+          when :captures
+            "{ #{stub_info[:var]} += 1; }"
+          when :sequence
+            "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
+          when :with
+            "#{stub_info[:var]}(#{args_zig.join(', ')})"
+          end
+        end
+        if stub_info
+          call_code = stub_code
         else
-          call = "#{fn_zig}(#{args.join(', ')})"
-          call_code = can_fail ? "try #{call}" : call
+          # Only inject rt / emit try if the callee actually needs them.
+          needs_rt = callee_needs_rt?(node.name)
+          can_fail  = callee_can_fail?(node.name)
+          args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
+          fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
+
+          is_tail_self_call = @current_tail_call_fn == node.name
+          llvm_backend = !(@default_stack_size == "Large")
+          if is_tail_self_call && llvm_backend
+            call = "@call(.always_tail, #{fn_zig}, .{#{args.join(', ')}})"
+            call_code = call
+          else
+            call = "#{fn_zig}(#{args.join(', ')})"
+            call_code = can_fail ? "try #{call}" : call
+          end
         end
 
         # Heap-promoted returns used as temporaries (not assigned to a variable)
@@ -2425,7 +2440,7 @@ private
       "// PROFILE: not yet wired (commit 9)"
 
     when AST::StubDecl
-      "// TODO: STUB #{node.function_name} (not yet transpiled)"
+      transpile_stub(node)
 
     when AST::Raise
       # RAISE Kind, ErrorName, "message"
@@ -3168,7 +3183,16 @@ private
     tests = []
     node.whens.each do |when_block|
       when_desc = when_block.description
-      when_setup = transpile_block(when_block.setup)
+
+      # Collect stubs from when-level setup and separate them from regular setup.
+      stubs = when_block.setup.select { |s| s.is_a?(AST::StubDecl) }
+      non_stub_setup = when_block.setup.reject { |s| s.is_a?(AST::StubDecl) }
+      when_setup = transpile_block(non_stub_setup)
+
+      # Install stubs for this WHEN block's scope
+      prev_stubs = @active_stubs || {}
+      @active_stubs = prev_stubs.dup
+      stub_decls = stubs.map { |s| transpile_stub(s) }.join("\n")
 
       when_block.tests.each do |test_that|
         full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
@@ -3177,6 +3201,7 @@ private
         tests << <<~ZIG
           test "#{full_name}" {
               #{test_preamble}
+              #{stub_decls}
               #{setup_code}
               #{when_setup}
               #{body_code}
@@ -3184,19 +3209,22 @@ private
         ZIG
       end
 
-      # Emit BENCHMARK/SMASH/PROFILE as their own test blocks
       when_block.benchmarks.each do |b|
         bench_name = "#{test_name}: #{when_desc}: #{b.class.name.split('::').last.downcase}"
         bench_code = visit(b)
         tests << <<~ZIG
           test "#{bench_name}" {
               #{test_preamble}
+              #{stub_decls}
               #{setup_code}
               #{when_setup}
               #{bench_code}
           }
         ZIG
       end
+
+      # Restore stubs
+      @active_stubs = prev_stubs
     end
 
     tests.join("\n")
@@ -3285,6 +3313,41 @@ private
       ZIG
     else
       "// SMASH: expression is not a function call, skipping"
+    end
+  end
+
+  # Transpile a STUB declaration. Emits Zig code that creates the stub state
+  # and registers it in @active_stubs for call-site replacement.
+  def transpile_stub(node)
+    fn_name = node.function_name
+    stub_var = "__stub_#{fn_name}"
+
+    case node.kind
+    when :returns
+      val_code = visit(node.value)
+      @active_stubs[fn_name] = { kind: :returns, var: stub_var }
+      "const #{stub_var} = #{val_code};"
+
+    when :captures
+      cap_name = node.value  # string: the variable name to capture into
+      @active_stubs[fn_name] = { kind: :captures, var: cap_name }
+      "var #{cap_name}: i64 = 0; _ = &#{cap_name};"
+
+    when :sequence
+      values = node.value  # AST::ListLit or array of expressions
+      items = if values.respond_to?(:items)
+        values.items.map { |v| visit(v) }
+      else
+        [visit(values)]
+      end
+      @active_stubs[fn_name] = { kind: :sequence, var: stub_var }
+      arr_items = items.map { |v| "#{v}" }.join(", ")
+      "const #{stub_var}_seq = [_][]const u8{ #{arr_items} };\nvar #{stub_var}_idx: usize = 0; _ = &#{stub_var}_idx;"
+
+    when :with
+      lambda_code = visit(node.value)
+      @active_stubs[fn_name] = { kind: :with, var: stub_var }
+      "const #{stub_var} = #{lambda_code};"
     end
   end
 

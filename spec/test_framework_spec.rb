@@ -271,6 +271,72 @@ RSpec.describe "Test Framework DSL" do
     end
   end
 
+  describe "STUB transpilation" do
+    def transpile(source)
+      ZigTranspiler.new.transpile(source, test_mode: true)
+    end
+
+    it "emits const for STUB RETURNS" do
+      src = <<~CLEAR
+        FN getData() RETURNS String -> RETURN "real"; END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Stubs DO
+          WHEN "returns" DO
+            STUB getData RETURNS "mock";
+            TEST THAT "works" DO
+              result = getData();
+              ASSERT result == "mock";
+            END
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("__stub_getData")
+      expect(zig).to include('"mock"')
+    end
+
+    it "emits counter for STUB CAPTURES" do
+      src = <<~CLEAR
+        FN send(msg: String) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Stubs DO
+          WHEN "capture" DO
+            STUB send CAPTURES count;
+            TEST THAT "works" DO
+              send("hi");
+              ASSERT count == 1;
+            END
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("var count: i64 = 0")
+    end
+
+    it "stubs are scoped to their WHEN block" do
+      src = <<~CLEAR
+        FN getData() RETURNS String -> RETURN "real"; END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Scope DO
+          WHEN "stubbed" DO
+            STUB getData RETURNS "mock";
+            TEST THAT "uses mock" DO
+              ASSERT getData() == "mock";
+            END
+          END
+          WHEN "unstubbed" DO
+            TEST THAT "uses real" DO
+              ASSERT getData() == "real";
+            END
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      # The "unstubbed" test should call the real getData, not the stub
+      expect(zig).to include('test "Scope: unstubbed: uses real"')
+    end
+  end
+
   describe "BENCHMARK transpilation" do
     def transpile(source)
       ZigTranspiler.new.transpile(source, test_mode: true)
