@@ -77,8 +77,10 @@ class PromotionPlan
   # @param schema_lookup [Proc] lambda(type_name_sym) → schema hash or nil
   # @return [PromotionPlan]
   def self.compute(fn_node, schema_lookup:)
-    # Gate: if the function never allocates, nothing is frame-owned.
-    return EMPTY unless fn_allocates?(fn_node)
+    # Gate: if the function never allocates AND isn't marked returns_promoted
+    # (e.g., CATCH wrapper functions that pass through caller's frame data),
+    # nothing needs promotion.
+    return EMPTY unless fn_allocates?(fn_node) || fn_node.returns_promoted
 
     ret_type_sym = fn_node.return_type
     return EMPTY unless ret_type_sym
@@ -95,6 +97,7 @@ class PromotionPlan
     var_promotes = []
     suppress_defers = []
     handled_fields = Set.new
+    struct_promote = nil
 
     return_nodes.each do |ret_node|
       val = ret_node.value
@@ -117,21 +120,33 @@ class PromotionPlan
         end
 
       elsif val.is_a?(AST::Identifier)
-        # Direct variable return: promote the variable itself.
+        # Direct variable return.
         ti = val.type_info
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
         if ti&.escaped_return && !ti.string?
-          var_promotes << { var: val.name, zig_type: ti.zig_type }
-          suppress_defers << val.name
+          if ti.list_collection? || ti.map?
+            # Collections: promote in-place (they own their allocator/buffer)
+            var_promotes << { var: val.name, zig_type: ti.zig_type }
+            suppress_defers << val.name
+          else
+            # Structs: promote via __ret copy (source may be const parameter)
+            struct_promote ||= zig_type_for(ret_type)
+          end
         end
       end
     end
 
-    # Struct-level promote: only when per-variable promotion found escaped vars
-    # AND the struct has additional promotable fields not covered (e.g., string literals).
-    # Without per-variable escapes, no promotion needed.
-    struct_promote = if var_promotes.any?
+    # Struct-level promote (if not already set by bare-identifier path):
+    # 1. Per-variable promotion found escaped vars AND struct has additional unhandled fields
+    # 2. Function is returns_promoted (CATCH wrapper) with no per-variable escapes
+    # Only apply struct_promote for struct types (not unions).
+    # Union promotion is per-variable via escaped_return.
+    schema = schema_lookup.call(ret_type.resolved) rescue nil
+    is_union = schema.is_a?(Hash) && schema[:kind] == :union
+    struct_promote ||= if var_promotes.any?
       compute_struct_promote(ret_type, schema_lookup, handled_fields)
+    elsif fn_node.returns_promoted && !is_union && ret_type.needs_promotion?(schema_lookup)
+      zig_type_for(ret_type)
     end
 
     if var_promotes.empty? && struct_promote.nil?
@@ -190,6 +205,7 @@ class PromotionPlan
   end
 
   def self.zig_type_for(type)
-    type.resolved.to_s
+    # Strip error union (!) and optional (?) prefixes - promote operates on the payload type.
+    type.resolved.to_s.sub(/^[!?]+/, '')
   end
 end
