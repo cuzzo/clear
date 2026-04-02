@@ -18,16 +18,19 @@ class TestGenerator < ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
-    # 2. Pre-populate needs_rt/can_fail tables and promotion plans.
+    # 2. Pre-populate needs_rt/can_fail tables, promotion plans, and cleanup plans.
     @fn_needs_rt = {}
     @fn_can_fail = {}
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     @promotion_plans = {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
-      @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
-      @promotion_plans[stmt.name] = PromotionPlan.compute(stmt, schema_lookup: schema_lookup)
+    @cleanup_plans = {}
+    fn_nodes.each do |name, fn|
+      @fn_needs_rt[name] = fn.needs_rt.nil? ? true : fn.needs_rt
+      @fn_can_fail[name] = fn.can_fail.nil? ? true : fn.can_fail
+      @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
+      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     end
 
     # 3. Get Raw Zig Body

@@ -48,12 +48,15 @@ class ZigTranspiler
     annotator.annotate!(ast)
     @ownership_graph = annotator.instance_variable_get(:@og)
 
-    # Pass C: compute promotion plans for all functions.
+    # Pass C: compute promotion + cleanup plans for all functions.
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     @promotion_plans = {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      @promotion_plans[stmt.name] = PromotionPlan.compute(stmt, schema_lookup: schema_lookup)
+    @cleanup_plans = {}
+    fn_nodes.each do |name, fn|
+      @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
+      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     end
 
     @needs_safety_import = false

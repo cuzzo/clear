@@ -14,44 +14,27 @@ module OwnershipGenerator
     # Skip cleanup if ownership transferred via return (collections + strings)
     return "" if type_info&.escaped_return && (type_info.collection? || type_info.string?)
 
-    # Heap-promoted strings from callee returns: free with heapAlloc.
-    if type_info&.string? && type_info.heap_promoted
-      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
-    end
-
-    # Heap-promoted list/slice (from promoteList): cleanup with heapAlloc.
-    if type_info&.heap_promoted && type_info&.array? && !type_info&.collection?
-      zig_type = type_info.zig_type
-      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-    end
-
-    # Heap-promoted struct/union: emit cleanup so heap data is freed.
-    if type_info&.heap_promoted && !type_info&.collection?
-      resolved = type_info&.resolved
-
-      # Union with collection variants: use graph to determine cleanup.
-      # Graph.needs_cleanup? returns false for aliased variables (shared backing).
-      if @ownership_graph&.needs_cleanup?(name)
-        union_variants = (@union_schemas ||= {})[resolved]
-        if union_variants && union_variants.any? { |_, vt| Type.variant_has_heap?(vt) }
-          zig_type = transpile_type(resolved.to_s)
+    # CleanupPlan-driven: check if the plan says this binding needs heap cleanup.
+    # Covers all heap-promoted bindings (from returns_promoted callees) including
+    # cases that walk_promote_callers missed (IF/MATCH branches, chained calls).
+    fn_name = current_tp_ctx&.fn_name
+    plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(name.to_s)
+    if plan_entry && plan_entry[:alloc] == :heap
+      # For unions, gate on ownership graph — aliased/consumed variables skip cleanup.
+      skip_union = plan_entry[:kind] == :heap_union && !@ownership_graph&.needs_cleanup?(name)
+      unless skip_union
+        case plan_entry[:kind]
+        when :heap_string
+          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
+        when :heap_slice
+          zig_type = type_info.zig_type
           return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-        end
-      end
-
-      # Struct with escapable fields
-      schema = (@struct_schemas ||= {})[resolved]
-      if schema
-        cleanups = schema.filter_map do |fname, fdef|
-          next if fname.is_a?(Symbol) # skip :kind, :variants etc.
-          ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
-          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          ft.escape_cleanup_code("#{name}.#{fname}")
-        end
-        unless cleanups.empty?
-          moved_guard = "var #{name}_moved = false; _ = &#{name}_moved;\n"
-          defers = cleanups.map { |c| c.sub("defer ", "defer if (!#{name}_moved) ") }.join
-          return moved_guard + defers
+        when :heap_union
+          zig_type = transpile_type(type_info.resolved.to_s)
+          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+        when :heap_struct
+          zig_type = transpile_type(type_info.resolved.to_s)
+          return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
         end
       end
     end

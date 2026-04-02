@@ -313,6 +313,8 @@ class CleanupPlan
       when AST::MatchStatement
         (node.cases || []).each { |c| walk_bindings(c[:body], promoted_fns, schema_lookup, bindings) }
         walk_bindings(node.default_case, promoted_fns, schema_lookup, bindings) if node.default_case
+      when AST::WhileLoop
+        walk_bindings(node.do_branch, promoted_fns, schema_lookup, bindings)
       else
         walk_bindings(node.body, promoted_fns, schema_lookup, bindings) if node.respond_to?(:body) && node.body
       end
