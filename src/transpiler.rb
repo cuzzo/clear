@@ -38,6 +38,7 @@ class ZigTranspiler
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
   def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false)
     @source_dir = File.expand_path(source_dir)
+    @test_mode = test_mode
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
     tokens    = Lexer.new(cheat_code).tokenize
@@ -550,7 +551,7 @@ private
       else
         final_type
       end
-      vis = node.visibility == :pub ? "pub " : ""
+      vis = (node.visibility == :pub || @test_mode) ? "pub " : ""
       signature = "#{vis}fn #{zig_safe_name(node.name)}(#{all_params.join(', ')}) #{return_type_str}"
 
       @transpiler_context_stack.push(TranspilerContext.new(
@@ -2408,6 +2409,18 @@ private
       cond = visit(node.condition)
       "CheatLib.assert(#{cond}, \"#{node.message}\")"
 
+    when AST::TestBlock
+      transpile_test_block(node)
+
+    when AST::AssertRaises
+      transpile_assert_raises(node)
+
+    when AST::BenchmarkStmt, AST::SmashStmt, AST::ProfileStmt
+      "// TODO: #{node.class.name.split('::').last} (not yet transpiled)"
+
+    when AST::StubDecl
+      "// TODO: STUB #{node.function_name} (not yet transpiled)"
+
     when AST::Raise
       # RAISE Kind, ErrorName, "message"
       rt_name = @do_rt_name || "rt"
@@ -3121,6 +3134,83 @@ private
                 );
       ZIG
     end
+  end
+
+  # ── Test Framework Transpilation ─────────────────────────────────
+
+  # Generate a Zig test preamble: GPA + EBR + Runtime + scheduler init.
+  # Returns [preamble_code, cleanup_code] strings.
+  def test_preamble
+    <<~ZIG
+      var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+      defer _ = gpa.deinit();
+      const allocator = gpa.allocator();
+      var global_ctx = EbrContext{};
+      defer global_ctx.deinit(allocator);
+      var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
+      defer rt.deinit();
+      rt.wireAllocator();
+    ZIG
+  end
+
+  # Transpile a TestBlock into one or more Zig `test "..." { }` blocks.
+  # Each TEST THAT becomes a separate Zig test with setup replayed.
+  def transpile_test_block(node)
+    test_name = node.name
+    setup_code = transpile_block(node.setup)
+
+    tests = []
+    node.whens.each do |when_block|
+      when_desc = when_block.description
+      when_setup = transpile_block(when_block.setup)
+
+      when_block.tests.each do |test_that|
+        full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
+        body_code = transpile_block(test_that.body)
+
+        tests << <<~ZIG
+          test "#{full_name}" {
+              #{test_preamble}
+              #{setup_code}
+              #{when_setup}
+              #{body_code}
+          }
+        ZIG
+      end
+
+      when_block.benchmarks.each do |b|
+        tests << "// #{b.class.name.split('::').last}: #{when_desc} (wired in commit 5)"
+      end
+    end
+
+    tests.join("\n")
+  end
+
+  # Transpile ASSERT_RAISES to Zig error-checking pattern.
+  def transpile_assert_raises(node)
+    rt_name = @do_rt_name || "rt"
+    kind = node.kind
+    expr_code = visit(node.expression)
+
+    error_name_check = if node.error_name
+      " and !#{rt_name}.__error.matchesName(\"#{node.error_name}\")"
+    else
+      ""
+    end
+
+    # Wrap expression: if it succeeds (no error), the assertion fails.
+    # If it fails with the right kind, pass. Wrong kind = fail.
+    <<~ZIG
+      {
+          if (#{expr_code}) |_| {
+              @panic("ASSERT_RAISES: expected #{kind} error but none raised");
+          } else |_| {
+              if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_name_check}) {
+                  @panic("ASSERT_RAISES: expected #{kind} error, got different kind");
+              }
+          }
+      }
+    ZIG
   end
 
   # Tier ordering for max() comparison

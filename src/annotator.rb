@@ -1010,6 +1010,58 @@ private
     node.full_type = :Void
   end
 
+  def visit_TestBlock(node)
+    with_new_scope do
+      node.setup.each { |s| visit(s) }
+      node.whens.each { |w| visit_WhenBlock(w) }
+    end
+    node.full_type = :Void
+  end
+
+  def visit_WhenBlock(node)
+    node.setup.each { |s| visit(s) }
+    node.tests.each do |t|
+      # Each TEST THAT gets its own scope for isolation
+      with_new_scope(current_scope) do
+        visit_TestThat(t)
+      end
+    end
+    node.benchmarks.each { |b| visit(b) }
+    node.full_type = :Void
+  end
+
+  def visit_TestThat(node)
+    node.body.each { |s| visit(s) }
+    node.full_type = :Void
+  end
+
+  def visit_AssertRaises(node)
+    visit(node.expression)
+    node.full_type = :Void
+  end
+
+  def visit_BenchmarkStmt(node)
+    visit(node.expression)
+    node.full_type = :Void
+  end
+
+  def visit_SmashStmt(node)
+    visit(node.expression)
+    node.full_type = :Void
+  end
+
+  def visit_ProfileStmt(node)
+    visit(node.expression)
+    node.full_type = :Void
+  end
+
+  def visit_StubDecl(node)
+    # Stubs are processed at transpile time, not during annotation.
+    # Just visit the value for type checking if it's an expression.
+    visit(node.value) if node.value.respond_to?(:full_type)
+    node.full_type = :Void
+  end
+
   def visit_DieNode(node)
      # Usually takes an integer status code
      visit(node.status) if node.status

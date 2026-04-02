@@ -218,6 +218,59 @@ RSpec.describe "Test Framework DSL" do
     end
   end
 
+  describe "transpilation" do
+    def transpile(source, test_mode: true)
+      ZigTranspiler.new.transpile(source, test_mode: test_mode)
+    end
+
+    it "generates Zig test blocks for each TEST THAT" do
+      src = <<~CLEAR
+        FN add(a: Float64, b: Float64) RETURNS Float64 ->
+            RETURN a + b;
+        END
+        FN main() RETURNS Void -> RETURN; END
+        TEST Math DO
+          WHEN "add" DO
+            TEST THAT "works" DO
+              ASSERT add(1.0, 2.0) == 3.0;
+            END
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include('test "Math: add: works"')
+      expect(zig).to include("GeneralPurposeAllocator")
+    end
+
+    it "makes private functions pub in test mode" do
+      src = <<~CLEAR
+        PRIVATE FN secret() RETURNS Float64 -> RETURN 42.0; END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      zig_test = transpile(src, test_mode: true)
+      zig_prod = transpile(src, test_mode: false)
+      expect(zig_test).to include("pub fn secret(")
+      expect(zig_prod).not_to include("pub fn secret(")
+    end
+
+    it "emits separate test blocks with setup replay" do
+      src = <<~CLEAR
+        FN main() RETURNS Void -> RETURN; END
+        TEST Setup DO
+          WHEN "group" DO
+            TEST THAT "first" DO ASSERT TRUE; END
+            TEST THAT "second" DO ASSERT TRUE; END
+          END
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include('test "Setup: group: first"')
+      expect(zig).to include('test "Setup: group: second"')
+      # Each test should have its own runtime init
+      expect(zig.scan("GeneralPurposeAllocator").count).to be >= 2
+    end
+  end
+
   describe "keyword lexing" do
     %w[TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE].each do |kw|
       it "lexes #{kw} as a keyword" do
