@@ -87,6 +87,15 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                         resp = resp + "+PONG\r\n";
                     ELSE_IF arg0 == "COMMAND" || arg0 == "command" THEN
                         resp = resp + "*0\r\n";
+                    ELSE_IF arg0 == "CONFIG" || arg0 == "config" THEN
+                        -- CONFIG GET returns empty list; CONFIG SET returns OK
+                        IF arg1 == "SET" || arg1 == "set" THEN
+                            resp = resp + "+OK\r\n";
+                        ELSE
+                            resp = resp + "*0\r\n";
+                        END
+                    ELSE_IF arg0 == "DBSIZE" || arg0 == "dbsize" THEN
+                        resp = resp + ":0\r\n";
                     ELSE_IF arg0 == "QUIT" || arg0 == "quit" THEN
                         resp = resp + "+OK\r\n";
                         running = FALSE;

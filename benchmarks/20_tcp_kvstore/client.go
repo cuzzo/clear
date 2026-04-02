@@ -80,8 +80,13 @@ func main() {
 	cmd := exec.Command("redis-benchmark", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "redis-benchmark failed: %v\n%s\n", err, string(out))
-		os.Exit(1)
+		// redis-benchmark may exit non-zero due to CONFIG warnings but still produce valid CSV.
+		// Only fail if there's no CSV output at all.
+		if !strings.Contains(string(out), "\"test\"") {
+			fmt.Fprintf(os.Stderr, "redis-benchmark failed: %v\n%s\n", err, string(out))
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "redis-benchmark warning: %v\n", err)
 	}
 
 	hwmAfter, rssAfter := readServerRSS(pid)
