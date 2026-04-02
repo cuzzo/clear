@@ -1344,47 +1344,25 @@ private
         "const #{inner} = #{name}.ctrl.data.*;\n_ = &#{inner};"
       end.join("\n")
 
-      # --- Mutex bindings: acquire(), bind alias as *T ---
-      # When the variable also has an ownership wrapper (Arc/Rc), the Zig variable is
-      # Arc(Locked(T)) or Rc(Locked(T)); dereference through .data.* to reach Locked(T).
-      mutex_bindings = mutex_caps.map do |cap|
+      # --- Lock bindings (Mutex/RwWrite/RwRead): acquire guard, bind alias ---
+      # All three patterns are identical except for the access method name.
+      # When the variable also has an ownership wrapper (Arc/Rc), dereference
+      # through .data.* to reach the Locked/RwLocked inner type.
+      access_method = { mutex: "acquire", rw_write: "write", rw_read: "read" }
+      all_lock_caps = [
+        *mutex_caps.map    { |c| [c, :mutex] },
+        *rw_write_caps.map { |c| [c, :rw_write] },
+        *rw_read_caps.map  { |c| [c, :rw_read] },
+      ]
+      lock_bindings = all_lock_caps.map do |cap, kind|
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
         zig_var    = @do_capture_map&.dig(var_name) || var_name
         lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
+        method     = access_method[kind]
         <<~ZIG.chomp
-          var #{guard_var} = #{lock_expr}.acquire();
-          defer #{guard_var}.release();
-          const #{alias_name} = #{guard_var}.get();
-          _ = &#{alias_name};
-        ZIG
-      end.join("\n")
-
-      # --- RwLock write bindings: write(), bind alias as *T (exclusive) ---
-      rw_write_bindings = rw_write_caps.map do |cap|
-        var_name   = cap[:var_node].name
-        alias_name = cap[:alias] || var_name
-        guard_var  = "__#{var_name}_guard"
-        zig_var    = @do_capture_map&.dig(var_name) || var_name
-        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
-        <<~ZIG.chomp
-          var #{guard_var} = #{lock_expr}.write();
-          defer #{guard_var}.release();
-          const #{alias_name} = #{guard_var}.get();
-          _ = &#{alias_name};
-        ZIG
-      end.join("\n")
-
-      # --- RwLock read bindings: read(), bind alias as *const T (shared read) ---
-      rw_read_bindings = rw_read_caps.map do |cap|
-        var_name   = cap[:var_node].name
-        alias_name = cap[:alias] || var_name
-        guard_var  = "__#{var_name}_guard"
-        zig_var    = @do_capture_map&.dig(var_name) || var_name
-        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
-        <<~ZIG.chomp
-          var #{guard_var} = #{lock_expr}.read();
+          var #{guard_var} = #{lock_expr}.#{method}();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -1410,7 +1388,7 @@ private
       @rc_unwrap_map     = prev_rc_map
       @locked_unwrap_map = prev_locked_map
 
-      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings].reject(&:empty?).join("\n")
+      all_bindings = [rc_bindings, lock_bindings].reject(&:empty?).join("\n")
       "{\n#{all_bindings}\n#{body}\n}"
 
     when AST::DoBlock
