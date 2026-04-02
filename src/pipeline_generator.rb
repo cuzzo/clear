@@ -560,7 +560,7 @@ module PipelineGenerator
   def transpile_tap(smooth_node)
     lhs     = smooth_node.left
     tap_op  = smooth_node.right
-    lhs_type = lhs.type_info
+    my_label = next_pipe_label
 
     body_code = with_pipeline_context(placeholder: "__tap_item") do
       tap_op.body.map { |stmt|
@@ -571,13 +571,13 @@ module PipelineGenerator
 
     list_code = visit(lhs)
     <<~ZIG.chomp
-      __tap_blk: {
+      #{my_label}: {
           const __tap_src = #{list_code};
           const __tap_items = if (@hasField(@TypeOf(__tap_src), "items")) __tap_src.items else __tap_src[0..];
           for (__tap_items) |__tap_item| {
               #{body_code}
           }
-          break :__tap_blk __tap_src;
+          break :#{my_label} __tap_src;
       }
     ZIG
   end

@@ -146,8 +146,8 @@ class Parser
   primary(:KEYWORD, 'COUNT',   AST::CountOp,   ['COUNT',   :pipe_expression])
   primary(:KEYWORD, 'SUM',     AST::SumOp,     ['SUM',     :pipe_expression])
   primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :pipe_expression])
-  primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :expression])
-  primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :expression])
+  primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
+  primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
   primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
 
