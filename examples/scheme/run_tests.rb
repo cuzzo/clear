@@ -21,6 +21,7 @@ KNOWN_PASSING = %w[
   10_concat
   11_smooth_pipe
   12_while_loop
+  15_select
   13_if_else
   20_subfield_move
   21_subfield_return
@@ -41,6 +42,7 @@ KNOWN_PASSING = %w[
   39_move_return
   44_do_block
   45_match
+  46_match_when
   46_range
   47_match_destructure
   49_visibility
@@ -48,9 +50,13 @@ KNOWN_PASSING = %w[
   51_enum
   52_union
   54_generic_fn
+  55_string_ops
+  56_else_if_chain
   56_match_enum_exhaustive
+  57_line_parser
   57_match_union_capture
   58_string_return_leak
+  59_string_temp_takes
 ]
 
 # Additional candidates to try (simple tests, no capabilities/concurrency/FFI)

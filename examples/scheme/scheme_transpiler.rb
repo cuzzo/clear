@@ -249,18 +249,18 @@ class SchemeTranspiler
     rest = emit_match_cases(subject, cases, default_case, idx + 1)
 
     # Determine match condition based on pattern type
-    if pattern.is_a?(AST::GetField)
+    if c[:kind] == :when
+      # WHEN guard: condition is the pattern value
+      cond = emit(pattern)
+    elsif pattern.is_a?(AST::GetField)
       type_name = pattern.target.name.to_s
       variant = pattern.field.to_s
 
       if @enums.include?(type_name)
-        # Enum match: (eq? subject 'Variant)
         cond = "(eq? #{subject} (quote #{variant}))"
       elsif @unions[type_name]
-        # Union match: (eq? (car subject) 'Variant)
         cond = "(eq? (car #{subject}) (quote #{variant}))"
         if binding
-          # AS binding: bind payload to variable
           body_expr = "(begin (define #{binding} (cdr #{subject})) #{body_expr})"
         end
       else
@@ -313,9 +313,11 @@ class SchemeTranspiler
     when "eql?"
       "(= #{args})"
     when "toFloat"
-      args  # identity - all numbers are floats in scheme
+      args
     when "toInt"
-      args  # identity
+      "(toInt #{args})"
+    when "floor"
+      args
     else
       "(#{name} #{args})"
     end
@@ -331,8 +333,11 @@ class SchemeTranspiler
     when "toString"
       "(number->string #{target})"
     when "length"
-      # Could be string or list - emit list-length for now (works for both via dispatch)
       "(list-length #{target})"
+    when "trim"
+      "(trim #{target})"
+    when "split"
+      "(split #{target} #{args[0]})"
     when "append"
       # list.append(val) -> (set! list (list-push list val))
       # Need the raw target name for set!
@@ -351,7 +356,7 @@ class SchemeTranspiler
   end
 
   OP_MAP = {
-    ADD: "+", SUB: "-", MUL: "*", DIV: "/", MOD: "%",
+    ADD: "+", SUB: "-", MUL: "*", DIV: "/", MOD: "modulo",
     EQ: "=", NEQ: "!=", LT: "<", GT: ">", LTE: "<=", GTE: ">=",
     AND: "and", OR: "or",
     CONCAT: "string-append",
@@ -473,7 +478,7 @@ class SchemeTranspiler
   def emit_unary(node)
     operand = emit(node.right)
     case node.op
-    when :NOT, :BANG
+    when :NOT, :BANG, :EXCL
       "(not #{operand})"
     when :SUB, :NEG
       "(- 0 #{operand})"

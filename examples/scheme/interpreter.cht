@@ -252,6 +252,14 @@ END
 
 FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     -- Arithmetic
+    -- Modulo
+    IF id == 37 THEN
+        ia = toInt(getNum(evaled[1]));
+        ib = toInt(getNum(evaled[2]));
+        MUTABLE modResult: Int64 = 0;
+        IF ib != 0 THEN modResult = ia MOD ib; END
+        RETURN Value{ Number: toFloat(modResult) };
+    END
     IF id == 1 THEN
         -- + works on numbers and strings
         MATCH evaled[1] START
@@ -325,7 +333,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 31 THEN
         parsed = toNumber(getStr(evaled[1])) OR (0.0 - 999999.0);
-        IF parsed == 0.0 - 999999.0 THEN RETURN Value.FalseVal; END
+        IF parsed == 0.0 - 999999.0 THEN RETURN Value.Error{ errMsg: "parse failed", errKind: "Input" }; END
         RETURN Value{ Number: parsed };
     END
     IF id == 32 THEN
@@ -333,9 +341,75 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value.FalseVal;
     END
     IF id == 33 THEN print(prStr(evaled[1], FALSE)); RETURN Value.Nil; END
+    -- String stdlib: 38=startsWith?, 39=split, 40=indexOf, 41=contains?, 42=trim, 43=charAt, 44=substr
+    IF id == 38 THEN
+        -- startsWith?(str, prefix)
+        s = getStr(evaled[1]);
+        prefix = getStr(evaled[2]);
+        IF prefix.length() == 0 THEN RETURN Value.TrueVal; END
+        IF s.length() < prefix.length() THEN RETURN Value.FalseVal; END
+        RETURN boolVal(substr(s, 0, prefix.length()) == prefix);
+    END
+    IF id == 39 THEN
+        -- split(str, delim) -> List of strings
+        s = getStr(evaled[1]);
+        delim = getStr(evaled[2]);
+        MUTABLE parts: Value[]@list = List[];
+        MUTABLE start: Int64 = 0;
+        MUTABLE si: Int64 = 0;
+        WHILE si + delim.length() <= s.length() DO
+            IF substr(s, si, delim.length()) == delim THEN
+                parts.append(Value{ Str: substr(s, start, si - start) });
+                si += delim.length();
+                start = si;
+            ELSE
+                si += 1;
+            END
+        END
+        IF start <= s.length() THEN
+            parts.append(Value{ Str: substr(s, start, s.length() - start) });
+        END
+        RETURN Value{ List: parts };
+    END
+    IF id == 40 THEN
+        -- indexOf(str, needle) -> Int64 or -1
+        s = getStr(evaled[1]);
+        needle = getStr(evaled[2]);
+        MUTABLE idx: Int64 = 0;
+        WHILE idx <= s.length() - needle.length() DO
+            IF substr(s, idx, needle.length()) == needle THEN
+                RETURN Value{ Number: toFloat(idx) };
+            END
+            idx += 1;
+        END
+        RETURN Value{ Number: 0.0 - 1.0 };
+    END
+    IF id == 41 THEN RETURN boolVal(getStr(evaled[1]).length() > 0); END
+    IF id == 42 THEN RETURN Value{ Str: getStr(evaled[1]) }; END
+    IF id == 44 THEN
+        -- toInt: truncate float to integer
+        truncated = toInt(getNum(evaled[1]));
+        RETURN Value{ Number: toFloat(truncated) };
+    END
+    IF id == 43 THEN
+        -- substr(str, start, len) - CLEAR-style
+        s = getStr(evaled[1]);
+        start = toInt(getNum(evaled[2]));
+        MUTABLE len: Int64 = toInt(getNum(evaled[3]));
+        IF start + len > s.length() THEN len = s.length() - start; END
+        IF len < 0 THEN len = 0; END
+        RETURN Value{ Str: substr(s, start, len) };
+    END
     -- List operations: 34=list-ref, 35=list-length
     IF id == 34 THEN RETURN listRef(evaled[1], toInt(getNum(evaled[2]))); END
-    IF id == 35 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
+    IF id == 35 THEN
+        -- list-length: works on lists AND strings
+        MATCH evaled[1] START
+            Value.Str AS s -> RETURN Value{ Number: toFloat(s.length()) };,
+            DEFAULT -> RETURN Value{ Number: toFloat(listLen(evaled[1])) };
+        END
+        RETURN Value{ Number: toFloat(listLen(evaled[1])) };
+    END
     IF id == 36 THEN
         -- list-push: return new list with element appended
         MATCH evaled[1] START
@@ -801,10 +875,24 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["string->number"] = Value{ NativeFn: 31 };
     pool[rootId]?.vars["string?"] = Value{ NativeFn: 32 };
     pool[rootId]?.vars["display"] = Value{ NativeFn: 33 };
-    -- List access: 34=list-ref, 35=list-length, 36=list-push (returns new list with appended elem)
+    -- Modulo: 37
+    pool[rootId]?.vars["modulo"] = Value{ NativeFn: 37 };
+    -- List access: 34=list-ref, 35=list-length, 36=list-push
     pool[rootId]?.vars["list-ref"] = Value{ NativeFn: 34 };
     pool[rootId]?.vars["list-length"] = Value{ NativeFn: 35 };
     pool[rootId]?.vars["list-push"] = Value{ NativeFn: 36 };
+    -- String stdlib: 38-42 + aliases
+    pool[rootId]?.vars["startsWith?"] = Value{ NativeFn: 38 };
+    pool[rootId]?.vars["split"] = Value{ NativeFn: 39 };
+    pool[rootId]?.vars["indexOf"] = Value{ NativeFn: 40 };
+    pool[rootId]?.vars["contains?"] = Value{ NativeFn: 41 };
+    pool[rootId]?.vars["trim"] = Value{ NativeFn: 42 };
+    pool[rootId]?.vars["charAt"] = Value{ NativeFn: 29 };
+    pool[rootId]?.vars["substr"] = Value{ NativeFn: 43 };
+    pool[rootId]?.vars["toNumber"] = Value{ NativeFn: 31 };
+    pool[rootId]?.vars["toInt"] = Value{ NativeFn: 44 };
+    pool[rootId]?.vars["toFloat"] = Value{ NativeFn: 30 };
+    pool[rootId]?.vars["join"] = Value{ NativeFn: 26 };
     -- error?, error-message, error-kind, list-append! are special forms
     RETURN rootId;
 END
@@ -1361,7 +1449,7 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(string-ref \"hello\" 0)", TRUE, rootId, pool, penv) =="\"h\"", "string-ref";
     ASSERT evalIn!("(number->string 42)", TRUE, rootId, pool, penv) =="\"42\"", "number->string";
     ASSERT evalIn!("(string->number \"3\")", TRUE, rootId, pool, penv) =="3", "string->number";
-    ASSERT evalIn!("(string->number \"bad\")", TRUE, rootId, pool, penv) =="false", "string->number invalid";
+    ASSERT evalIn!("(try (string->number \"bad\") (catch e \"error\"))", TRUE, rootId, pool, penv) =="\"error\"", "string->number invalid";
     ASSERT evalIn!("(string? \"hi\")", TRUE, rootId, pool, penv) =="true", "string? true";
     ASSERT evalIn!("(string? 42)", TRUE, rootId, pool, penv) =="false", "string? false";
 
