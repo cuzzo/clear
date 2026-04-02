@@ -116,6 +116,26 @@ class SchemeTranspiler
       emit_raise(node)
     when AST::OptionalUnwrap
       emit(node.target)
+    when AST::CapabilityWrap
+      # VM ignores capabilities - emit inner value
+      emit(node.value)
+    when AST::Copy
+      emit(node.value)
+    when AST::MoveNode
+      # GIVE transfers ownership - identity in VM (GC handles lifetime)
+      emit(node.value)
+    when AST::WithBlock
+      # WITH blocks - bind aliases and emit body
+      bindings = []
+      node.capabilities.each do |cap|
+        if cap[:alias] && cap[:var_node]
+          var = emit(cap[:var_node])
+          bindings << "(define #{cap[:alias]} #{var})"
+        end
+      end
+      body = node.body.map { |n| emit(n) }
+      all = bindings + body
+      all.length == 1 ? all[0] : "(begin #{all.join(' ')})"
     when NilClass
       "nil"
     else

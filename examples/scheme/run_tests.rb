@@ -25,11 +25,16 @@ KNOWN_PASSING = %w[
   22_heap_subfield_move
   23_optional
   24_error_returns
+  31_multiowned
   32_multiowned_return
+  33_multiowned_param
+  34_multiowned_struct_field
+  35_shared
   36_shared_return
+  37_shared_param
+  38_move_ownership
   39_move_return
-  41_locked_return
-  43_write_locked_return
+  44_do_block
   45_match
   46_range
   47_match_destructure
