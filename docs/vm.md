@@ -73,19 +73,22 @@ The GC vs. arena gap is an implementation detail invisible to the programmer.
 - Arithmetic, comparison, list ops, boolean logic
 - 21 passing tests (arithmetic, recursion, closures, fibonacci)
 
-### Compilation Blockers
+### Compilation Status
 
-The interpreter **does not currently compile**. It depends on CLEAR compiler features that don't exist yet:
+The `TODO.md` lists 8 compilation blockers - **all are already implemented**:
 
-| Feature | Why it's needed |
-|---------|----------------|
-| String escape sequences (`\"`, `\n`) | Tokenizer whitespace/quote handling |
-| String indexing (`str[i]`) | Manual tokenizer character iteration |
-| `MATCH` payload extraction (`Value.X AS payload`) | Core of the evaluator |
-| `@indirect` on union fields | Break `Value -> Lambda -> Value` recursion |
-| `RAISE` inside `WHILE` | Error propagation in parser loops |
+| Feature | Status | Evidence |
+|---------|--------|---------|
+| String escape sequences (`\"`, `\n`) | Done | `lexer.rb:172-210` |
+| String indexing (`charAt`) | Done | `std_lib.rb:67-72`, `transpile-tests/55_string_ops.cht` |
+| `substr()` | Done | `std_lib.rb:29-36`, `transpile-tests/55_string_ops.cht` |
+| `toNumber()` with `OR` fallback | Done | `std_lib.rb:88-93`, `transpile-tests/55_string_ops.cht` |
+| `MATCH ... AS` payload extraction | Done | `parser.rb:1298`, `transpiler.rb:1266`, `match_spec.rb:601-648` |
+| `@indirect` on union fields | Done | `parser.rb:1786`, `transpile-tests/97_stack_heap_interop.cht` |
+| `@shared` construction | Done | `transpile-tests/35_shared.cht`, `capabilities_spec.rb` |
+| `RAISE` inside `WHILE` | Done | Error handling fully implemented |
 
-See `examples/scheme/TODO.md` for the full list (P0 through P2).
+The additional features the interpreter uses (`@reentrant`, `@pool`, `Id<T>`, `HashMap<Value>` with `OR` fallback, `@list`, UNION with struct-like variants) are also all implemented and tested. **The interpreter should compile today.** The TODO.md is stale.
 
 ### Gap: What the Interpreter Still Needs
 
@@ -113,31 +116,156 @@ Features actually needed beyond current Mal 4:
 
 This is roughly **Mal 4.5** - not Mal 7+. The interpreter work is smaller than initially estimated.
 
+## Architecture: Instruction IR with Swappable Backends
+
+The transpiler should **not** emit S-expressions directly. Instead, it emits an intermediate **instruction list**, and separate renderers produce either S-expressions or bytecode from it. This means the transpiler never changes when we switch execution strategy - only the renderer and interpreter loop swap.
+
+### Why Not Emit S-Expressions Directly?
+
+If the transpiler emits S-expression strings, switching to bytecode later means either:
+- Rewriting the transpiler to emit bytecode instead (throwing away working code), or
+- Parsing the S-expressions back into a structure to compile to bytecode (wasting work the transpiler already did)
+
+Both are bad. The transpiler already knows every variable's scope index, every function's arity, every tail position. That information should be preserved in a structured form, not serialized into text and re-parsed.
+
+### The Instruction IR
+
+The transpiler emits a flat list of typed instructions:
+
+```ruby
+Instruction = Struct.new(:op, :args, :source_loc)
+
+# CLEAR source:  IF x > 1 THEN x + 2 ELSE 0 END
+# Instruction output:
+[
+  Inst(:LOAD_SLOT,      [3],    loc(12, 4)),   # x
+  Inst(:LOAD_CONST,     [1],    loc(12, 8)),   # 1
+  Inst(:GT,             [],     loc(12, 6)),
+  Inst(:JUMP_IF_FALSE,  [:L1],  loc(12, 1)),
+  Inst(:LOAD_SLOT,      [3],    loc(12, 14)),  # x
+  Inst(:LOAD_CONST,     [2],    loc(12, 18)),  # 2
+  Inst(:ADD,            [],     loc(12, 16)),
+  Inst(:JUMP,           [:L2],  loc(12, 1)),
+  Inst(:LABEL,          [:L1],  nil),
+  Inst(:LOAD_CONST,     [0],    loc(12, 22)),  # 0
+  Inst(:LABEL,          [:L2],  nil),
+]
+```
+
+Source locations are preserved at every instruction for the debugger.
+
+### Two Renderers, Same Input
+
+```
+                                 +---> SexpRenderer ----> "(if (> x 1) (+ x 2) 0)"
+                                 |                         tree-walker interprets this
+CLEAR AST --> SchemeTranspiler --+
+              (emits Inst[])     |
+                                 +---> BytecodeRenderer -> [0x05, 0x03, 0x06, 0x01, ...]
+                                                           dispatch loop executes this
+```
+
+**SexpRenderer** reconstructs nested S-expressions from the flat instruction stream. `JUMP_IF_FALSE` + `LABEL` pairs become `(if ...)`. `CALL` becomes `(fn arg1 arg2)`. This is the day-1 execution path and the permanent debug/inspect output (`--scheme` flag).
+
+**BytecodeRenderer** resolves labels to byte offsets and packs instructions into a `u8[]` array. This replaces the S-expression path when performance matters. ~200 lines of code, added later.
+
+### The Interpreter Has the Same Split
+
+The interpreter's runtime - `Value` union, environment pool, native function table, debugger hooks - is shared between both execution modes. Only the eval loop changes:
+
+| Component | Shared? | Changes for bytecode? |
+|---|---|---|
+| `Value` union (tagged, inline) | Yes | No |
+| Environment pool (arena-allocated) | Yes | No |
+| Native function table | Yes | No |
+| Debugger / breakpoint hooks | Yes | No |
+| Source-map lookup | Yes | No |
+| S-expression parser + tree-walk eval | Day 1 | Replaced by dispatch loop |
+| Bytecode dispatch loop | Day 2 | New code (~150 lines) |
+
+### File Layout
+
+| File | Role | Changes for bytecode? |
+|---|---|---|
+| `src/scheme_transpiler.rb` | CLEAR AST -> `Instruction[]` | No |
+| `src/sexp_renderer.rb` | `Instruction[]` -> S-expression string | No (becomes `--scheme` debug output) |
+| `src/bytecode_renderer.rb` | `Instruction[]` -> `u8[]` | New file (~200 lines) |
+| `interpreter.cht` (runtime) | Value, Env, native fns, debugger | No |
+| `interpreter.cht` (eval) | Tree-walks S-expressions | Replaced by dispatch loop |
+
+The cut line is between the transpiler and the renderer. Everything above stays. Everything below swaps.
+
+### Performance Trajectory
+
+| Stage | Execution path | Speed vs CPython (no JIT) |
+|---|---|---|
+| Day 1: S-expressions | Tree-walk eval | ~3-10x slower |
+| Day 2: Bytecode + hashmap envs | Dispatch loop | ~1x (parity) |
+| Day 3: Bytecode + slot-indexed envs | Dispatch loop + array access | ~2-5x faster |
+
+The slot-indexed environment optimization is free - the transpiler already resolves variable scopes. It emits `LOAD_SLOT 3` instead of `LOAD_NAME "x"`, and environments become `Value[]` arrays instead of `HashMap<Value>`. This eliminates hash lookups on every variable reference, which is the single largest overhead in any interpreter.
+
+### ~30 Opcodes (Complete Set)
+
+The transpiler controls what gets emitted. The full opcode set for CLEAR's subset:
+
+| Category | Opcodes |
+|---|---|
+| Stack | `LOAD_CONST`, `LOAD_SLOT`, `STORE_SLOT`, `POP`, `DUP` |
+| Arithmetic | `ADD`, `SUB`, `MUL`, `DIV`, `MOD`, `NEG` |
+| Comparison | `EQ`, `LT`, `GT`, `LTE`, `GTE` |
+| Logic | `NOT`, `AND`, `OR` |
+| Control | `JUMP`, `JUMP_IF_FALSE`, `CALL`, `TAIL_CALL`, `RETURN` |
+| Data | `MAKE_VEC`, `VEC_GET`, `VEC_SET`, `MAKE_LIST`, `LIST_GET`, `CONS`, `CAR`, `CDR` |
+| Strings | `STR_CONCAT`, `STR_LEN`, `SUBSTR` |
+| Environment | `MAKE_ENV`, `CLOSE_OVER` |
+| VM | `BREAKPOINT`, `HALT`, `NATIVE_CALL` |
+
+No `CALL_CC`. No `EVAL`. No `MACRO_EXPAND`. The opcode set is closed because the transpiler is the only producer.
+
 ## Effort Breakdown
 
-### Phase 0: Compiler Prerequisites (~10-15 commits)
+### Phase 0: Compiler Prerequisites
 
-Implement the CLEAR language features that unblock `interpreter.cht` compilation. These are compiler tasks (lexer/parser/annotator/transpiler), not interpreter tasks.
+**None.** All required compiler features are already implemented. The interpreter should compile and run its 21 tests today. Verify with:
 
-- String escape sequences
-- String indexing and slicing
-- `MATCH` payload extraction
-- `@indirect` on recursive union fields
-- `RAISE` propagation through `WHILE`
-- Optional type fallback (`OR` pattern)
+```bash
+./clear test examples/scheme/interpreter.cht
+```
 
-### Phase 1: Interpreter Maturation - Mal 4 -> 4.5 (~8-12 commits)
+### Phase 1: Interpreter Maturation (~15-25 commits)
 
-The interpreter only needs to handle what the transpiler emits. No `quote`, no macros, no continuations, no file I/O, no atoms.
+The interpreter only needs to handle what the transpiler emits. No `quote`, no macros, no continuations, no `call/cc`. But "Mal 4.5" understates the delta - the current interpreter speaks Mal syntax and handles a handful of forms. Running transpiler output requires standard Scheme syntax, new data types, error semantics, and debugger hooks.
+
+**Syntax alignment** (transpiler emits standard Scheme, not Mal):
 
 | Work | Size | Notes |
 |------|------|-------|
-| TCO: trampoline loop in `eval` | Medium | Convert tail-position calls to loop iterations |
-| `set!` for mutable bindings | Small | Env mutation - walk scope chain, update in place |
-| Error values + propagation | Medium | Tagged error type, unwind on `RAISE`, catch on `s>` |
-| Growable env pool + cycle cleanup | Medium | Replace fixed 10,000-slot array, handle Env->Lambda->Env |
-| Source-map metadata in emitted S-exprs | Small | Line/col annotations for debugger |
-| Native function registration API | Small | Extensible dispatch table (replaces string matching) |
+| `define` / `lambda` / `let` / `begin` / `set!` | Medium | Replace or alias `def!` / `fn*` / `let*` / `do`. Touches every branch of `evalList!`. |
+
+**Data model extensions** (CLEAR types lowered to Scheme):
+
+| Work | Size | Notes |
+|------|------|-------|
+| Vectors (`vector`, `vector-ref`, `vector-set!`) | Medium | STRUCT lowering. New Value variant, index bookkeeping. |
+| Tagged pairs (`cons`, `car`, `cdr` + symbol tags) | Medium | UNION lowering. Tag check at each MATCH site. |
+| String operations (`string-append`, `substring`, `string-length`, `string-ref`) | Medium | Current string support is near-zero. |
+
+**Runtime semantics:**
+
+| Work | Size | Notes |
+|------|------|-------|
+| TCO: trampoline loop in `eval` | Medium | Well-known pattern but restructures the entire eval loop. |
+| Error values + propagation | Large | New error Value variant, check-after-every-eval, unwind on `RAISE`, catch on `s>`. Biggest single item. |
+| Growable env pool + cycle cleanup | Medium | Replace fixed 10,000-slot array, handle Env->Lambda->Env cycles. |
+
+**Tooling hooks:**
+
+| Work | Size | Notes |
+|------|------|-------|
+| Source-map metadata in emitted S-exprs | Medium | Thread source locations through parse + eval. |
+| Native function registration API | Small | Extensible dispatch table (replaces string `if` chain). |
+| `BREAKPOINT` hook in eval loop | Small | Check breakpoint state at each eval step. |
 
 **This phase produces a working interpreter that can run transpiler output.** Independently useful as a CLEAR showcase.
 
@@ -175,17 +303,17 @@ A new `src/scheme_transpiler.rb` that lowers CLEAR AST to S-expressions.
 - Verify `ASSERT` statements pass identically on VM and native backends
 - Performance baseline: establish "fast enough" threshold for interactive use
 
-### Total: ~55-85 commits
+### Total: ~55-80 commits
 
 | Phase | Commits | Focus |
 |-------|---------|-------|
-| 0: Compiler prereqs | 10-15 | Unblock interpreter compilation |
-| 1: Mal 4 -> 4.5 | 8-12 | Minimal viable interpreter |
+| 0: Compiler prereqs | 0 | Already done |
+| 1: Interpreter maturation | 15-25 | Syntax, data types, errors, TCO, debugger hooks |
 | 2: REPL & debugger | 10-15 | **Primary deliverable** |
-| 3: Scheme transpiler | 20-28 | CLEAR-to-Scheme lowering |
+| 3: Scheme transpiler | 20-28 | CLEAR AST -> Instruction IR -> S-expressions |
 | 4: Integration & testing | 7-12 | End-to-end validation |
 
-Split roughly **25/75** between interpreter maturation (Phases 0-1) and transpiler/tooling (Phases 2-4).
+Split roughly **30/70** between interpreter maturation (Phase 1) and transpiler/tooling (Phases 2-4).
 
 ## Features Only Possible With a VM
 
