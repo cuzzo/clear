@@ -1,0 +1,333 @@
+#!/usr/bin/env ruby
+# CLEAR Scheme VM - run CLEAR programs on the Scheme interpreter
+#
+# Usage:
+#   ./clear run foo.cht          # transpile + run on Scheme VM
+#   ./clear repl                 # interactive REPL
+#   ./clear repl foo.cht         # REPL with file's definitions loaded
+#   ./clear transpile foo.cht    # emit S-expressions to stdout
+#   ./clear test                 # run compliance test suite
+#   ./clear test foo.cht         # run single test
+
+require "readline"
+require "tempfile"
+require "set"
+
+DIR = __dir__
+PROJECT_ROOT = File.expand_path("../../", DIR)
+$LOAD_PATH.unshift(File.join(PROJECT_ROOT, "src"))
+
+require "lexer"
+require "parser"
+require "ast"
+
+# Load the transpiler class
+load File.join(DIR, "scheme_transpiler.rb")
+
+# ---------------------------------------------------------------------------
+# Interpreter bridge: generate a CLEAR wrapper that runs S-expressions
+# on the Scheme interpreter, compile with the native toolchain, execute.
+# ---------------------------------------------------------------------------
+
+class InterpreterBridge
+  def initialize
+    @interp_path = File.join(DIR, "interpreter.cht")
+    @interp_src = File.read(@interp_path)
+    # Strip from main() onward
+    main_idx = @interp_src.index(/^FN main\(\)/)
+    @interp_base = main_idx ? @interp_src[0...main_idx] : @interp_src
+  end
+
+  # Run a list of S-expression strings on the interpreter.
+  # Returns [stdout_output, success_bool]
+  def run_scheme(scheme_lines, silent: false)
+    combined = scheme_lines.length == 1 ? scheme_lines[0] : "(begin #{scheme_lines.join(' ')})"
+    escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+
+    main_code = <<~CHT
+      FN main() RETURNS Void ->
+          MUTABLE pool: Env[50000]@pool = [];
+          MUTABLE penv: HashMap<Value> = {};
+          rootId = setupEnv!(pool);
+          MUTABLE schemeResult: Value = runTest!("#{escaped}", rootId, pool, penv);
+          IF isError?(schemeResult) THEN print("ERROR: " + getErrMsg(schemeResult)); END
+          RETURN;
+      END
+    CHT
+
+    run_clear(@interp_base + main_code, silent: silent)
+  end
+
+  # Run a CLEAR source file (the full interpreter + custom main)
+  def run_clear(source, silent: false)
+    tmp = File.join(DIR, "_vm_run.cht")
+    File.write(tmp, source)
+    output = `#{PROJECT_ROOT}/clear run #{tmp} 2>&1`
+    File.delete(tmp) if File.exist?(tmp)
+
+    # Filter out noise
+    lines = output.lines.reject { |l|
+      l.include?("hint:") || l.include?("error(gpa)") ||
+      l.include?("leaked:") || l.include?(".zig") ||
+      l.include?("rt.") || l.include?("task.") ||
+      l.include?("promoteList") || l.include?("referenced by:") ||
+      l.include?("try ") || l.include?("const ") ||
+      l.include?("???:") || l.include?("Unwind info") ||
+      l.strip.empty? || l.strip == "^"
+    }
+    stdout = lines.join
+    success = !output.include?("ERROR:") && !output.include?("Compilation failed")
+    $stdout.print(stdout) unless silent
+    [stdout.strip, success]
+  end
+
+  # REPL: persistent env across evaluations.
+  # We build up function definitions and evaluate expressions.
+  def run_repl(preload_file: nil)
+    puts "CLEAR Scheme VM REPL"
+    puts "Type CLEAR expressions. Multi-line: FN...END, IF...END, etc."
+    puts "Commands: :quit, :defs, :reset"
+    puts
+
+    @fn_defs = []       # accumulated function definitions (S-expr strings)
+    @repl_counter = 0
+    transpiler = SchemeTranspiler.new
+
+    # Preload file if given
+    if preload_file
+      source = File.read(preload_file)
+      scheme = transpiler.transpile(source)
+      scheme.each_line do |line|
+        line = line.strip
+        next if line.empty?
+        if line.start_with?("(define ") && line.include?("(lambda")
+          @fn_defs << line
+        elsif line.start_with?("(define ")
+          @fn_defs << line
+        end
+      end
+      puts "Loaded #{@fn_defs.length} definitions from #{preload_file}"
+    end
+
+    buffer = ""
+    prompt = "clear> "
+    nesting = 0
+
+    while (line = Readline.readline(prompt, true))
+      line = line.strip
+      next if line.empty?
+
+      # REPL commands
+      case line
+      when ":quit", ":q", ":exit"
+        break
+      when ":defs"
+        if @fn_defs.empty?
+          puts "(no definitions)"
+        else
+          @fn_defs.each { |d| puts "  #{d[0..78]}#{'...' if d.length > 78}" }
+        end
+        next
+      when ":reset"
+        @fn_defs.clear
+        puts "Definitions cleared."
+        next
+      end
+
+      # Accumulate multi-line input
+      buffer += (buffer.empty? ? "" : "\n") + line
+      nesting += line.scan(/\b(FN|IF|WHILE|FOR|MATCH|DO)\b/).length
+      nesting -= line.scan(/\bEND\b/).length
+
+      if nesting > 0
+        prompt = "  ...> "
+        next
+      end
+
+      prompt = "clear> "
+      input = buffer
+      buffer = ""
+      nesting = 0
+
+      # Try to transpile
+      begin
+        if is_definition?(input)
+          transpiler_instance = SchemeTranspiler.new
+          scheme = transpiler_instance.transpile(input)
+          lines = scheme.each_line.map(&:strip).reject(&:empty?)
+          lines.each { |l| @fn_defs << l unless l.start_with?(";") }
+          puts "defined"
+          next
+        end
+
+        # Wrap as assignment in a function so the parser accepts it
+        stmt = input.strip
+        stmt += ";" unless stmt.end_with?(";")
+
+        # Parse and transpile. The transpiler emits the function as
+        # (define replEval (lambda () body...)) - extract the body.
+        wrapped = nil
+        ["FN main() RETURNS Void -> #{stmt}\nRETURN;\nEND",
+         "FN main() RETURNS Void -> MUTABLE replResult = #{stmt.chomp(';')};\nRETURN;\nEND"].each do |candidate|
+          begin
+            transpiler_instance = SchemeTranspiler.new
+            scheme = transpiler_instance.transpile(candidate)
+            wrapped = scheme
+            break
+          rescue
+            next
+          end
+        end
+
+        unless wrapped
+          puts "Parse error"
+          next
+        end
+
+        # main() body is emitted as top-level expressions
+        lines = wrapped.each_line.map(&:strip).reject(&:empty?)
+      rescue => e
+        puts "Parse error: #{e.message.lines.first&.strip}"
+        next
+      end
+
+      # Filter nil returns
+      lines.reject! { |l| l == "nil" }
+      next if lines.empty?
+
+      # Persist variable bindings
+      lines.each do |l|
+        @fn_defs << l if l.start_with?("(define ") || l.start_with?("(set! ")
+      end
+
+      # Build program: all persisted defs + this expression
+      all_lines = @fn_defs.dup
+      # Add non-define lines (the actual expression result)
+      lines.each { |l| all_lines << l unless l.start_with?("(define ") || l.start_with?("(set! ") }
+
+      # The last emitted line is the result to display
+      last_expr = lines.last
+      display_result = !last_expr&.start_with?("(define ") && !last_expr&.start_with?("(display") && !last_expr&.start_with?("(set!")
+
+      combined = all_lines.length == 1 ? all_lines[0] : "(begin #{all_lines.join(' ')})"
+      escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+
+      if display_result
+        main_code = <<~CHT
+          FN main() RETURNS Void ->
+              MUTABLE pool: Env[50000]@pool = [];
+              MUTABLE penv: HashMap<Value> = {};
+              rootId = setupEnv!(pool);
+              MUTABLE schemeResult: Value = runTest!("#{escaped}", rootId, pool, penv);
+              IF isError?(schemeResult) THEN
+                  print("ERROR: " + getErrMsg(schemeResult));
+              ELSE
+                  rStr = prStr(schemeResult, TRUE);
+                  IF rStr != "nil" THEN print("=> " + rStr); END
+              END
+              RETURN;
+          END
+        CHT
+      else
+        main_code = <<~CHT
+          FN main() RETURNS Void ->
+              MUTABLE pool: Env[50000]@pool = [];
+              MUTABLE penv: HashMap<Value> = {};
+              rootId = setupEnv!(pool);
+              runTest!("#{escaped}", rootId, pool, penv);
+              RETURN;
+          END
+        CHT
+      end
+
+      run_clear(@interp_base + main_code, silent: false)
+    end
+
+    puts "\nBye."
+  end
+
+  private
+
+  def is_definition?(input)
+    input.strip.start_with?("FN ") ||
+    input.strip.start_with?("STRUCT ") ||
+    input.strip.start_with?("UNION ") ||
+    input.strip.start_with?("ENUM ")
+  end
+
+  def run_clear(source, silent: false)
+    tmp = File.join(DIR, "_vm_run.cht")
+    File.write(tmp, source)
+    output = `#{PROJECT_ROOT}/clear run #{tmp} 2>&1`
+    File.delete(tmp) if File.exist?(tmp)
+
+    lines = output.lines.reject { |l|
+      l.include?("hint:") || l.include?("error(gpa)") ||
+      l.include?("leaked:") || l.include?(".zig") ||
+      l.include?("rt.") || l.include?("task.") ||
+      l.include?("promoteList") || l.include?("referenced by:") ||
+      l.include?("try ") || l.include?("const ") ||
+      l.include?("???:") || l.include?("Unwind info") ||
+      l.strip.empty? || l.strip == "^"
+    }
+    stdout = lines.join
+    $stdout.print(stdout) unless silent
+    [stdout.strip, !output.include?("ERROR:") && !output.include?("Compilation failed")]
+  end
+end
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def usage
+  $stderr.puts <<~USAGE
+    CLEAR Scheme VM
+
+    Usage:
+      ./clear run <file.cht>       Transpile + run on Scheme VM
+      ./clear repl                 Interactive REPL
+      ./clear repl <file.cht>      REPL with file's definitions loaded
+      ./clear transpile <file.cht> Emit S-expressions to stdout
+      ./clear test                 Run compliance test suite (31 tests)
+      ./clear test <file.cht>      Run single file as test
+  USAGE
+  exit 1
+end
+
+usage if ARGV.empty?
+
+command = ARGV.shift
+
+case command
+when "run"
+  file = ARGV.shift or usage
+  transpiler = SchemeTranspiler.new
+  source = File.read(file)
+  scheme = transpiler.transpile(source)
+  lines = scheme.each_line.map(&:strip).reject(&:empty?)
+
+  bridge = InterpreterBridge.new
+  bridge.run_scheme(lines)
+
+when "repl"
+  preload = ARGV.shift  # optional
+  bridge = InterpreterBridge.new
+  bridge.run_repl(preload_file: preload)
+
+when "transpile"
+  file = ARGV.shift or usage
+  transpiler = SchemeTranspiler.new
+  source = File.read(file)
+  puts transpiler.transpile(source)
+
+when "test"
+  if ARGV.empty?
+    exec("ruby", File.join(DIR, "run_tests.rb"))
+  else
+    exec("ruby", File.join(DIR, "run_tests.rb"), *ARGV)
+  end
+
+else
+  usage
+end

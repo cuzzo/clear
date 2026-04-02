@@ -412,18 +412,19 @@ class SchemeTranspiler
   end
 end
 
-# --- Main ---
-if ARGV.empty?
+# --- Main (only when run directly) ---
+if $PROGRAM_NAME == __FILE__ && ARGV.empty?
   $stderr.puts "Usage: ruby scheme_transpiler.rb <file.cht> [--run]"
   exit 1
 end
 
-run_mode = ARGV.delete("--run")
-source = File.read(ARGV[0])
-transpiler = SchemeTranspiler.new
-scheme = transpiler.transpile(source)
+if $PROGRAM_NAME == __FILE__
+  run_mode = ARGV.delete("--run")
+  source = File.read(ARGV[0])
+  transpiler = SchemeTranspiler.new
+  scheme = transpiler.transpile(source)
 
-if run_mode
+  if run_mode
   # Read the interpreter source, strip everything from main() onward,
   # and replace with a main() that executes the transpiled S-expressions.
   project_root = File.expand_path("../../", __dir__)
@@ -463,6 +464,7 @@ if run_mode
 
   system("#{project_root}/clear", "run", tmp_path)
   File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
-else
-  puts scheme
+  else
+    puts scheme
+  end
 end
