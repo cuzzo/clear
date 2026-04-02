@@ -7,7 +7,7 @@ separate assertion library, no mocking framework to install. The compiler knows
 your code's types, capabilities, effects, and call graph -- and uses that
 knowledge to make testing automatic where possible and simple where it's not.
 
-```clear
+```
 TEST UserService DO
   store: HashMap<User>@sharded(8):locked = {};
 
@@ -56,7 +56,7 @@ This means the compiler can:
 
 ### TEST block
 
-```clear
+```
 TEST <name> DO
   -- setup code: runs before each WHEN block
   store: HashMap<String> = {};
@@ -90,7 +90,7 @@ END
 
 ### ASSERT variants
 
-```clear
+```
 ASSERT condition;                         -- fails with generic message
 ASSERT condition, "message";              -- fails with custom message
 ASSERT_RAISES Kind, expression;           -- expects a RAISE of the given kind
@@ -99,7 +99,7 @@ ASSERT_RAISES Kind, ErrorName, expr;      -- expects specific error kind + name
 
 ### BENCHMARK and SMASH
 
-```clear
+```
 TEST MyServer DO
   store: HashMap<String>@sharded(32):locked = {};
 
@@ -140,7 +140,7 @@ The compiler knows which functions have the `EXTERN` or `BLOCKING` effect.
 
 In test mode (`clear test`), the compiler can replace these with stubs:
 
-```clear
+```
 TEST HttpHandler DO
   -- STUB replaces the real implementation for this test scope
   STUB tcpRead RETURNS "GET /api/users HTTP/1.1\r\n\r\n";
@@ -166,7 +166,7 @@ emits a `// visible for testing` comment on private functions in test mode.
 
 ### STUB variants
 
-```clear
+```
 -- Return a fixed value
 STUB tcpRead RETURNS "response data";
 
@@ -205,7 +205,7 @@ CLEAR has three visibility levels: `PUB`, `PRIVATE`, and package (default).
 
 In test mode, ALL functions are accessible:
 
-```clear
+```
 -- In src/user.cht:
 PRIVATE FN validateEmail(email: String) RETURNS Bool ->
     RETURN email.contains?("@");
@@ -226,7 +226,7 @@ the compiler rather than an annotation.
 
 ## PROFILE integration
 
-```clear
+```
 TEST MyServer DO
   WHEN "profile" DO
     PROFILE process(real_data);

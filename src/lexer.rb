@@ -23,6 +23,7 @@ class Lexer
       EXTERN FROM EFFECTS CLOSE
       STREAM YIELD
       TIGHT
+      TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE
     ].to_set
 
   def initialize(source)

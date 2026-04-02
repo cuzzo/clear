@@ -501,6 +501,33 @@ module AST
   # ForEach: FOR var IN collection DO body END
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops) { include Locatable }
 
+  # ── Test Framework ───────────────────────────────────────────────
+
+  # TEST name DO setup... WHEN... END
+  TestBlock = Struct.new(:token, :name, :setup, :whens) { include Locatable }
+
+  # WHEN "description" DO setup... TEST THAT... BENCHMARK... END
+  WhenBlock = Struct.new(:token, :description, :setup, :tests, :benchmarks) { include Locatable }
+
+  # TEST THAT "description" DO body... END
+  TestThat = Struct.new(:token, :description, :body) { include Locatable }
+
+  # ASSERT_RAISES Kind, expr  OR  ASSERT_RAISES Kind, ErrorName, expr
+  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable }
+
+  # BENCHMARK expr x<N>
+  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable }
+
+  # SMASH expr
+  SmashStmt = Struct.new(:token, :expression) { include Locatable }
+
+  # PROFILE expr
+  ProfileStmt = Struct.new(:token, :expression) { include Locatable }
+
+  # STUB fn RETURNS value | STUB fn CAPTURES var | STUB fn SEQUENCE [...] | STUB fn WITH lambda
+  StubDecl = Struct.new(:token, :function_name, :kind, :value) { include Locatable }
+  # kind: :returns, :captures, :sequence, :with
+
   UNARY_OPS = ['-', '!', '~']
 
   PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64,

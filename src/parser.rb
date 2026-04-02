@@ -81,6 +81,12 @@ class Parser
   stmt(:KEYWORD, 'TIGHT') { parse_tight_stmt }
   stmt(:KEYWORD, 'RETURN') { parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
+  stmt(:KEYWORD, 'ASSERT_RAISES') { parse_assert_raises }
+  stmt(:KEYWORD, 'TEST') { parse_test_block }
+  stmt(:KEYWORD, 'STUB') { parse_stub }
+  stmt(:KEYWORD, 'BENCHMARK') { parse_benchmark_stmt }
+  stmt(:KEYWORD, 'SMASH') { parse_smash_stmt }
+  stmt(:KEYWORD, 'PROFILE') { parse_profile_stmt }
   stmt(:KEYWORD, 'RAISE') { parse_raise_stmt }
   stmt(:KEYWORD, 'EXIT') { parse_exit }
   stmt(:KEYWORD, 'DIE') { parse_die }
@@ -2309,6 +2315,161 @@ class Parser
       AST::GetIndex.new(node.token, deep_clone_node(node.target), deep_clone_node(node.index))
     else
       node.dup
+    end
+  end
+
+  # ── Test Framework Parsing ──────────────────────────────────────
+
+  # TEST <name> DO ... END
+  def parse_test_block
+    tok = consume(:KEYWORD, 'TEST')
+    name = consume(:TYPE_ID).value  # TestName is a TYPE_ID (capitalized)
+    consume(:KEYWORD, 'DO')
+
+    setup = []
+    whens = []
+
+    until match?(:KEYWORD, 'END')
+      if match?(:KEYWORD, 'WHEN')
+        whens << parse_when_block
+      else
+        setup << parse_statement
+      end
+    end
+    consume(:KEYWORD, 'END')
+
+    AST::TestBlock.new(tok, name, setup, whens)
+  end
+
+  # WHEN "description" DO ... END
+  def parse_when_block
+    tok = consume(:KEYWORD, 'WHEN')
+    desc = consume(:STRING).value
+    consume(:KEYWORD, 'DO')
+
+    setup = []
+    tests = []
+    benchmarks = []
+
+    until match?(:KEYWORD, 'END')
+      if match?(:KEYWORD, 'TEST') && @tokens[@pos + 1]&.value == 'THAT'
+        tests << parse_test_that
+      elsif match?(:KEYWORD, 'BENCHMARK')
+        benchmarks << parse_benchmark_stmt
+      elsif match?(:KEYWORD, 'SMASH')
+        benchmarks << parse_smash_stmt
+      elsif match?(:KEYWORD, 'PROFILE')
+        benchmarks << parse_profile_stmt
+      elsif match?(:KEYWORD, 'STUB')
+        setup << parse_stub
+      else
+        setup << parse_statement
+      end
+    end
+    consume(:KEYWORD, 'END')
+
+    AST::WhenBlock.new(tok, desc, setup, tests, benchmarks)
+  end
+
+  # TEST THAT "description" DO ... END
+  def parse_test_that
+    tok = consume(:KEYWORD, 'TEST')
+    consume(:KEYWORD, 'THAT')
+    desc = consume(:STRING).value
+    consume(:KEYWORD, 'DO')
+
+    body = []
+    until match?(:KEYWORD, 'END')
+      body << parse_statement
+    end
+    consume(:KEYWORD, 'END')
+
+    AST::TestThat.new(tok, desc, body)
+  end
+
+  # ASSERT_RAISES Kind, expr;  OR  ASSERT_RAISES Kind, ErrorName, expr;
+  def parse_assert_raises
+    tok = consume(:KEYWORD, 'ASSERT_RAISES')
+    kind = consume(:TYPE_ID).value  # e.g., Input, System, Transient
+
+    consume(:CHAR, ',')
+
+    # Peek: if next is TYPE_ID followed by comma, it's ASSERT_RAISES Kind, ErrorName, expr
+    error_name = nil
+    if current.type == :TYPE_ID && @tokens[@pos + 1]&.type == :CHAR && @tokens[@pos + 1]&.value == ','
+      error_name = consume(:TYPE_ID).value
+      consume(:CHAR, ',')
+    end
+
+    expr = parse_expression
+    consume(:CHAR, ';')
+
+    AST::AssertRaises.new(tok, kind, error_name, expr)
+  end
+
+  # BENCHMARK expr x<N>;
+  def parse_benchmark_stmt
+    tok = consume(:KEYWORD, 'BENCHMARK')
+    expr = parse_expression
+
+    # Parse optional iteration count: x1000 or x 1000
+    iterations = 1000  # default
+    if match?(:VAR_ID) && current.value =~ /^x(\d+)$/
+      iterations = $1.to_i
+      consume(:VAR_ID)
+    end
+    consume(:CHAR, ';')
+
+    AST::BenchmarkStmt.new(tok, expr, iterations)
+  end
+
+  # SMASH expr;
+  def parse_smash_stmt
+    tok = consume(:KEYWORD, 'SMASH')
+    expr = parse_expression
+    consume(:CHAR, ';')
+    AST::SmashStmt.new(tok, expr)
+  end
+
+  # PROFILE expr;
+  def parse_profile_stmt
+    tok = consume(:KEYWORD, 'PROFILE')
+    expr = parse_expression
+    consume(:CHAR, ';')
+    AST::ProfileStmt.new(tok, expr)
+  end
+
+  # STUB fn RETURNS value;
+  # STUB fn CAPTURES var;
+  # STUB fn SEQUENCE [values];
+  # STUB fn WITH %(params) -> expr;
+  def parse_stub
+    tok = consume(:KEYWORD, 'STUB')
+    fn_name = consume(:VAR_ID).value
+
+    kind_tok = current
+    if match?(:KEYWORD, 'RETURNS')
+      consume(:KEYWORD, 'RETURNS')
+      value = parse_expression
+      consume(:CHAR, ';')
+      AST::StubDecl.new(tok, fn_name, :returns, value)
+    elsif match?(:KEYWORD, 'CAPTURES')
+      consume(:KEYWORD, 'CAPTURES')
+      var_name = consume(:VAR_ID).value
+      consume(:CHAR, ';')
+      AST::StubDecl.new(tok, fn_name, :captures, var_name)
+    elsif match?(:KEYWORD, 'SEQUENCE')
+      consume(:KEYWORD, 'SEQUENCE')
+      values = parse_list_literal
+      consume(:CHAR, ';')
+      AST::StubDecl.new(tok, fn_name, :sequence, values)
+    elsif match?(:KEYWORD, 'WITH')
+      consume(:KEYWORD, 'WITH')
+      lambda_node = parse_expression  # should parse a lambda %(params) -> expr
+      consume(:CHAR, ';')
+      AST::StubDecl.new(tok, fn_name, :with, lambda_node)
+    else
+      error!(kind_tok, "Expected RETURNS, CAPTURES, SEQUENCE, or WITH after STUB #{fn_name}")
     end
   end
 end
