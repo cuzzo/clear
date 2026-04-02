@@ -1,76 +1,91 @@
-# Mal Level 4 Interpreter — Implementation Gaps
+# Mal Interpreter - Status & Roadmap
 
-This interpreter is the **confidence test** for CLEAR's v0.1-pre release.
-If it compiles and runs, the language isn't brittle.
+This interpreter is the **confidence test** for CLEAR's v0.1-pre release
+and the foundation for the **CLEAR VM backend** (see `docs/vm.md`).
 
-## Current Status
+## Current Status: Mal Level 4
 
-**First blocker**: The lexer doesn't support string escape sequences (`\"`, `\n`, `\t`).
-The interpreter.cht file uses these extensively in the tokenizer.
+**Compiles and runs.** All 21 tests pass. The P0 blockers listed in the
+original TODO are resolved - the compiler supports string escapes, charAt,
+substr, toNumber, MATCH AS, @indirect, @shared, and RAISE in WHILE.
 
-Attempting to compile (`ruby src/transpiler.rb examples/scheme/interpreter.cht`):
+```bash
+./clear test examples/scheme/interpreter.cht
 ```
-Unexpected char: \ on line 48:26
-```
 
-## P0 — Blocks Compilation
+Implemented:
+- Lexer/parser for S-expressions
+- `def!`, `let*`, `fn*`, `do`, `if`
+- Lambdas with closure capture (pool-based environments)
+- Arithmetic (`+`, `-`, `*`, `/`)
+- Comparison (`=`, `<`, `>`, `<=`, `>=`)
+- List ops (`list`, `list?`, `empty?`, `count`)
+- Boolean logic (`not`), truthiness
+- Recursive functions (sumdown, fibonacci)
+- `prn` (readable printing)
 
-These are CLEAR compiler features that must be implemented before interpreter.cht
-can even parse and transpile. Ordered by dependency:
+## Mal 4.5: VM Backend Target
 
-1. **String escape sequences** — lexer must handle `\"`, `\n`, `\t`, `\\` in string
-   literals. Without this, the tokenizer's whitespace/quote handling can't be expressed.
+The interpreter does not need to be a full Scheme. It only needs to handle
+what the CLEAR transpiler emits - a closed, known set. No `quote`, no
+macros, no continuations, no `call/cc`, no `eval`, no varargs, no atoms.
 
-2. **String indexing** — `str[i]` must return a character. Used throughout the manual
-   tokenizer (`c = str[i]`). May return String (single char) or Byte.
+### Syntax Alignment
 
-3. **String.substring(start, end)** — or equivalent slice syntax. Used in readAtom
-   to strip quotes from string literals, and in eval to slice argument lists.
+The transpiler will emit standard Scheme, not Mal syntax. Either rename
+the existing forms or add parallel dispatch:
 
-4. **toNumber(string)** — `toNumber(token) OR -999.999` in readAtom. Needs to return
-   `?Float64` (optional). The `OR` fallback pattern must work with optionals.
+| Current (Mal) | Needed (Scheme) | Notes |
+|---|---|---|
+| `def!` | `define` | Top-level binding |
+| `fn*` | `lambda` | Function creation |
+| `let*` | `let` | Scoped bindings |
+| `do` | `begin` | Sequential evaluation |
+| (missing) | `set!` | Mutable binding reassignment |
 
-5. **MATCH payload extraction** — `Value.Number(n) -> n` must bind `n` to the payload.
-   This is the core of the evaluator. Every `MATCH v START Value.X(payload) -> ...`
-   pattern depends on this.
+### Data Model Extensions
 
-6. **@indirect on union fields** — `Body: Value @indirect` in the Lambda variant must
-   emit a heap-allocated pointer to break the `Value -> Lambda -> Value` recursion.
+CLEAR structs and unions lower to Scheme vectors and tagged pairs:
 
-7. **@shared struct construction** — `Env{...} @shared` must wrap in Arc. Used for
-   environment creation in eval (let*, fn*).
+| Work | Notes |
+|------|-------|
+| `vector`, `vector-ref`, `vector-set!` | STRUCT fields become vector slots |
+| `cons`, `car`, `cdr` + symbol tag checks | UNION variants become `(cons 'Tag payload)` |
+| String ops (`string-append`, `substring`, `string-length`, `string-ref`) | Current string support is minimal |
 
-8. **Error propagation through WHILE** — `RAISE` inside a WHILE loop body must
-   propagate the error to the function's return type (`!Value`).
+### Runtime Semantics
 
-## P1 — Blocks Test Suite
+| Work | Size | Notes |
+|------|------|-------|
+| TCO: trampoline loop in `eval` | Medium | Convert tail-position calls to loop iterations. Without this, any recursive CLEAR program stack-overflows. |
+| `set!` for mutable bindings | Small | Walk scope chain, find binding, update in place. |
+| Error values + propagation | Large | New error Value variant. Check after every sub-eval, unwind on `RAISE`, catch on `s>`. Biggest single item. |
+| Growable env pool + cycle cleanup | Medium | Replace fixed 10,000-slot array. Handle Env->Lambda->Env reference cycles. |
 
-The step4_tests.mal file needs these to pass:
+### Tooling Hooks
 
-9. **Math operators** — `-`, `*`, `/` on native functions. Only `+` is currently
-   implemented in the interpreter.
+| Work | Size | Notes |
+|------|------|-------|
+| Source-map metadata | Medium | Thread CLEAR line/col through parse + eval for debugger. |
+| Native function registration API | Small | Replace string `if` chain with extensible dispatch table. |
+| `BREAKPOINT` hook in eval loop | Small | Check breakpoint state at each eval step. |
 
-10. **Comparison operators** — `=`, `<`, `>`, `<=`, `>=` as native functions. Needed
-    for `if` conditionals and recursive algorithms (fibonacci, etc.).
+### Not Needed
 
-11. **`OR BREAK`** — `readForm!(r) OR BREAK` in the REPL loop. Error-to-break
-    coercion for loop control flow.
+These are standard Scheme/Mal features that the transpiler will never emit:
 
-12. **Optional field access** — `inner.Outer.?` to unwrap optional Env. Used in
-    envGet for scope chain traversal.
+- `call/cc` or continuations
+- `quote` / `quasiquote` / macros / `macroexpand`
+- `eval` at runtime
+- Varargs / `& rest`
+- Atoms (`atom`, `deref`, `swap!`)
+- File I/O (`slurp`, `read-string`)
+- Hygienic macro expansion
 
-## P2 — Demo Polish
+## Future (Post-VM)
 
-13. **stdin REPL** — read a line from stdin for interactive use.
-14. **More native functions** — `pr-str`, `prn`, `str`, `println` for Mal compliance.
-15. **Varargs** — `& rest` syntax in fn* for variadic functions.
-
-## v0.2+ (Punt)
-
-These are legitimate improvements but not needed for v0.1-pre confidence:
-
+- Bytecode compilation (transpiler emits bytecode directly, dispatch loop replaces tree-walker)
+- Slot-indexed environments (variable index instead of hash lookup)
 - Native @regex (replace manual tokenizer)
-- Sealed interfaces / protocols (replace UNION Value)
-- Weak pointers for Env→Lambda→Env cycles
-- TCO (@tco attribute for infinite recursion)
+- Weak pointers for Env->Lambda->Env cycles
 - Automatic @indirect inference on recursive unions
