@@ -112,6 +112,10 @@ class SchemeTranspiler
       emit_while(node)
     when AST::Assert
       emit_assert(node)
+    when AST::Raise
+      emit_raise(node)
+    when AST::OptionalUnwrap
+      emit(node.target)
     when NilClass
       "nil"
     else
@@ -328,9 +332,26 @@ class SchemeTranspiler
   }
 
   def emit_binary(node)
+    op = node.op
+
+    # OR_RESCUE: expr OR fallback
+    if op == :OR_RESCUE
+      left = emit(node.left)
+      if node.right.is_a?(AST::OrRaise)
+        # OR RAISE: just emit expr (errors propagate naturally)
+        return left
+      elsif node.right.is_a?(AST::OrPass)
+        # OR PASS: catch error, return nil
+        return "(try #{left} (catch __e nil))"
+      else
+        # OR value: catch error, return fallback
+        fallback = emit(node.right)
+        return "(try #{left} (catch __e #{fallback}))"
+      end
+    end
+
     left = emit(node.left)
     right = emit(node.right)
-    op = node.op
 
     scheme_op = OP_MAP[op]
     if scheme_op
@@ -348,12 +369,18 @@ class SchemeTranspiler
     end
   end
 
+  def emit_raise(node)
+    kind = node.kind.to_s
+    msg = node.message_expr ? emit(node.message_expr) : "\"error\""
+    "(raise #{msg} \"#{kind}\")"
+  end
+
   def emit_unary(node)
     operand = emit(node.right)
-    case node.op.to_s
-    when "!", "NOT"
+    case node.op
+    when :NOT, :BANG
       "(not #{operand})"
-    when "-"
+    when :SUB, :NEG
       "(- 0 #{operand})"
     else
       ";; unhandled unary: #{node.op}"
