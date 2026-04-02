@@ -68,6 +68,29 @@ ruby benchmarks/runner.rb --cores=2 benchmarks/17_kvstore/  # Control core count
 
 See `benchmarks/README.md` for the full benchmark index and details.
 
+## Profiling
+
+When debugging performance issues, use `clear profile` and `clear doctor`:
+
+```bash
+./clear profile foo.cht              # Build with alloc tracking + run with perf/strace
+./clear doctor foo.profile/          # Analyze and print actionable advice
+```
+
+Doctor output has four sections:
+- **Heap**: per-site allocation counts with CLEAR line numbers. Look for hot allocators (charAtCodepoint, intToString, concat) and leak candidates (allocs with 0 frees).
+- **CPU**: top functions by sample count. Look for lock functions (`pthread_rwlock_*`, `pthread_mutex_*`) indicating contention, and `memcpy`/`memmove` indicating copy overhead.
+- **Syscalls**: top syscalls by time. Look for `futex` (contention), `write` (I/O bound), `mmap` (allocation pressure).
+- **Hardware counters**: IPC, cache misses, branch misses. High LLC miss rate (>20%) means working set exceeds cache. High branch misses (>5%) suggest unpredictable control flow.
+
+Common patterns:
+- `pthread_rwlock_*` > 10% CPU → switch `@writeLocked` to `@locked` for write-heavy workloads
+- `charAtCodepoint` hot in heap profile → replace character-by-character parsing with `indexOf`/`substr`
+- `smartAlloc` dominant → frame arena overflowing to heap; reduce per-iteration allocations
+- High LLC miss rate + hashmap hot → inherent to random-access data structures; increase shard count or prefetch
+
+See `docs/profiling.md` for a full case study.
+
 ## Ignored Directories
 
 - `vm/` — Obsolete bytecode VM from the toy implementation. Not part of the current compiler. Ignore entirely.
