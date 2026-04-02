@@ -130,11 +130,23 @@ pub const Runtime = struct {
         const self = @as(*Runtime, @ptrCast(@alignCast(ctx)));
         const align_u8 = @as(u8, @intCast(ptr_align.toByteUnits()));
 
+        // Catch-all: record every arena allocation. The ret_addr may resolve
+        // to entryWrapper after inlining, but ensures no allocs are missed.
         if (profiling_enabled) {
             alloc_profile.recordAlloc(ret_addr, n);
         }
 
         return self.overflow_arena.alloc(n, align_u8, ret_addr);
+    }
+
+    /// Record a frame allocation from a runtime helper.
+    /// Called with @returnAddress() from the helper (charAtCodepoint, intToString, etc.)
+    /// so the profile captures the CLEAR call site, not the allocator internals.
+    /// These entries supplement smartAlloc's catch-all with more specific call sites.
+    pub inline fn profileAlloc(n: usize) void {
+        if (profiling_enabled) {
+            alloc_profile.recordAlloc(@returnAddress(), n);
+        }
     }
 
     fn smartResize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {

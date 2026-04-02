@@ -149,6 +149,7 @@ pub const CheatLib = struct {
     // UTF-8 codepoint access: returns the i-th codepoint as a multi-byte slice.
     // O(n) per call — iterates from the start. Returns "" on out-of-bounds or invalid UTF-8.
     pub fn charAtCodepoint(alloc: std.mem.Allocator, str: []const u8, index: anytype) ![]const u8 {
+        Runtime.profileAlloc(1);
         const target: usize = @intCast(index);
         const view = std.unicode.Utf8View.initUnchecked(str);
         var it = view.iterator();
@@ -177,6 +178,7 @@ pub const CheatLib = struct {
     }
 
     pub fn concat(allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
+        Runtime.profileAlloc(s1.len + s2.len);
         return try std.mem.concat(allocator, u8, &.{ s1, s2 });
     }
 
@@ -641,11 +643,12 @@ pub const CheatLib = struct {
 
     // Used to make HEAP strings
     pub fn makeString(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+        Runtime.profileAlloc(text.len);
         return try std.fmt.allocPrint(allocator, "{s}", .{text});
     }
 
     pub fn substr(allocator: std.mem.Allocator, str: []const u8, start: i64, length: i64) ![]const u8 {
-        // Basic safety checks (Zig panics on slice OOB, but clean errors are better)
+        Runtime.profileAlloc(@intCast(length));
         const u_start: usize = @intCast(start);
         const u_len: usize = @intCast(length);
 
@@ -904,6 +907,7 @@ pub const CheatLib = struct {
     }
 
     pub fn intToString(allocator: std.mem.Allocator, value: i64) ![]const u8 {
+        Runtime.profileAlloc(21);
         // Max i64 is 19 digits + sign + null = 21 bytes; allocate 21
         var buf: [21]u8 = undefined;
         var slen: usize = 0;
@@ -954,6 +958,7 @@ pub const CheatLib = struct {
 
     // Join: List -> String (technically an array function)
     pub fn join(allocator: std.mem.Allocator, list: anytype, delimiter: []const u8) ![]const u8 {
+        Runtime.profileAlloc(0); // size unknown until join completes
         const items = if (@hasField(@TypeOf(list), "items")) list.items else list;
         return std.mem.join(allocator, delimiter, items);
     }
