@@ -1753,10 +1753,10 @@ pub const CheatLib = struct {
         // 2. ArrayList (list collections)
         if (comptime isArrayList(T)) {
             const ElemT = comptime arrayListElemType(T).?;
-            // Release ref-counted elements before freeing backing buffer
-            if (comptime refInnerType(ElemT) != null) {
-                for (ptr.items) |item| {
-                    releaseOne(ElemT, alloc, item);
+            // Recursively cleanup elements (RC release, string free, nested unions, etc.)
+            if (comptime needsCleanup(ElemT)) {
+                for (ptr.items) |*item| {
+                    cleanup(ElemT, alloc, item);
                 }
             }
             ptr.deinit(alloc);
@@ -1849,7 +1849,7 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 9. Tagged unions: check active variant and clean up its payload
+        // 9. Tagged unions: check active variant and clean up its payload.
         if (info == .@"union" and info.@"union".tag_type != null) {
             inline for (info.@"union".fields) |field| {
                 if (comptime needsCleanup(field.type)) {
@@ -1863,12 +1863,13 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 10. Primitives, enums, untagged unions: no-op (comptime-eliminated)
+        // Primitives, enums, untagged unions: no-op (comptime-eliminated)
     }
 
     /// Returns true if a type needs cleanup (has heap-allocated data).
-    /// Excludes []const u8 — strings have mixed provenance (static, frame, heap)
-    /// and cannot be freed generically. StringMap handles its own string cleanup.
+    /// Excludes []const u8 at this level — string cleanup inside unions is
+    /// handled by freeUnionPayload (in StringMap.deinit) which already frees
+    /// strings. Including strings here would cause double-frees.
     fn needsCleanup(comptime FT: type) bool {
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
@@ -1899,7 +1900,7 @@ pub const CheatLib = struct {
     /// Generic comptime promotion: walks any type and dupes all frame-arena
     /// data to heap. Handles strings, ArrayLists, StringMaps, structs, and
     /// tagged unions recursively. No-op for primitives (comptime eliminated).
-    pub fn promote(comptime T: type, rt: *Runtime, value: *T) !void {
+    pub fn promote(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
         const info = @typeInfo(T);
 
         // 1. Strings: dupe to heap
@@ -1951,7 +1952,7 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 6. Primitives, enums, etc.: no-op (comptime-eliminated)
+        // Primitives, enums, etc.: no-op (comptime-eliminated)
     }
 
     /// Returns true if a type has data that needs promotion (frame -> heap).
