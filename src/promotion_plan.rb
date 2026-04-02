@@ -209,3 +209,194 @@ class PromotionPlan
     type.resolved.to_s.sub(/^[!?]+/, '')
   end
 end
+
+# Pass C (caller side): Cleanup Planning
+#
+# For each function, decides which local bindings need defer cleanup
+# and with what allocator. Replaces the decision logic in emit_cleanup
+# (ownership_generator.rb) with a testable, declarative plan.
+#
+# The plan answers: "does this binding ever hold heap data that must be freed?"
+# It uses:
+#   - Type information (collection?, map?, rc?, etc.)
+#   - Call graph (does the binding receive a returns_promoted call result?)
+#   - Schema lookup (does the union/struct have heap variants?)
+
+class CleanupPlan
+  # Hash of var_name => { alloc: :heap/:frame, kind: symbol }
+  attr_reader :bindings
+
+  def initialize(bindings: {})
+    @bindings = bindings.freeze
+  end
+
+  EMPTY = new.freeze
+
+  # Compute cleanup plan for a function.
+  #
+  # @param fn_node [AST::FunctionDef]
+  # @param fn_nodes [Hash] name => FunctionDef for all functions (for returns_promoted lookup)
+  # @param schema_lookup [Proc] lambda(type_sym) => schema hash
+  def self.compute(fn_node, fn_nodes:, schema_lookup:)
+    return EMPTY unless fn_node.body
+
+    # Build set of function names that return promoted data (transitively).
+    promoted_fns = compute_promoted_fns(fn_nodes)
+
+    bindings = {}
+
+    # Walk all declarations and assignments in the function body.
+    walk_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
+
+    bindings.empty? ? EMPTY : new(bindings: bindings)
+  end
+
+  private
+
+  # Compute the transitive closure of returns_promoted functions.
+  def self.compute_promoted_fns(fn_nodes)
+    promoted = Set.new
+    fn_nodes.each { |name, fn| promoted << name if fn.returns_promoted }
+
+    # Transitive: if fn returns a call to a promoted fn, fn is also promoted.
+    changed = true
+    while changed
+      changed = false
+      fn_nodes.each do |name, fn|
+        next if promoted.include?(name)
+        next unless fn.body
+        if body_calls_promoted?(fn.body, promoted)
+          promoted << name
+          changed = true
+        end
+      end
+    end
+    promoted
+  end
+
+  # Check if a function body has a RETURN of a call to a promoted function.
+  def self.body_calls_promoted?(body, promoted)
+    nodes = body.is_a?(Array) ? body : [body]
+    nodes.any? do |node|
+      case node
+      when AST::ReturnNode
+        val = node.value
+        val.is_a?(AST::FuncCall) && promoted.include?(val.name)
+      when AST::IfStatement
+        body_calls_promoted?(node.then_branch, promoted) ||
+          body_calls_promoted?(node.else_branch, promoted)
+      when AST::MatchStatement
+        (node.cases || []).any? { |c| body_calls_promoted?(c[:body], promoted) } ||
+          (node.default_case && body_calls_promoted?(node.default_case, promoted))
+      else
+        node.respond_to?(:body) && node.body && body_calls_promoted?(node.body, promoted)
+      end
+    end
+  end
+
+  # Walk function body, find bindings that need cleanup.
+  def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
+    nodes = body.is_a?(Array) ? body : [body]
+    nodes.each do |node|
+      case node
+      when AST::VarDecl, AST::BindExpr
+        var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+        ti = node.type_info
+        ti = Type.new(ti) if ti && !ti.is_a?(Type)
+
+        cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
+        bindings[var_name] = cleanup if cleanup
+
+      when AST::IfStatement
+        walk_bindings(node.then_branch, promoted_fns, schema_lookup, bindings)
+        walk_bindings(node.else_branch, promoted_fns, schema_lookup, bindings)
+      when AST::MatchStatement
+        (node.cases || []).each { |c| walk_bindings(c[:body], promoted_fns, schema_lookup, bindings) }
+        walk_bindings(node.default_case, promoted_fns, schema_lookup, bindings) if node.default_case
+      else
+        walk_bindings(node.body, promoted_fns, schema_lookup, bindings) if node.respond_to?(:body) && node.body
+      end
+    end
+  end
+
+  # Decide if a binding needs cleanup and with what allocator.
+  # Returns { alloc: :heap/:frame, kind: symbol } or nil.
+  def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
+    return nil unless ti
+
+    # Escaped via return — cleanup suppressed (caller takes ownership)
+    return nil if ti.escaped_return && (ti.collection? || ti.string?)
+
+    # Resource: handled separately by emit_cleanup (not in plan yet)
+    return nil if node.respond_to?(:resource_close_zig) && node.resource_close_zig
+
+    # Collections: always need cleanup
+    return { alloc: :frame, kind: :list } if ti.list_collection? && !ti.sharded? && !ti.heap_promoted
+    return { alloc: :heap, kind: :list } if ti.list_collection?
+    return { alloc: :heap, kind: :string_map } if ti.map? && !ti.numeric_map?
+    return { alloc: :heap, kind: :numeric_map } if ti.numeric_map?
+    return { alloc: :heap, kind: :pool } if ti.pool?
+    return { alloc: :heap, kind: :set } if ti.set_collection?
+
+    # RC/link: always need cleanup
+    return { alloc: :heap, kind: :rc } if ti.any_rc? || ti.link?
+
+    # Sync (locked/write_locked)
+    return { alloc: :heap, kind: :locked } if ti.locked?
+    return { alloc: :heap, kind: :write_locked } if ti.write_locked?
+
+    # Heap-promoted bindings (from returns_promoted callee)
+    if ti.heap_promoted
+      return { alloc: :heap, kind: :heap_string } if ti.string?
+      return { alloc: :heap, kind: :heap_slice } if ti.array? && !ti.collection?
+      # Union/struct with heap data
+      resolved = ti.resolved
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        return { alloc: :heap, kind: :heap_union } if has_heap
+      end
+      if schema.is_a?(Hash) && !schema[:kind]
+        has_escapable = schema.any? do |k, v|
+          next false if k.is_a?(Symbol)
+          ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+          ft.needs_escape_promotion?
+        end
+        return { alloc: :heap, kind: :heap_struct } if has_escapable
+      end
+    end
+
+    # Check if binding receives a call to a returns_promoted function
+    # (even if heap_promoted wasn't set by walk_promote_callers)
+    val = node.respond_to?(:value) ? node.value : nil
+    if val.is_a?(AST::FuncCall) && promoted_fns.include?(val.name)
+      resolved = ti.resolved
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        return { alloc: :heap, kind: :heap_union } if has_heap
+      end
+      return { alloc: :heap, kind: :heap_slice } if ti.array? && !ti.collection?
+    end
+
+    # Struct with RC/link fields
+    resolved = ti.resolved
+    schema = schema_lookup.call(resolved) rescue nil
+    if schema.is_a?(Hash) && !schema[:kind]
+      has_rc = schema.any? do |k, v|
+        next false if k.is_a?(Symbol)
+        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+        ft.link? || ft.any_rc?
+      end
+      return { alloc: :heap, kind: :struct_rc } if has_rc
+    end
+
+    # Heap storage plain struct
+    storage = node.respond_to?(:storage) ? node.storage : nil
+    if storage == :heap && !ti.any_rc? && !ti.any_sync? && !ti.link?
+      return { alloc: :heap, kind: :heap_struct_plain }
+    end
+
+    nil
+  end
+end
