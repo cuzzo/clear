@@ -258,11 +258,10 @@ when 'profile'
   do_build(source, output: output, opt_level: 'ReleaseFast', profile: true)
   puts "Built: #{output} (ReleaseFast + alloc profiling)"
 
-  # CPU profiling: perf (best) > callgrind (fallback) > none
+  # CPU profiling via perf
   has_perf = system('which perf > /dev/null 2>&1') &&
     File.readable?('/proc/sys/kernel/perf_event_paranoid') &&
     File.read('/proc/sys/kernel/perf_event_paranoid').strip.to_i <= 2
-  has_callgrind = !has_perf && system('which valgrind > /dev/null 2>&1')
 
   # Build the run command
   env_parts = ["CLEAR_ALLOC_PROFILE=#{alloc_file}"]
@@ -271,26 +270,20 @@ when 'profile'
 
   if has_perf
     cmd = "perf record -g -o #{perf_data} -- env #{target_env} #{output} #{run_args.join(' ')}".strip
-  elsif has_callgrind
-    cmd = "valgrind --tool=callgrind --callgrind-out-file=#{callgrind_file} -- env #{target_env} #{output} #{run_args.join(' ')} 2>/dev/null".strip
   else
+    hint "perf unavailable (perf_event_paranoid > 2). CPU profiling skipped."
     cmd = "env #{target_env} #{output} #{run_args.join(' ')}".strip
   end
 
-  cpu_tool = has_perf ? "perf" : (has_callgrind ? "callgrind" : "none")
-  puts "Profiling (CPU: #{cpu_tool}): #{cmd}"
+  puts "Profiling: #{cmd}"
   system(cmd)
 
   puts ""
   puts "Profile data: #{profile_dir}/"
   puts "  Heap: #{alloc_file} (#{File.exist?(alloc_file) ? "#{(File.size(alloc_file) / 1024.0).round(1)} KB" : 'not generated'})"
-  if has_perf
-    puts "  CPU:  #{perf_data} (#{File.exist?(perf_data) ? "#{(File.size(perf_data) / 1024.0).round(1)} KB" : 'skipped'})"
-  elsif has_callgrind && File.exist?(callgrind_file)
-    puts "  CPU:  #{callgrind_file} (#{(File.size(callgrind_file) / 1024.0).round(1)} KB)"
-    puts "        View: callgrind_annotate #{callgrind_file} | head -40"
-  else
-    hint "No CPU profiler available. Install perf or valgrind."
+  if has_perf && File.exist?(perf_data)
+    puts "  CPU:  #{perf_data} (#{(File.size(perf_data) / 1024.0).round(1)} KB)"
+    puts "        View: perf report -i #{perf_data}"
   end
 
 when 'help', '--help', '-h', nil
