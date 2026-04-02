@@ -140,10 +140,10 @@ pub const Runtime = struct {
     }
 
     /// Record a frame allocation from a runtime helper.
-    /// Called with @returnAddress() from the helper (charAtCodepoint, intToString, etc.)
-    /// so the profile captures the CLEAR call site, not the allocator internals.
-    /// These entries supplement smartAlloc's catch-all with more specific call sites.
-    pub inline fn profileAlloc(n: usize) void {
+    /// noinline so @returnAddress() captures the HELPER function (charAtCodepoint,
+    /// intToString, etc.) — not the inlined caller. addr2line then resolves to
+    /// the helper name, which is the actionable information.
+    pub noinline fn profileAlloc(n: usize) void {
         if (profiling_enabled) {
             alloc_profile.recordAlloc(@returnAddress(), n);
         }

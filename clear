@@ -264,7 +264,8 @@ when 'profile'
   perf_data = File.join(profile_dir, 'perf.data')
   callgrind_file = File.join(profile_dir, 'callgrind.out')
 
-  # Build optimized with profiling enabled (comptime CLEAR_PROFILE flag)
+  # Build ReleaseFast with profiling enabled. Debug symbols retained (-fno-strip)
+  # for addr2line resolution.
   do_build(source, output: output, opt_level: 'ReleaseFast', profile: true)
   puts "Built: #{output} (ReleaseFast + alloc profiling)"
 
