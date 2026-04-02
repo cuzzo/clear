@@ -122,4 +122,3 @@ The benchmark tests I/O efficiency, not CPU parallelism.
 | `pthread_rwlock_t` writer starvation | Mixed workloads 3x slower | Use `:locked` (Mutex) |
 | `onRootStack` FFI overhead | 400x for hot FFI loops | Use `:safe` effect for lightweight FFI |
 | LLVM inlining across yield points | Corruption when fiber stolen mid-yield | `noinline` on socket I/O and onRootStack functions |
-| BG capture analysis | Inner-scope vars incorrectly captured | Declare at BG block scope |
