@@ -80,6 +80,41 @@ pub const ErrorContext = struct {
     }
 };
 
+/// Map a Zig error to a CLEAR ErrorKind. Best-effort classification
+/// based on known error names. Unrecognized errors become .Unknown.
+pub fn zigErrorToKind(err: anyerror) ErrorKind {
+    const name = @errorName(err);
+    // System: resource exhaustion, infrastructure failure
+    if (std.mem.eql(u8, name, "OutOfMemory")) return .System;
+    if (std.mem.eql(u8, name, "SystemResources")) return .System;
+    if (std.mem.eql(u8, name, "Unexpected")) return .System;
+    if (std.mem.eql(u8, name, "DiskQuota")) return .System;
+    if (std.mem.eql(u8, name, "NoSpaceLeft")) return .System;
+    // Transient: temporary, retry-able
+    if (std.mem.eql(u8, name, "WouldBlock")) return .Transient;
+    if (std.mem.eql(u8, name, "ConnectionTimedOut")) return .Transient;
+    if (std.mem.eql(u8, name, "ConnectionRefused")) return .Transient;
+    if (std.mem.eql(u8, name, "ConnectionResetByPeer")) return .Transient;
+    if (std.mem.eql(u8, name, "BrokenPipe")) return .Transient;
+    if (std.mem.eql(u8, name, "NetworkUnreachable")) return .Transient;
+    if (std.mem.eql(u8, name, "HostUnreachable")) return .Transient;
+    // NotFound: resource doesn't exist
+    if (std.mem.eql(u8, name, "FileNotFound")) return .NotFound;
+    if (std.mem.eql(u8, name, "PathNotFound")) return .NotFound;
+    // Permission: access denied
+    if (std.mem.eql(u8, name, "AccessDenied")) return .Permission;
+    if (std.mem.eql(u8, name, "PermissionDenied")) return .Permission;
+    // Input: bad data
+    if (std.mem.eql(u8, name, "InvalidCharacter")) return .Input;
+    if (std.mem.eql(u8, name, "InvalidArgument")) return .Input;
+    if (std.mem.eql(u8, name, "Overflow")) return .Input;
+    if (std.mem.eql(u8, name, "UnexpectedEndOfInput")) return .Input;
+    // Canceled
+    if (std.mem.eql(u8, name, "Canceled")) return .Canceled;
+    if (std.mem.eql(u8, name, "OperationAborted")) return .Canceled;
+    return .Unknown;
+}
+
 pub const Runtime = struct {
     // Control
     ebr: ThreadLocalEbr,  // This probably needs to be global...
@@ -267,6 +302,17 @@ pub const Runtime = struct {
     // ── Error Context Helpers ─────────────────────────────────────
     pub fn setError(self: *Runtime, kind: ErrorKind, error_name: []const u8, message: []const u8, clear_line: u32) void {
         self.__error = .{ .kind = kind, .error_name = error_name, .message = message, .clear_line = clear_line };
+    }
+
+    /// Map a Zig error into the CLEAR error context.
+    /// Called by EXTERN FN trampolines when a native Zig function returns an error.
+    pub fn setZigError(self: *Runtime, err: anyerror, clear_line: u32) void {
+        self.__error = .{
+            .kind = zigErrorToKind(err),
+            .error_name = @errorName(err),
+            .message = "",
+            .clear_line = clear_line,
+        };
     }
 
     /// Heap-copy a value as a snapshot. OOM = no snapshot (snapshot_ptr stays 0).

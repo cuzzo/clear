@@ -1802,7 +1802,14 @@ private
         self_field = "self_val: #{obj_zig}"
         alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
         err_field = is_error_union ? "err: ?anyerror = null, " : ""
-        err_check = is_error_union ? "if (__extm#{tid}_frame.err) |e| return e; " : ""
+        rt_name = @do_rt_name || "rt"
+        err_check = if is_error_union && @current_fn_has_rt
+          "if (__extm#{tid}_frame.err) |e| { #{rt_name}.setZigError(e, #{node.token.line}); return e; } "
+        elsif is_error_union
+          "if (__extm#{tid}_frame.err) |e| return e; "
+        else
+          ""
+        end
 
         all_fields = [self_field, alloc_field + arg_fields].reject(&:empty?).join(", ")
         arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
@@ -1957,7 +1964,13 @@ private
                     end
         alloc_init = has_alloc ? ", .alloc = #{alloc_zig}" : ""
         err_field = is_error_union ? "err: ?anyerror = null, " : ""
-        err_check = is_error_union ? "if (__ext#{tid}_frame.err) |e| return e; " : ""
+        err_check = if is_error_union && @current_fn_has_rt
+          "if (__ext#{tid}_frame.err) |e| { #{rt_name}.setZigError(e, #{node.token.line}); return e; } "
+        elsif is_error_union
+          "if (__ext#{tid}_frame.err) |e| return e; "
+        else
+          ""
+        end
 
         field_inits = runtime_indices.each_with_index.map { |_, fi| ".a#{fi} = __ext#{tid}_args[#{fi}]" }.join(', ')
         struct_fields = [alloc_field.rstrip.chomp(','), arg_fields].reject(&:empty?).join(", ")
