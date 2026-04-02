@@ -252,7 +252,14 @@ END
 
 FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     -- Arithmetic
-    IF id == 1 THEN RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) }; END
+    IF id == 1 THEN
+        -- + works on numbers and strings
+        MATCH evaled[1] START
+            Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
+            DEFAULT -> RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
+        END
+        RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
+    END
     IF id == 2 THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
     IF id == 3 THEN RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) }; END
     IF id == 4 THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
@@ -326,6 +333,26 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value.FalseVal;
     END
     IF id == 33 THEN print(prStr(evaled[1], FALSE)); RETURN Value.Nil; END
+    -- List operations: 34=list-ref, 35=list-length
+    IF id == 34 THEN RETURN listRef(evaled[1], toInt(getNum(evaled[2]))); END
+    IF id == 35 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
+    IF id == 36 THEN
+        -- list-push: return new list with element appended
+        MATCH evaled[1] START
+            Value.List AS srcItems ->
+                MUTABLE newItems: Value[]@list = List[];
+                FOR li IN (0_i64 ..< srcItems.length()) DO
+                    newItems.append(srcItems[li]);
+                END
+                newItems.append(evaled[2]);
+                RETURN Value{ List: newItems };,
+            DEFAULT ->
+                MUTABLE singleItem: Value[]@list = List[];
+                singleItem.append(evaled[2]);
+                RETURN Value{ List: singleItem };
+        END
+        RETURN Value.Nil;
+    END
 
     RETURN Value.Nil;
 END
@@ -373,6 +400,16 @@ END
 
 -- eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
 -- let body, lambda body) reassign ast/curEnv and continue instead of recursing.
+
+FN listRef(v: Value, idx: Int64) RETURNS Value ->
+    MATCH v START
+        Value.List AS items ->
+            elem = items[idx];
+            RETURN elem;,
+        DEFAULT -> RETURN Value.Nil;
+    END
+    RETURN Value.Nil;
+END
 
 FN isVector?(v: Value) RETURNS Bool ->
     MATCH v START Value.Vector -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
@@ -672,7 +709,11 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["string->number"] = Value{ NativeFn: 31 };
     pool[rootId]?.vars["string?"] = Value{ NativeFn: 32 };
     pool[rootId]?.vars["display"] = Value{ NativeFn: 33 };
-    -- error?, error-message, error-kind are special forms (not native fns)
+    -- List access: 34=list-ref, 35=list-length, 36=list-push (returns new list with appended elem)
+    pool[rootId]?.vars["list-ref"] = Value{ NativeFn: 34 };
+    pool[rootId]?.vars["list-length"] = Value{ NativeFn: 35 };
+    pool[rootId]?.vars["list-push"] = Value{ NativeFn: 36 };
+    -- error?, error-message, error-kind, list-append! are special forms
     RETURN rootId;
 END
 

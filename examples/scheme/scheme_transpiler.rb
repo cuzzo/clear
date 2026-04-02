@@ -87,6 +87,12 @@ class SchemeTranspiler
       emit_get_field(node)
     when AST::MatchStatement
       emit_match(node)
+    when AST::ListLit
+      emit_list_lit(node)
+    when AST::GetIndex
+      emit_get_index(node)
+    when AST::ForRange
+      emit_for_range(node)
     when AST::BindExpr
       if mutables.include?(node.name.to_s)
         "(set! #{node.name} #{emit(node.value)})"
@@ -239,6 +245,33 @@ class SchemeTranspiler
     "(if #{cond} #{body_expr} #{rest})"
   end
 
+  def emit_list_lit(node)
+    if node.items.empty?
+      "(list)"
+    else
+      items = node.items.map { |i| emit(i) }.join(" ")
+      "(list #{items})"
+    end
+  end
+
+  def emit_get_index(node)
+    target = emit(node.target)
+    index = emit(node.index)
+    "(list-ref #{target} #{index})"
+  end
+
+  def emit_for_range(node)
+    @while_counter ||= 0
+    @while_counter += 1
+    fname = "__for#{@while_counter}"
+    var = node.var_name
+    start_expr = emit(node.start_expr)
+    end_expr = emit(node.end_expr)
+    body = node.body.map { |n| emit(n) }.join(" ")
+    # FOR i IN (start ..< end) -> recursive lambda with counter
+    "(begin (define #{fname} (lambda (#{var}) (if (< #{var} #{end_expr}) (begin #{body} (#{fname} (+ #{var} 1))) nil))) (#{fname} #{start_expr}))"
+  end
+
   def emit_func_call(node)
     name = node.name.to_s
     args = node.args.map { |a| emit(a) }.join(" ")
@@ -247,6 +280,12 @@ class SchemeTranspiler
     case name
     when "print"
       "(display #{args})"
+    when "eql?"
+      "(= #{args})"
+    when "toFloat"
+      args  # identity - all numbers are floats in scheme
+    when "toInt"
+      args  # identity
     else
       "(#{name} #{args})"
     end
@@ -262,7 +301,18 @@ class SchemeTranspiler
     when "toString"
       "(number->string #{target})"
     when "length"
-      "(string-length #{target})"
+      # Could be string or list - emit list-length for now (works for both via dispatch)
+      "(list-length #{target})"
+    when "append"
+      # list.append(val) -> (set! list (list-push list val))
+      # Need the raw target name for set!
+      target_name = node.object.is_a?(AST::Identifier) ? node.object.name.to_s : nil
+      val = args[0]
+      if target_name
+        "(set! #{target_name} (list-push #{target} #{val}))"
+      else
+        "(list-push #{target} #{val})"
+      end
     else
       # UFCS: obj.method(args) -> (method obj args)
       all_args = ([target] + args).join(" ")
