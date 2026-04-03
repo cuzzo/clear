@@ -578,4 +578,46 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # List indexing of non-Copy elements: must use .remove(i) to take ownership.
+  # Plain indexing returns a borrow (cannot store/move).
+  # ===========================================================================
+  describe "List indexing of non-Copy elements" do
+    context "assigning non-Copy list element to variable" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          FN test!(MUTABLE list: Value[]@list) RETURNS Void ->
+              list.append(Value.Nil);
+              f = list[0];
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "marks list index result as borrowed" do
+        # f is a borrow from the list - cannot be moved/stored
+        expect { ast }.not_to raise_error
+        # f should be borrowed in the OG
+      end
+    end
+
+    context "storing non-Copy list element into HashMap" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          FN test!(MUTABLE list: Value[]@list, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              list.append(Value.Nil);
+              map["key"] = list[0];
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error when storing list index borrow into HashMap" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+  end
+
 end

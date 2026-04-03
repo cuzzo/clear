@@ -1439,6 +1439,7 @@ private
     end
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type, storage)
+    register_container_borrow!(node)
     # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
     ti = node.type_info
     if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
@@ -1505,6 +1506,7 @@ private
       end
       classify_ownership!(node.symbol)
       og_declare(node.name, node, node.type_info || final_type, storage)
+      register_container_borrow!(node)
       ti = node.type_info
       if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         current_fn_ctx.heap_count += 1 if current_fn_ctx
@@ -2531,6 +2533,13 @@ private
     current_fn_ctx.heap_count += 1 if current_fn_ctx
   end
 
+  # Infer return type for list.remove(i) — returns the element type.
+  def infer_element_type(args, node)
+    receiver = args.first
+    ti = receiver&.type_info
+    ti&.element_type&.resolved || :Any
+  end
+
   def visit_LinkNode(node)
     visit(node.value)
     ti = node.value.type_info
@@ -2879,6 +2888,18 @@ private
 
   def handle_assign_move(node)
     if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
+      # Container indexing of borrowed source into an owned target (HashMap
+      # assignment) is an error. Plain variable declarations get borrow marking
+      # via register_container_borrow! instead.
+      if node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
+        container = find_container_source(node.value)
+        if container
+          source_name = root_variable_name(node.value)
+          if source_name && @og[source_name]&.kind == :borrowed
+            error!(node, "Cannot move borrowed value from '#{source_name}' (container index is a borrow). Use COPY for an explicit deep-copy.")
+          end
+        end
+      end
       path = get_path_to_root(node.value)
       return if path.nil?
       if Type.new(node.value.resolved_type).requires_move?

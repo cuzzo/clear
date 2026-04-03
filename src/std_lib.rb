@@ -19,6 +19,12 @@ STD_LIB = {
     allocates: true,
   },
 
+  "remove" => {
+    args: [:"Any[]", :Int64],
+    return: :infer_element_type,
+    zig: "{0}.orderedRemove(@intCast({1}))",
+  },
+
 
   # 1. String.length()
   "length" => [
