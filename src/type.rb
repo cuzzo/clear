@@ -846,6 +846,10 @@ class Type
     if lookup_arg || lookup_block
       resolver = lookup_arg || lookup_block
       schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
+      # For generic instances (Option<Float64>), try the base type (Option)
+      if schema.nil? && generic_instance?
+        schema = resolver.is_a?(Proc) ? resolver.call(generic_base) : (resolver[generic_base] rescue nil)
+      end
       return true if schema.is_a?(Hash) && schema[:kind] == :enum
       # Unions: Copy if no heap variants
       if schema.is_a?(Hash) && schema[:kind] == :union

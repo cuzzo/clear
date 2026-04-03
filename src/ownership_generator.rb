@@ -124,13 +124,16 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.free(rt, #{name});\n"
     end
 
-    # Non-Copy union on stack: needs cleanup for *T/@indirect fields.
-    # The _moved guard suppresses cleanup when the value is moved (e.g. into HashMap).
-    if @union_schemas&.key?(type_info&.resolved)
-      is_copy = type_info.implicitly_copyable? { |t| @struct_schemas&.dig(t) || @union_schemas&.dig(t) } rescue true
-      unless is_copy
+    # Non-Copy types on stack: need cleanup with _moved guard.
+    is_copy = type_info&.implicitly_copyable? { |t| @struct_schemas&.dig(t) || @union_schemas&.dig(t) } rescue true
+    unless is_copy
+      if @union_schemas&.key?(type_info&.resolved)
         zig_t = transpile_type(type_info.resolved.to_s)
         return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, rt.heapAlloc(), &#{name});\n"
+      end
+      # Strings: cleanup frees the heap buffer.
+      if type_info&.string?
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { if (#{name}.len > 0) rt.heapAlloc().free(#{name}); };\n"
       end
     end
 
@@ -182,7 +185,22 @@ module OwnershipGenerator
         sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
         decl = sym&.reg
         is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-        return "#{zig_safe_name(rhs_node.name)}_moved = true;" if is_local
+        is_takes = sym&.respond_to?(:takes) && sym&.takes
+        # Only emit _moved if the variable has a _moved guard.
+        # Guards are emitted by emit_cleanup for: mutable locals, heap_promoted,
+        # cleanup plan entries, non-Copy unions, TAKES params.
+        if is_local || is_takes
+          ti = rhs_node.type_info
+          # escaped_return suppresses the guard - no _moved to set.
+          return "" if ti&.escaped_return && (ti.collection? || ti.string?)
+          fn_name = current_tp_ctx&.fn_name
+          plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(rhs_node.name)
+          has_guard = sym&.mutable || (ti&.heap_promoted rescue false) || plan_entry ||
+                      ti&.collection? || ti&.map? || ti&.pool? || ti&.set_collection? ||
+                      ti&.resource? ||
+                      (ti && @union_schemas&.key?(ti.resolved) && !(ti.implicitly_copyable? { |t| @struct_schemas&.dig(t) || @union_schemas&.dig(t) } rescue true))
+          return "#{zig_safe_name(rhs_node.name)}_moved = true;" if has_guard
+        end
         return ""
       end
 
