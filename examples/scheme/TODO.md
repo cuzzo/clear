@@ -160,8 +160,24 @@ interactions:
 - Debug pausing is natural (process blocks on readLine)
 - Full CLEAR runtime access maintained throughout
 
+## Blocked on Compiler
+
+**Bug #2 (@list arena lifetime) is the single biggest blocker.** Fixing PromotionPlan
+to promote @list data to the heap when it escapes through @indirect assignment
+would unblock ALL of the following:
+
+- **Typed structs**: typed-struct:i64/f64 infrastructure built, FFI functions ready,
+  transpiler detects homogeneous types. Data dies on return. (Commit 43)
+- **Nested collections**: list-index results, struct arrays, struct-of-struct.
+  Inner arrays freed when outer function returns. (25_index, 29_unnest)
+- **Mutation**: vector-set!, struct field mutation. MATCH AS bindings are immutable.
+  7 transpile-tests blocked (04, 19, 40, 41, 42, 43, 48).
+- **Bytecode compiler return**: compile! stores bytecode entry-by-entry in env
+  as workaround. Should return Pair{List[ops], List[consts]} directly. (Commit 9)
+
 ## Compiler Changes Needed
 
+- **PromotionPlan fix** - promote @list to heap when escaping through @indirect (bug #2)
 - **readLine** - add to std_lib.rb + runtime-header.zig (Phase 2+3)
 - **@pool + @shared:locked** - fix capability composition for real concurrency (bug #6)
 
