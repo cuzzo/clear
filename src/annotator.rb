@@ -1832,55 +1832,42 @@ private
     node.full_type = :Void
   end
 
-  # TODO: Simplify with new type class
   def visit_GetIndex(node)
     visit(node.target)
     visit(node.index)
 
     target_type_info = node.target.type_info
 
-    # Case 1: HashMap Access — returns ?V (optional; nil if key missing)
-    if target_type_info.map?
-      val_t = target_type_info.value_type
-      node.full_type = Type.new(:"?#{val_t.resolved}")
+    # Look up index operation from the registry
+    op = resolve_index_op(target_type_info, :get)
 
-      # Validate Key Type
-      # Numeric maps (HashMap<Int64,V> or HashMap<Number,V>) accept numeric keys.
-      # String maps require a String key.
-      index_type_info = node.index.type_info
-      if target_type_info.numeric_map?
-        unless index_type_info&.numeric?
-          error!(node, "Numeric map keys must be a number type, got #{node.index.resolved_type}")
-        end
-      else
-        unless index_type_info&.string?
-          error!(node, "Map keys must be Strings, got #{node.index.resolved_type}")
+    if op
+      # Registry-driven: type and ownership from INDEX_OPS
+      node.full_type = op[:return_type].call(target_type_info)
+      node.container_borrow = true if op[:container_borrow]
+
+      # Validate key types for maps
+      if target_type_info.map?
+        index_type_info = node.index.type_info
+        if target_type_info.numeric_map?
+          error!(node, "Numeric map keys must be a number type, got #{node.index.resolved_type}") unless index_type_info&.numeric?
+        else
+          error!(node, "Map keys must be Strings, got #{node.index.resolved_type}") unless index_type_info&.string?
         end
       end
 
-    # Case 2: Pool Index Access: pool[id] -> ?T  (sugar for pool.get(id))
-    elsif target_type_info.pool?
-      elem = target_type_info.element_type
-      node.full_type = Type.new(:"?#{elem.resolved}")
-
-    # Case 2b: Promise List Index Access: ~T[]@list[i] -> ~T (a single promise)
-    # CheatLib.getAt handles ArrayListUnmanaged; annotator returns the promise type.
+    # Special cases not in registry (no container ownership semantics)
     elsif target_type_info.promise_list?
       elem_t = target_type_info.tense_type.element_type
       node.full_type = Type.new(:"~#{elem_t.resolved}")
-
-    # Case 2c: String indexing — only allowed on String@raw
     elsif target_type_info.string? && !target_type_info.raw?
       error!(node, "Cannot index String by integer. Use String@raw for byte access, or .codepoints() for iteration.")
-
-    # Case 2d: String@raw byte indexing -> returns String (single byte as 1-char slice)
     elsif target_type_info.string? && target_type_info.raw?
       node.full_type = :String
-
-    # Case 3: Array Access "Number[]" -> :Float64, "Number[][]" -> "Number[]"
     elsif target_type_info.array? || node.target.metatype == :struct
+      # Fallback for struct field access via index (rare)
       node.full_type = target_type_info.element_type
-
+      node.container_borrow = true
     else
       error!(node, "Unsupported Index")
     end

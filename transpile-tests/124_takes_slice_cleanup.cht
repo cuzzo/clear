@@ -1,0 +1,16 @@
+-- Test: TAKES slice parameter must clean up elements + buffer.
+
+UNION Value { Nil, Symbol: String, List: Value[] }
+
+FN process!(TAKES items: Value[]) RETURNS Float64 ->
+    RETURN 42.0;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE list: Value[]@list = List[];
+    list.append(Value{ Symbol: COPY "hello" });
+    list.append(Value{ Symbol: COPY "world" });
+    result = process!(list);
+    ASSERT result == 42.0, "ok";
+    RETURN;
+END

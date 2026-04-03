@@ -303,6 +303,20 @@ module FunctionAnalysis
       is_give = arg_node.is_a?(AST::MoveNode)
       inner_node = is_give ? arg_node.value : arg_node
       if param[:takes] || is_give
+        # Reject borrowed values passed to TAKES params.
+        # Container index access (arr[i], map[key]) returns a borrow -
+        # you cannot take ownership of data inside a container.
+        # Use .remove(i) or COPY arr[i] instead.
+        if inner_node.respond_to?(:container_borrow) && inner_node.container_borrow
+          arg_ti = inner_node.type_info
+          arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
+          is_copy = arg_ti&.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
+          unless is_copy
+            error!(inner_node, "Cannot pass container index access to TAKES parameter. " \
+              "Index access returns a borrow. Use .remove(i) to take ownership, or COPY to deep-copy.")
+          end
+        end
+
         if inner_node.is_a?(AST::Identifier)
           # Only mark non-Copy types as moved in the OG. Copy types (Int64,
           # Float64, Bool, enums) can be reused after TAKES - the callee gets

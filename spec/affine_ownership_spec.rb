@@ -638,6 +638,46 @@ RSpec.describe SemanticAnnotator do
         expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
       end
     end
+
+    context "passing non-Copy list element to TAKES parameter" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String, List: Value[] }
+          FN consume!(TAKES v: Value) RETURNS Void ->
+              RETURN;
+          END
+          FN test!(MUTABLE list: Value[]@list) RETURNS Void ->
+              list.append(Value.Nil);
+              consume!(list[0]);
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error (cannot TAKES a container borrow)" do
+        expect { ast }.to raise_error(/Cannot pass container index.*TAKES|borrow/)
+      end
+    end
+
+    context "passing Copy list element to TAKES parameter is OK" do
+      let(:code) {
+        <<~CLEAR
+          FN consume!(TAKES n: Int64) RETURNS Void ->
+              RETURN;
+          END
+          FN test!() RETURNS Void ->
+              MUTABLE list: Int64[]@list = List[];
+              list.append(1_i64);
+              consume!(list[0]);
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "allows Copy types through TAKES" do
+        expect { ast }.not_to raise_error
+      end
+    end
   end
 
   # ===========================================================================
