@@ -12,7 +12,7 @@ STD_LIB = {
   },
 
   "append" => {
-    args: [:"Any[]", :Any],
+    args: [:"Any[]", { type: :Any, takes: true }],
     return: :Void,
     zig: "try {0}.append({alloc}, {1})",
     narrows_collection: true,  # narrows Any[] element type from arg 1
@@ -22,6 +22,7 @@ STD_LIB = {
   "remove" => {
     args: [:"Any[]", :Int64],
     return: :infer_element_type,
+    return_alloc: :heap,  # removed element may contain heap data
     zig: "{0}.orderedRemove(@intCast({1}))",
   },
 
@@ -381,6 +382,7 @@ STD_LIB = {
 POOL_METHODS = {
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
+    takes_args: [0],  # Pool.insert takes ownership of the value
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type

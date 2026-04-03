@@ -304,7 +304,13 @@ module FunctionAnalysis
       inner_node = is_give ? arg_node.value : arg_node
       if param[:takes] || is_give
         if inner_node.is_a?(AST::Identifier)
-          og_set_moved(inner_node.name)
+          # Only mark non-Copy types as moved in the OG. Copy types (Int64,
+          # Float64, Bool, enums) can be reused after TAKES - the callee gets
+          # a bitwise copy. Same as Rust: Vec::push(42) doesn't consume 42.
+          arg_ti = inner_node.type_info
+          arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
+          is_copy = arg_ti&.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
+          og_set_moved(inner_node.name) unless is_copy
         end
         inner_node.was_moved = true
         arg_node.was_moved = true

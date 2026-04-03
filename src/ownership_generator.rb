@@ -247,13 +247,10 @@ module OwnershipGenerator
     when AST::StructLit
       inner.fields.values.select { |v| v.is_a?(AST::Identifier) }
     when AST::FuncCall, AST::MethodCall
+      # was_moved is set by the annotator for TAKES params (both user-defined
+      # functions and stdlib intrinsics). No zig_pattern hacks needed.
       consumed = inner.args.select { |a| a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier) } +
         inner.args.select { |a| a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier) }.map(&:value)
-      if inner.respond_to?(:zig_pattern) && inner.zig_pattern.is_a?(String) && inner.zig_pattern.include?("append")
-        val_arg = inner.args.last
-        val_arg = val_arg.is_a?(AST::MoveNode) ? val_arg.value : val_arg
-        consumed << val_arg if val_arg.is_a?(AST::Identifier) && !consumed.include?(val_arg)
-      end
       consumed
     else
       []

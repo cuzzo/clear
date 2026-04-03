@@ -1371,18 +1371,8 @@ private
 
     # 5. Collection type narrowing (e.g., append narrows Any[] → T[])
     narrow_collection_type!(matched_def, args)
-
-    # 6. Append moves: the value arg is consumed by the collection.
-    if matched_def[:zig].is_a?(String) && matched_def[:zig].include?("append") && args.length >= 2
-      val_arg = args.last
-      if val_arg.is_a?(AST::Identifier)
-        vt = val_arg.type_info
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        if vt && !vt.implicitly_copyable? { |t| lookup_type_schema(t) }
-          og_set_moved(val_arg.name)
-        end
-      end
-    end
+    # Ownership for TAKES args (e.g., append value) is handled uniformly
+    # by verify_function_signature! via the takes: true flag in STD_LIB.
   end
 
   # Loop-local SROA: when a large struct literal (storage == :frame) is declared
@@ -3571,16 +3561,10 @@ private
           t.link? || t.any_rc? || t.string?
         end
       elsif schema.is_a?(Hash) && schema[:kind] == :union
-        # Union: check variants for @indirect (*T) fields in inline structs
-        needs_heap = (schema[:variants] || {}).any? do |_, vt|
-          next false unless vt
-          if vt.is_a?(Hash) && vt[:kind] == :inline_struct
-            indirect = vt[:indirect_fields]
-            indirect.is_a?(Set) && !indirect.empty?
-          else
-            false
-          end
-        end
+        # Union: needs heap if any variant has heap data (strings, slices,
+        # @indirect pointers, collections). COPY always allocates on the heap,
+        # so any non-Copy union holding COPY'd data needs heapAlloc cleanup.
+        needs_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
     end
     ti.cleanup_alloc = needs_heap ? :heap : :frame

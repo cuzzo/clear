@@ -95,6 +95,18 @@ module MethodAnalysis
       end
     end
 
+    # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
+    if defn[:takes_args]
+      defn[:takes_args].each do |arg_idx|
+        arg_node = node.args[arg_idx]
+        next unless arg_node
+        if arg_node.is_a?(AST::Identifier)
+          og_set_moved(arg_node.name)
+        end
+        arg_node.was_moved = true
+      end
+    end
+
     # Methods that allocate on the heap — record so needs_rt is computed correctly.
     if defn[:allocates] && current_fn_ctx
       current_fn_ctx.heap_count += 1

@@ -1,0 +1,15 @@
+-- Test: mutable reassignment of non-Copy union must clean up old value.
+-- Without cleanup, the old value's heap data leaks.
+
+UNION Value { Nil, Str: String, List: Value[] }
+
+FN makeStr(s: String) RETURNS Value ->
+    RETURN Value{ Str: COPY s };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE result = makeStr("hello");
+    result = makeStr("world");
+    result = Value.Nil;
+    RETURN;
+END

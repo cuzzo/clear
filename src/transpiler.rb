@@ -974,12 +974,23 @@ private
         proxy.container_borrow   = node.container_borrow
         visit(proxy)
       else
-        # Transpile as simple assignment
+        # Transpile as simple assignment - clean up old value for non-Copy types
         current_tp_ctx&.bind_value_node = node.value
         value_str = visit(node.value)
         current_tp_ctx&.bind_value_node = nil
         move_logic = emit_move_suppression(node.value)
-        "#{zig_safe_name(node.name)} = #{value_str}; #{move_logic}"
+        safe = zig_safe_name(node.name)
+        # Before overwriting a non-Copy binding, clean up the old value.
+        fn_name = current_tp_ctx&.fn_name
+        entry = @cleanup_plans&.dig(fn_name)&.lookup(node.name)
+        if entry && entry[:needs_cleanup] && entry[:kind] != :resource
+          alloc = alloc_expr_from_plan(entry)
+          ti = node.type_info
+          zig_type = ti ? transpile_type(ti.resolved.to_s) : "UNKNOWN"
+          "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{value_str}; #{move_logic}"
+        else
+          "#{safe} = #{value_str}; #{move_logic}"
+        end
       end
 
     when AST::Assignment
