@@ -180,7 +180,15 @@ class InterpreterBridge
       when /^:break\s+(.+)/
         fn_name = $1.strip
         @breakpoints.add(fn_name)
+        # Register breakpoint in the Scheme env
+        @fn_defs << "(debug-set-break \"#{fn_name}\")"
         puts "Breakpoint set on #{fn_name}"
+        next
+      when /^:unbreak\s+(.+)/
+        fn_name = $1.strip
+        @breakpoints.delete(fn_name)
+        @fn_defs << "(debug-clear-break \"#{fn_name}\")"
+        puts "Breakpoint removed from #{fn_name}"
         next
       when ":breakpoints"
         if @breakpoints.empty?
@@ -197,8 +205,12 @@ class InterpreterBridge
           :inspect <expr>      Evaluate a CLEAR expression
           :trace <expr>        Show S-expression for a CLEAR expression
           :type <var>          Show the type of a variable
-          :break <fn>          Set breakpoint on function entry
+          :break <fn>          Set breakpoint on function entry (pauses execution)
+          :unbreak <fn>        Remove breakpoint
           :breakpoints         List breakpoints
+          At break: :i <expr>  Inspect expression in current scope
+          At break: :l         Show call with argument values
+          At break: :c         Continue execution
           :defs                Show function/variable definitions
           :locals              Show variable inspection help
           :reset               Clear all definitions and breakpoints
@@ -293,17 +305,7 @@ class InterpreterBridge
         # Don't persist set! - the original define is already in @fn_defs
       end
 
-      # Inject breakpoint prologue for breakpointed function calls
-      unless @breakpoints.empty?
-        lines = lines.map do |l|
-          @breakpoints.each do |bp|
-            if l.include?("(#{bp} ")
-              l = "(begin (display \"[break] #{bp} called\") #{l})"
-            end
-          end
-          l
-        end
-      end
+      # Breakpoints handled via file-based IPC in the interpreter
 
       # Build program: all persisted defs + this expression
       all_lines = @fn_defs.dup
@@ -345,7 +347,11 @@ class InterpreterBridge
         CHT
       end
 
-      run_clear(@interp_base + main_code, silent: false)
+      if @breakpoints.any?
+        run_with_debug(@interp_base + main_code)
+      else
+        run_clear(@interp_base + main_code, silent: false)
+      end
     end
 
     puts "\nBye."
@@ -404,6 +410,103 @@ class InterpreterBridge
     end
 
     puts "Loaded #{new_defs.length} definitions from #{File.basename(path)}"
+  end
+
+  def run_with_debug(source)
+    # Clean up debug files
+    ["_debug_break.txt", "_debug_cmd.txt", "_debug_resp.txt"].each do |f|
+      File.write("/tmp/#{f}", "")
+    end
+
+    tmp = File.join(DIR, "_vm_run.cht")
+    File.write(tmp, source)
+
+    # Compile first
+    compile_out = `#{PROJECT_ROOT}/clear build #{tmp} -o #{File.join(DIR, "_vm_debug")} 2>&1`
+    unless $?.success?
+      puts compile_out.lines.reject { |l| l.include?("hint:") }.first(3).join
+      File.delete(tmp) if File.exist?(tmp)
+      return
+    end
+
+    # Run in background thread
+    break_file = "/tmp/_debug_break.txt"
+    cmd_file = "/tmp/_debug_cmd.txt"
+    resp_file = "/tmp/_debug_resp.txt"
+
+    File.write(break_file, "")
+    File.write(cmd_file, "")
+    File.write(resp_file, "")
+
+    pid = spawn(File.join(DIR, "_vm_debug"), [:out, :err] => [File.join(DIR, "_vm_output.txt"), "w"])
+
+    # Poll for break or process exit
+    loop do
+      # Check if process finished
+      result = Process.waitpid(pid, Process::WNOHANG) rescue nil
+      if result
+        # Process done - show output
+        output = File.read(File.join(DIR, "_vm_output.txt")) rescue ""
+        lines = output.lines.reject { |l|
+          l.include?("hint:") || l.include?("error(gpa)") ||
+          l.include?("leaked:") || l.include?(".zig") ||
+          l.include?("rt.") || l.include?("task.") ||
+          l.include?("promoteList") || l.include?("referenced by:") ||
+          l.include?("try ") || l.include?("const ") ||
+          l.include?("???:") || l.include?("Unwind info") ||
+          l.strip.empty? || l.strip == "^"
+        }
+        print lines.join
+        break
+      end
+
+      # Check for breakpoint
+      bp_content = File.read(break_file) rescue ""
+      if bp_content.length > 0
+        puts "[break] #{bp_content}"
+
+        # Enter debug REPL
+        debug_prompt = "debug> "
+        while (dcmd = Readline.readline(debug_prompt, true))
+          dcmd = dcmd.strip
+          break if dcmd == ":c" || dcmd == ":continue"
+
+          if dcmd == ":l" || dcmd == ":locals"
+            File.write(cmd_file, ":l")
+          elsif dcmd.start_with?(":i ") || dcmd.start_with?(":inspect ")
+            expr = dcmd.sub(/^:(i|inspect)\s+/, "")
+            File.write(cmd_file, ":i #{expr}")
+          else
+            File.write(cmd_file, dcmd)
+          end
+
+          # Wait for response
+          20.times do
+            sleep 0.05
+            resp = File.read(resp_file) rescue ""
+            if resp.length > 0
+              puts resp
+              File.write(resp_file, "")
+              break
+            end
+          end
+        end
+
+        # Send continue
+        File.write(cmd_file, ":c")
+        sleep 0.05
+      end
+
+      sleep 0.02
+    end
+
+    # Cleanup
+    File.delete(tmp) if File.exist?(tmp)
+    File.delete(File.join(DIR, "_vm_debug")) rescue nil
+    File.delete(File.join(DIR, "_vm_output.txt")) rescue nil
+    ["_debug_break.txt", "_debug_cmd.txt", "_debug_resp.txt"].each do |f|
+      File.delete("/tmp/#{f}") rescue nil
+    end
   end
 
   def run_debug_expr(scheme_expr, defs)

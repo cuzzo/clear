@@ -648,6 +648,16 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
     RETURN Value.Error{ errMsg: errMsg, errKind: errKind };
 END
 
+FN readFileOr!(path: String, fallback: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+    content = readFile(path) OR RAISE;
+    RETURN content;
+END
+
+FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS String ->
+    content = readFileOr!(path, "", pool) OR "";
+    RETURN content;
+END
+
 FN isSymbol?(v: Value) RETURNS Bool ->
     MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
@@ -1108,6 +1118,17 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value{ Str: "Unknown" };
 
+    ELSE_IF formName == "debug-set-break" THEN
+        -- (debug-set-break "fnName") -> register breakpoint
+        bpName = eval!(items[1], envId, pool);
+        pool[envId]?.vars["__bp_" + getStr(bpName)] = Value.TrueVal;
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "debug-clear-break" THEN
+        bpName = eval!(items[1], envId, pool);
+        pool[envId]?.vars["__bp_" + getStr(bpName)] = Value.Nil;
+        RETURN Value.Nil;
+
     -- Error introspection: special forms to avoid error propagation
     ELSE_IF formName == "error?" THEN
         val = eval!(COPY items[1], envId, pool);
@@ -1223,6 +1244,49 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
             evaled.append(argVal);
         END
         f = evaled[0];
+
+        -- Breakpoint check: look up in env chain via special __bp_ keys
+        calledName = getSymName(items[0]);
+        IF calledName.length() > 0 THEN
+            bpLookup = "__bp_" + calledName;
+            bpKey = envGet!(envId, bpLookup, pool);
+            IF isTruthy?(bpKey) THEN
+                -- Build arg dump string
+                MUTABLE argDump = calledName + "(";
+                FOR ai IN (1_i64 ..< evaled.length()) DO
+                    IF ai > 1 THEN argDump = argDump + ", "; END
+                    argDump = argDump + prStr(evaled[ai], TRUE);
+                END
+                argDump = argDump + ")";
+
+                -- Write break info + poll for commands via file IPC
+                writeFile("/tmp/_debug_break.txt", argDump);
+                MUTABLE debugActive = TRUE;
+                WHILE debugActive DO
+                    MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool);
+                    IF cmdRaw.length() > 0 THEN
+                        writeFile("/tmp/_debug_cmd.txt", "");
+                        IF cmdRaw == ":c" || cmdRaw == ":continue" THEN
+                            debugActive = FALSE;
+                        ELSE_IF startsWith?(cmdRaw, ":i ") THEN
+                            inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
+                            MUTABLE inspPenv: HashMap<Value> = {};
+                            tokenizeToEnv!(inspPenv, inspectExpr);
+                            inspPenv["__rp"] = Value{ Number: 0.0 };
+                            inspAst = readFormEnv!(inspPenv);
+                            inspResult = eval!(inspAst, envId, pool);
+                            writeFile("/tmp/_debug_resp.txt", prStr(inspResult, TRUE));
+                        ELSE_IF cmdRaw == ":l" THEN
+                            writeFile("/tmp/_debug_resp.txt", argDump);
+                        ELSE
+                            writeFile("/tmp/_debug_resp.txt", "unknown: " + cmdRaw);
+                        END
+                    END
+                END
+                writeFile("/tmp/_debug_break.txt", "");
+            END
+        END
+
         IF isLambda?(f) THEN
             MATCH f START
                 Value.Lambda AS lam ->
