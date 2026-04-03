@@ -13,32 +13,8 @@ pub const WaitGroup = fp.WaitGroup;
 pub const Semaphore = fp.Semaphore;
 pub const TaskFn = @import("queues.zig").TaskFn;
 
-// Scheduler + fiber-memory re-exported for test harness scheduler setup.
-pub const scheduler = fp;
-pub const fiber_memory = @import("fiber-memory.zig");
-
 
 // Helper Functions
-// Cached cwd file descriptor — resolved once, used by readFile/writeFile
-// so they can use openat() (a single syscall) instead of std.fs.cwd()
-// which needs deep stack frames.
-var __cwd_fd: ?std.posix.fd_t = null;
-fn getCwdFd() std.posix.fd_t {
-    if (__cwd_fd) |fd| return fd;
-    __cwd_fd = std.fs.cwd().fd;
-    return __cwd_fd.?;
-}
-
-// Open a file relative to cwd using direct openat syscall.
-// Null-terminates the path inline — zero heap alloc, minimal stack.
-noinline fn openPathFd(path: []const u8, flags: std.posix.O, mode: std.posix.mode_t) !std.posix.fd_t {
-    if (path.len > 255) return error.NameTooLong;
-    var buf: [256]u8 = undefined;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-    return std.posix.openatZ(getCwdFd(), buf[0..path.len :0], flags, mode);
-}
-
 pub const CheatLib = struct {
     // -----------------------------------------------------------------------
     // Range: a contiguous numeric range [start, end) (end is always exclusive)
@@ -60,23 +36,33 @@ pub const CheatLib = struct {
     // Mostly for green fibers
     // Read from a non-blocking socket
     // Only works on Linux
-    pub noinline fn read(fd: i32, buffer: []u8) !usize {
+    pub fn read(fd: i32, buffer: []u8) !usize {
+        const sched = fp.active_scheduler;
+        const task = sched.getCurrent();
+
         while (true) {
+            // 1. Try to read using the high-level wrapper
+            // This returns an error union (!usize), not a raw number.
             const n = std.posix.read(fd, buffer) catch |err| {
                 if (err == error.WouldBlock) {
-                    const sched = fp.active_scheduler;
-                    const task = sched.getCurrent();
-                    // Unregister from any previous scheduler's epoll
-                    if (task.epoll_fd >= 0 and task.epoll_io_fd == fd and task.epoll_fd != sched.poller.epoll_fd) {
-                        std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
-                    }
+                    // 2. EAGAIN! No data yet.
+
+                    // Register with Epoll
+                    // We catch 'FileDescriptorAlreadyPresent' just in case we loop rapidly
                     try sched.registerFd(fd, task);
-                    task.status.store(.Blocked, .release);
+
+                    // Yield (Block)
+                    task.status = .Blocked;
                     task.base.yield();
+
+                    // When we wake up, loop back and try read() again!
                     continue;
                 }
+                // Propagate legitimate errors (e.g. ConnectionReset, etc)
                 return err;
             };
+
+            // Success! 'n' is definitely the valid byte count.
             return n;
         }
     }
@@ -132,36 +118,12 @@ pub const CheatLib = struct {
         }
     }
 
-    // Byte-level character access: returns a single-byte slice ([]const u8).
-    // Used by CLEAR's String@raw buf[i] indexing.
+    // String character access: returns a single-character slice ([]const u8).
+    // Used by CLEAR's str[i] when the target is a String.
     pub fn charAt(str: []const u8, index: anytype) []const u8 {
         const i: usize = @intCast(index);
         if (i >= str.len) return "";
         return str[i .. i + 1];
-    }
-
-    // UTF-8 codepoint count. Returns the number of Unicode codepoints in the string.
-    // Falls back to byte count on invalid UTF-8.
-    pub fn codepointCount(str: []const u8) i64 {
-        return @intCast(std.unicode.utf8CountCodepoints(str) catch str.len);
-    }
-
-    // UTF-8 codepoint access: returns the i-th codepoint as a multi-byte slice.
-    // O(n) per call — iterates from the start. Returns "" on out-of-bounds or invalid UTF-8.
-    pub fn charAtCodepoint(alloc: std.mem.Allocator, str: []const u8, index: anytype) ![]const u8 {
-        Runtime.profileAlloc(1);
-        const target: usize = @intCast(index);
-        const view = std.unicode.Utf8View.initUnchecked(str);
-        var it = view.iterator();
-        var i: usize = 0;
-        while (it.nextCodepointSlice()) |cp_slice| {
-            if (i == target) {
-                const result = try alloc.dupe(u8, cp_slice);
-                return result;
-            }
-            i += 1;
-        }
-        return "";
     }
 
     // Works for Lists and Slices because it modifies the memory the slice points to.
@@ -178,7 +140,6 @@ pub const CheatLib = struct {
     }
 
     pub fn concat(allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
-        Runtime.profileAlloc(s1.len + s2.len);
         return try std.mem.concat(allocator, u8, &.{ s1, s2 });
     }
 
@@ -238,24 +199,16 @@ pub const CheatLib = struct {
 
             /// All operations use self.alloc — set at construction by transpiler.
             /// The key_alloc/bucket_alloc params are kept for backward compat but ignored.
-            /// For tagged union values with []const u8 fields, the string data is
-            /// heap-duped so it survives loop-mark arena rewinds.
-            /// TAKES ownership of value. Strings are duped (may be rodata/frame).
-            /// TAKES ownership of value. No implicit copies. Caller must
-            /// ensure all data (including strings) is heap-owned.
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 _ = key_alloc;
                 _ = bucket_alloc;
-                const stored_value = value;
                 if (self.inner.getPtr(key)) |val_ptr| {
-                    CheatLib.cleanup(V, self.alloc, val_ptr);
-                    val_ptr.* = stored_value;
+                    val_ptr.* = value;
                     return;
                 }
                 const key_copy = try self.alloc.dupe(u8, key);
-                try self.inner.put(self.alloc, key_copy, stored_value);
+                try self.inner.put(self.alloc, key_copy, value);
             }
-
 
             pub fn get(self: anytype, key: []const u8) ?V {
                 return self.inner.get(key);
@@ -269,8 +222,6 @@ pub const CheatLib = struct {
                 _ = key_alloc;
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
-                    var val = kv.value;
-                    CheatLib.cleanup(V, self.alloc, &val);
                 }
             }
 
@@ -281,15 +232,11 @@ pub const CheatLib = struct {
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
                 _ = key_alloc;
                 _ = bucket_alloc;
+                // Use stored allocator — guarantees consistency with put().
                 var it = self.inner.iterator();
-                while (it.next()) |entry| {
-                    self.alloc.free(entry.key_ptr.*);
-                    CheatLib.cleanup(V, self.alloc, entry.value_ptr);
-                }
+                while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
                 self.inner.deinit(self.alloc);
             }
-
-            /// Free heap-allocated payloads inside tagged union values.
 
             // Delegate to inner for code that still uses raw HashMap API
             pub fn getPtr(self: *Self, key: []const u8) ?*V {
@@ -504,38 +451,26 @@ pub const CheatLib = struct {
     //
     // Fallback: Outside a scheduler context (unit tests), a plain blocking
     // readAll is used — no io_uring, no yield.
-    const ReadFileCtx = struct {
-        allocator: std.mem.Allocator,
-        path: []const u8,
-        result: []const u8 = &.{},
-        err: ?anyerror = null,
-        fn run(ptr: ?*anyopaque) callconv(.c) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            const fd = openPathFd(self.path, .{ .ACCMODE = .RDONLY }, 0) catch |e| { self.err = e; return; };
-            defer std.posix.close(fd);
-            const stat = std.posix.fstat(fd) catch |e| { self.err = e; return; };
-            const size: usize = @intCast(stat.size);
-            const buffer = self.allocator.alloc(u8, size) catch |e| { self.err = e; return; };
-            var total: usize = 0;
-            while (total < buffer.len) {
-                const n = std.posix.read(fd, buffer[total..]) catch |e| { self.err = e; return; };
-                if (n == 0) break;
-                total += n;
-            }
-            self.result = buffer[0..total];
-        }
-    };
+    pub fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+        // 1. Open + stat are fast (no data transfer, just metadata).
+        var dir = std.fs.cwd();
+        var file = try dir.openFile(path, .{});
+        defer file.close();
 
-    pub noinline fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-        var ctx = ReadFileCtx{ .allocator = allocator, .path = path };
-        if (fp.scheduler_running) {
-            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
-            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &ReadFileCtx.run), @ptrCast(&ctx));
-        } else {
-            ReadFileCtx.run(@ptrCast(&ctx));
+        const stat = try file.stat();
+        const buffer = try allocator.alloc(u8, stat.size);
+
+        // 2. Blocking read — use posix read() directly.
+        // TODO: io_uring async path disabled pending investigation of CQE/fiber
+        // interaction under concurrent load.  Blocking read is safe on all fiber
+        // stacks and still fast for local files (kernel page cache).
+        var total: usize = 0;
+        while (total < buffer.len) {
+            const n = try std.posix.read(file.handle, buffer[total..]);
+            if (n == 0) break;
+            total += n;
         }
-        if (ctx.err) |e| return e;
-        return ctx.result;
+        return buffer[0..total];
     }
 
     // List all files in a directory. Returns an ArrayListUnmanaged of heap-allocated
@@ -607,42 +542,22 @@ pub const CheatLib = struct {
     }
 
     // Write File
-    const WriteFileCtx = struct {
-        path: []const u8,
-        content: []const u8,
-        err: ?anyerror = null,
-        fn run(ptr: ?*anyopaque) callconv(.c) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            const fd = openPathFd(self.path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644) catch |e| { self.err = e; return; };
-            defer std.posix.close(fd);
-            var written: usize = 0;
-            while (written < self.content.len) {
-                written += std.posix.write(fd, self.content[written..]) catch |e| { self.err = e; return; };
-            }
-        }
-    };
-
-    pub noinline fn writeFile(path: []const u8, content: []const u8) !void {
-        var ctx = WriteFileCtx{ .path = path, .content = content };
-        if (fp.scheduler_running) {
-            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
-            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &WriteFileCtx.run), @ptrCast(&ctx));
-        } else {
-            WriteFileCtx.run(@ptrCast(&ctx));
-        }
-        if (ctx.err) |e| return e;
+    pub fn writeFile(path: []const u8, content: []const u8) !void {
+        var dir = std.fs.cwd();
+        var file = try dir.createFile(path, .{});
+        defer file.close();
+        try file.writeAll(content);
     }
 
     // String Lib
 
     // Used to make HEAP strings
     pub fn makeString(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-        Runtime.profileAlloc(text.len);
         return try std.fmt.allocPrint(allocator, "{s}", .{text});
     }
 
     pub fn substr(allocator: std.mem.Allocator, str: []const u8, start: i64, length: i64) ![]const u8 {
-        Runtime.profileAlloc(@intCast(length));
+        // Basic safety checks (Zig panics on slice OOB, but clean errors are better)
         const u_start: usize = @intCast(start);
         const u_len: usize = @intCast(length);
 
@@ -702,92 +617,9 @@ pub const CheatLib = struct {
     // Clock & Timing
     // -----------------------------------------------------------------
 
-    // Integer arithmetic: checked in debug/safe (panics on overflow),
-    // wrapping in release (matches Rust semantics). This ensures hash
-    // functions, RNGs, and checksums work correctly in production while
-    // catching accidental overflow bugs during development.
-    fn IntResult(comptime A: type, comptime B: type) type {
-        // When mixing comptime_int with a fixed-width int, use the fixed-width type.
-        if (A == comptime_int) return B;
-        return A;
-    }
-
-    pub inline fn intAdd(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        const av: R = a;
-        const bv: R = b;
-        if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) {
-            return av + bv;
-        } else {
-            return av +% bv;
-        }
-    }
-    pub inline fn intSub(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        const av: R = a;
-        const bv: R = b;
-        if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) {
-            return av - bv;
-        } else {
-            return av -% bv;
-        }
-    }
-    pub inline fn intMul(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        const av: R = a;
-        const bv: R = b;
-        if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) {
-            return av * bv;
-        } else {
-            return av *% bv;
-        }
-    }
-
-    // Explicit wrapping arithmetic (%+, %-, %*) — wraps in ALL build modes.
-    // Use for hash functions, RNGs, checksums, and other intentional-overflow code.
-    pub inline fn wrapAdd(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        return @as(R, a) +% @as(R, b);
-    }
-    pub inline fn wrapSub(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        return @as(R, a) -% @as(R, b);
-    }
-    pub inline fn wrapMul(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        return @as(R, a) *% @as(R, b);
-    }
-
-    // Explicit checked arithmetic (!+, !-, !*) — panics in ALL build modes.
-    // Use for financial math, safety-critical code, and overflow detection.
-    pub inline fn checkAdd(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        const result = @addWithOverflow(@as(R, a), @as(R, b));
-        if (result[1] != 0) @panic("integer overflow in checked addition (!+)");
-        return result[0];
-    }
-    pub inline fn checkSub(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        const result = @subWithOverflow(@as(R, a), @as(R, b));
-        if (result[1] != 0) @panic("integer overflow in checked subtraction (!-)");
-        return result[0];
-    }
-    pub inline fn checkMul(a: anytype, b: anytype) IntResult(@TypeOf(a), @TypeOf(b)) {
-        const R = IntResult(@TypeOf(a), @TypeOf(b));
-        const result = @mulWithOverflow(@as(R, a), @as(R, b));
-        if (result[1] != 0) @panic("integer overflow in checked multiplication (!*)");
-        return result[0];
-    }
-
     /// Wall clock milliseconds since Unix epoch.
     pub fn timestampMs() i64 {
         return std.time.milliTimestamp();
-    }
-
-    /// Returns the total number of scheduler threads.
-    /// Matches the CLEAR_THREADS environment variable.
-    pub fn threadCount() i64 {
-        return @as(i64, @intCast(fp.global_registry.count()));
     }
 
     // sleep is called directly on rt: rt.sleep(ms) — see Runtime.sleep in runtime.zig
@@ -857,51 +689,7 @@ pub const CheatLib = struct {
         return @intCast(val % umax);
     }
 
-    /// Format an integer into a caller-provided buffer. Returns the slice written.
-    /// Zero-allocation — use for transient string interpolation (map keys, comparisons).
-    pub fn fmtInt(buf: []u8, value: i64) []const u8 {
-        var tmp: [21]u8 = undefined;
-        var slen: usize = 0;
-        var v: u64 = if (value < 0) @intCast(-value) else @intCast(value);
-        if (v == 0) {
-            tmp[0] = '0';
-            slen = 1;
-        } else {
-            while (v > 0) : (slen += 1) {
-                tmp[slen] = @intCast('0' + (v % 10));
-                v /= 10;
-            }
-            if (value < 0) {
-                tmp[slen] = '-';
-                slen += 1;
-            }
-            var lo: usize = 0;
-            var hi: usize = slen - 1;
-            while (lo < hi) {
-                const t = tmp[lo];
-                tmp[lo] = tmp[hi];
-                tmp[hi] = t;
-                lo += 1;
-                hi -= 1;
-            }
-        }
-        @memcpy(buf[0..slen], tmp[0..slen]);
-        return buf[0..slen];
-    }
-
-    /// Concatenate slices into a caller-provided buffer. Returns the slice written.
-    /// Zero-allocation — use for transient string building (map keys, comparisons).
-    pub fn bufConcat(buf: []u8, parts: anytype) []const u8 {
-        var pos: usize = 0;
-        inline for (parts) |part| {
-            @memcpy(buf[pos..][0..part.len], part);
-            pos += part.len;
-        }
-        return buf[0..pos];
-    }
-
     pub fn intToString(allocator: std.mem.Allocator, value: i64) ![]const u8 {
-        Runtime.profileAlloc(21);
         // Max i64 is 19 digits + sign + null = 21 bytes; allocate 21
         var buf: [21]u8 = undefined;
         var slen: usize = 0;
@@ -952,7 +740,7 @@ pub const CheatLib = struct {
 
     // Join: List -> String (technically an array function)
     pub fn join(allocator: std.mem.Allocator, list: anytype, delimiter: []const u8) ![]const u8 {
-        Runtime.profileAlloc(0); // size unknown until join completes
+        // Support both ArrayListUnmanaged and raw Slices
         const items = if (@hasField(@TypeOf(list), "items")) list.items else list;
         return std.mem.join(allocator, delimiter, items);
     }
@@ -1018,21 +806,24 @@ pub const CheatLib = struct {
     // If no connection is ready yet (EAGAIN/WouldBlock), registers with epoll
     // and yields the current fiber until a connection arrives.
     // Returns the client fd (set non-blocking via fcntl). Caller owns it.
-    pub noinline fn socketAccept(server_fd: i32) !i32 {
+    pub fn socketAccept(server_fd: i32) !i32 {
+        const sched = fp.active_scheduler;
+        const task  = sched.getCurrent();
+
         while (true) {
             var client_addr: std.posix.sockaddr = undefined;
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
 
+            // Use the high-level posix wrapper — it maps kernel errors to Zig errors
+            // (same pattern as std.posix.read used in CheatLib.read above).
             const client_fd = std.posix.accept(
                 server_fd, &client_addr, &addr_len,
                 std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
             ) catch |err| {
                 if (err == error.WouldBlock) {
-                    // Reload scheduler/task on every yield (fiber may be stolen).
-                    const sched = fp.active_scheduler;
-                    const task = sched.getCurrent();
+                    // No client yet — register for read-readiness and yield.
                     try sched.registerFd(server_fd, task);
-                    task.status.store(.Blocked, .release);
+                    task.status = .Blocked;
                     task.base.yield();
                     continue;
                 }
@@ -1043,29 +834,20 @@ pub const CheatLib = struct {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Socket I/O: runs on the FIBER stack (epoll + yield, non-blocking).
-    //
-    // Unlike file I/O (readFile/writeFile) which trampolines to g0 via
-    // onRootStack because std.fs needs deep stack frames, socket I/O uses
-    // direct posix read/write syscalls with epoll-backed yield. The fiber
-    // yields on EAGAIN and resumes when data is ready. Minimal stack usage
-    // (~4KB temp buffer for reads, no std.fs overhead).
-    // -----------------------------------------------------------------------
-
     // Write `data` to a non-blocking socket fd.
     // Loops until all bytes are sent, yielding the fiber on EAGAIN.
     // Returns the total bytes sent (== data.len on success).
-    pub noinline fn socketWrite(fd: i32, data: []const u8) !usize {
+    pub fn socketWrite(fd: i32, data: []const u8) !usize {
+        const sched = fp.active_scheduler;
+        const task  = sched.getCurrent();
+
         var sent: usize = 0;
         while (sent < data.len) {
             const n = std.posix.write(fd, data[sent..]) catch |err| {
                 if (err == error.WouldBlock) {
-                    // Reload scheduler/task on every yield (fiber may be stolen).
-                    const sched = fp.active_scheduler;
-                    const task = sched.getCurrent();
+                    // Socket send buffer is full — wait for write-readiness.
                     try sched.registerWriteFd(fd, task);
-                    task.status.store(.Blocked, .release);
+                    task.status = .Blocked;
                     task.base.yield();
                     continue;
                 }
@@ -1077,7 +859,7 @@ pub const CheatLib = struct {
     }
 
     // Close a TCP socket fd, removing it from epoll first so no stale events fire.
-    pub noinline fn socketClose(fd: i32) void {
+    pub fn socketClose(fd: i32) void {
         fp.active_scheduler.unregisterFd(fd);
         std.posix.close(fd);
     }
@@ -1091,27 +873,16 @@ pub const CheatLib = struct {
     // restoreLoopMark rewinds the arena — zero GPA calls in the hot path.
     //
     // Usage: data = tcpRead(client)
-    // After a successful read, yields the fiber so other fibers on the same
-    // scheduler get a turn. Without this, a single client with pipelined
-    // data can monopolize the scheduler indefinitely.
-    // Yields after successful read for I/O fairness among concurrent client fibers.
-    pub noinline fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
+    pub fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
         var buf: [4096]u8 = undefined;
         const n = try CheatLib.read(fd, &buf);
-        const result = try allocator.dupe(u8, buf[0..n]);
-        // Cooperative yield: if other fibers are Ready, give them a turn.
-        // This prevents a single client with pipelined data from monopolizing
-        // the scheduler across multiple read-process-write cycles.
-        if (fp.scheduler_running) {
-            fp.active_scheduler.coopYield();
-        }
-        return result;
+        return allocator.dupe(u8, buf[0..n]);
     }
 
     // Write all bytes from `data` to a connected client socket, discarding the byte count.
     // Yields the fiber if the send buffer is temporarily full (epoll-backed).
     // Usage: tcpWrite(client, "hello")
-    pub noinline fn socketWriteVoid(fd: i32, data: []const u8) !void {
+    pub fn socketWriteVoid(fd: i32, data: []const u8) !void {
         _ = try CheatLib.socketWrite(fd, data);
     }
 
@@ -1119,7 +890,10 @@ pub const CheatLib = struct {
     // Non-blocking: if the kernel returns EINPROGRESS the fiber yields until
     // epoll signals write-readiness, then the connection result is verified.
     // Returns the client fd; caller owns it (close via socketClose / RAII).
-    pub noinline fn socketConnect(host: []const u8, port: u16) !i32 {
+    pub fn socketConnect(host: []const u8, port: u16) !i32 {
+        const sched = fp.active_scheduler;
+        const task  = sched.getCurrent();
+
         const fd = try std.posix.socket(
             std.posix.AF.INET,
             std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
@@ -1136,12 +910,11 @@ pub const CheatLib = struct {
         };
 
         std.posix.connect(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch |err| {
+            // Non-blocking connect returns WouldBlock (EINPROGRESS) immediately.
             if (err != error.WouldBlock) return err;
-            // Reload scheduler/task at yield point (fiber may be stolen).
-            const sched = fp.active_scheduler;
-            const task = sched.getCurrent();
+            // Wait for epoll OUT event — kernel signals it when the 3-way handshake completes.
             try sched.registerWriteFd(fd, task);
-            task.status.store(.Blocked, .release);
+            task.status = .Blocked;
             task.base.yield();
             // Check SO_ERROR to distinguish success from async errors (e.g. ECONNREFUSED).
             try std.posix.getsockoptError(fd);
@@ -1304,761 +1077,85 @@ pub const CheatLib = struct {
     // Reference Counting (multiowned / Rc)
     // -------------------------------------------------------------------------
 
-    // -------------------------------------------------------------------------
-    // Reference Counting with Control Block (supports weak references)
-    // -------------------------------------------------------------------------
-    // Both Rc and Arc use a control block that holds strong + weak counts
-    // alongside the data pointer. This enables WeakRc/WeakArc to check if
-    // the value is still alive without holding a strong reference.
-
-    pub fn RcControlBlock(comptime T: type) type {
-        return struct {
-            strong: usize,
-            weak: usize,
-            data: *T,
-            alloc: std.mem.Allocator,
-        };
-    }
-
     /// Rc(T): a reference-counted wrapper around a heap-allocated T.
-    /// Uses a control block shared with WeakRc for weak reference support.
+    /// The data pointer and ref-count are both allocated via the provided allocator.
     pub fn Rc(comptime T: type) type {
         return struct {
             const Self = @This();
-            ctrl: *RcControlBlock(T),
-            // Convenience: access data through .data for compatibility
-            pub fn getData(self: Self) *T { return self.ctrl.data; }
+            data: *T,
+            ref_count: *usize,
         };
     }
 
+    /// Create a new Rc from an already-heap-allocated *T.
+    /// The Rc takes ownership of data_ptr; ref_count starts at 1.
     pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
-        const ctrl = try alloc.create(RcControlBlock(T));
+        const ref_count = try alloc.create(usize);
+        ref_count.* = 1;
         const data_ptr = try alloc.create(T);
         data_ptr.* = data;
-        ctrl.* = .{ .strong = 1, .weak = 0, .data = data_ptr, .alloc = alloc };
-        return Rc(T){ .ctrl = ctrl };
+        return Rc(T){ .data = data_ptr, .ref_count = ref_count };
     }
 
+    /// Increment the reference count and return a copy of the handle.
+    /// Both the original and the returned handle must eventually be released.
     pub fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
-        rc.ctrl.strong += 1;
+        rc.ref_count.* += 1;
         return rc;
     }
 
+    /// Decrement the reference count.  When it reaches 0 the data and
+    /// ref-count allocation are freed.
     pub fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
-        _ = alloc; // alloc stored in control block
-        rc.ctrl.strong -= 1;
-        if (rc.ctrl.strong == 0) {
-            rc.ctrl.alloc.destroy(rc.ctrl.data);
-            if (rc.ctrl.weak == 0) {
-                rc.ctrl.alloc.destroy(rc.ctrl);
-            }
+        rc.ref_count.* -= 1;
+        if (rc.ref_count.* == 0) {
+            alloc.destroy(rc.data);
+            alloc.destroy(rc.ref_count);
         }
     }
 
     // -------------------------------------------------------------------------
-    // Atomic Reference Counting with Control Block (shared / Arc)
+    // Atomic Reference Counting (shared / Arc)
     // -------------------------------------------------------------------------
 
-    pub fn ArcControlBlock(comptime T: type) type {
-        return struct {
-            strong: std.atomic.Value(usize),
-            weak: std.atomic.Value(usize),
-            data: *T,
-            alloc: std.mem.Allocator,
-        };
-    }
-
     /// Arc(T): an atomically reference-counted wrapper around a heap-allocated T.
-    /// Uses a control block shared with WeakArc for weak reference support.
+    /// Thread-safe: the ref-count is an atomic usize.
     pub fn Arc(comptime T: type) type {
         return struct {
             const Self = @This();
-            ctrl: *ArcControlBlock(T),
-            pub fn getData(self: Self) *T { return self.ctrl.data; }
+            data: *T,
+            ref_count: *std.atomic.Value(usize),
         };
     }
 
+    /// Create a new Arc from an already-heap-allocated *T.
+    /// The Arc takes ownership of data_ptr; ref_count starts at 1.
     pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
-        const ctrl = try alloc.create(ArcControlBlock(T));
+        const ref_count = try alloc.create(std.atomic.Value(usize));
+        ref_count.* = std.atomic.Value(usize).init(1);
         const data_ptr = try alloc.create(T);
         data_ptr.* = data;
-        ctrl.* = .{
-            .strong = std.atomic.Value(usize).init(1),
-            .weak = std.atomic.Value(usize).init(0),
-            .data = data_ptr,
-            .alloc = alloc,
-        };
-        return Arc(T){ .ctrl = ctrl };
+        return Arc(T){ .data = data_ptr, .ref_count = ref_count };
     }
 
+    /// Increment the reference count atomically and return a copy of the handle.
+    /// Both the original and the returned handle must eventually be released.
     pub fn arcRetain(comptime T: type, arc: Arc(T)) Arc(T) {
-        _ = arc.ctrl.strong.fetchAdd(1, .acquire);
+        _ = arc.ref_count.fetchAdd(1, .acquire);
         return arc;
     }
 
+    /// Decrement the reference count atomically. When it reaches 0 the data
+    /// and ref-count allocation are freed.
     pub fn arcRelease(comptime T: type, alloc: std.mem.Allocator, arc: Arc(T)) void {
-        _ = alloc;
-        const prev = arc.ctrl.strong.fetchSub(1, .release);
+        const prev = arc.ref_count.fetchSub(1, .release);
         if (prev == 1) {
-            _ = arc.ctrl.strong.load(.acquire);
-            // Deinit inner data before freeing the pointer.
-            // RwLocked/Locked wrap types that may own heap memory (StringMap keys, etc.).
-            arcDeinitInner(T, arc.ctrl.alloc, arc.ctrl.data);
-            arc.ctrl.alloc.destroy(arc.ctrl.data);
-            if (arc.ctrl.weak.load(.acquire) == 0) {
-                arc.ctrl.alloc.destroy(arc.ctrl);
-            }
+            // Acquire the release-sequence so all writes before prior arcRelease()
+            // calls are visible before we free the data.
+            _ = arc.ref_count.load(.acquire);
+            alloc.destroy(arc.data);
+            alloc.destroy(arc.ref_count);
         }
-    }
-
-    /// Recursively deinit inner data for Arc-wrapped types.
-    /// Handles RwLocked(StringMap), Locked(StringMap), and plain StringMap.
-    fn arcDeinitInner(comptime T: type, a: std.mem.Allocator, ptr: *T) void {
-        // RwLocked(U) or Locked(U): deinit the inner .data field
-        if (@hasField(T, "data") and @hasField(T, "lock")) {
-            const DataT = @TypeOf(ptr.data);
-            if (@hasDecl(DataT, "deinit")) {
-                // StringMap.deinit takes (key_alloc, bucket_alloc) but uses self.alloc internally
-                const deinit_fn = @typeInfo(@TypeOf(DataT.deinit)).@"fn";
-                if (deinit_fn.params.len == 3) {
-                    ptr.data.deinit(a, a);
-                } else if (deinit_fn.params.len == 2) {
-                    ptr.data.deinit(a);
-                } else {
-                    ptr.data.deinit();
-                }
-            }
-        } else if (@hasDecl(T, "deinit")) {
-            const deinit_fn = @typeInfo(@TypeOf(T.deinit)).@"fn";
-            if (deinit_fn.params.len == 3) {
-                ptr.deinit(a, a);
-            } else if (deinit_fn.params.len == 2) {
-                ptr.deinit(a);
-            } else {
-                ptr.deinit();
-            }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Weak References (link / WeakRc / WeakArc)
-    // -------------------------------------------------------------------------
-
-    pub fn WeakRc(comptime T: type) type {
-        return struct {
-            const Self = @This();
-            ctrl: *RcControlBlock(T),
-        };
-    }
-
-    pub fn rcDowngrade(comptime T: type, rc: Rc(T)) WeakRc(T) {
-        rc.ctrl.weak += 1;
-        return WeakRc(T){ .ctrl = rc.ctrl };
-    }
-
-    pub fn weakRcUpgrade(comptime T: type, weak: WeakRc(T)) ?Rc(T) {
-        if (weak.ctrl.strong == 0) return null;
-        weak.ctrl.strong += 1;
-        return Rc(T){ .ctrl = weak.ctrl };
-    }
-
-    pub fn weakRcRelease(comptime T: type, weak: WeakRc(T)) void {
-        weak.ctrl.weak -= 1;
-        if (weak.ctrl.weak == 0 and weak.ctrl.strong == 0) {
-            weak.ctrl.alloc.destroy(weak.ctrl);
-        }
-    }
-
-    pub fn WeakArc(comptime T: type) type {
-        return struct {
-            const Self = @This();
-            ctrl: *ArcControlBlock(T),
-        };
-    }
-
-    pub fn arcDowngrade(comptime T: type, arc: Arc(T)) WeakArc(T) {
-        _ = arc.ctrl.weak.fetchAdd(1, .acquire);
-        return WeakArc(T){ .ctrl = arc.ctrl };
-    }
-
-    pub fn weakArcUpgrade(comptime T: type, weak: WeakArc(T)) ?Arc(T) {
-        // CAS loop: atomically increment strong if > 0
-        while (true) {
-            const strong = weak.ctrl.strong.load(.acquire);
-            if (strong == 0) return null;
-            if (weak.ctrl.strong.cmpxchgWeak(strong, strong + 1, .acquire, .monotonic)) |_| {
-                continue; // CAS failed, retry
-            } else {
-                return Arc(T){ .ctrl = weak.ctrl };
-            }
-        }
-    }
-
-    pub fn weakArcRelease(comptime T: type, weak: WeakArc(T)) void {
-        const prev = weak.ctrl.weak.fetchSub(1, .release);
-        if (prev == 1) {
-            if (weak.ctrl.strong.load(.acquire) == 0) {
-                weak.ctrl.alloc.destroy(weak.ctrl);
-            }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Comptime Structural Helpers
-    // -------------------------------------------------------------------------
-
-    /// Extracts the inner type T from Rc(T), Arc(T), WeakRc(T), or WeakArc(T).
-    /// Returns null if the type is not a recognized ref-counted wrapper.
-    fn refInnerType(comptime FT: type) ?type {
-        const info = @typeInfo(FT);
-        if (info != .@"struct") return null;
-        const fields = info.@"struct".fields;
-        if (fields.len < 1) return null;
-        if (!std.mem.eql(u8, fields[0].name, "ctrl")) return null;
-        const ctrl_ptr_info = @typeInfo(fields[0].type);
-        if (ctrl_ptr_info != .pointer) return null;
-        const ctrl_info = @typeInfo(ctrl_ptr_info.pointer.child);
-        if (ctrl_info != .@"struct") return null;
-        inline for (ctrl_info.@"struct".fields) |cf| {
-            if (comptime std.mem.eql(u8, cf.name, "data")) {
-                const data_info = @typeInfo(cf.type);
-                if (data_info == .pointer) return data_info.pointer.child;
-            }
-        }
-        return null;
-    }
-
-    /// Returns true if FT is an Arc(T) or WeakArc(T) — the control block
-    /// uses atomic ref counts (strong field is not a plain integer).
-    fn isAtomicRef(comptime FT: type) bool {
-        const info = @typeInfo(FT);
-        if (info != .@"struct") return false;
-        const fields = info.@"struct".fields;
-        if (fields.len < 1) return false;
-        if (!comptime std.mem.eql(u8, fields[0].name, "ctrl")) return false;
-        const ctrl_ptr_info = @typeInfo(fields[0].type);
-        if (ctrl_ptr_info != .pointer) return false;
-        const ctrl_info = @typeInfo(ctrl_ptr_info.pointer.child);
-        if (ctrl_info != .@"struct") return false;
-        inline for (ctrl_info.@"struct".fields) |cf| {
-            if (comptime std.mem.eql(u8, cf.name, "strong")) {
-                return @typeInfo(cf.type) != .int;
-            }
-        }
-        return false;
-    }
-
-    /// Returns true if FT is a WeakRc(T) or WeakArc(T).
-    /// Weak types have no `getData` decl (only strong Rc/Arc do).
-    fn isWeakRef(comptime FT: type) bool {
-        if (refInnerType(FT) == null) return false;
-        return !@hasDecl(FT, "getData");
-    }
-
-    /// Release a single ref-counted value. Dispatches to the correct release
-    /// function based on the comptime type (Rc/Arc/WeakRc/WeakArc).
-    pub fn releaseOne(comptime FT: type, alloc: std.mem.Allocator, value: FT) void {
-        const T = comptime refInnerType(FT) orelse return;
-        const is_weak = comptime isWeakRef(FT);
-        const is_atomic = comptime isAtomicRef(FT);
-        if (is_weak) {
-            if (is_atomic) {
-                weakArcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
-            } else {
-                weakRcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
-            }
-        } else {
-            if (is_atomic) {
-                arcRelease(T, alloc, .{ .ctrl = @ptrCast(value.ctrl) });
-            } else {
-                rcRelease(T, alloc, .{ .ctrl = @ptrCast(value.ctrl) });
-            }
-        }
-    }
-
-    /// Walk all fields of struct T and release any that are ref-counted
-    /// (Rc, Arc, WeakRc, WeakArc). Zero-cost: fields without ref-counted
-    /// types emit no code thanks to comptime dead-code elimination.
-    pub fn releaseFields(comptime T: type, alloc: std.mem.Allocator, value: T) void {
-        inline for (@typeInfo(T).@"struct".fields) |field| {
-            if (comptime refInnerType(field.type) != null) {
-                releaseOne(field.type, alloc, @field(value, field.name));
-            }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Unified comptime cleanup — replaces per-type Ruby emit_cleanup logic.
-    // The transpiler emits `defer CheatLib.cleanup(T, alloc, &x);` for every
-    // variable that needs cleanup. Zig comptime eliminates no-op branches,
-    // so primitives and copy types emit zero code.
-    // -------------------------------------------------------------------------
-
-    /// Returns true if T is a StringMap(V) wrapper (has inner + alloc + put).
-    fn isStringMap(comptime T: type) bool {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return false;
-        return @hasField(T, "inner") and @hasField(T, "alloc") and @hasDecl(T, "put");
-    }
-
-    /// Returns true if T is a numeric map (AutoHashMapUnmanaged or similar).
-    /// Detected by: struct with metadata field and deinit, but not a StringMap.
-    fn isNumericMap(comptime T: type) bool {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return false;
-        if (isStringMap(T)) return false;
-        return @hasField(T, "metadata") and @hasDecl(T, "deinit");
-    }
-
-    /// Returns true if T is a Pool(U) — has slots, free_stack, free_top, capacity.
-    fn isPool(comptime T: type) bool {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return false;
-        return @hasField(T, "slots") and @hasField(T, "free_stack") and
-               @hasField(T, "free_top") and @hasField(T, "capacity");
-    }
-
-    /// Returns true if T is a Set(U) — has inner field and is not a StringMap.
-    fn isSetType(comptime T: type) bool {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return false;
-        if (!@hasField(T, "inner")) return false;
-        if (isStringMap(T)) return false;
-        // Set has insert/remove/contains but no alloc field
-        return @hasDecl(T, "insert") and !@hasField(T, "alloc");
-    }
-
-    /// Returns true if T is a Locked(U) — has mutex + data fields.
-    fn isLocked(comptime T: type) bool {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return false;
-        return @hasField(T, "mutex") and @hasField(T, "data") and !@hasField(T, "lock");
-    }
-
-    /// Returns true if T is a RwLocked(U) — has lock (RwLock) + data fields.
-    fn isRwLocked(comptime T: type) bool {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return false;
-        return @hasField(T, "lock") and @hasField(T, "data") and !@hasField(T, "mutex");
-    }
-
-    /// Unified comptime cleanup for any CLEAR type.
-    /// Dispatches to the correct cleanup function based on structural type analysis.
-    /// For types that need no cleanup (primitives, enums, plain structs without RC fields),
-    /// comptime eliminates the entire function body — zero runtime cost.
-    pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
-        const ptr = @constCast(cptr);
-
-        // 0. Strings: free with the provided allocator. Frame-arena free is
-        // a no-op, so frame strings are safe. Heap strings are freed.
-        if (T == []const u8 or T == []u8) {
-            if (ptr.len > 0) alloc.free(ptr.*);
-            return;
-        }
-
-        // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
-        if (comptime refInnerType(T) != null) {
-            releaseOne(T, alloc, ptr.*);
-            return;
-        }
-
-        // 2. ArrayList (list collections)
-        if (comptime isArrayList(T)) {
-            const ElemT = comptime arrayListElemType(T).?;
-            // Recursively cleanup elements (RC release, string free, nested unions, etc.)
-            if (comptime needsCleanup(ElemT)) {
-                for (ptr.items) |*item| {
-                    cleanup(ElemT, alloc, item);
-                }
-            }
-            ptr.deinit(alloc);
-            return;
-        }
-
-        // Note: generic slice cleanup removed — slices may be borrowed views.
-        // Heap-promoted slices inside unions are cleaned up by freeUnionPayload.
-
-        // 3. StringMap(V) — string-keyed hashmap wrapper
-        if (comptime isStringMap(T)) {
-            ptr.deinit(alloc, alloc);
-            return;
-        }
-
-        // 4. Numeric map (AutoHashMapUnmanaged or custom hash)
-        if (comptime isNumericMap(T)) {
-            ptr.deinit(alloc);
-            return;
-        }
-
-        // 5. Pool(U)
-        if (comptime isPool(T)) {
-            ptr.deinit(alloc);
-            return;
-        }
-
-        // 6. Set(U)
-        if (comptime isSetType(T)) {
-            // Release ref-counted elements
-            const InnerMap = @TypeOf(ptr.inner);
-            const inner_info = @typeInfo(InnerMap);
-            if (inner_info == .@"struct") {
-                // Iterate keys to release RC elements or free duped strings
-                var it = ptr.inner.keyIterator();
-                while (it.next()) |key_ptr| {
-                    const KeyT = @TypeOf(key_ptr.*);
-                    if (comptime refInnerType(KeyT) != null) {
-                        releaseOne(KeyT, alloc, key_ptr.*);
-                    } else if (KeyT == []const u8) {
-                        alloc.free(key_ptr.*);
-                    }
-                }
-            }
-            ptr.inner.deinit(alloc);
-            return;
-        }
-
-        // 7. Locked(U) / RwLocked(U)
-        if (comptime isLocked(T)) {
-            alloc.destroy(@as(*align(@alignOf(T)) T, @alignCast(ptr)));
-            return;
-        }
-        if (comptime isRwLocked(T)) {
-            alloc.destroy(@as(*align(@alignOf(T)) T, @alignCast(ptr)));
-            return;
-        }
-
-        // 8. Structs with a deinit method (ShardedList, ShardedMap, etc.)
-        //    Detect deinit arity: 1 alloc (ShardedList) vs 2 allocs (ShardedMap).
-        if (@typeInfo(T) == .@"struct" and @hasDecl(T, "deinit") and
-            !isStringMap(T) and !isPool(T) and !isNumericMap(T))
-        {
-            const deinit_info = @typeInfo(@TypeOf(T.deinit));
-            const param_count = deinit_info.@"fn".params.len;
-            if (param_count == 3) {
-                // deinit(self, key_alloc, bucket_alloc)
-                ptr.deinit(alloc, alloc);
-            } else if (param_count == 2) {
-                // deinit(self, alloc)
-                ptr.deinit(alloc);
-            } else {
-                // deinit(self) - no allocator needed
-                ptr.deinit();
-            }
-            return;
-        }
-
-        // 9. Structs: recursively clean up all owned fields
-        const info = @typeInfo(T);
-        if (info == .@"struct") {
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                const f_info = @typeInfo(FT);
-                // Skip opaque types and function pointers (Zig stdlib internals)
-                if (f_info == .@"opaque" or f_info == .@"fn") continue;
-                if (comptime refInnerType(FT) != null) {
-                    releaseOne(FT, alloc, @field(ptr, field.name));
-                } else if (f_info == .pointer and f_info.pointer.size == .slice) {
-                    const payload = @field(ptr, field.name);
-                    if (FT == []const u8 or FT == []u8) {
-                        if (payload.len > 0) alloc.free(payload);
-                    } else {
-                        if (comptime needsCleanup(f_info.pointer.child)) {
-                            for (payload) |*elem| {
-                                cleanup(f_info.pointer.child, alloc, elem);
-                            }
-                        }
-                        if (payload.len > 0) alloc.free(payload);
-                    }
-                } else if (f_info == .pointer and f_info.pointer.size == .one) {
-                    // Single pointer (*T): cleanup the pointee then free the pointer.
-                    // This handles @indirect fields in inline struct union variants.
-                    const pointee = @field(ptr, field.name);
-                    const ChildT = f_info.pointer.child;
-                    if (comptime needsCleanup(ChildT)) {
-                        cleanup(ChildT, alloc, pointee);
-                    }
-                    alloc.destroy(pointee);
-                } else if (comptime needsCleanup(FT)) {
-                    cleanup(FT, alloc, &@field(ptr, field.name));
-                }
-            }
-            return;
-        }
-
-        // 9. Tagged unions: check active variant and clean up its payload.
-        if (info == .@"union" and info.@"union".tag_type != null) {
-            inline for (info.@"union".fields) |field| {
-                if (std.meta.activeTag(ptr.*) == @field(std.meta.Tag(T), field.name)) {
-                    const FT = field.type;
-                    const f_info = @typeInfo(FT);
-                    // Slice variant ([]T): recursively cleanup elements then free buffer.
-                    if (f_info == .pointer and f_info.pointer.size == .slice) {
-                        if (FT == []const u8 or FT == []u8) {
-                            const str = @field(ptr, field.name);
-                            if (str.len > 0) alloc.free(str);
-                        } else {
-                            const payload = @field(ptr, field.name);
-                            if (comptime needsCleanup(f_info.pointer.child)) {
-                                for (payload) |*elem| {
-                                    cleanup(f_info.pointer.child, alloc, elem);
-                                }
-                            }
-                            if (payload.len > 0) alloc.free(payload);
-                        }
-                    } else if (comptime needsCleanup(FT)) {
-                        cleanup(FT, alloc, &@field(ptr, field.name));
-                    }
-                    return;
-                }
-            }
-            return;
-        }
-
-        // Primitives, enums, untagged unions: no-op (comptime-eliminated)
-    }
-
-    /// Returns true if a type needs cleanup (has heap-allocated data).
-    pub fn needsCleanup(comptime FT: type) bool {
-        if (FT == []const u8 or FT == []u8) return true;
-        if (refInnerType(FT) != null) return true;
-        if (isArrayList(FT)) return true;
-        if (isStringMap(FT)) return true;
-        if (isNumericMap(FT)) return true;
-        if (isPool(FT)) return true;
-        const ft_info = @typeInfo(FT);
-        // Note: non-string slices excluded from needsCleanup. Slice cleanup
-        // inside unions is handled by the union cleanup handler directly.
-        // Including slices here causes over-freeing in ArrayList element recursion.
-        if (ft_info == .@"struct") {
-            inline for (ft_info.@"struct".fields) |field| {
-                if (comptime needsCleanup(field.type)) return true;
-                const fi = @typeInfo(field.type);
-                if (fi == .pointer and fi.pointer.size == .one) return true;
-                if (fi == .pointer and fi.pointer.size == .slice and
-                    field.type != []const u8 and field.type != []u8) return true;
-            }
-        }
-        if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
-            inline for (ft_info.@"union".fields) |field| {
-                if (comptime needsCleanup(field.type)) return true;
-                // Non-string slice variants need cleanup (heap buffers from promoteList).
-                const fi = @typeInfo(field.type);
-                if (fi == .pointer and fi.pointer.size == .slice and
-                    field.type != []const u8 and field.type != []u8) return true;
-            }
-        }
-        return false;
-    }
-
-    /// Promote all escapable fields of a struct from frame arena to heap.
-    /// DEPRECATED: use promote() for new code. Kept for backward compat.
-    /// Deep-copy a union value's heap-owning payload (strings, slices, struct fields).
-    pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
-        const info = @typeInfo(T);
-        if (info != .@"union" or info.@"union".tag_type == null) return value;
-        var result = value;
-        inline for (info.@"union".fields) |field| {
-            if (std.meta.activeTag(value) == @field(std.meta.Tag(T), field.name)) {
-                const FT = field.type;
-                const ft_info = @typeInfo(FT);
-                if (FT == []const u8) {
-                    const src = @field(value, field.name);
-                    @field(result, field.name) = if (src.len > 0) try alloc.dupe(u8, src) else src;
-                    return result;
-                } else if (ft_info == .pointer and ft_info.pointer.size == .slice and FT != []u8) {
-                    const src = @field(value, field.name);
-                    if (src.len > 0) {
-                        const ElemT = ft_info.pointer.child;
-                        const buf = try alloc.alloc(ElemT, src.len);
-                        for (src, 0..) |elem, i| {
-                            buf[i] = dupeUnionValue(ElemT, elem, alloc) catch elem;
-                        }
-                        @field(result, field.name) = buf;
-                    }
-                    return result;
-                } else if (ft_info == .@"struct" and
-                    !isArrayList(FT) and !isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
-                    !(@hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")))
-                {
-                    @field(result, field.name) = dupeStructSlices(FT, @field(value, field.name), alloc) catch @field(value, field.name);
-                    return result;
-                }
-                return value;
-            }
-        }
-        return value;
-    }
-
-    /// Deep-copy slice and pointer fields inside a struct.
-    fn dupeStructSlices(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return value;
-        var result = value;
-        inline for (info.@"struct".fields) |field| {
-            const FT = field.type;
-            const ft_info = @typeInfo(FT);
-            if (ft_info == .pointer and ft_info.pointer.size == .slice) {
-                const src = @field(value, field.name);
-                if (src.len > 0) {
-                    const ElemT = ft_info.pointer.child;
-                    if (FT == []const u8 or FT == []u8) {
-                        @field(result, field.name) = try alloc.dupe(u8, src);
-                    } else {
-                        const buf = try alloc.alloc(ElemT, src.len);
-                        for (src, 0..) |elem, i| {
-                            buf[i] = dupeUnionValue(ElemT, elem, alloc) catch elem;
-                        }
-                        @field(result, field.name) = buf;
-                    }
-                }
-            } else if (ft_info == .pointer and ft_info.pointer.size == .one) {
-                const child_ptr = @field(value, field.name);
-                const ChildT = ft_info.pointer.child;
-                const new_ptr = try alloc.create(ChildT);
-                new_ptr.* = dupeUnionValue(ChildT, child_ptr.*, alloc) catch child_ptr.*;
-                @field(result, field.name) = new_ptr;
-            } else if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
-                @field(result, field.name) = dupeUnionValue(FT, @field(value, field.name), alloc) catch @field(value, field.name);
-            }
-        }
-        return result;
-    }
-
-    pub fn promoteFields(comptime T: type, rt: *Runtime, value: *T) !void {
-        try promote(T, rt, value);
-    }
-
-    /// Generic comptime promotion: walks any type and dupes all frame-arena
-    /// data to heap. Handles strings, ArrayLists, StringMaps, structs, and
-    /// tagged unions recursively. No-op for primitives (comptime eliminated).
-    pub fn promote(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
-        const info = @typeInfo(T);
-
-        // 1. Strings: dupe to heap
-        if (T == []const u8 or T == []u8) {
-            value.* = try rt.heapAlloc().dupe(u8, value.*);
-            return;
-        }
-
-        // 2. ArrayList: promote backing buffer + recurse into elements
-        if (comptime isArrayList(T)) {
-            const ElemT = comptime arrayListElemType(T).?;
-            try promoteList(ElemT, rt, value);
-            // Recursively promote elements if they contain escapable data
-            if (comptime needsPromotion(ElemT)) {
-                for (value.items) |*elem| {
-                    try promote(ElemT, rt, elem);
-                }
-            }
-            return;
-        }
-
-        // 3. StringMap: alloc is already heapAlloc (set at construction).
-        // Ensure alloc field is heap. Keys and values are managed by StringMap.
-        if (comptime isStringMap(T)) {
-            value.alloc = rt.heapAlloc();
-            return;
-        }
-
-        // 4. Tagged unions: promote the active variant's payload
-        if (info == .@"union" and info.@"union".tag_type != null) {
-            inline for (info.@"union".fields) |field| {
-                if (comptime needsPromotion(field.type)) {
-                    if (std.meta.activeTag(value.*) == @field(std.meta.Tag(T), field.name)) {
-                        try promote(field.type, rt, &@field(value, field.name));
-                        return;
-                    }
-                }
-            }
-            return;
-        }
-
-        // 5. Structs: walk fields recursively
-        if (info == .@"struct") {
-            inline for (info.@"struct".fields) |field| {
-                if (comptime needsPromotion(field.type)) {
-                    try promote(field.type, rt, &@field(value, field.name));
-                }
-            }
-            return;
-        }
-
-        // Primitives, enums, etc.: no-op (comptime-eliminated)
-    }
-
-    /// Returns true if a type has data that needs promotion (frame -> heap).
-    fn needsPromotion(comptime FT: type) bool {
-        if (FT == []const u8 or FT == []u8) return true;
-        if (isArrayList(FT)) return true;
-        if (isStringMap(FT)) return true;
-        const ft_info = @typeInfo(FT);
-        if (ft_info == .@"struct") {
-            inline for (ft_info.@"struct".fields) |field| {
-                if (comptime needsPromotion(field.type)) return true;
-            }
-        }
-        if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
-            inline for (ft_info.@"union".fields) |field| {
-                if (comptime needsPromotion(field.type)) return true;
-            }
-        }
-        return false;
-    }
-
-    fn isArrayList(comptime T: type) bool {
-        return arrayListElemType(T) != null;
-    }
-
-    fn arrayListElemType(comptime T: type) ?type {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return null;
-        const fields = info.@"struct".fields;
-        // ArrayListUnmanaged has `items` (slice) and `capacity` (usize)
-        var has_items = false;
-        var has_capacity = false;
-        var elem_type: ?type = null;
-        inline for (fields) |f| {
-            if (comptime std.mem.eql(u8, f.name, "items")) {
-                has_items = true;
-                const slice_info = @typeInfo(f.type);
-                if (slice_info == .pointer and slice_info.pointer.size == .slice) {
-                    elem_type = slice_info.pointer.child;
-                }
-            }
-            if (comptime std.mem.eql(u8, f.name, "capacity")) has_capacity = true;
-        }
-        if (has_items and has_capacity) return elem_type;
-        return null;
-    }
-
-    /// Deinit a list whose elements may be ref-counted. Releases each element
-    /// before freeing the backing buffer. If elements are not ref-counted,
-    /// comptime eliminates the release loop entirely.
-    pub fn deinitList(comptime ElemT: type, alloc: std.mem.Allocator, heapAlloc: std.mem.Allocator, list: *std.ArrayListUnmanaged(ElemT)) void {
-        if (comptime refInnerType(ElemT) != null) {
-            for (list.items) |item| {
-                releaseOne(ElemT, heapAlloc, item);
-            }
-        }
-        list.deinit(alloc);
-    }
-
-    /// Deinit a set whose elements may be ref-counted. Releases each element
-    /// before freeing the backing hashmap. For string sets, frees duped keys.
-    /// If elements are not ref-counted, comptime eliminates the release loop.
-    pub fn deinitSet(comptime ElemT: type, alloc: std.mem.Allocator, set: *Set(ElemT)) void {
-        const is_string = ElemT == []const u8;
-        if (comptime refInnerType(ElemT) != null) {
-            var it = set.inner.keyIterator();
-            while (it.next()) |key_ptr| {
-                releaseOne(ElemT, alloc, key_ptr.*);
-            }
-        }
-        if (is_string) {
-            var it = set.inner.keyIterator();
-            while (it.next()) |key_ptr| alloc.free(key_ptr.*);
-        }
-        set.inner.deinit(alloc);
     }
 
     // -------------------------------------------------------------------------
@@ -2100,42 +1197,6 @@ pub const CheatLib = struct {
                 }
             };
         };
-    }
-
-    // -------------------------------------------------------------------------
-    // Interior Mutability (RefCell)
-    // -------------------------------------------------------------------------
-
-    /// RefCell(T): interior mutability without a mutex. Single-thread only.
-    /// Allows mutation through const bindings. Panics on overlapping mutable borrows.
-    pub fn RefCell(comptime T: type) type {
-        return struct {
-            data: T,
-
-            const Self = @This();
-
-            pub fn init(val: T) Self {
-                return .{ .data = val };
-            }
-
-            pub fn get(self: *Self) *T {
-                return &self.data;
-            }
-
-            pub fn getConst(self: *const Self) *const T {
-                return &self.data;
-            }
-        };
-    }
-
-    pub fn refCellCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*RefCell(T) {
-        const ptr = try alloc.create(RefCell(T));
-        ptr.* = RefCell(T).init(data);
-        return ptr;
-    }
-
-    pub fn refCellDestroy(comptime T: type, alloc: std.mem.Allocator, rc: *RefCell(T)) void {
-        alloc.destroy(rc);
     }
 
     /// Heap-allocate a new Locked(T) wrapping a value of type T.
@@ -2544,7 +1605,7 @@ pub const CheatLib = struct {
                         return; // Value was consumed — proceed to next YIELD
                     }
                     const task = inner.sched.getCurrent();
-                    task.status.store(.Blocked, .release);
+                    task.status = .Blocked;
                     inner.producer_task = task;
                     inner.lock.store(0, .release);
                     task.base.yield();
@@ -2578,7 +1639,7 @@ pub const CheatLib = struct {
                         return val;
                     }
                     const task = inner.sched.getCurrent();
-                    task.status.store(.Blocked, .release);
+                    task.status = .Blocked;
                     inner.consumer_task = task;
                     inner.lock.store(0, .release);
                     task.base.yield();
@@ -2668,19 +1729,8 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-                // Clean up live elements: deinit any StringMap fields.
-                for (self.slots) |*slot| {
-                    if (slot.alive) {
-                        deinitFields(&slot.value, allocator);
-                    }
-                }
                 allocator.free(self.slots);
                 allocator.free(self.free_stack);
-            }
-
-            /// Cleanup all fields of a struct value using CheatLib.cleanup.
-            fn deinitFields(value: *T, alloc: std.mem.Allocator) void {
-                CheatLib.cleanup(T, alloc, value);
             }
 
             /// Insert a value, returning a stable u64 handle. O(1).
@@ -2984,7 +2034,6 @@ pub const CheatLib = struct {
                 if (is_string) {
                     if (!self.inner.contains(value)) {
                         const owned = try alloc.dupe(u8, value);
-                        errdefer alloc.free(owned);
                         try self.inner.put(alloc, owned, {});
                     }
                 } else {
@@ -3055,12 +2104,7 @@ pub const CheatLib = struct {
             ownership_init: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
             pub fn shardIndex(key: []const u8) usize {
-                return @as(usize, std.hash_map.hashString(key)) % N;
-            }
-
-            pub fn shardIndexWithHash(key: []const u8) struct { shard: usize, hash: u64 } {
-                const h = std.hash_map.hashString(key);
-                return .{ .shard = @as(usize, h) % N, .hash = h };
+                return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
             /// Initialize shard-to-scheduler ownership mapping.
@@ -3179,7 +2223,7 @@ pub const CheatLib = struct {
                 // Cost: ~100ns per yield (register save/restore).
                 while (!done_flag.load(.acquire)) {
                     const task = fp.active_scheduler.getCurrent();
-                    task.status.store(.Ready, .release);
+                    task.status = .Ready;
                     task.base.yield();
                 }
             }
@@ -3241,37 +2285,6 @@ pub const CheatLib = struct {
                     if (comptime is_slice_value) alloc.free(safe_val);
                     return e;
                 };
-            }
-
-            /// Insert using a pre-computed hash. The hash MUST have been computed
-            /// by shardIndexWithHash (Wyhash) — the same function StringHashMap uses.
-            /// Skips rehashing the key, saving ~50% of hash work in SHARD pipelines.
-            pub fn putPrehashed(self: *Self, shard: usize, precomputed_hash: u64, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
-                const owned_key = try alloc.dupe(u8, key);
-                const safe_val = if (comptime is_slice_value)
-                    try alloc.dupe(@typeInfo(V).pointer.child, value)
-                else
-                    value;
-                const PrehashedCtx = struct {
-                    h: u64,
-                    pub fn hash(self_ctx: @This(), _: []const u8) u64 { return self_ctx.h; }
-                    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool { return std.mem.eql(u8, a, b); }
-                };
-                const gop = self.shards[shard].map.getOrPutAdapted(alloc, owned_key, PrehashedCtx{ .h = precomputed_hash }) catch |e| {
-                    alloc.free(owned_key);
-                    if (comptime is_slice_value) alloc.free(safe_val);
-                    return e;
-                };
-                if (gop.found_existing) {
-                    alloc.free(owned_key);
-                    if (comptime is_slice_value) {
-                        const old = gop.value_ptr.*;
-                        alloc.free(old);
-                    }
-                } else {
-                    gop.key_ptr.* = owned_key;
-                }
-                gop.value_ptr.* = safe_val;
             }
 
             pub fn getDirect(self: *Self, shard: usize, key: []const u8) ?V {
@@ -3344,6 +2357,7 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.RwLock = .{},
+                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -3359,6 +2373,7 @@ pub const CheatLib = struct {
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
+                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 if (self.shards[s].map.getPtr(key)) |val_ptr| {
                     val_ptr.* = value;
                     return;
@@ -3371,6 +2386,7 @@ pub const CheatLib = struct {
                 const s = shardIndex(key);
                 self.shards[s].lock.lockShared();
                 defer self.shards[s].lock.unlockShared();
+                _ = self.shards[s].ops.fetchAdd(1, .monotonic);
                 return self.shards[s].map.get(key);
             }
 
@@ -3434,14 +2450,12 @@ pub const CheatLib = struct {
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {
-                _ = self;
-                return [_]u64{0} ** N;
+                var counts: [N]u64 = undefined;
+                for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
+                return counts;
             }
         };
     }
-
-    // MutexShardedStringMap: report contention stats to stderr on deinit.
-    // This is temporary instrumentation for performance debugging.
 
     // MutexShardedStringMap(V, N) — Mutex-sharded string hash map.
     // Like ShardedStringMap but uses Mutex (exclusive) instead of RwLock.
@@ -3456,8 +2470,6 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.Mutex = .{},
-                contention_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-                lock_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -3467,66 +2479,11 @@ pub const CheatLib = struct {
                 return @as(usize, std.hash.Fnv1a_64.hash(key)) % N;
             }
 
-            inline fn instrumentedLock(shard: *Shard) void {
-                _ = shard.lock_count.fetchAdd(1, .monotonic);
-                if (!shard.lock.tryLock()) {
-                    _ = shard.contention_count.fetchAdd(1, .monotonic);
-                    shard.lock.lock();
-                }
-            }
-
-            pub fn getContentionStats(self: *Self) struct { total_locks: u64, total_contentions: u64, hot_shard_locks: u64, hot_shard_contentions: u64, hot_shard_idx: usize } {
-                var total_locks: u64 = 0;
-                var total_contentions: u64 = 0;
-                var hot_shard_locks: u64 = 0;
-                var hot_shard_contentions: u64 = 0;
-                var hot_shard_idx: usize = 0;
-                for (&self.shards, 0..) |*shard, i| {
-                    const lc = shard.lock_count.load(.monotonic);
-                    const cc = shard.contention_count.load(.monotonic);
-                    total_locks += lc;
-                    total_contentions += cc;
-                    if (lc > hot_shard_locks) {
-                        hot_shard_locks = lc;
-                        hot_shard_contentions = cc;
-                        hot_shard_idx = i;
-                    }
-                }
-                return .{ .total_locks = total_locks, .total_contentions = total_contentions, .hot_shard_locks = hot_shard_locks, .hot_shard_contentions = hot_shard_contentions, .hot_shard_idx = hot_shard_idx };
-            }
-
-            pub fn printShardDistribution(self: *Self) void {
-                // Print top 5 shards by lock count
-                var top_idx: [5]usize = .{0} ** 5;
-                var top_cnt: [5]u64 = .{0} ** 5;
-                for (&self.shards, 0..) |*shard, i| {
-                    const lc = shard.lock_count.load(.monotonic);
-                    for (0..5) |j| {
-                        if (lc > top_cnt[j]) {
-                            // Shift down
-                            var k: usize = 4;
-                            while (k > j) : (k -= 1) {
-                                top_idx[k] = top_idx[k - 1];
-                                top_cnt[k] = top_cnt[k - 1];
-                            }
-                            top_idx[j] = i;
-                            top_cnt[j] = lc;
-                            break;
-                        }
-                    }
-                }
-                std.debug.print("[top shards] ", .{});
-                for (0..5) |j| {
-                    if (top_cnt[j] > 0) std.debug.print("[{d}]={d} ", .{ top_idx[j], top_cnt[j] });
-                }
-                std.debug.print("\n", .{});
-            }
-
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 _ = key_alloc;
                 _ = bucket_alloc;
                 const s = shardIndex(key);
-                instrumentedLock(&self.shards[s]);
+                self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
                 // Update in-place if key exists (avoids key re-dupe and leak).
                 if (self.shards[s].map.getPtr(key)) |val_ptr| {
@@ -3539,7 +2496,7 @@ pub const CheatLib = struct {
 
             pub fn get(self: *Self, key: []const u8) ?V {
                 const s = shardIndex(key);
-                instrumentedLock(&self.shards[s]);
+                self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
                 return self.shards[s].map.get(key);
             }
@@ -3596,18 +2553,6 @@ pub const CheatLib = struct {
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
                 _ = key_alloc;
                 _ = bucket_alloc;
-                // Report contention stats
-                const stats = self.getContentionStats();
-                if (stats.total_locks > 0) {
-                    const pct = if (stats.total_locks > 0) (stats.total_contentions * 100) / stats.total_locks else 0;
-                    const hot_pct = if (stats.hot_shard_locks > 0) (stats.hot_shard_contentions * 100) / stats.hot_shard_locks else 0;
-                    std.debug.print("[contention] locks={d} contentions={d} ({d}%) hot_shard[{d}]: locks={d} contentions={d} ({d}%)\n", .{
-                        stats.total_locks, stats.total_contentions, pct,
-                        stats.hot_shard_idx,
-                        stats.hot_shard_locks, stats.hot_shard_contentions, hot_pct,
-                    });
-                    self.printShardDistribution();
-                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
                     while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
@@ -3635,6 +2580,7 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.Mutex = .{},
+                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -3649,6 +2595,7 @@ pub const CheatLib = struct {
             }
 
             inline fn acquire(shard: *Shard, elided: bool) void {
+                _ = shard.ops.fetchAdd(1, .monotonic);
                 if (!elided) shard.lock.lock();
             }
 
@@ -3710,8 +2657,9 @@ pub const CheatLib = struct {
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {
-                _ = self;
-                return [_]u64{0} ** N;
+                var counts: [N]u64 = undefined;
+                for (0..N) |i| counts[i] = self.shards[i].ops.load(.monotonic);
+                return counts;
             }
 
             pub fn enableLocks(self: *Self) void {
@@ -3770,147 +2718,6 @@ pub const CheatLib = struct {
 
         return frame.ret;
     }
-
-    // =====================================================================
-    // Benchmark / Profile / Smash Infrastructure
-    // =====================================================================
-
-    pub const BenchmarkResult = struct {
-        iterations: u64,
-        total_ns: u64,
-        min_ns: u64,
-        max_ns: u64,
-        avg_ns: u64,
-        p50_ns: u64,
-        p99_ns: u64,
-        alloc_count: u64,
-        alloc_bytes: u64,
-        arena_high_water: usize,
-    };
-
-    /// Run a function N times, measuring wall-clock time, allocations, and arena usage.
-    pub fn benchmark(
-        comptime func: anytype,
-        rt: *Runtime,
-        args: anytype,
-        iterations: u64,
-    ) BenchmarkResult {
-        const alloc_profile = @import("alloc-profile.zig");
-        const timer = std.time.Timer;
-
-        const max_samples = @min(iterations, 10_000);
-        var samples: [10_000]u64 = undefined;
-        var sample_count: u64 = 0;
-
-        const alloc_before = alloc_profile.totalAllocs();
-        const bytes_before = alloc_profile.totalBytes();
-
-        var total_ns: u64 = 0;
-        var min_ns: u64 = std.math.maxInt(u64);
-        var max_ns: u64 = 0;
-        var arena_hw: usize = 0;
-
-        var i: u64 = 0;
-        while (i < iterations) : (i += 1) {
-            const mark = rt.saveFrameMark();
-            var t = timer.start() catch continue;
-
-            const ResultType = @typeInfo(@TypeOf(func)).@"fn".return_type.?;
-            if (@typeInfo(ResultType) == .error_union) {
-                _ = @call(.auto, func, .{rt} ++ args) catch {};
-            } else {
-                _ = @call(.auto, func, .{rt} ++ args);
-            }
-            const elapsed = t.read();
-
-            const cursor = rt.overflow_arena.cursor;
-            if (cursor > arena_hw) arena_hw = cursor;
-            rt.restoreFrameMark(mark);
-
-            total_ns += elapsed;
-            if (elapsed < min_ns) min_ns = elapsed;
-            if (elapsed > max_ns) max_ns = elapsed;
-            if (sample_count < max_samples) {
-                samples[sample_count] = elapsed;
-                sample_count += 1;
-            }
-        }
-
-        const alloc_after = alloc_profile.totalAllocs();
-        const bytes_after = alloc_profile.totalBytes();
-
-        if (sample_count > 0) {
-            std.mem.sort(u64, samples[0..sample_count], {}, std.sort.asc(u64));
-        }
-        const p50_idx = if (sample_count > 0) sample_count / 2 else 0;
-        const p99_idx = if (sample_count > 0) (sample_count * 99) / 100 else 0;
-
-        return BenchmarkResult{
-            .iterations = iterations,
-            .total_ns = total_ns,
-            .min_ns = if (min_ns == std.math.maxInt(u64)) 0 else min_ns,
-            .max_ns = max_ns,
-            .avg_ns = if (iterations > 0) total_ns / iterations else 0,
-            .p50_ns = if (sample_count > 0) samples[p50_idx] else 0,
-            .p99_ns = if (sample_count > 0) samples[p99_idx] else 0,
-            .alloc_count = alloc_after - alloc_before,
-            .alloc_bytes = bytes_after - bytes_before,
-            .arena_high_water = arena_hw,
-        };
-    }
-
-    /// Print a BenchmarkResult to stderr.
-    pub fn printBenchmarkResult(name: []const u8, r: BenchmarkResult) void {
-        std.debug.print("\nBENCHMARK {s} x{d}:\n", .{ name, r.iterations });
-        std.debug.print("  Time:    {d:.1}ms avg ({d:.1}ms min, {d:.1}ms max)\n", .{
-            @as(f64, @floatFromInt(r.avg_ns)) / 1_000_000.0,
-            @as(f64, @floatFromInt(r.min_ns)) / 1_000_000.0,
-            @as(f64, @floatFromInt(r.max_ns)) / 1_000_000.0,
-        });
-        std.debug.print("  Latency: {d:.1}ms p50, {d:.1}ms p99\n", .{
-            @as(f64, @floatFromInt(r.p50_ns)) / 1_000_000.0,
-            @as(f64, @floatFromInt(r.p99_ns)) / 1_000_000.0,
-        });
-        if (r.alloc_count > 0) {
-            const per_call = if (r.iterations > 0) r.alloc_count / r.iterations else 0;
-            std.debug.print("  Allocs:  {d} total ({d} per call, {d} KB)\n", .{
-                r.alloc_count, per_call, r.alloc_bytes / 1024,
-            });
-        }
-        if (r.arena_high_water > 0) {
-            std.debug.print("  Arena:   {d} KB high-water\n", .{r.arena_high_water / 1024});
-        }
-    }
-
-    /// Generate keys that all route to the same shard in a sharded map.
-    pub fn generateSkewKeys(
-        comptime N: usize,
-        target_shard: usize,
-        count: usize,
-        allocator: std.mem.Allocator,
-    ) ![][]const u8 {
-        var keys = try allocator.alloc([]const u8, count);
-        var found: usize = 0;
-        var candidate: u64 = 0;
-
-        while (found < count) : (candidate += 1) {
-            var buf: [20]u8 = undefined;
-            const key_str = std.fmt.bufPrint(&buf, "sk{d}", .{candidate}) catch continue;
-            const h = std.hash_map.hashString(key_str);
-            if (@as(usize, h) % N == target_shard) {
-                const duped = try allocator.dupe(u8, key_str);
-                keys[found] = duped;
-                found += 1;
-            }
-        }
-        return keys;
-    }
-
-    /// Free keys generated by generateSkewKeys.
-    pub fn freeSkewKeys(keys: [][]const u8, allocator: std.mem.Allocator) void {
-        for (keys) |k| allocator.free(k);
-        allocator.free(keys);
-    }
 };
 
 /// Module-level spawnPinned: distribute a pinned fiber round-robin across
@@ -3956,33 +2763,4 @@ pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, con
     try target.submitSpawn(trampoline_addr, user_fn, args, config);
 }
 
-/// Spawn a BG block on a dedicated OS thread (not a green fiber).
-/// Designed for heavy-compute tasks that are non-cooperative (no yields).
-/// The OS handles preemption. The result is delivered via the existing
-/// Promise/WaitGroup mechanism — the thread calls wg.done() when finished,
-/// which wakes the calling fiber on its scheduler.
-///
-/// Unlike fiber-based BG, the user function receives a freshly allocated
-/// Runtime with its own frame arena. No scheduler is involved — the thread
-/// runs independently until completion.
-pub fn spawnOsThread(user_fn: TaskFn, args: ?*anyopaque) !void {
-    _ = std.Thread.spawn(.{}, struct {
-        fn run(fn_ptr: TaskFn, fn_args: ?*anyopaque) void {
-            // Allocate a standalone Runtime for this thread.
-            // Use c_allocator (no GPA — OS threads are outside the scheduler).
-            const allocator = std.heap.c_allocator;
-            const frame_size = 64 * 1024; // 64 KB frame arena
-            const frame_mem = allocator.alloc(u8, frame_size) catch return;
-            defer allocator.free(frame_mem);
-
-            var global_ctx = EbrContext{};
-            var rt = Runtime.initFromSlice(frame_mem, &global_ctx, allocator, 0) catch return;
-            defer rt.deinit();
-            rt.wireAllocator();
-
-            const rt_ptr = @as(*anyopaque, @ptrCast(&rt));
-            if (fn_ptr(rt_ptr, fn_args)) |_| {} else |_| {}
-        }
-    }.run, .{ user_fn, args }) catch return error.ThreadSpawnFailed;
-}
 

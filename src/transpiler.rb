@@ -14,7 +14,6 @@ require_relative "./pipeline_generator"
 require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
 require_relative "./importer"
-require_relative "./promotion_plan"
 require_relative "./transpiler_context"
 
 class ZigTranspiler
@@ -37,53 +36,31 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false)
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false)
     @source_dir = File.expand_path(source_dir)
-    @test_mode = test_mode
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
     tokens    = Lexer.new(cheat_code).tokenize
     ast       = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
-    @ownership_graph = annotator.instance_variable_get(:@og)
-
-    # Pass C: compute promotion + cleanup plans for all functions.
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    @promotion_plans = {}
-    @cleanup_plans = {}
-    fn_nodes.each do |name, fn|
-      @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
-      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    end
 
     @needs_safety_import = false
     # Pre-populate needs_rt/can_fail lookup tables from annotated FunctionDef nodes
     # so call sites can look up callee flags before the callee's definition is visited.
     @fn_needs_rt = {}
     @fn_can_fail = {}
-    @fn_effects = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
       @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
-      @fn_effects[stmt.name] = stmt.effects || Set.new
     end
     body = visit(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
     # Auto-detect: use c_allocator when @sharded maps or @pinned BG blocks are present.
     # GPA is not suitable for multi-threaded workloads (canary corruption under concurrent load).
-    needs_c_alloc = !test_mode && (use_c_allocator || @used_sharded_map)
+    needs_c_alloc = use_c_allocator || @used_sharded_map
     alloc_config = needs_c_alloc ? "pub const USE_C_ALLOCATOR = true;\n" : ""
-
-    has_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
-    footer = if test_mode
-      has_main ? TEST_FOOTER : ""
-    else
-      File.read("./zig/runtime-footer.zig")
-    end
 
     <<~ZIG
       const std = @import("std");
@@ -98,63 +75,16 @@ class ZigTranspiler
       #{body}
 
       // -------------------------------------------------------------------------
-      // 3. #{test_mode ? 'Test Harness' : 'Main Entry'}
+      // 3. Main Entry (Test Harness)
       // -------------------------------------------------------------------------
-      #{footer}
+      #{File.read("./zig/runtime-footer.zig")}
     ZIG
   end
-
-  TEST_FOOTER = <<~'ZIG'
-    test "cheat main" {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const allocator = gpa.allocator();
-        var global_ctx = EbrContext{};
-        defer global_ctx.deinit(allocator);
-        var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-        defer rt.deinit();
-        rt.wireAllocator();
-        const fp = @import("scheduler.zig");
-        const fm = @import("fiber-memory.zig");
-        var stack_pool = fm.StackPool.init(allocator);
-        defer stack_pool.deinit();
-        var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
-        defer {
-            fp.scheduler_running = false;
-            sched.deinit();
-            fp.global_registry.deinit(allocator);
-        }
-        fp.active_scheduler = &sched;
-        fp.scheduler_running = true;
-        const MainRunner = struct {
-            fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                _ = raw_args;
-                const rt_ptr: *Runtime = @ptrCast(@alignCast(raw_rt));
-                try clearMain(rt_ptr);
-            }
-        };
-        try sched.submitSpawn(
-            @intFromPtr(&Runtime.entryWrapper),
-            @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
-            null,
-            .{ .stack_size = .Large },
-        );
-        sched.run();
-    }
-  ZIG
 
   # Module entry point: transpile a pre-parsed+annotated AST, emitting only
   # declarations that are importable (non-private). Used by ModuleImporter.
   def transpile_module(ast)
     @emitted_extern_modules = Set.new
-    # Pre-populate needs_rt/can_fail so call sites emit correct signatures.
-    @fn_needs_rt ||= {}
-    @fn_can_fail ||= {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
-      @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
-    end
     parts = []
     ast.statements.each do |stmt|
       case stmt
@@ -202,52 +132,7 @@ class ZigTranspiler
     # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
     has_cheat_main = ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
-    needs_scheduler = cheat_code.include?("DO {") || cheat_code.include?("BG {") ||
-                      cheat_code.include?("BG STREAM {") ||
-                      cheat_code.include?("TCPServer") || cheat_code.include?("TCPClient") ||
-                      cheat_code.include?("@pinned")
-
-    test_block = if has_cheat_main && needs_scheduler
-      <<~ZIG_TEST
-
-        test "cheat main" {
-            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-            defer _ = gpa.deinit();
-            const allocator = gpa.allocator();
-            var global_ctx = EbrContext{};
-            defer global_ctx.deinit(allocator);
-            var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-            defer rt.deinit();
-            rt.wireAllocator();
-            const fp = CheatHeader.scheduler;
-            const fm = CheatHeader.fiber_memory;
-            var stack_pool = fm.StackPool.init(allocator);
-            defer stack_pool.deinit();
-            var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
-            defer {
-                fp.scheduler_running = false;
-                sched.deinit();
-                fp.global_registry.deinit(allocator);
-            }
-            fp.active_scheduler = &sched;
-            fp.scheduler_running = true;
-            const MainRunner = struct {
-                fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                    _ = raw_args;
-                    const rt_ptr: *Runtime = @ptrCast(@alignCast(raw_rt));
-                    try clearMain(rt_ptr);
-                }
-            };
-            try sched.submitSpawn(
-                @intFromPtr(&Runtime.entryWrapper),
-                @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
-                null,
-                .{ .stack_size = .Large },
-            );
-            sched.run();
-        }
-      ZIG_TEST
-    elsif has_cheat_main
+    test_block = if has_cheat_main
       <<~ZIG_TEST
 
         test "cheat main" {
@@ -280,21 +165,6 @@ class ZigTranspiler
 
 private
 
-  # Compute cleanup plans from the annotated AST if not already done.
-  # Called from visit_node(Program) to handle specs that bypass `transpile`.
-  def ensure_cleanup_plans!(program_node)
-    return if @cleanup_plans && !@cleanup_plans.empty?
-    @cleanup_plans ||= {}
-    @promotion_plans ||= {}
-    fn_nodes = {}
-    program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-    fn_nodes.each do |name, fn|
-      @promotion_plans[name] ||= PromotionPlan.compute(fn, schema_lookup: schema_lookup)
-      @cleanup_plans[name] ||= CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    end
-  end
-
   def visit(node)
     code = visit_node(node)
     # SROA path: stack-allocated fixed-array literals are emitted as raw [N]T{...} which
@@ -312,9 +182,6 @@ private
     case node
     when AST::Program
       @emitted_extern_modules = Set.new
-      # Ensure cleanup plans are computed (needed when visit is called directly
-      # without going through the transpile method, e.g. from specs).
-      ensure_cleanup_plans!(node)
       node.statements.map { |stmt|
         code = visit(stmt)
         next nil unless code
@@ -437,34 +304,11 @@ private
         next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
         indirect = var_data[:indirect_fields] || Set.new
         fields = var_data[:fields].map do |fname, ftype|
-          zig_t = transpile_type(ftype, is_field: true)
+          zig_t = transpile_type(ftype, is_field: true)  # Union inline struct fields use slices like variant payloads
           zig_t = "*#{zig_t}" if indirect.include?(fname)
           "    #{fname}: #{zig_t},"
         end.join("\n")
-
-        # Generate deinit for inline structs that own heap data (@indirect, []T).
-        deinit_lines = []
-        var_data[:fields].each do |fname, ftype|
-          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          if indirect.include?(fname)
-            # @indirect: cleanup pointee then free pointer
-            zig_t = transpile_type(ftype, is_field: true)
-            deinit_lines << "        CheatLib.cleanup(#{zig_t}, alloc, self.#{fname});"
-            deinit_lines << "        alloc.destroy(self.#{fname});"
-          elsif ft.array? && !ft.string?
-            # Non-string slice: cleanup elements then free buffer
-            elem_zig = transpile_type(ft.element_type)
-            deinit_lines << "        if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (self.#{fname}) |*__e| { CheatLib.cleanup(#{elem_zig}, alloc, __e); } }"
-            deinit_lines << "        if (self.#{fname}.len > 0) alloc.free(self.#{fname});"
-          end
-        end
-
-        if deinit_lines.any?
-          deinit_body = deinit_lines.join("\n")
-          "const #{node.name}_#{var_name} = struct {\n#{fields}\n\n    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {\n#{deinit_body}\n    }\n};"
-        else
-          "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
-        end
+        "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
       end
 
       variants = node.variants.map do |var_name, var_data|
@@ -586,7 +430,6 @@ private
       comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
 
       fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
-      @current_fn_has_rt = fn_needs_rt
       fn_can_fail = node.can_fail.nil? ? true : node.can_fail
 
       all_params = if fn_needs_rt
@@ -607,13 +450,12 @@ private
       else
         final_type
       end
-      vis = (node.visibility == :pub || @test_mode) ? "pub " : ""
+      vis = node.visibility == :pub ? "pub " : ""
       signature = "#{vis}fn #{zig_safe_name(node.name)}(#{all_params.join(', ')}) #{return_type_str}"
 
       @transpiler_context_stack.push(TranspilerContext.new(
         uses_frame: node.uses_frame,
         has_rt: fn_needs_rt,
-        fn_name: node.name,
         collection_params: node.params.select { |p|
           pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
           pt.needs_pointer_passing?
@@ -628,21 +470,9 @@ private
       # types: primitives, Void, enums, unions (returned by copy, not pointer).
       uses_frame_or_alloc = node.uses_frame || node.uses_alloc
       ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
-      # Unions with string/collection variants must NOT rewind the frame —
-      # frame-allocated string payloads would be destroyed before the caller reads them.
-      union_has_strings = if @union_schemas&.key?(ret_type_obj.resolved)
-        @union_schemas[ret_type_obj.resolved]&.any? { |_, vt| vt && Type.new(vt).string? }
-      end
       returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
                            @enum_schemas&.key?(ret_type_obj.resolved) ||
-                           (@union_schemas&.key?(ret_type_obj.resolved) && !union_has_strings)
-      # Don't rewind frame for functions that mutate reference parameters
-      # (e.g., HashMap passed as MUTABLE). Frame-allocated data stored through
-      # the parameter would be destroyed on rewind.
-      has_mutable_ref_param = node.params&.any? { |p|
-        p[:mutable] && (p[:type].to_s.include?("HashMap") || p[:type].to_s.include?("@pool") || p[:type].to_s.include?("@list"))
-      }
-      returns_value_type = false if has_mutable_ref_param
+                           @union_schemas&.key?(ret_type_obj.resolved)
       prologue = if fn_needs_rt
         (uses_frame_or_alloc && returns_value_type) ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
       else
@@ -672,116 +502,19 @@ private
         .map    { |name| "var #{name} = _m_#{name}; _ = &#{name};" }
         .join("\n    ")
 
-      # Emit cleanup for TAKES parameters via CleanupPlan.
-      fn_plan = @cleanup_plans&.dig(node.name)
-      takes_cleanup = (node.deferred_drops || []).filter_map { |drop|
-        param_def = node.params.find { |p| p[:name] == drop[:name] }
-        next unless param_def&.dig(:takes)
-        entry = fn_plan&.lookup(drop[:name])
-        next unless entry && entry[:needs_cleanup]
-        ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
-        proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, entry[:resource_close_zig], false)
-        emit_cleanup_from_entry(zig_safe_name(drop[:name]), entry, proxy)
-      }.reject(&:empty?).join("\n    ")
-
       prologue_parts = [prologue,
                         param_suppressions.empty? ? nil : param_suppressions,
-                        mutable_param_shadows.empty? ? nil : mutable_param_shadows,
-                        takes_cleanup.empty? ? nil : takes_cleanup].compact
+                        mutable_param_shadows.empty? ? nil : mutable_param_shadows].compact
       prologue = prologue_parts.join("\n    ")
-      has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
-      @current_fn_has_catch = has_catch
-      @current_fn_snapshot_types = Set.new if has_catch
-
-      prev_tail_call_fn = @current_tail_call_fn
-      @current_tail_call_fn = node.tail_call ? node.name : nil
       body = transpile_block(node.body)
-      @current_tail_call_fn = prev_tail_call_fn
       @transpiler_context_stack.pop
 
-      if !has_catch
-        <<~ZIG
-          #{signature} {
-              #{prologue}
-              #{body}
-          }
-        ZIG
-      else
-        # CATCH blocks: wrap the body so all `return error.X` are caught.
-        # We use errdefer to intercept errors before they leave the function.
-        # For functions that need to return a non-error value from CATCH,
-        # we wrap the body in a helper that we call with catch.
-        rt_name = @do_rt_name || "rt"
-
-        # After transpiling the body, check snapshot types for ambiguity
-        snap_types = @current_fn_snapshot_types || Set.new
-        snapshot_decl = ""
-        if snap_types.size == 1
-          snap_zig = transpile_type(snap_types.first)
-          # Unwrap the optional pointer so CATCH body can access snapshot.field directly
-          snapshot_decl = "const __snap_ptr = #{rt_name}.__error.snapshotAs(#{snap_zig});\n" \
-                          "            const snapshot = if (__snap_ptr) |p| p.* else undefined;\n" \
-                          "            const __has_snapshot = __snap_ptr != null;\n" \
-                          "            _ = &snapshot; _ = &__has_snapshot;"
-        end
-
-        # If this function has returns_promoted (set by Pass B), CATCH clause
-        # string returns must be duped to heap so both paths return heap-owned data.
-        catch_dupe = node.returns_promoted && node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
-
-        catch_clauses_zig = node.catch_clauses.map do |clause|
-          kind = clause[:kind]
-          error_name = clause[:error_name]
-          prev_catch_dupe = @catch_dupe_string_returns
-          @catch_dupe_string_returns = catch_dupe
-          clause_body_code = clause[:body].map { |s| visit(s) }.join("\n            ")
-          @catch_dupe_string_returns = prev_catch_dupe
-
-          cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
-          cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
-          cond = cond_parts.join(" and ")
-
-          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            #{rt_name}.freeSnapshot();\n            #{clause_body_code}\n        }"
-        end.join(" else ")
-
-        # DEFAULT clause
-        default_code = ""
-        if node.default_catch.is_a?(Array) && node.default_catch.any?
-          prev_catch_dupe = @catch_dupe_string_returns
-          @catch_dupe_string_returns = catch_dupe
-          default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
-          @catch_dupe_string_returns = prev_catch_dupe
-          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
-        else
-          # No DEFAULT: re-raise if function returns error union, else unreachable
-          if fn_can_fail
-            default_code = " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
-          else
-            default_code = " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
-          end
-        end
-
-        # Use an inner function so the body's errors can be caught.
-        # The inner function has the same signature; the outer catches errors.
-        # Generate call args: rt + user params (matching the inner function signature)
-        call_args = fn_needs_rt ? (["rt"] + node.params.map { |p| p[:name] }) : node.params.map { |p| p[:name] }
-        inner_params = all_params.join(', ')
-        inner_ret = fn_can_fail ? (final_type.start_with?("!") ? "anyerror!#{final_type[1..]}" : "anyerror!#{final_type}") : "!#{final_type}"
-        inner_name = "__#{node.name}_body"
-
-        <<~ZIG
-          fn #{inner_name}(#{inner_params}) #{inner_ret} {
-              #{prologue}
-              #{body}
-          }
-
-          #{signature} {
-              return #{inner_name}(#{call_args.join(', ')}) catch {
-                  #{catch_clauses_zig}#{default_code}
-              };
-          }
-        ZIG
-      end
+      <<~ZIG
+        #{signature} {
+            #{prologue}
+            #{body}
+        }
+      ZIG
 
     when AST::LambdaLit
       # Transpile a lambda literal as an anonymous Zig struct with a named `call` function.
@@ -816,6 +549,7 @@ private
 
       "&(struct { fn #{fn_name}(#{all_params.join(', ')}) #{ret_str} { #{sups} #{body_str} } }).#{fn_name}"
 
+    # TODO: Need to call destroy, have objects recursively destroy pointers / resources
     when AST::VarDecl
       is_mutable = node.respond_to?(:mutable) && node.mutable
       # Bounded/open/infinite streams and shared promises must be `var` even when declared
@@ -825,8 +559,6 @@ private
       is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
       is_mutable ||= ft.collection?
       is_mutable ||= ft.resource? || node.resource_close_zig  # Resources need var for defer deinit
-      # Union locals with graph-driven cleanup need `var` for CheatLib.cleanup.
-      is_mutable ||= @ownership_graph&.needs_cleanup?(node.name.to_s)
       # @local pointers are always `const` — mutation goes through the pointer, not the binding.
       # Same as @locked: the pointer itself never changes, only the pointee.
       is_mutable = false if ft.local?
@@ -848,7 +580,7 @@ private
       end
       has_mutable_cleanup = ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
                             ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
-                            node.type_info&.heap_promoted || ft&.resource? || node.resource_close_zig || struct_has_cleanup
+                            ft&.heap_promoted || ft&.resource? || node.resource_close_zig || struct_has_cleanup
       forced_var = is_mutable && has_mutable_cleanup
       keyword = if !is_mutable
         "const"
@@ -877,7 +609,6 @@ private
       rhs_ti = rhs_ident&.type_info
       rt_name = @do_rt_name || "rt"
 
-      current_tp_ctx&.bind_value_node = node.value
       value_code = if node.full_type&.pool?
         # Pool: pre-allocate with fixed capacity via initCapacity.
         rt_name = @do_rt_name || "rt"
@@ -892,28 +623,13 @@ private
         rhs = @current_rhs_is_move ? node.value.value : node.value
         if rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)
           visit(node.value)
-        elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
-          # T[N]@list: pre-allocate N slots to avoid realloc during append.
-          rt_name = @do_rt_name || "rt"
-          alloc = storage_alloc_expr(node.type_info)
-          "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{node.full_type.capacity})"
         else
           "#{node.full_type.zig_type}{}"
         end
       elsif node.type.is_a?(Type) && node.type.map? && node.type.striped?
         # Striped map (ShardedStringMap/MutexShardedStringMap): store heapAlloc.
         @used_sharded_map = true
-        if node.type.shared? || node.type.multiowned?
-          # Arc/Rc-wrapped striped map: build inner map, then wrap with Arc/Rc.
-          bare = Type.new(node.type.resolved.to_s)
-          bare.shard_count = node.type.shard_count
-          bare.sync = node.type.sync
-          bare_init = "#{bare.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
-          create_fn = node.type.shared? ? "arcCreate" : "rcCreate"
-          "try CheatLib.#{create_fn}(#{bare.zig_type}, #{rt_name}.heapAlloc(), #{bare_init})"
-        else
-          "#{node.type.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
-        end
+        "#{node.type.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
       elsif node.type.is_a?(Type) && node.type.map? && node.type.sharded?
         # PartitionedStringMap (shared-nothing): no alloc field.
         @used_sharded_map = true
@@ -924,15 +640,8 @@ private
         visit(node.value)
       end
 
-      current_tp_ctx&.bind_value_node = nil
-
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
-
-      # T[N]@list: expand len to capacity so indexed writes (arr[i] = val) work.
-      if node.full_type&.list_collection? && node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
-        decl += "\n#{safe_name}.expandToCapacity();"
-      end
 
       # 2. Cleanup & Move Suppression (must be computed before suppression decision)
       affine_logic = emit_cleanup(safe_name, node)
@@ -950,13 +659,7 @@ private
           "_ = &#{safe_name};"
         end
       else
-        # In test mode, always suppress unused const (stubs may bypass usage).
-        # In normal mode, suppress only when unused and no cleanup.
-        if @test_mode
-          "_ = &#{safe_name};"
-        else
-          (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
-        end
+        (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
       end
 
       "#{decl} #{suppression}\n#{affine_logic}\n#{move_source_logic}"
@@ -971,26 +674,12 @@ private
         proxy.slot_size          = node.slot_size
         proxy.resource_close_zig = node.resource_close_zig
         proxy.var_used           = node.var_used
-        proxy.container_borrow   = node.container_borrow
         visit(proxy)
       else
-        # Transpile as simple assignment - clean up old value for non-Copy types
-        current_tp_ctx&.bind_value_node = node.value
+        # Transpile as simple assignment
         value_str = visit(node.value)
-        current_tp_ctx&.bind_value_node = nil
         move_logic = emit_move_suppression(node.value)
-        safe = zig_safe_name(node.name)
-        # Before overwriting a non-Copy binding, clean up the old value.
-        fn_name = current_tp_ctx&.fn_name
-        entry = @cleanup_plans&.dig(fn_name)&.lookup(node.name)
-        if entry && entry[:needs_cleanup] && entry[:kind] != :resource
-          alloc = alloc_expr_from_plan(entry)
-          ti = node.type_info
-          zig_type = ti ? transpile_type(ti.resolved.to_s) : "UNKNOWN"
-          "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{value_str}; #{move_logic}"
-        else
-          "#{safe} = #{value_str}; #{move_logic}"
-        end
+        "#{zig_safe_name(node.name)} = #{value_str}; #{move_logic}"
       end
 
     when AST::Assignment
@@ -1002,7 +691,7 @@ private
         elsif node.name.is_a?(AST::Identifier)
           node.name.name
         elsif node.name.is_a?(AST::GetField)
-          # Auto-lock/auto-borrow: emit inline guard for one-line mutations.
+          # Auto-lock: emit inline mutex guard for one-line mutations on @locked/@writeLocked vars.
           if node.auto_lock
             var_name  = node.auto_lock[:var]
             sync      = node.auto_lock[:sync]
@@ -1011,23 +700,13 @@ private
             zig_var   = @do_capture_map&.dig(var_name) || var_name
             lock_expr = zig_var
 
-            if sync == :always_mutable
-              # RefCell: direct access through .data, no mutex guard
-              field = node.name.field
-              prev_locked_map = @locked_unwrap_map || {}
-              @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
-              value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
-              @locked_unwrap_map = prev_locked_map
-              return "#{zig_var}.get().#{field} = #{value};"
-            end
-
             acquire = sync == :write_locked ? "#{lock_expr}.write()" : "#{lock_expr}.acquire()"
             # Install locked unwrap map so RHS field reads also use the dereferenced pointer.
             prev_locked_map = @locked_unwrap_map || {}
             @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
             # Transpile field and value with the alias substituted for the target.
             field = node.name.field
-            value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.ctrl\.data\./, "#{alias_var}.")
+            value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
             @locked_unwrap_map = prev_locked_map
 
             return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value};\n}"
@@ -1038,38 +717,43 @@ private
           value  = visit(node.value)
           return "#{target}.#{field} = #{value};"
         elsif node.name.is_a?(AST::GetIndex)
+          # Check if target is a Map
           target_node = node.name.target
-          target_ti = target_node.type_info
-          rt_name = @do_rt_name || "rt"
+          if target_node.metatype == :hashmap
+             map_ft   = Type.new(target_node.full_type)
+             map_ref  = visit(target_node)
+             key_ref  = visit(node.name.index)
+             val_ref  = visit(node.value)
+             rt_name  = @do_rt_name || "rt"
 
-          # Auto-deref Arc/Rc-wrapped maps
-          target_ref = visit(target_node)
-          target_ref = "#{target_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
-
-          key_ref = visit(node.name.index)
+             if map_ft.numeric_map?
+               alloc = (map_ft.escaped_return || map_ft.heap_promoted || map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               if map_ft.sharded? || map_ft.striped?
+                 return "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
+               else
+                 key_zig = map_ft.key_type.zig_type
+                 val_zig = map_ft.value_type.zig_type
+                 return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
+               end
+             else
+               # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing
+               # Key comes from the pre-routed queue, not recomputed from the body expression.
+               if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
+                 return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
+               end
+               # The map stores its own allocator from the first put — the allocator
+               # passed here is captured by the map and used for all subsequent ops.
+               # Frame-local maps get frameAlloc (arena, zero-cost cleanup).
+               # Sharded/promoted maps get heapAlloc (GPA, tracked cleanup).
+               alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               return "try #{map_ref}.put(#{alloc}, #{alloc}, #{key_ref}, #{val_ref});"
+             end
+          end
+          arr_ref = visit(target_node)
+          idx_ref = visit(node.name.index)
           val_ref = visit(node.value)
 
-          # Shard-direct optimization (bypasses registry)
-          if target_ti&.map? && !target_ti&.numeric_map? && @shard_direct_map &&
-             target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
-            return "try #{target_ref}.putPrehashed(#{@shard_direct_idx}, #{@shard_direct_hash}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
-          end
-
-          # Sharded string map: direct put with single alloc
-          if target_ti&.map? && !target_ti&.numeric_map? && (target_ti&.sharded? || target_ti&.striped?)
-            return "try #{target_ref}.put(#{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
-          end
-
-          op = resolve_index_op(target_ti, :set)
-          if op
-            # String literals in map values must be heap-duped (rodata can't be freed)
-            val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name) if target_ti&.map?
-            move_logic = op[:takes_value] ? emit_move_suppression(node.value) : ""
-            code = emit_index_set(op, target_ref, key_ref, val_ref, target_ti, rt_name)
-            return move_logic.empty? ? "#{code};" : "#{code};\n#{move_logic}"
-          else
-            return "CheatLib.setAt(#{target_ref}, #{key_ref}, #{val_ref});"
-          end
+          return "CheatLib.setAt(#{arr_ref}, #{idx_ref}, #{val_ref});"
         else
           # Recursive visit for things like 'user.id' or 'list[0]'
           visit(node.name)
@@ -1156,6 +840,7 @@ private
       end
 
 
+    # TODO: Need overflow logic for frame to overflow to heap / malloc
     when AST::ListLit
       # 1. Determine the Zig Type (T)
       ti = node.coerced_type_info || node.type_info
@@ -1200,8 +885,8 @@ private
         return "[#{ti.capacity}]#{zig_type}{ #{items_code} }"
       end
 
-      # 2. Determine Allocator (from annotator's storage_alloc)
-      allocator = storage_alloc_expr(node.type_info)
+      # 2. Determine Allocator
+      allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
 
       # 3. Generate Items Slice
       if node.items.empty?
@@ -1234,25 +919,34 @@ private
       transpile_hash_lit(node)
 
     when AST::GetIndex
+      # 1. Resolve Target and Index
       target = visit(node.target)
       index = visit(node.index)
-      target_ti = node.target.type_info
 
-      # Auto-deref Arc/Rc-wrapped maps
-      target = "#{target}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
+      if node.target.metatype == :hashmap
+        map_ft = Type.new(node.target.full_type)
 
-      # Shard-direct optimization (bypasses registry for perf-critical path)
-      if target_ti&.map? && @shard_direct_map && node.target.is_a?(AST::Identifier) && node.target.name == @shard_direct_map
-        "#{target}.getDirect(#{@shard_direct_idx}, #{@shard_direct_key})"
-      else
-        op = resolve_index_op(target_ti, :get)
-        if op
-          emit_index_get(op, target, index, target_ti)
-        elsif target_ti&.string?
-          "CheatLib.charAt(#{target}, #{index})"
+        if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
+          key_zig = map_ft.key_type.zig_type
+          val_zig = map_ft.value_type.zig_type
+          "CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target}, #{index})"
         else
-          "CheatLib.getAt(#{target}, #{index})"
+          # Shard-direct: getDirect(shard_idx, key) — no hash, no routing
+          # Key comes from the pre-routed queue, not recomputed from the index expression.
+          if @shard_direct_map && node.target.is_a?(AST::Identifier) && node.target.name == @shard_direct_map
+            "#{target}.getDirect(#{@shard_direct_idx}, #{@shard_direct_key})"
+          else
+            # Unified .get() API works for StringMap, PartitionedStringMap, ShardedStringMap
+            "#{target}.get(#{index})"
+          end
         end
+      elsif node.target.type_info&.pool?
+        "#{target}.get(#{index})"
+      elsif node.target.type_info&.string?
+        # String indexing: returns a single-char string ([]const u8), not a byte
+        "CheatLib.charAt(#{target}, #{index})"
+      else
+        "CheatLib.getAt(#{target}, #{index})"
       end
 
     # TODO: See where drops live
@@ -1297,38 +991,7 @@ private
           cond = "std.meta.activeTag(#{subject}) == .#{variant}"
           # Emit payload binding: `const r = subject.Variant;`
           if c[:binding]
-            # Use var if MATCH-as-move will emit deinit (needs mutable self)
-            bind_kw = (node.expr.is_a?(AST::Identifier) && node.expr.was_moved) ? "var" : "const"
-            binding_decl = "#{bind_kw} #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
-            # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup
-            # on source and emit cleanup on the AS binding.
-            if node.expr.is_a?(AST::Identifier) && node.expr.was_moved
-              src_name = zig_safe_name(node.expr.name)
-              sym = node.expr.respond_to?(:symbol) ? node.expr.symbol : nil
-              decl = sym&.reg
-              is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-              is_takes_param = sym&.respond_to?(:takes) && sym&.takes
-              # Only suppress source cleanup in branches where the AS binding
-              # takes ownership (has a CleanupPlan entry). For borrowed payloads
-              # (strings, primitives), let the source's defer handle cleanup.
-              fn_name = current_tp_ctx&.fn_name
-              as_entry = @cleanup_plans&.dig(fn_name)&.lookup(c[:binding])
-              if as_entry && as_entry[:needs_cleanup]
-                binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
-                as_alloc = alloc_expr_from_plan(as_entry)
-                case as_entry[:kind]
-                when :match_as_slice
-                  variant_schema = @union_schemas&.dig(union_lookup, variant)
-                  payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
-                  elem_zig = transpile_type(payload_t&.element_type)
-                  binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
-                  binding_decl += "defer if (!#{c[:binding]}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{as_alloc}, __e); } } if (#{c[:binding]}.len > 0) #{as_alloc}.free(#{c[:binding]}); };\n    "
-                when :match_as_inline_struct
-                  binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
-                  binding_decl += "defer if (!#{c[:binding]}_moved) #{c[:binding]}.deinit(#{as_alloc});\n    "
-                end
-              end
-            end
+            binding_decl = "const #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
             body = "#{binding_decl}#{body}"
           elsif c[:destructure]
             # Union variant destructuring: extract each named field from the payload.
@@ -1398,12 +1061,7 @@ private
       cmp       = node.inclusive ? "<=" : "<"
       @for_counter = (@for_counter || 0) + 1
       iter_var  = "__for_#{@for_counter}"
-      if node.mark_per_iter && current_tp_ctx&.has_rt
-        # Loop-local frame allocs: unwind arena each iteration AND yield at back-edge.
-        mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
-        mark_var = "__loop_mark_#{mark_id}"
-        "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
-      elsif current_tp_ctx&.has_rt
+      if current_tp_ctx&.has_rt
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
       else
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n}\n}"
@@ -1440,28 +1098,50 @@ private
       rc_bindings = rc_caps.map do |cap|
         name = cap[:var_node].name
         inner = "__#{name}_unwrap"
-        "const #{inner} = #{name}.ctrl.data.*;\n_ = &#{inner};"
+        "const #{inner} = #{name}.data.*;\n_ = &#{inner};"
       end.join("\n")
 
-      # --- Lock bindings (Mutex/RwWrite/RwRead): acquire guard, bind alias ---
-      # All three patterns are identical except for the access method name.
-      # When the variable also has an ownership wrapper (Arc/Rc), dereference
-      # through .data.* to reach the Locked/RwLocked inner type.
-      access_method = { mutex: "acquire", rw_write: "write", rw_read: "read" }
-      all_lock_caps = [
-        *mutex_caps.map    { |c| [c, :mutex] },
-        *rw_write_caps.map { |c| [c, :rw_write] },
-        *rw_read_caps.map  { |c| [c, :rw_read] },
-      ]
-      lock_bindings = all_lock_caps.map do |cap, kind|
+      # --- Mutex bindings: acquire(), bind alias as *T ---
+      # When the variable also has an ownership wrapper (Arc/Rc), the Zig variable is
+      # Arc(Locked(T)) or Rc(Locked(T)); dereference through .data.* to reach Locked(T).
+      mutex_bindings = mutex_caps.map do |cap|
         var_name   = cap[:var_node].name
         alias_name = cap[:alias] || var_name
         guard_var  = "__#{var_name}_guard"
         zig_var    = @do_capture_map&.dig(var_name) || var_name
-        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
-        method     = access_method[kind]
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
         <<~ZIG.chomp
-          var #{guard_var} = #{lock_expr}.#{method}();
+          var #{guard_var} = #{lock_expr}.acquire();
+          defer #{guard_var}.release();
+          const #{alias_name} = #{guard_var}.get();
+          _ = &#{alias_name};
+        ZIG
+      end.join("\n")
+
+      # --- RwLock write bindings: write(), bind alias as *T (exclusive) ---
+      rw_write_bindings = rw_write_caps.map do |cap|
+        var_name   = cap[:var_node].name
+        alias_name = cap[:alias] || var_name
+        guard_var  = "__#{var_name}_guard"
+        zig_var    = @do_capture_map&.dig(var_name) || var_name
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
+        <<~ZIG.chomp
+          var #{guard_var} = #{lock_expr}.write();
+          defer #{guard_var}.release();
+          const #{alias_name} = #{guard_var}.get();
+          _ = &#{alias_name};
+        ZIG
+      end.join("\n")
+
+      # --- RwLock read bindings: read(), bind alias as *const T (shared read) ---
+      rw_read_bindings = rw_read_caps.map do |cap|
+        var_name   = cap[:var_node].name
+        alias_name = cap[:alias] || var_name
+        guard_var  = "__#{var_name}_guard"
+        zig_var    = @do_capture_map&.dig(var_name) || var_name
+        lock_expr  = cap[:resolved_type]&.any_rc? ? "#{zig_var}.data.*" : zig_var
+        <<~ZIG.chomp
+          var #{guard_var} = #{lock_expr}.read();
           defer #{guard_var}.release();
           const #{alias_name} = #{guard_var}.get();
           _ = &#{alias_name};
@@ -1487,7 +1167,7 @@ private
       @rc_unwrap_map     = prev_rc_map
       @locked_unwrap_map = prev_locked_map
 
-      all_bindings = [rc_bindings, lock_bindings].reject(&:empty?).join("\n")
+      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings].reject(&:empty?).join("\n")
       "{\n#{all_bindings}\n#{body}\n}"
 
     when AST::DoBlock
@@ -1527,7 +1207,7 @@ private
 
         # Default: spawnBest distributes across all schedulers (work-stealing).
         # @pinned: pin to the current thread's scheduler via submitSpawn.
-        task_cfg = task_config_zig(branch[:stack_size], computed_tier: branch[:computed_stack_tier])
+        task_cfg = task_config_zig(branch[:stack_size])
         spawn_call = if pinned
           <<~ZIG.chomp
             try #{wg_var}.sched.submitSpawn(
@@ -1701,15 +1381,14 @@ private
       # Strings need explicit free (duped to heap); collections are freed
       # via their own deinit in the fiber's normal cleanup path.
       # Resources use the schema-driven close_zig pattern from the symbol entry.
-      # SKIP free for strings whose ownership transfers to the caller as the
-      # BG result (result_line references ctx.<name> directly).
       capture_close_zig = @_capture_close_zig || {}
       capture_frees = captured.filter_map do |name, type_obj|
         t = type_obj.is_a?(Type) ? type_obj : (type_obj ? Type.new(type_obj) : nil)
         if t&.string?
-          next nil if result_line.strip == "ctx.inner.result = ctx.#{name};"  # ownership transfers to caller
           "defer ctx.alloc.free(ctx.#{name});"
         elsif capture_close_zig[name]
+          # Resource: use the close_zig pattern from the type schema.
+          # {0} is replaced with the context field access.
           "defer #{capture_close_zig[name].gsub('{0}', "ctx.#{name}")};"
         end
       end.compact.join("\n                    ")
@@ -1819,7 +1498,7 @@ private
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 #{ctx_var},
-                #{task_config_zig(node.stack_size, computed_tier: node.computed_stack_tier)},
+                #{task_config_zig(node.stack_size)},
             );
             break :#{blk_label} #{stream_var};
         }
@@ -1844,78 +1523,12 @@ private
       result
 
     when AST::FuncCall, AST::MethodCall
-      # EXTERN method dispatch: obj.method() → trampoline to g0 stack via onRootStack.
+      # EXTERN method dispatch: obj.method() → direct method call (no UFCS, no module prefix)
       if node.is_a?(AST::MethodCall) && node.instance_variable_get(:@extern_method)
         obj_code = visit(node.object)
-        args_zig = node.args.map { |a| visit(a) }
-        rt_name = @do_rt_name || "rt"
-        @extern_trampoline_counter = (@extern_trampoline_counter || 0) + 1
-        tid = @extern_trampoline_counter
-
-        effects = node.extern_effects || {}
-        alloc_kind = effects.is_a?(Hash) ? effects[:alloc] : nil
-        has_alloc = !!alloc_kind
-        ret_type = node.full_type
-        ret_type_obj = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type || :Void)
-        is_error_union = ret_type_obj.error_union?
-        inner_zig = is_error_union ? ret_type_obj.payload_type.zig_type : ret_type_obj.zig_type
-        is_void = (inner_zig == "void")
-
-        obj_type = node.object.type_info
-        obj_zig = obj_type.is_a?(Type) ? obj_type.zig_type : Type.new(obj_type).zig_type
-
-        # Build native call: f.self_val.methodName([alloc,] args...)
-        native_args = args_zig.each_index.map { |i| "f.a#{i}" }
-        native_args.unshift("f.alloc") if has_alloc
-        native_call = "f.self_val.#{node.name}(#{native_args.join(', ')})"
-        native_call = "(#{native_call} catch |err| { f.err = err; return; })" if is_error_union
-
-        # Trampoline struct fields
-        arg_fields = args_zig.each_with_index.map { |_, i|
-          arg_type = node.args[i]&.type_info
-          zig_t = arg_type.is_a?(Type) ? arg_type.zig_type : (arg_type ? Type.new(arg_type).zig_type : "@TypeOf(__extm#{tid}_args[#{i}])")
-          "a#{i}: #{zig_t}"
-        }.join(", ")
-        self_field = "self_val: #{obj_zig}"
-        alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
-        err_field = is_error_union ? "err: ?anyerror = null, " : ""
-        rt_name = @do_rt_name || "rt"
-        err_check = if is_error_union && @current_fn_has_rt
-          "if (__extm#{tid}_frame.err) |e| { #{rt_name}.setZigError(e, #{node.token.line}); return e; } "
-        elsif is_error_union
-          "if (__extm#{tid}_frame.err) |e| return e; "
-        else
-          ""
-        end
-
-        all_fields = [self_field, alloc_field + arg_fields].reject(&:empty?).join(", ")
-        arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
-        alloc_zig = case alloc_kind
-                    when :frame then "#{rt_name}.frameAlloc()"
-                    when :heap  then "#{rt_name}.heapAlloc()"
-                    else nil
-                    end
-        alloc_init = has_alloc ? ", .alloc = #{alloc_zig}" : ""
-        field_inits = args_zig.each_index.map { |i| ".a#{i} = __extm#{tid}_args[#{i}]" }.join(', ')
-
-        if is_void && !is_error_union
-          return "{ const __extm#{tid}_args = #{arg_tuple}; " \
-          "const __ExtM#{tid} = struct { #{all_fields}, " \
-          "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
-          "f.self_val.#{node.name}(#{native_args.join(', ')}) catch {}; } }; " \
-          "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}#{field_inits.empty? ? '' : ', ' + field_inits}#{alloc_init} }; " \
-          "#{trampoline_call_method(tid, rt_name, node)}; }"
-        else
-          return "blk_extm#{tid}: { const __extm#{tid}_args = #{arg_tuple}; " \
-          "const __ExtM#{tid} = struct { #{all_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
-          "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
-          "f.ret = #{native_call}; } }; " \
-          "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}, #{field_inits}#{alloc_init} }; " \
-          "#{trampoline_call_method(tid, rt_name, node)}; " \
-          "#{err_check}break :blk_extm#{tid} __extm#{tid}_frame.ret; }"
-        end
+        args_code = node.args.map { |a| visit(a) }.join(", ")
+        call = args_code.empty? ? "#{obj_code}.#{node.name}()" : "#{obj_code}.#{node.name}(#{args_code})"
+        return call
       end
 
       # Pool method dispatch: pool.insert/get/remove bypass UFCS
@@ -1958,10 +1571,7 @@ private
       mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
 
       if node.respond_to?(:extern_call) && node.extern_call
-        # Native FFI call. Only trampoline to g0 stack (onRootStack) when
-        # the function needs deep stacks (filesystem I/O, std.json, etc).
-        # Pure compute functions (SHA256, math, etc.) run directly on the
-        # fiber stack for zero overhead.
+        # Native FFI call: trampoline to g0 stack via onRootStack.
         rt_name = @do_rt_name || "rt"
         @extern_trampoline_counter = (@extern_trampoline_counter || 0) + 1
         tid = @extern_trampoline_counter
@@ -2041,34 +1651,25 @@ private
                     end
         alloc_init = has_alloc ? ", .alloc = #{alloc_zig}" : ""
         err_field = is_error_union ? "err: ?anyerror = null, " : ""
-        err_check = if is_error_union && @current_fn_has_rt
-          "if (__ext#{tid}_frame.err) |e| { #{rt_name}.setZigError(e, #{node.token.line}); return e; } "
-        elsif is_error_union
-          "if (__ext#{tid}_frame.err) |e| return e; "
-        else
-          ""
-        end
+        err_check = is_error_union ? "if (__ext#{tid}_frame.err) |e| return e; " : ""
 
         field_inits = runtime_indices.each_with_index.map { |_, fi| ".a#{fi} = __ext#{tid}_args[#{fi}]" }.join(', ')
-        struct_fields = [alloc_field.rstrip.chomp(','), arg_fields].reject(&:empty?).join(", ")
-        args_decl = runtime_args_zig.any? ? "const __ext#{tid}_args = #{arg_tuple}; " : ""
         if is_void && !is_error_union
-          f_discard = native_call.include?("f.") ? "" : "_ = f; "
-          "{ #{args_decl}" \
-          "const __Ext#{tid} = struct { #{struct_fields}#{struct_fields.empty? ? '' : ', '}" \
+          "{ const __ext#{tid}_args = #{arg_tuple}; " \
+          "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
-          "const f: *@This() = @ptrCast(@alignCast(ptr)); #{f_discard}" \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "_ = #{native_call}; } }; " \
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
-          "#{trampoline_call(tid, rt_name, node)}; }"
+          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); }"
         else
-          "blk_ext#{tid}: { #{args_decl}" \
-          "const __Ext#{tid} = struct { #{struct_fields}#{struct_fields.empty? ? '' : ', '}#{err_field}ret: #{inner_zig} = undefined, " \
+          "blk_ext#{tid}: { const __ext#{tid}_args = #{arg_tuple}; " \
+          "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
-          "#{trampoline_call(tid, rt_name, node)}; " \
+          "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame)); " \
           "#{err_check}break :blk_ext#{tid} __ext#{tid}_frame.ret; }"
         end
       elsif node.respond_to?(:fn_var_call) && node.fn_var_call
@@ -2084,63 +1685,12 @@ private
         else
           []
         end
-        # STUB interception: if this function is stubbed, emit stub value instead of real call.
-        stub_info = (@active_stubs || {})[node.name]
-        if stub_info
-          stub_code = case stub_info[:kind]
-          when :returns
-            stub_info[:var]
-          when :captures
-            "{ #{stub_info[:var]} += 1; }"
-          when :sequence
-            "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
-          when :with
-            "#{stub_info[:var]}(#{args_zig.join(', ')})"
-          end
-        end
-        if stub_info
-          call_code = stub_code
-        else
-          # Only inject rt / emit try if the callee actually needs them.
-          needs_rt = callee_needs_rt?(node.name)
-          can_fail  = callee_can_fail?(node.name)
-          # UFCS: inject the object as the first argument for method calls
-          ufcs_args = if node.is_a?(AST::MethodCall) && node.respond_to?(:object)
-            obj_code = visit(node.object)
-            [obj_code]
-          else
-            []
-          end
-          args = type_arg_strs + (needs_rt ? [rt_name] : []) + ufcs_args + args_zig
-          fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
-
-          is_tail_self_call = @current_tail_call_fn == node.name
-          llvm_backend = !(@default_stack_size == "Large")
-          if is_tail_self_call && llvm_backend
-            call = "@call(.always_tail, #{fn_zig}, .{#{args.join(', ')}})"
-            call_code = call
-          else
-            call = "#{fn_zig}(#{args.join(', ')})"
-            call_code = can_fail ? "try #{call}" : call
-          end
-        end
-
-        # Heap-promoted returns used as temporaries (not assigned to a variable)
-        # must be captured with defer-free to prevent leaks.
-        # Skip temp hoisting when:
-        # - Direct bind value (VarDecl/BindExpr handles cleanup via emit_cleanup)
-        # - TAKES parameter (callee takes ownership, no caller cleanup needed)
-        # - Inside GIVE (ownership transfers to callee)
-        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call &&
-           !node.equal?(current_tp_ctx&.bind_value_node) && !node.was_moved && !current_tp_ctx&.inside_give
-          ctx = current_tp_ctx
-          ctx.heap_temp_counter += 1
-          tmp = "__hpt_#{ctx.heap_temp_counter}"
-          ctx.pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info }
-          tmp
-        else
-          call_code
-        end
+        # Only inject rt / emit try if the callee actually needs them.
+        needs_rt = callee_needs_rt?(node.name)
+        can_fail  = callee_can_fail?(node.name)
+        args = type_arg_strs + (needs_rt ? [rt_name] : []) + args_zig
+        call = "#{mod_prefix}#{zig_safe_name(node.name)}(#{args.join(', ')})"
+        can_fail ? "try #{call}" : call
       end
 
     when AST::ReturnNode
@@ -2162,23 +1712,11 @@ private
         if ti&.any_rc?
           return "return #{transpile_rc_retain(ti, node.value.name)};"
         end
-        # TODO: Container borrow deep-copy on return. Blocked because envGet
-        # doesn't have rt in scope. Needs either: (a) envGet to receive rt,
-        # or (b) dupeUnionValue to use the container's own allocator.
       end
 
       # 2. Standard Return with Move Suppression for unique heap
       rt_name = @do_rt_name || "rt"
       suppress = emit_move_suppression(node.value)
-      # TAKES auto-move: when RETURN fn(args), mark TAKES args as moved BEFORE return.
-      if node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
-        node.value.args.each do |a|
-          next unless a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier)
-          fn_name = current_tp_ctx&.fn_name
-          entry = @cleanup_plans&.dig(fn_name)&.lookup(a.name)
-          suppress = "#{zig_safe_name(a.name)}_moved = true;\n#{suppress}" if entry && entry[:has_moved_guard]
-        end
-      end
       val_code = if node.value.nil?
         ""
       elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
@@ -2187,19 +1725,11 @@ private
         visit(node.value)
       end
 
-      # 3. Escape promotion — driven by PromotionPlan (Pass C).
-      plan = @promotion_plans&.dig(current_tp_ctx&.fn_name)
-      if plan && !plan.empty?
-        # Filter plan to only promote variables referenced in THIS return expression.
-        filtered = plan.filter_for_return(node.value)
-        emit_return_from_plan(val_code, filtered, rt_name, suppress)
-      elsif @catch_dupe_string_returns && node.value
-        ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
-        if ret_type&.string?
-          [suppress, "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"].reject(&:empty?).join("\n")
-        else
-          [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
-        end
+      # 3. Unified escape promotion — one path for all return shapes.
+      # Driven by return TYPE, not AST node kind.
+      if node.collection_return
+        ret_type = node.value.respond_to?(:full_type) ? node.value.full_type : nil
+        emit_return_with_promotion(val_code, ret_type, rt_name, suppress, node: node.value)
       else
         [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       end
@@ -2226,12 +1756,9 @@ private
       ti = node.target.type_info
       if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
         # Rc(T)/Arc(T) store the value as .data (*T); Zig auto-derefs through the pointer
-        "#{target_code}.ctrl.data.#{node.field}"
+        "#{target_code}.data.#{node.field}"
       elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
         # *Locked(T) / *RwLocked(T): auto-deref pointer, then access .data field
-        "#{target_code}.ctrl.data.#{node.field}"
-      elsif ti&.always_mutable? && !is_locked_unwrapped
-        # *RefCell(T): access through .data field
         "#{target_code}.data.#{node.field}"
       elsif @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         # SOA field-slice rewrite: _.field → __soa_field[__soa_i]
@@ -2255,14 +1782,12 @@ private
       # Build from the inside out: sync layer first, then ownership layer.
       # This handles all 9 legal (ownership × sync) combinations generically.
       sync_fn   = case node.sync
-                  when :locked         then "lockedCreate"
-                  when :write_locked   then "rwLockedCreate"
-                  when :always_mutable then "refCellCreate"
+                  when :locked      then "lockedCreate"
+                  when :write_locked then "rwLockedCreate"
                   end
       sync_type = case node.sync
-                  when :locked         then "CheatLib.Locked(#{zig_base})"
-                  when :write_locked   then "CheatLib.RwLocked(#{zig_base})"
-                  when :always_mutable then "CheatLib.RefCell(#{zig_base})"
+                  when :locked      then "CheatLib.Locked(#{zig_base})"
+                  when :write_locked then "CheatLib.RwLocked(#{zig_base})"
                   end
       own_fn    = case node.ownership
                   when :shared     then "arcCreate"
@@ -2288,6 +1813,23 @@ private
         inner_code
       end
 
+    when AST::CopyNode
+      # COPY expr — explicit deep-copy. Produces an owned value.
+      val = visit(node.value)
+      ti = node.value.type_info
+      rt_name = @do_rt_name || "rt"
+      if ti && @union_schemas&.key?(ti.resolved)
+        zig_t = transpile_type(ti)
+        "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
+      elsif ti&.string?
+        "try #{rt_name}.heapAlloc().dupe(u8, #{val})"
+      elsif ti&.array? && !ti&.string?
+        elem_zig = transpile_type(ti.element_type)
+        "blk_copy: {\n    const __src = #{val};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy __src;\n}"
+      else
+        val
+      end
+
     when AST::MoveNode
       # MOVE expr — if it's an identifier, set the moved flag and return the value.
       # This ensures GIVE f; as a statement correctly suppresses the local defer.
@@ -2295,51 +1837,8 @@ private
         safe_name = zig_safe_name(node.value.name)
         "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
       else
-        # GIVE expr (non-identifier): ownership transfers to callee.
-        # Suppress heap-promoted temp hoisting — callee owns the result.
-        saved = current_tp_ctx&.inside_give
-        current_tp_ctx.inside_give = true if current_tp_ctx
-        result = visit(node.value)
-        current_tp_ctx.inside_give = saved if current_tp_ctx
-        result
+        visit(node.value)
       end
-
-    when AST::CopyNode
-      # COPY expr — explicit deep-copy. Produces an owned value.
-      val = visit(node.value)
-      ti = node.value.type_info
-      rt_name = @do_rt_name || "rt"
-      if ti&.string?
-        # String copy: dupe to heap
-        "try #{rt_name}.heapAlloc().dupe(u8, #{val})"
-      elsif ti && @union_schemas&.key?(ti.resolved)
-        zig_t = transpile_type(ti)
-        "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
-      elsif ti&.array? && !ti&.string?
-        # Slice copy: allocate new buffer, copy elements
-        elem_zig = transpile_type(ti.element_type)
-        "blk_copy: {\n    const __src = #{val};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy __src;\n}"
-      else
-        # Fallback: bitwise copy (for types without heap data)
-        val
-      end
-
-    when AST::LinkNode
-      # LINK expr — downgrade Rc/Arc to WeakRc/WeakArc
-      inner = visit(node.value)
-      ti = node.value.type_info
-      base = transpile_type(ti.resolved.to_s)
-      func = ti.shared? ? "arcDowngrade" : "rcDowngrade"
-      "CheatLib.#{func}(#{base}, #{inner})"
-
-    when AST::ResolveNode
-      # RESOLVE expr — upgrade WeakRc/WeakArc to ?Rc/?Arc
-      inner = visit(node.value)
-      ti = node.value.type_info
-      base = transpile_type(ti.resolved.to_s)
-      source = ti.link_source || :multiowned
-      func = source == :shared ? "weakArcUpgrade" : "weakRcUpgrade"
-      "CheatLib.#{func}(#{base}, #{inner})"
 
     when AST::Copy
       # Zig copies structs by value on assignment, so just return the inner expression
@@ -2362,10 +1861,6 @@ private
       # [FIX] Handle '_' Identifier acting as a Placeholder
       if node.name == "_" && @placeholder_name
         return @placeholder_name
-      end
-      # JOIN lambda param mapping
-      if @join_param_map && @join_param_map[node.name]
-        return @join_param_map[node.name]
       end
 
       # Named function used as a value: emit a function pointer
@@ -2392,7 +1887,6 @@ private
           when 0x0D then '\\r'   # carriage return
           when 0x09 then '\\t'   # tab
           when 0x00 then '\\x00' # null
-          when 0x80..0xFF then "\\x#{'%02x' % b}" # non-ASCII -> hex escape
           else b.chr
           end
         }.join
@@ -2410,16 +1904,6 @@ private
         end
       when :INT64
         node.value.to_s
-      when :INT8    then "@as(i8, #{node.value})"
-      when :INT16   then "@as(i16, #{node.value})"
-      when :INT32   then "@as(i32, #{node.value})"
-      when :UINT16  then "@as(u16, #{node.value})"
-      when :UINT32  then "@as(u32, #{node.value})"
-      when :UINT64  then "@as(u64, #{node.value})"
-      when :FLOAT32
-        s = node.value.to_s
-        s = "#{s}.0" if node.value == node.value.to_i && !s.include?('.')
-        "@as(f32, #{s})"
       when :BOOLEAN
         node.value.to_s      # "true"/"false" is fine
       when :NIL
@@ -2446,40 +1930,21 @@ private
       return transpile_Smooth(node) if node.op == :SMOOTH
       return transpile_OrRescue(node) if node.op == :OR_RESCUE
 
-      if (node.op == :ADD || node.op == "+") &&
-         (node.left.type_info&.string? || node.right.type_info&.string?)
-        # Flatten chained string + into a single allocation.
-        rt_ref = @do_rt_name || "rt"
-        alloc = storage_alloc_expr(node.type_info)
-        parts = collect_string_concat_parts(node)
-
-        # Optimization: when all parts are string literals or numeric toString(),
-        # use count+alloc+bufPrint (1 alloc, no intermediates) instead of
-        # intToString+concat (2 allocs + intermediate copies).
-        # allocPrint is NOT used because CLEAR's frame allocator can't resize
-        # in-place (smartResize returns false), causing wasteful reallocation.
-        if parts.all? { |p| interp_string_literal?(p) || interp_numeric_to_string?(p) }
-          @interp_counter ||= 0
-          id = @interp_counter
-          @interp_counter += 1
-          fmt_str, fmt_args = build_alloc_print_args(parts)
-          args_tuple = fmt_args.empty? ? ".{}" : ".{ #{fmt_args.join(', ')} }"
-          label = "__interp#{id}"
-          return "#{label}: {\n" \
-                 "    const __n = std.fmt.count(\"#{fmt_str}\", #{args_tuple});\n" \
-                 "    const __buf = try #{alloc}.alloc(u8, __n);\n" \
-                 "    _ = std.fmt.bufPrint(__buf, \"#{fmt_str}\", #{args_tuple}) catch unreachable;\n" \
-                 "    break :#{label} __buf;\n" \
-                 "}"
-        end
-
-        # Fallback: general concat path for mixed string expressions.
-        parts_zig = parts.map { |p| visit(p) }
-        return "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
-      end
-
       left = visit(node.left)
       right = visit(node.right)
+
+      if node.op == :ADD || node.op == "+"
+        # Check if we are operating on Strings
+        # Annotator ensures full_type is set (e.g. "String" or "%String")
+        rt_ref = @do_rt_name || "rt"
+        alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+
+        if node.left.type_info&.string? || node.right.type_info&.string?
+          # Generate call to runtime helper
+          # We use heapAlloc to ensure the result survives (safe default)
+          return "try CheatLib.concat(#{alloc}, #{left}, #{right})"
+        end
+      end
 
       if node.op == :POW
         left_type = node.left.full_type
@@ -2501,16 +1966,6 @@ private
         end
       end
 
-      if node.op == :DIV
-        # Zig's `/` only works on unsigned integers; signed i64 requires @divTrunc.
-        # Only apply when BOTH sides are integers. Mixed int/float uses native `/`.
-        left_ti = node.left.type_info
-        right_ti = node.right.type_info
-        if left_ti&.integer? && right_ti&.integer?
-          return "@divTrunc(#{left}, #{right})"
-        end
-      end
-
       # String comparison: Zig can't use native operators on slices.
       if Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?
         case node.op
@@ -2520,36 +1975,6 @@ private
         when :LTE then return "(CheatLib.strcmp(#{left}, #{right}) <= 0)"
         when :GT  then return "(CheatLib.strcmp(#{left}, #{right}) > 0)"
         when :GTE then return "(CheatLib.strcmp(#{left}, #{right}) >= 0)"
-        end
-      end
-
-      # Explicit wrapping operators (%+, %-, %*) — always wrap, all build modes.
-      if %i[WRAP_ADD WRAP_SUB WRAP_MUL].include?(node.op)
-        fn_name = { WRAP_ADD: "wrapAdd", WRAP_SUB: "wrapSub", WRAP_MUL: "wrapMul" }[node.op]
-        return "CheatLib.#{fn_name}(#{left}, #{right})"
-      end
-
-      # Explicit checked operators (!+, !-, !*) — always panic on overflow, all build modes.
-      if %i[CHECK_ADD CHECK_SUB CHECK_MUL].include?(node.op)
-        fn_name = { CHECK_ADD: "checkAdd", CHECK_SUB: "checkSub", CHECK_MUL: "checkMul" }[node.op]
-        return "CheatLib.#{fn_name}(#{left}, #{right})"
-      end
-
-      # Default integer arithmetic (+, -, *): checked in debug, wrapping in release.
-      # Float arithmetic uses native operators (IEEE 754 handles overflow correctly).
-      # Only apply when BOTH operands are integers (not float, not comptime literals).
-      if %i[ADD SUB MUL].include?(node.op)
-        left_ti = node.left.type_info
-        right_ti = node.right.type_info
-        left_is_comptime = node.left.is_a?(AST::Literal) && node.left.type == :NUMBER && !left_ti&.integer?
-        right_is_comptime = node.right.is_a?(AST::Literal) && node.right.type == :NUMBER && !right_ti&.integer?
-        both_int = left_ti&.integer? && right_ti&.integer?
-        no_lits = !left_is_comptime && !right_is_comptime
-        no_float_coerce = !node.left.respond_to?(:coerced_type) || node.left.coerced_type.nil? || Type.new(node.left.coerced_type).integer?
-        no_float_coerce &&= !node.right.respond_to?(:coerced_type) || node.right.coerced_type.nil? || Type.new(node.right.coerced_type).integer?
-        if both_int && no_lits && no_float_coerce
-          fn_name = { ADD: "intAdd", SUB: "intSub", MUL: "intMul" }[node.op]
-          return "CheatLib.#{fn_name}(#{left}, #{right})"
         end
       end
 
@@ -2566,35 +1991,10 @@ private
       cond = visit(node.condition)
       "CheatLib.assert(#{cond}, \"#{node.message}\")"
 
-    when AST::TestBlock
-      transpile_test_block(node)
-
-    when AST::AssertRaises
-      transpile_assert_raises(node)
-
-    when AST::BenchmarkStmt
-      transpile_benchmark(node)
-
-    when AST::SmashStmt
-      transpile_smash(node)
-
-    when AST::ProfileStmt
-      transpile_profile(node)
-
-    when AST::StubDecl
-      transpile_stub(node)
-
     when AST::Raise
-      # RAISE Kind, ErrorName, "message"
-      rt_name = @do_rt_name || "rt"
-      kind = node.kind || :System
-      error_name = node.error_name || ""
-      msg_code = node.message_expr ? visit(node.message_expr) : "\"\""
-      if @current_fn_has_rt
-        "#{rt_name}.setError(.#{kind}, \"#{error_name}\", #{msg_code}, #{node.token.line});\nreturn error.CheatError"
-      else
-        "return error.CheatError"
-      end
+      # RAISE "message" - return an error in Zig
+      msg = visit(node.message_expr) if node.message_expr
+      "return error.CheatError"
 
     when AST::BreakNode
       "break"
@@ -2624,11 +2024,6 @@ private
     lhs = node.left
     rhs = node.right
 
-    # Try pipeline loop fusion: WHERE/SELECT chains ending in a fold
-    # are fused into a single loop with no intermediate allocations.
-    fusible = collect_fusible_chain(node)
-    return transpile_fused_pipeline(fusible) if fusible
-
     # Check Higher-Order functions
     if node.right.is_a?(AST::SelectOp)
       return transpile_select_projection(node.left, node.right.expression)
@@ -2654,29 +2049,8 @@ private
     elsif node.right.is_a?(AST::DistinctOp)
       return transpile_distinct(node.left, node.right, node)
 
-    elsif node.right.is_a?(AST::TakeWhileOp)
-      return transpile_take_while(node.left, node.right.expression, node)
-
-    elsif node.right.is_a?(AST::WindowOp)
-      return transpile_window(node.left, node.right, node)
-
-    elsif node.right.is_a?(AST::JoinOp)
-      return transpile_join(node.left, node.right, node)
-
-    elsif node.right.is_a?(AST::RecoverOp)
-      # RECOVER(default): catch errors and replace with default value
-      default_code = visit(node.right.default_expr)
-      left_code = visit(node.left).sub(/^try /, '')
-      return "(#{left_code} catch #{default_code})"
-
     elsif node.right.is_a?(AST::EachOp)
       return transpile_each(node)
-
-    elsif node.right.is_a?(AST::TapOp)
-      return transpile_tap(node)
-
-    elsif node.right.is_a?(AST::SkipOp)
-      return transpile_skip(node.left, node.right, node)
 
     elsif node.right.is_a?(AST::FindOp)
       return transpile_find(node.left, node.right, node)
@@ -2740,51 +2114,7 @@ private
       synthetic_call.coerced_type = rhs.coerced_type
     end
 
-    # If this function has CATCH blocks and the pipe step can fail,
-    # generate snapshot capture: bind LHS to a variable, wrap call in
-    # catch that heap-copies the LHS before propagating the error.
-    lhs_type = lhs.respond_to?(:full_type) ? lhs.full_type : nil
-    lhs_t = lhs_type ? Type.new(lhs_type) : nil
-    # Check if the RHS function can fail: look up the function name in @fn_can_fail
-    rhs_fn_name = rhs.is_a?(AST::Identifier) ? rhs.name : (rhs.is_a?(AST::FuncCall) ? rhs.name : nil)
-    rhs_can_fail = rhs_fn_name && (@fn_can_fail || {})[rhs_fn_name]
-
-    if @current_fn_has_catch && rhs_can_fail && lhs_t && !lhs_t.void?
-      zig_type = transpile_type(lhs_t.resolved.to_s)
-      rt_name = @do_rt_name || "rt"
-      @snapshot_counter = (@snapshot_counter || 0) + 1
-      snap_var = "__snap_#{@snapshot_counter}"
-      snap_label = "__snap_blk#{@snapshot_counter}"
-
-      # Track types for ambiguity checking
-      @current_fn_snapshot_types ||= Set.new
-      @current_fn_snapshot_types << lhs_t.resolved.to_s
-
-      # Visit LHS once, bind to variable
-      lhs_code = visit(lhs)
-
-      # Build the function call with snap_var replacing LHS
-      if rhs.is_a?(AST::Identifier)
-        call_zig = "#{rhs.name}(#{rt_name}, #{snap_var})"
-      elsif rhs.is_a?(AST::FuncCall)
-        extra_args = rhs.args.map { |a| visit(a) }.join(', ')
-        fn_name = rhs.name
-        call_zig = "#{fn_name}(#{rt_name}, #{snap_var}#{extra_args.empty? ? '' : ', ' + extra_args})"
-      else
-        # Fallback: just visit normally
-        return visit(synthetic_call)
-      end
-
-      return "#{snap_label}: {\n" \
-             "    const #{snap_var} = #{lhs_code};\n" \
-             "    break :#{snap_label} #{call_zig} catch |__snap_err| {\n" \
-             "        #{rt_name}.captureSnapshot(#{zig_type}, &#{snap_var});\n" \
-             "        return __snap_err;\n" \
-             "    };\n" \
-             "}"
-    end
-
-    # Normal path: no CATCH blocks or non-failing step
+    # Visit the fake node as if it were in the original source
     visit(synthetic_call)
   end
 
@@ -2822,17 +2152,6 @@ private
         return "try #{left_raw}"
       else
         # Non-error type: just return the value
-        return left
-      end
-    end
-
-    # Handle OR EXIT "message": set error context message + propagate
-    if node.right.is_a?(AST::OrExit)
-      rt_name = @do_rt_name || "rt"
-      msg_code = visit(node.right.message)
-      if t_left.error_union?
-        return "(#{left_raw} catch |__exit_err| {\n#{rt_name}.__error.message = #{msg_code};\n#{rt_name}.__error.clear_line = #{node.token.line};\nreturn __exit_err;\n})"
-      else
         return left
       end
     end
@@ -2921,21 +2240,29 @@ private
     #    {alloc} -> determine allocator automatically
     #    For method calls, use the object's storage (not the result's storage)
     if pattern.include?("{alloc}")
-      # Resolve allocator from the receiver's storage.
-      # For UFCS calls (append(list, val)), the receiver is args[0].
-      # For method calls (list.append(val)), the receiver is node.object.
-      receiver = if node.is_a?(AST::MethodCall)
-        node.object
+      # Sharded lists are shared across fibers — must stay heap-backed.
+      # Regular @list uses the frame arena (CheatArena grows dynamically via heap pages).
+      # @pool is always heap (explicit location: :heap set in annotator).
+      first_arg_type = node.respond_to?(:args) ? node.args&.first&.type_info : nil
+      force_heap = if node.is_a?(AST::MethodCall)
+        node.object.respond_to?(:type_info) &&
+          (node.object.type_info&.pool? || node.object.type_info&.sharded?)
       else
-        node.args&.first
+        first_arg_type&.pool? || first_arg_type&.sharded?
       end
-      receiver_ti = receiver&.type_info
+      target_storage = if force_heap
+        :heap
+      elsif node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
+        node.object.storage
+      elsif !node.is_a?(AST::MethodCall) && first_arg_type&.list_collection?
+        # For list operations (append, etc.), use the list arg's storage,
+        # not the call result's storage (which is always :stack for Void returns).
+        node.args&.first&.respond_to?(:storage) ? (node.args.first.storage || :stack) : :stack
+      else
+        node.storage
+      end
       rt_ref = @do_rt_name || "rt"
-      # Use storage-based alloc: heap for pools/sharded, frame for everything else.
-      # This is the BACKING STORE allocator, not the cleanup allocator.
-      is_heap = receiver_ti&.pool? || receiver_ti&.sharded? || receiver_ti&.striped? ||
-                (receiver&.respond_to?(:storage) && receiver.storage == :heap)
-      alloc = is_heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+      alloc = target_storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
       pattern = pattern.gsub("{alloc}", alloc)
     end
 
@@ -2955,41 +2282,72 @@ private
   # For direct types (string, list, map): promotes the value itself.
   # For struct types: walks schema + field values, promotes each escapable field.
   # +node+ is the return value AST node (used to inspect StructLit field values).
-  # Emit return code from a PromotionPlan. Zero decisions here — the plan
-  # already decided what to promote.
-  def emit_return_from_plan(val_code, plan, rt_name, suppress)
-    parts = [suppress]
+  def emit_return_with_promotion(val_code, ret_type, rt_name, suppress = "", node: nil)
+    ret_type = Type.new(ret_type) if ret_type && !ret_type.is_a?(Type)
 
-    # 1. Per-variable promotes (before struct construction)
-    # ArrayList: promoteList (avoids recursive element promotion that dupes heap strings).
-    # StringMap: inline .alloc swap (O(1), avoids GPA tracking issues with promote(&map)).
-    # Others: generic promote.
-    plan.var_promotes.each do |vp|
-      vname = zig_safe_name(vp[:var])
-      if vp[:zig_type].include?("ArrayListUnmanaged")
-        elem = vp[:zig_type][/ArrayListUnmanaged\((.+)\)/, 1]
-        parts << "try CheatLib.promoteList(#{elem}, #{rt_name}, &#{vname});"
-      elsif vp[:zig_type].include?("StringMap")
-        parts << "#{vname}.alloc = #{rt_name}.heapAlloc();"
+    # Direct escapable type (string, list, map)
+    if ret_type&.needs_escape_promotion?
+      if ret_type.string?
+        promoted = "try #{rt_name}.heapAlloc().dupe(u8, #{val_code})"
+        return [suppress, "return #{promoted};"].reject(&:empty?).join("\n")
       else
-        parts << "try CheatLib.promote(#{vp[:zig_type]}, #{rt_name}, &#{vname});"
+        promo = ret_type.escape_promote_code("__ret", rt_name)
+        return [suppress, "var __ret = #{val_code};", promo, "return __ret;"].compact.reject(&:empty?).join("\n")
       end
     end
 
-    # 2. Struct-level promote (after construction, for remaining fields)
-    if plan.struct_promote
-      zig_type = transpile_type(plan.struct_promote)
-      parts << "var __ret = #{val_code};"
-      parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
-      parts << "return __ret;"
-    elsif plan.var_promotes.any?
-      parts << "const __ret = #{val_code};"
-      parts << "return __ret;"
-    else
-      parts << "return #{val_code};"
+    # Struct/union: collect promotions from two sources:
+    #   1. StructLit field values: promotes source VARIABLES before struct init
+    #      (e.g., promoteList on @list before .items is captured in the struct)
+    #   2. Schema field types: promotes __ret FIELDS after struct init
+    #      (e.g., dupe string fields that are already in the struct)
+    pre_promos = []   # Before struct init (operate on source variables)
+    post_promos = []  # After struct init (operate on __ret fields)
+
+    # Source 1: StructLit field values — promote source variables.
+    # Collections: pre-promo (before struct init) so .items captures heap data.
+    # Strings: post-promo (after struct init) via __ret.field = dupe(...).
+    promoted_fields = Set.new
+    if node&.is_a?(AST::StructLit)
+      node.fields.each do |fname, fval|
+        fval_type = fval.respond_to?(:type_info) ? fval.type_info : nil
+        fval_type = Type.new(fval_type) if fval_type && !fval_type.is_a?(Type)
+        next unless fval_type&.needs_escape_promotion? && fval.is_a?(AST::Identifier)
+        promoted_fields << fname.to_s
+        if fval_type.string?
+          # String: dupe to heap after struct init (can't reassign const source var).
+          post_promos << "__ret.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fname});"
+        else
+          # Collection: promote in-place before struct init so .items is heap-backed.
+          pre_promos << fval_type.escape_promote_code("#{zig_safe_name(fval.name)}", rt_name)
+        end
+      end
     end
 
-    parts.reject(&:empty?).join("\n")
+    # Source 2: schema walk — promote __ret fields AFTER struct init
+    # (covers string fields where the actual value may be a literal or expression)
+    resolved = ret_type&.resolved
+    schema = @struct_schemas&.dig(resolved)
+    if schema
+      schema.each do |fname, fdef|
+        next if fname.is_a?(Symbol) || promoted_fields.include?(fname.to_s)
+        ftype = fdef.is_a?(Hash) ? fdef[:type] : fdef
+        ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+        next unless ft.needs_escape_promotion?
+        if ft.string?
+          post_promos << "__ret.#{fname} = try #{rt_name}.heapAlloc().dupe(u8, __ret.#{fname});"
+        else
+          post_promos << ft.escape_promote_code("__ret.#{fname}", rt_name)
+        end
+      end
+    end
+
+    if pre_promos.any? || post_promos.any?
+      return [suppress, *pre_promos.compact, "var __ret = #{val_code};", *post_promos.compact, "return __ret;"].reject(&:empty?).join("\n")
+    end
+
+    # No promotion needed.
+    [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).
@@ -3021,57 +2379,6 @@ private
     end
 
     [promotions, promoted_names]
-  end
-
-  # Look up the INDEX_OPS entry for a container type.
-  def resolve_index_op(type_info, op)
-    kind = if type_info&.numeric_map? then :numeric_map
-           elsif type_info&.map? then :string_map
-           elsif type_info&.pool? then :pool
-           elsif type_info&.array? || type_info&.list_collection? then :array
-           end
-    return nil unless kind
-    INDEX_OPS.dig(kind, op)
-  end
-
-  # Emit Zig for a registry-driven index GET operation.
-  def emit_index_get(op, target, index, target_ti)
-    pattern = op[:zig]
-    pattern = pattern.gsub("{target}", target).gsub("{index}", index)
-    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
-      pattern = pattern.gsub("{key_zig}", target_ti.key_type.zig_type)
-                       .gsub("{val_zig}", target_ti.value_type.zig_type)
-    end
-    pattern
-  end
-
-  # Emit Zig for a registry-driven index SET operation.
-  def emit_index_set(op, target, index, value, target_ti, rt_name)
-    pattern = op[:zig]
-    pattern = pattern.gsub("{target}", target).gsub("{index}", index).gsub("{value}", value)
-    if pattern.include?("{key_alloc}")
-      key_alloc_kind = op[:key_alloc] || :heap
-      pattern = pattern.gsub("{key_alloc}", key_alloc_kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()")
-    end
-    if pattern.include?("{val_alloc}")
-      # Registry specifies :storage -> use receiver's storage_alloc, or explicit :heap/:frame
-      val_alloc_kind = op[:val_alloc]
-      val_alloc = case val_alloc_kind
-                  when :storage then storage_alloc_expr(target_ti)
-                  when :heap then "#{rt_name}.heapAlloc()"
-                  when :frame then "#{rt_name}.frameAlloc()"
-                  else storage_alloc_expr(target_ti)
-                  end
-      pattern = pattern.gsub("{val_alloc}", val_alloc)
-    end
-    if pattern.include?("{alloc}")
-      pattern = pattern.gsub("{alloc}", cleanup_alloc_expr(target_ti))
-    end
-    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
-      pattern = pattern.gsub("{key_zig}", target_ti.key_type.zig_type)
-                       .gsub("{val_zig}", target_ti.value_type.zig_type)
-    end
-    pattern
   end
 
   # Emits Zig for pool.insert / pool.get / pool.remove method calls.
@@ -3117,47 +2424,20 @@ private
   def transpile_hash_lit(node)
     # Prefer coerced_type (the declared type) over the inferred HashMap<Any> from empty literals.
     # Use Type objects directly to preserve shard_count (not lost through to_s round-trip).
-    # Use coerced_type_info (full Type with capabilities) instead of coerced_type (raw symbol).
-    coerced_ti = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : nil
-    map_ft = if coerced_ti && node.full_type.map? && node.full_type.value_type.resolved == :Any
-      coerced_ti
+    map_ft = if node.coerced_type && node.full_type.map? && node.full_type.value_type.resolved == :Any
+      node.coerced_type.is_a?(Type) ? node.coerced_type : Type.new(node.coerced_type)
     else
       node.full_type.is_a?(Type) ? node.full_type : Type.new(node.full_type)
     end
     rt_name  = @do_rt_name || "rt"
-
-    # Build the bare inner map type (without Arc/RwLocked wrapping) for initialization.
-    bare_ft = Type.new(map_ft.resolved.to_s)
-    bare_ft.shard_count = map_ft.shard_count if map_ft.shard_count
-    bare_ft.sync = map_ft.sync if map_ft.shard_count && map_ft.sync
-
     # StringMap, ShardedStringMap, MutexShardedStringMap store their allocator.
     # Numeric maps and PartitionedStringMap (shared-nothing) don't have alloc.
-    if bare_ft.numeric_map? || (bare_ft.sharded? && !bare_ft.striped?)
-      bare_init = "#{bare_ft.zig_type}{}"
+    if map_ft.numeric_map? || (map_ft.sharded? && !map_ft.striped?)
+      zig_init = "#{map_ft.zig_type}{}"
+    elsif map_ft.striped?
+      zig_init = "#{map_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
     else
-      # Always use heapAlloc for StringMaps. Frame-allocated keys become
-      # dangling after restoreFrameMark in called functions, causing
-      # use-after-free when the map is accessed later.
-      bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
-    end
-
-    # Wrap with RwLocked/Locked and Arc/Rc if capabilities require it.
-    # Skip Locked/RwLocked wrapping for striped maps — sync is built into the map type.
-    if !bare_ft.striped?
-      if map_ft.sync == :write_locked
-        bare_init = "CheatLib.RwLocked(#{bare_ft.zig_type}).init(#{bare_init})"
-      elsif map_ft.sync == :locked
-        bare_init = "CheatLib.Locked(#{bare_ft.zig_type}).init(#{bare_init})"
-      end
-    end
-
-    if map_ft.shared?
-      zig_init = "try CheatLib.arcCreate(#{bare_ft.zig_type}, #{rt_name}.heapAlloc(), #{bare_init})"
-    elsif map_ft.multiowned?
-      zig_init = "try CheatLib.rcCreate(#{bare_ft.zig_type}, #{rt_name}.heapAlloc(), #{bare_init})"
-    else
-      zig_init = bare_init
+      zig_init = "#{map_ft.zig_type}{ .alloc = #{rt_name}.frameAlloc() }"
     end
 
     return zig_init if node.pairs.empty?
@@ -3180,7 +2460,7 @@ private
       puts_stmts = node.pairs.map do |k, v|
         key_str = visit(k)
         val_str = visit(v)
-        "try #{var}.put(#{rt_name}.heapAlloc(), #{rt_name}.frameAlloc(), #{key_str}, #{val_str});"
+        "try #{var}.put(#{rt_name}.frameAlloc(), #{rt_name}.frameAlloc(), #{key_str}, #{val_str});"
       end.join("\n            ")
     end
 
@@ -3192,9 +2472,6 @@ private
     obj_code = visit(node.object)
     rt_name  = @do_rt_name || "rt"
     map_ft   = Type.new(node.object.full_type)
-    # Auto-deref Arc-wrapped maps: map.ctrl.data.* gives the inner map.
-    obj_ti = node.object.type_info
-    obj_code = "#{obj_code}.ctrl.data.*" if obj_ti&.shared? || obj_ti&.multiowned?
 
     # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
     if !map_ft.numeric_map?
@@ -3263,30 +2540,20 @@ private
   # Maps a CLEAR stack_size symbol (or nil) to a Zig TaskConfig struct literal.
   # nil / :standard → Standard (16 KB); :micro → Micro (4 KB); :large → Large (64 KB); :xl → Xl (256 KB)
   STACK_SIZE_ZIG_VARIANT = {
-    nil        => "Standard",
-    :micro     => "Micro",
-    :standard  => "Standard",
-    :large     => "Large",
-    :xl        => "Xl",
-    :unbounded => "Xl",      # best-effort: runtime control plane upsizes if needed
-    :service   => "Huge",
+    nil       => "Standard",
+    :micro    => "Micro",
+    :standard => "Standard",
+    :large    => "Large",
+    :xl       => "Xl",
+    :service  => "Huge",
   }.freeze
 
   # BG spawn call: spawnBest by default, spawnPinned when @pinned.
   # spawnPinned distributes fibers round-robin across schedulers — each
   # scheduler gets its own set of pinned fibers (shared-nothing model).
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
-    if node.stack_size == :service
-      # @service: spawn a dedicated OS thread (not a green fiber).
-      # The thread gets its own Runtime. No scheduler involvement.
-      <<~ZIG.chomp
-        try CheatHeader.spawnOsThread(
-                    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-                    #{ctx_var},
-                );
-      ZIG
-    elsif node.pinned
-      task_cfg = task_config_zig(node.stack_size, pinned: true, computed_tier: node.computed_stack_tier)
+    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
+    if node.pinned
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -3296,7 +2563,6 @@ private
                 );
       ZIG
     else
-      task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned, computed_tier: node.computed_stack_tier)
       <<~ZIG.chomp
         try CheatHeader.spawnBest(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -3308,265 +2574,8 @@ private
     end
   end
 
-  # ── Test Framework Transpilation ─────────────────────────────────
-
-  # Generate a Zig test preamble: GPA + EBR + Runtime + scheduler init.
-  # Returns [preamble_code, cleanup_code] strings.
-  def test_preamble
-    <<~ZIG
-      var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-      defer _ = gpa.deinit();
-      const allocator = gpa.allocator();
-      var global_ctx = EbrContext{};
-      defer global_ctx.deinit(allocator);
-      var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-      defer rt.deinit();
-      rt.wireAllocator();
-    ZIG
-  end
-
-  # Transpile a TestBlock into one or more Zig `test "..." { }` blocks.
-  # Each TEST THAT becomes a separate Zig test with setup replayed.
-  def transpile_test_block(node)
-    test_name = node.name
-    setup_code = transpile_block(node.setup)
-
-    tests = []
-    node.whens.each do |when_block|
-      when_desc = when_block.description
-
-      # Collect stubs from when-level setup and separate them from regular setup.
-      stubs = when_block.setup.select { |s| s.is_a?(AST::StubDecl) }
-      non_stub_setup = when_block.setup.reject { |s| s.is_a?(AST::StubDecl) }
-      when_setup = transpile_block(non_stub_setup)
-
-      # Install stubs for this WHEN block's scope
-      prev_stubs = @active_stubs || {}
-      @active_stubs = prev_stubs.dup
-      stub_decls = stubs.map { |s| transpile_stub(s) }.join("\n")
-
-      when_block.tests.each do |test_that|
-        full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
-        body_code = transpile_block(test_that.body)
-
-        tests << <<~ZIG
-          test "#{full_name}" {
-              #{test_preamble}
-              #{stub_decls}
-              #{setup_code}
-              #{when_setup}
-              #{body_code}
-          }
-        ZIG
-      end
-
-      when_block.benchmarks.each do |b|
-        bench_name = "#{test_name}: #{when_desc}: #{b.class.name.split('::').last.downcase}"
-        bench_code = visit(b)
-        tests << <<~ZIG
-          test "#{bench_name}" {
-              #{test_preamble}
-              #{stub_decls}
-              #{setup_code}
-              #{when_setup}
-              #{bench_code}
-          }
-        ZIG
-      end
-
-      # Restore stubs
-      @active_stubs = prev_stubs
-    end
-
-    tests.join("\n")
-  end
-
-  # Transpile ASSERT_RAISES to Zig error-checking pattern.
-  def transpile_assert_raises(node)
-    rt_name = @do_rt_name || "rt"
-    kind = node.kind
-    expr_code = visit(node.expression)
-
-    error_name_check = if node.error_name
-      " and !#{rt_name}.__error.matchesName(\"#{node.error_name}\")"
-    else
-      ""
-    end
-
-    # Wrap expression: if it succeeds (no error), the assertion fails.
-    # If it fails with the right kind, pass. Wrong kind = fail.
-    <<~ZIG
-      {
-          if (#{expr_code}) |_| {
-              @panic("ASSERT_RAISES: expected #{kind} error but none raised");
-          } else |_| {
-              if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_name_check}) {
-                  @panic("ASSERT_RAISES: expected #{kind} error, got different kind");
-              }
-          }
-      }
-    ZIG
-  end
-
-  # Transpile BENCHMARK expr x<N> to CheatLib.benchmark + printBenchmarkResult.
-  # Decomposes a FuncCall into function reference + args for CheatLib.benchmark.
-  def transpile_benchmark(node)
-    rt_name = @do_rt_name || "rt"
-    expr = node.expression
-    iterations = node.iterations
-
-    if expr.is_a?(AST::FuncCall)
-      fn_name = zig_safe_name(expr.name)
-      args_zig = expr.args.map { |a| visit(a) }
-      needs_rt = callee_needs_rt?(expr.name)
-      can_fail = callee_can_fail?(expr.name)
-
-      # Generate a wrapper that matches fn(*Runtime) -> RetType.
-      # The wrapper captures the user's args and calls the real function.
-      all_args = needs_rt ? ["rt_ptr"] + args_zig : args_zig
-      ret_type_str = can_fail ? "anyerror!void" : "void"
-      call_str = "#{fn_name}(#{all_args.join(', ')})"
-      call_str = "_ = try #{call_str}" if can_fail
-      call_str = "_ = #{call_str}" unless can_fail
-
-      suppress_rt = needs_rt ? "" : "_ = rt_ptr; "
-      <<~ZIG
-        {
-            const __bench_wrapper = struct {
-                fn run(rt_ptr: *Runtime) #{ret_type_str} {
-                    #{suppress_rt}#{call_str};
-                }
-            };
-            const __bench_result = CheatLib.benchmark(__bench_wrapper.run, &#{rt_name}, .{}, #{iterations});
-            CheatLib.printBenchmarkResult("#{expr.name}", __bench_result);
-        }
-      ZIG
-    else
-      "// BENCHMARK: expression is not a function call, skipping"
-    end
-  end
-
-  # Transpile SMASH expr to shard skew attack.
-  # Detects sharded map arguments and generates adversarial keys.
-  def transpile_smash(node)
-    rt_name = @do_rt_name || "rt"
-    expr = node.expression
-
-    if expr.is_a?(AST::FuncCall)
-      fn_name = zig_safe_name(expr.name)
-      # For now, emit a TODO with the function name.
-      # Full SMASH needs sharded map detection from the annotator (type info).
-      <<~ZIG
-        {
-            std.debug.print("\\nSMASH #{expr.name}: adversarial workload analysis\\n", .{});
-            std.debug.print("  (shard skew generation requires @sharded map parameter)\\n", .{});
-        }
-      ZIG
-    else
-      "// SMASH: expression is not a function call, skipping"
-    end
-  end
-
-  # Transpile PROFILE expr to allocation profiling + timing + suggestion output.
-  def transpile_profile(node)
-    rt_name = @do_rt_name || "rt"
-    expr = node.expression
-
-    if expr.is_a?(AST::FuncCall)
-      fn_name = zig_safe_name(expr.name)
-      args_zig = expr.args.map { |a| visit(a) }
-      needs_rt = callee_needs_rt?(expr.name)
-      can_fail = callee_can_fail?(expr.name)
-      all_args = needs_rt ? ["&#{rt_name}"] + args_zig : args_zig
-      call_str = "#{fn_name}(#{all_args.join(', ')})"
-      call_str = can_fail ? "try #{call_str}" : call_str
-
-      # Look up effects for capability-aware suggestions
-      effects = (@fn_effects || {})[expr.name] || Set.new
-      has_blocking = effects.include?(:BLOCKING)
-      has_heap = effects.include?(:HEAP)
-
-      suggestions = []
-      suggestions << 'std.debug.print("  Suggestion: function has BLOCKING effect (lock contention possible).\\n"' \
-                     '  ++ "  Consider @locked instead of @writeLocked for write-heavy workloads.\\n", .{});' if has_blocking
-      suggestions << 'std.debug.print("  Suggestion: function has HEAP effect (dynamic allocation).\\n"' \
-                     '  ++ "  Check alloc-profile output for hotspots.\\n", .{});' if has_heap
-      suggestion_code = suggestions.join("\n")
-
-      <<~ZIG
-        {
-            const __prof_alloc = @import("alloc-profile.zig");
-            const __prof_allocs_before = __prof_alloc.totalAllocs();
-            const __prof_bytes_before = __prof_alloc.totalBytes();
-            var __prof_timer = std.time.Timer.start() catch unreachable;
-            _ = #{call_str};
-            const __prof_elapsed = __prof_timer.read();
-            const __prof_allocs_after = __prof_alloc.totalAllocs();
-            const __prof_bytes_after = __prof_alloc.totalBytes();
-            const __prof_allocs = __prof_allocs_after - __prof_allocs_before;
-            const __prof_bytes = __prof_bytes_after - __prof_bytes_before;
-            std.debug.print("\\nPROFILE #{expr.name}:\\n", .{});
-            std.debug.print("  Time:   {d:.3}ms\\n", .{@as(f64, @floatFromInt(__prof_elapsed)) / 1_000_000.0});
-            std.debug.print("  Allocs: {d} ({d} KB)\\n", .{__prof_allocs, __prof_bytes / 1024});
-            #{suggestion_code}
-        }
-      ZIG
-    else
-      "// PROFILE: expression is not a function call, skipping"
-    end
-  end
-
-  # Transpile a STUB declaration. Emits Zig code that creates the stub state
-  # and registers it in @active_stubs for call-site replacement.
-  def transpile_stub(node)
-    fn_name = node.function_name
-    stub_var = "__stub_#{fn_name}"
-
-    case node.kind
-    when :returns
-      val_code = visit(node.value)
-      @active_stubs[fn_name] = { kind: :returns, var: stub_var }
-      "const #{stub_var} = #{val_code};"
-
-    when :captures
-      cap_name = node.value  # string: the variable name to capture into
-      @active_stubs[fn_name] = { kind: :captures, var: cap_name }
-      "var #{cap_name}: i64 = 0; _ = &#{cap_name};"
-
-    when :sequence
-      values = node.value  # AST::ListLit or array of expressions
-      items = if values.respond_to?(:items)
-        values.items.map { |v| visit(v) }
-      else
-        [visit(values)]
-      end
-      @active_stubs[fn_name] = { kind: :sequence, var: stub_var }
-      arr_items = items.map { |v| "#{v}" }.join(", ")
-      "const #{stub_var}_seq = [_][]const u8{ #{arr_items} };\nvar #{stub_var}_idx: usize = 0; _ = &#{stub_var}_idx;"
-
-    when :with
-      lambda_code = visit(node.value)
-      @active_stubs[fn_name] = { kind: :with, var: stub_var }
-      "const #{stub_var} = #{lambda_code};"
-    end
-  end
-
-  # Tier ordering for max() comparison
-  TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
-
-  def task_config_zig(stack_size, pinned: false, computed_tier: nil)
-    default = @default_stack_size || "Standard"
-    if stack_size
-      # User explicitly chose a size - honor it
-      variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
-    elsif computed_tier
-      # Auto-sized: take the MAX of computed tier and build-mode default.
-      # Debug builds use Large default because safety checks inflate frames.
-      computed = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
-      variant = TIER_RANK.fetch(computed, 0) >= TIER_RANK.fetch(default, 0) ? computed : default
-    else
-      variant = default
-    end
+  def task_config_zig(stack_size, pinned: false)
+    variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")
     if pinned
       ".{ .stack_size = .#{variant}, .pinned = true }"
     else
@@ -3602,9 +2611,6 @@ private
       if (e.is_a?(AST::BindExpr) || e.is_a?(AST::VarDecl)) && e.name.is_a?(String)
         locally_bound = locally_bound | Set[e.name]
       end
-      if (e.is_a?(AST::ForRange) || e.is_a?(AST::ForEach)) && e.var_name.is_a?(String)
-        locally_bound = locally_bound | Set[e.var_name]
-      end
       # ThenChain: all step bindings are locally declared inside the fiber.
       if e.is_a?(AST::ThenChain)
         e.steps.each { |step| locally_bound = locally_bound | Set[step[:binding]] if step[:binding] }
@@ -3616,123 +2622,8 @@ private
   # Escape CLEAR variable names that would shadow Zig primitive types
   # (uN, iN, fN patterns like u8, i32, f64) using Zig's @"name" quoting syntax.
   # Strips trailing `!` (mutation) and `?` (predicate) suffixes from CLEAR names —
-  # Flatten a chain of string + operations into a list of leaf operands.
-  # "a" + "b" + "c" is parsed as ADD(ADD("a", "b"), "c"), flattened to ["a", "b", "c"].
-  def collect_string_concat_parts(node)
-    parts = []
-    if node.is_a?(AST::BinaryOp) && (node.op == :ADD || node.op == "+") &&
-       (node.left.type_info&.string? || node.right.type_info&.string?)
-      parts.concat(collect_string_concat_parts(node.left))
-      parts.concat(collect_string_concat_parts(node.right))
-    else
-      parts << node
-    end
-    parts
-  end
-
-  # EXTERN FFI trampoline: only use onRootStack for functions that need deep
-  # stacks (filesystem I/O, std.json). Pure compute functions (SHA256, math)
-  # run directly on the fiber stack for zero overhead.
-  # EXTERN FFI trampoline dispatch. Functions marked :safe run directly on the
-  # fiber stack (zero overhead). All others go through onRootStack (safe for
-  # deep stacks / filesystem I/O but adds ~1us per call).
-  def trampoline_call(tid, rt_name, node)
-    effects = node.respond_to?(:extern_effects) ? (node.extern_effects || {}) : {}
-    is_safe = effects.is_a?(Hash) ? effects[:safe] : false
-    if is_safe
-      "__Ext#{tid}.run(@ptrCast(&__ext#{tid}_frame))"
-    else
-      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__Ext#{tid}.run), @ptrCast(&__ext#{tid}_frame))"
-    end
-  end
-
-  def trampoline_call_method(tid, rt_name, node)
-    effects = node.respond_to?(:extern_effects) ? (node.extern_effects || {}) : {}
-    is_safe = effects.is_a?(Hash) ? effects[:safe] : false
-    if is_safe
-      "__ExtM#{tid}.run(@ptrCast(&__extm#{tid}_frame))"
-    else
-      "#{rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &__ExtM#{tid}.run), @ptrCast(&__extm#{tid}_frame))"
-    end
-  end
-
-  # allocPrint optimization helpers: detect when string interpolation can use
-  # std.fmt.allocPrint (1 alloc) instead of intToString+concat (2 allocs).
-
-  def interp_string_literal?(node)
-    node.is_a?(AST::Literal) && node.type == :STRING
-  end
-
-  def interp_numeric_to_string?(node)
-    node.is_a?(AST::MethodCall) &&
-      node.name == "toString" &&
-      node.object.type_info&.numeric?
-  end
-
-  def build_alloc_print_args(parts)
-    fmt = ""
-    args = []
-    parts.each do |p|
-      if interp_string_literal?(p)
-        # Zig-escape the literal bytes, then escape { } for std.fmt.
-        escaped = p.value.bytes.map { |b|
-          case b
-          when 0x5C then '\\\\'
-          when 0x22 then '\\"'
-          when 0x0A then '\\n'
-          when 0x0D then '\\r'
-          when 0x09 then '\\t'
-          when 0x00 then '\\x00'
-          when 0x80..0xFF then "\\x#{'%02x' % b}"
-          else b.chr
-          end
-        }.join
-        fmt += escaped.gsub("{", "{{").gsub("}", "}}")
-      else
-        # Numeric toString(): emit {d} for integers, {d:.0} for floats
-        # (truncate to integer, matching CLEAR's toString() semantics).
-        obj_type = p.object.type_info
-        if obj_type&.float?
-          fmt += "{d:.0}"
-          args << visit(p.object)
-        else
-          fmt += "{d}"
-          args << visit(p.object)
-        end
-      end
-    end
-    [fmt, args]
-  end
-
   # these are naming conventions not valid in Zig identifiers.
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
-  # Wrap string literals in heapAlloc.dupe for HashMap value storage.
-  # String literals are rodata - can't be freed by HashMap.deinit.
-  # This is the CLEAR equivalent of Rust's String::from("literal").
-  def heap_dupe_string_literals(val_ref, val_node, rt_name)
-    # Direct string literal: "hello" -> try heapAlloc.dupe(u8, "hello")
-    if val_node.is_a?(AST::Literal) && val_node.type_info&.string?
-      return "try #{rt_name}.heapAlloc().dupe(u8, #{val_ref})"
-    end
-    # Union construction with string literal field: Value{ Str: "hello" }
-    if val_node.is_a?(AST::StructLit)
-      schema = @union_schemas&.dig(val_node.name.to_sym)
-      if schema
-        val_node.fields.each do |fname, fnode|
-          if fnode.type_info&.string? && fnode.is_a?(AST::Literal)
-            # The val_ref already has the Zig StructLit. Replace the literal.
-            if fnode.respond_to?(:value) && fnode.value.is_a?(String)
-              old_str = "\"#{fnode.value}\""
-              new_str = "try #{rt_name}.heapAlloc().dupe(u8, #{old_str})"
-              return val_ref.sub(old_str, new_str)
-            end
-          end
-        end
-      end
-    end
-    val_ref
-  end
-
   def zig_safe_name(name)
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
     # CLEAR's main() must not collide with Zig's pub fn main() entry point.
@@ -3745,6 +2636,7 @@ private
     if node.is_a?(AST::Identifier)
       unless locally_bound.include?(node.name)
         result[node.name] ||= node.type_info
+        # Capture the resource close pattern from the symbol entry if available.
         if node.symbol.respond_to?(:close_zig) && node.symbol.close_zig && !@_capture_close_zig.key?(node.name)
           @_capture_close_zig[node.name] = node.symbol.close_zig
         end
@@ -3752,23 +2644,13 @@ private
       return
     end
     # ThenChain: process steps in order, accumulating bindings into locally_bound
+    # so later steps that reference earlier bindings are NOT captured from outer scope.
     if node.is_a?(AST::ThenChain)
       lb = locally_bound
       node.steps.each do |step|
         walk_do_identifiers(step[:expr], result, lb)
         lb = lb | Set[step[:binding]] if step[:binding]
       end
-      return
-    end
-    # ForRange/ForEach: loop variable is locally declared, not an outer capture.
-    if node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
-      new_bound = locally_bound | Set[node.var_name]
-      walk_do_body(node.body, result, new_bound)
-      if node.respond_to?(:start_expr)
-        walk_do_identifiers(node.start_expr, result, locally_bound)
-        walk_do_identifiers(node.end_expr, result, locally_bound)
-      end
-      walk_do_identifiers(node.collection, result, locally_bound) if node.respond_to?(:collection) && node.collection
       return
     end
     # WithBlock: visit var_nodes as outer refs but exclude aliases from capture.
@@ -3778,23 +2660,12 @@ private
       end
       aliases = node.capabilities.filter_map { |cap| cap[:alias] || cap[:var_node]&.name }.to_set
       new_bound = locally_bound | aliases
-      walk_do_body(node.body, result, new_bound)
+      node.body.each { |stmt| walk_do_identifiers(stmt, result, new_bound) }
       return
     end
     node.members.each do |m|
       child = node.send(m)
       do_walk_child(child, result, locally_bound)
-    end
-  end
-
-  # Walk a body (array of statements), tracking declarations as locally_bound.
-  def walk_do_body(stmts, result, locally_bound)
-    lb = locally_bound
-    stmts.each do |stmt|
-      walk_do_identifiers(stmt, result, lb)
-      if (stmt.is_a?(AST::BindExpr) || stmt.is_a?(AST::VarDecl)) && stmt.name.is_a?(String)
-        lb = lb | Set[stmt.name]
-      end
     end
   end
 
@@ -3852,48 +2723,7 @@ private
 
   def transpile_block(statements)
     statements.map do |stmt|
-      ctx = current_tp_ctx
-      saved_temps = ctx&.pending_heap_temps
-      ctx.pending_heap_temps = [] if ctx
       code = visit(stmt)
-      # Move suppression: for consumed args (TAKES, append, struct/union construction).
-      # Appended AFTER the statement with semicolons to form valid Zig.
-      consumed = emit_consumed_moves(stmt)
-      unless consumed.empty?
-        code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-        code = "#{code}\n#{consumed}"
-      end
-      # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
-      # Uses the same emit_cleanup logic as VarDecl for correct type-specific cleanup.
-      # Resource types get their CLOSE method via the type schema.
-      temps = ctx&.pending_heap_temps || []
-      if temps.any?
-        schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-        preamble = temps.map { |t|
-          ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
-          ti.heap_promoted = true
-          zig_t = ti.zig_type
-          entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
-          if entry
-            proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, nil, false)
-            cleanup = emit_cleanup_from_entry(t[:var], entry, proxy)
-          else
-            cleanup = ""
-          end
-          "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
-        }.join("\n")
-        # When a heap temp is used in a return statement, suppress its
-        # cleanup - ownership transfers to the caller.
-        if stmt.is_a?(AST::ReturnNode) && temps.any? { |t| t[:var] && code.include?(t[:var]) }
-          move_suppression = temps.filter_map { |t|
-            "#{t[:var]}_moved = true;" if code.include?(t[:var])
-          }.join("\n")
-          code = "#{preamble}\n#{move_suppression}\n#{code}"
-        else
-          code = "#{preamble}\n#{code}"
-        end
-      end
-      ctx.pending_heap_temps = saved_temps if ctx
       # Zig requires non-void expression results to be consumed. Any AST node
       # that is an expression (not a declaration, assignment, or control flow)
       # with a non-void return type needs `_ = ` when used as a statement.
@@ -3926,7 +2756,7 @@ private
 
     # 3. Handle Primitives
     case t
-    when "Float64", "Int64", "Byte" then "{d}" # Decimal
+    when "Number", "Int64", "Byte" then "{d}" # Decimal
     when "Bool"                    then "{}"  # Auto (true/false)
     when "Void"                    then "{}"  # Void
     else
@@ -4017,9 +2847,6 @@ if __FILE__ == $0
     opts.on('--module', 'Emit as a Zig module (uses @import("cheat_runtime"), no runtime footer)') do
       options[:mode] = :module
     end
-    opts.on('--test', 'Emit with test harness (GPA leak detection, scheduler setup)') do
-      options[:mode] = :test
-    end
     opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.cht"') do |spec|
       name, path = spec.split('=', 2)
       options[:pkg_paths][name] = File.expand_path(path)
@@ -4027,11 +2854,14 @@ if __FILE__ == $0
     opts.on('--use-c-allocator', 'Use the C allocator (jemalloc/mimalloc) instead of GPA') do
       options[:use_c_allocator] = true
     end
-    opts.on('--default-stack SIZE', 'Default fiber stack size (Standard, Large, Xl)') do |s|
-      options[:default_stack_size] = s
+    opts.on('--test', 'Emit as test module') do
+      options[:mode] = :test
     end
-    opts.on('--strict', 'Strict test mode: require all IO functions to be stubbed') do
-      options[:strict_test] = true
+    opts.on('--default-stack SIZE', 'Default stack size class') do |size|
+      options[:default_stack] = size
+    end
+    opts.on('--strict', 'Strict test mode') do
+      options[:strict] = true
     end
   end.parse!
 
@@ -4040,13 +2870,10 @@ if __FILE__ == $0
     code       = File.read(script_file)
     source_dir = File.dirname(File.expand_path(script_file))
     transpiler = ZigTranspiler.new
-    transpiler.instance_variable_set(:@default_stack_size, options[:default_stack_size]) if options[:default_stack_size]
 
     case options[:mode]
     when :module
       puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
-    when :test
-      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths], test_mode: true, strict_test: !!options[:strict_test])
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
     end
