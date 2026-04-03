@@ -1038,51 +1038,38 @@ private
           value  = visit(node.value)
           return "#{target}.#{field} = #{value};"
         elsif node.name.is_a?(AST::GetIndex)
-          # Check if target is a Map
           target_node = node.name.target
-          if target_node.metatype == :hashmap
-             map_ft   = Type.new(target_node.full_type)
-             map_ref  = visit(target_node)
-             # Auto-deref Arc-wrapped maps
-             map_ti = target_node.type_info
-             map_ref = "#{map_ref}.ctrl.data.*" if map_ti&.shared? || map_ti&.multiowned?
-             key_ref  = visit(node.name.index)
-             val_ref  = visit(node.value)
-             rt_name  = @do_rt_name || "rt"
+          target_ti = target_node.type_info
+          rt_name = @do_rt_name || "rt"
 
-             if map_ft.numeric_map?
-               alloc = (map_ft.escaped_return || map_ft.heap_promoted || map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
-               if map_ft.sharded? || map_ft.striped?
-                 return "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
-               else
-                 key_zig = map_ft.key_type.zig_type
-                 val_zig = map_ft.value_type.zig_type
-                 return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
-               end
-             else
-               # Shard-direct: putPrehashed(shard_idx, hash, alloc, key, val) — zero rehash.
-               # Key + hash come from the pre-routed queue, computed once during routing.
-               if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
-                 return "try #{map_ref}.putPrehashed(#{@shard_direct_idx}, #{@shard_direct_hash}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
-               end
-               # Keys must use heapAlloc — they outlive the current frame
-               # (frame rewind after function return would dangle key pointers).
-               # Values use frameAlloc for frame-local maps, heapAlloc for sharded.
-               val_alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
-               move_logic = emit_move_suppression(node.value)
-               # String literals in values must be heap-duped (rodata can't be freed).
-               # This is like Rust's String::from("literal") - the compiler promotes
-               # literals to owned heap data when stored in containers.
-               # TODO: In tight loops, hoist the dupe outside the loop body.
-               val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name)
-               return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{val_alloc}, #{key_ref}, #{val_ref});\n#{move_logic}"
-             end
-          end
-          arr_ref = visit(target_node)
-          idx_ref = visit(node.name.index)
+          # Auto-deref Arc/Rc-wrapped maps
+          target_ref = visit(target_node)
+          target_ref = "#{target_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
+
+          key_ref = visit(node.name.index)
           val_ref = visit(node.value)
 
-          return "CheatLib.setAt(#{arr_ref}, #{idx_ref}, #{val_ref});"
+          # Shard-direct optimization (bypasses registry)
+          if target_ti&.map? && !target_ti&.numeric_map? && @shard_direct_map &&
+             target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
+            return "try #{target_ref}.putPrehashed(#{@shard_direct_idx}, #{@shard_direct_hash}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
+          end
+
+          # Sharded string map: direct put with single alloc
+          if target_ti&.map? && !target_ti&.numeric_map? && (target_ti&.sharded? || target_ti&.striped?)
+            return "try #{target_ref}.put(#{rt_name}.heapAlloc(), #{key_ref}, #{val_ref});"
+          end
+
+          op = resolve_index_op(target_ti, :set)
+          if op
+            # String literals in map values must be heap-duped (rodata can't be freed)
+            val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name) if target_ti&.map?
+            move_logic = op[:takes_value] ? emit_move_suppression(node.value) : ""
+            code = emit_index_set(op, target_ref, key_ref, val_ref, target_ti, rt_name)
+            return move_logic.empty? ? "#{code};" : "#{code};\n#{move_logic}"
+          else
+            return "CheatLib.setAt(#{target_ref}, #{key_ref}, #{val_ref});"
+          end
         else
           # Recursive visit for things like 'user.id' or 'list[0]'
           visit(node.name)
@@ -1213,7 +1200,7 @@ private
         return "[#{ti.capacity}]#{zig_type}{ #{items_code} }"
       end
 
-      # 2. Determine Allocator
+      # 2. Determine Allocator (storage-based: heap for heap-stored, frame otherwise)
       allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
 
       # 3. Generate Items Slice
@@ -1247,37 +1234,25 @@ private
       transpile_hash_lit(node)
 
     when AST::GetIndex
-      # 1. Resolve Target and Index
       target = visit(node.target)
       index = visit(node.index)
+      target_ti = node.target.type_info
 
-      if node.target.metatype == :hashmap
-        map_ft = Type.new(node.target.full_type)
-        # Auto-deref Arc/Rc-wrapped maps (same pattern as Assignment and map methods).
-        map_ti = node.target.type_info
-        target = "#{target}.ctrl.data.*" if map_ti&.shared? || map_ti&.multiowned?
+      # Auto-deref Arc/Rc-wrapped maps
+      target = "#{target}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
 
-        if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
-          key_zig = map_ft.key_type.zig_type
-          val_zig = map_ft.value_type.zig_type
-          "CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target}, #{index})"
-        else
-          # Shard-direct: getDirect(shard_idx, key) — no hash, no routing
-          # Key comes from the pre-routed queue, not recomputed from the index expression.
-          if @shard_direct_map && node.target.is_a?(AST::Identifier) && node.target.name == @shard_direct_map
-            "#{target}.getDirect(#{@shard_direct_idx}, #{@shard_direct_key})"
-          else
-            # Unified .get() API works for StringMap, PartitionedStringMap, ShardedStringMap
-            "#{target}.get(#{index})"
-          end
-        end
-      elsif node.target.type_info&.pool?
-        "#{target}.get(#{index})"
-      elsif node.target.type_info&.string?
-        # String indexing: returns a single-char string ([]const u8), not a byte
-        "CheatLib.charAt(#{target}, #{index})"
+      # Shard-direct optimization (bypasses registry for perf-critical path)
+      if target_ti&.map? && @shard_direct_map && node.target.is_a?(AST::Identifier) && node.target.name == @shard_direct_map
+        "#{target}.getDirect(#{@shard_direct_idx}, #{@shard_direct_key})"
       else
-        "CheatLib.getAt(#{target}, #{index})"
+        op = resolve_index_op(target_ti, :get)
+        if op
+          emit_index_get(op, target, index, target_ti)
+        elsif target_ti&.string?
+          "CheatLib.charAt(#{target}, #{index})"
+        else
+          "CheatLib.getAt(#{target}, #{index})"
+        end
       end
 
     # TODO: See where drops live
@@ -2945,29 +2920,21 @@ private
     #    {alloc} -> determine allocator automatically
     #    For method calls, use the object's storage (not the result's storage)
     if pattern.include?("{alloc}")
-      # Sharded lists are shared across fibers — must stay heap-backed.
-      # Regular @list uses the frame arena (CheatArena grows dynamically via heap pages).
-      # @pool is always heap (explicit location: :heap set in annotator).
-      first_arg_type = node.respond_to?(:args) ? node.args&.first&.type_info : nil
-      force_heap = if node.is_a?(AST::MethodCall)
-        node.object.respond_to?(:type_info) &&
-          (node.object.type_info&.pool? || node.object.type_info&.sharded?)
+      # Resolve allocator from the receiver's storage.
+      # For UFCS calls (append(list, val)), the receiver is args[0].
+      # For method calls (list.append(val)), the receiver is node.object.
+      receiver = if node.is_a?(AST::MethodCall)
+        node.object
       else
-        first_arg_type&.pool? || first_arg_type&.sharded?
+        node.args&.first
       end
-      target_storage = if force_heap
-        :heap
-      elsif node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
-        node.object.storage
-      elsif !node.is_a?(AST::MethodCall) && first_arg_type&.list_collection?
-        # For list operations (append, etc.), use the list arg's storage,
-        # not the call result's storage (which is always :stack for Void returns).
-        node.args&.first&.respond_to?(:storage) ? (node.args.first.storage || :stack) : :stack
-      else
-        node.storage
-      end
+      receiver_ti = receiver&.type_info
       rt_ref = @do_rt_name || "rt"
-      alloc = target_storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+      # Use storage-based alloc: heap for pools/sharded, frame for everything else.
+      # This is the BACKING STORE allocator, not the cleanup allocator.
+      is_heap = receiver_ti&.pool? || receiver_ti&.sharded? || receiver_ti&.striped? ||
+                (receiver&.respond_to?(:storage) && receiver.storage == :heap)
+      alloc = is_heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
       pattern = pattern.gsub("{alloc}", alloc)
     end
 
@@ -3053,6 +3020,52 @@ private
     end
 
     [promotions, promoted_names]
+  end
+
+  # Look up the INDEX_OPS entry for a container type.
+  def resolve_index_op(type_info, op)
+    kind = if type_info&.numeric_map? then :numeric_map
+           elsif type_info&.map? then :string_map
+           elsif type_info&.pool? then :pool
+           elsif type_info&.array? || type_info&.list_collection? then :array
+           end
+    return nil unless kind
+    INDEX_OPS.dig(kind, op)
+  end
+
+  # Emit Zig for a registry-driven index GET operation.
+  def emit_index_get(op, target, index, target_ti)
+    pattern = op[:zig]
+    pattern = pattern.gsub("{target}", target).gsub("{index}", index)
+    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
+      pattern = pattern.gsub("{key_zig}", target_ti.key_type.zig_type)
+                       .gsub("{val_zig}", target_ti.value_type.zig_type)
+    end
+    pattern
+  end
+
+  # Emit Zig for a registry-driven index SET operation.
+  def emit_index_set(op, target, index, value, target_ti, rt_name)
+    pattern = op[:zig]
+    pattern = pattern.gsub("{target}", target).gsub("{index}", index).gsub("{value}", value)
+    if pattern.include?("{key_alloc}")
+      pattern = pattern.gsub("{key_alloc}", "#{rt_name}.heapAlloc()")
+    end
+    if pattern.include?("{val_alloc}")
+      # String map put(key_alloc, val_alloc, key, val): val_alloc is for internal
+      # value duplication. Frame for local maps, heap for sharded/striped.
+      is_heap = target_ti.sharded? || target_ti.striped?
+      val_alloc = is_heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+      pattern = pattern.gsub("{val_alloc}", val_alloc)
+    end
+    if pattern.include?("{alloc}")
+      pattern = pattern.gsub("{alloc}", cleanup_alloc_expr(target_ti))
+    end
+    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
+      pattern = pattern.gsub("{key_zig}", target_ti.key_type.zig_type)
+                       .gsub("{val_zig}", target_ti.value_type.zig_type)
+    end
+    pattern
   end
 
   # Emits Zig for pool.insert / pool.get / pool.remove method calls.

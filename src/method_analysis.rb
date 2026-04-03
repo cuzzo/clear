@@ -114,4 +114,16 @@ module MethodAnalysis
 
     true
   end
+
+  # Look up the INDEX_OPS entry for a container type.
+  # Returns the :get or :set sub-entry, or nil.
+  def resolve_index_op(type_info, op)
+    kind = if type_info&.numeric_map? then :numeric_map
+           elsif type_info&.map? then :string_map
+           elsif type_info&.pool? then :pool
+           elsif type_info&.array? || type_info&.list_collection? then :array
+           end
+    return nil unless kind
+    INDEX_OPS.dig(kind, op)
+  end
 end

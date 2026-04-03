@@ -470,3 +470,61 @@ MAP_METHODS = {
     return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]" },
   },
 }.freeze
+
+# ============================================================================
+# Index Operations Registry — container[key] get/set semantics
+# ============================================================================
+# Keyed by container kind (:string_map, :numeric_map, :array, :pool).
+# Each entry has :get and :set with:
+#   zig:             Zig pattern string ({target}, {index}, {value}, {alloc}, {key_alloc})
+#   return_type:     lambda(container_type) -> return type for get
+#   container_borrow: true if get returns a borrowed view (no cleanup)
+#   takes_value:     true if set takes ownership of the value
+#   allocates:       true if set requires an allocator
+#   key_alloc:       :heap/:frame for string map key allocation
+
+INDEX_OPS = {
+  string_map: {
+    get: {
+      zig: "{target}.get({index})",
+      return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
+      container_borrow: true,
+    },
+    set: {
+      zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})",
+      takes_value: true,
+      allocates: true,
+      key_alloc: :heap,
+    },
+  },
+  numeric_map: {
+    get: {
+      zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})",
+      return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
+      container_borrow: true,
+    },
+    set: {
+      zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})",
+      takes_value: true,
+      allocates: true,
+    },
+  },
+  array: {
+    get: {
+      zig: "CheatLib.getAt({target}, {index})",
+      return_type: ->(ct) { ct.element_type },
+      container_borrow: true,
+    },
+    set: {
+      zig: "CheatLib.setAt({target}, {index}, {value})",
+      takes_value: false,
+    },
+  },
+  pool: {
+    get: {
+      zig: "{target}.get({index})",
+      return_type: ->(ct) { :"?#{ct.element_type.resolved}" },
+      container_borrow: false,
+    },
+  },
+}.freeze
