@@ -713,6 +713,153 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value{ List: distinct };
 
+    ELSE_IF formName == "list-orderby" THEN
+        -- (list-orderby list keyFn) -> sorted copy (insertion sort)
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        keyFn = eval!(items[2], envId, pool);
+        MUTABLE sorted: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR oi IN (0_i64 ..< srcItems.length()) DO
+                    sorted.append(srcItems[oi]);
+                END
+                -- Insertion sort by key
+                MUTABLE si: Int64 = 1;
+                WHILE si < sorted.length() DO
+                    MUTABLE j: Int64 = si;
+                    WHILE j > 0 DO
+                        MUTABLE aArgs: Value[]@list = List[];
+                        aArgs.append(keyFn); aArgs.append(sorted[j]);
+                        MUTABLE aKey: Value = evalList!(aArgs, envId, pool);
+                        MATCH aKey START Value.Tco AS tco -> aKey = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                        MUTABLE bArgs: Value[]@list = List[];
+                        bArgs.append(keyFn); bArgs.append(sorted[j - 1]);
+                        MUTABLE bKey: Value = evalList!(bArgs, envId, pool);
+                        MATCH bKey START Value.Tco AS tco -> bKey = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                        IF getNum(aKey) < getNum(bKey) THEN
+                            tmp = sorted[j - 1];
+                            sorted[j - 1] = sorted[j];
+                            sorted[j] = tmp;
+                            j -= 1;
+                        ELSE
+                            j = 0;
+                        END
+                    END
+                    si += 1;
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: sorted };
+
+    ELSE_IF formName == "list-unnest" THEN
+        -- (list-unnest list fieldFn) -> flatten nested lists
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        fieldFn = eval!(items[2], envId, pool);
+        MUTABLE flat: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR ui IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE fArgs: Value[]@list = List[];
+                    fArgs.append(fieldFn); fArgs.append(srcItems[ui]);
+                    MUTABLE nested: Value = evalList!(fArgs, envId, pool);
+                    MATCH nested START Value.Tco AS tco -> nested = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                    MATCH nested START
+                        Value.List AS innerItems ->
+                            FOR ni IN (0_i64 ..< innerItems.length()) DO
+                                flat.append(innerItems[ni]);
+                            END,
+                        DEFAULT -> flat.append(nested);
+                    END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: flat };
+
+    ELSE_IF formName == "list-index" THEN
+        -- (list-index list keyFn) -> assoc list of (key . items[])
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        keyFn = eval!(items[2], envId, pool);
+        MUTABLE groups: Value[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR gi IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE kArgs: Value[]@list = List[];
+                    kArgs.append(keyFn); kArgs.append(srcItems[gi]);
+                    MUTABLE gKey: Value = evalList!(kArgs, envId, pool);
+                    MATCH gKey START Value.Tco AS tco -> gKey = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                    -- Find existing group
+                    MUTABLE found: Int64 = 0 - 1;
+                    FOR fi IN (0_i64 ..< groups.length()) DO
+                        groupPair = pairCar(groups[fi]);
+                        IF valEqual?(groupPair, gKey) THEN found = fi; END
+                    END
+                    IF found >= 0 THEN
+                        -- Add to existing group (rebuild pair with appended list)
+                        existingList = pairCdr(groups[found]);
+                        MUTABLE newGroupItems: Value[]@list = List[];
+                        MATCH existingList START
+                            Value.List AS gl -> FOR gj IN (0_i64 ..< gl.length()) DO newGroupItems.append(gl[gj]); END,
+                            DEFAULT -> PASS;
+                        END
+                        newGroupItems.append(srcItems[gi]);
+                        groups[found] = Value.Pair{ pairCar: gKey, pairCdr: Value{ List: newGroupItems } };
+                    ELSE
+                        -- New group
+                        MUTABLE newItems: Value[]@list = List[];
+                        newItems.append(srcItems[gi]);
+                        groups.append(Value.Pair{ pairCar: gKey, pairCdr: Value{ List: newItems } });
+                    END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ List: groups };
+
+    ELSE_IF formName == "assoc-get" THEN
+        -- (assoc-get alist key) -> value or error if not found
+        alist = eval!(items[1], envId, pool);
+        key = eval!(items[2], envId, pool);
+        MATCH alist START
+            Value.List AS pairs ->
+                FOR ai IN (0_i64 ..< pairs.length()) DO
+                    pKey = pairCar(pairs[ai]);
+                    IF valEqual?(pKey, key) THEN
+                        RETURN pairCdr(pairs[ai]);
+                    END
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound" };
+
+    ELSE_IF formName == "assoc-set" THEN
+        -- (assoc-set alist key val) -> new alist with key set
+        alist = eval!(items[1], envId, pool);
+        key = eval!(items[2], envId, pool);
+        IF isError?(key) THEN RETURN key; END
+        val = eval!(items[3], envId, pool);
+        IF isError?(val) THEN RETURN val; END
+        MUTABLE newPairs: Value[]@list = List[];
+        MUTABLE replaced = FALSE;
+        MATCH alist START
+            Value.List AS pairs ->
+                FOR ai IN (0_i64 ..< pairs.length()) DO
+                    pKey = pairCar(pairs[ai]);
+                    IF valEqual?(pKey, key) THEN
+                        newPairs.append(Value.Pair{ pairCar: key, pairCdr: val });
+                        replaced = TRUE;
+                    ELSE
+                        newPairs.append(pairs[ai]);
+                    END
+                END,
+            DEFAULT -> PASS;
+        END
+        IF replaced == FALSE THEN
+            newPairs.append(Value.Pair{ pairCar: key, pairCdr: val });
+        END
+        RETURN Value{ List: newPairs };
+
     -- Error introspection: special forms to avoid error propagation
     ELSE_IF formName == "error?" THEN
         val = eval!(COPY items[1], envId, pool);

@@ -21,6 +21,7 @@ KNOWN_PASSING = %w[
   10_concat
   11_smooth_pipe
   12_while_loop
+  14_hashmap
   15_select
   16_file_io
   17_shell
@@ -31,6 +32,7 @@ KNOWN_PASSING = %w[
   23_optional
   24_error_returns
   26_reduce
+  27_order_by
   28_limit
   30_distinct
   31_multiowned

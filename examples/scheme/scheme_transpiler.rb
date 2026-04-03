@@ -20,6 +20,7 @@ class SchemeTranspiler
     @unions = {}  # name -> {variant_name -> has_payload}
     @mutable_stack = [Set.new]  # stack of per-function mutable sets
     @var_types = {}  # var_name -> struct_name (for field access resolution)
+    @hash_vars = Set.new  # variable names known to be HashMaps
   end
 
   def transpile(source)
@@ -88,6 +89,8 @@ class SchemeTranspiler
       emit_get_field(node)
     when AST::MatchStatement
       emit_match(node)
+    when AST::HashLit
+      emit_hash_lit(node)
     when AST::ListLit
       emit_list_lit(node)
     when AST::GetIndex
@@ -110,6 +113,8 @@ class SchemeTranspiler
       mutables.add(node.name.to_s) if node.mutable
       if node.value.is_a?(AST::StructLit)
         @var_types[node.name.to_s] = node.value.name.to_s
+      elsif node.value.is_a?(AST::HashLit)
+        @hash_vars.add(node.name.to_s)
       end
       "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
     when AST::Assignment
@@ -239,7 +244,6 @@ class SchemeTranspiler
 
   def emit_assignment(node)
     if node.name.is_a?(AST::GetField)
-      # p.x = val -> (vector-set! p idx val)
       target = emit(node.name.target)
       field = node.name.field.to_s
       val = emit(node.value)
@@ -248,6 +252,16 @@ class SchemeTranspiler
         return "(vector-set! #{target} #{idx} #{val})" if idx
       end
       ";; unknown field assignment: #{field}"
+    elsif node.name.is_a?(AST::GetIndex)
+      # m["key"] = val -> (set! m (assoc-set m "key" val))
+      target_name = node.name.target.is_a?(AST::Identifier) ? node.name.target.name.to_s : nil
+      key = emit(node.name.index)
+      val = emit(node.value)
+      if target_name
+        "(set! #{target_name} (assoc-set #{target_name} #{key} #{val}))"
+      else
+        ";; index assignment on non-identifier"
+      end
     else
       "(set! #{node.name} #{emit(node.value)})"
     end
@@ -310,6 +324,12 @@ class SchemeTranspiler
     "(if #{cond} #{body_expr} #{rest})"
   end
 
+  def emit_hash_lit(node)
+    # HashMap -> assoc list: ((key . val) ...)
+    pairs = node.pairs.map { |k, v| "(cons #{emit(k)} #{emit(v)})" }.join(" ")
+    "(list #{pairs})"
+  end
+
   def emit_list_lit(node)
     if node.items.empty?
       "(list)"
@@ -322,7 +342,14 @@ class SchemeTranspiler
   def emit_get_index(node)
     target = emit(node.target)
     index = emit(node.index)
-    "(list-ref #{target} #{index})"
+    target_name = node.target.is_a?(AST::Identifier) ? node.target.name.to_s : nil
+    # HashMap or string-keyed access -> assoc-get
+    if (target_name && @hash_vars.include?(target_name)) ||
+       (node.index.is_a?(AST::Literal) && node.index.type == :STRING)
+      "(assoc-get #{target} #{index})"
+    else
+      "(list-ref #{target} #{index})"
+    end
   end
 
   def emit_for_range(node)
