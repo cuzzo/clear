@@ -505,6 +505,24 @@ class CleanupPlan
   def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
 
+    # COPY creates heap-allocated data. Mark as heap_promoted so the
+    # binding gets cleanup regardless of the underlying type.
+    if node.respond_to?(:value) && node.value.is_a?(AST::CopyNode)
+      ti = Type.new(ti) if !ti.is_a?(Type)
+      if ti.string?
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
+      end
+      resolved = ti.resolved
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :local } if has_heap
+      end
+      if ti.array? && !ti.collection?
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :local }
+      end
+    end
+
     # Container borrows: data owned by container, no cleanup
     if node.respond_to?(:container_borrow) && node.container_borrow
       return nil
