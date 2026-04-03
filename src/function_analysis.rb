@@ -567,6 +567,19 @@ module FunctionAnalysis
   end
 
   def verify_return(node)
+    # Container borrows returned via Identifier: must have lifetime annotation.
+    if node.is_a?(AST::Identifier) && node.type_info&.container_borrow
+      lifetime_path = current_fn_ctx&.lifetime
+      unless lifetime_path
+        error!(
+          node,
+          "Cannot return borrowed value '#{node.name}' (borrowed from '#{node.type_info.container_borrow}') without a lifetime annotation.\n" \
+          "  Add: RETURNS #{node.type_info.container_borrow}:#{node.resolved_type}"
+        )
+      end
+      return true
+    end
+
     # Only verify for fields & indexes
     return true if !node.is_a?(AST::GetField) && !node.is_a?(AST::GetIndex)
 

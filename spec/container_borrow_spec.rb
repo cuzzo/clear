@@ -61,4 +61,17 @@ RSpec.describe "Container borrow semantics" do
     expect(env_decl).not_to be_nil
     expect(env_decl.type_info&.container_borrow).to be_truthy
   end
+
+  # =========================================================================
+  # Returning a container borrow without lifetime annotation is an error
+  # =========================================================================
+  it "raises error when returning container_borrow without lifetime" do
+    expect_error(<<~CLEAR, /Cannot return.*borrowed/)
+      UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+      FN getVal!(MUTABLE map: HashMap<Value>) RETURNS Value ->
+          val = map["key"] OR Value.Nil;
+          RETURN val;
+      END
+    CLEAR
+  end
 end
