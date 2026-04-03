@@ -532,4 +532,50 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # MATCH AS borrow propagation: binding inherits borrow from source.
+  # If the MATCH source is borrowed, the AS binding is also borrowed.
+  # ===========================================================================
+  describe "MATCH AS borrow propagation" do
+    context "MATCH AS on borrowed parameter produces borrowed binding" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+          FN bad(v: Value) RETURNS Value ->
+              MATCH v START
+                  Value.List AS items ->
+                      RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
+                  DEFAULT -> RETURN Value.Nil;
+              END
+              RETURN Value.Nil;
+          END
+        CLEAR
+      }
+
+      it "raises error when storing MATCH AS borrow into union variant" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+
+    context "MATCH AS on owned TAKES parameter produces owned binding" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+          FN good(TAKES v: Value) RETURNS Value ->
+              MATCH v START
+                  Value.List AS items ->
+                      RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
+                  DEFAULT -> RETURN Value.Nil;
+              END
+              RETURN Value.Nil;
+          END
+        CLEAR
+      }
+
+      it "allows storing MATCH AS owned binding into union variant" do
+        expect { ast }.not_to raise_error
+      end
+    end
+  end
+
 end

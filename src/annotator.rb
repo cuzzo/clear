@@ -745,6 +745,12 @@ private
                   og_declare(c[:binding], nil, payload_type, :stack)
                   classify_ownership!(current_scope.locals[c[:binding]])
                 end
+                # MATCH AS inherits borrow from source: if the MATCH subject
+                # is borrowed (or derived from a borrow), the AS binding is also borrowed.
+                source_name = root_variable_name(node.expr)
+                if source_name && @og[source_name]&.kind == :borrowed
+                  @og[c[:binding]]&.kind = :borrowed
+                end
               end
             end
           end
