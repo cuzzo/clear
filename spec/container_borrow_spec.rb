@@ -4,10 +4,6 @@ require_relative "../src/parser"
 require_relative "../src/annotator"
 require_relative "../src/transpiler"
 
-# Tests that container access (HashMap get, pool indexing) registers
-# borrows in the OwnershipGraph, suppresses cleanup, and prevents
-# returning borrowed values without lifetime annotations.
-
 RSpec.describe "Container borrow semantics" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
@@ -23,6 +19,10 @@ RSpec.describe "Container borrow semantics" do
 
   def expect_error(src, pattern)
     expect { annotate(src) }.to raise_error(CompilerError, pattern)
+  end
+
+  def expect_no_error(src)
+    expect { annotate(src) }.not_to raise_error
   end
 
   # =========================================================================
@@ -43,13 +43,31 @@ RSpec.describe "Container borrow semantics" do
   end
 
   # =========================================================================
-  # OR on container borrow is an error (mixes borrowed + owned)
+  # OR on container borrow with Copy fallback is allowed
   # =========================================================================
-  it "raises error when using OR on container borrow" do
-    expect_error(<<~CLEAR, /Cannot use OR.*borrowed/)
+  it "allows OR with Copy fallback on container borrow" do
+    expect_no_error(<<~CLEAR)
       UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
       FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
           val = map["key"] OR Value.Nil;
+          RETURN;
+      END
+    CLEAR
+  end
+
+  # =========================================================================
+  # OR on container borrow with non-Copy fallback is an error
+  # =========================================================================
+  it "raises error when OR fallback is non-Copy on container borrow" do
+    expect_error(<<~CLEAR, /Cannot use OR with non-Copy fallback/)
+      UNION Value { Nil, Num: Float64, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+      FN makeList!() RETURNS Value ->
+          MUTABLE items: Value[]@list = List[];
+          items.append(Value{ Num: 1.0 });
+          RETURN Value{ List: items };
+      END
+      FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+          val = map["key"] OR makeList!();
           RETURN;
       END
     CLEAR

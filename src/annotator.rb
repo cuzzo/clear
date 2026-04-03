@@ -2276,14 +2276,38 @@ private
     visit(node.left)
     visit(node.right)
 
-    # OR on container borrow of non-Copy type is an error: mixes borrowed with owned.
+    # OR on container borrow: the fallback (right side) must not have heap data.
+    # The borrow path has no cleanup (container owns it). The fallback path
+    # also gets no cleanup (binding inherits borrow status). If the fallback
+    # has heap data, it would leak.
+    # TODO: Allow non-Copy fallbacks by splitting OR into if/else with
+    # separate cleanup paths (borrow path = no cleanup, fallback = cleanup).
     container = find_container_source(node.left)
     if container
-      left_type = node.left.type_info
-      # Unwrap optional: ?Value -> Value for copyability check
-      inner = left_type&.optional? ? Type.new(left_type.resolved.to_s.sub(/^\?/, '').to_sym) : left_type
-      unless inner&.implicitly_copyable?(method(:lookup_type_schema))
-        error!(node, "Cannot use OR on a borrowed container value (non-Copy type #{inner&.resolved}). Use MATCH on the optional (?Type) instead.")
+      fallback = node.right
+      fallback_safe = if fallback.type_info&.implicitly_copyable?(method(:lookup_type_schema))
+        true
+      elsif fallback.is_a?(AST::GetField) && fallback.target.is_a?(AST::Identifier)
+        # Union unit variant (Value.Nil) - no payload, no heap data
+        schema = lookup_type_schema(fallback.target.name.to_sym) rescue nil
+        schema.is_a?(Hash) && schema[:kind] == :union && schema[:variants]&.[](fallback.field).nil?
+      elsif fallback.is_a?(AST::UnionVariantLit)
+        # Union variant literal (Value.Lambda{...}) - check if all field values are Copy
+        fallback.fields.all? { |_, v| v.type_info&.implicitly_copyable?(method(:lookup_type_schema)) rescue true }
+      elsif fallback.is_a?(AST::StructLit)
+        # Union variant as StructLit (Value{ Number: 0.0 }) - check if all field values are Copy
+        schema = lookup_type_schema(fallback.name.to_sym) rescue nil
+        is_union_lit = schema.is_a?(Hash) && schema[:kind] == :union
+        if is_union_lit
+          fallback.fields.all? { |_, v| v.type_info&.implicitly_copyable?(method(:lookup_type_schema)) rescue true }
+        else
+          false
+        end
+      else
+        false
+      end
+      unless fallback_safe
+        error!(node, "Cannot use OR with non-Copy fallback on a container borrow. Use MATCH on the optional (?Type) instead.")
       end
     end
 
