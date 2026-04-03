@@ -637,9 +637,14 @@ private
         param_def = node.params.find { |p| p[:name] == drop[:name] }
         next unless param_def&.dig(:takes)
         ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
-        # Only emit cleanup for types that have heap-allocated data to free.
         schema = (@struct_schemas || {})[ti.resolved]
         is_resource = schema.is_a?(Hash) && schema[:kind] == :resource
+        is_union = @union_schemas&.key?(ti.resolved)
+        if is_union
+          zig_t = transpile_type(ti)
+          safe = zig_safe_name(drop[:name])
+          next "var #{safe}_moved = false; _ = &#{safe}_moved;\ndefer if (!#{safe}_moved) CheatLib.cleanup(#{zig_t}, rt.heapAlloc(), &#{safe});\n"
+        end
         next unless ti.string? || is_resource
         ti.heap_promoted = true
         proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, nil)
@@ -1269,6 +1274,15 @@ private
           # Emit payload binding: `const r = subject.Variant;`
           if c[:binding]
             binding_decl = "const #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
+            # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup.
+            if node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+              src_name = zig_safe_name(node.expr.name)
+              sym = node.expr.respond_to?(:symbol) ? node.expr.symbol : nil
+              decl = sym&.reg
+              is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+              is_takes_param = sym&.respond_to?(:takes) && sym&.takes
+              binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
+            end
             body = "#{binding_decl}#{body}"
           elsif c[:destructure]
             # Union variant destructuring: extract each named field from the payload.

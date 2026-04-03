@@ -747,9 +747,24 @@ private
                 end
                 # MATCH AS inherits borrow from source: if the MATCH subject
                 # is borrowed (or derived from a borrow), the AS binding is also borrowed.
+                # If the source is owned, MATCH AS consumes it (move).
                 source_name = root_variable_name(node.expr)
                 if source_name && @og[source_name]&.kind == :borrowed
                   @og[c[:binding]]&.kind = :borrowed
+                elsif source_name && @og[source_name] && @og[source_name].kind != :borrowed
+                  # Owned source with non-Copy payload: MATCH AS is a move.
+                  # Copy payloads (Float64, String, etc.) don't need a move.
+                  is_payload_copy = if raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
+                    # Inline struct: non-Copy if it has @indirect or slice fields
+                    !Type.variant_has_heap?(raw_payload)
+                  else
+                    payload_type = raw_payload.is_a?(Type) ? raw_payload : Type.new(raw_payload || :Any)
+                    payload_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
+                  end
+                  unless is_payload_copy
+                    node.expr.was_moved = true if node.expr.is_a?(AST::Identifier)
+                    og_set_moved(source_name)
+                  end
                 end
               end
             end

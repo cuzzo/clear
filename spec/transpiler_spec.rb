@@ -657,5 +657,41 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       expect(zig).to include("val_moved = true")
     end
+
+    it "emits source_moved = true after MATCH AS on owned non-Copy payload" do
+      src = <<~CLEAR
+        STRUCT Env { x: Int64 }
+        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+            pool.insert(Env{ x: 1 });
+            MATCH v START
+                Value.Lambda AS lam -> RETURN Value.Nil;,
+                DEFAULT -> RETURN Value.Nil;
+            END
+            RETURN Value.Nil;
+        END
+      CLEAR
+      zig = transpile(src)
+      # MATCH AS of non-Copy payload on TAKES param must suppress cleanup on source
+      expect(zig).to include("v_moved = true")
+    end
+
+    it "does NOT emit source_moved for MATCH AS on Copy payload" do
+      src = <<~CLEAR
+        STRUCT Env { x: Int64 }
+        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+            pool.insert(Env{ x: 1 });
+            MATCH v START
+                Value.Num AS n -> RETURN Value{ Num: n };,
+                DEFAULT -> RETURN Value.Nil;
+            END
+            RETURN Value.Nil;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Copy payload: no move needed, source still usable
+      expect(zig).not_to include("v_moved = true")
+    end
   end
 end
