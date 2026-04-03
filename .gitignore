@@ -16,7 +16,11 @@ benchmarks/**/bench_clear
 benchmarks/**/bench_go
 benchmarks/**/bench_rust
 benchmarks/**/server_clear
-benchmarks/**/Cargo.lock
+benchmarks/**/Cargo.loc
+benchmarks/**/client_go
+benchmarks/**/server_go
+benchmarks/**/server
 benchmarks/10_concurrent_search/data/
 
-examples/web_crawler/.zig-cache/
+**/*.profile/
+**/.zig-cache/
