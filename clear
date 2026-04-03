@@ -323,17 +323,27 @@ when 'test'
     puts
     puts
     if failed_names.any?
-      puts "Failures:"
-      failed_names.each { |n| puts "  \e[31m#{n}\e[0m" }
       puts
+      puts "  \e[31m\e[1mFAILURES:\e[0m"
+      failed_names.each { |n| puts "    \e[31m\e[1m#{n}\e[0m" }
+      puts
+      puts "  \e[31m\e[1m#{passed} passed, #{failed} FAILED, #{passed + failed} total\e[0m"
+      puts
+      exit 1
+    else
+      puts "  \e[32m#{passed} passed, #{passed} total\e[0m"
+      exit 0
     end
-    total = passed + failed
-    color = failed > 0 ? "\e[31m" : "\e[32m"
-    puts "#{color}#{passed} passed, #{failed} failed, #{total} total\e[0m"
-    exit(failed > 0 ? 1 : 0)
   else
     output = do_build(source, module_mode: true, profile: !!profile_mode, strict_test: !!strict_mode)
+    if output.include?('FAIL') || !$?.success?
+      $stderr.puts "\e[31m\e[1mTEST FAILED\e[0m"
+      $stderr.puts output
+      exit 1
+    end
+    # Print pass count from test output if available
     puts output unless output.strip.empty?
+    exit 0
   end
 
 when 'benchmark'
