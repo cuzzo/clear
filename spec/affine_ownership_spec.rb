@@ -435,4 +435,44 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # Storing borrowed values into struct/union construction is an error.
+  # A borrow cannot outlive its source via struct capture.
+  # ===========================================================================
+  describe "Borrow capture in struct/union construction" do
+    let(:preamble) {
+      <<~CLEAR
+        UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+      CLEAR
+    }
+
+    context "borrowed parameter captured in union variant" do
+      let(:code) {
+        preamble + <<~CLEAR
+          FN bad(items: Value[]) RETURNS Value ->
+              RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };
+          END
+        CLEAR
+      }
+
+      it "raises error when storing borrowed slice into union variant" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+
+    context "owned parameter captured in union variant" do
+      let(:code) {
+        preamble + <<~CLEAR
+          FN good(TAKES items: Value[]) RETURNS Value ->
+              RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };
+          END
+        CLEAR
+      }
+
+      it "allows storing owned parameter into union variant" do
+        expect { ast }.not_to raise_error
+      end
+    end
+  end
+
 end

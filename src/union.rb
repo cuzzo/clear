@@ -163,6 +163,10 @@ module UnionAnalysis
 
     node.fields.each do |fname, val_node|
       visit(val_node)
+      # Cannot capture a borrowed value into a struct/union variant.
+      if val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
+        error!(val_node, "Cannot store borrowed value '#{val_node.name}' into #{node.union_name}.#{node.variant_name}. Parameters are implicit borrows unless TAKES.")
+      end
       expected_type = expected_fields[fname]
       actual = val_node.type_info
       unless expected_type.accepts?(actual)

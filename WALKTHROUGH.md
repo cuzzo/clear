@@ -276,7 +276,7 @@ END
 | Borrowed (parameter, `map.get`) | Borrow | No |
 | Owned (local, TAKES param) | Move (consumes source) | Yes |
 
-```ruby clear
+```ruby clear illustrative
 UNION Value { Nil, Num: Float64, List: Value[] }
 
 -- Borrowed source: MATCH AS produces a borrow
@@ -300,7 +300,7 @@ END
 
 Storing a borrowed `MATCH AS` binding into a struct or union variant is a compile error:
 
-```ruby clear
+```ruby clear illustrative
 FN bad(items: Value[]) RETURNS Value ->
     -- items is a borrowed parameter
     RETURN Value.Lambda{ params: items };  -- COMPILER ERROR: Cannot store borrowed 'items'
