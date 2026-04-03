@@ -539,20 +539,107 @@ private
         .map    { |name| "var #{name} = _m_#{name}; _ = &#{name};" }
         .join("\n    ")
 
+      # Emit cleanup for TAKES parameters via CleanupPlan.
+      # Only when the function has rt (cleanup uses rt.heapAlloc/frameAlloc).
+      fn_plan = @cleanup_plans&.dig(node.name)
+      takes_cleanup = if fn_needs_rt
+        (node.deferred_drops || []).filter_map { |drop|
+          param_def = node.params.find { |p| p[:name] == drop[:name] }
+          next unless param_def&.dig(:takes)
+          entry = fn_plan&.lookup(drop[:name])
+          next unless entry && entry[:needs_cleanup]
+          ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
+          proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, entry[:resource_close_zig], false)
+          emit_cleanup_from_entry(zig_safe_name(drop[:name]), entry, proxy)
+        }.reject(&:empty?).join("\n    ")
+      else
+        ""
+      end
+
       prologue_parts = [prologue,
                         param_suppressions.empty? ? nil : param_suppressions,
-                        mutable_param_shadows.empty? ? nil : mutable_param_shadows].compact
+                        mutable_param_shadows.empty? ? nil : mutable_param_shadows,
+                        takes_cleanup.empty? ? nil : takes_cleanup].compact
       prologue = prologue_parts.join("\n    ")
+
+      has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+      @current_fn_has_catch = has_catch
+      @current_fn_snapshot_types = Set.new if has_catch
+
       body = transpile_block(node.body)
       @current_tail_call_fn = prev_tail_call_fn
       @transpiler_context_stack.pop
 
-      <<~ZIG
-        #{signature} {
-            #{prologue}
-            #{body}
-        }
-      ZIG
+      if !has_catch
+        <<~ZIG
+          #{signature} {
+              #{prologue}
+              #{body}
+          }
+        ZIG
+      else
+        rt_name = @do_rt_name || "rt"
+
+        snap_types = @current_fn_snapshot_types || Set.new
+        snapshot_decl = ""
+        if snap_types.size == 1
+          snap_zig = transpile_type(snap_types.first)
+          snapshot_decl = "const __snap_ptr = #{rt_name}.__error.snapshotAs(#{snap_zig});\n" \
+                          "            const snapshot = if (__snap_ptr) |p| p.* else undefined;\n" \
+                          "            const __has_snapshot = __snap_ptr != null;\n" \
+                          "            _ = &snapshot; _ = &__has_snapshot;"
+        end
+
+        catch_dupe = node.returns_promoted && node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+
+        catch_clauses_zig = node.catch_clauses.map do |clause|
+          kind = clause[:kind]
+          error_name = clause[:error_name]
+          prev_catch_dupe = @catch_dupe_string_returns
+          @catch_dupe_string_returns = catch_dupe
+          clause_body_code = clause[:body].map { |s| visit(s) }.join("\n            ")
+          @catch_dupe_string_returns = prev_catch_dupe
+
+          cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
+          cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
+          cond = cond_parts.join(" and ")
+
+          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            #{rt_name}.freeSnapshot();\n            #{clause_body_code}\n        }"
+        end.join(" else ")
+
+        default_code = ""
+        if node.default_catch.is_a?(Array) && node.default_catch.any?
+          prev_catch_dupe = @catch_dupe_string_returns
+          @catch_dupe_string_returns = catch_dupe
+          default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
+          @catch_dupe_string_returns = prev_catch_dupe
+          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
+        else
+          if fn_can_fail
+            default_code = " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
+          else
+            default_code = " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
+          end
+        end
+
+        call_args = fn_needs_rt ? (["rt"] + node.params.map { |p| p[:name] }) : node.params.map { |p| p[:name] }
+        inner_params = all_params.join(', ')
+        inner_ret = fn_can_fail ? (final_type.start_with?("!") ? "anyerror!#{final_type[1..]}" : "anyerror!#{final_type}") : "!#{final_type}"
+        inner_name = "__#{node.name}_body"
+
+        <<~ZIG
+          fn #{inner_name}(#{inner_params}) #{inner_ret} {
+              #{prologue}
+              #{body}
+          }
+
+          #{signature} {
+              return #{inner_name}(#{call_args.join(', ')}) catch {
+                  #{catch_clauses_zig}#{default_code}
+              };
+          }
+        ZIG
+      end
 
     when AST::LambdaLit
       # Transpile a lambda literal as an anonymous Zig struct with a named `call` function.
@@ -747,6 +834,16 @@ private
             alias_var = "__#{var_name}_inner"
             zig_var   = @do_capture_map&.dig(var_name) || var_name
             lock_expr = zig_var
+
+            if sync == :always_mutable
+              # RefCell: direct access through .data, no mutex guard
+              field = node.name.field
+              prev_locked_map = @locked_unwrap_map || {}
+              @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
+              value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
+              @locked_unwrap_map = prev_locked_map
+              return "#{zig_var}.get().#{field} = #{value};"
+            end
 
             acquire = sync == :write_locked ? "#{lock_expr}.write()" : "#{lock_expr}.acquire()"
             # Install locked unwrap map so RHS field reads also use the dereferenced pointer.
@@ -1773,6 +1870,22 @@ private
         else
           []
         end
+        # STUB interception: if this function is stubbed, emit stub value instead of real call.
+        stub_info = (@active_stubs || {})[node.name]
+        if stub_info
+          stub_code = case stub_info[:kind]
+          when :returns
+            stub_info[:var]
+          when :captures
+            "{ #{stub_info[:var]} += 1; }"
+          when :sequence
+            "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
+          when :with
+            "#{stub_info[:var]}(#{args_zig.join(', ')})"
+          end
+          return stub_code
+        end
+
         # Only inject rt / emit try if the callee actually needs them.
         needs_rt = callee_needs_rt?(node.name)
         can_fail  = callee_can_fail?(node.name)
@@ -1864,6 +1977,9 @@ private
       elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
         # *Locked(T) / *RwLocked(T): auto-deref pointer, then access .ctrl.data field
         "#{target_code}.ctrl.data.#{node.field}"
+      elsif ti&.always_mutable? && !is_locked_unwrapped
+        # RefCell(T): access through .data field
+        "#{target_code}.data.#{node.field}"
       elsif @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         # SOA field-slice rewrite: _.field → __soa_field[__soa_i]
         @soa_needed_fields << node.field
@@ -2303,7 +2419,46 @@ private
       synthetic_call.coerced_type = rhs.coerced_type
     end
 
-    # Visit the fake node as if it were in the original source
+    # If this function has CATCH blocks and the pipe step can fail,
+    # generate snapshot capture: bind LHS to a variable, wrap call in
+    # catch that heap-copies the LHS before propagating the error.
+    lhs_type = lhs.respond_to?(:full_type) ? lhs.full_type : nil
+    lhs_t = lhs_type ? Type.new(lhs_type) : nil
+    rhs_fn_name = rhs.is_a?(AST::Identifier) ? rhs.name : (rhs.is_a?(AST::FuncCall) ? rhs.name : nil)
+    rhs_can_fail = rhs_fn_name && (@fn_can_fail || {})[rhs_fn_name]
+
+    if @current_fn_has_catch && rhs_can_fail && lhs_t && !lhs_t.void?
+      zig_type = transpile_type(lhs_t.resolved.to_s)
+      rt_name = @do_rt_name || "rt"
+      @snapshot_counter = (@snapshot_counter || 0) + 1
+      snap_var = "__snap_#{@snapshot_counter}"
+      snap_label = "__snap_blk#{@snapshot_counter}"
+
+      @current_fn_snapshot_types ||= Set.new
+      @current_fn_snapshot_types << lhs_t.resolved.to_s
+
+      lhs_code = visit(lhs)
+
+      if rhs.is_a?(AST::Identifier)
+        call_zig = "#{rhs.name}(#{rt_name}, #{snap_var})"
+      elsif rhs.is_a?(AST::FuncCall)
+        extra_args = rhs.args.map { |a| visit(a) }.join(', ')
+        fn_name = rhs.name
+        call_zig = "#{fn_name}(#{rt_name}, #{snap_var}#{extra_args.empty? ? '' : ', ' + extra_args})"
+      else
+        return visit(synthetic_call)
+      end
+
+      return "#{snap_label}: {\n" \
+             "    const #{snap_var} = #{lhs_code};\n" \
+             "    break :#{snap_label} #{call_zig} catch |__snap_err| {\n" \
+             "        #{rt_name}.captureSnapshot(#{zig_type}, &#{snap_var});\n" \
+             "        return __snap_err;\n" \
+             "    };\n" \
+             "}"
+    end
+
+    # Normal path: no CATCH blocks or non-failing step
     visit(synthetic_call)
   end
 
