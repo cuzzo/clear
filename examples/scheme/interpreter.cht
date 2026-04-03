@@ -554,7 +554,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Str: substr(s, start, len) };
     END
     -- List operations: 34=list-ref, 35=list-length
-    IF id == 34 THEN RETURN listRef(evaled[1], toInt(getNum(evaled[2]))); END
+    IF id == 34 THEN RETURN listRef(evaled[1], getInt(evaled[2])); END
     IF id == 35 THEN
         -- list-length: works on lists, typed arrays, AND strings
         MATCH evaled[1] START
@@ -565,8 +565,15 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: toFloat(listLen(evaled[1])) };
     END
     IF id == 36 THEN
-        -- list-push: return new list with element appended
+        -- list-push: return new list with element appended (preserves typed arrays)
         MATCH evaled[1] START
+            Value.TypedI64Arr AS srcInts ->
+                MUTABLE newInts: Int64[]@list = List[];
+                FOR li IN (0_i64 ..< srcInts.length()) DO
+                    newInts.append(srcInts[li]);
+                END
+                newInts.append(getInt(evaled[2]));
+                RETURN Value{ TypedI64Arr: newInts };,
             Value.List AS srcItems ->
                 MUTABLE newItems: Value[]@list = List[];
                 FOR li IN (0_i64 ..< srcItems.length()) DO
@@ -822,22 +829,20 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
 
     -- Pipeline operations: special forms that call lambdas
     IF formName == "list-where" THEN
-        -- (list-where list pred) -> filter
+        -- (list-where list pred) -> filter (handles List and TypedI64Arr)
         listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         predVal = eval!(items[2], envId, pool);
         MUTABLE filtered: Value[]@list = List[];
-        MATCH listVal START
-            Value.List AS srcItems ->
-                FOR fi IN (0_i64 ..< srcItems.length()) DO
-                    MUTABLE callArgs: Value[]@list = List[];
-                    callArgs.append(predVal);
-                    callArgs.append(srcItems[fi]);
-                    MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
-                    MATCH callResult START Value.Tco AS tco -> callResult = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
-                    IF isTruthy?(callResult) THEN filtered.append(srcItems[fi]); END
-                END,
-            DEFAULT -> PASS;
+        len = listLen(listVal);
+        FOR fi IN (0_i64 ..< len) DO
+            elem = listRef(listVal, fi);
+            MUTABLE callArgs: Value[]@list = List[];
+            callArgs.append(predVal);
+            callArgs.append(elem);
+            MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
+            MATCH callResult START Value.Tco AS tco -> callResult = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+            IF isTruthy?(callResult) THEN filtered.append(elem); END
         END
         RETURN Value{ List: filtered };
 
@@ -862,36 +867,34 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         RETURN Value{ List: mapped };
 
     ELSE_IF formName == "list-reduce" THEN
-        -- (list-reduce list init fn) -> fold
+        -- (list-reduce list init fn) -> fold (handles both List and TypedI64Arr)
         listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE acc: Value = eval!(items[2], envId, pool);
         fnVal = eval!(items[3], envId, pool);
-        MATCH listVal START
-            Value.List AS srcItems ->
-                FOR ri IN (0_i64 ..< srcItems.length()) DO
-                    MUTABLE callArgs: Value[]@list = List[];
-                    callArgs.append(fnVal);
-                    callArgs.append(acc);
-                    callArgs.append(srcItems[ri]);
-                    callResult = evalList!(callArgs, envId, pool);
-                    MATCH callResult START Value.Tco AS tco -> acc = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> acc = callResult; END
-                END,
-            DEFAULT -> PASS;
+        len = listLen(listVal);
+        FOR ri IN (0_i64 ..< len) DO
+            elem = listRef(listVal, ri);
+            MUTABLE callArgs: Value[]@list = List[];
+            callArgs.append(fnVal);
+            callArgs.append(acc);
+            callArgs.append(elem);
+            MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
+            MATCH callResult START Value.Tco AS tco -> acc = eval!(tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> acc = callResult; END
         END
         RETURN acc;
 
     ELSE_IF formName == "list-limit" THEN
         listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        limitN = toInt(getNum(eval!(items[2], envId, pool)));
+        limitN = getInt(eval!(items[2], envId, pool));
+        len = listLen(listVal);
         MUTABLE limited: Value[]@list = List[];
-        MATCH listVal START
-            Value.List AS srcItems ->
-                FOR li IN (0_i64 ..< srcItems.length()) DO
-                    IF li < limitN THEN limited.append(srcItems[li]); END
-                END,
-            DEFAULT -> PASS;
+        FOR li IN (0_i64 ..< len) DO
+            IF li < limitN THEN
+                elem = listRef(listVal, li);
+                limited.append(elem);
+            END
         END
         RETURN Value{ List: limited };
 
@@ -918,13 +921,14 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(items[2], envId, pool);
         MUTABLE sorted: Value[]@list = List[];
-        MATCH listVal START
-            Value.List AS srcItems ->
-                FOR oi IN (0_i64 ..< srcItems.length()) DO
-                    sorted.append(srcItems[oi]);
-                END
-                -- Insertion sort by key
-                MUTABLE si: Int64 = 1;
+        len = listLen(listVal);
+        FOR oi IN (0_i64 ..< len) DO
+            elem = listRef(listVal, oi);
+            sorted.append(elem);
+        END
+        -- Insertion sort by key
+        MUTABLE si: Int64 = 1;
+        IF sorted.length() > 0 THEN
                 WHILE si < sorted.length() DO
                     MUTABLE j: Int64 = si;
                     WHILE j > 0 DO
@@ -946,8 +950,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                         END
                     END
                     si += 1;
-                END,
-            DEFAULT -> PASS;
+                END
         END
         RETURN Value{ List: sorted };
 

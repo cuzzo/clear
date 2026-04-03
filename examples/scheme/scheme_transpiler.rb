@@ -193,13 +193,18 @@ class SchemeTranspiler
       # Track struct type for field resolution
       if node.value.is_a?(AST::StructLit)
         @var_types[node.name.to_s] = node.value.name.to_s
-      elsif node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::Identifier)
-        # Propagate type from function calls or variable copies
+      end
+      # Typed array: Int64[] = [...] -> (typed-list:i64 ...)
+      val_expr = if node.type && node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit)
+        items = node.value.items.map { |i| emit(i) }.join(" ")
+        items.empty? ? "(typed-list:i64)" : "(typed-list:i64 #{items})"
+      else
+        emit(node.value)
       end
       if mutables.include?(node.name.to_s)
-        "(set! #{node.name} #{emit(node.value)})"
+        "(set! #{node.name} #{val_expr})"
       else
-        "(define #{node.name} #{emit(node.value)})"
+        "(define #{node.name} #{val_expr})"
       end
     when AST::VarDecl
       mutables.add(node.name.to_s) if node.mutable
@@ -208,7 +213,15 @@ class SchemeTranspiler
       elsif node.value.is_a?(AST::HashLit)
         @hash_vars.add(node.name.to_s)
       end
-      "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
+      # Typed array declaration: Int64[] = [...] -> (typed-list:i64 ...)
+      if node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit) && !node.value.items.empty?
+        items = node.value.items.map { |i| emit(i) }.join(" ")
+        "(define #{node.name} (typed-list:i64 #{items}))"
+      elsif node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit) && node.value.items.empty?
+        "(define #{node.name} (typed-list:i64))"
+      else
+        "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
+      end
     when AST::Assignment
       emit_assignment(node)
     when AST::ReturnNode
@@ -278,7 +291,9 @@ class SchemeTranspiler
     case node.type
     when :STRING, :string, :String
       "\"#{node.value}\""
-    when :INT, :FLOAT, :int, :float, :i64, :f64, :Int64, :Float64
+    when :INT64, :i64, :Int64
+      "#{node.value}:i64"
+    when :INT, :FLOAT, :float, :f64, :Float64, :NUMBER
       node.value.to_s
     when :BOOL, :bool, :Bool, :TRUE, :FALSE
       node.value.to_s
