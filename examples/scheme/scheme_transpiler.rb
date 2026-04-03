@@ -198,6 +198,9 @@ class SchemeTranspiler
       val_expr = if node.type && node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit)
         items = node.value.items.map { |i| emit(i) }.join(" ")
         items.empty? ? "(typed-list:i64)" : "(typed-list:i64 #{items})"
+      elsif node.type && node.type.to_s.include?("Float64[]") && node.value.is_a?(AST::ListLit)
+        items = node.value.items.map { |i| emit(i) }.join(" ")
+        items.empty? ? "(typed-list:f64)" : "(typed-list:f64 #{items})"
       else
         emit(node.value)
       end
@@ -214,11 +217,12 @@ class SchemeTranspiler
         @hash_vars.add(node.name.to_s)
       end
       # Typed array declaration: Int64[] = [...] -> (typed-list:i64 ...)
-      if node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit) && !node.value.items.empty?
+      if node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit)
         items = node.value.items.map { |i| emit(i) }.join(" ")
         "(define #{node.name} (typed-list:i64 #{items}))"
-      elsif node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit) && node.value.items.empty?
-        "(define #{node.name} (typed-list:i64))"
+      elsif node.type.to_s.include?("Float64[]") && node.value.is_a?(AST::ListLit)
+        items = node.value.items.map { |i| emit(i) }.join(" ")
+        "(define #{node.name} (typed-list:f64 #{items}))"
       else
         "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
       end
@@ -494,9 +498,9 @@ class SchemeTranspiler
     when "eql?"
       "(= #{args})"
     when "toFloat"
-      args
+      "(int->float #{args})"
     when "toInt"
-      "(toInt #{args})"
+      "(float->int #{args})"
     when "floor"
       args
     else

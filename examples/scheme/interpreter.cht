@@ -12,6 +12,22 @@ FN nativeSum(arr: Int64[]) RETURNS Int64 ->
     RETURN total;
 END
 
+FN nativeSumF64(arr: Float64[]) RETURNS Float64 ->
+    MUTABLE total: Float64 = 0.0;
+    FOR i IN (0_i64 ..< arr.length()) DO
+        total = total + arr[i];
+    END
+    RETURN total;
+END
+
+FN nativeDot(a: Float64[], b: Float64[]) RETURNS Float64 ->
+    MUTABLE total: Float64 = 0.0;
+    FOR i IN (0_i64 ..< a.length()) DO
+        total = total + a[i] * b[i];
+    END
+    RETURN total;
+END
+
 FN nativeContains(arr: Int64[], needle: Int64) RETURNS Bool ->
     FOR i IN (0_i64 ..< arr.length()) DO
         IF arr[i] == needle THEN RETURN TRUE; END
@@ -41,7 +57,8 @@ UNION Value {
     Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String },
     Int64Val: Int64,
-    TypedI64Arr: Int64[]
+    TypedI64Arr: Int64[],
+    TypedF64Arr: Float64[]
 }
 
 -- Pure helpers
@@ -103,6 +120,7 @@ FN listLen(v: Value) RETURNS Int64 ->
     MATCH v START
         Value.List AS items -> RETURN items.length();,
         Value.TypedI64Arr AS iarr -> RETURN iarr.length();,
+        Value.TypedF64Arr AS farr -> RETURN farr.length();,
         DEFAULT -> RETURN 0;
     END
     RETURN 0;
@@ -214,6 +232,13 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
                 iout = iout + iarr[ii].toString();
             END
             RETURN iout + "]:i64";,
+        Value.TypedF64Arr AS farr ->
+            MUTABLE fout = "[";
+            FOR fi IN (0_i64 ..< farr.length()) DO
+                IF fi > 0 THEN fout = fout + " "; END
+                fout = fout + farr[fi].toString();
+            END
+            RETURN fout + "]:f64";,
         Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
@@ -579,6 +604,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         MATCH evaled[1] START
             Value.Str AS s -> RETURN Value{ Number: toFloat(s.length()) };,
             Value.TypedI64Arr AS iarr -> RETURN Value{ Int64Val: iarr.length() };,
+            Value.TypedF64Arr AS farr -> RETURN Value{ Int64Val: farr.length() };,
             DEFAULT -> RETURN Value{ Number: toFloat(listLen(evaled[1])) };
         END
         RETURN Value{ Number: toFloat(listLen(evaled[1])) };
@@ -593,6 +619,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
                 END
                 newInts.append(getInt(evaled[2]));
                 RETURN Value{ TypedI64Arr: newInts };,
+            Value.TypedF64Arr AS srcFloats ->
+                MUTABLE newFloats: Float64[]@list = List[];
+                FOR li IN (0_i64 ..< srcFloats.length()) DO
+                    newFloats.append(srcFloats[li]);
+                END
+                newFloats.append(getNum(evaled[2]));
+                RETURN Value{ TypedF64Arr: newFloats };,
             Value.List AS srcItems ->
                 MUTABLE newItems: Value[]@list = List[];
                 FOR li IN (0_i64 ..< srcItems.length()) DO
@@ -662,6 +695,8 @@ FN listRef(v: Value, idx: Int64) RETURNS Value ->
             RETURN elem;,
         Value.TypedI64Arr AS iarr ->
             RETURN Value{ Int64Val: iarr[idx] };,
+        Value.TypedF64Arr AS farr ->
+            RETURN Value{ Number: farr[idx] };,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -921,16 +956,14 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE distinct: Value[]@list = List[];
-        MATCH listVal START
-            Value.List AS srcItems ->
-                FOR di IN (0_i64 ..< srcItems.length()) DO
-                    MUTABLE found = FALSE;
-                    FOR dj IN (0_i64 ..< distinct.length()) DO
-                        IF valEqual?(srcItems[di], distinct[dj]) THEN found = TRUE; END
-                    END
-                    IF found == FALSE THEN distinct.append(srcItems[di]); END
-                END,
-            DEFAULT -> PASS;
+        len = listLen(listVal);
+        FOR di IN (0_i64 ..< len) DO
+            elem = listRef(listVal, di);
+            MUTABLE found = FALSE;
+            FOR dj IN (0_i64 ..< distinct.length()) DO
+                IF valEqual?(elem, distinct[dj]) THEN found = TRUE; END
+            END
+            IF found == FALSE THEN distinct.append(elem); END
         END
         RETURN Value{ List: distinct };
 
@@ -1280,6 +1313,43 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value{ TypedI64Arr: typedItems };
 
+    ELSE_IF formName == "typed-list:f64" THEN
+        MUTABLE typedFloats: Float64[]@list = List[];
+        FOR ti IN (1_i64 ..< items.length()) DO
+            tval = eval!(items[ti], envId, pool);
+            IF isError?(tval) THEN RETURN tval; END
+            typedFloats.append(getNum(tval));
+        END
+        RETURN Value{ TypedF64Arr: typedFloats };
+
+    ELSE_IF formName == "to-typed:f64" THEN
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        MUTABLE convertedF: Float64[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR ci IN (0_i64 ..< srcItems.length()) DO
+                    convertedF.append(getNum(srcItems[ci]));
+                END,
+            Value.TypedF64Arr -> RETURN listVal;,
+            Value.TypedI64Arr AS iarr ->
+                FOR ci IN (0_i64 ..< iarr.length()) DO
+                    convertedF.append(toFloat(iarr[ci]));
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ TypedF64Arr: convertedF };
+
+    -- Type conversion ops
+    ELSE_IF formName == "int->float" THEN
+        val = eval!(items[1], envId, pool);
+        RETURN Value{ Number: toFloat(getInt(val)) };
+
+    ELSE_IF formName == "float->int" THEN
+        val = eval!(items[1], envId, pool);
+        truncated = toInt(getNum(val));
+        RETURN Value{ Int64Val: truncated };
+
     ELSE_IF formName == "to-typed:i64" THEN
         -- (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
         listVal = eval!(items[1], envId, pool);
@@ -1337,6 +1407,32 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                 result = nativeSum(iarr);
                 RETURN Value{ Int64Val: result };,
             DEFAULT -> RETURN Value.Error{ errMsg: "native-sum requires typed Int64 array", errKind: "Type" };
+        END
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "native-sum-f64" THEN
+        arrVal = eval!(items[1], envId, pool);
+        IF isError?(arrVal) THEN RETURN arrVal; END
+        MATCH arrVal START
+            Value.TypedF64Arr AS farr ->
+                RETURN Value{ Number: nativeSumF64(farr) };,
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum-f64 requires typed Float64 array", errKind: "Type" };
+        END
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "native-dot" THEN
+        aVal = eval!(items[1], envId, pool);
+        IF isError?(aVal) THEN RETURN aVal; END
+        bVal = eval!(items[2], envId, pool);
+        IF isError?(bVal) THEN RETURN bVal; END
+        MATCH aVal START
+            Value.TypedF64Arr AS fa ->
+                MATCH bVal START
+                    Value.TypedF64Arr AS fb ->
+                        RETURN Value{ Number: nativeDot(fa, fb) };,
+                    DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type" };
+                END,
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires Float64 arrays", errKind: "Type" };
         END
         RETURN Value.Nil;
 
@@ -2024,6 +2120,19 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             sp -= 2;
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
+        ELSE_IF op == 87 THEN
+            -- INT_TO_F64: pop Int64Val, push Number (Float64)
+            sp -= 1;
+            pv = Value{ Number: toFloat(getInt(stack[sp])) };
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 88 THEN
+            -- F64_TO_INT: pop Number, push Int64Val
+            sp -= 1;
+            convInt = toInt(getNum(stack[sp]));
+            pv = Value{ Int64Val: convInt };
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
         ELSE_IF op == 71 THEN
             running = FALSE;
         END
@@ -2214,10 +2323,17 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(+ (list-ref (typed-list:i64 10 20) 0) 5)", TRUE, rootId, pool, penv) == "15", "typed arr elem + untyped";
 
     -- FFI bridge: native CLEAR functions on typed arrays
-    ASSERT evalIn!("(native-sum (typed-list:i64 10 20 30))", TRUE, rootId, pool, penv) == "60", "FFI native-sum";
+    ASSERT evalIn!("(native-sum (typed-list:i64 10 20 30))", TRUE, rootId, pool, penv) == "60", "FFI native-sum i64";
     ASSERT evalIn!("(type-of (native-sum (typed-list:i64 1 2 3)))", FALSE, rootId, pool, penv) == "Int64", "FFI returns Int64";
-    ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 20)", TRUE, rootId, pool, penv) == "true", "FFI native-contains found";
-    ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 99)", TRUE, rootId, pool, penv) == "false", "FFI native-contains not found";
+    ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 20)", TRUE, rootId, pool, penv) == "true", "FFI contains found";
+    ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 99)", TRUE, rootId, pool, penv) == "false", "FFI contains not found";
+    -- FFI f64
+    ASSERT evalIn!("(native-sum-f64 (typed-list:f64 1.5 2.5 3.0))", TRUE, rootId, pool, penv) == "7", "FFI native-sum-f64";
+    ASSERT evalIn!("(native-dot (typed-list:f64 1 2 3) (typed-list:f64 4 5 6))", TRUE, rootId, pool, penv) == "32", "FFI native-dot";
+    -- Conversions
+    ASSERT evalIn!("(type-of (int->float 42:i64))", FALSE, rootId, pool, penv) == "Float64", "int->float type";
+    ASSERT evalIn!("(type-of (float->int 3.14))", FALSE, rootId, pool, penv) == "Int64", "float->int type";
+    ASSERT evalIn!("(float->int 42.9)", TRUE, rootId, pool, penv) == "42", "float->int truncates";
 
     print("Interpreter smoke tests PASSED!");
     RETURN;
