@@ -385,7 +385,36 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: 0.0 - 1.0 };
     END
     IF id == 41 THEN RETURN boolVal(getStr(evaled[1]).length() > 0); END
-    IF id == 42 THEN RETURN Value{ Str: getStr(evaled[1]) }; END
+    IF id == 42 THEN
+        -- trim: strip leading/trailing whitespace
+        s = getStr(evaled[1]);
+        MUTABLE trimStart: Int64 = 0;
+        WHILE trimStart < s.length() && (charAt(s, trimStart) == " " || charAt(s, trimStart) == "\n" || charAt(s, trimStart) == "\t" || charAt(s, trimStart) == "\r") DO
+            trimStart += 1;
+        END
+        MUTABLE trimEnd: Int64 = s.length();
+        WHILE trimEnd > trimStart && (charAt(s, trimEnd - 1) == " " || charAt(s, trimEnd - 1) == "\n" || charAt(s, trimEnd - 1) == "\t" || charAt(s, trimEnd - 1) == "\r") DO
+            trimEnd -= 1;
+        END
+        RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
+    END
+    -- File I/O: 45=readFile, 46=writeFile, 47=shell
+    IF id == 45 THEN
+        path = getStr(evaled[1]);
+        content = readFile(path);
+        RETURN Value{ Str: content };
+    END
+    IF id == 46 THEN
+        path = getStr(evaled[1]);
+        content = getStr(evaled[2]);
+        writeFile(path, content);
+        RETURN Value.Nil;
+    END
+    IF id == 47 THEN
+        cmd = getStr(evaled[1]);
+        output = shell(cmd);
+        RETURN Value{ Str: output };
+    END
     IF id == 44 THEN
         -- toInt: truncate float to integer
         truncated = toInt(getNum(evaled[1]));
@@ -893,6 +922,10 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["toInt"] = Value{ NativeFn: 44 };
     pool[rootId]?.vars["toFloat"] = Value{ NativeFn: 30 };
     pool[rootId]?.vars["join"] = Value{ NativeFn: 26 };
+    -- File I/O: 45-47
+    pool[rootId]?.vars["readFile"] = Value{ NativeFn: 45 };
+    pool[rootId]?.vars["writeFile"] = Value{ NativeFn: 46 };
+    pool[rootId]?.vars["shell"] = Value{ NativeFn: 47 };
     -- error?, error-message, error-kind, list-append! are special forms
     RETURN rootId;
 END

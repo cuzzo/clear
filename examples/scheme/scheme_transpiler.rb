@@ -19,6 +19,7 @@ class SchemeTranspiler
     @enums = Set.new    # enum type names
     @unions = {}  # name -> {variant_name -> has_payload}
     @mutable_stack = [Set.new]  # stack of per-function mutable sets
+    @var_types = {}  # var_name -> struct_name (for field access resolution)
   end
 
   def transpile(source)
@@ -94,6 +95,12 @@ class SchemeTranspiler
     when AST::ForRange
       emit_for_range(node)
     when AST::BindExpr
+      # Track struct type for field resolution
+      if node.value.is_a?(AST::StructLit)
+        @var_types[node.name.to_s] = node.value.name.to_s
+      elsif node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::Identifier)
+        # Propagate type from function calls or variable copies
+      end
       if mutables.include?(node.name.to_s)
         "(set! #{node.name} #{emit(node.value)})"
       else
@@ -101,6 +108,9 @@ class SchemeTranspiler
       end
     when AST::VarDecl
       mutables.add(node.name.to_s) if node.mutable
+      if node.value.is_a?(AST::StructLit)
+        @var_types[node.name.to_s] = node.value.name.to_s
+      end
       "(define #{node.name} #{node.value ? emit(node.value) : 'nil'})"
     when AST::Assignment
       emit_assignment(node)
@@ -130,6 +140,24 @@ class SchemeTranspiler
          AST::OrderByOp, AST::DistinctOp, AST::UnnestOp, AST::IndexOp
       # Pipeline ops - handled via SMOOTH in emit_binary
       ";; pipeline op outside pipe"
+    when AST::BgBlock
+      # Sequential fake: BG { expr } -> eval immediately
+      body = node.body.map { |n| emit(n) }
+      body.length == 1 ? body[0] : "(begin #{body.join(' ')})"
+    when AST::DoBlock
+      # Sequential fake: DO { a, b } -> eval a then b
+      branches = node.branches.map { |br|
+        if br.is_a?(Array)
+          stmts = br.map { |n| emit(n) }
+          stmts.length == 1 ? stmts[0] : "(begin #{stmts.join(' ')})"
+        else
+          emit(br)
+        end
+      }
+      "(begin #{branches.join(' ')})"
+    when AST::NextExpr
+      # NEXT p -> identity (already resolved in sequential mode)
+      emit(node.expr)
     when AST::WithBlock
       # WITH blocks - bind aliases and emit body
       bindings = []
@@ -195,6 +223,13 @@ class SchemeTranspiler
 
     # Struct field access: p.x -> (vector-ref p idx)
     target = emit(node.target)
+    # Try to resolve via tracked variable type first
+    target_name = node.target.is_a?(AST::Identifier) ? node.target.name.to_s : nil
+    if target_name && @var_types[target_name] && @structs[@var_types[target_name]]
+      idx = @structs[@var_types[target_name]].index(field)
+      return "(vector-ref #{target} #{idx})" if idx
+    end
+    # Fallback: search all structs
     @structs.each do |_name, fields|
       idx = fields.index(field)
       return "(vector-ref #{target} #{idx})" if idx
@@ -220,7 +255,7 @@ class SchemeTranspiler
 
   def emit_assert(node)
     cond = emit(node.condition)
-    msg = node.message || "assertion failed"
+    msg = (node.message.is_a?(String) && !node.message.empty?) ? node.message : "assertion failed"
     # Emit as: if not cond, raise error
     "(if (not #{cond}) (raise \"#{msg}\" \"Assert\") nil)"
   end

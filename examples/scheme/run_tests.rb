@@ -22,6 +22,8 @@ KNOWN_PASSING = %w[
   11_smooth_pipe
   12_while_loop
   15_select
+  16_file_io
+  17_shell
   13_if_else
   20_subfield_move
   21_subfield_return
@@ -49,13 +51,18 @@ KNOWN_PASSING = %w[
   50_require
   51_enum
   52_union
+  53_generic_struct
+  53_writefile
   54_generic_fn
+  54_writefile_bg
   55_string_ops
   56_else_if_chain
   56_match_enum_exhaustive
   57_line_parser
   57_match_union_capture
+  58_bg
   58_string_return_leak
+  59_bg_concurrent
   59_string_temp_takes
 ]
 
