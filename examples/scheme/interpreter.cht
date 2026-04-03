@@ -431,6 +431,33 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
         RETURN Value{ Str: joined };
     END
+    -- Math: 50-56
+    IF id == 50 THEN
+        v = getNum(evaled[1]);
+        IF v < 0.0 THEN RETURN Value{ Number: 0.0 - v }; END
+        RETURN Value{ Number: v };
+    END
+    IF id == 51 THEN
+        -- min(a, b)
+        a = getNum(evaled[1]); b = getNum(evaled[2]);
+        IF a < b THEN RETURN Value{ Number: a }; END
+        RETURN Value{ Number: b };
+    END
+    IF id == 52 THEN
+        -- max(a, b)
+        a = getNum(evaled[1]); b = getNum(evaled[2]);
+        IF a > b THEN RETURN Value{ Number: a }; END
+        RETURN Value{ Number: b };
+    END
+    IF id == 53 THEN floorVal = toInt(getNum(evaled[1])); RETURN Value{ Number: toFloat(floorVal) }; END
+    IF id == 54 THEN ts = timestampMs(); RETURN Value{ Number: toFloat(ts) }; END
+    IF id == 55 THEN
+        RETURN Value{ Number: random() };
+    END
+    IF id == 56 THEN
+        maxVal = toInt(getNum(evaled[1]));
+        RETURN Value{ Number: toFloat(randomInt(maxVal)) };
+    END
     -- File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
         path = getStr(evaled[1]);
@@ -1271,6 +1298,14 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["toFloat"] = Value{ NativeFn: 30 };
     pool[rootId]?.vars["endsWith?"] = Value{ NativeFn: 48 };
     pool[rootId]?.vars["join"] = Value{ NativeFn: 49 };
+    -- Math: 50-56
+    pool[rootId]?.vars["abs"] = Value{ NativeFn: 50 };
+    pool[rootId]?.vars["min"] = Value{ NativeFn: 51 };
+    pool[rootId]?.vars["max"] = Value{ NativeFn: 52 };
+    pool[rootId]?.vars["floor"] = Value{ NativeFn: 53 };
+    pool[rootId]?.vars["timestampMs"] = Value{ NativeFn: 54 };
+    pool[rootId]?.vars["random"] = Value{ NativeFn: 55 };
+    pool[rootId]?.vars["randomInt"] = Value{ NativeFn: 56 };
     -- File I/O: 45-47
     pool[rootId]?.vars["readFile"] = Value{ NativeFn: 45 };
     pool[rootId]?.vars["writeFile"] = Value{ NativeFn: 46 };
