@@ -84,6 +84,12 @@ class InterpreterBridge
   # REPL: persistent env across evaluations.
   # We build up function definitions and evaluate expressions.
   def run_repl(preload_file: nil)
+    # Load readline history
+    @history_file = File.expand_path("~/.clear_vm_history")
+    if File.exist?(@history_file)
+      File.readlines(@history_file, chomp: true).last(1000).each { |l| Readline::HISTORY.push(l) }
+    end
+
     puts "CLEAR Scheme VM REPL"
     puts "Type CLEAR expressions. Multi-line: FN...END, IF...END, etc."
     puts "Type :help for debug commands."
@@ -386,6 +392,11 @@ class InterpreterBridge
         run_clear(@interp_base + main_code, silent: false)
       end
     end
+
+    # Save readline history
+    File.open(@history_file, "w") do |f|
+      Readline::HISTORY.to_a.last(1000).each { |l| f.puts(l) }
+    end rescue nil
 
     puts "\nBye."
   end
