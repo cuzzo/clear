@@ -20,7 +20,8 @@ UNION Value {
     NativeFn: Int64,
     EnvRef: Id<Env>,
     Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
-    Error { errMsg: String, errKind: String }
+    Error { errMsg: String, errKind: String },
+    Int64Val: Int64
 }
 
 -- Pure helpers
@@ -41,8 +42,26 @@ FN getSymName(v: Value) RETURNS String ->
 END
 
 FN getNum(v: Value) RETURNS Float64 ->
-    MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
+    MATCH v START
+        Value.Number AS n -> RETURN n;,
+        Value.Int64Val AS i -> RETURN toFloat(i);,
+        DEFAULT -> RETURN 0.0;
+    END
     RETURN 0.0;
+END
+
+FN getInt(v: Value) RETURNS Int64 ->
+    MATCH v START
+        Value.Int64Val AS i -> RETURN i;,
+        Value.Number AS n -> tr = toInt(n); RETURN tr;,
+        DEFAULT -> RETURN 0;
+    END
+    RETURN 0;
+END
+
+FN isInt64?(v: Value) RETURNS Bool ->
+    MATCH v START Value.Int64Val -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
 END
 
 FN getStr(v: Value) RETURNS String ->
@@ -75,7 +94,14 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
         Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.TrueVal -> MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.FalseVal -> MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.Number AS na -> MATCH b START Value.Number AS nb -> RETURN na == nb;, DEFAULT -> RETURN FALSE; END,
+        Value.Number AS na -> MATCH b START
+            Value.Number AS nb -> RETURN na == nb;,
+            Value.Int64Val AS ib -> RETURN na == toFloat(ib);,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Int64Val AS ia -> MATCH b START
+            Value.Int64Val AS ib -> RETURN ia == ib;,
+            Value.Number AS nb -> RETURN toFloat(ia) == nb;,
+            DEFAULT -> RETURN FALSE; END,
         Value.Str AS sa -> MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
         Value.Symbol AS sa -> MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
         Value.List AS la -> MATCH b START
@@ -109,6 +135,22 @@ FN readAtom(token: String) RETURNS Value ->
     IF token == "true" THEN RETURN Value.TrueVal; END
     IF token == "false" THEN RETURN Value.FalseVal; END
     IF charAt(token, 0) == "\"" THEN RETURN Value{ Str: substr(token, 1, token.length() - 2) }; END
+
+    -- Typed literals: 42:i64, 3.14:f64
+    IF contains?(token, ":i64") THEN
+        numPart = substr(token, 0, token.length() - 4);
+        n = toNumber(numPart) OR (0.0 - 999999.0);
+        IF n != 0.0 - 999999.0 THEN
+            intVal = toInt(n);
+            RETURN Value{ Int64Val: intVal };
+        END
+    END
+    IF contains?(token, ":f64") THEN
+        numPart = substr(token, 0, token.length() - 4);
+        n = toNumber(numPart) OR (0.0 - 999999.0);
+        IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
+    END
+
     n = toNumber(token) OR (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
     RETURN Value{ Symbol: token };
@@ -121,7 +163,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.FalseVal -> RETURN "false";,
         Value.Number AS n ->
             IF n == floor(n) THEN RETURN toInt(n).toString(); END
-            RETURN toInt(n).toString();,
+            RETURN n.toString();,
+        Value.Int64Val AS i -> RETURN i.toString();,
         Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
         Value.Symbol AS s -> RETURN s;,
         Value.List AS items ->
@@ -261,15 +304,24 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: toFloat(modResult) };
     END
     IF id == 1 THEN
-        -- + works on numbers and strings
+        -- + works on i64, f64, and strings
         MATCH evaled[1] START
             Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
+            Value.Int64Val AS ia ->
+                IF isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: ia + getInt(evaled[2]) };
+                ELSE RETURN Value{ Number: toFloat(ia) + getNum(evaled[2]) }; END,
             DEFAULT -> RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
         END
         RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
     END
-    IF id == 2 THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
-    IF id == 3 THEN RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) }; END
+    IF id == 2 THEN
+        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
+        RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) };
+    END
+    IF id == 3 THEN
+        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
+        RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) };
+    END
     IF id == 4 THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
     -- Comparison
     IF id == 5 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
@@ -1167,7 +1219,8 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
             Value.Nil -> RETURN Value{ Str: "Nil" };,
             Value.TrueVal -> RETURN Value{ Str: "Bool" };,
             Value.FalseVal -> RETURN Value{ Str: "Bool" };,
-            Value.Number -> RETURN Value{ Str: "Number" };,
+            Value.Number -> RETURN Value{ Str: "Float64" };,
+            Value.Int64Val -> RETURN Value{ Str: "Int64" };,
             Value.Str -> RETURN Value{ Str: "String" };,
             Value.Symbol -> RETURN Value{ Str: "Symbol" };,
             Value.List -> RETURN Value{ Str: "List" };,
@@ -1987,6 +2040,17 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(if true 1 2)", TRUE, rootId, pool, penv) == "1", "if";
     ASSERT evalSeqIn!(["(define f (lambda (x) (* x 2)))", "(f 21)"], TRUE, rootId, pool, penv) == "42", "lambda";
     ASSERT evalIn!("(try (raise \"x\" \"E\") (catch e \"ok\"))", FALSE, rootId, pool, penv) == "ok", "try/catch";
+
+    -- Typed values: Int64Val
+    ASSERT evalIn!("42:i64", TRUE, rootId, pool, penv) == "42", "typed i64 literal";
+    ASSERT evalIn!("(+ 10:i64 20:i64)", TRUE, rootId, pool, penv) == "30", "typed i64 add";
+    ASSERT evalIn!("(= 42:i64 42)", TRUE, rootId, pool, penv) == "true", "i64 == float cross-type";
+    ASSERT evalIn!("(= 42 42:i64)", TRUE, rootId, pool, penv) == "true", "float == i64 cross-type";
+    ASSERT evalIn!("(type-of 42:i64)", FALSE, rootId, pool, penv) == "Int64", "type-of i64";
+    ASSERT evalIn!("(type-of 42)", FALSE, rootId, pool, penv) == "Float64", "type-of untyped";
+    ASSERT evalIn!("(+ 10:i64 2.5)", TRUE, rootId, pool, penv) == "12", "i64 + float promotes";
+    ASSERT evalIn!("(* 3:i64 4:i64)", TRUE, rootId, pool, penv) == "12", "typed i64 mul";
+    ASSERT evalIn!("(- 10:i64 3:i64)", TRUE, rootId, pool, penv) == "7", "typed i64 sub";
 
     print("Interpreter smoke tests PASSED!");
     RETURN;
