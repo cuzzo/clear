@@ -384,7 +384,18 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
         RETURN Value{ Number: 0.0 - 1.0 };
     END
-    IF id == 41 THEN RETURN boolVal(getStr(evaled[1]).length() > 0); END
+    IF id == 41 THEN
+        -- contains?(str, needle)
+        s = getStr(evaled[1]);
+        needle = getStr(evaled[2]);
+        IF needle.length() == 0 THEN RETURN Value.TrueVal; END
+        MUTABLE ci: Int64 = 0;
+        WHILE ci + needle.length() <= s.length() DO
+            IF substr(s, ci, needle.length()) == needle THEN RETURN Value.TrueVal; END
+            ci += 1;
+        END
+        RETURN Value.FalseVal;
+    END
     IF id == 42 THEN
         -- trim: strip leading/trailing whitespace
         s = getStr(evaled[1]);
@@ -397,6 +408,28 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
             trimEnd -= 1;
         END
         RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
+    END
+    IF id == 48 THEN
+        -- endsWith?(str, suffix)
+        s = getStr(evaled[1]);
+        suffix = getStr(evaled[2]);
+        IF suffix.length() == 0 THEN RETURN Value.TrueVal; END
+        IF s.length() < suffix.length() THEN RETURN Value.FalseVal; END
+        RETURN boolVal(substr(s, s.length() - suffix.length(), suffix.length()) == suffix);
+    END
+    IF id == 49 THEN
+        -- join(list, separator) -> string
+        MUTABLE joined = "";
+        sep = getStr(evaled[2]);
+        MATCH evaled[1] START
+            Value.List AS joinItems ->
+                FOR ji IN (0_i64 ..< joinItems.length()) DO
+                    IF ji > 0 THEN joined = joined + sep; END
+                    joined = joined + getStr(joinItems[ji]);
+                END,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ Str: joined };
     END
     -- File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
@@ -1092,7 +1125,8 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["toNumber"] = Value{ NativeFn: 31 };
     pool[rootId]?.vars["toInt"] = Value{ NativeFn: 44 };
     pool[rootId]?.vars["toFloat"] = Value{ NativeFn: 30 };
-    pool[rootId]?.vars["join"] = Value{ NativeFn: 26 };
+    pool[rootId]?.vars["endsWith?"] = Value{ NativeFn: 48 };
+    pool[rootId]?.vars["join"] = Value{ NativeFn: 49 };
     -- File I/O: 45-47
     pool[rootId]?.vars["readFile"] = Value{ NativeFn: 45 };
     pool[rootId]?.vars["writeFile"] = Value{ NativeFn: 46 };
