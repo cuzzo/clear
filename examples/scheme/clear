@@ -92,6 +92,8 @@ class InterpreterBridge
     @fn_defs = []       # accumulated function definitions (S-expr strings)
     @file_defs = {}     # file_path -> [def strings] for hot reload
     @breakpoints = Set.new
+    @watching = false
+    @file_mtimes = {}
     @repl_counter = 0
 
     # Preload file if given
@@ -102,6 +104,18 @@ class InterpreterBridge
     nesting = 0
 
     while (line = Readline.readline(prompt, true))
+      # Watch mode: check for file changes
+      if @watching
+        @file_mtimes.each do |path, old_mtime|
+          new_mtime = File.mtime(path) rescue nil
+          if new_mtime && new_mtime != old_mtime
+            puts "[watch] #{File.basename(path)} changed, reloading..."
+            load_file(path)
+            @file_mtimes[path] = new_mtime
+          end
+        end
+      end
+
       line = line.strip
       next if line.empty?
 
@@ -138,6 +152,20 @@ class InterpreterBridge
           puts "(no files loaded)"
         else
           @file_defs.each { |path, defs| puts "  #{File.basename(path)} (#{defs.length} defs)" }
+        end
+        next
+      when ":watch"
+        if @file_defs.empty?
+          puts "No files loaded. Use :load <file.cht> first."
+        else
+          @watching = !@watching
+          if @watching
+            @file_mtimes = {}
+            @file_defs.keys.each { |p| @file_mtimes[p] = File.mtime(p) rescue nil }
+            puts "Watching #{@file_defs.length} file(s) for changes."
+          else
+            puts "Watch mode off."
+          end
         end
         next
       when ":locals"
@@ -200,6 +228,7 @@ class InterpreterBridge
       when ":help", ":h"
         puts <<~HELP
           :load <file.cht>     Load/reload a CLEAR source file
+          :watch               Toggle auto-reload on file changes
           :reload              Reload all loaded files (hot reload)
           :files               List loaded files
           :inspect <expr>      Evaluate a CLEAR expression
