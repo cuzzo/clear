@@ -48,6 +48,7 @@ KNOWN_PASSING = %w[
   45_match
   46_match_when
   46_range
+  47_match_destructure
   49_visibility
   50_require
   51_enum

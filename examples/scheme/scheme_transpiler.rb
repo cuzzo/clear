@@ -448,6 +448,33 @@ class SchemeTranspiler
       else
         cond = "(= #{subject} #{emit(pattern)})"
       end
+    elsif pattern.is_a?(AST::StructPattern)
+      # Struct pattern: {x: 10, y: _, ...} -> check matching fields
+      checks = []
+      pattern.fields.each do |f|
+        next if f[:value] == :wildcard
+        # Find field index in any known struct
+        field_name = f[:name]
+        field_idx = nil
+        @structs.each do |_sname, fields|
+          idx = fields.index(field_name)
+          if idx
+            field_idx = idx
+            break
+          end
+        end
+        if field_idx
+          checks << "(= (vector-ref #{subject} #{field_idx}) #{emit(f[:value])})"
+        end
+      end
+      if checks.empty?
+        cond = "true" # wildcard-only pattern always matches
+      elsif checks.length == 1
+        cond = checks[0]
+      else
+        # AND all checks: (if c1 (if c2 true false) false)
+        cond = checks.reverse.reduce("true") { |acc, c| "(if #{c} #{acc} false)" }
+      end
     elsif pattern.is_a?(AST::Literal)
       cond = "(= #{subject} #{emit(pattern)})"
     else
