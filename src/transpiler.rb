@@ -2262,6 +2262,23 @@ private
         result
       end
 
+    when AST::CopyNode
+      # COPY expr — explicit deep-copy. Produces an owned value.
+      val = visit(node.value)
+      ti = node.value.type_info
+      rt_name = @do_rt_name || "rt"
+      if ti && @union_schemas&.key?(ti.resolved)
+        zig_t = transpile_type(ti)
+        "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
+      elsif ti&.array? && !ti&.string?
+        # Slice copy: allocate new buffer, copy elements
+        elem_zig = transpile_type(ti.element_type)
+        "blk_copy: {\n    const __src = #{val};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy __src;\n}"
+      else
+        # Fallback: bitwise copy (for types without heap data)
+        val
+      end
+
     when AST::LinkNode
       # LINK expr — downgrade Rc/Arc to WeakRc/WeakArc
       inner = visit(node.value)

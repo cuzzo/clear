@@ -125,6 +125,7 @@ class Parser
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
   primary(:KEYWORD, 'GIVE', AST::MoveNode, ['GIVE', :expression])
+  primary(:KEYWORD, 'COPY', AST::CopyNode, ['COPY', :expression])
   primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
   primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
   primary(:KEYWORD, 'BG')   { parse_bg_block }

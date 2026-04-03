@@ -2522,6 +2522,15 @@ private
     og_set_moved(node.value.name)
   end
 
+  def visit_CopyNode(node)
+    visit(node.value)
+    # COPY produces an owned deep-copy. The source is NOT consumed.
+    node.full_type = node.value.full_type
+    node.storage = :stack
+    # Mark as heap usage - COPY allocates via heapAlloc
+    current_fn_ctx.heap_count += 1 if current_fn_ctx
+  end
+
   def visit_LinkNode(node)
     visit(node.value)
     ti = node.value.type_info

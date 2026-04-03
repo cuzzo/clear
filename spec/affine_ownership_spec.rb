@@ -183,8 +183,8 @@ RSpec.describe SemanticAnnotator do
               END
             FLUX
           }
-          it "raises error for non-copyable array" do
-            expect { ast }.to raise_error(/Cannot COPY non-copyable type/)
+          it "allows COPY of non-copyable array (explicit deep-copy)" do
+            expect { ast }.not_to raise_error
           end
         end
 
@@ -198,8 +198,8 @@ RSpec.describe SemanticAnnotator do
               END
             FLUX
           }
-          it "raises error for struct containing non-copyable field" do
-            expect { ast }.to raise_error(/Cannot COPY non-copyable type/)
+          it "allows COPY of struct with non-copyable field (explicit deep-copy)" do
+            expect { ast }.not_to raise_error
           end
         end
       end

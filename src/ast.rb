@@ -388,6 +388,7 @@ module AST
   # layout:    nil | :indirect
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
+  CopyNode          = Struct.new(:token, :value) { include Locatable }  # COPY expr               -> explicit deep-copy of non-Copy value
   LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
   ResolveNode       = Struct.new(:token, :value) { include Locatable }  # RESOLVE expr            -> upgrade WeakRc/WeakArc to ?Rc/?Arc
   # PassStmt: no-op statement (like Python's `pass`).
