@@ -1944,38 +1944,27 @@ private
     when AST::ReturnNode
       rc_map = @rc_unwrap_map || {}
 
-      # 1. Handle MOVE or RC-Retain
-      if node.value.is_a?(AST::MoveNode) && node.value.value.is_a?(AST::Identifier)
-        src_name = node.value.value.name
-        return "#{src_name}_moved = true;\nreturn #{src_name};"
-      end
-
+      # 1. Handle RC-Retain (Arc/Rc types need retain, not move)
       if node.value.is_a?(AST::Identifier) && !rc_map.key?(node.value.name)
         ti = node.value.type_info
-        is_resource = ti&.resource?
-        if is_resource
-          safe_name = zig_safe_name(node.value.name)
-          return "#{safe_name}_moved = true;\nreturn #{safe_name};"
-        end
         if ti&.any_rc?
           return "return #{transpile_rc_retain(ti, node.value.name)};"
         end
       end
 
-      # 2. Standard Return with Move Suppression for unique heap
+      # 2. Standard Return with ownership escape analysis.
+      # Walk the return value AST and find ALL identifiers whose ownership
+      # escapes through this return. Emit _moved = true for each so their
+      # cleanup defers are suppressed.
       rt_name = @do_rt_name || "rt"
       suppress = emit_move_suppression(node.value)
-
-      # Suppress cleanup on TAKES parameters whose data is returned inside
-      # struct/union construction (ownership escapes via the return value).
-      if node.value.is_a?(AST::StructLit)
-        fn_name = current_tp_ctx&.fn_name
-        fn_plan = @cleanup_plans&.dig(fn_name)
-        node.value.fields.each do |_fname, fval|
-          next unless fval.is_a?(AST::Identifier)
-          entry = fn_plan&.lookup(fval.name)
-          next unless entry && entry[:source_kind] == :takes_param && entry[:has_moved_guard]
-          suppress = "#{zig_safe_name(fval.name)}_moved = true;\n#{suppress}"
+      fn_name = current_tp_ctx&.fn_name
+      fn_plan = @cleanup_plans&.dig(fn_name)
+      if fn_plan
+        collect_escaping_identifiers(node.value).each do |ident|
+          entry = fn_plan.lookup(ident.name)
+          next unless entry && entry[:has_moved_guard]
+          suppress = "#{zig_safe_name(ident.name)}_moved = true;\n#{suppress}"
         end
       end
       val_code = if node.value.nil?
@@ -2678,6 +2667,27 @@ private
   # frame-allocated fields are promoted to heap, and __ret is returned.
   #
   # For direct types (string, list, map): promotes the value itself.
+  # Walk a return value AST and collect all Identifier nodes whose ownership
+  # escapes through the return. Covers: bare identifiers, StructLit fields,
+  # MoveNode targets, and function call arguments.
+  def collect_escaping_identifiers(node)
+    return [] unless node
+    case node
+    when AST::Identifier
+      [node]
+    when AST::MoveNode
+      collect_escaping_identifiers(node.value)
+    when AST::StructLit
+      node.fields.values.flat_map { |v| collect_escaping_identifiers(v) }
+    when AST::FuncCall, AST::MethodCall
+      node.args.flat_map { |a| collect_escaping_identifiers(a) }
+    when AST::CopyNode
+      []  # COPY creates a new value; the source doesn't escape
+    else
+      []
+    end
+  end
+
   # Emit return code from a PromotionPlan. Zero decisions here — the plan
   # already decided what to promote.
   def emit_return_from_plan(val_code, plan, rt_name, suppress)
@@ -3453,12 +3463,10 @@ private
       ctx.pending_heap_temps = [] if ctx
       code = visit(stmt)
       # Move suppression: for consumed args (TAKES, append, struct/union construction).
-      consumed = emit_consumed_moves(stmt)
-      unless consumed.empty?
-        if stmt.is_a?(AST::ReturnNode)
-          # For returns, emit moves BEFORE the return (after return is unreachable).
-          code = "#{consumed}\n#{code}"
-        else
+      # ReturnNode handles its own escape analysis via collect_escaping_identifiers.
+      unless stmt.is_a?(AST::ReturnNode)
+        consumed = emit_consumed_moves(stmt)
+        unless consumed.empty?
           code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
           code = "#{code}\n#{consumed}"
         end
