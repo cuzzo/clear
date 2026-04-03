@@ -211,7 +211,7 @@ FN readAtom(token: String) RETURNS Value ->
 
     n = toNumber(token) OR (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
-    RETURN Value{ Symbol: token };
+    RETURN Value{ Symbol: COPY token };
 END
 
 FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
@@ -276,7 +276,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
         c = charAt(str, i);
         IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
         ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
-            penv["__t" + count.toString()] = Value{ Str: c };
+            penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
@@ -291,7 +291,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
                 END
             END
             s = s + "\"";
-            penv["__t" + count.toString()] = Value{ Str: s };
+            penv["__t" + count.toString()] = Value{ Str: COPY s };
             count += 1;
             i += 1;
         ELSE
@@ -300,7 +300,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
                 s = s + charAt(str, i); i += 1;
             END
             IF s.length() > 0 THEN
-                penv["__t" + count.toString()] = Value{ Str: s };
+                penv["__t" + count.toString()] = Value{ Str: COPY s };
                 count += 1;
             END
         END
@@ -436,7 +436,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         FOR si IN (2_i64 ..< evaled.length()) DO
             out = out + getStr(evaled[si]);
         END
-        RETURN Value{ Str: out };
+        RETURN Value{ Str: COPY out };
     END
     IF id == 27 THEN RETURN Value{ Number: toFloat(getStr(evaled[1]).length()) }; END
     IF id == 28 THEN
@@ -553,7 +553,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
                 END,
             DEFAULT -> PASS;
         END
-        RETURN Value{ Str: joined };
+        RETURN Value{ Str: COPY joined };
     END
     -- Math: 50-56
     IF id == 50 THEN
@@ -586,7 +586,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 45 THEN
         path = getStr(evaled[1]);
         content = readFile(path);
-        RETURN Value{ Str: content };
+        RETURN Value{ Str: COPY content };
     END
     IF id == 46 THEN
         path = getStr(evaled[1]);
@@ -597,7 +597,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 47 THEN
         cmd = getStr(evaled[1]);
         output = shell(cmd);
-        RETURN Value{ Str: output };
+        RETURN Value{ Str: COPY output };
     END
     IF id == 44 THEN
         -- toInt: truncate float to integer
@@ -663,7 +663,7 @@ END
 -- Environment operations using Pool
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    val = COPY (pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 });
+    val = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
     MATCH val START
         Value.Number AS n ->
             IF n == 0.0 - 777777.0 THEN
@@ -681,22 +681,22 @@ END
 
 -- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
-    existing = COPY (pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 });
-    MUTABLE hasVar = TRUE;
+FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
+    existing = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
     MATCH existing START
         Value.Number AS n ->
-            IF n == 0.0 - 777777.0 THEN hasVar = FALSE; END,
-        DEFAULT -> PASS;
-    END
-    IF hasVar THEN
-        pool[envId]?.vars[name] = COPY val;
-        RETURN TRUE;
-    END
-    parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
-    MATCH parentVal START
-        Value.EnvRef AS pid -> RETURN envSet!(pid, name, GIVE val, pool);,
-        DEFAULT -> RETURN FALSE;
+            IF n == 0.0 - 777777.0 THEN
+                parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
+                MATCH parentVal START
+                    Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool);,
+                    DEFAULT -> RETURN FALSE;
+                END
+            END
+            pool[envId]?.vars[name] = COPY val;
+            RETURN TRUE;,
+        DEFAULT ->
+            pool[envId]?.vars[name] = COPY val;
+            RETURN TRUE;
     END
     RETURN FALSE;
 END
@@ -704,7 +704,7 @@ END
 -- eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
 -- let body, lambda body) reassign ast/curEnv and continue instead of recursing.
 
-FN listRef(TAKES v: Value, idx: Int64) RETURNS Value ->
+FN listRef(v: Value, idx: Int64) RETURNS Value ->
     MATCH v START
         Value.List AS items ->
             elem = items[idx];
@@ -728,7 +728,7 @@ FN vecLen(v: Value) RETURNS Int64 ->
     RETURN 0;
 END
 
-FN vecRef(TAKES v: Value, idx: Int64) RETURNS Value ->
+FN vecRef(v: Value, idx: Int64) RETURNS Value ->
     MATCH v START
         Value.Vector AS elems ->
             elem = elems[idx];
@@ -744,7 +744,7 @@ FN isPair?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN pairCar(TAKES v: Value) RETURNS Value ->
+FN pairCar(v: Value) RETURNS Value ->
     MATCH v START
         Value.Pair AS p ->
             result = p.pairCar;
@@ -754,7 +754,7 @@ FN pairCar(TAKES v: Value) RETURNS Value ->
     RETURN Value.Nil;
 END
 
-FN pairCdr(TAKES v: Value) RETURNS Value ->
+FN pairCdr(v: Value) RETURNS Value ->
     MATCH v START
         Value.Pair AS p ->
             result = p.pairCdr;
@@ -779,7 +779,7 @@ FN getErrKind(v: Value) RETURNS String ->
     RETURN "";
 END
 
-FN handleCatch!(TAKES catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
     MATCH catchExpr START
         Value.List AS catchItems ->
             catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
@@ -805,13 +805,13 @@ END
 -- Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
 -- Returns the debug action: 0=continue, 1=step-into, 2=step-over, 3=step-out
 
-FN debugPause!(TAKES reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
+FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
     -- Build call stack string
     stackStr = envGet!(envId, "__dbg_stack", pool);
     stackDisplay = getStr(stackStr);
 
     -- Write break info
-    MUTABLE breakInfo = reason;
+    MUTABLE breakInfo = COPY reason;
     IF stackDisplay.length() > 0 THEN
         breakInfo = breakInfo + "\n  stack: " + stackDisplay;
     END
@@ -869,50 +869,52 @@ FN isSymbol?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
+-- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
+FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+    MATCH v START
+        Value.Tco AS tco ->
+            tcoAst = COPY tco.tcoAst;
+            tcoEnv = COPY tco.tcoEnv;
+            RETURN eval!(tcoAst, tcoEnv, pool);,
+        DEFAULT -> RETURN COPY v;
+    END
+    RETURN COPY v;
+END
+
 -- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(TAKES astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    MUTABLE ast: Value = astIn;
+FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+    MUTABLE ast: Value = COPY astIn;
     MUTABLE curEnv: Id<Env> = COPY envId;
     MUTABLE tcoActive = TRUE;
     WHILE tcoActive DO
-        -- TODO: remove COPY when MATCH borrows by default (MATCH TAKES for explicit consume)
-        MUTABLE astCopy: Value = COPY ast;
-        MATCH astCopy START
+        MATCH ast START
             Value.Symbol AS sym ->
                 RETURN envGet!(curEnv, sym, pool);,
             Value.List AS listItems ->
-                -- TODO: remove COPY when MATCH borrows by default (MATCH TAKES for explicit consume)
-                MUTABLE tcoResult: Value = evalList!(listItems, curEnv, pool);
-                MUTABLE tcoResultCopy: Value = COPY tcoResult;
-                MATCH tcoResult START
+                result = evalList!(listItems, curEnv, pool);
+                MATCH result START
                     Value.Tco AS tco ->
                         ast = COPY tco.tcoAst;
-                        curEnv = tco.tcoEnv;,
-                    DEFAULT -> RETURN tcoResultCopy;
+                        curEnv = COPY tco.tcoEnv;,
+                    DEFAULT -> RETURN result;
                 END,
-            Value.Nil -> RETURN Value.Nil;,
-            Value.TrueVal -> RETURN Value.TrueVal;,
-            Value.FalseVal -> RETURN Value.FalseVal;,
-            Value.Number AS n -> RETURN Value{ Number: n };,
-            Value.Int64Val AS i -> RETURN Value{ Int64Val: i };,
-            Value.Str AS s -> RETURN Value{ Str: s };,
-            DEFAULT -> RETURN Value.Nil;
+            DEFAULT -> RETURN ast;
         END
     END
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
     -- Pipeline operations: special forms that call lambdas
     IF formName == "list-where" THEN
         -- (list-where list pred) -> filter (handles List and TypedI64Arr)
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        predVal = eval!(COPY items[2], envId, pool);
+        predVal = eval!(items[2], envId, pool);
         MUTABLE filtered: Value[]@list = List[];
         len = listLen(listVal);
         FOR fi IN (0_i64 ..< len) DO
@@ -920,28 +922,26 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             MUTABLE callArgs: Value[]@list = List[];
             callArgs.append(COPY predVal);
             callArgs.append(COPY elem);
-            MUTABLE callResultTmp: Value = evalList!(callArgs, envId, pool);
-            MUTABLE callResult: Value = COPY callResultTmp;
-            MATCH callResultTmp START Value.Tco AS tco -> callResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
-            IF isTruthy?(callResult) THEN filtered.append(elem); END
+            MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
+            callResult = resolveTco!(callResult, pool);
+            IF isTruthy?(callResult) THEN filtered.append(COPY elem); END
         END
         RETURN Value{ List: filtered };
 
     ELSE_IF formName == "list-select" THEN
         -- (list-select list fn) -> map
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        fnVal = eval!(COPY items[2], envId, pool);
+        fnVal = eval!(items[2], envId, pool);
         MUTABLE mapped: Value[]@list = List[];
         MATCH listVal START
             Value.List AS srcItems ->
                 FOR mi IN (0_i64 ..< srcItems.length()) DO
                     MUTABLE callArgs: Value[]@list = List[];
                     callArgs.append(COPY fnVal);
-                    callArgs.append(srcItems[mi]);
-                    MUTABLE callResultTmp: Value = evalList!(callArgs, envId, pool);
-            MUTABLE callResult: Value = COPY callResultTmp;
-            MATCH callResultTmp START Value.Tco AS tco -> callResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                    callArgs.append(COPY srcItems[mi]);
+                    MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
+                    callResult = resolveTco!(callResult, pool);
                     mapped.append(callResult);
                 END,
             DEFAULT -> PASS;
@@ -950,10 +950,10 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "list-reduce" THEN
         -- (list-reduce list init fn) -> fold (handles both List and TypedI64Arr)
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        MUTABLE acc: Value = eval!(COPY items[2], envId, pool);
-        fnVal = eval!(COPY items[3], envId, pool);
+        MUTABLE acc: Value = eval!(items[2], envId, pool);
+        fnVal = eval!(items[3], envId, pool);
         len = listLen(listVal);
         FOR ri IN (0_i64 ..< len) DO
             elem = listRef(listVal, ri);
@@ -962,28 +962,26 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             callArgs.append(COPY acc);
             callArgs.append(COPY elem);
             MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
-            -- TODO: remove COPY when MATCH borrows by default
-            callResultTmp = COPY callResult;
-            MATCH callResultTmp START Value.Tco AS tco -> callResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+            acc = resolveTco!(callResult, pool);
         END
         RETURN acc;
 
     ELSE_IF formName == "list-limit" THEN
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        limitN = getInt(eval!(COPY items[2], envId, pool));
+        limitN = getInt(eval!(items[2], envId, pool));
         len = listLen(listVal);
         MUTABLE limited: Value[]@list = List[];
         FOR li IN (0_i64 ..< len) DO
             IF li < limitN THEN
                 elem = listRef(listVal, li);
-                limited.append(elem);
+                limited.append(COPY elem);
             END
         END
         RETURN Value{ List: limited };
 
     ELSE_IF formName == "list-distinct" THEN
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE distinct: Value[]@list = List[];
         len = listLen(listVal);
@@ -993,20 +991,20 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             FOR dj IN (0_i64 ..< distinct.length()) DO
                 IF valEqual?(elem, distinct[dj]) THEN found = TRUE; END
             END
-            IF found == FALSE THEN distinct.append(elem); END
+            IF found == FALSE THEN distinct.append(COPY elem); END
         END
         RETURN Value{ List: distinct };
 
     ELSE_IF formName == "list-orderby" THEN
         -- (list-orderby list keyFn) -> sorted copy (insertion sort)
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        keyFn = eval!(COPY items[2], envId, pool);
+        keyFn = eval!(items[2], envId, pool);
         MUTABLE sorted: Value[]@list = List[];
         len = listLen(listVal);
         FOR oi IN (0_i64 ..< len) DO
             elem = listRef(listVal, oi);
-            sorted.append(elem);
+            sorted.append(COPY elem);
         END
         -- Insertion sort by key
         MUTABLE si: Int64 = 1;
@@ -1016,14 +1014,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     WHILE j > 0 DO
                         MUTABLE aArgs: Value[]@list = List[];
                         aArgs.append(COPY keyFn); aArgs.append(COPY sorted[j]);
-                        MUTABLE aKeyTmp: Value = evalList!(aArgs, envId, pool);
-            MUTABLE aKey: Value = COPY aKeyTmp;
-            MATCH aKeyTmp START Value.Tco AS tco -> aKey = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                        MUTABLE aKey: Value = evalList!(aArgs, envId, pool);
+                        aKey = resolveTco!(aKey, pool);
                         MUTABLE bArgs: Value[]@list = List[];
                         bArgs.append(COPY keyFn); bArgs.append(COPY sorted[j - 1]);
-                        MUTABLE bKeyTmp: Value = evalList!(bArgs, envId, pool);
-            MUTABLE bKey: Value = COPY bKeyTmp;
-            MATCH bKeyTmp START Value.Tco AS tco -> bKey = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                        MUTABLE bKey: Value = evalList!(bArgs, envId, pool);
+                        bKey = resolveTco!(bKey, pool);
                         IF getNum(aKey) < getNum(bKey) THEN
                             tmp = COPY sorted[j - 1];
                             sorted[j - 1] = COPY sorted[j];
@@ -1040,29 +1036,23 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "list-unnest" THEN
         -- (list-unnest list fieldFn) -> flatten nested lists
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        fieldFn = eval!(COPY items[2], envId, pool);
+        fieldFn = eval!(items[2], envId, pool);
         MUTABLE flat: Value[]@list = List[];
         MATCH listVal START
             Value.List AS srcItems ->
                 FOR ui IN (0_i64 ..< srcItems.length()) DO
                     MUTABLE fArgs: Value[]@list = List[];
-                    fArgs.append(COPY fieldFn); fArgs.append(srcItems[ui]);
-                    MUTABLE nestedTmp: Value = evalList!(fArgs, envId, pool);
-            MUTABLE nested: Value = COPY nestedTmp;
-            MATCH nestedTmp START Value.Tco AS tco -> nested = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
-                    -- TODO: remove COPY when MATCH borrows by default
-                    IF isList?(nested) THEN
-                        MATCH nested START
-                            Value.List AS innerItems ->
-                                FOR ni IN (0_i64 ..< innerItems.length()) DO
-                                    flat.append(COPY innerItems[ni]);
-                                END,
-                            DEFAULT -> PASS;
-                        END
-                    ELSE
-                        flat.append(nested);
+                    fArgs.append(COPY fieldFn); fArgs.append(COPY srcItems[ui]);
+                    MUTABLE nested: Value = evalList!(fArgs, envId, pool);
+                    nested = resolveTco!(nested, pool);
+                    MATCH nested START
+                        Value.List AS innerItems ->
+                            FOR ni IN (0_i64 ..< innerItems.length()) DO
+                                flat.append(COPY innerItems[ni]);
+                            END,
+                        DEFAULT -> flat.append(nested);
                     END
                 END,
             DEFAULT -> PASS;
@@ -1071,18 +1061,17 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "list-index" THEN
         -- (list-index list keyFn) -> assoc list of (key . items[])
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        keyFn = eval!(COPY items[2], envId, pool);
+        keyFn = eval!(items[2], envId, pool);
         MUTABLE groups: Value[]@list = List[];
         MATCH listVal START
             Value.List AS srcItems ->
                 FOR gi IN (0_i64 ..< srcItems.length()) DO
                     MUTABLE kArgs: Value[]@list = List[];
-                    kArgs.append(COPY keyFn); kArgs.append(srcItems[gi]);
-                    MUTABLE gKeyTmp: Value = evalList!(kArgs, envId, pool);
-            MUTABLE gKey: Value = COPY gKeyTmp;
-            MATCH gKeyTmp START Value.Tco AS tco -> gKey = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                    kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[gi]);
+                    MUTABLE gKey: Value = evalList!(kArgs, envId, pool);
+                    gKey = resolveTco!(gKey, pool);
                     -- Find existing group
                     MUTABLE found: Int64 = 0 - 1;
                     FOR fi IN (0_i64 ..< groups.length()) DO
@@ -1094,16 +1083,16 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         existingList = pairCdr(groups[found]);
                         MUTABLE newGroupItems: Value[]@list = List[];
                         MATCH existingList START
-                            Value.List AS gl -> FOR gj IN (0_i64 ..< gl.length()) DO newGroupItems.append(gl[gj]); END,
+                            Value.List AS gl -> FOR gj IN (0_i64 ..< gl.length()) DO newGroupItems.append(COPY gl[gj]); END,
                             DEFAULT -> PASS;
                         END
-                        newGroupItems.append(srcItems[gi]);
-                        groups[found] = Value.Pair{ pairCar: gKey, pairCdr: Value{ List: newGroupItems } };
+                        newGroupItems.append(COPY srcItems[gi]);
+                        groups[found] = Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newGroupItems } };
                     ELSE
                         -- New group
                         MUTABLE newItems: Value[]@list = List[];
-                        newItems.append(srcItems[gi]);
-                        groups.append(Value.Pair{ pairCar: gKey, pairCdr: Value{ List: newItems } });
+                        newItems.append(COPY srcItems[gi]);
+                        groups.append(Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newItems } });
                     END
                 END,
             DEFAULT -> PASS;
@@ -1112,8 +1101,8 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "assoc-get" THEN
         -- (assoc-get alist key) -> value or error if not found
-        alist = eval!(COPY items[1], envId, pool);
-        key = eval!(COPY items[2], envId, pool);
+        alist = eval!(items[1], envId, pool);
+        key = eval!(items[2], envId, pool);
         MATCH alist START
             Value.List AS pairs ->
                 FOR ai IN (0_i64 ..< pairs.length()) DO
@@ -1127,19 +1116,19 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound" };
 
     ELSE_IF formName == "list-slice" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        startIdx = toInt(getNum(eval!(COPY items[2], envId, pool)));
-        endIdx = toInt(getNum(eval!(COPY items[3], envId, pool)));
+        listVal = eval!(items[1], envId, pool);
+        startIdx = toInt(getNum(eval!(items[2], envId, pool)));
+        endIdx = toInt(getNum(eval!(items[3], envId, pool)));
         MUTABLE sliced: Value[]@list = List[];
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (startIdx ..< endIdx) DO
-                IF si < srcItems.length() THEN sliced.append(srcItems[si]); END
+                IF si < srcItems.length() THEN sliced.append(COPY srcItems[si]); END
             END, DEFAULT -> PASS; END
         RETURN Value{ List: sliced };
 
     ELSE_IF formName == "list-range" THEN
-        startVal = toInt(getNum(eval!(COPY items[1], envId, pool)));
-        endVal = toInt(getNum(eval!(COPY items[2], envId, pool)));
+        startVal = toInt(getNum(eval!(items[1], envId, pool)));
+        endVal = toInt(getNum(eval!(items[2], envId, pool)));
         MUTABLE rangeItems: Value[]@list = List[];
         FOR ri IN (startVal ..< endVal) DO
             rangeItems.append(Value{ Number: toFloat(ri) });
@@ -1147,153 +1136,144 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: rangeItems };
 
     ELSE_IF formName == "list-count" THEN
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         RETURN Value{ Number: toFloat(listLen(listVal)) };
 
     ELSE_IF formName == "list-sum" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        keyFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        keyFn = eval!(items[2], envId, pool);
         MUTABLE total = 0.0;
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE kArgs: Value[]@list = List[];
-                kArgs.append(COPY keyFn); kArgs.append(srcItems[si]);
-                MUTABLE kResultTmp: Value = evalList!(kArgs, envId, pool);
-            MUTABLE kResult: Value = COPY kResultTmp;
-            MATCH kResultTmp START Value.Tco AS tco -> kResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
+                MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
+                kResult = resolveTco!(kResult, pool);
                 total = total + getNum(kResult);
             END, DEFAULT -> PASS; END
         RETURN Value{ Number: total };
 
     ELSE_IF formName == "list-avg" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        keyFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        keyFn = eval!(items[2], envId, pool);
         MUTABLE total = 0.0;
         count = listLen(listVal);
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE kArgs: Value[]@list = List[];
-                kArgs.append(COPY keyFn); kArgs.append(srcItems[si]);
-                MUTABLE kResultTmp: Value = evalList!(kArgs, envId, pool);
-            MUTABLE kResult: Value = COPY kResultTmp;
-            MATCH kResultTmp START Value.Tco AS tco -> kResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
+                MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
+                kResult = resolveTco!(kResult, pool);
                 total = total + getNum(kResult);
             END, DEFAULT -> PASS; END
         IF count > 0 THEN RETURN Value{ Number: total / toFloat(count) }; END
         RETURN Value{ Number: 0.0 };
 
     ELSE_IF formName == "list-min" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        keyFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        keyFn = eval!(items[2], envId, pool);
         MUTABLE best = 999999999.0;
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE kArgs: Value[]@list = List[];
-                kArgs.append(COPY keyFn); kArgs.append(srcItems[si]);
-                MUTABLE kResultTmp: Value = evalList!(kArgs, envId, pool);
-            MUTABLE kResult: Value = COPY kResultTmp;
-            MATCH kResultTmp START Value.Tco AS tco -> kResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
+                MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
+                kResult = resolveTco!(kResult, pool);
                 v = getNum(kResult);
                 IF v < best THEN best = v; END
             END, DEFAULT -> PASS; END
         RETURN Value{ Number: best };
 
     ELSE_IF formName == "list-max" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        keyFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        keyFn = eval!(items[2], envId, pool);
         MUTABLE best = 0.0 - 999999999.0;
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE kArgs: Value[]@list = List[];
-                kArgs.append(COPY keyFn); kArgs.append(srcItems[si]);
-                MUTABLE kResultTmp: Value = evalList!(kArgs, envId, pool);
-            MUTABLE kResult: Value = COPY kResultTmp;
-            MATCH kResultTmp START Value.Tco AS tco -> kResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
+                MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
+                kResult = resolveTco!(kResult, pool);
                 v = getNum(kResult);
                 IF v > best THEN best = v; END
             END, DEFAULT -> PASS; END
         RETURN Value{ Number: best };
 
     ELSE_IF formName == "list-find" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        predFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        predFn = eval!(items[2], envId, pool);
         MUTABLE findResult: Value = Value.Nil;
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE pArgs: Value[]@list = List[];
-                pArgs.append(COPY predFn); pArgs.append(srcItems[si]);
-                MUTABLE pResultTmp: Value = evalList!(pArgs, envId, pool);
-            MUTABLE pResult: Value = COPY pResultTmp;
-            MATCH pResultTmp START Value.Tco AS tco -> pResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
-                IF isTruthy?(pResult) THEN findResult = srcItems[si]; END
+                pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
+                MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
+                pResult = resolveTco!(pResult, pool);
+                IF isTruthy?(pResult) THEN findResult = COPY srcItems[si]; END
             END, DEFAULT -> PASS; END
         RETURN findResult;
 
     ELSE_IF formName == "list-any" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        predFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        predFn = eval!(items[2], envId, pool);
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE pArgs: Value[]@list = List[];
-                pArgs.append(COPY predFn); pArgs.append(srcItems[si]);
-                MUTABLE pResultTmp: Value = evalList!(pArgs, envId, pool);
-            MUTABLE pResult: Value = COPY pResultTmp;
-            MATCH pResultTmp START Value.Tco AS tco -> pResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
+                MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
+                pResult = resolveTco!(pResult, pool);
                 IF isTruthy?(pResult) THEN RETURN Value.TrueVal; END
             END, DEFAULT -> PASS; END
         RETURN Value.FalseVal;
 
     ELSE_IF formName == "list-all" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        predFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        predFn = eval!(items[2], envId, pool);
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE pArgs: Value[]@list = List[];
-                pArgs.append(COPY predFn); pArgs.append(srcItems[si]);
-                MUTABLE pResultTmp: Value = evalList!(pArgs, envId, pool);
-            MUTABLE pResult: Value = COPY pResultTmp;
-            MATCH pResultTmp START Value.Tco AS tco -> pResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
+                MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
+                pResult = resolveTco!(pResult, pool);
                 IF isTruthy?(pResult) == FALSE THEN RETURN Value.FalseVal; END
             END, DEFAULT -> PASS; END
         RETURN Value.TrueVal;
 
     ELSE_IF formName == "list-each" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        fnVal = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        fnVal = eval!(items[2], envId, pool);
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 MUTABLE eArgs: Value[]@list = List[];
-                eArgs.append(COPY fnVal); eArgs.append(srcItems[si]);
-                MUTABLE eResultTmp: Value = evalList!(eArgs, envId, pool);
-            MUTABLE eResult: Value = COPY eResultTmp;
-            MATCH eResultTmp START Value.Tco AS tco -> eResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
+                eArgs.append(COPY fnVal); eArgs.append(COPY srcItems[si]);
+                MUTABLE eResult: Value = evalList!(eArgs, envId, pool);
+                eResult = resolveTco!(eResult, pool);
             END, DEFAULT -> PASS; END
-        RETURN Value.Nil;
+        RETURN listVal;
 
     ELSE_IF formName == "list-skip" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        skipN = toInt(getNum(eval!(COPY items[2], envId, pool)));
+        listVal = eval!(items[1], envId, pool);
+        skipN = toInt(getNum(eval!(items[2], envId, pool)));
         MUTABLE skipped: Value[]@list = List[];
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (skipN ..< srcItems.length()) DO
-                skipped.append(srcItems[si]);
+                skipped.append(COPY srcItems[si]);
             END, DEFAULT -> PASS; END
         RETURN Value{ List: skipped };
 
     ELSE_IF formName == "list-take-while" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        predFn = eval!(COPY items[2], envId, pool);
+        listVal = eval!(items[1], envId, pool);
+        predFn = eval!(items[2], envId, pool);
         MUTABLE taken: Value[]@list = List[];
         MUTABLE taking = TRUE;
         MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 IF taking THEN
                     MUTABLE tArgs: Value[]@list = List[];
-                    tArgs.append(COPY predFn); tArgs.append(srcItems[si]);
-                    MUTABLE tResultTmp: Value = evalList!(tArgs, envId, pool);
-            MUTABLE tResult: Value = COPY tResultTmp;
-            MATCH tResultTmp START Value.Tco AS tco -> tResult = eval!(COPY tco.tcoAst, tco.tcoEnv, pool);, DEFAULT -> PASS; END
-                    IF isTruthy?(tResult) THEN taken.append(srcItems[si]);
+                    tArgs.append(COPY predFn); tArgs.append(COPY srcItems[si]);
+                    MUTABLE tResult: Value = evalList!(tArgs, envId, pool);
+                    tResult = resolveTco!(tResult, pool);
+                    IF isTruthy?(tResult) THEN taken.append(COPY srcItems[si]);
                     ELSE taking = FALSE; END
                 END
             END, DEFAULT -> PASS; END
@@ -1301,10 +1281,10 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "assoc-set" THEN
         -- (assoc-set alist key val) -> new alist with key set
-        alist = eval!(COPY items[1], envId, pool);
-        key = eval!(COPY items[2], envId, pool);
+        alist = eval!(items[1], envId, pool);
+        key = eval!(items[2], envId, pool);
         IF isError?(key) THEN RETURN key; END
-        val = eval!(COPY items[3], envId, pool);
+        val = eval!(items[3], envId, pool);
         IF isError?(val) THEN RETURN val; END
         MUTABLE newPairs: Value[]@list = List[];
         MUTABLE replaced = FALSE;
@@ -1316,7 +1296,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         newPairs.append(Value.Pair{ pairCar: COPY key, pairCdr: COPY val });
                         replaced = TRUE;
                     ELSE
-                        newPairs.append(pairs[ai]);
+                        newPairs.append(COPY pairs[ai]);
                     END
                 END,
             DEFAULT -> PASS;
@@ -1332,7 +1312,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "type-of" THEN
         -- (type-of expr) -> string describing the type
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(items[1], envId, pool);
         MATCH val START
             Value.Nil -> RETURN Value{ Str: "Nil" };,
             Value.TrueVal -> RETURN Value{ Str: "Bool" };,
@@ -1364,7 +1344,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     -- Typed struct: (cons 'Tag TypedI64Arr/TypedF64Arr/Vector)
     ELSE_IF formName == "typed-struct:i64" THEN
         -- (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
-        tagVal = eval!(COPY items[1], envId, pool);
+        tagVal = eval!(items[1], envId, pool);
         IF isError?(tagVal) THEN RETURN tagVal; END
         MUTABLE structData: Int64[]@list = List[];
         FOR fi IN (2_i64 ..< items.length()) DO
@@ -1375,7 +1355,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Pair{ pairCar: Value{ Symbol: getStr(tagVal) }, pairCdr: Value{ TypedI64Arr: structData } };
 
     ELSE_IF formName == "typed-struct:f64" THEN
-        tagVal = eval!(COPY items[1], envId, pool);
+        tagVal = eval!(items[1], envId, pool);
         IF isError?(tagVal) THEN RETURN tagVal; END
         MUTABLE structData: Float64[]@list = List[];
         FOR fi IN (2_i64 ..< items.length()) DO
@@ -1386,23 +1366,23 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Pair{ pairCar: Value{ Symbol: getStr(tagVal) }, pairCdr: Value{ TypedF64Arr: structData } };
 
     ELSE_IF formName == "typed-struct-ref:i64" THEN
-        sval = eval!(COPY items[1], envId, pool);
+        sval = eval!(items[1], envId, pool);
         IF isError?(sval) THEN RETURN sval; END
-        idx = getInt(eval!(COPY items[2], envId, pool));
+        idx = getInt(eval!(items[2], envId, pool));
         dataVal = pairCdr(sval);
         RETURN listRef(dataVal, idx);
 
     ELSE_IF formName == "typed-struct-ref:f64" THEN
-        sval = eval!(COPY items[1], envId, pool);
+        sval = eval!(items[1], envId, pool);
         IF isError?(sval) THEN RETURN sval; END
-        idx = getInt(eval!(COPY items[2], envId, pool));
+        idx = getInt(eval!(items[2], envId, pool));
         dataVal = pairCdr(sval);
         RETURN listRef(dataVal, idx);
 
     ELSE_IF formName == "typed-struct-ref:mixed" THEN
-        sval = eval!(COPY items[1], envId, pool);
+        sval = eval!(items[1], envId, pool);
         IF isError?(sval) THEN RETURN sval; END
-        idx = getInt(eval!(COPY items[2], envId, pool));
+        idx = getInt(eval!(items[2], envId, pool));
         RETURN vecRef(sval, idx);
 
     ELSE_IF formName == "typed-list:f64" THEN
@@ -1415,7 +1395,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ TypedF64Arr: typedFloats };
 
     ELSE_IF formName == "to-typed:f64" THEN
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE convertedF: Float64[]@list = List[];
         MATCH listVal START
@@ -1423,7 +1403,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 FOR ci IN (0_i64 ..< srcItems.length()) DO
                     convertedF.append(getNum(srcItems[ci]));
                 END,
-            Value.TypedF64Arr AS fa -> RETURN Value{ TypedF64Arr: fa };,
+            Value.TypedF64Arr -> RETURN listVal;,
             Value.TypedI64Arr AS iarr ->
                 FOR ci IN (0_i64 ..< iarr.length()) DO
                     convertedF.append(toFloat(iarr[ci]));
@@ -1434,17 +1414,17 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     -- Type conversion ops
     ELSE_IF formName == "int->float" THEN
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(items[1], envId, pool);
         RETURN Value{ Number: toFloat(getInt(val)) };
 
     ELSE_IF formName == "float->int" THEN
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(items[1], envId, pool);
         truncated = toInt(getNum(val));
         RETURN Value{ Int64Val: truncated };
 
     ELSE_IF formName == "to-typed:i64" THEN
         -- (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
-        listVal = eval!(COPY items[1], envId, pool);
+        listVal = eval!(items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE converted: Int64[]@list = List[];
         MATCH listVal START
@@ -1452,14 +1432,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 FOR ci IN (0_i64 ..< srcItems.length()) DO
                     converted.append(getInt(srcItems[ci]));
                 END,
-            Value.TypedI64Arr AS ia -> RETURN Value{ TypedI64Arr: ia };,
+            Value.TypedI64Arr -> RETURN listVal;,
             DEFAULT -> PASS;
         END
         RETURN Value{ TypedI64Arr: converted };
 
     ELSE_IF formName == "to-list" THEN
         -- (to-list typedArr) -> convert TypedI64Arr back to Value[] list
-        arrVal = eval!(COPY items[1], envId, pool);
+        arrVal = eval!(items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
@@ -1468,16 +1448,16 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     untyped.append(Value{ Int64Val: iarr[ui] });
                 END
                 RETURN Value{ List: untyped };,
-            Value.List AS la -> RETURN Value{ List: la };,
-            DEFAULT -> RETURN Value.Nil;
+            Value.List -> RETURN arrVal;,
+            DEFAULT -> RETURN arrVal;
         END
-        RETURN Value.Nil;
+        RETURN arrVal;
 
     ELSE_IF formName == "typed-push:i64" THEN
         -- (typed-push:i64 arr val) -> new typed array with value appended
-        arrVal = eval!(COPY items[1], envId, pool);
+        arrVal = eval!(items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
-        newVal = eval!(COPY items[2], envId, pool);
+        newVal = eval!(items[2], envId, pool);
         IF isError?(newVal) THEN RETURN newVal; END
         MUTABLE newArr: Int64[]@list = List[];
         MATCH arrVal START
@@ -1492,7 +1472,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     -- FFI bridge: call native CLEAR functions with typed arrays
     ELSE_IF formName == "native-sum" THEN
-        arrVal = eval!(COPY items[1], envId, pool);
+        arrVal = eval!(items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
@@ -1503,7 +1483,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-sum-f64" THEN
-        arrVal = eval!(COPY items[1], envId, pool);
+        arrVal = eval!(items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         MATCH arrVal START
             Value.TypedF64Arr AS farr ->
@@ -1513,9 +1493,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-dot" THEN
-        aVal = eval!(COPY items[1], envId, pool);
+        aVal = eval!(items[1], envId, pool);
         IF isError?(aVal) THEN RETURN aVal; END
-        bVal = eval!(COPY items[2], envId, pool);
+        bVal = eval!(items[2], envId, pool);
         IF isError?(bVal) THEN RETURN bVal; END
         MATCH aVal START
             Value.TypedF64Arr AS fa ->
@@ -1534,19 +1514,19 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isTruthy?(sandbox) THEN
             RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
         END
-        pathVal = eval!(COPY items[1], envId, pool);
+        pathVal = eval!(items[1], envId, pool);
         IF isError?(pathVal) THEN RETURN pathVal; END
         content = readFile(getStr(pathVal)) OR RAISE;
-        RETURN Value{ Str: content };
+        RETURN Value{ Str: COPY content };
 
     ELSE_IF formName == "sandboxed-write" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
             RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
         END
-        pathVal = eval!(COPY items[1], envId, pool);
+        pathVal = eval!(items[1], envId, pool);
         IF isError?(pathVal) THEN RETURN pathVal; END
-        contentVal = eval!(COPY items[2], envId, pool);
+        contentVal = eval!(items[2], envId, pool);
         IF isError?(contentVal) THEN RETURN contentVal; END
         writeFile(getStr(pathVal), getStr(contentVal));
         RETURN Value.Nil;
@@ -1556,14 +1536,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isTruthy?(sandbox) THEN
             RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission" };
         END
-        cmdVal = eval!(COPY items[1], envId, pool);
+        cmdVal = eval!(items[1], envId, pool);
         IF isError?(cmdVal) THEN RETURN cmdVal; END
         output = shell(getStr(cmdVal));
-        RETURN Value{ Str: output };
+        RETURN Value{ Str: COPY output };
 
     ELSE_IF formName == "source-line" THEN
         -- (source-line N) -> track current CLEAR source line for error messages
-        lineVal = eval!(COPY items[1], envId, pool);
+        lineVal = eval!(items[1], envId, pool);
         pool[envId]?.vars["__source_line"] = lineVal;
         RETURN Value.Nil;
 
@@ -1573,13 +1553,15 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "native-manhattan" THEN
         -- (native-manhattan structA structB) -> Int64 manhattan distance
-        aVal = eval!(COPY items[1], envId, pool);
+        aVal = eval!(items[1], envId, pool);
         IF isError?(aVal) THEN RETURN aVal; END
-        bVal = eval!(COPY items[2], envId, pool);
+        bVal = eval!(items[2], envId, pool);
         IF isError?(bVal) THEN RETURN bVal; END
-        MATCH pairCdr(aVal) START
+        aCdr = pairCdr(aVal);
+        bCdr = pairCdr(bVal);
+        MATCH aCdr START
             Value.TypedI64Arr AS ai ->
-                MATCH pairCdr(bVal) START
+                MATCH bCdr START
                     Value.TypedI64Arr AS bi ->
                         RETURN Value{ Int64Val: nativePointManhattan(ai, bi) };,
                     DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
@@ -1590,27 +1572,28 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "native-translate" THEN
         -- (native-translate struct dx dy) -> new TypedStructI64
-        sVal = eval!(COPY items[1], envId, pool);
+        sVal = eval!(items[1], envId, pool);
         IF isError?(sVal) THEN RETURN sVal; END
-        dxVal = eval!(COPY items[2], envId, pool);
+        dxVal = eval!(items[2], envId, pool);
         IF isError?(dxVal) THEN RETURN dxVal; END
-        dyVal = eval!(COPY items[3], envId, pool);
+        dyVal = eval!(items[3], envId, pool);
         IF isError?(dyVal) THEN RETURN dyVal; END
-        tagVal = pairCar(COPY sVal);
-        MATCH pairCdr(sVal) START
+        tagVal = pairCar(sVal);
+        sCdr = pairCdr(sVal);
+        MATCH sCdr START
             Value.TypedI64Arr AS si ->
                 MUTABLE trData: Int64[]@list = List[];
                 trData.append(si[0] + getInt(dxVal));
                 trData.append(si[1] + getInt(dyVal));
-                RETURN Value.Pair{ pairCar: tagVal, pairCdr: Value{ TypedI64Arr: trData } };,
+                RETURN Value.Pair{ pairCar: COPY tagVal, pairCdr: Value{ TypedI64Arr: trData } };,
             DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
         END
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-contains" THEN
-        arrVal = eval!(COPY items[1], envId, pool);
+        arrVal = eval!(items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
-        needleVal = eval!(COPY items[2], envId, pool);
+        needleVal = eval!(items[2], envId, pool);
         IF isError?(needleVal) THEN RETURN needleVal; END
         MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
@@ -1621,26 +1604,26 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "debug-set-break" THEN
         -- (debug-set-break "fnName") -> register breakpoint
-        bpName = eval!(COPY items[1], envId, pool);
+        bpName = eval!(items[1], envId, pool);
         pool[envId]?.vars["__bp_" + getStr(bpName)] = Value.TrueVal;
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-clear-break" THEN
-        bpName = eval!(COPY items[1], envId, pool);
+        bpName = eval!(items[1], envId, pool);
         pool[envId]?.vars["__bp_" + getStr(bpName)] = Value.Nil;
         RETURN Value.Nil;
 
     -- Error introspection: special forms to avoid error propagation
     ELSE_IF formName == "error?" THEN
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(items[1], envId, pool);
         RETURN boolVal(isError?(val));
 
     ELSE_IF formName == "error-message" THEN
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(items[1], envId, pool);
         RETURN Value{ Str: getErrMsg(val) };
 
     ELSE_IF formName == "error-kind" THEN
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(items[1], envId, pool);
         RETURN Value{ Str: getErrKind(val) };
 
     ELSE_IF formName == "quote" THEN
@@ -1648,9 +1631,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN quoted;
 
     ELSE_IF formName == "raise" THEN
-        msg = eval!(COPY items[1], envId, pool);
+        msg = eval!(items[1], envId, pool);
         IF isError?(msg) THEN RETURN msg; END
-        kind = eval!(COPY items[2], envId, pool);
+        kind = eval!(items[2], envId, pool);
         IF isError?(kind) THEN RETURN kind; END
         -- Include source line in error message if tracked
         srcLine = envGet!(envId, "__source_line", pool);
@@ -1659,11 +1642,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             lineNum = toInt(getNum(srcLine));
             errMsg = errMsg + " (line " + lineNum.toString() + ")";
         END
-        RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind) };
+        RETURN Value.Error{ errMsg: errMsg, errKind: getStr(kind) };
 
     ELSE_IF formName == "try" THEN
         -- (try expr (catch e handler))
-        MUTABLE tryResult: Value = eval!(COPY items[1], envId, pool);
+        MUTABLE tryResult: Value = eval!(items[1], envId, pool);
         MATCH tryResult START
             Value.Error AS e ->
                 RETURN handleCatch!(items[2], e.errMsg, e.errKind, envId, pool);,
@@ -1673,7 +1656,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "def!" || formName == "define" THEN
         defName = getSymName(items[1]);
-        val = eval!(COPY items[2], envId, pool);
+        val = eval!(items[2], envId, pool);
         IF isError?(val) THEN RETURN val; END
         pool[envId]?.vars[defName] = val;
         result = pool[envId]?.vars[defName] OR Value.Nil;
@@ -1681,7 +1664,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "set!" THEN
         setName = getSymName(items[1]);
-        setVal = eval!(COPY items[2], envId, pool);
+        setVal = eval!(items[2], envId, pool);
         IF isError?(setVal) THEN RETURN setVal; END
         envSet!(envId, setName, setVal, pool);
         RETURN setVal;
@@ -1696,7 +1679,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         MATCH binds[bi] START
                             Value.List AS pair ->
                                 bName = getSymName(pair[0]);
-                                bVal = eval!(COPY pair[1], letId, pool);
+                                bVal = eval!(pair[1], letId, pool);
                                 IF isError?(bVal) THEN RETURN bVal; END
                                 pool[letId]?.vars[bName] = bVal;,
                             DEFAULT -> PASS;
@@ -1733,7 +1716,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Tco{ tcoAst: COPY items[items.length() - 1], tcoEnv: envId };
 
     ELSE_IF formName == "if" THEN
-        cond = eval!(COPY items[1], envId, pool);
+        cond = eval!(items[1], envId, pool);
         IF isError?(cond) THEN RETURN cond; END
         IF isTruthy?(cond) THEN
             RETURN Value.Tco{ tcoAst: COPY items[2], tcoEnv: envId };
@@ -1751,7 +1734,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             IF isError?(argVal) THEN RETURN argVal; END
             evaled.append(argVal);
         END
-        f = evaled.remove(0_i64);
+        f = evaled[0];
 
         -- Debug: check breakpoints + step mode
         calledName = getSymName(items[0]);
@@ -1782,9 +1765,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 -- Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
                 IF oldStack.length() > 0 THEN
-                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: callDesc + " < " + oldStack };
+                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
                 ELSE
-                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: callDesc };
+                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY callDesc };
                 END
 
                 action = debugPause!(callDesc, envId, pool);
@@ -1794,7 +1777,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 pool[envId]?.vars["__dbg_target_depth"] = Value{ Number: curDepth };
 
                 -- Restore stack
-                pool[envId]?.vars["__dbg_stack"] = Value{ Str: oldStack };
+                pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY oldStack };
             END
 
             -- Track call depth for step-over/out
@@ -1808,7 +1791,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
                     FOR pi IN (0_i64 ..< lam.params.length()) DO
                         pname = getSymName(lam.params[pi]);
-                        pool[callId]?.vars[pname] = COPY evaled[pi];
+                        pool[callId]?.vars[pname] = evaled[pi + 1];
                     END
                     RETURN Value.Tco{ tcoAst: COPY lam.body, tcoEnv: callId };,
                 DEFAULT -> RETURN Value.Nil;
@@ -1829,7 +1812,7 @@ FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABL
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
-    RETURN eval!(GIVE ast, envId, pool);
+    RETURN eval!(ast, envId, pool);
 END
 
 -- Setup: create root env with all native functions registered.
@@ -2065,7 +2048,7 @@ END
 -- compile! stores results in pool env at __bc_ops and __bc_consts keys.
 -- Caller reads them from pool[envId] after the call.
 
-FN compile!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
+FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
     MUTABLE ops: Value[]@list = List[];
     MUTABLE consts: Value[]@list = List[];
 
@@ -2079,11 +2062,11 @@ FN compile!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RET
             ops.append(Value{ Number: 80.0 }); ops.append(Value{ Number: toFloat(slotNum) });
         ELSE
             -- Name-based load (fallback for builtins/unslotted)
-            cidx = consts.length(); consts.append(ast);
+            cidx = consts.length(); consts.append(COPY ast);
             ops.append(Value{ Number: 2.0 }); ops.append(Value{ Number: toFloat(cidx) });
         END
     ELSE_IF isList?(ast) == FALSE THEN
-        cidx = consts.length(); consts.append(ast);
+        cidx = consts.length(); consts.append(COPY ast);
         ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
     ELSE
         MATCH ast START Value.List AS items ->
@@ -2091,15 +2074,15 @@ FN compile!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RET
             formName = getSymName(items[0]);
 
             IF formName == "quote" THEN
-                cidx = consts.length(); consts.append(items[1]);
+                cidx = consts.length(); consts.append(COPY items[1]);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
             ELSE_IF formName == "+" || formName == "-" || formName == "*" || formName == "/" || formName == "=" || formName == "<" || formName == ">" || formName == "<=" || formName == ">=" THEN
                 -- Eval sub-args with tree-walker, store results as consts
-                ev1 = eval!(COPY items[1], envId, pool);
+                ev1 = eval!(items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
-                ev2 = eval!(COPY items[2], envId, pool);
+                ev2 = eval!(items[2], envId, pool);
                 c2 = consts.length(); consts.append(ev2);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c2) });
                 IF formName == "+" THEN ops.append(Value{ Number: 10.0 });
@@ -2114,13 +2097,13 @@ FN compile!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RET
                 END
 
             ELSE_IF formName == "not" THEN
-                ev1 = eval!(COPY items[1], envId, pool);
+                ev1 = eval!(items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
                 ops.append(Value{ Number: 30.0 });
 
             ELSE_IF formName == "define" || formName == "def!" THEN
-                ev1 = eval!(COPY items[2], envId, pool);
+                ev1 = eval!(items[2], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
                 -- Assign a slot for this variable
@@ -2131,23 +2114,23 @@ FN compile!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RET
                 pool[envId]?.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
                 ops.append(Value{ Number: 81.0 }); ops.append(Value{ Number: toFloat(nextSlot) });
                 -- Also storeName for env compatibility (tree-walker interop)
-                cidx = consts.length(); consts.append(Value{ Symbol: defName });
+                cidx = consts.length(); consts.append(Value{ Symbol: COPY defName });
                 ops.append(Value{ Number: 3.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
             ELSE_IF formName == "if" THEN
-                ev1 = eval!(COPY items[1], envId, pool);
+                ev1 = eval!(items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
                 ops.append(Value{ Number: 41.0 });
                 jumpFalseIdx = ops.length(); ops.append(Value{ Number: 0.0 });
-                ev2 = eval!(COPY items[2], envId, pool);
+                ev2 = eval!(items[2], envId, pool);
                 c2 = consts.length(); consts.append(ev2);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c2) });
                 ops.append(Value{ Number: 40.0 });
                 jumpEndIdx = ops.length(); ops.append(Value{ Number: 0.0 });
                 ops[jumpFalseIdx] = Value{ Number: toFloat(ops.length()) };
                 IF items.length() > 3 THEN
-                    ev3 = eval!(COPY items[3], envId, pool);
+                    ev3 = eval!(items[3], envId, pool);
                     c3 = consts.length(); consts.append(ev3);
                     ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c3) });
                 ELSE
@@ -2198,7 +2181,7 @@ END
 -- Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
 -- Returns the value on top of the stack at halt.
 
-FN exec!(ops: Int64[], TAKES consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;
@@ -2225,7 +2208,7 @@ FN exec!(ops: Int64[], TAKES consts: Value[], envId: Id<Env>, MUTABLE pool: Env[
             sp += 1;
         ELSE_IF op == 3 THEN
             idx = ops[ip]; ip += 1;
-            pool[curEnv]?.vars[getSymName(consts[idx])] = COPY stack[sp - 1];
+            pool[curEnv]?.vars[getSymName(consts[idx])] = stack[sp - 1];
         ELSE_IF op == 4 THEN
             sp -= 1;
         ELSE_IF op == 10 THEN
@@ -2296,9 +2279,9 @@ FN exec!(ops: Int64[], TAKES consts: Value[], envId: Id<Env>, MUTABLE pool: Env[
         ELSE_IF op == 61 THEN
             idx = ops[ip]; ip += 1;
             sp -= 1;
-            setVal = stack[sp];
+            setVal = COPY stack[sp];
             envSet!(curEnv, getSymName(consts[idx]), setVal, pool);
-            pv = setVal;
+            pv = COPY setVal;
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
         ELSE_IF op == 42 THEN
@@ -2311,7 +2294,7 @@ FN exec!(ops: Int64[], TAKES consts: Value[], envId: Id<Env>, MUTABLE pool: Env[
                 MUTABLE cArgs: Value[]@list = List[];
                 cArgs.append(Value.Nil);
                 FOR ci IN (0_i64 ..< argc) DO
-                    cArgs.append(stack[sp - argc + ci]);
+                    cArgs.append(COPY stack[sp - argc + ci]);
                 END
                 sp -= argc + 1; -- pop args + fn
                 pv = applyNative(fnId, cArgs);
@@ -2330,7 +2313,7 @@ FN exec!(ops: Int64[], TAKES consts: Value[], envId: Id<Env>, MUTABLE pool: Env[
             MUTABLE nArgs: Value[]@list = List[];
             nArgs.append(Value.Nil);
             FOR ni IN (0_i64 ..< argc) DO
-                nArgs.append(stack[sp - argc + ni]);
+                nArgs.append(COPY stack[sp - argc + ni]);
             END
             sp -= argc;
             pv = applyNative(nid, nArgs);
