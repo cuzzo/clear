@@ -1354,6 +1354,7 @@ private
     storage = finalize_decl_storage!(node, final_type)
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
+    propagate_container_borrow!(node)
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
     node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
@@ -1415,6 +1416,7 @@ private
       storage = finalize_decl_storage!(node, final_type)
       propagate_collection_metadata!(node, final_type)
       propagate_call_flags!(node)
+      propagate_container_borrow!(node)
       is_resource, resource_close = resolve_resource_close(node, final_type)
       node.resource_close_zig = resource_close
       node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
@@ -1809,6 +1811,9 @@ private
     if target_type_info.map?
       val_t = target_type_info.value_type
       node.full_type = Type.new(:"?#{val_t.resolved}")
+      # Container borrow: the returned value borrows from the container root.
+      container_name = root_variable_name(node.target)
+      node.type_info.container_borrow = container_name if container_name
 
       # Validate Key Type
       # Numeric maps (HashMap<Int64,V> or HashMap<Number,V>) accept numeric keys.
@@ -1828,6 +1833,8 @@ private
     elsif target_type_info.pool?
       elem = target_type_info.element_type
       node.full_type = Type.new(:"?#{elem.resolved}")
+      container_name = root_variable_name(node.target)
+      node.type_info.container_borrow = container_name if container_name
 
     # Case 2b: Promise List Index Access: ~T[]@list[i] -> ~T (a single promise)
     # CheatLib.getAt handles ArrayListUnmanaged; annotator returns the promise type.
@@ -2992,6 +2999,22 @@ private
 
   def get_lifetime_path(func_node)
     get_path_to_root(func_node.return_lifetime)&.join(".")
+  end
+
+  # Walk through GetField/GetIndex chains to find the root Identifier name.
+  def root_variable_name(node)
+    curr = node
+    while curr
+      return curr.name if curr.is_a?(AST::Identifier)
+      curr = if curr.respond_to?(:target)
+               curr.target
+             elsif curr.respond_to?(:object)
+               curr.object
+             else
+               nil
+             end
+    end
+    nil
   end
 
   # ── Strict Test Mode ─────────────────────────────────────────────

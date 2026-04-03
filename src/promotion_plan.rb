@@ -326,6 +326,9 @@ class CleanupPlan
   def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
 
+    # Container borrows: no cleanup — the container owns the data.
+    return nil if ti.container_borrow
+
     # Escaped via return — cleanup suppressed (caller takes ownership)
     return nil if ti.escaped_return && (ti.collection? || ti.string?)
 

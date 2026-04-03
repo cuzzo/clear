@@ -545,3 +545,90 @@ test "BUG: StringMap.get of struct variant with *T must not share pointer with m
     // Map must still be valid and deinit cleanly.
     map.deinit(alloc, alloc);
 }
+
+// --- Bug 8: HashMap deinit must free duped strings inside struct variant slice fields ---
+
+const SchemeValue = union(enum) {
+    Nil: void,
+    Num: f64,
+    Sym: []const u8,
+    List: []SchemeValue,
+    Lambda: SchemeLam,
+};
+const SchemeLam = struct {
+    params: []SchemeValue,
+    body: *SchemeValue,
+    env_id: u64,
+};
+
+test "BUG: HashMap deinit frees duped strings inside Lambda params" {
+    // Scheme pattern: Lambda params is []Value containing Value.Symbol
+    // elements with heap-duped strings. When the map deinits, freeStructPayload
+    // must recurse into params elements and free the duped strings.
+    const alloc = std.testing.allocator;
+
+    var map = CheatLib.StringMap(SchemeValue){ .alloc = alloc };
+
+    // Build params with string-containing union elements
+    const params = try alloc.alloc(SchemeValue, 2);
+    const s1 = try alloc.dupe(u8, "x");
+    const s2 = try alloc.dupe(u8, "y");
+    params[0] = SchemeValue{ .Sym = s1 };
+    params[1] = SchemeValue{ .Sym = s2 };
+    const body = try alloc.create(SchemeValue);
+    body.* = SchemeValue{ .Num = 0.0 };
+
+    // put deep-copies everything: params slice, each Sym string, body pointer
+    try map.put(alloc, alloc, "f", SchemeValue{ .Lambda = .{
+        .params = params,
+        .body = body,
+        .env_id = 0,
+    } });
+
+    // Free originals
+    alloc.free(s1);
+    alloc.free(s2);
+    alloc.free(params);
+    alloc.destroy(body);
+
+    // deinit must free: map key + deep-copied params slice + each duped Sym
+    // string inside params + deep-copied body pointer. No leaks.
+    map.deinit(alloc, alloc);
+}
+
+const SchemeEnv = struct {
+    vars: CheatLib.StringMap(SchemeValue),
+};
+
+test "BUG: Pool deinit frees duped strings inside Lambda params in HashMap values" {
+    // Same as Bug 8 but through Pool(Env) -> Env.vars HashMap.
+    // Pool.freeStructPayloadPool was passing @TypeOf(value) (struct type)
+    // to freeUnionPayloadGeneric instead of ElemT (union element type),
+    // causing it to return immediately without freeing duped strings.
+    const alloc = std.testing.allocator;
+
+    var pool = try CheatLib.Pool(SchemeEnv).initCapacity(alloc, 4);
+
+    const env_id = try pool.insert(alloc, SchemeEnv{
+        .vars = CheatLib.StringMap(SchemeValue){ .alloc = alloc },
+    });
+
+    const params = try alloc.alloc(SchemeValue, 2);
+    const s1 = try alloc.dupe(u8, "x");
+    const s2 = try alloc.dupe(u8, "y");
+    params[0] = SchemeValue{ .Sym = s1 };
+    params[1] = SchemeValue{ .Sym = s2 };
+    const body = try alloc.create(SchemeValue);
+    body.* = SchemeValue{ .Num = 0.0 };
+
+    try pool.get(env_id).?.vars.put(alloc, alloc, "f", SchemeValue{ .Lambda = .{
+        .params = params, .body = body, .env_id = 0,
+    } });
+
+    alloc.free(s1);
+    alloc.free(s2);
+    alloc.free(params);
+    alloc.destroy(body);
+
+    pool.deinit(alloc);
+}

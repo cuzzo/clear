@@ -305,6 +305,21 @@ module GenericAnalysis
     end
   end
 
+  # Propagate container_borrow from value expression (GetIndex, OR wrapper) to declaration.
+  def propagate_container_borrow!(node)
+    borrow = find_container_borrow(node.value)
+    node.type_info.container_borrow = borrow if borrow
+  end
+
+  def find_container_borrow(expr)
+    return nil unless expr
+    return expr.type_info&.container_borrow if expr.type_info&.container_borrow
+    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
+      return find_container_borrow(expr.left)
+    end
+    nil
+  end
+
   # Check if an expression carries heap_promoted_call, looking through
   # OR/OR_RESCUE wrappers. Used by propagate_call_flags! and visit_BgBlock.
   # Both OR (orelse) and OR_RESCUE (catch) propagate because the transpiler

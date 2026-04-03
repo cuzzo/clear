@@ -1859,25 +1859,21 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 9. Structs: recursively clean up fields
+        // 9. Structs: recursively clean up RC/link fields
         const info = @typeInfo(T);
         if (info == .@"struct") {
+            // Walk fields for any that are ref-counted
             inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                const f_info = @typeInfo(FT);
-                if (comptime refInnerType(FT) != null) {
-                    releaseOne(FT, alloc, @field(ptr, field.name));
-                } else if (f_info == .pointer and f_info.pointer.size == .one) {
-                    // Single-pointer field (*T via @indirect): cleanup pointee then free.
-                    const child_ptr = @field(ptr, field.name);
-                    cleanup(f_info.pointer.child, alloc, child_ptr);
-                    alloc.destroy(child_ptr);
-                } else if (comptime f_info == .@"struct" and
-                    refInnerType(FT) == null and
-                    !isArrayList(FT) and !isStringMap(FT) and
-                    !isNumericMap(FT) and !isPool(FT))
+                if (comptime refInnerType(field.type) != null) {
+                    releaseOne(field.type, alloc, @field(ptr, field.name));
+                }
+                // Recurse into struct fields that might contain RC fields
+                if (comptime @typeInfo(field.type) == .@"struct" and
+                    refInnerType(field.type) == null and
+                    !isArrayList(field.type) and !isStringMap(field.type) and
+                    !isNumericMap(field.type) and !isPool(field.type))
                 {
-                    cleanup(FT, alloc, &@field(ptr, field.name));
+                    cleanup(field.type, alloc, &@field(ptr, field.name));
                 }
             }
             return;
@@ -1932,10 +1928,9 @@ pub const CheatLib = struct {
         // inside unions is handled by the union cleanup handler directly.
         // Including slices here causes over-freeing in ArrayList element recursion.
         if (ft_info == .@"struct") {
+            // Check if any field needs cleanup
             inline for (ft_info.@"struct".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
-                const fi = @typeInfo(field.type);
-                if (fi == .pointer and fi.pointer.size == .one) return true;
             }
         }
         if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
@@ -2858,14 +2853,14 @@ pub const CheatLib = struct {
                         const s = @field(value, sf.name);
                         const ElemT = sf_info.pointer.child;
                         if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                            for (s) |elem| freeUnionPayloadGeneric(@TypeOf(value), elem, alloc_);
+                            for (s) |elem| freeUnionPayloadGeneric(ElemT, elem, alloc_);
                         }
                         if (s.len > 0) alloc_.free(s);
                     } else if (sf_info == .pointer and sf_info.pointer.size == .one) {
                         const child_ptr = @field(value, sf.name);
                         const ChildT = sf_info.pointer.child;
                         if (@typeInfo(ChildT) == .@"union" and @typeInfo(ChildT).@"union".tag_type != null) {
-                            freeUnionPayloadGeneric(@TypeOf(value), child_ptr.*, alloc_);
+                            freeUnionPayloadGeneric(ChildT, child_ptr.*, alloc_);
                         }
                         alloc_.destroy(child_ptr);
                     }
