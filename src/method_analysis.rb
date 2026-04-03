@@ -118,6 +118,11 @@ module MethodAnalysis
   # Look up the INDEX_OPS entry for a container type.
   # Returns the :get or :set sub-entry, or nil.
   def resolve_index_op(type_info, op)
+    # Non-raw String and promise lists are not registry-indexable.
+    # String requires .codepoints() or @raw; promise lists yield ~T via NEXT.
+    return nil if type_info&.string? && !type_info&.raw?
+    return nil if type_info&.promise_list?
+
     kind = if type_info&.numeric_map? then :numeric_map
            elsif type_info&.map? then :string_map
            elsif type_info&.pool? then :pool
