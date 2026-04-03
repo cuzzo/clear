@@ -1,4 +1,23 @@
 -- Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
+-- with typed values, debugger, and FFI bridge for typed arrays.
+
+-- FFI functions: native CLEAR functions callable from Scheme via typed arrays.
+-- These operate on real Int64[] - no Value wrapping, no conversion.
+
+FN nativeSum(arr: Int64[]) RETURNS Int64 ->
+    MUTABLE total: Int64 = 0;
+    FOR i IN (0_i64 ..< arr.length()) DO
+        total += arr[i];
+    END
+    RETURN total;
+END
+
+FN nativeContains(arr: Int64[], needle: Int64) RETURNS Bool ->
+    FOR i IN (0_i64 ..< arr.length()) DO
+        IF arr[i] == needle THEN RETURN TRUE; END
+    END
+    RETURN FALSE;
+END
 --
 -- Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
 -- Each Env holds a HashMap<Value> for its local bindings.
@@ -1309,6 +1328,30 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         newArr.append(getInt(newVal));
         RETURN Value{ TypedI64Arr: newArr };
 
+    -- FFI bridge: call native CLEAR functions with typed arrays
+    ELSE_IF formName == "native-sum" THEN
+        arrVal = eval!(items[1], envId, pool);
+        IF isError?(arrVal) THEN RETURN arrVal; END
+        MATCH arrVal START
+            Value.TypedI64Arr AS iarr ->
+                result = nativeSum(iarr);
+                RETURN Value{ Int64Val: result };,
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum requires typed Int64 array", errKind: "Type" };
+        END
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "native-contains" THEN
+        arrVal = eval!(items[1], envId, pool);
+        IF isError?(arrVal) THEN RETURN arrVal; END
+        needleVal = eval!(items[2], envId, pool);
+        IF isError?(needleVal) THEN RETURN needleVal; END
+        MATCH arrVal START
+            Value.TypedI64Arr AS iarr ->
+                RETURN boolVal(nativeContains(iarr, getInt(needleVal)));,
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-contains requires typed Int64 array", errKind: "Type" };
+        END
+        RETURN Value.Nil;
+
     ELSE_IF formName == "debug-set-break" THEN
         -- (debug-set-break "fnName") -> register breakpoint
         bpName = eval!(items[1], envId, pool);
@@ -1950,6 +1993,37 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             -- storeSlot [idx]: peek top, store in slots[idx]
             slotIdx = ops[ip]; ip += 1;
             pool[curEnv]?.vars["__s" + slotIdx.toString()] = stack[sp - 1];
+        -- Specialized typed ops: operate on Int64Val directly, no float conversion
+        ELSE_IF op == 82 THEN
+            -- ADD_I64: pop two Int64Val, push Int64Val
+            pv = Value{ Int64Val: getInt(stack[sp - 2]) + getInt(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 83 THEN
+            -- SUB_I64
+            pv = Value{ Int64Val: getInt(stack[sp - 2]) - getInt(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 84 THEN
+            -- MUL_I64
+            pv = Value{ Int64Val: getInt(stack[sp - 2]) * getInt(stack[sp - 1]) };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 85 THEN
+            -- LT_I64
+            pv = boolVal(getInt(stack[sp - 2]) < getInt(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 86 THEN
+            -- EQ_I64
+            pv = boolVal(getInt(stack[sp - 2]) == getInt(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
         ELSE_IF op == 71 THEN
             running = FALSE;
         END
@@ -2138,6 +2212,12 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(list-ref (to-typed:i64 (list 5 10)) 0)", TRUE, rootId, pool, penv) == "5", "to-typed conversion";
     -- Interop: typed values in untyped operations
     ASSERT evalIn!("(+ (list-ref (typed-list:i64 10 20) 0) 5)", TRUE, rootId, pool, penv) == "15", "typed arr elem + untyped";
+
+    -- FFI bridge: native CLEAR functions on typed arrays
+    ASSERT evalIn!("(native-sum (typed-list:i64 10 20 30))", TRUE, rootId, pool, penv) == "60", "FFI native-sum";
+    ASSERT evalIn!("(type-of (native-sum (typed-list:i64 1 2 3)))", FALSE, rootId, pool, penv) == "Int64", "FFI returns Int64";
+    ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 20)", TRUE, rootId, pool, penv) == "true", "FFI native-contains found";
+    ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 99)", TRUE, rootId, pool, penv) == "false", "FFI native-contains not found";
 
     print("Interpreter smoke tests PASSED!");
     RETURN;
