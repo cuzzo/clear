@@ -168,9 +168,27 @@ class SchemeTranspiler
     when AST::PassStmt
       "nil"
     when AST::BreakNode
-      ";; break (not supported in scheme loops)"
+      ";; break"
     when AST::ContinueNode
-      ";; continue (not supported in scheme loops)"
+      ";; continue"
+    when AST::Slice
+      # target[start..end] -> (list-slice target start end)
+      target = emit(node.target)
+      s = emit(node.start)
+      e = node.end ? emit(node.end) : "(list-length #{target})"
+      "(list-slice #{target} #{s} #{e})"
+    when AST::Cast
+      # value AS Type -> identity (VM doesn't do type coercion)
+      emit(node.value)
+    when AST::RangeLit
+      # 1..5 or 1..<5 -> generate list
+      s = emit(node.start)
+      f = emit(node.finish)
+      if node.inclusive
+        "(list-range #{s} (+ #{f} 1))"
+      else
+        "(list-range #{s} #{f})"
+      end
     when AST::BindExpr
       # Track struct type for field resolution
       if node.value.is_a?(AST::StructLit)

@@ -893,6 +893,26 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound" };
 
+    ELSE_IF formName == "list-slice" THEN
+        listVal = eval!(items[1], envId, pool);
+        startIdx = toInt(getNum(eval!(items[2], envId, pool)));
+        endIdx = toInt(getNum(eval!(items[3], envId, pool)));
+        MUTABLE sliced: Value[]@list = List[];
+        MATCH listVal START Value.List AS srcItems ->
+            FOR si IN (startIdx ..< endIdx) DO
+                IF si < srcItems.length() THEN sliced.append(srcItems[si]); END
+            END, DEFAULT -> PASS; END
+        RETURN Value{ List: sliced };
+
+    ELSE_IF formName == "list-range" THEN
+        startVal = toInt(getNum(eval!(items[1], envId, pool)));
+        endVal = toInt(getNum(eval!(items[2], envId, pool)));
+        MUTABLE rangeItems: Value[]@list = List[];
+        FOR ri IN (startVal ..< endVal) DO
+            rangeItems.append(Value{ Number: toFloat(ri) });
+        END
+        RETURN Value{ List: rangeItems };
+
     ELSE_IF formName == "list-count" THEN
         listVal = eval!(items[1], envId, pool);
         RETURN Value{ Number: toFloat(listLen(listVal)) };
