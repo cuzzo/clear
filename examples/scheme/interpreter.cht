@@ -658,6 +658,68 @@ FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS String ->
     RETURN content;
 END
 
+-- Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
+-- Returns the debug action: 0=continue, 1=step-into, 2=step-over, 3=step-out
+
+FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
+    -- Build call stack string
+    stackStr = envGet!(envId, "__dbg_stack", pool);
+    stackDisplay = getStr(stackStr);
+
+    -- Write break info
+    MUTABLE breakInfo = reason;
+    IF stackDisplay.length() > 0 THEN
+        breakInfo = breakInfo + "\n  stack: " + stackDisplay;
+    END
+    writeFile("/tmp/_debug_break.txt", breakInfo);
+
+    MUTABLE debugAction: Int64 = 0;
+    MUTABLE debugActive = TRUE;
+    WHILE debugActive DO
+        MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool);
+        IF cmdRaw.length() > 0 THEN
+            writeFile("/tmp/_debug_cmd.txt", "");
+            IF cmdRaw == ":c" || cmdRaw == ":continue" THEN
+                debugAction = 0; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":s" || cmdRaw == ":step" THEN
+                debugAction = 1; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":n" || cmdRaw == ":next" THEN
+                debugAction = 2; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":f" || cmdRaw == ":finish" THEN
+                debugAction = 3; debugActive = FALSE;
+            ELSE_IF startsWith?(cmdRaw, ":i ") THEN
+                inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
+                MUTABLE inspPenv: HashMap<Value> = {};
+                tokenizeToEnv!(inspPenv, inspectExpr);
+                inspPenv["__rp"] = Value{ Number: 0.0 };
+                inspAst = readFormEnv!(inspPenv);
+                inspResult = eval!(inspAst, envId, pool);
+                writeFile("/tmp/_debug_resp.txt", prStr(inspResult, TRUE));
+            ELSE_IF cmdRaw == ":l" || cmdRaw == ":locals" THEN
+                -- Dump all known variable names from locals tracking
+                localsStr = envGet!(envId, "__dbg_locals", pool);
+                MUTABLE localDump = "";
+                IF getStr(localsStr).length() > 0 THEN
+                    localDump = getStr(localsStr);
+                ELSE
+                    localDump = "(no tracked locals)";
+                END
+                writeFile("/tmp/_debug_resp.txt", localDump);
+            ELSE_IF cmdRaw == ":w" || cmdRaw == ":where" || cmdRaw == ":bt" THEN
+                IF stackDisplay.length() > 0 THEN
+                    writeFile("/tmp/_debug_resp.txt", stackDisplay);
+                ELSE
+                    writeFile("/tmp/_debug_resp.txt", "(top level)");
+                END
+            ELSE
+                writeFile("/tmp/_debug_resp.txt", "commands: :c :s :n :f :i <expr> :l :w");
+            END
+        END
+    END
+    writeFile("/tmp/_debug_break.txt", "");
+    RETURN debugAction;
+END
+
 FN isSymbol?(v: Value) RETURNS Bool ->
     MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
@@ -1245,46 +1307,52 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         f = evaled[0];
 
-        -- Breakpoint check: look up in env chain via special __bp_ keys
+        -- Debug: check breakpoints + step mode
         calledName = getSymName(items[0]);
         IF calledName.length() > 0 THEN
-            bpLookup = "__bp_" + calledName;
-            bpKey = envGet!(envId, bpLookup, pool);
-            IF isTruthy?(bpKey) THEN
-                -- Build arg dump string
-                MUTABLE argDump = calledName + "(";
-                FOR ai IN (1_i64 ..< evaled.length()) DO
-                    IF ai > 1 THEN argDump = argDump + ", "; END
-                    argDump = argDump + prStr(evaled[ai], TRUE);
-                END
-                argDump = argDump + ")";
-
-                -- Write break info + poll for commands via file IPC
-                writeFile("/tmp/_debug_break.txt", argDump);
-                MUTABLE debugActive = TRUE;
-                WHILE debugActive DO
-                    MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool);
-                    IF cmdRaw.length() > 0 THEN
-                        writeFile("/tmp/_debug_cmd.txt", "");
-                        IF cmdRaw == ":c" || cmdRaw == ":continue" THEN
-                            debugActive = FALSE;
-                        ELSE_IF startsWith?(cmdRaw, ":i ") THEN
-                            inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
-                            MUTABLE inspPenv: HashMap<Value> = {};
-                            tokenizeToEnv!(inspPenv, inspectExpr);
-                            inspPenv["__rp"] = Value{ Number: 0.0 };
-                            inspAst = readFormEnv!(inspPenv);
-                            inspResult = eval!(inspAst, envId, pool);
-                            writeFile("/tmp/_debug_resp.txt", prStr(inspResult, TRUE));
-                        ELSE_IF cmdRaw == ":l" THEN
-                            writeFile("/tmp/_debug_resp.txt", argDump);
-                        ELSE
-                            writeFile("/tmp/_debug_resp.txt", "unknown: " + cmdRaw);
-                        END
-                    END
-                END
-                writeFile("/tmp/_debug_break.txt", "");
+            -- Build call description
+            MUTABLE callDesc = calledName + "(";
+            FOR ai IN (1_i64 ..< evaled.length()) DO
+                IF ai > 1 THEN callDesc = callDesc + ", "; END
+                callDesc = callDesc + prStr(evaled[ai], TRUE);
             END
+            callDesc = callDesc + ")";
+
+            -- Check if we should break: explicit breakpoint OR step mode
+            bpKey = envGet!(envId, "__bp_" + calledName, pool);
+            stepMode = getNum(envGet!(envId, "__dbg_step", pool));
+            curDepth = getNum(envGet!(envId, "__dbg_depth", pool));
+            targetDepth = getNum(envGet!(envId, "__dbg_target_depth", pool));
+            MUTABLE shouldBreak = isTruthy?(bpKey);
+
+            -- Step-into: always break
+            IF stepMode == 1.0 THEN shouldBreak = TRUE; END
+            -- Step-over: break when depth <= target
+            IF stepMode == 2.0 && curDepth <= targetDepth THEN shouldBreak = TRUE; END
+            -- Step-out: break when depth < target
+            IF stepMode == 3.0 && curDepth < targetDepth THEN shouldBreak = TRUE; END
+
+            IF shouldBreak THEN
+                -- Push call stack
+                oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
+                IF oldStack.length() > 0 THEN
+                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: callDesc + " < " + oldStack };
+                ELSE
+                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: callDesc };
+                END
+
+                action = debugPause!(callDesc, envId, pool);
+
+                -- Set step mode based on debug action
+                pool[envId]?.vars["__dbg_step"] = Value{ Number: toFloat(action) };
+                pool[envId]?.vars["__dbg_target_depth"] = Value{ Number: curDepth };
+
+                -- Restore stack
+                pool[envId]?.vars["__dbg_stack"] = Value{ Str: oldStack };
+            END
+
+            -- Track call depth for step-over/out
+            pool[envId]?.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 };
         END
 
         IF isLambda?(f) THEN

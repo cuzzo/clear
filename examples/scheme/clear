@@ -205,12 +205,16 @@ class InterpreterBridge
           :inspect <expr>      Evaluate a CLEAR expression
           :trace <expr>        Show S-expression for a CLEAR expression
           :type <var>          Show the type of a variable
-          :break <fn>          Set breakpoint on function entry (pauses execution)
+          :break <fn>          Set breakpoint (pauses execution)
           :unbreak <fn>        Remove breakpoint
           :breakpoints         List breakpoints
-          At break: :i <expr>  Inspect expression in current scope
-          At break: :l         Show call with argument values
+          At break: :s         Step into next call
+          At break: :n         Step over (same depth)
+          At break: :f         Finish (step out of current function)
           At break: :c         Continue execution
+          At break: :i <expr>  Inspect expression in current scope
+          At break: :l         Show local variables
+          At break: :w         Show call stack (backtrace)
           :defs                Show function/variable definitions
           :locals              Show variable inspection help
           :reset               Clear all definitions and breakpoints
@@ -465,23 +469,47 @@ class InterpreterBridge
       if bp_content.length > 0
         puts "[break] #{bp_content}"
 
+        # Show break info (may include stack)
+        bp_content.lines.each { |bl| puts bl }
+
         # Enter debug REPL
         debug_prompt = "debug> "
         while (dcmd = Readline.readline(debug_prompt, true))
           dcmd = dcmd.strip
-          break if dcmd == ":c" || dcmd == ":continue"
+          next if dcmd.empty?
 
-          if dcmd == ":l" || dcmd == ":locals"
+          # Commands that resume execution
+          if [":c", ":continue", ":s", ":step", ":n", ":next", ":f", ":finish"].include?(dcmd)
+            File.write(cmd_file, dcmd)
+            sleep 0.05
+            break
+          end
+
+          # Commands that query state
+          case dcmd
+          when ":l", ":locals"
             File.write(cmd_file, ":l")
-          elsif dcmd.start_with?(":i ") || dcmd.start_with?(":inspect ")
-            expr = dcmd.sub(/^:(i|inspect)\s+/, "")
-            File.write(cmd_file, ":i #{expr}")
+          when ":w", ":where", ":bt", ":backtrace"
+            File.write(cmd_file, ":w")
+          when /^:i\s+(.+)/, /^:inspect\s+(.+)/, /^:p\s+(.+)/
+            File.write(cmd_file, ":i #{$1}")
+          when ":h", ":help"
+            puts <<~DHELP
+              :c / :continue   Resume execution
+              :s / :step       Step into next call
+              :n / :next       Step over (stay at current depth)
+              :f / :finish     Step out (return from current function)
+              :i <expr>        Inspect/evaluate expression
+              :l / :locals     Show local variables
+              :w / :where      Show call stack
+            DHELP
+            next
           else
             File.write(cmd_file, dcmd)
           end
 
           # Wait for response
-          20.times do
+          40.times do
             sleep 0.05
             resp = File.read(resp_file) rescue ""
             if resp.length > 0
@@ -491,10 +519,6 @@ class InterpreterBridge
             end
           end
         end
-
-        # Send continue
-        File.write(cmd_file, ":c")
-        sleep 0.05
       end
 
       sleep 0.02
