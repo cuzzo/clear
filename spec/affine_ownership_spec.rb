@@ -746,4 +746,28 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "TAKES parameter registration in pre_register_function" do
+    context "when calling a TAKES function from another function" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN consume!(TAKES v: Value) RETURNS Void ->
+              RETURN;
+          END
+          FN caller() RETURNS Void ->
+              x = Value{ Str: COPY "hello" };
+              consume!(x);
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "marks the argument as was_moved at the call site" do
+        fn = ast[1].find { |n| n.is_a?(AST::FunctionDef) && n.name == "caller" }
+        call = fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "consume!" }
+        expect(call.args[0].was_moved).to eq(true)
+      end
+    end
+  end
+
 end

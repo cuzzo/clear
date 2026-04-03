@@ -320,7 +320,8 @@ private
         name: p[:name],
         type: p[:type],
         required: p[:default].nil?,
-        mutable: p[:mutable]
+        mutable: p[:mutable],
+        takes: p[:takes] || false
       }},
       return: {
         type: (node.return_type || :Any),
