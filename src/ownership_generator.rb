@@ -6,7 +6,7 @@ module OwnershipGenerator
     resource_close = node.resource_close_zig
 
     # Container borrows: no cleanup — the container owns the data.
-    return "" if type_info&.container_borrow
+    return "" if @ownership_graph&.borrowed?(name)
 
     # Resources use a simple `defer close()` - use moved-flag to prevent double-close.
     if resource_close

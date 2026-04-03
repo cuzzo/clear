@@ -1354,7 +1354,6 @@ private
     storage = finalize_decl_storage!(node, final_type)
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
-    propagate_container_borrow!(node)
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
     node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
@@ -1378,6 +1377,7 @@ private
     end
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type, storage)
+    register_container_borrow!(node)
     accumulate_stack_bytes(storage, node)
     track_union_alias(node.name, node.value)
     record_capability_binding(node.name, node, final_type, storage)
@@ -1416,7 +1416,6 @@ private
       storage = finalize_decl_storage!(node, final_type)
       propagate_collection_metadata!(node, final_type)
       propagate_call_flags!(node)
-      propagate_container_borrow!(node)
       is_resource, resource_close = resolve_resource_close(node, final_type)
       node.resource_close_zig = resource_close
       node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
@@ -1440,6 +1439,7 @@ private
       end
       classify_ownership!(node.symbol)
       og_declare(node.name, node, node.type_info || final_type, storage)
+      register_container_borrow!(node)
       accumulate_stack_bytes(storage, node)
       track_union_alias(node.name, node.value)
       record_capability_binding(node.name, node, final_type, storage)
@@ -1494,14 +1494,7 @@ private
       node.full_type = raw_type
     end
 
-    # 3. Propagate container_borrow from declaration to usage site.
-    sym_entry = scope.locals&.[](node.name)
-    decl_node = sym_entry&.reg rescue nil
-    if decl_node.respond_to?(:type_info) && decl_node.type_info&.container_borrow
-      node.type_info.container_borrow = decl_node.type_info.container_borrow
-    end
-
-    # 4. Liveness
+    # 3. Liveness
     if @og&.moved?(node.name)
       error!(node, "Use of moved value '#{node.name}'")
     end
@@ -1816,9 +1809,6 @@ private
     if target_type_info.map?
       val_t = target_type_info.value_type
       node.full_type = Type.new(:"?#{val_t.resolved}")
-      # Container borrow: the returned value borrows from the container root.
-      container_name = root_variable_name(node.target)
-      node.type_info.container_borrow = container_name if container_name
 
       # Validate Key Type
       # Numeric maps (HashMap<Int64,V> or HashMap<Number,V>) accept numeric keys.
@@ -1838,8 +1828,6 @@ private
     elsif target_type_info.pool?
       elem = target_type_info.element_type
       node.full_type = Type.new(:"?#{elem.resolved}")
-      container_name = root_variable_name(node.target)
-      node.type_info.container_borrow = container_name if container_name
 
     # Case 2b: Promise List Index Access: ~T[]@list[i] -> ~T (a single promise)
     # CheatLib.getAt handles ArrayListUnmanaged; annotator returns the promise type.

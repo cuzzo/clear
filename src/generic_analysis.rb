@@ -305,17 +305,26 @@ module GenericAnalysis
     end
   end
 
-  # Propagate container_borrow from value expression (GetIndex, OR wrapper) to declaration.
-  def propagate_container_borrow!(node)
-    borrow = find_container_borrow(node.value)
-    node.type_info.container_borrow = borrow if borrow
+  # Register container borrow in the OwnershipGraph when a binding receives
+  # a value from container access (HashMap/Pool/List indexing, through OR).
+  def register_container_borrow!(node)
+    container = find_container_source(node.value)
+    return unless container
+    var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+    @og&.borrow(var_name, container, mutable: false)
   end
 
-  def find_container_borrow(expr)
+  # Walk through OR/OR_RESCUE to find the root container variable name.
+  def find_container_source(expr)
     return nil unless expr
-    return expr.type_info&.container_borrow if expr.type_info&.container_borrow
+    if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:type_info)
+      ti = expr.target.type_info
+      if ti&.map? || ti&.pool? || (ti&.array? && ti&.list_collection?)
+        return root_variable_name(expr.target)
+      end
+    end
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
-      return find_container_borrow(expr.left)
+      return find_container_source(expr.left)
     end
     nil
   end

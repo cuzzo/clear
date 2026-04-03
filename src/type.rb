@@ -14,7 +14,6 @@ class Type
   attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
   attr_accessor :heap_promoted  # true when collection data was promoted to heap (returned from frame-using fn)
   attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
-  attr_accessor :container_borrow # set to container variable name when value is borrowed from a container (no cleanup)
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
   attr_reader :location  # Use location= setter for cache invalidation
 

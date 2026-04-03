@@ -4,8 +4,9 @@ require_relative "../src/parser"
 require_relative "../src/annotator"
 require_relative "../src/transpiler"
 
-# Tests that container access (HashMap get, pool indexing) of non-Copy
-# union types marks the binding as a container borrow.
+# Tests that container access (HashMap get, pool indexing) registers
+# borrows in the OwnershipGraph, suppresses cleanup, and prevents
+# returning borrowed values without lifetime annotations.
 
 RSpec.describe "Container borrow semantics" do
   def annotate(src)
@@ -25,9 +26,9 @@ RSpec.describe "Container borrow semantics" do
   end
 
   # =========================================================================
-  # HashMap indexing sets container_borrow on the type
+  # HashMap indexing registers borrow in OwnershipGraph
   # =========================================================================
-  it "marks HashMap get result as container_borrow" do
+  it "registers HashMap get result as borrowed in OG" do
     src = <<~CLEAR
       STRUCT Env { x: Int64 }
       UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
@@ -37,17 +38,16 @@ RSpec.describe "Container borrow semantics" do
           RETURN;
       END
     CLEAR
-    ast, _ann = annotate(src)
-    fn = ast.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "test!" }
-    val_decl = fn.body.find { |n| (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.name.to_s == "val" }
-    expect(val_decl).not_to be_nil
-    expect(val_decl.type_info&.container_borrow).to be_truthy
+    _ast, ann = annotate(src)
+    og = ann.instance_variable_get(:@og)
+    expect(og.borrowed?("val")).to be true
+    expect(og.borrow_source("val")).to eq("map")
   end
 
   # =========================================================================
-  # Pool indexing sets container_borrow
+  # Pool indexing registers borrow in OwnershipGraph
   # =========================================================================
-  it "marks pool indexing result as container_borrow" do
+  it "registers pool indexing result as borrowed in OG" do
     src = <<~CLEAR
       STRUCT Env { vars: HashMap<Float64> }
       FN test!(MUTABLE pool: Env[10]@pool) RETURNS Void ->
@@ -55,11 +55,10 @@ RSpec.describe "Container borrow semantics" do
           RETURN;
       END
     CLEAR
-    ast, _ann = annotate(src)
-    fn = ast.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "test!" }
-    env_decl = fn.body.find { |n| (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.name.to_s == "env" }
-    expect(env_decl).not_to be_nil
-    expect(env_decl.type_info&.container_borrow).to be_truthy
+    _ast, ann = annotate(src)
+    og = ann.instance_variable_get(:@og)
+    expect(og.borrowed?("env")).to be true
+    expect(og.borrow_source("env")).to eq("pool")
   end
 
   # =========================================================================
