@@ -90,25 +90,12 @@ class InterpreterBridge
     puts
 
     @fn_defs = []       # accumulated function definitions (S-expr strings)
+    @file_defs = {}     # file_path -> [def strings] for hot reload
     @breakpoints = Set.new
     @repl_counter = 0
-    transpiler = SchemeTranspiler.new
 
     # Preload file if given
-    if preload_file
-      source = File.read(preload_file)
-      scheme = transpiler.transpile(source)
-      scheme.each_line do |line|
-        line = line.strip
-        next if line.empty?
-        if line.start_with?("(define ") && line.include?("(lambda")
-          @fn_defs << line
-        elsif line.start_with?("(define ")
-          @fn_defs << line
-        end
-      end
-      puts "Loaded #{@fn_defs.length} definitions from #{preload_file}"
-    end
+    load_file(preload_file) if preload_file
 
     buffer = ""
     prompt = "clear> "
@@ -131,8 +118,27 @@ class InterpreterBridge
         next
       when ":reset"
         @fn_defs.clear
+        @file_defs.clear
         @breakpoints.clear
         puts "Definitions cleared."
+        next
+      when /^:load\s+(.+)/
+        path = $1.strip
+        load_file(path)
+        next
+      when ":reload"
+        if @file_defs.empty?
+          puts "No files loaded. Use :load <file.cht>"
+        else
+          @file_defs.keys.each { |path| load_file(path) }
+        end
+        next
+      when ":files"
+        if @file_defs.empty?
+          puts "(no files loaded)"
+        else
+          @file_defs.each { |path, defs| puts "  #{File.basename(path)} (#{defs.length} defs)" }
+        end
         next
       when ":locals"
         run_debug_expr("(env-keys)", @fn_defs)
@@ -185,13 +191,16 @@ class InterpreterBridge
         next
       when ":help", ":h"
         puts <<~HELP
-          :locals              Show all defined variables
+          :load <file.cht>     Load/reload a CLEAR source file
+          :reload              Reload all loaded files (hot reload)
+          :files               List loaded files
           :inspect <expr>      Evaluate a CLEAR expression
           :trace <expr>        Show S-expression for a CLEAR expression
           :type <var>          Show the type of a variable
           :break <fn>          Set breakpoint on function entry
           :breakpoints         List breakpoints
           :defs                Show function/variable definitions
+          :locals              Show variable inspection help
           :reset               Clear all definitions and breakpoints
           :quit                Exit REPL
         HELP
@@ -320,6 +329,61 @@ class InterpreterBridge
     end
 
     puts "\nBye."
+  end
+
+  def load_file(path)
+    unless File.exist?(path)
+      puts "File not found: #{path}"
+      return
+    end
+
+    source = File.read(path)
+    transpiler = SchemeTranspiler.new
+    scheme = transpiler.transpile(source)
+
+    # Collect definitions from the file
+    new_defs = []
+    scheme.each_line do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?(";")
+      new_defs << line if line.start_with?("(define ")
+    end
+
+    # Remove old definitions from this file (hot reload)
+    if @file_defs[path]
+      old_names = @file_defs[path].map { |d| d[/\(define (\S+)/, 1] }.compact
+      @fn_defs.reject! { |d| old_names.include?(d[/\(define (\S+)/, 1]) }
+    end
+
+    # Add new definitions
+    @file_defs[path] = new_defs
+    @fn_defs.concat(new_defs)
+
+    # Also run non-define top-level expressions (like main body statements)
+    top_level = []
+    scheme.each_line do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?(";") || line.start_with?("(define ")
+      top_level << line
+    end
+
+    if top_level.any?
+      all = @fn_defs + top_level
+      combined = "(begin #{all.join(' ')})"
+      escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+      main_code = <<~CHT
+        FN main() RETURNS Void ->
+            MUTABLE pool: Env[50000]@pool = [];
+            MUTABLE penv: HashMap<Value> = {};
+            rootId = setupEnv!(pool);
+            runTest!("#{escaped}", rootId, pool, penv);
+            RETURN;
+        END
+      CHT
+      run_clear(@interp_base + main_code, silent: false)
+    end
+
+    puts "Loaded #{new_defs.length} definitions from #{File.basename(path)}"
   end
 
   def run_debug_expr(scheme_expr, defs)

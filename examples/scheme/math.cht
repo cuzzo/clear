@@ -1,0 +1,14 @@
+FN add(a: Float64, b: Float64) RETURNS Float64 ->
+    RETURN a + b;
+END
+
+FN multiply(a: Float64, b: Float64) RETURNS Float64 ->
+    RETURN a * b;
+END
+
+FN safeDivide(a: Float64, b: Float64) RETURNS !Float64 ->
+    IF b == 0.0 THEN
+        RAISE "Division by zero";
+    END
+    RETURN a / b;
+END
