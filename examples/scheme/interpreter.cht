@@ -1792,6 +1792,74 @@ STRUCT Frame {
     envId: Id<Env>
 }
 
+-- Bytecode loader: reads ops and consts from files written by Ruby compiler
+
+FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[] ->
+    raw = readFile(path) OR RAISE;
+    -- Split on commas using the interpreter's split function
+    parts = split(raw, ",");
+    MUTABLE ops: Int64[]@list = List[];
+    FOR pi IN (0_i64 ..< parts.length()) DO
+        part = trim(parts[pi]);
+        IF part.length() > 0 THEN
+            n = toNumber(part) OR 0.0;
+            intN = toInt(n);
+            ops.append(intN);
+        END
+    END
+    RETURN ops;
+END
+
+FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Value[] ->
+    raw = readFile(path) OR RAISE;
+    MUTABLE consts: Value[]@list = List[];
+    -- Parse line by line
+    MUTABLE lineStart: Int64 = 0;
+    FOR ci IN (0_i64 ..< raw.length()) DO
+        IF charAt(raw, ci) == "\n" THEN
+            line = substr(raw, lineStart, ci - lineStart);
+            consts.append(parseConstLine!(line, pool));
+            lineStart = ci + 1;
+        END
+    END
+    -- Last line (no trailing newline)
+    IF lineStart < raw.length() THEN
+        line = substr(raw, lineStart, raw.length() - lineStart);
+        consts.append(parseConstLine!(line, pool));
+    END
+    RETURN consts;
+END
+
+FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
+    IF line == "N" THEN RETURN Value.Nil; END
+    IF startsWith?(line, "I:") THEN
+        numStr = substr(line, 2, line.length() - 2);
+        n = toNumber(numStr) OR 0.0;
+        intVal = toInt(n);
+        RETURN Value{ Int64Val: intVal };
+    END
+    IF startsWith?(line, "F:") THEN
+        numStr = substr(line, 2, line.length() - 2);
+        n = toNumber(numStr) OR 0.0;
+        RETURN Value{ Number: n };
+    END
+    IF startsWith?(line, "S:") THEN
+        RETURN Value{ Str: substr(line, 2, line.length() - 2) };
+    END
+    IF startsWith?(line, "B:") THEN
+        IF substr(line, 2, line.length() - 2) == "true" THEN RETURN Value.TrueVal; END
+        RETURN Value.FalseVal;
+    END
+    IF startsWith?(line, "SYM:") THEN
+        RETURN Value{ Symbol: substr(line, 4, line.length() - 4) };
+    END
+    IF line == "L" THEN
+        MUTABLE empty: Value[]@list = List[];
+        RETURN Value{ List: empty };
+    END
+    RETURN Value.Nil;
+END
+
 -- Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
 -- Build bytecode by appending directly to ops/consts/lines arrays inline.
 
@@ -1980,7 +2048,16 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         ELSE_IF op == 4 THEN
             sp -= 1;
         ELSE_IF op == 10 THEN
-            pv = Value{ Number: getNum(stack[sp - 2]) + getNum(stack[sp - 1]) };
+            -- ADD: handles numbers (i64/f64) and string concatenation
+            MATCH stack[sp - 2] START
+                Value.Str AS s1 ->
+                    pv = Value{ Str: s1 + getStr(stack[sp - 1]) };,
+                Value.Int64Val AS ia ->
+                    IF isInt64?(stack[sp - 1]) THEN pv = Value{ Int64Val: ia + getInt(stack[sp - 1]) };
+                    ELSE pv = Value{ Number: toFloat(ia) + getNum(stack[sp - 1]) }; END,
+                DEFAULT ->
+                    pv = Value{ Number: getNum(stack[sp - 2]) + getNum(stack[sp - 1]) };
+            END
             sp -= 2;
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;

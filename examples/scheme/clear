@@ -361,6 +361,38 @@ class InterpreterBridge
     puts "\nBye."
   end
 
+  def run_bytecode(bc_path)
+    # Read serialized bytecodes
+    lines = File.readlines(bc_path, chomp: true)
+    ops_str = lines[0]  # comma-separated integers
+    const_lines = lines[1..]
+
+    # Write ops + consts as data files the interpreter reads at runtime
+    # This avoids generating thousands of append() calls
+    ops_file = File.join(DIR, "_bc_ops.txt")
+    consts_file = File.join(DIR, "_bc_consts.txt")
+    File.write(ops_file, ops_str)
+    File.write(consts_file, const_lines.join("\n"))
+
+    # Generate CLEAR main that reads the files and calls exec!
+    main_code = <<~CHT
+      FN main() RETURNS Void ->
+          MUTABLE pool: Env[50000]@pool = [];
+          MUTABLE penv: HashMap<Value> = {};
+          rootId = setupEnv!(pool);
+          bcOps = loadBytecodeOps!("#{ops_file}", pool);
+          bcConsts = loadBytecodeConsts!("#{consts_file}", pool);
+          exec!(bcOps, bcConsts, rootId, pool);
+          RETURN;
+      END
+    CHT
+
+    run_clear(@interp_base + main_code, silent: false)
+
+    File.delete(ops_file) if File.exist?(ops_file)
+    File.delete(consts_file) if File.exist?(consts_file)
+  end
+
   def load_file(path)
     unless File.exist?(path)
       puts "File not found: #{path}"
@@ -612,13 +644,30 @@ command = ARGV.shift
 case command
 when "run"
   file = ARGV.shift or usage
-  transpiler = SchemeTranspiler.new
-  source = File.read(file)
-  scheme = transpiler.transpile(source)
-  lines = scheme.each_line.map(&:strip).reject(&:empty?)
+  if ARGV.include?("--bytecode")
+    ARGV.delete("--bytecode")
+    require_relative "bytecode_compiler"
+    source = File.read(file)
+    compiler = BytecodeCompiler.new
+    result = compiler.compile_program(source)
 
-  bridge = InterpreterBridge.new
-  bridge.run_scheme(lines)
+    # Write bytecode to temp file
+    bc_path = File.join(DIR, "_bytecode.txt")
+    File.write(bc_path, compiler.serialize)
+
+    # Build interpreter main that loads + exec!s the bytecode
+    bridge = InterpreterBridge.new
+    bridge.run_bytecode(bc_path)
+    File.delete(bc_path) if File.exist?(bc_path)
+  else
+    transpiler = SchemeTranspiler.new
+    source = File.read(file)
+    scheme = transpiler.transpile(source)
+    lines = scheme.each_line.map(&:strip).reject(&:empty?)
+
+    bridge = InterpreterBridge.new
+    bridge.run_scheme(lines)
+  end
 
 when "repl"
   preload = ARGV.shift  # optional
