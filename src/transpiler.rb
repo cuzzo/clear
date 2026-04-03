@@ -1308,12 +1308,13 @@ private
               decl = sym&.reg
               is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
-              binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
-
-              # Emit cleanup for the AS binding via CleanupPlan.
+              # Only suppress source cleanup in branches where the AS binding
+              # takes ownership (has a CleanupPlan entry). For borrowed payloads
+              # (strings, primitives), let the source's defer handle cleanup.
               fn_name = current_tp_ctx&.fn_name
               as_entry = @cleanup_plans&.dig(fn_name)&.lookup(c[:binding])
               if as_entry && as_entry[:needs_cleanup]
+                binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
                 as_alloc = alloc_expr_from_plan(as_entry)
                 case as_entry[:kind]
                 when :match_as_slice

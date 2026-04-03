@@ -1,0 +1,25 @@
+-- Test: MATCH TAKES must clean up string payloads in non-slice branches.
+-- When MATCH TAKES ast extracts a Symbol (string), the source's defer
+-- must still fire for branches that don't take ownership of heap data.
+
+UNION Value { Nil, Number: Float64, Symbol: String, List: Value[] }
+
+FN makeSymbol() RETURNS Value ->
+    RETURN Value{ Symbol: COPY "hello" };
+END
+
+FN consume!(TAKES v: Value) RETURNS String ->
+    MATCH TAKES v START
+        Value.Symbol AS s -> RETURN COPY s;,
+        Value.List AS items -> RETURN "list";,
+        DEFAULT -> RETURN "other";
+    END
+    RETURN "?";
+END
+
+FN main() RETURNS Void ->
+    sym = makeSymbol();
+    result = consume!(sym);
+    ASSERT result == "hello", "got symbol";
+    RETURN;
+END
