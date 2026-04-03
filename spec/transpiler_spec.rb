@@ -693,5 +693,22 @@ RSpec.describe ZigTranspiler do
       # Copy payload: no move needed, source still usable
       expect(zig).not_to include("v_moved = true")
     end
+    it "emits cleanup on MATCH AS binding when source is moved" do
+      src = <<~CLEAR
+        UNION Value { Num: Float64, List: Value[] }
+        FN test!() RETURNS Void ->
+            result = Value{ Num: 1.0 };
+            MATCH result START
+                Value.List AS items -> RETURN;,
+                DEFAULT -> RETURN;
+            END
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # MATCH-as-move transfers ownership to items.
+      # items must get defer cleanup to free the []Value slice.
+      expect(zig).to match(/items.*len.*alloc\.free|cleanup.*items/)
+    end
   end
 end

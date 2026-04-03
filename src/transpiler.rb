@@ -1297,7 +1297,8 @@ private
           # Emit payload binding: `const r = subject.Variant;`
           if c[:binding]
             binding_decl = "const #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
-            # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup.
+            # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup
+            # on source and emit cleanup on the AS binding.
             if node.expr.is_a?(AST::Identifier) && node.expr.was_moved
               src_name = zig_safe_name(node.expr.name)
               sym = node.expr.respond_to?(:symbol) ? node.expr.symbol : nil
@@ -1305,6 +1306,23 @@ private
               is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
               binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
+
+              # Emit cleanup for the AS binding (it now owns the data).
+              variant_schema = @union_schemas&.dig(union_lookup, variant)
+              if variant_schema && !variant_schema.is_a?(Hash)
+                # Simple payload type (e.g. Value[])
+                payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
+                if payload_t&.array? && !payload_t&.string?
+                  elem_zig = transpile_type(payload_t.element_type)
+                  rt_name = @do_rt_name || "rt"
+                  binding_decl += "defer { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{rt_name}.heapAlloc(), __e); } } if (#{c[:binding]}.len > 0) #{rt_name}.heapAlloc().free(#{c[:binding]}); }\n    "
+                end
+              elsif variant_schema.is_a?(Hash) && variant_schema[:kind] == :inline_struct
+                # Inline struct variant (e.g. Lambda{...}) - has deinit
+                struct_name = "#{union_lookup}_#{variant}"
+                rt_name = @do_rt_name || "rt"
+                binding_decl += "defer #{c[:binding]}.deinit(#{rt_name}.heapAlloc());\n    "
+              end
             end
             body = "#{binding_decl}#{body}"
           elsif c[:destructure]
