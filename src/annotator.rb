@@ -2094,6 +2094,20 @@ private
           error!(val_node, "Cannot store borrowed value '#{root}[index]' into #{node.name}.#{variant_name}. Use COPY for an explicit deep-copy.")
         end
       end
+      # Check borrowed Identifier (parameter, local from container access)
+      if val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
+        vti = val_node.type_info
+        has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
+        unless vti&.primitive? || vti&.generic_instance? || (!has_pointer && !vti&.struct?)
+          error!(val_node, "Cannot store borrowed value '#{val_node.name}' into #{node.name}.#{variant_name}. Use COPY for an explicit deep-copy.")
+        end
+      end
+      # String variables in union construction: strings are frame-arena managed.
+      # Storing a frame string into a union that may be stored in a container
+      # (which uses heapAlloc for cleanup) causes allocator mismatch. Require COPY.
+      if val_node.is_a?(AST::Identifier) && val_node.type_info&.string?
+        error!(val_node, "Cannot store string variable '#{val_node.name}' into #{node.name}.#{variant_name} without COPY. Strings are frame-arena managed; use COPY for heap ownership.")
+      end
       actual = val_node.type_info
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)

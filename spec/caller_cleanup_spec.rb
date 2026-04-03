@@ -54,7 +54,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
         UNION Value { Num: Float64, Text: String }
         FN makeValue(s: String) RETURNS Value ->
             label = s + "!";
-            RETURN Value{ Text: label };
+            RETURN Value{ Text: COPY label };
         END
         FN main() RETURNS Void ->
             v = makeValue("hi");

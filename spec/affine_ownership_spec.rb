@@ -642,4 +642,41 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # String variable in union construction stored to HashMap must use COPY
+  # ===========================================================================
+  describe "String variable in union construction for HashMap" do
+    context "storing string variable into HashMap via union without COPY" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN test!(s: String, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              map["key"] = Value{ Str: s };
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error (s is borrowed, cannot store into container)" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|Cannot/)
+      end
+    end
+
+    context "storing COPY of string variable into HashMap via union" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN test!(s: String, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              map["key"] = Value{ Str: COPY s };
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "allows storing COPY'd string" do
+        expect { ast }.not_to raise_error
+      end
+    end
+  end
+
 end
