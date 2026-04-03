@@ -418,7 +418,7 @@ class CleanupPlan
       elsif ti.array? && !ti.string?
         # TAKES slice param (e.g. Value[]): needs cleanup of elements + buffer
         bindings[name] = {
-          needs_cleanup: true, alloc: :heap, kind: :takes_slice,
+          needs_cleanup: true, alloc: :frame, kind: :takes_slice,
           has_moved_guard: true, source_kind: :takes_param
         }
       end

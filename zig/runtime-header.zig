@@ -2284,6 +2284,13 @@ pub const CheatLib = struct {
                 self.alloc.destroy(self.inner);
                 return val;
             }
+
+            /// No-op: next() owns the Inner lifecycle. After next() frees Inner,
+            /// the pointer is dangling. Cleanup must not recurse into fields.
+            pub fn deinit(self: *Self, alloc_: std.mem.Allocator) void {
+                _ = self;
+                _ = alloc_;
+            }
         };
     }
 
