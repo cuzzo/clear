@@ -541,6 +541,31 @@ test "BUG: HashMap deinit frees duped strings inside Lambda params" {
     map.deinit(alloc, alloc);
 }
 
+test "BUG: Pool deinit frees COPY'd Value.Sym stored via put" {
+    // Scheme pattern: envGet returns COPY of a Value from HashMap.
+    // The COPY dupes strings inside the Value. The COPY'd Value is then
+    // stored into another HashMap (pool[callId].vars[pname] = COPY val).
+    // put uses dupeStringsOnly which dupes the string AGAIN.
+    // deinit must free the dupeStringsOnly dupe. The COPY's dupe leaks
+    // because nobody frees it.
+    const alloc = std.testing.allocator;
+
+    var map = CheatLib.StringMap(SchemeValue){ .alloc = alloc };
+
+    // Simulate COPY: deep-copy a Sym value (dupes the string)
+    const original = SchemeValue{ .Sym = "hello" };
+    const copied = CheatLib.dupeUnionValue(SchemeValue, original, alloc) catch original;
+
+    // Store the COPY'd value into the map (put dupes strings again via dupeStringsOnly)
+    try map.put(alloc, alloc, "x", copied);
+
+    // deinit must free: key + the dupeStringsOnly'd string.
+    // But what about the COPY'd string from dupeUnionValue? Nobody frees it.
+    // The COPY'd string is inside `copied.Sym` which was overwritten by
+    // dupeStringsOnly in put. The original COPY'd string leaks.
+    map.deinit(alloc, alloc);
+}
+
 const SchemeEnv = struct {
     vars: CheatLib.StringMap(SchemeValue),
 };
