@@ -1496,6 +1496,43 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value.Nil;
 
+    -- Sandboxed I/O: check __sandbox flag before file/shell ops
+    ELSE_IF formName == "sandboxed-read" THEN
+        sandbox = envGet!(envId, "__sandbox", pool);
+        IF isTruthy?(sandbox) THEN
+            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
+        END
+        pathVal = eval!(items[1], envId, pool);
+        IF isError?(pathVal) THEN RETURN pathVal; END
+        content = readFile(getStr(pathVal)) OR RAISE;
+        RETURN Value{ Str: content };
+
+    ELSE_IF formName == "sandboxed-write" THEN
+        sandbox = envGet!(envId, "__sandbox", pool);
+        IF isTruthy?(sandbox) THEN
+            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
+        END
+        pathVal = eval!(items[1], envId, pool);
+        IF isError?(pathVal) THEN RETURN pathVal; END
+        contentVal = eval!(items[2], envId, pool);
+        IF isError?(contentVal) THEN RETURN contentVal; END
+        writeFile(getStr(pathVal), getStr(contentVal));
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "sandboxed-shell" THEN
+        sandbox = envGet!(envId, "__sandbox", pool);
+        IF isTruthy?(sandbox) THEN
+            RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission" };
+        END
+        cmdVal = eval!(items[1], envId, pool);
+        IF isError?(cmdVal) THEN RETURN cmdVal; END
+        output = shell(getStr(cmdVal));
+        RETURN Value{ Str: output };
+
+    ELSE_IF formName == "sandbox-enable" THEN
+        pool[envId]?.vars["__sandbox"] = Value.TrueVal;
+        RETURN Value.Nil;
+
     ELSE_IF formName == "native-manhattan" THEN
         -- (native-manhattan structA structB) -> Int64 manhattan distance
         aVal = eval!(items[1], envId, pool);

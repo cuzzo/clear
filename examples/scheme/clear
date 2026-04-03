@@ -644,6 +644,7 @@ command = ARGV.shift
 case command
 when "run"
   file = ARGV.shift or usage
+  allow_io = ARGV.delete("--allow-io")
   if ARGV.include?("--bytecode")
     ARGV.delete("--bytecode")
     require_relative "bytecode_compiler"
@@ -664,6 +665,7 @@ when "run"
     source = File.read(file)
     scheme = transpiler.transpile(source)
     lines = scheme.each_line.map(&:strip).reject(&:empty?)
+    lines.unshift("(sandbox-enable)") unless allow_io
 
     bridge = InterpreterBridge.new
     bridge.run_scheme(lines)
