@@ -1,0 +1,29 @@
+-- Minimal TCP server to reproduce the fiber reuse crash.
+-- Progressively add operations to find which one crashes.
+
+FN handleClient!(client: TCPClient) RETURNS Void ->
+    data = tcpRead(client);
+    IF startsWith?(data, "SET:") THEN
+        writeFile("data/test.json", "{\"data\":[1,2,3]}");
+        tcpWrite(client, "+OK\r\n");
+    ELSE_IF startsWith?(data, "GET:") THEN
+        content = readFile("data/test.json");
+        tcpWrite(client, "+${content}\r\n");
+    ELSE
+        tcpWrite(client, "+OK\r\n");
+    END
+END
+
+FN main() RETURNS Void ->
+    shell("mkdir -p data");
+    server = TCPServer::listen(6391);
+    print("debug server on 6391");
+
+    MUTABLE tasks: ~Void[]@list = [];
+    WHILE TRUE DO
+        client = accept(server);
+        tasks.append(BG { @xl ->
+            handleClient!(client);
+        });
+    END
+END

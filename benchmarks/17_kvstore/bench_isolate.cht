@@ -1,0 +1,145 @@
+-- Isolation test: is the negative scaling from the scheduler or from map contention?
+--
+-- Test A: compute-only fibers (zipf RNG + string format, NO map access)
+-- Test B: compute + map reads (same as benchmark zipf workload)
+-- Test C: compute-only, NO string formatting (pure RNG loop)
+--
+-- If A shows negative scaling -> scheduler/fiber overhead
+-- If A scales fine but B doesn't -> map Mutex contention under fibers
+-- C isolates the scheduler overhead from everything else
+
+FN hFunc(x: Float64, s: Float64) RETURNS Float64 ->
+    RETURN exp(0.0 - s * log(x));
+END
+
+FN hInt(x: Float64, s: Float64) RETURNS Float64 ->
+    t = 1.0 - s;
+    IF abs(t) > 0.00000001 -> RETURN (x ** t - 1.0) / t;
+    RETURN log(x);
+END
+
+FN hIntInv(x: Float64, s: Float64) RETURNS Float64 ->
+    t = 1.0 - s;
+    IF abs(t) > 0.00000001 -> RETURN (t * x + 1.0) ** (1.0 / t);
+    RETURN exp(x);
+END
+
+FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFraction: Float64) RETURNS Int64 ->
+    hIntHalf = hInt(0.5, s);
+    WHILE TRUE DO
+        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        MUTABLE uBits = state;
+        IF uBits < 0 THEN uBits = 0 - uBits; END
+        MUTABLE u = (uBits MOD 1000000000) / 1000000000.0;
+        u = hIntegral + u * (hIntHalf - hIntegral);
+        x = hIntInv(u, s);
+        MUTABLE k = toInt(x + 0.5);
+        IF k < 1 THEN k = 1; END
+        IF k > n THEN k = n; END
+        IF k - x <= hFraction THEN RETURN k - 1; END
+        IF u >= hInt(k + 0.5, s) - hFunc(k, s) THEN RETURN k - 1; END
+    END
+    RETURN 0;
+END
+
+FN main() RETURNS Void ->
+    n = 1000000;
+    workers = threadCount();
+    chunk = n / workers;
+    zipfSkew = 1.0;
+    hIntegral = hInt(n + 0.5, zipfSkew);
+    hFraction = hFunc(1.5, zipfSkew) - 1.0;
+
+    -- Pre-populate map for test B
+    MUTABLE map: HashMap<String>@shared:sharded(128):locked = {};
+    MUTABLE wi: Int64 = 0;
+    WHILE wi < workers DO
+        start = wi * chunk;
+        cnt = chunk;
+        FOR idx IN (start ..< start + cnt) DO
+            map["key:${idx.toString()}"] = "v";
+        END
+        wi += 1;
+    END
+
+    -- Test C: pure compute (RNG only, no string, no map)
+    t0 = timestampMs();
+    MUTABLE c_futures: ~Int64[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        seed = wi + 42;
+        cnt = chunk;
+        c_futures.append(BG {
+            MUTABLE total: Int64 = 0;
+            MUTABLE state: Int64 = seed;
+            FOR idx IN (0_i64 ..< cnt) DO
+                k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                total += k;
+            END
+            total;
+        });
+        wi += 1;
+    END
+    MUTABLE c_total: Int64 = 0;
+    FOR ci IN (0_i64 ..< workers) -> c_total += NEXT c_futures[ci];
+    computeMs = timestampMs() - t0;
+
+    -- Test A: compute + string format (no map access)
+    t1 = timestampMs();
+    MUTABLE a_futures: ~Int64[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        seed = wi + 42;
+        cnt = chunk;
+        a_futures.append(BG {
+            MUTABLE total: Int64 = 0;
+            MUTABLE state: Int64 = seed;
+            FOR idx IN (0_i64 ..< cnt) DO
+                k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                s = "key:${k.toString()}";
+                total += s.length();
+            END
+            total;
+        });
+        wi += 1;
+    END
+    MUTABLE a_total: Int64 = 0;
+    FOR ai IN (0_i64 ..< workers) -> a_total += NEXT a_futures[ai];
+    fmtMs = timestampMs() - t1;
+
+    -- Test B: compute + string format + map read
+    t2 = timestampMs();
+    MUTABLE b_futures: ~Int64[]@list = [];
+    wi = 0;
+    WHILE wi < workers DO
+        seed = wi + 42;
+        cnt = chunk;
+        b_futures.append(BG {
+            MUTABLE hits: Int64 = 0;
+            MUTABLE state: Int64 = seed;
+            FOR idx IN (0_i64 ..< cnt) DO
+                k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                got = map["key:${k.toString()}"] OR "";
+                IF got.length() > 0 THEN hits += 1; END
+            END
+            hits;
+        });
+        wi += 1;
+    END
+    MUTABLE b_total: Int64 = 0;
+    FOR bi IN (0_i64 ..< workers) -> b_total += NEXT b_futures[bi];
+    mapMs = timestampMs() - t2;
+
+    ASSERT c_total > 0, "compute total must be > 0";
+    ASSERT a_total > 0, "fmt total must be > 0";
+    ASSERT b_total > 0, "map total must be > 0";
+
+    print("Workers: ${workers.toString()}");
+    print("C_compute: ${computeMs.toString()} ms");
+    print("A_fmt: ${fmtMs.toString()} ms");
+    print("B_map: ${mapMs.toString()} ms");
+    RETURN;
+END

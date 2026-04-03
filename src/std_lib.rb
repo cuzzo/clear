@@ -386,7 +386,6 @@ POOL_METHODS = {
   },
   "get" => {
     arity: 1, tag: :pool_method,
-    borrows: :self,
     return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
   },
   "remove" => {

@@ -305,29 +305,6 @@ module GenericAnalysis
     end
   end
 
-  # Register container borrow in the OwnershipGraph when a binding receives
-  # a value from container access (HashMap/Pool/List indexing, through OR).
-  def register_container_borrow!(node)
-    container = find_container_source(node.value)
-    return unless container
-    var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-    @og&.borrow(var_name, container, mutable: false)
-  end
-
-  # Walk through OR/OR_RESCUE to find the root container variable name.
-  def find_container_source(expr)
-    return nil unless expr
-    if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:type_info)
-      ti = expr.target.type_info
-      if ti&.map? || ti&.pool? || (ti&.array? && ti&.list_collection?)
-        return root_variable_name(expr.target)
-      end
-    end
-    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
-      return find_container_source(expr.left)
-    end
-    nil
-  end
 
   # Check if an expression carries heap_promoted_call, looking through
   # OR/OR_RESCUE wrappers. Used by propagate_call_flags! and visit_BgBlock.

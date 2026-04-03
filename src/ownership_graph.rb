@@ -17,7 +17,7 @@
 #   fork / merge(other)                — branch analysis (IF/ELSE)
 
 class OwnershipGraph
-  Node = Struct.new(:path, :kind, :state, :storage, :type_info, :scope_depth, :line, :borrowed_from, keyword_init: true) do
+  Node = Struct.new(:path, :kind, :state, :storage, :type_info, :scope_depth, :line, keyword_init: true) do
     def live?;    state == :live; end
     def moved?;   state == :moved; end
     def dropped?; state == :dropped; end
@@ -85,9 +85,6 @@ class OwnershipGraph
       return mut_conflict if mut_conflict
       @edges << Edge.new(from: borrower, to: source, kind: :borrows)
     end
-    # Mark the node as borrowed (persists after edge cleanup for transpiler queries).
-    borrower_node = @nodes[borrower]
-    borrower_node.borrowed_from = source if borrower_node
     nil
   end
 
@@ -151,16 +148,6 @@ class OwnershipGraph
     return false if node.aliased?
     return false unless node.live? || node.dropped?
     node.storage == :heap
-  end
-
-  # Is this path a borrower? Checks the persistent borrowed_from field.
-  def borrowed?(path)
-    @nodes[path]&.borrowed_from != nil
-  end
-
-  # Return the source variable name this path borrows from, or nil.
-  def borrow_source(path)
-    @nodes[path]&.borrowed_from
   end
 
   # Is the path moved?

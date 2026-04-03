@@ -125,7 +125,6 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 - `GIVE` - Transfer ownership to callee.
 - `TAKES` - Function receives ownership.
 - **Zero implicit copies.** All copies of non-Copy types must be explicit. Rc/Arc increment refcounts (not copies). Primitives, strings, enums are Copy. Unions with heap variants (`@indirect`, `[]T` slices, collections) are non-Copy.
-- **Container access is a borrow.** `map["key"]`, `pool[id]`, `list[i]` return borrows tied to the container's lifetime. Borrows cannot be returned without a lifetime annotation (`RETURNS param:Type`), appended to collections, or stored in structs without explicit cloning.
 - **Borrow state lives in the OwnershipGraph.** All borrow/lifetime decisions are resolved via the OG, not by inspecting specific AST node types. The OG is the single source of truth for ownership state.
 
 ## Design Principles

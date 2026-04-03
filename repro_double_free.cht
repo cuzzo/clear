@@ -1,0 +1,10 @@
+STRUCT Node { id: Int64 }
+STRUCT Wrapper { inner: Node @multiowned }
+
+FN main() RETURNS Void ->
+    VAR w1 = Wrapper{ inner: Node{id: 1} @multiowned };
+    VAR w2 = w1; -- Move w1 to w2
+    ASSERT w2.inner.id == 1, "w2.inner.id should be 1";
+    -- w1 should be considered moved and NOT cleaned up.
+    RETURN;
+END

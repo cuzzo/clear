@@ -1,0 +1,151 @@
+commit 27d88d1f48cfe8bf1a070f3d8f235aa88147bd3b
+Author: Brian Yahn <yahn007@gmail.com>
+Date:   Sat Jan 17 21:58:05 2026 +0000
+
+    Fix bug to drop conditionally when return interrupts.
+
+diff --git a/src/annotator.rb b/src/annotator.rb
+index b534d90..6105eca 100644
+--- a/src/annotator.rb
++++ b/src/annotator.rb
+@@ -138,8 +138,9 @@ private
+   # SCOPE MANAGEMENT
+   # ==========================================
+ 
+-  def with_new_scope(scope = nil)
++  def with_new_scope(scope = nil, type: :block)
+     new_scope = scope.nil? ? Scope.new : scope.dup
++    new_scope.type = type
+     @scope_stack.push(new_scope)
+     yield
+     @scope_stack.pop
+@@ -159,7 +160,7 @@ private
+     verify_captures!(node)
+ 
+     # 2. Enter the Lambda's Scope
+-    with_new_scope do
++    with_new_scope(nil, type: :function_root) do
+       param_types = declare_and_verify_params(node)
+       declare_captures(node)
+ 
+@@ -227,7 +228,7 @@ private
+     # 4. Analyze Body & Track Returns
+     @return_collection_stack.push([])
+ 
+-    with_new_scope do
++    with_new_scope(nil, type: :function_root) do
+       # Register Parameters
+       declare_and_verify_params(node)
+       declare_captures(node)
+@@ -398,7 +399,10 @@ private
+     # 1. Lifetime Tracking
+     verify_return(node.value)
+ 
+-    # 2. Ownership Tracking
++    # 2. Handle conditional drops
++    node.drops = get_return_drops(node)
++
++    # 3. Ownership Tracking
+     # TODO: Move to ownership tracker
+     root = get_root_object(node.value)
+     if root.is_a?(AST::Identifier)
+@@ -503,6 +507,8 @@ private
+     end
+   end
+ 
++  # TODO: verify_signature is sufficiently complicated.  Intrinsics must support the correct signatures.
++  # This does not have all the proper protections of regular functions and method calls.
+   def visit_IntrinsicFunc(node, args)
+     definitions = STD_LIB[node.name]
+     definitions = [definitions] if definitions.is_a?(Hash)
+@@ -550,16 +556,7 @@ private
+   def visit_VarDecl(node)
+     visit(node.value)
+ 
+-    # 0. Affine Ownership:
+-    if node.value.is_a?(AST::Identifier)
+-      rhs_name = node.value.name
+-      rhs_type = current_scope.resolve_type(rhs_name)
+-
+-      if Type.new(rhs_type).requires_move?
+-        current_scope.set_state(rhs_name, :moved)
+-      end
+-    end
+-
++    verify_unrestricted!(node)
+     handle_assign_move(node)
+     handle_assign_borrow(node)
+ 
+diff --git a/src/ast.rb b/src/ast.rb
+index b98d9d5..583c832 100644
+--- a/src/ast.rb
++++ b/src/ast.rb
+@@ -105,7 +105,7 @@ module AST
+   GetField     = Struct.new(:token, :target, :field) { include Locatable }
+   GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
+   Cast         = Struct.new(:token, :value, :target) { include Locatable }
+-  ReturnNode   = Struct.new(:token, :value) { include Locatable }
++  ReturnNode   = Struct.new(:token, :value, :drops) { include Locatable }
+   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
+   Raise        = Struct.new(:token, :message_expr) { include Locatable }
+   ThrowNode    = Struct.new(:token, :value) { include Locatable }
+diff --git a/src/ownership_tracker.rb b/src/ownership_tracker.rb
+index fc8cc16..e13e81a 100644
+--- a/src/ownership_tracker.rb
++++ b/src/ownership_tracker.rb
+@@ -172,6 +172,27 @@ module OwnershipTracker
+     end
+   end
+ 
++  def get_return_drops(node)
++    all_drops = []
++
++    # Walk backwards through scopes until we hit the function boundary
++    # (You might need a flag in Scope to mark it as a "function body" vs "block")
++    @scope_stack.reverse_each do |scope|
++      scope.locals.each do |name, info|
++        if scope.get_state(name) == :live && Type.new(info[:type]).requires_move?
++           all_drops << { name: name, type: info[:type] }
++           # We don't mark them :moved in the tracker because execution stops here anyway.
++        end
++      end
++      # Stop if we hit the function scope (implementation detail depends on how you track function boundaries)
++      # For now, dropping everything is safe if RETURN is top-level,
++      # but be careful if you implement lambdas/closures later.
++      break if scope.type == :function_root
++    end
++
++    node.drops = all_drops
++  end
++
+   def get_path_to_root(node)
+     path = []
+     curr = node
+diff --git a/src/scope.rb b/src/scope.rb
+index 50b20dc..e7444a0 100644
+--- a/src/scope.rb
++++ b/src/scope.rb
+@@ -1,13 +1,14 @@
+ require "set"
+ 
+ class Scope
+-  attr_accessor :locals, :var_states, :dependencies, :var_states
++  attr_accessor :locals, :var_states, :dependencies, :var_states, :type
+ 
+   def initialize
+     @locals = {}
+     @dependencies = {}
+     @types = {}
+     @var_states = {}
++    @type = :block
+   end
+ 
+   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, borrowed_paths = [])
+@@ -42,6 +43,7 @@ class Scope
+     # 2. Copy State Maps
+     @var_states = original.var_states.dup
+     @dependencies = original.dependencies.dup
++    @type = :block # must be overwritten
+ 
+     # 3. Types are usually static definitions, so a shallow copy is fine
+     @types = original.instance_variable_get(:@types).dup

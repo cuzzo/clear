@@ -1,0 +1,25 @@
+STRUCT Large {
+    x1: Int64, x2: Int64, x3: Int64, x4: Int64, x5: Int64, x6: Int64, x7: Int64, x8: Int64,
+    x9: Int64, x10: Int64, x11: Int64, x12: Int64, x13: Int64, x14: Int64, x15: Int64, x16: Int64,
+    x17: Int64, x18: Int64, x19: Int64, x20: Int64, x21: Int64, x22: Int64, x23: Int64, x24: Int64,
+    x25: Int64, x26: Int64, x27: Int64, x28: Int64, x29: Int64, x30: Int64, x31: Int64, x32: Int64,
+    x33: Int64, x34: Int64, x35: Int64, x36: Int64, x37: Int64, x38: Int64, x39: Int64, x40: Int64,
+    x41: Int64, x42: Int64, x43: Int64, x44: Int64, x45: Int64, x46: Int64, x47: Int64, x48: Int64,
+    x49: Int64, x50: Int64, x51: Int64, x52: Int64, x53: Int64, x54: Int64, x55: Int64, x56: Int64,
+    x57: Int64, x58: Int64, x59: Int64, x60: Int64, x61: Int64, x62: Int64, x63: Int64, x64: Int64,
+    x65: Int64, x66: Int64, x67: Int64, x68: Int64, x69: Int64, x70: Int64, x71: Int64, x72: Int64,
+    x73: Int64, x74: Int64, x75: Int64, x76: Int64, x77: Int64, x78: Int64, x79: Int64, x80: Int64,
+    x81: Int64, x82: Int64, x83: Int64, x84: Int64, x85: Int64, x86: Int64, x87: Int64, x88: Int64,
+    x89: Int64, x90: Int64, x91: Int64, x92: Int64, x93: Int64, x94: Int64, x95: Int64, x96: Int64,
+    x97: Int64, x98: Int64, x99: Int64, x100: Int64, x101: Int64, x102: Int64, x103: Int64, x104: Int64,
+    x105: Int64, x106: Int64, x107: Int64, x108: Int64, x109: Int64, x110: Int64, x111: Int64, x112: Int64,
+    x113: Int64, x114: Int64, x115: Int64, x116: Int64, x117: Int64, x118: Int64, x119: Int64, x120: Int64,
+    x121: Int64, x122: Int64, x123: Int64, x124: Int64, x125: Int64, x126: Int64, x127: Int64, x128: Int64,
+    x129: Int64
+}
+
+FN cheatMain() RETURNS Void ->
+    -- 129 * 8 = 1032 bytes. Threshold is 1024 bytes (128 slots).
+    l = Large{ x1: 1 };
+    RETURN;
+END

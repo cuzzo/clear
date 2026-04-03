@@ -1,0 +1,24 @@
+EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "json_native";
+EXTERN FN parseJsonArraySum(content: String) RETURNS Int64 FROM "json_native";
+EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
+
+FN processLine(line: String) RETURNS String ->
+    IF startsWith?(line, "SET:") THEN
+        RETURN "+OK";
+    ELSE_IF startsWith?(line, "GET:") THEN
+        RETURN ":42";
+    ELSE_IF line == "QUIT" THEN
+        RETURN "+BYE";
+    ELSE
+        RETURN "-ERR";
+    END
+END
+
+FN main() RETURNS Void ->
+    ensureDir("data");
+    print(processLine("SET:1"));
+    print(processLine("GET:1"));
+    print(processLine("QUIT"));
+    print(processLine("GARBAGE"));
+    RETURN;
+END

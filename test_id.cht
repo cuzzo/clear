@@ -1,0 +1,3 @@
+FN cheatMain() RETURNS Void ->
+  print("Hello");
+END

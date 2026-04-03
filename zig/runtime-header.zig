@@ -1862,12 +1862,10 @@ pub const CheatLib = struct {
         // 9. Structs: recursively clean up RC/link fields
         const info = @typeInfo(T);
         if (info == .@"struct") {
-            // Walk fields for any that are ref-counted
             inline for (info.@"struct".fields) |field| {
                 if (comptime refInnerType(field.type) != null) {
                     releaseOne(field.type, alloc, @field(ptr, field.name));
                 }
-                // Recurse into struct fields that might contain RC fields
                 if (comptime @typeInfo(field.type) == .@"struct" and
                     refInnerType(field.type) == null and
                     !isArrayList(field.type) and !isStringMap(field.type) and
@@ -1928,7 +1926,6 @@ pub const CheatLib = struct {
         // inside unions is handled by the union cleanup handler directly.
         // Including slices here causes over-freeing in ArrayList element recursion.
         if (ft_info == .@"struct") {
-            // Check if any field needs cleanup
             inline for (ft_info.@"struct".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
             }
