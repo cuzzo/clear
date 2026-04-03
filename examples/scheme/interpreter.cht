@@ -262,7 +262,7 @@ END
 
 -- eval: dispatch by AST type (no penv needed — Lambda stores body directly)
 
-FN eval!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     MATCH ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -280,16 +280,14 @@ FN eval!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Valu
     RETURN ast;
 END
 
-FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     IF items.length() == 0 THEN RETURN Value{ List: items }; END
     formName = getSymName(items[0]);
 
     IF formName == "def!" THEN
         defName = getSymName(items[1]);
-        val = eval!(items[2], envId, pool);
-        pool[envId]?.vars[defName] = val;
-        result = pool[envId]?.vars[defName] OR Value.Nil;
-        RETURN result;
+        pool[envId]?.vars[defName] = eval!(items[2], envId, pool);
+        RETURN Value.Nil;
 
     ELSE_IF formName == "let*" THEN
         MUTABLE letResult: Value = Value.Nil;
@@ -300,8 +298,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETU
                 MUTABLE bi: Int64 = 0;
                 WHILE bi < binds.length() DO
                     bName = getSymName(binds[bi]);
-                    bVal = eval!(binds[bi + 1], letId, pool);
-                    pool[letId]?.vars[bName] = bVal;
+                    pool[letId]?.vars[bName] = eval!(binds[bi + 1], letId, pool);
                     bi += 2;
                 END
                 letResult = eval!(items[2], letId, pool);,
@@ -352,7 +349,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETU
     END
 END
 
-FN evalLambdaCall!(f: Value, evaled: Value[], MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
+FN evalLambdaCall!(TAKES f: Value, TAKES evaled: Value[], MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     MUTABLE result: Value = Value.Nil;
     MATCH f START
         Value.Lambda AS lam ->
@@ -374,7 +371,7 @@ FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[10000]@pool, MUTABL
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
-    RETURN eval!(ast, envId, pool);
+    RETURN eval!(GIVE ast, envId, pool);
 END
 
 FN main() RETURNS Void ->
@@ -407,11 +404,11 @@ FN main() RETURNS Void ->
 
     result = runTest!("(def! a 10)", rootId, pool, penv);
     print(prStr(result, TRUE));
-    ASSERT prStr(result, TRUE) == "10", "test 2";
+    ASSERT prStr(result, TRUE) == "nil", "test 2: def! returns nil";
 
     result = runTest!("(def! f (fn* (x) (+ x a)))", rootId, pool, penv);
     print(prStr(result, TRUE));
-    ASSERT prStr(result, TRUE) == "#<function>", "test 3";
+    ASSERT prStr(result, TRUE) == "nil", "test 3: def! returns nil";
 
     result = runTest!("(f 5)", rootId, pool, penv);
     print(prStr(result, TRUE));
@@ -471,7 +468,7 @@ FN main() RETURNS Void ->
 
     result = runTest!("(def! sumdown (fn* (n) (if (> n 0) (+ n (sumdown (- n 1))) 0)))", rootId, pool, penv);
     print(prStr(result, TRUE));
-    ASSERT prStr(result, TRUE) == "#<function>", "test 18";
+    ASSERT prStr(result, TRUE) == "nil", "test 18: def! returns nil";
 
     result = runTest!("(sumdown 6)", rootId, pool, penv);
     print(prStr(result, TRUE));
@@ -479,7 +476,7 @@ FN main() RETURNS Void ->
 
     result = runTest!("(def! fib (fn* (n) (if (<= n 1) 1 (+ (fib (- n 1)) (fib (- n 2))))))", rootId, pool, penv);
     print(prStr(result, TRUE));
-    ASSERT prStr(result, TRUE) == "#<function>", "test 20";
+    ASSERT prStr(result, TRUE) == "nil", "test 20: def! returns nil";
 
     result = runTest!("(fib 4)", rootId, pool, penv);
     print(prStr(result, TRUE));
