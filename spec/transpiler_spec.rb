@@ -786,6 +786,27 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "TAKES parameter returned in union suppresses cleanup" do
+    it "emits items_moved = true when TAKES slice is returned inside union" do
+      src = <<~CLEAR
+        UNION Value { Nil, List: Value[] }
+        FN consume!(TAKES items: Value[]) RETURNS Value ->
+            IF items.length() == 0 THEN RETURN Value{ List: items }; END
+            RETURN Value.Nil;
+        END
+        FN main() RETURNS Void ->
+            MUTABLE list: Value[]@list = List[];
+            result = consume!(list);
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The RETURN Value{ List: items } must set items_moved = true
+      # so the TAKES defer doesn't double-free the returned data.
+      expect(zig).to match(/items_moved = true;\s*\n\s*return Value/)
+    end
+  end
+
   describe "TAKES slice needs_rt" do
     it "generates rt parameter for function with TAKES slice" do
       src = <<~CLEAR

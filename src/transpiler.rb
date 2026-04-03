@@ -340,7 +340,27 @@ private
           zig_t = "*#{zig_t}" if indirect.include?(fname)
           "    #{fname}: #{zig_t},"
         end.join("\n")
-        "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
+        # Generate deinit for inline structs that own heap data (@indirect, []T).
+        deinit_lines = []
+        var_data[:fields].each do |fname, ftype|
+          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+          if indirect.include?(fname)
+            zig_t = transpile_type(ftype, is_field: true)
+            deinit_lines << "        CheatLib.cleanup(#{zig_t}, alloc, self.#{fname});"
+            deinit_lines << "        alloc.destroy(self.#{fname});"
+          elsif ft.array? && !ft.string?
+            elem_zig = transpile_type(ft.element_type)
+            deinit_lines << "        if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (self.#{fname}) |*__e| { CheatLib.cleanup(#{elem_zig}, alloc, __e); } }"
+            deinit_lines << "        if (self.#{fname}.len > 0) alloc.free(self.#{fname});"
+          end
+        end
+
+        if deinit_lines.any?
+          deinit_body = deinit_lines.join("\n")
+          "const #{node.name}_#{var_name} = struct {\n#{fields}\n\n    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {\n#{deinit_body}\n    }\n};"
+        else
+          "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
+        end
       end
 
       variants = node.variants.map do |var_name, var_data|
@@ -1945,6 +1965,19 @@ private
       # 2. Standard Return with Move Suppression for unique heap
       rt_name = @do_rt_name || "rt"
       suppress = emit_move_suppression(node.value)
+
+      # Suppress cleanup on TAKES parameters whose data is returned inside
+      # struct/union construction (ownership escapes via the return value).
+      if node.value.is_a?(AST::StructLit)
+        fn_name = current_tp_ctx&.fn_name
+        fn_plan = @cleanup_plans&.dig(fn_name)
+        node.value.fields.each do |_fname, fval|
+          next unless fval.is_a?(AST::Identifier)
+          entry = fn_plan&.lookup(fval.name)
+          next unless entry && entry[:source_kind] == :takes_param && entry[:has_moved_guard]
+          suppress = "#{zig_safe_name(fval.name)}_moved = true;\n#{suppress}"
+        end
+      end
       val_code = if node.value.nil?
         ""
       elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
@@ -3422,8 +3455,13 @@ private
       # Move suppression: for consumed args (TAKES, append, struct/union construction).
       consumed = emit_consumed_moves(stmt)
       unless consumed.empty?
-        code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-        code = "#{code}\n#{consumed}"
+        if stmt.is_a?(AST::ReturnNode)
+          # For returns, emit moves BEFORE the return (after return is unreachable).
+          code = "#{consumed}\n#{code}"
+        else
+          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+          code = "#{code}\n#{consumed}"
+        end
       end
       # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
       temps = ctx&.pending_heap_temps || []

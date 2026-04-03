@@ -1820,6 +1820,7 @@ pub const CheatLib = struct {
 
     /// Returns true if a type needs cleanup (has heap-allocated data).
     pub fn needsCleanup(comptime FT: type) bool {
+        @setEvalBranchQuota(10000);
         if (FT == []const u8 or FT == []u8) return true;
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
@@ -1827,6 +1828,8 @@ pub const CheatLib = struct {
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
         const ft_info = @typeInfo(FT);
+        // Types with deinit manage their own lifecycle — don't recurse into fields.
+        if (ft_info == .@"struct" and @hasDecl(FT, "deinit")) return true;
         // Note: non-string slices excluded from needsCleanup. Slice cleanup
         // inside unions is handled by the union cleanup handler directly.
         // Including slices here causes over-freeing in ArrayList element recursion.
