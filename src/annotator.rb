@@ -3542,7 +3542,7 @@ private
           next false if k.is_a?(Symbol)
           ft = v.is_a?(Hash) ? v[:type] : v
           t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-          t.link? || t.any_rc?
+          t.link? || t.any_rc? || t.string?
         end
       end
     end

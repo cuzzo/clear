@@ -97,4 +97,34 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
       expect(main_body).to include("defer")
     end
   end
+
+  # =========================================================================
+  # Case 4: Struct with string field returned from CATCH-wrapped function
+  # =========================================================================
+  describe "promoted struct with string field from CATCH pipeline" do
+    let(:zig) do
+      transpile(<<~CLEAR)
+        STRUCT User { name: String }
+        FN checkUser(u: User) RETURNS !User ->
+            IF u.name == "" THEN RAISE Input; END
+            RETURN u;
+        END
+        FN process(u: User) RETURNS String ->
+            validUser = u s> checkUser;
+            RETURN validUser.name;
+        CATCH Input
+            RETURN "error";
+        END
+        FN main() RETURNS Void ->
+            r = process(User{ name: "Alice" });
+            ASSERT r == "Alice", "ok";
+            RETURN;
+        END
+      CLEAR
+    end
+
+    it "emits cleanup for struct with promoted string field" do
+      expect(zig).to include("cleanup(User")
+    end
+  end
 end

@@ -90,7 +90,7 @@ module OwnershipGenerator
     if !type_info&.any_rc? && !type_info&.link? && !type_info&.any_sync?
       resolved = type_info&.resolved
       schema = (@struct_schemas ||= {})[resolved]
-      if schema && schema.any? { |k, v| !k.is_a?(Symbol) && (ft = v.is_a?(Hash) ? v[:type] : v; t = ft.is_a?(Type) ? ft : Type.new(ft || :Any); t.link? || t.any_rc?) }
+      if schema && schema.any? { |k, v| !k.is_a?(Symbol) && (ft = v.is_a?(Hash) ? v[:type] : v; t = ft.is_a?(Type) ? ft : Type.new(ft || :Any); t.link? || t.any_rc? || t.string?) }
         zig_type = transpile_type(resolved.to_s)
         return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
       end
