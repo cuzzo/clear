@@ -244,7 +244,7 @@ END
 -- Environment operations using Pool
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
-    val = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
+    val = COPY (pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 });
     MATCH val START
         Value.Number AS n ->
             IF n == 0.0 - 777777.0 THEN
@@ -309,7 +309,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool
     ELSE_IF formName == "fn*" THEN
         MATCH items[1] START
             Value.List AS pnames ->
-                RETURN Value.Lambda{ params: pnames, body: items[2], envId: envId };,
+                RETURN Value.Lambda{ params: COPY pnames, body: COPY items[2], envId: envId };,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
@@ -357,9 +357,9 @@ FN evalLambdaCall!(TAKES f: Value, TAKES evaled: Value[], MUTABLE pool: Env[1000
             pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
             FOR pi IN (0_i64 ..< lam.params.length()) DO
                 pname = getSymName(lam.params[pi]);
-                pool[callId]?.vars[pname] = evaled[pi + 1];
+                pool[callId]?.vars[pname] = COPY evaled[pi + 1];
             END
-            result = eval!(lam.body, callId, pool);,
+            result = eval!(COPY lam.body, callId, pool);,
         DEFAULT -> PASS;
     END
     RETURN result;
