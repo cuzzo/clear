@@ -132,6 +132,10 @@ class SchemeTranspiler
         if stmt.name == "main"
           stmt.body.each do |node|
             next if node.is_a?(AST::ReturnNode) && node.value.nil?
+            # Emit source line marker for error tracking
+            if node.respond_to?(:line) && node.line
+              @output << "(source-line #{node.line})"
+            end
             @output << emit(node)
           end
         else

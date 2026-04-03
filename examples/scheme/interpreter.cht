@@ -1529,6 +1529,12 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         output = shell(getStr(cmdVal));
         RETURN Value{ Str: output };
 
+    ELSE_IF formName == "source-line" THEN
+        -- (source-line N) -> track current CLEAR source line for error messages
+        lineVal = eval!(items[1], envId, pool);
+        pool[envId]?.vars["__source_line"] = lineVal;
+        RETURN Value.Nil;
+
     ELSE_IF formName == "sandbox-enable" THEN
         pool[envId]?.vars["__sandbox"] = Value.TrueVal;
         RETURN Value.Nil;
@@ -1614,7 +1620,14 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         IF isError?(msg) THEN RETURN msg; END
         kind = eval!(items[2], envId, pool);
         IF isError?(kind) THEN RETURN kind; END
-        RETURN Value.Error{ errMsg: getStr(msg), errKind: getStr(kind) };
+        -- Include source line in error message if tracked
+        srcLine = envGet!(envId, "__source_line", pool);
+        MUTABLE errMsg: String = getStr(msg);
+        IF getNum(srcLine) > 0.0 THEN
+            lineNum = toInt(getNum(srcLine));
+            errMsg = errMsg + " (line " + lineNum.toString() + ")";
+        END
+        RETURN Value.Error{ errMsg: errMsg, errKind: getStr(kind) };
 
     ELSE_IF formName == "try" THEN
         -- (try expr (catch e handler))
