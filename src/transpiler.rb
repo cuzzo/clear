@@ -895,7 +895,7 @@ private
         elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
           # T[N]@list: pre-allocate N slots to avoid realloc during append.
           rt_name = @do_rt_name || "rt"
-          alloc = node.storage == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+          alloc = storage_alloc_expr(node.type_info)
           "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{node.full_type.capacity})"
         else
           "#{node.full_type.zig_type}{}"
@@ -1200,8 +1200,8 @@ private
         return "[#{ti.capacity}]#{zig_type}{ #{items_code} }"
       end
 
-      # 2. Determine Allocator (storage-based: heap for heap-stored, frame otherwise)
-      allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      # 2. Determine Allocator (from annotator's storage_alloc)
+      allocator = storage_alloc_expr(node.type_info)
 
       # 3. Generate Items Slice
       if node.items.empty?
@@ -2449,7 +2449,7 @@ private
          (node.left.type_info&.string? || node.right.type_info&.string?)
         # Flatten chained string + into a single allocation.
         rt_ref = @do_rt_name || "rt"
-        alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+        alloc = storage_alloc_expr(node.type_info)
         parts = collect_string_concat_parts(node)
 
         # Optimization: when all parts are string literals or numeric toString(),

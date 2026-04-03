@@ -3535,6 +3535,11 @@ private
       end
     end
     ti.cleanup_alloc = needs_heap ? :heap : :frame
+
+    # Storage allocator: where to allocate NEW data (backing stores, buffers).
+    # Determined by the binding's storage location, not its content.
+    storage = node.respond_to?(:storage) ? node.storage : nil
+    ti.storage_alloc = (storage == :heap) ? :heap : :frame
   end
 
   def og_declare(name, node, type_info, storage)

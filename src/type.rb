@@ -15,6 +15,7 @@ class Type
   attr_accessor :heap_promoted  # true when collection data was promoted to heap (returned from frame-using fn)
   attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
   attr_accessor :cleanup_alloc  # :heap or :frame — which allocator to use for cleanup. Set once, read everywhere.
+  attr_accessor :storage_alloc  # :heap or :frame — which allocator for NEW allocations (backing stores, concat buffers).
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
   attr_reader :location  # Use location= setter for cache invalidation
 
