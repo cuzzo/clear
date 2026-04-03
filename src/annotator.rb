@@ -2276,6 +2276,17 @@ private
     visit(node.left)
     visit(node.right)
 
+    # OR on container borrow of non-Copy type is an error: mixes borrowed with owned.
+    container = find_container_source(node.left)
+    if container
+      left_type = node.left.type_info
+      # Unwrap optional: ?Value -> Value for copyability check
+      inner = left_type&.optional? ? Type.new(left_type.resolved.to_s.sub(/^\?/, '').to_sym) : left_type
+      unless inner&.implicitly_copyable?(method(:lookup_type_schema))
+        error!(node, "Cannot use OR on a borrowed container value (non-Copy type #{inner&.resolved}). Use MATCH on the optional (?Type) instead.")
+      end
+    end
+
     t_left_type = node.left.type_info
     t_right_type = node.right.type_info
 

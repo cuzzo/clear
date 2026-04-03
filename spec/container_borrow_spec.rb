@@ -26,25 +26,6 @@ RSpec.describe "Container borrow semantics" do
   end
 
   # =========================================================================
-  # HashMap indexing registers borrow in OwnershipGraph
-  # =========================================================================
-  it "registers HashMap get result as borrowed in OG" do
-    src = <<~CLEAR
-      STRUCT Env { x: Int64 }
-      UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
-      FN test!(MUTABLE pool: Env[10]@pool, MUTABLE map: HashMap<Value>) RETURNS Void ->
-          pool.insert(Env{ x: 1 });
-          val = map["key"] OR Value.Nil;
-          RETURN;
-      END
-    CLEAR
-    _ast, ann = annotate(src)
-    og = ann.instance_variable_get(:@og)
-    expect(og.borrowed?("val")).to be true
-    expect(og.borrow_source("val")).to eq("map")
-  end
-
-  # =========================================================================
   # Pool indexing registers borrow in OwnershipGraph
   # =========================================================================
   it "registers pool indexing result as borrowed in OG" do
@@ -62,14 +43,27 @@ RSpec.describe "Container borrow semantics" do
   end
 
   # =========================================================================
+  # OR on container borrow is an error (mixes borrowed + owned)
+  # =========================================================================
+  it "raises error when using OR on container borrow" do
+    expect_error(<<~CLEAR, /Cannot use OR.*borrowed/)
+      UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+      FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+          val = map["key"] OR Value.Nil;
+          RETURN;
+      END
+    CLEAR
+  end
+
+  # =========================================================================
   # Returning a container borrow without lifetime annotation is an error
   # =========================================================================
   it "raises error when returning container_borrow without lifetime" do
     expect_error(<<~CLEAR, /Cannot return.*borrowed/)
-      UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
-      FN getVal!(MUTABLE map: HashMap<Value>) RETURNS Value ->
-          val = map["key"] OR Value.Nil;
-          RETURN val;
+      STRUCT Env { vars: HashMap<Float64> }
+      FN getEnv!(MUTABLE pool: Env[10]@pool) RETURNS ?Env ->
+          env = pool[0_u64];
+          RETURN env;
       END
     CLEAR
   end
