@@ -1755,11 +1755,6 @@ pub const CheatLib = struct {
                 if (f_info == .@"opaque" or f_info == .@"fn") continue;
                 if (comptime refInnerType(FT) != null) {
                     releaseOne(FT, alloc, @field(ptr, field.name));
-                } else if (f_info == .pointer and f_info.pointer.size == .one and
-                    @typeInfo(f_info.pointer.child) != .@"opaque" and @typeInfo(f_info.pointer.child) != .@"fn") {
-                    const child_ptr = @field(ptr, field.name);
-                    cleanup(f_info.pointer.child, alloc, child_ptr);
-                    alloc.destroy(child_ptr);
                 } else if (f_info == .pointer and f_info.pointer.size == .slice) {
                     const payload = @field(ptr, field.name);
                     if (FT == []const u8 or FT == []u8) {
