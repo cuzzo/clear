@@ -480,6 +480,14 @@ module FunctionAnalysis
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])
       og_declare(param[:name], nil, param[:type], :stack)
+      # Non-TAKES parameters are implicit borrows. Mark in OG so the
+      # annotator prevents moving borrowed data into owned containers.
+      unless param[:takes]
+        ti = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
+        unless ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+          @og[param[:name]]&.kind = :borrowed
+        end
+      end
       param[:type]
     end
   end

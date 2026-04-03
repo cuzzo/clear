@@ -2836,6 +2836,10 @@ private
     type_obj = Type.new(rhs_type)
     is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
     if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
+      # Cannot move a borrowed value (non-TAKES parameter).
+      if @og[rhs_name]&.kind == :borrowed
+        error!(node, "Cannot move borrowed value '#{rhs_name}'. Parameters are implicit borrows unless TAKES.")
+      end
       lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
       og_move(rhs_name, lhs_name)
       node.value.was_moved = true

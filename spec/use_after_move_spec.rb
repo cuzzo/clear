@@ -236,4 +236,5 @@ RSpec.describe "Use-after-move detection" do
       END
     CLEAR
   end
+
 end

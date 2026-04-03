@@ -362,4 +362,77 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # Parameter ownership: default = borrow, TAKES = owned
+  # Non-TAKES parameters are implicit borrows. They cannot be moved into
+  # containers or returned from functions (for non-Copy types).
+  # ===========================================================================
+  describe "Parameter ownership" do
+    let(:preamble) {
+      <<~CLEAR
+        UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+      CLEAR
+    }
+
+    context "default parameter (implicit borrow)" do
+      let(:code) {
+        preamble + <<~CLEAR
+          FN test!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              map["key"] = v;
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error when storing borrowed parameter into HashMap" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+
+    context "MUTABLE parameter (still a borrow, not owned)" do
+      let(:code) {
+        preamble + <<~CLEAR
+          FN test!(MUTABLE v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              map["key"] = v;
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error when storing mutable borrowed parameter into HashMap" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+
+    context "TAKES parameter (owned)" do
+      let(:code) {
+        preamble + <<~CLEAR
+          FN test!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              map["key"] = v;
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "allows storing TAKES parameter into HashMap" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "TAKES MUTABLE parameter (owned + mutable)" do
+      let(:code) {
+        preamble + <<~CLEAR
+          FN test!(TAKES MUTABLE v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+              map["key"] = v;
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "allows storing TAKES MUTABLE parameter into HashMap" do
+        expect { ast }.not_to raise_error
+      end
+    end
+  end
+
 end
