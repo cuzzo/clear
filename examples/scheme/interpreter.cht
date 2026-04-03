@@ -218,26 +218,27 @@ END
 -- Native function dispatch
 
 FN applyNative(name: String, evaled: Value[]) RETURNS Value @reentrant ->
-    IF name == "+" THEN RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) }; END
-    IF name == "-" THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
-    IF name == "*" THEN RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) }; END
-    IF name == "/" THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
-    IF name == "=" THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
-    IF name == "<" THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
-    IF name == ">" THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
-    IF name == "<=" THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
-    IF name == ">=" THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
+    -- evaled has the function removed (index 0 = first arg, not function)
+    IF name == "+" THEN RETURN Value{ Number: getNum(evaled[0]) + getNum(evaled[1]) }; END
+    IF name == "-" THEN RETURN Value{ Number: getNum(evaled[0]) - getNum(evaled[1]) }; END
+    IF name == "*" THEN RETURN Value{ Number: getNum(evaled[0]) * getNum(evaled[1]) }; END
+    IF name == "/" THEN RETURN Value{ Number: getNum(evaled[0]) / getNum(evaled[1]) }; END
+    IF name == "=" THEN RETURN boolVal(valEqual?(evaled[0], evaled[1])); END
+    IF name == "<" THEN RETURN boolVal(getNum(evaled[0]) < getNum(evaled[1])); END
+    IF name == ">" THEN RETURN boolVal(getNum(evaled[0]) > getNum(evaled[1])); END
+    IF name == "<=" THEN RETURN boolVal(getNum(evaled[0]) <= getNum(evaled[1])); END
+    IF name == ">=" THEN RETURN boolVal(getNum(evaled[0]) >= getNum(evaled[1])); END
     IF name == "list" THEN
         MUTABLE litems: Value[]@list = List[];
-        FOR li IN (1_i64 ..< evaled.length()) ->
+        FOR li IN (0_i64 ..< evaled.length()) ->
             litems.append(evaled[li]);
         RETURN Value{ List: litems };
     END
-    IF name == "list?" THEN RETURN boolVal(isList?(evaled[1])); END
-    IF name == "empty?" THEN RETURN boolVal(listLen(evaled[1]) == 0); END
-    IF name == "count" THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
-    IF name == "not" THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
-    IF name == "prn" THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
+    IF name == "list?" THEN RETURN boolVal(isList?(evaled[0])); END
+    IF name == "empty?" THEN RETURN boolVal(listLen(evaled[0]) == 0); END
+    IF name == "count" THEN RETURN Value{ Number: toFloat(listLen(evaled[0])) }; END
+    IF name == "not" THEN RETURN boolVal(isTruthy?(evaled[0]) == FALSE); END
+    IF name == "prn" THEN print(prStr(evaled[0], TRUE)); RETURN Value.Nil; END
     RETURN Value.Nil;
 END
 
@@ -336,7 +337,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool
         MUTABLE evaled: Value[]@list = List[];
         FOR ei IN (0_i64 ..< items.length()) ->
             evaled.append(eval!(items[ei], envId, pool));
-        f = evaled[0];
+        f = evaled.remove(0_i64);
         IF isLambda?(f) THEN
             RETURN evalLambdaCall!(f, evaled, pool);
         ELSE
@@ -357,7 +358,7 @@ FN evalLambdaCall!(TAKES f: Value, TAKES evaled: Value[], MUTABLE pool: Env[1000
             pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
             FOR pi IN (0_i64 ..< lam.params.length()) DO
                 pname = getSymName(lam.params[pi]);
-                pool[callId]?.vars[pname] = COPY evaled[pi + 1];
+                pool[callId]?.vars[pname] = COPY evaled[pi];
             END
             result = eval!(COPY lam.body, callId, pool);,
         DEFAULT -> PASS;
