@@ -1,19 +1,21 @@
--- Test: @indirect field in union struct variant must be freed on cleanup.
+-- Test: @indirect field must deep-copy when capturing shared data.
 --
--- When a union has an inline struct variant with an @indirect field,
--- constructing that variant heap-allocates a *Value for the field.
--- cleanup(Value) must free that pointer. Currently it doesn't.
+-- Pattern: Lambda body captures a Value via @indirect. The @indirect
+-- heap-allocates a *Value. If the source Value contains heap data,
+-- the stored value must be a deep copy so cleanup doesn't double-free.
 
+STRUCT Env { x: Int64 }
 UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
 
-FN makeLambda!(MUTABLE out: HashMap<Value>) RETURNS Value ->
-    out["_tmp"] = Value.Nil;
-    RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
+FN captureLambda!(bodyVal: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+    pool.insert(Env{ x: 1 });
+    RETURN Value.Lambda{ body: bodyVal, id: 1 };
 END
 
 FN main() RETURNS Void ->
-    MUTABLE scratch: HashMap<Value> = {};
-    v = makeLambda!(scratch);
-    -- v goes out of scope. cleanup(Value) must free the *Value body.
+    MUTABLE pool: Env[10]@pool = [];
+    body = Value{ Num: 42.0 };
+    lambda = captureLambda!(body, pool);
+    -- lambda goes out of scope. cleanup(Value) must free *Value body.
     RETURN;
 END

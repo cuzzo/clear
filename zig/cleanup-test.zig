@@ -488,3 +488,30 @@ test "BUG: cleanup(LamValue.Lambda) must free *MinValue body pointer" {
     CheatLib.cleanup(LamValue, alloc, &val);
     // testing.allocator will report leak if body pointer wasn't freed.
 }
+
+test "BUG: cleanup(Lambda) with List body must not double-free shared slice" {
+    // Scheme pattern: Lambda body is *Value pointing to a Value.List
+    // whose []Value slice was allocated by promoteList. If the same
+    // []Value slice is also cleaned up by the caller (e.g. via
+    // cleanup on the parent AST list), cleanup on the Lambda's body
+    // must not double-free.
+    //
+    // This tests that cleanup on an INDEPENDENTLY-owned *Value.List
+    // body works correctly (no double-free, no leak).
+    const alloc = std.testing.allocator;
+
+    // Create a body that is Value.List with its own heap slice
+    const body_items = try alloc.alloc(MinValue, 2);
+    body_items[0] = MinValue{ .Num = 10.0 };
+    body_items[1] = MinValue{ .Num = 20.0 };
+    const body = try alloc.create(MinValue);
+    body.* = MinValue{ .List = body_items };
+
+    var val = LamValue{ .Lambda = .{
+        .params = &.{},
+        .body = body,
+        .env_id = 1,
+    } };
+    // cleanup must free: body_items slice + body pointer. No double-free.
+    CheatLib.cleanup(LamValue, alloc, &val);
+}
