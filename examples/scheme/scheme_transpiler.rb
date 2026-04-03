@@ -163,6 +163,14 @@ class SchemeTranspiler
       emit_get_index(node)
     when AST::ForRange
       emit_for_range(node)
+    when AST::ForEach
+      emit_for_each(node)
+    when AST::PassStmt
+      "nil"
+    when AST::BreakNode
+      ";; break (not supported in scheme loops)"
+    when AST::ContinueNode
+      ";; continue (not supported in scheme loops)"
     when AST::BindExpr
       # Track struct type for field resolution
       if node.value.is_a?(AST::StructLit)
@@ -428,6 +436,18 @@ class SchemeTranspiler
     body = node.body.map { |n| emit(n) }.join(" ")
     # FOR i IN (start ..< end) -> recursive lambda with counter
     "(begin (define #{fname} (lambda (#{var}) (if (< #{var} #{end_expr}) (begin #{body} (#{fname} (+ #{var} 1))) nil))) (#{fname} #{start_expr}))"
+  end
+
+  def emit_for_each(node)
+    @while_counter ||= 0
+    @while_counter += 1
+    fname = "__each#{@while_counter}"
+    idx = "__i#{@while_counter}"
+    var = node.var_name
+    coll = emit(node.collection)
+    body = node.body.map { |n| emit(n) }.join(" ")
+    # FOR item IN list -> recursive lambda iterating by index
+    "(begin (define #{fname} (lambda (#{idx}) (if (< #{idx} (list-length #{coll})) (begin (define #{var} (list-ref #{coll} #{idx})) #{body} (#{fname} (+ #{idx} 1))) nil))) (#{fname} 0))"
   end
 
   def emit_func_call(node)

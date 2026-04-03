@@ -209,7 +209,7 @@ class InterpreterBridge
 
       # Accumulate multi-line input
       buffer += (buffer.empty? ? "" : "\n") + line
-      nesting += line.scan(/\b(FN|IF|WHILE|FOR|MATCH|DO)\b/).length
+      nesting += line.scan(/\b(FN|IF|WHILE|FOR|MATCH)\b/).length
       nesting -= line.scan(/\bEND\b/).length
 
       if nesting > 0
@@ -237,10 +237,15 @@ class InterpreterBridge
         stmt = input.strip
         stmt += ";" unless stmt.end_with?(";")
 
-        # Parse and transpile. The transpiler emits the function as
-        # (define replEval (lambda () body...)) - extract the body.
+        # Known variable names for MUTABLE pre-declarations and set! conversion
+        known_names = Set.new(@fn_defs.map { |d| d[/\(define (\S+)/, 1] }.compact)
+
+        # Prepend MUTABLE declarations so the parser accepts references
+        # to previously-defined variables in loops/assignments
+        mutable_decls = known_names.map { |n| "MUTABLE #{n} = 0;\n" }.join
+
         wrapped = nil
-        ["FN main() RETURNS Void -> #{stmt}\nRETURN;\nEND",
+        ["FN main() RETURNS Void -> #{mutable_decls}\n#{stmt}\nRETURN;\nEND",
          "FN main() RETURNS Void -> MUTABLE replResult = #{stmt.chomp(';')};\nRETURN;\nEND"].each do |candidate|
           begin
             transpiler_instance = SchemeTranspiler.new
@@ -258,7 +263,9 @@ class InterpreterBridge
         end
 
         # main() body is emitted as top-level expressions
+        # Strip the dummy MUTABLE declarations we prepended for parsing
         lines = wrapped.each_line.map(&:strip).reject(&:empty?)
+        lines.reject! { |l| known_names.any? { |n| l == "(define #{n} 0)" } }
       rescue => e
         puts "Parse error: #{e.message.lines.first&.strip}"
         next
@@ -268,9 +275,22 @@ class InterpreterBridge
       lines.reject! { |l| l == "nil" }
       next if lines.empty?
 
+      # Convert (define x ...) to (set! x ...) for already-defined variables
+      lines = lines.map do |l|
+        result = l
+        known_names.each do |name|
+          # Replace (define name ...) with (set! name ...) but NOT lambda defs
+          result = result.gsub(/\(define #{Regexp.escape(name)} (?!\(lambda)/, "(set! #{name} ")
+        end
+        result
+      end
+
       # Persist variable bindings
       lines.each do |l|
-        @fn_defs << l if l.start_with?("(define ") || l.start_with?("(set! ")
+        if l.start_with?("(define ")
+          @fn_defs << l
+        end
+        # Don't persist set! - the original define is already in @fn_defs
       end
 
       # Inject breakpoint prologue for breakpointed function calls
