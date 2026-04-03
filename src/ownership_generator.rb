@@ -254,7 +254,7 @@ module OwnershipGenerator
   def emit_consumed_moves(node)
     moves = []
     inner = node
-    inner = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    inner = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) || node.is_a?(AST::ReturnNode)
     inner = inner.value if inner.is_a?(AST::MoveNode)
 
     args = case inner
