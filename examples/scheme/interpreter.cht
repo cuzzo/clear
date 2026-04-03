@@ -860,6 +860,30 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value{ List: newPairs };
 
+    -- Debug introspection
+    ELSE_IF formName == "env-keys" THEN
+        RETURN Value{ Str: "(use :inspect <varname> to check specific variables)" };
+
+    ELSE_IF formName == "type-of" THEN
+        -- (type-of expr) -> string describing the type
+        val = eval!(items[1], envId, pool);
+        MATCH val START
+            Value.Nil -> RETURN Value{ Str: "Nil" };,
+            Value.TrueVal -> RETURN Value{ Str: "Bool" };,
+            Value.FalseVal -> RETURN Value{ Str: "Bool" };,
+            Value.Number -> RETURN Value{ Str: "Number" };,
+            Value.Str -> RETURN Value{ Str: "String" };,
+            Value.Symbol -> RETURN Value{ Str: "Symbol" };,
+            Value.List -> RETURN Value{ Str: "List" };,
+            Value.Vector -> RETURN Value{ Str: "Vector" };,
+            Value.Pair -> RETURN Value{ Str: "Pair" };,
+            Value.Lambda -> RETURN Value{ Str: "Function" };,
+            Value.NativeFn -> RETURN Value{ Str: "NativeFunction" };,
+            Value.Error -> RETURN Value{ Str: "Error" };,
+            DEFAULT -> RETURN Value{ Str: "Unknown" };
+        END
+        RETURN Value{ Str: "Unknown" };
+
     -- Error introspection: special forms to avoid error propagation
     ELSE_IF formName == "error?" THEN
         val = eval!(COPY items[1], envId, pool);
