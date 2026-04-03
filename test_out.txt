@@ -1,6 +1,0 @@
-Run options: include {:locations=>{"./spec/annotator_spec.rb"=>[2442]}}
-.
-
-Finished in 0.01774 seconds (files took 0.35087 seconds to load)
-1 example, 0 failures
-

@@ -1,9 +1,0 @@
-FN f() RETURNS Void ->
-    s = TCPServer::listen(8080);
-    BG { 
-        c = accept(s);
-        RETURN;
-    }
-    c2 = accept(s); -- This should be an error!
-    RETURN;
-END

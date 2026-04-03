@@ -1,6 +1,0 @@
-
-STRUCT Node { v: Number }
-FN cheatMain() ->
-    VAR x: Node;
-    print(x.v);
-END

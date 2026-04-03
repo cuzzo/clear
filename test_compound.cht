@@ -1,3 +1,0 @@
-MUTABLE x: Int64 = 10;
-x += 5;
-PRINT x;
