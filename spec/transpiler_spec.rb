@@ -638,4 +638,24 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("saveFrameMark")
     end
   end
+
+  # ===========================================================================
+  # @indirect field deep-copy in union variant construction
+  # ===========================================================================
+  describe "@indirect field deep-copy" do
+    it "emits dupeUnionValue for @indirect union field in variant construction" do
+      src = <<~CLEAR
+        STRUCT Env { x: Int64 }
+        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+        FN test!(MUTABLE pool: Env[10]@pool) RETURNS Value ->
+            pool.insert(Env{ x: 1 });
+            RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
+        END
+      CLEAR
+      zig = transpile(src)
+      # The @indirect field must deep-copy the value to avoid shared ownership.
+      # __p.* should use dupeUnionValue, not a plain assignment.
+      expect(zig).to include("dupeUnionValue")
+    end
+  end
 end

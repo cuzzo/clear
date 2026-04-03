@@ -464,9 +464,17 @@ private
       field_inits = node.fields.map do |k, v|
         val = visit(v)
         if indirect.include?(k)
-          # Heap-allocate indirect field: create pointer, assign value
+          # Heap-allocate indirect field: create pointer, deep-copy value.
+          # @indirect fields create *T heap pointers. If the source value
+          # is a union with heap data (e.g. Value.List with []Value), a
+          # shallow copy would create shared ownership. Deep-copy ensures
+          # the @indirect pointer owns independent data.
           zig_t = transpile_type(var_data[:fields][k])
-          "blk_#{k}: {\n    const __p = try #{rt_name}.heapAlloc().create(#{zig_t});\n    __p.* = #{val};\n    break :blk_#{k} __p;\n}"
+          inner_type = var_data[:fields][k]
+          inner_type_obj = inner_type.is_a?(Type) ? inner_type : Type.new(inner_type || :Any)
+          is_inner_union = @union_schemas&.key?(inner_type_obj.resolved)
+          val_expr = is_inner_union ? "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())" : val
+          "blk_#{k}: {\n    const __p = try #{rt_name}.heapAlloc().create(#{zig_t});\n    __p.* = #{val_expr};\n    break :blk_#{k} __p;\n}"
         else
           val
         end
