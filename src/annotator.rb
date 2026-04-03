@@ -1362,8 +1362,9 @@ private
       node.full_type = ret
     end
 
-    # 4. Store Zig pattern for transpiler
+    # 4. Store Zig pattern and stdlib metadata for transpiler
     node.zig_pattern = matched_def[:zig]
+    node.matched_stdlib_def = matched_def
     node.stdlib_allocates = true if matched_def[:allocates]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail])
 
@@ -3543,12 +3544,21 @@ private
   def set_cleanup_alloc!(node)
     ti = node.type_info
     return unless ti
-    # Heap allocator needed for: heap-promoted data, maps (keys duped to heap),
-    # RC/Arc (heap-allocated control blocks), sync (heap-allocated mutexes),
-    # resources, sharded collections, and structs with RC/link fields.
+
+    # Check if value comes from a stdlib function with explicit return_alloc
+    val = node.respond_to?(:value) ? node.value : nil
+    if val && (val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall))
+      matched_def = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
+      if matched_def.is_a?(Hash) && matched_def[:return_alloc]
+        ti.cleanup_alloc = matched_def[:return_alloc]
+        return
+      end
+    end
+
+    # Heap allocator needed for: heap-promoted data, maps, RC/Arc, sync,
+    # resources, sharded collections, structs with RC/link/string fields.
     needs_heap = ti.heap_promoted || ti.map? || ti.any_rc? || ti.any_sync? ||
                  ti.resource? || ti.sharded? || ti.striped? || ti.link?
-    # Check if struct has RC/link fields
     unless needs_heap
       schema = lookup_type_schema(ti.resolved) rescue nil
       if schema.is_a?(Hash) && !schema[:kind]

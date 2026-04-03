@@ -12,6 +12,7 @@ module AST
     attr_reader :coerced_type_object
     attr_reader :type_object
     attr_accessor :zig_pattern
+    attr_accessor :matched_stdlib_def  # Hash from STD_LIB entry (for return_alloc etc.)
     attr_accessor :stdlib_allocates  # true when matched stdlib entry has allocates: true
     attr_accessor :was_moved
     attr_accessor :slot_size

@@ -35,7 +35,7 @@ STD_LIB = {
   # 2. String.substr(start, len)
   "substr" => {
     args: [STRING_TYPE, :Int64, :Int64],
-    return: STRING_TYPE, # Returns new string on heap
+    return: STRING_TYPE, return_alloc: :frame, # Returns new string on heap
     # Call runtime helper: rt.substr(allocator, str, start, len)
     zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})",
     allocates: true,
@@ -57,9 +57,9 @@ STD_LIB = {
 
   # toString() (Overloaded)
   "toString" => [
-    { args: [:Int64],   return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, {0})", allocates: true },
-    { args: [:Float64], return: STRING_TYPE, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", allocates: true },
-    { args: [STRING_TYPE], return: STRING_TYPE, zig: "{0}" }
+    { args: [:Int64],   return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, {0})", allocates: true },
+    { args: [:Float64], return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", allocates: true },
+    { args: [STRING_TYPE], return: STRING_TYPE, return_alloc: :frame, zig: "{0}" }
   ],
 
   # toFloat() (Overloaded)
@@ -72,7 +72,7 @@ STD_LIB = {
   # charAt(string, index) → String — i-th codepoint (UTF-8 aware, O(n))
   "charAt" => {
     args: [STRING_TYPE, :Int64],
-    return: STRING_TYPE,
+    return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.charAtCodepoint({alloc}, {0}, {1})",
     allocates: true,
   },
@@ -108,7 +108,7 @@ STD_LIB = {
   # 4. Read File
   "readFile" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE,
+    return: STRING_TYPE, return_alloc: :heap,
     zig: "try CheatLib.readFile({alloc}, {0})",
     allocates: true,
   },
@@ -132,14 +132,14 @@ STD_LIB = {
   # 7. Join (String[] -> String)
   "join" => {
     args: [:"String[]", STRING_TYPE], # list, delimiter
-    return: STRING_TYPE,
+    return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.join({alloc}, {0}, {1})",
     allocates: true,
   },
 
   "trim" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE,
+    return: STRING_TYPE, return_alloc: :frame,
     # No 'rt.' prefix needed. We call std directly.
     zig: "std.mem.trim(u8, {0}, &std.ascii.whitespace)"
   },
@@ -213,7 +213,7 @@ STD_LIB = {
 
   "shell" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE, # Returns %String (Heap String)
+    return: STRING_TYPE, return_alloc: :frame, # Returns %String (Heap String)
     zig: "try CheatLib.shell({alloc}, {0})",
     allocates: true,
   },
@@ -222,7 +222,7 @@ STD_LIB = {
   # Usage: contents = fileReadAll(f)
   "fileReadAll" => {
     args: [:File],
-    return: STRING_TYPE,
+    return: STRING_TYPE, return_alloc: :heap,
     zig: "try CheatLib.fileReadAll({alloc}, {0})",
     allocates: true,
   },
@@ -290,7 +290,7 @@ STD_LIB = {
   # Usage: data = tcpRead(client)
   "tcpRead" => {
     args: [:TCPClient],
-    return: STRING_TYPE,
+    return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.socketRead({alloc}, {0})",
     allocates: true,
   },

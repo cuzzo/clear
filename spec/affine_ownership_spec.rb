@@ -679,4 +679,26 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # Stdlib function returning frame string stored into container
+  # ===========================================================================
+  describe "Stdlib frame string in union for HashMap" do
+    context "substr result in union without COPY" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+              s = substr("hello", 0_i64, 3_i64);
+              map["key"] = Value{ Str: s };
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error (substr returns frame string)" do
+        expect { ast }.to raise_error(/Cannot.*store.*string|COPY/)
+      end
+    end
+  end
+
 end
