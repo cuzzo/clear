@@ -1176,6 +1176,13 @@ private
       fn_node.returns_promoted = true if fn_node
     end
 
+    # RETURN COPY expr (string): the COPY heap-dupes, so the caller receives
+    # heap-allocated data. Mark returns_promoted so CleanupPlan tracks it.
+    if node.value.is_a?(AST::CopyNode) && node.value.value&.type_info&.string?
+      fn_node = @fn_nodes[current_fn_ctx&.name]
+      fn_node.returns_promoted = true if fn_node
+    end
+
     # Promote non-identifier literals to heap when the expected return type requires it.
     # handle_return_escape only handles identifier variables; literals need this explicit check.
     unless was_promoted || node.value.is_a?(AST::Identifier)

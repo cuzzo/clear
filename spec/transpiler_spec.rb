@@ -769,4 +769,59 @@ RSpec.describe ZigTranspiler do
       expect(zig).to match(/items_moved|cleanup.*items/)
     end
   end
+
+  describe "Mutable reassignment cleanup" do
+    it "emits cleanup of old value before overwriting non-Copy union" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String }
+        FN makeStr(s: String) RETURNS Value -> RETURN Value{ Str: COPY s }; END
+        FN main() RETURNS Void ->
+            MUTABLE result = makeStr("hello");
+            result = makeStr("world");
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/cleanup\(Value.*&result\).*\n.*result = /)
+    end
+  end
+
+  describe "TAKES slice needs_rt" do
+    it "generates rt parameter for function with TAKES slice" do
+      src = <<~CLEAR
+        UNION Value { Nil, Symbol: String }
+        FN process!(TAKES items: Value[]) RETURNS Float64 -> RETURN 42.0; END
+        FN main() RETURNS Void ->
+            MUTABLE list: Value[]@list = List[];
+            result = process!(list);
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("fn process(rt: *Runtime,")
+    end
+  end
+
+  describe "Heap-promoted return cleanup" do
+    it "emits cleanup for heap string returned by TAKES function" do
+      src = <<~CLEAR
+        UNION Value { Nil, Symbol: String, List: Value[] }
+        FN consume!(TAKES v: Value) RETURNS String ->
+            MATCH TAKES v START
+                Value.Symbol AS s -> RETURN COPY s;,
+                DEFAULT -> RETURN "other";
+            END
+            RETURN "?";
+        END
+        FN main() RETURNS Void ->
+            sym = Value{ Symbol: COPY "hello" };
+            result = consume!(sym);
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # result holds a heap-duped string - needs cleanup
+      expect(zig).to match(/result.*=.*consume|heapAlloc\(\)\.dupe/)
+    end
+  end
 end
