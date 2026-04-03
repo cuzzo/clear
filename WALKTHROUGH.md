@@ -104,6 +104,42 @@ END
 
 Explicit `GIVE` at the call site ensures that "data disappearance" is always visible to the reader. For more details, see [docs/sharing-capabilities.md](docs/sharing-capabilities.md).
 
+### Parameter Ownership
+
+Function parameters are **implicit borrows** by default. Only `TAKES` transfers ownership.
+
+| Param Style | Ownership | Can Move Into Container? | Can Mutate? |
+| :--- | :--- | :--- | :--- |
+| `v: Value` | Borrow | No | No |
+| `MUTABLE v: Value` | Borrow | No | Yes |
+| `TAKES v: Value` | Owned | Yes | No |
+| `TAKES MUTABLE v: Value` | Owned | Yes | Yes |
+
+```ruby clear
+UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect } }
+
+-- Borrow: can read, cannot store or move
+FN inspect(v: Value) RETURNS String ->
+    MATCH v START
+        Value.Num AS n -> RETURN n.toString();,
+        DEFAULT -> RETURN "other";
+    END
+END
+
+-- Owned: can store into collections
+FN store!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+    map["item"] = v;                -- OKAY: v is owned via TAKES
+    RETURN;
+END
+
+FN bad!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+    map["item"] = v;                -- COMPILER ERROR: Cannot move borrowed value 'v'
+    RETURN;
+END
+```
+
+**Zero implicit copies.** Copy types (primitives, strings, enums) can be freely used after assignment. Non-Copy types (unions with `@indirect` or `[]T` variants, structs with heap data) follow move semantics. There are never implicit deep copies.
+
 ## 5. Sharded Shared-Nothing Architecture
 
 The `@sharded` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
@@ -228,6 +264,46 @@ FN main() RETURNS Void ->
         Result.Empty -> print("nothing");
     END
     RETURN;
+END
+```
+
+### MATCH AS and Ownership
+
+`MATCH ... AS` payload extraction follows the same ownership rules as parameters. The binding is a **borrow** of the source by default, or a **move** if the source is owned.
+
+| Source Ownership | MATCH AS Produces | Can Store in Struct? |
+| :--- | :--- | :--- |
+| Borrowed (parameter, `map.get`) | Borrow | No |
+| Owned (local, TAKES param) | Move (consumes source) | Yes |
+
+```ruby clear
+UNION Value { Nil, Num: Float64, List: Value[] }
+
+-- Borrowed source: MATCH AS produces a borrow
+FN sum(v: Value) RETURNS Float64 ->
+    MATCH v START
+        Value.List AS items ->       -- items is &[]Value (borrow)
+            RETURN items.length();   -- OKAY: reading a borrow
+        DEFAULT -> RETURN 0.0;
+    END
+END
+
+-- Owned source: MATCH AS moves the payload
+FN take!(TAKES v: Value) RETURNS Value[] ->
+    MATCH v START
+        Value.List AS items ->       -- items is []Value (owned, v consumed)
+            RETURN items;            -- OKAY: returning owned data
+        DEFAULT -> RETURN List[];
+    END
+END
+```
+
+Storing a borrowed `MATCH AS` binding into a struct or union variant is a compile error:
+
+```ruby clear
+FN bad(items: Value[]) RETURNS Value ->
+    -- items is a borrowed parameter
+    RETURN Value.Lambda{ params: items };  -- COMPILER ERROR: Cannot store borrowed 'items'
 END
 ```
 
