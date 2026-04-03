@@ -112,16 +112,58 @@ These are standard Scheme/Mal features that the transpiler will never emit:
    in the interpreter - the pool can't be shared across BG fibers without it.
    Workaround: sequential fake concurrency (BG evals immediately).
 
-7. **Early return in functions** - `IF cond THEN RETURN val; END RETURN other;` transpiles
-   to `(if cond val nil) other` which always evaluates `other`. The Scheme tree-walker
-   has no early-return mechanism. Needs either: continuation-based return, or the
-   transpiler restructuring the body as nested if/else chains.
-   Affects: 55_generic_union and any function with conditional early returns.
+7. **Early return in functions** - FIXED in Commit 27. Transpiler restructures
+   IF...RETURN...END patterns into nested if/else chains.
 
 8. **Nested list arena lifetime** - Vectors/lists inside other lists (e.g., list of structs
    returned from list-index grouping) hit use-after-free when accessed after the creating
    function returns. Related to bug #2 but specifically for nested collections.
    Affects: 25_index field access, 29_unnest (double free).
+
+## Debugger Plan
+
+### Phase 1: File-based IPC (stub, no compiler changes)
+
+The interpreter uses readFile/writeFile to communicate with the Ruby wrapper:
+
+1. Breakpoint check in eval loop: when entering a function in the breakpoint set,
+   the interpreter writes env state to `_debug_env.txt` and function name to
+   `_debug_break.txt`, then polls `_debug_cmd.txt` for commands.
+2. Ruby wrapper polls `_debug_break.txt`. When a break is detected, enters debug
+   REPL. User commands are written to `_debug_cmd.txt`.
+3. Interpreter reads command, processes (inspect var, dump locals, eval expression),
+   writes response to `_debug_resp.txt`. Loops until `:continue`.
+4. On `:continue`, interpreter clears break file and resumes eval.
+
+This gives: breakpoints, variable inspection, expression eval at break, call stack
+display, continue. All without readLine.
+
+### Phase 2: readLine-based (requires compiler change)
+
+Add `readLine` to CLEAR stdlib (~10 lines of Zig):
+```zig
+pub fn readLine(alloc: Allocator) ![]const u8 {
+    return std.io.getStdIn().reader().readUntilDelimiterAlloc(alloc, '\n', 4096);
+}
+```
+
+Replace file polling with direct stdin reading. Same debug commands, no temp files,
+lower latency. The interpreter's debug REPL reads from stdin directly.
+
+### Phase 3: Persistent interpreter process
+
+Compile the interpreter ONCE with a stdin-reading main loop. The Ruby wrapper pipes
+S-expressions via stdin, reads results from stdout. Process stays alive across
+interactions:
+- Eliminates 2-second compile latency per REPL interaction
+- Eliminates arena lifetime issues (single process = persistent memory)
+- Debug pausing is natural (process blocks on readLine)
+- Full CLEAR runtime access maintained throughout
+
+## Compiler Changes Needed
+
+- **readLine** - add to std_lib.rb + runtime-header.zig (Phase 2+3)
+- **@pool + @shared:locked** - fix capability composition for real concurrency (bug #6)
 
 ## Future (Post-VM)
 
