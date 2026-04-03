@@ -701,4 +701,49 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "Container Borrow (HashMap.get)" do
+    context "when reading a non-Copy union from a HashMap" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN test!(MUTABLE map: HashMap<Value>) RETURNS String ->
+              val = map["t0"] OR Value.Nil;
+              MATCH val START
+                  Value.Str AS s -> RETURN s;,
+                  DEFAULT -> RETURN "";
+              END
+              RETURN "";
+          END
+        CLEAR
+      }
+
+      it "marks the binding as container_borrow" do
+        fn = ast[1].find { |n| n.is_a?(AST::FunctionDef) && n.name == "test!" }
+        bind = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == "val" }
+        expect(bind.container_borrow).to eq(true)
+      end
+    end
+
+    context "when binding from a function call (not container)" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN makeVal() RETURNS Value ->
+              RETURN Value.Nil;
+          END
+          FN test() RETURNS Void ->
+              val = makeVal();
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "does NOT mark as container_borrow" do
+        fn = ast[1].find { |n| n.is_a?(AST::FunctionDef) && n.name == "test" }
+        bind = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == "val" }
+        expect(bind.container_borrow).to be_nil
+      end
+    end
+  end
+
 end

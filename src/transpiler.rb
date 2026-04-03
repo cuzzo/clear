@@ -280,6 +280,21 @@ class ZigTranspiler
 
 private
 
+  # Compute cleanup plans from the annotated AST if not already done.
+  # Called from visit_node(Program) to handle specs that bypass `transpile`.
+  def ensure_cleanup_plans!(program_node)
+    return if @cleanup_plans && !@cleanup_plans.empty?
+    @cleanup_plans ||= {}
+    @promotion_plans ||= {}
+    fn_nodes = {}
+    program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+    fn_nodes.each do |name, fn|
+      @promotion_plans[name] ||= PromotionPlan.compute(fn, schema_lookup: schema_lookup)
+      @cleanup_plans[name] ||= CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    end
+  end
+
   def visit(node)
     code = visit_node(node)
     # SROA path: stack-allocated fixed-array literals are emitted as raw [N]T{...} which
@@ -297,6 +312,9 @@ private
     case node
     when AST::Program
       @emitted_extern_modules = Set.new
+      # Ensure cleanup plans are computed (needed when visit is called directly
+      # without going through the transpile method, e.g. from specs).
+      ensure_cleanup_plans!(node)
       node.statements.map { |stmt|
         code = visit(stmt)
         next nil unless code
@@ -654,25 +672,16 @@ private
         .map    { |name| "var #{name} = _m_#{name}; _ = &#{name};" }
         .join("\n    ")
 
-      # Emit cleanup for TAKES parameters that receive heap-promoted data.
-      # Only strings and resources need explicit cleanup — stack structs are value copies.
+      # Emit cleanup for TAKES parameters via CleanupPlan.
+      fn_plan = @cleanup_plans&.dig(node.name)
       takes_cleanup = (node.deferred_drops || []).filter_map { |drop|
         param_def = node.params.find { |p| p[:name] == drop[:name] }
         next unless param_def&.dig(:takes)
+        entry = fn_plan&.lookup(drop[:name])
+        next unless entry && entry[:needs_cleanup]
         ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
-        schema = (@struct_schemas || {})[ti.resolved]
-        is_resource = schema.is_a?(Hash) && schema[:kind] == :resource
-        is_union = @union_schemas&.key?(ti.resolved)
-        if is_union
-          zig_t = transpile_type(ti)
-          safe = zig_safe_name(drop[:name])
-          next "var #{safe}_moved = false; _ = &#{safe}_moved;\ndefer if (!#{safe}_moved) CheatLib.cleanup(#{zig_t}, rt.heapAlloc(), &#{safe});\n"
-        end
-        next unless ti.string? || is_resource
-        ti.heap_promoted = true
-        proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, nil)
-        proxy.resource_close_zig = schema[:close_zig] if is_resource
-        emit_cleanup(drop[:name], proxy)
+        proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, entry[:resource_close_zig], false)
+        emit_cleanup_from_entry(zig_safe_name(drop[:name]), entry, proxy)
       }.reject(&:empty?).join("\n    ")
 
       prologue_parts = [prologue,
@@ -962,6 +971,7 @@ private
         proxy.slot_size          = node.slot_size
         proxy.resource_close_zig = node.resource_close_zig
         proxy.var_used           = node.var_used
+        proxy.container_borrow   = node.container_borrow
         visit(proxy)
       else
         # Transpile as simple assignment
@@ -1314,18 +1324,22 @@ private
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
               binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
 
-              # Emit cleanup for the AS binding using the source's cleanup allocator.
-              source_ti = node.expr.type_info
-              alloc_expr = source_ti ? cleanup_alloc_expr(source_ti) : "rt.frameAlloc()"
-              variant_schema = @union_schemas&.dig(union_lookup, variant)
-              if variant_schema && !variant_schema.is_a?(Hash)
-                payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
-                if payload_t&.array? && !payload_t&.string?
-                  elem_zig = transpile_type(payload_t.element_type)
-                  binding_decl += "defer { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc_expr}, __e); } } if (#{c[:binding]}.len > 0) #{alloc_expr}.free(#{c[:binding]}); }\n    "
+              # Emit cleanup for the AS binding via CleanupPlan.
+              fn_name = current_tp_ctx&.fn_name
+              as_entry = @cleanup_plans&.dig(fn_name)&.lookup(c[:binding])
+              if as_entry && as_entry[:needs_cleanup]
+                as_alloc = alloc_expr_from_plan(as_entry)
+                case as_entry[:kind]
+                when :match_as_slice
+                  variant_schema = @union_schemas&.dig(union_lookup, variant)
+                  payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
+                  elem_zig = transpile_type(payload_t&.element_type)
+                  binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
+                  binding_decl += "defer if (!#{c[:binding]}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{as_alloc}, __e); } } if (#{c[:binding]}.len > 0) #{as_alloc}.free(#{c[:binding]}); };\n    "
+                when :match_as_inline_struct
+                  binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
+                  binding_decl += "defer if (!#{c[:binding]}_moved) #{c[:binding]}.deinit(#{as_alloc});\n    "
                 end
-              elsif variant_schema.is_a?(Hash) && variant_schema[:kind] == :inline_struct
-                binding_decl += "defer #{c[:binding]}.deinit(#{alloc_expr});\n    "
               end
             end
             body = "#{binding_decl}#{body}"
@@ -2173,13 +2187,9 @@ private
       if node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
         node.value.args.each do |a|
           next unless a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier)
-          sym = a.respond_to?(:symbol) ? a.symbol : nil
-          decl = sym&.reg
-          is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
           fn_name = current_tp_ctx&.fn_name
-          plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(a.name)
-          has_guard = is_local && (sym&.mutable || plan_entry)
-          suppress = "#{zig_safe_name(a.name)}_moved = true;\n#{suppress}" if has_guard
+          entry = @cleanup_plans&.dig(fn_name)&.lookup(a.name)
+          suppress = "#{zig_safe_name(a.name)}_moved = true;\n#{suppress}" if entry && entry[:has_moved_guard]
         end
       end
       val_code = if node.value.nil?
@@ -3828,19 +3838,18 @@ private
       # Resource types get their CLOSE method via the type schema.
       temps = ctx&.pending_heap_temps || []
       if temps.any?
+        schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
         preamble = temps.map { |t|
           ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
           ti.heap_promoted = true
           zig_t = ti.zig_type
-          # Look up resource CLOSE from type schema (same as resolve_resource_close)
-          resource_close = nil
-          resolved = ti.resolved
-          schema = (@struct_schemas || {})[resolved]
-          if schema.is_a?(Hash) && schema[:kind] == :resource
-            resource_close = schema[:close_zig]
+          entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
+          if entry
+            proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, nil, false)
+            cleanup = emit_cleanup_from_entry(t[:var], entry, proxy)
+          else
+            cleanup = ""
           end
-          proxy = Struct.new(:type_info, :storage, :resource_close_zig).new(ti, :heap, resource_close)
-          cleanup = emit_cleanup(t[:var], proxy)
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
         code = "#{preamble}\n#{code}"

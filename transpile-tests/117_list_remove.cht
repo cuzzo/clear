@@ -1,0 +1,14 @@
+-- Test: list.remove(i) returns the removed element
+
+FN main() RETURNS Void ->
+    MUTABLE items: Float64[]@list = List[];
+    items.append(10.0);
+    items.append(20.0);
+    items.append(30.0);
+
+    removed = items.remove(1_i64);
+    ASSERT removed == 20.0, "removed element should be 20";
+    ASSERT items.length() == 2, "list should have 2 elements after remove";
+
+    RETURN;
+END

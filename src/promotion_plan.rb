@@ -7,11 +7,11 @@ require_relative "type"
 # mechanically with zero decisions.
 #
 # Zig's CheatLib.promote(T, rt, &x) handles the type-specific logic:
-#   ArrayList  → promoteList (dupes .items to heap)
-#   StringMap  → .alloc = heapAlloc (O(1) pointer swap)
-#   String     → heapAlloc.dupe (O(N) copy)
-#   Struct     → recurse fields
-#   Union      → promote active variant
+#   ArrayList  -> promoteList (dupes .items to heap)
+#   StringMap  -> .alloc = heapAlloc (O(1) pointer swap)
+#   String     -> heapAlloc.dupe (O(N) copy)
+#   Struct     -> recurse fields
+#   Union      -> promote active variant
 #
 # Ruby just decides WHICH variables/values to call it on.
 
@@ -74,7 +74,7 @@ class PromotionPlan
   # Compute a promotion plan for a single function.
   #
   # @param fn_node [AST::FunctionDef] the annotated function
-  # @param schema_lookup [Proc] lambda(type_name_sym) → schema hash or nil
+  # @param schema_lookup [Proc] lambda(type_name_sym) -> schema hash or nil
   # @return [PromotionPlan]
   def self.compute(fn_node, schema_lookup:)
     # Gate: if the function never allocates AND isn't marked returns_promoted
@@ -210,20 +210,29 @@ class PromotionPlan
   end
 end
 
+# =========================================================================
 # Pass C (caller side): Cleanup Planning
 #
-# For each function, decides which local bindings need defer cleanup
-# and with what allocator. Replaces the decision logic in emit_cleanup
-# (ownership_generator.rb) with a testable, declarative plan.
+# THE SINGLE AUTHORITY for all cleanup decisions. Every defer/cleanup
+# emission in the transpiler consults this plan. No re-inference.
 #
-# The plan answers: "does this binding ever hold heap data that must be freed?"
-# It uses:
-#   - Type information (collection?, map?, rc?, etc.)
-#   - Call graph (does the binding receive a returns_promoted call result?)
-#   - Schema lookup (does the union/struct have heap variants?)
-
+# Per-binding entry:
+#   needs_cleanup:  true/false       - whether a defer is emitted
+#   alloc:          :heap/:frame     - which allocator
+#   kind:           symbol           - drives Zig template selection
+#   has_moved_guard: true/false      - whether var X_moved = false is emitted
+#   source_kind:    symbol           - :local/:takes_param/:match_as/:container_borrow
+#
+# Data sources (all from annotator, no re-inference):
+#   - type_info (cleanup_alloc, collection?, map?, etc.)
+#   - node.container_borrow (set by register_container_borrow!)
+#   - type_info.escaped_return (set by mark_symbol_escaped!)
+#   - node.resource_close_zig (set by annotator)
+#   - deferred_drops (TAKES params)
+#   - MatchStatement cases with bindings + was_moved
+#   - union/struct schemas (for non-Copy checks)
+# =========================================================================
 class CleanupPlan
-  # Hash of var_name => { alloc: :heap/:frame, kind: symbol }
   attr_reader :bindings
 
   def initialize(bindings: {})
@@ -232,33 +241,80 @@ class CleanupPlan
 
   EMPTY = new.freeze
 
+  # Look up the cleanup entry for a binding by name.
+  def lookup(name)
+    @bindings[name.to_s]
+  end
+
   # Compute cleanup plan for a function.
   #
   # @param fn_node [AST::FunctionDef]
-  # @param fn_nodes [Hash] name => FunctionDef for all functions (for returns_promoted lookup)
+  # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
   def self.compute(fn_node, fn_nodes:, schema_lookup:)
     return EMPTY unless fn_node.body
 
-    # Build set of function names that return promoted data (transitively).
     promoted_fns = compute_promoted_fns(fn_nodes)
-
     bindings = {}
 
-    # Walk all declarations and assignments in the function body.
+    # 1. Walk all VarDecl/BindExpr in the function body.
     walk_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
+
+    # 2. TAKES parameters from deferred_drops.
+    walk_takes_params(fn_node, schema_lookup, bindings)
+
+    # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
+    walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
 
     bindings.empty? ? EMPTY : new(bindings: bindings)
   end
 
+  # Classify a heap-promoted temporary (generated during transpilation,
+  # not during annotation). Uses the same classification logic as the
+  # main plan but for synthetically created entries.
+  def self.classify_heap_temp(ti, schema_lookup)
+    return nil unless ti
+    ti = Type.new(ti) if !ti.is_a?(Type)
+
+    if ti.string?
+      return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :heap_temp }
+    end
+
+    resolved = ti.resolved
+    schema = schema_lookup.call(resolved) rescue nil
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      if has_heap
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :heap_temp }
+      end
+    end
+
+    if ti.array? && !ti.collection?
+      return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :heap_temp }
+    end
+
+    if schema.is_a?(Hash) && !schema[:kind]
+      has_escapable = schema.any? do |k, v|
+        next false if k.is_a?(Symbol)
+        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+        ft.needs_escape_promotion?
+      end
+      if has_escapable
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_struct, has_moved_guard: true, source_kind: :heap_temp }
+      end
+    end
+
+    nil
+  end
+
   private
 
-  # Compute the transitive closure of returns_promoted functions.
+  # ── Promoted function detection ──────────────────────────────────
+
   def self.compute_promoted_fns(fn_nodes)
     promoted = Set.new
     fn_nodes.each { |name, fn| promoted << name if fn.returns_promoted }
 
-    # Transitive: if fn returns a call to a promoted fn, fn is also promoted.
     changed = true
     while changed
       changed = false
@@ -274,7 +330,6 @@ class CleanupPlan
     promoted
   end
 
-  # Check if a function body has a RETURN of a call to a promoted function.
   def self.body_calls_promoted?(body, promoted)
     nodes = body.is_a?(Array) ? body : [body]
     nodes.any? do |node|
@@ -294,12 +349,16 @@ class CleanupPlan
     end
   end
 
-  # Walk function body, find bindings that need cleanup.
+  # ── Walk VarDecl / BindExpr ──────────────────────────────────────
+
   def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each do |node|
       case node
       when AST::VarDecl, AST::BindExpr
+        # Skip reassignments (mode: :assign) - only declarations create entries
+        next if node.is_a?(AST::BindExpr) && node.mode == :assign
+
         var_name = node.name.is_a?(String) ? node.name : node.name.to_s
         ti = node.type_info
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
@@ -321,42 +380,213 @@ class CleanupPlan
     end
   end
 
-  # Decide if a binding needs cleanup and with what allocator.
-  # Returns { alloc: :heap/:frame, kind: symbol } or nil.
+  # ── Walk TAKES parameters ───────────────────────────────────────
+
+  def self.walk_takes_params(fn_node, schema_lookup, bindings)
+    drops = fn_node.deferred_drops || []
+    drops.each do |drop|
+      param_def = fn_node.params.find { |p| p[:name] == drop[:name] }
+      next unless param_def&.dig(:takes)
+
+      ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
+      name = drop[:name].to_s
+
+      schema = schema_lookup.call(ti.resolved) rescue nil
+      is_resource = schema.is_a?(Hash) && schema[:kind] == :resource
+      is_union = schema.is_a?(Hash) && schema[:kind] == :union
+
+      if is_resource
+        close_zig = schema[:close_zig]
+        bindings[name] = {
+          needs_cleanup: true, alloc: :heap, kind: :resource,
+          has_moved_guard: true, source_kind: :takes_param,
+          resource_close_zig: close_zig
+        }
+      elsif is_union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        if has_heap
+          bindings[name] = {
+            needs_cleanup: true, alloc: :heap, kind: :takes_union,
+            has_moved_guard: true, source_kind: :takes_param
+          }
+        end
+      elsif ti.string?
+        bindings[name] = {
+          needs_cleanup: true, alloc: :heap, kind: :takes_string,
+          has_moved_guard: true, source_kind: :takes_param
+        }
+      end
+    end
+  end
+
+  # ── Walk MATCH AS bindings ──────────────────────────────────────
+
+  def self.walk_match_as_bindings(body, schema_lookup, bindings)
+    return unless body
+    nodes = body.is_a?(Array) ? body : [body]
+    nodes.each do |node|
+      case node
+      when AST::MatchStatement
+        next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+
+        # Resolve the union schema for the MATCH source
+        source_ti = node.expr.type_info
+        source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
+        union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
+        schema = schema_lookup.call(union_lookup) rescue nil
+        next unless schema.is_a?(Hash) && schema[:kind] == :union
+
+        # Determine allocator from source's cleanup_alloc
+        source_alloc = source_ti&.cleanup_alloc || :frame
+
+        (node.cases || []).each do |c|
+          next unless c[:binding]
+          variant_name = case c[:value]
+                         when AST::GetField then c[:value].field
+                         when AST::MethodCall then c[:value].name
+                         else nil
+                         end
+          next unless variant_name
+
+          variant_type = (schema[:variants] || {})[variant_name]
+          next unless variant_type
+
+          # Classify the payload
+          if variant_type.is_a?(Hash) && variant_type[:kind] == :inline_struct
+            # Inline struct variant with deinit
+            has_heap = Type.variant_has_heap?(variant_type)
+            if has_heap
+              bindings[c[:binding]] = {
+                needs_cleanup: true, alloc: source_alloc, kind: :match_as_inline_struct,
+                has_moved_guard: true, source_kind: :match_as
+              }
+            end
+          else
+            pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type || :Any)
+            # Match the annotator's move criteria (annotator.rb ~line 717):
+            # slices, collections, maps need cleanup when extracted from a moved union
+            needs_as_cleanup = (pt.array? && !pt.string?) || pt.collection? || pt.map?
+
+            if needs_as_cleanup
+              if pt.array? && !pt.string?
+                bindings[c[:binding]] = {
+                  needs_cleanup: true, alloc: source_alloc, kind: :match_as_slice,
+                  has_moved_guard: true, source_kind: :match_as
+                }
+              end
+            end
+          end
+
+          # Recurse into branch body
+          walk_match_as_bindings(c[:body], schema_lookup, bindings)
+        end
+        walk_match_as_bindings(node.default_case, schema_lookup, bindings) if node.default_case
+
+      when AST::IfStatement
+        walk_match_as_bindings(node.then_branch, schema_lookup, bindings)
+        walk_match_as_bindings(node.else_branch, schema_lookup, bindings)
+      when AST::WhileLoop
+        walk_match_as_bindings(node.do_branch, schema_lookup, bindings)
+      else
+        walk_match_as_bindings(node.body, schema_lookup, bindings) if node.respond_to?(:body) && node.body
+      end
+    end
+  end
+
+  # ── classify_binding: THE single decision point ─────────────────
+
   def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
 
-    # Escaped via return — cleanup suppressed (caller takes ownership)
+    # Container borrows: data owned by container, no cleanup
+    if node.respond_to?(:container_borrow) && node.container_borrow
+      return nil
+    end
+
+    # Escaped via return: caller takes ownership, no cleanup
     return nil if ti.escaped_return && (ti.collection? || ti.string?)
 
-    # Resource: handled separately by emit_cleanup (not in plan yet)
-    return nil if node.respond_to?(:resource_close_zig) && node.resource_close_zig
+    # Resources: close on scope exit
+    if node.respond_to?(:resource_close_zig) && node.resource_close_zig
+      return {
+        needs_cleanup: true, alloc: :heap, kind: :resource,
+        has_moved_guard: true, source_kind: :local,
+        resource_close_zig: node.resource_close_zig
+      }
+    end
 
-    # Collections: always need cleanup
-    return { alloc: :frame, kind: :list } if ti.list_collection? && !ti.sharded? && !ti.heap_promoted
-    return { alloc: :heap, kind: :list } if ti.list_collection?
-    return { alloc: :heap, kind: :string_map } if ti.map? && !ti.numeric_map?
-    return { alloc: :heap, kind: :numeric_map } if ti.numeric_map?
-    return { alloc: :heap, kind: :pool } if ti.pool?
-    return { alloc: :heap, kind: :set } if ti.set_collection?
+    # ── Collections ────────────────────────────────────────────────
 
-    # RC/link: always need cleanup
-    return { alloc: :heap, kind: :rc } if ti.any_rc? || ti.link?
+    if ti.list_collection? && !ti.sharded? && !ti.heap_promoted
+      # Check if elements need cleanup (union elements with heap variants)
+      elem_type = ti.element_type
+      elem_resolved = elem_type&.resolved
+      elem_schema = schema_lookup.call(elem_resolved) rescue nil
+      has_heap_elems = elem_schema.is_a?(Hash) && elem_schema[:kind] == :union &&
+        (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
 
-    # Sync (locked/write_locked)
-    return { alloc: :heap, kind: :locked } if ti.locked?
-    return { alloc: :heap, kind: :write_locked } if ti.write_locked?
+      return {
+        needs_cleanup: true, alloc: :frame, kind: has_heap_elems ? :list_with_elem_cleanup : :list,
+        has_moved_guard: true, source_kind: :local,
+        elem_needs_cleanup: has_heap_elems
+      }
+    end
 
-    # Heap-promoted bindings (from returns_promoted callee)
+    if ti.list_collection?
+      return { needs_cleanup: true, alloc: :heap, kind: :list, has_moved_guard: !ti.sharded?, source_kind: :local }
+    end
+
+    if ti.map? && !ti.numeric_map?
+      if ti.shared?
+        return { needs_cleanup: true, alloc: :heap, kind: :rc, has_moved_guard: true, source_kind: :local }
+      end
+      return { needs_cleanup: true, alloc: :heap, kind: :string_map, has_moved_guard: true, source_kind: :local }
+    end
+
+    if ti.numeric_map?
+      return { needs_cleanup: true, alloc: :frame, kind: :numeric_map, has_moved_guard: true, source_kind: :local }
+    end
+
+    if ti.pool?
+      return { needs_cleanup: true, alloc: ti.cleanup_alloc || :heap, kind: :pool, has_moved_guard: false, source_kind: :local }
+    end
+
+    if ti.set_collection?
+      return { needs_cleanup: true, alloc: ti.cleanup_alloc || :heap, kind: :set, has_moved_guard: false, source_kind: :local }
+    end
+
+    # ── RC / Link ─────────────────────────────────────────────────
+
+    if ti.any_rc? || ti.link?
+      return { needs_cleanup: true, alloc: :heap, kind: :rc, has_moved_guard: true, source_kind: :local }
+    end
+
+    # ── Sync (Locked / RwLocked) ──────────────────────────────────
+
+    if ti.locked?
+      return { needs_cleanup: true, alloc: :heap, kind: :locked, has_moved_guard: true, source_kind: :local }
+    end
+    if ti.write_locked?
+      return { needs_cleanup: true, alloc: :heap, kind: :write_locked, has_moved_guard: true, source_kind: :local }
+    end
+
+    # ── Heap-promoted bindings ────────────────────────────────────
+
     if ti.heap_promoted
-      return { alloc: :heap, kind: :heap_string } if ti.string?
-      return { alloc: :heap, kind: :heap_slice } if ti.array? && !ti.collection?
-      # Union/struct with heap data
+      if ti.string?
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
+      end
+      if ti.array? && !ti.collection?
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :local }
+      end
+
       resolved = ti.resolved
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash) && schema[:kind] == :union
         has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        return { alloc: :heap, kind: :heap_union } if has_heap
+        if has_heap
+          return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :local }
+        end
       end
       if schema.is_a?(Hash) && !schema[:kind]
         has_escapable = schema.any? do |k, v|
@@ -364,39 +594,65 @@ class CleanupPlan
           ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
           ft.needs_escape_promotion?
         end
-        return { alloc: :heap, kind: :heap_struct } if has_escapable
+        if has_escapable
+          return { needs_cleanup: true, alloc: :heap, kind: :heap_struct, has_moved_guard: true, source_kind: :local }
+        end
       end
     end
 
     # Check if binding receives a call to a returns_promoted function
-    # (even if heap_promoted wasn't set by walk_promote_callers)
     val = node.respond_to?(:value) ? node.value : nil
     if val.is_a?(AST::FuncCall) && promoted_fns.include?(val.name)
       resolved = ti.resolved
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash) && schema[:kind] == :union
         has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        return { alloc: :heap, kind: :heap_union } if has_heap
+        if has_heap
+          return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :local }
+        end
       end
-      return { alloc: :heap, kind: :heap_slice } if ti.array? && !ti.collection?
+      if ti.array? && !ti.collection?
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :local }
+      end
     end
 
-    # Struct with RC/link fields
+    # ── Heap storage plain struct ─────────────────────────────────
+    # Must come before struct_with_cleanup_fields because @alwaysMutable
+    # and @indirect create *RefCell(T) / *T heap pointers. These need
+    # CheatLib.free(rt, name), not CheatLib.cleanup(T, alloc, &name).
+
+    storage = node.respond_to?(:storage) ? node.storage : nil
+    is_locked_sync = ti.locked? || ti.write_locked?
+    if storage == :heap && !ti.any_rc? && !is_locked_sync && !ti.link?
+      return { needs_cleanup: true, alloc: :heap, kind: :heap_struct_plain, has_moved_guard: true, source_kind: :local }
+    end
+
+    # ── Struct with RC/link/string fields ─────────────────────────
+
     resolved = ti.resolved
     schema = schema_lookup.call(resolved) rescue nil
     if schema.is_a?(Hash) && !schema[:kind]
-      has_rc = schema.any? do |k, v|
+      has_cleanup_fields = schema.any? do |k, v|
         next false if k.is_a?(Symbol)
-        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
-        ft.link? || ft.any_rc?
+        ft = v.is_a?(Hash) ? v[:type] : v
+        t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+        t.link? || t.any_rc? || t.string?
       end
-      return { alloc: :heap, kind: :struct_rc } if has_rc
+      if has_cleanup_fields
+        alloc = ti.cleanup_alloc || :heap
+        return { needs_cleanup: true, alloc: alloc, kind: :struct_with_cleanup_fields, has_moved_guard: true, source_kind: :local }
+      end
     end
 
-    # Heap storage plain struct
-    storage = node.respond_to?(:storage) ? node.storage : nil
-    if storage == :heap && !ti.any_rc? && !ti.any_sync? && !ti.link?
-      return { alloc: :heap, kind: :heap_struct_plain }
+    # ── Non-Copy unions on stack ──────────────────────────────────
+
+    schema = schema_lookup.call(ti.resolved) rescue nil
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
+      unless is_copy
+        alloc = ti.cleanup_alloc || :frame
+        return { needs_cleanup: true, alloc: alloc, kind: :non_copy_union, has_moved_guard: true, source_kind: :local }
+      end
     end
 
     nil

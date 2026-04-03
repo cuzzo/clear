@@ -1,0 +1,25 @@
+-- Minimal reproducer: store COPY'd strings into HashMap in WHILE loop,
+-- then read them back. Tests that loop frame rewind doesn't corrupt
+-- heap-owned strings in the HashMap.
+
+UNION Value { Nil, Str: String, Num: Float64 }
+
+FN main() RETURNS Void ->
+    MUTABLE map: HashMap<Value> = {};
+    MUTABLE i: Int64 = 0;
+    WHILE i < 3 DO
+        c = charAt("abc", i);
+        map["t" + i.toString()] = Value{ Str: COPY c };
+        i += 1;
+    END
+
+    v0 = map["t0"] OR Value.Nil;
+    v1 = map["t1"] OR Value.Nil;
+    v2 = map["t2"] OR Value.Nil;
+
+    MATCH v0 START Value.Str AS s -> ASSERT s == "a", "t0=a";, DEFAULT -> ASSERT FALSE, "t0 missing"; END
+    MATCH v1 START Value.Str AS s -> ASSERT s == "b", "t1=b";, DEFAULT -> ASSERT FALSE, "t1 missing"; END
+    MATCH v2 START Value.Str AS s -> ASSERT s == "c", "t2=c";, DEFAULT -> ASSERT FALSE, "t2 missing"; END
+
+    RETURN;
+END

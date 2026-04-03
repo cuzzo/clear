@@ -313,6 +313,7 @@ module GenericAnalysis
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
     @og[var_name]&.kind = :borrowed
+    node.container_borrow = true
   end
 
   # Walk through OR/OR_RESCUE to find the root container variable name.

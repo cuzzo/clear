@@ -954,7 +954,7 @@ class Type
     end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
-    (t.collection? || t.map? || (t.array? && !t.fixed?)) rescue false
+    (t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
   end
 
   # Custom setter for location that invalidates zig_type cache

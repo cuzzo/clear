@@ -1,0 +1,23 @@
+-- Minimal: HashMap<Value> with union, extract string manually.
+
+UNION Value { Nil, Str: String }
+
+FN readStrDirect!(MUTABLE map: HashMap<Value>) RETURNS String ->
+    val = map["t0"] OR Value.Nil;
+    MATCH val START
+        Value.Str AS s -> RETURN s;,
+        DEFAULT -> RETURN "";
+    END
+    RETURN "";
+END
+
+FN main() RETURNS Void ->
+    MUTABLE map: HashMap<Value> = {};
+    map["t0"] = Value{ Str: COPY "hello" };
+
+    result = readStrDirect!(map);
+    print(result);
+    ASSERT result == "hello", "direct fn";
+
+    RETURN;
+END
