@@ -2245,9 +2245,9 @@ private
       when :INT64 then :Int64
       when :STRING
         if node.storage == :stack
-          :"Byte[#{node.value.length}]"
+          Type.new(:"Byte[#{node.value.length}]", location: :rodata)
         else
-          Type.new(Type::STRING_TYPE, location: :heap)
+          Type.new(Type::STRING_TYPE, location: :rodata)
         end
       when :BYTE    then :Byte
       when :INT8    then :Int8

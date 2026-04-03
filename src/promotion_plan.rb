@@ -657,11 +657,24 @@ class CleanupPlan
     resolved = ti.resolved
     schema = schema_lookup.call(resolved) rescue nil
     if schema.is_a?(Hash) && !schema[:kind]
+      # Check actual construction values: rodata string fields don't need cleanup.
+      struct_lit = node.respond_to?(:value) && node.value.is_a?(AST::StructLit) ? node.value : nil
       has_cleanup_fields = schema.any? do |k, v|
         next false if k.is_a?(Symbol)
         ft = v.is_a?(Hash) ? v[:type] : v
         t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-        t.link? || t.any_rc? || t.string?
+        next true if t.link? || t.any_rc?
+        if t.string?
+          # Check if the actual value for this field is rodata (no cleanup needed)
+          if struct_lit
+            fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
+            fval_ti = fval&.type_info
+            fval_ti = Type.new(fval_ti) if fval_ti && !fval_ti.is_a?(Type)
+            next false if fval_ti&.rodata?
+          end
+          next true
+        end
+        false
       end
       if has_cleanup_fields
         alloc = ti.cleanup_alloc || :heap

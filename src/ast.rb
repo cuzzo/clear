@@ -146,6 +146,8 @@ module AST
         t.ownership = :shared
       when :link
         t.ownership = :link
+      when :rodata
+        t.location = :rodata        # string literal — static data, never freed
       when :frame
         t.location = :frame         # marks variable as frame-arena pointer (*T in Zig)
       when :heap

@@ -461,6 +461,10 @@ class Type
     @location == :frame
   end
 
+  def rodata?
+    @location == :rodata
+  end
+
   def multiowned?
     @ownership == :multiowned
   end
@@ -843,7 +847,9 @@ class Type
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    # Strings are NOT Copy - they reference frame/heap data.
+    # String literals (rodata) are Copy - static data, never freed.
+    return true if string? && rodata?
+    # Non-literal strings are NOT Copy - they reference frame/heap data.
     return true if array? && !list_collection? && !pool? && !set_collection? && !string?
     if lookup_arg || lookup_block
       resolver = lookup_arg || lookup_block
@@ -1007,6 +1013,9 @@ class Type
 
     # Sync (locked) types need a stable heap address
     return :heap if any_sync? || current_storage == :heap && any_sync?
+
+    # Rodata (string literals) always stay rodata — never heap/frame allocated
+    return :rodata if current_storage == :rodata || rodata?
 
     # If already heap, keep it heap
     return :heap if current_storage == :heap || heap?

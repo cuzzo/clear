@@ -100,6 +100,8 @@ class Scope
     when :link
       base_type.ownership = :link
       base_type.link_source = entry.link_source
+    when :rodata
+      base_type.location = :rodata  # string literal: static data, never freed
     when :frame
       base_type.location = :frame   # large local var: arena pointer (*T in Zig)
     when :heap

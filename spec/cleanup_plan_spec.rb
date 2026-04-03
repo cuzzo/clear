@@ -480,4 +480,45 @@ RSpec.describe CleanupPlan do
       expect(entry).to be_nil
     end
   end
+
+  # =========================================================================
+  # Struct with rodata string fields: no cleanup needed
+  # =========================================================================
+  describe "struct with rodata string fields" do
+    let(:src) do
+      <<~CLEAR
+        STRUCT Pair { name: String, value: Float64 }
+        FN f() RETURNS Void ->
+            s = "hello";
+            p = Pair{ name: s, value: 1.0 };
+            RETURN;
+        END
+      CLEAR
+    end
+    let(:plan) { cleanup_for(src, "f") }
+
+    it "does not classify struct as needing cleanup when all string fields are rodata" do
+      entry = plan.lookup("p")
+      expect(entry).to be_nil
+    end
+  end
+
+  describe "struct with heap string fields" do
+    let(:src) do
+      <<~CLEAR
+        STRUCT Pair { name: String, value: Float64 }
+        FN f(s: String) RETURNS Void ->
+            p = Pair{ name: s, value: 1.0 };
+            RETURN;
+        END
+      CLEAR
+    end
+    let(:plan) { cleanup_for(src, "f") }
+
+    it "classifies struct as needing cleanup when string field is not rodata" do
+      entry = plan.lookup("p")
+      expect(entry).not_to be_nil
+      expect(entry[:kind]).to eq(:struct_with_cleanup_fields)
+    end
+  end
 end
