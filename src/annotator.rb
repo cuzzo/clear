@@ -3562,11 +3562,23 @@ private
     unless needs_heap
       schema = lookup_type_schema(ti.resolved) rescue nil
       if schema.is_a?(Hash) && !schema[:kind]
+        # Struct: check fields for RC/link/string
         needs_heap = schema.any? do |k, v|
           next false if k.is_a?(Symbol)
           ft = v.is_a?(Hash) ? v[:type] : v
           t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
           t.link? || t.any_rc? || t.string?
+        end
+      elsif schema.is_a?(Hash) && schema[:kind] == :union
+        # Union: check variants for @indirect (*T) fields in inline structs
+        needs_heap = (schema[:variants] || {}).any? do |_, vt|
+          next false unless vt
+          if vt.is_a?(Hash) && vt[:kind] == :inline_struct
+            indirect = vt[:indirect_fields]
+            indirect.is_a?(Set) && !indirect.empty?
+          else
+            false
+          end
         end
       end
     end

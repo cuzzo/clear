@@ -1770,6 +1770,15 @@ pub const CheatLib = struct {
                         }
                         if (payload.len > 0) alloc.free(payload);
                     }
+                } else if (f_info == .pointer and f_info.pointer.size == .one) {
+                    // Single pointer (*T): cleanup the pointee then free the pointer.
+                    // This handles @indirect fields in inline struct union variants.
+                    const pointee = @field(ptr, field.name);
+                    const ChildT = f_info.pointer.child;
+                    if (comptime needsCleanup(ChildT)) {
+                        cleanup(ChildT, alloc, pointee);
+                    }
+                    alloc.destroy(pointee);
                 } else if (comptime needsCleanup(FT)) {
                     cleanup(FT, alloc, &@field(ptr, field.name));
                 }
