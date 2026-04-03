@@ -476,7 +476,21 @@ private
           val_expr = is_inner_union ? "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())" : val
           "blk_#{k}: {\n    const __p = try #{rt_name}.heapAlloc().create(#{zig_t});\n    __p.* = #{val_expr};\n    break :blk_#{k} __p;\n}"
         else
-          val
+          # Non-string slice fields (e.g. params: Value[]) must be deep-copied
+          # to avoid shared ownership with the source data.
+          field_type = var_data.is_a?(Hash) ? var_data.dig(:fields, k) : nil
+          ft = field_type.is_a?(Type) ? field_type : (Type.new(field_type || :Any) rescue nil) if field_type
+          if ft&.array? && !ft&.string? && ft&.element_type
+            elem_resolved = ft.element_type.resolved
+            if @union_schemas&.key?(elem_resolved)
+              elem_zig = transpile_type(elem_resolved.to_s)
+              "blk_#{k}: {\n    const __src = #{val};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        for (__src, 0..) |__elem, __i| { __buf[__i] = CheatLib.dupeUnionValue(#{elem_zig}, __elem, #{rt_name}.heapAlloc()) catch __elem; }\n        break :blk_#{k} __buf;\n    } else break :blk_#{k} __src;\n}"
+            else
+              val
+            end
+          else
+            val
+          end
         end
       end
       field_strs = node.fields.keys.zip(field_inits).map { |k, v| ".#{k} = #{v}" }.join(", ")

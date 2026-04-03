@@ -643,6 +643,22 @@ RSpec.describe ZigTranspiler do
   # @indirect field deep-copy in union variant construction
   # ===========================================================================
   describe "@indirect field deep-copy" do
+    it "emits dupe for non-string slice field in variant construction" do
+      src = <<~CLEAR
+        STRUCT Env { x: Int64 }
+        UNION Value { Nil, Num: Float64, Str: String, Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+        FN test!(items: Value[], MUTABLE pool: Env[10]@pool) RETURNS Value ->
+            pool.insert(Env{ x: 1 });
+            RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };
+        END
+      CLEAR
+      zig = transpile(src)
+      # params is a []Value slice that may be borrowed from caller data.
+      # The transpiler must deep-copy it so the Lambda owns its own slice.
+      # Check that .params = is NOT a plain assignment of the input variable.
+      expect(zig).not_to match(/\.params = items[,\s}]/)
+    end
+
     it "emits dupeUnionValue for @indirect union field in variant construction" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
