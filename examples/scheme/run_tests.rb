@@ -57,6 +57,7 @@ KNOWN_PASSING = %w[
   53_writefile
   54_generic_fn
   54_writefile_bg
+  55_generic_union
   55_string_ops
   56_else_if_chain
   56_match_enum_exhaustive

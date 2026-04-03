@@ -35,6 +35,77 @@ class SchemeTranspiler
 
   def mutables; @mutable_stack.last; end
 
+  # Restructure function bodies with early returns:
+  # [IF cond THEN RETURN val END, ...rest...] -> (if cond val (begin ...rest...))
+  def emit_body_with_early_returns(stmts)
+    # Strip trailing bare RETURN
+    stmts = stmts.reject { |s| s.is_a?(AST::ReturnNode) && s.value.nil? }
+    return "nil" if stmts.empty?
+
+    # If last statement is a RETURN, emit the body up to it
+    # with early-return restructuring
+    emit_stmts_with_returns(stmts)
+  end
+
+  def emit_stmts_with_returns(stmts)
+    return "nil" if stmts.empty?
+
+    first = stmts[0]
+    rest = stmts[1..]
+
+    # If this is an IF with a RETURN in the then-branch and there's more code after
+    if first.is_a?(AST::IfStatement) && has_return?(first.then_branch) && !rest.empty?
+      cond = emit(first.condition)
+      then_val = emit_return_value(first.then_branch)
+      # The else branch of the original IF + remaining statements become the else
+      if first.else_branch && !first.else_branch.empty?
+        # IF cond THEN RETURN a ELSE_IF ... -> nested
+        else_stmts = first.else_branch + rest
+        else_val = emit_stmts_with_returns(else_stmts)
+      else
+        else_val = emit_stmts_with_returns(rest)
+      end
+      return "(if #{cond} #{then_val} #{else_val})"
+    end
+
+    # If this is a RETURN, emit its value
+    if first.is_a?(AST::ReturnNode)
+      return first.value ? emit(first.value) : "nil"
+    end
+
+    # Normal statement + rest
+    if rest.empty?
+      emit(first)
+    else
+      first_expr = emit(first)
+      rest_expr = emit_stmts_with_returns(rest)
+      "(begin #{first_expr} #{rest_expr})"
+    end
+  end
+
+  def has_return?(stmts)
+    return false unless stmts
+    stmts.any? { |s| s.is_a?(AST::ReturnNode) }
+  end
+
+  def emit_return_value(stmts)
+    ret = stmts.find { |s| s.is_a?(AST::ReturnNode) }
+    if ret
+      # Emit non-return statements first, then the return value
+      pre = stmts.take_while { |s| !s.is_a?(AST::ReturnNode) }
+      val = ret.value ? emit(ret.value) : "nil"
+      if pre.empty?
+        val
+      else
+        "(begin #{pre.map { |s| emit(s) }.join(' ')} #{val})"
+      end
+    else
+      # No explicit return - emit all and use last value
+      exprs = stmts.map { |s| emit(s) }
+      exprs.length == 1 ? exprs[0] : "(begin #{exprs.join(' ')})"
+    end
+  end
+
   def emit_program(program)
     program.statements.each do |stmt|
       case stmt
@@ -54,13 +125,8 @@ class SchemeTranspiler
           end
         else
           params = stmt.params.map { |p| p.is_a?(Hash) ? p[:name] : p.name }.join(" ")
-          body = stmt.body.map { |n| emit(n) }.reject { |s| s == "nil" && stmt.body.last.is_a?(AST::ReturnNode) && stmt.body.last.value.nil? }
-          body = ["nil"] if body.empty?
-          if body.length == 1
-            @output << "(define #{stmt.name} (lambda (#{params}) #{body[0]}))"
-          else
-            @output << "(define #{stmt.name} (lambda (#{params}) (begin #{body.join(' ')})))"
-          end
+          body_expr = emit_body_with_early_returns(stmt.body)
+          @output << "(define #{stmt.name} (lambda (#{params}) #{body_expr}))"
         end
         @mutable_stack.pop
       else
