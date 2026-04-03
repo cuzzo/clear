@@ -129,6 +129,11 @@ module OwnershipGenerator
     when :takes_string
       "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
 
+    when :takes_slice
+      ti = node&.type_info
+      elem_zig = ti&.element_type ? transpile_type(ti.element_type.resolved.to_s) : "UNKNOWN"
+      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } } if (#{name}.len > 0) rt.heapAlloc().free(#{name}); };\n"
+
     when :match_as_slice
       # The element type and cleanup are emitted by the MATCH transpiler
       # which has access to the variant schema. This entry just provides

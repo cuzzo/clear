@@ -140,6 +140,26 @@ RSpec.describe CleanupPlan do
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
+
+    context "TAKES slice parameter" do
+      let(:plan) do
+        cleanup_for(<<~CLEAR, "process!")
+          UNION Value { Nil, Num: Float64 }
+          FN process!(TAKES items: Value[]) RETURNS Void ->
+              RETURN;
+          END
+        CLEAR
+      end
+
+      it "marks TAKES slice param for cleanup with heap alloc" do
+        entry = plan.lookup("items")
+        expect(entry).not_to be_nil
+        expect(entry[:kind]).to eq(:takes_slice)
+        expect(entry[:alloc]).to eq(:heap)
+        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:source_kind]).to eq(:takes_param)
+      end
+    end
   end
 
   # =========================================================================
@@ -188,6 +208,11 @@ RSpec.describe CleanupPlan do
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:source_kind]).to eq(:match_as)
         expect(entry[:kind]).to eq(:match_as_slice)
+      end
+
+      it "uses heap allocator (slice contents may be heap-allocated via COPY/promote)" do
+        entry = plan.lookup("items")
+        expect(entry[:alloc]).to eq(:heap)
       end
     end
 

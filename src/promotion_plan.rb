@@ -415,6 +415,12 @@ class CleanupPlan
           needs_cleanup: true, alloc: :heap, kind: :takes_string,
           has_moved_guard: true, source_kind: :takes_param
         }
+      elsif ti.array? && !ti.string?
+        # TAKES slice param (e.g. Value[]): needs cleanup of elements + buffer
+        bindings[name] = {
+          needs_cleanup: true, alloc: :heap, kind: :takes_slice,
+          has_moved_guard: true, source_kind: :takes_param
+        }
       end
     end
   end
@@ -457,7 +463,7 @@ class CleanupPlan
             has_heap = Type.variant_has_heap?(variant_type)
             if has_heap
               bindings[c[:binding]] = {
-                needs_cleanup: true, alloc: source_alloc, kind: :match_as_inline_struct,
+                needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
                 has_moved_guard: true, source_kind: :match_as
               }
             end
@@ -469,8 +475,9 @@ class CleanupPlan
 
             if needs_as_cleanup
               if pt.array? && !pt.string?
+                # Always heap: slice contents are heap-allocated via COPY/promoteList.
                 bindings[c[:binding]] = {
-                  needs_cleanup: true, alloc: source_alloc, kind: :match_as_slice,
+                  needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
                   has_moved_guard: true, source_kind: :match_as
                 }
               end
