@@ -692,6 +692,38 @@ private
       schema[:type_params].zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
     end
 
+    # MATCH-as-move: if the source is a simple Identifier (not GetIndex/GetField)
+    # and any AS binding extracts a non-Copy payload from an owned source,
+    # mark the source as consumed BEFORE branch analysis.
+    # GetIndex sources (items[1]) cannot be moved out of - only Identifier sources.
+    if is_union && node.expr.is_a?(AST::Identifier)
+      source_name = node.expr.name
+      if @og[source_name] && @og[source_name].kind != :borrowed
+        has_ref_as = node.cases.any? do |c|
+          next false unless c[:binding]
+          variant_name = case c[:value]
+                         when AST::GetField then c[:value].field
+                         when AST::MethodCall then c[:value].name
+                         end
+          next false unless variant_name
+          raw = schema&.dig(:variants, variant_name)
+          next false unless raw
+          if raw.is_a?(Hash) && raw[:kind] == :inline_struct
+            Type.variant_has_heap?(raw)
+          else
+            pt = raw.is_a?(Type) ? raw : Type.new(raw || :Any)
+            # Move if payload has mutable/owned reference data (non-string
+            # slices, collections). Strings and primitives are safe.
+            (pt.array? && !pt.string?) || pt.collection? || pt.map?
+          end
+        end
+        if has_ref_as
+          node.expr.was_moved = true if node.expr.is_a?(AST::Identifier)
+          og_set_moved(source_name)
+        end
+      end
+    end
+
     branch_logic = node.cases.map do |c|
       proc {
         if c[:kind] == :when
@@ -2963,7 +2995,10 @@ private
     drops = []
     current_scope.locals.each do |name, info|
       next unless current_scope.owned_names.include?(name)
-      next unless @og.live?(name)
+      # TAKES params always need cleanup guards even if moved (the _moved
+      # flag controls whether cleanup runs at runtime).
+      is_takes = info.respond_to?(:takes) && info.takes
+      next unless @og.live?(name) || (is_takes && @og[name]&.moved?)
       classify_ownership!(info) unless info.ownership_kind
 
       case info.ownership_kind

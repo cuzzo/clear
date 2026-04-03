@@ -268,16 +268,16 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURN
             RETURN envGet!(envId, sym, pool);,
         Value.List AS items ->
             RETURN evalList!(items, envId, pool);,
-        Value.Nil -> RETURN ast;,
-        Value.TrueVal -> RETURN ast;,
-        Value.FalseVal -> RETURN ast;,
-        Value.Number -> RETURN ast;,
-        Value.Str -> RETURN ast;,
-        Value.NativeFn -> RETURN ast;,
-        Value.Lambda -> RETURN ast;,
-        Value.EnvRef -> RETURN ast;
+        Value.Nil -> RETURN Value.Nil;,
+        Value.TrueVal -> RETURN Value.TrueVal;,
+        Value.FalseVal -> RETURN Value.FalseVal;,
+        Value.Number AS n -> RETURN Value{ Number: n };,
+        Value.Str AS s -> RETURN Value{ Str: s };,
+        Value.NativeFn AS s -> RETURN Value{ NativeFn: s };,
+        Value.Lambda AS lam -> RETURN Value.Nil;,
+        Value.EnvRef AS id -> RETURN Value{ EnvRef: id };
     END
-    RETURN ast;
+    RETURN Value.Nil;
 END
 
 FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
