@@ -105,6 +105,24 @@ These are standard Scheme/Mal features that the transpiler will never emit:
 5. **Struct literal with @list fields** - `Chunk{ ops: List[], ... }` fails because the
    transpiler tries to access `.items` on the error union from `makeList`.
 
+6. **@pool + @shared:locked composition** - `pool @shared:locked` generates incorrect Zig.
+   The codegen wraps the raw array type `[N]T` instead of the Pool wrapper type
+   `CheatLib.Pool(T)`. Should emit `Arc(Mutex(CheatLib.Pool(T)))`. Fix is in
+   `src/transpiler.rb` capability composition logic. This blocks real concurrency
+   in the interpreter - the pool can't be shared across BG fibers without it.
+   Workaround: sequential fake concurrency (BG evals immediately).
+
+7. **Early return in functions** - `IF cond THEN RETURN val; END RETURN other;` transpiles
+   to `(if cond val nil) other` which always evaluates `other`. The Scheme tree-walker
+   has no early-return mechanism. Needs either: continuation-based return, or the
+   transpiler restructuring the body as nested if/else chains.
+   Affects: 55_generic_union and any function with conditional early returns.
+
+8. **Nested list arena lifetime** - Vectors/lists inside other lists (e.g., list of structs
+   returned from list-index grouping) hit use-after-free when accessed after the creating
+   function returns. Related to bug #2 but specifically for nested collections.
+   Affects: 25_index field access, 29_unnest (double free).
+
 ## Future (Post-VM)
 
 - Bytecode compilation (transpiler emits bytecode directly, dispatch loop replaces tree-walker)
