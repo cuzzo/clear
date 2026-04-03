@@ -21,7 +21,8 @@ UNION Value {
     EnvRef: Id<Env>,
     Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String },
-    Int64Val: Int64
+    Int64Val: Int64,
+    TypedI64Arr: Int64[]
 }
 
 -- Pure helpers
@@ -80,7 +81,11 @@ FN isList?(v: Value) RETURNS Bool ->
 END
 
 FN listLen(v: Value) RETURNS Int64 ->
-    MATCH v START Value.List AS items -> RETURN items.length();, DEFAULT -> RETURN 0; END
+    MATCH v START
+        Value.List AS items -> RETURN items.length();,
+        Value.TypedI64Arr AS iarr -> RETURN iarr.length();,
+        DEFAULT -> RETURN 0;
+    END
     RETURN 0;
 END
 
@@ -183,6 +188,13 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
             RETURN vout + ")";,
         Value.Pair AS p ->
             RETURN "(" + prStr(p.pairCar, readably) + " . " + prStr(p.pairCdr, readably) + ")";,
+        Value.TypedI64Arr AS iarr ->
+            MUTABLE iout = "[";
+            FOR ii IN (0_i64 ..< iarr.length()) DO
+                IF ii > 0 THEN iout = iout + " "; END
+                iout = iout + iarr[ii].toString();
+            END
+            RETURN iout + "]:i64";,
         Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
@@ -544,9 +556,10 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     -- List operations: 34=list-ref, 35=list-length
     IF id == 34 THEN RETURN listRef(evaled[1], toInt(getNum(evaled[2]))); END
     IF id == 35 THEN
-        -- list-length: works on lists AND strings
+        -- list-length: works on lists, typed arrays, AND strings
         MATCH evaled[1] START
             Value.Str AS s -> RETURN Value{ Number: toFloat(s.length()) };,
+            Value.TypedI64Arr AS iarr -> RETURN Value{ Int64Val: iarr.length() };,
             DEFAULT -> RETURN Value{ Number: toFloat(listLen(evaled[1])) };
         END
         RETURN Value{ Number: toFloat(listLen(evaled[1])) };
@@ -621,6 +634,8 @@ FN listRef(v: Value, idx: Int64) RETURNS Value ->
         Value.List AS items ->
             elem = items[idx];
             RETURN elem;,
+        Value.TypedI64Arr AS iarr ->
+            RETURN Value{ Int64Val: iarr[idx] };,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -1232,6 +1247,64 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
             DEFAULT -> RETURN Value{ Str: "Unknown" };
         END
         RETURN Value{ Str: "Unknown" };
+
+    ELSE_IF formName == "typed-list:i64" THEN
+        -- (typed-list:i64 1 2 3) -> TypedI64Arr with raw Int64[] storage
+        MUTABLE typedItems: Int64[]@list = List[];
+        FOR ti IN (1_i64 ..< items.length()) DO
+            tval = eval!(items[ti], envId, pool);
+            IF isError?(tval) THEN RETURN tval; END
+            typedItems.append(getInt(tval));
+        END
+        RETURN Value{ TypedI64Arr: typedItems };
+
+    ELSE_IF formName == "to-typed:i64" THEN
+        -- (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
+        listVal = eval!(items[1], envId, pool);
+        IF isError?(listVal) THEN RETURN listVal; END
+        MUTABLE converted: Int64[]@list = List[];
+        MATCH listVal START
+            Value.List AS srcItems ->
+                FOR ci IN (0_i64 ..< srcItems.length()) DO
+                    converted.append(getInt(srcItems[ci]));
+                END,
+            Value.TypedI64Arr -> RETURN listVal;,
+            DEFAULT -> PASS;
+        END
+        RETURN Value{ TypedI64Arr: converted };
+
+    ELSE_IF formName == "to-list" THEN
+        -- (to-list typedArr) -> convert TypedI64Arr back to Value[] list
+        arrVal = eval!(items[1], envId, pool);
+        IF isError?(arrVal) THEN RETURN arrVal; END
+        MATCH arrVal START
+            Value.TypedI64Arr AS iarr ->
+                MUTABLE untyped: Value[]@list = List[];
+                FOR ui IN (0_i64 ..< iarr.length()) DO
+                    untyped.append(Value{ Int64Val: iarr[ui] });
+                END
+                RETURN Value{ List: untyped };,
+            Value.List -> RETURN arrVal;,
+            DEFAULT -> RETURN arrVal;
+        END
+        RETURN arrVal;
+
+    ELSE_IF formName == "typed-push:i64" THEN
+        -- (typed-push:i64 arr val) -> new typed array with value appended
+        arrVal = eval!(items[1], envId, pool);
+        IF isError?(arrVal) THEN RETURN arrVal; END
+        newVal = eval!(items[2], envId, pool);
+        IF isError?(newVal) THEN RETURN newVal; END
+        MUTABLE newArr: Int64[]@list = List[];
+        MATCH arrVal START
+            Value.TypedI64Arr AS iarr ->
+                FOR pi IN (0_i64 ..< iarr.length()) DO
+                    newArr.append(iarr[pi]);
+                END,
+            DEFAULT -> PASS;
+        END
+        newArr.append(getInt(newVal));
+        RETURN Value{ TypedI64Arr: newArr };
 
     ELSE_IF formName == "debug-set-break" THEN
         -- (debug-set-break "fnName") -> register breakpoint
@@ -2051,6 +2124,17 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(+ 10:i64 2.5)", TRUE, rootId, pool, penv) == "12", "i64 + float promotes";
     ASSERT evalIn!("(* 3:i64 4:i64)", TRUE, rootId, pool, penv) == "12", "typed i64 mul";
     ASSERT evalIn!("(- 10:i64 3:i64)", TRUE, rootId, pool, penv) == "7", "typed i64 sub";
+
+    -- Typed arrays: TypedI64Arr
+    ASSERT evalIn!("(typed-list:i64 10 20 30)", TRUE, rootId, pool, penv) == "[10 20 30]:i64", "typed i64 array create";
+    ASSERT evalIn!("(list-ref (typed-list:i64 10 20 30) 1)", TRUE, rootId, pool, penv) == "20", "typed array ref";
+    ASSERT evalIn!("(type-of (list-ref (typed-list:i64 10 20 30) 0))", FALSE, rootId, pool, penv) == "Int64", "typed array element type";
+    ASSERT evalIn!("(list-length (typed-list:i64 1 2 3 4))", TRUE, rootId, pool, penv) == "4", "typed array length";
+    -- Conversion
+    ASSERT evalIn!("(list-ref (to-list (typed-list:i64 5 10)) 0)", TRUE, rootId, pool, penv) == "5", "to-list conversion";
+    ASSERT evalIn!("(list-ref (to-typed:i64 (list 5 10)) 0)", TRUE, rootId, pool, penv) == "5", "to-typed conversion";
+    -- Interop: typed values in untyped operations
+    ASSERT evalIn!("(+ (list-ref (typed-list:i64 10 20) 0) 5)", TRUE, rootId, pool, penv) == "15", "typed arr elem + untyped";
 
     print("Interpreter smoke tests PASSED!");
     RETURN;
