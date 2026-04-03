@@ -584,28 +584,37 @@ private
   # @param branches [Array<Proc>] Procs that execute branch logic
   # @return [Array<Array<Hash>>] Array of drops for each branch
   def analyze_control_flow_branches(branches, merge_to_parent: true)
-    og_snapshot = og_fork
+    og_snapshot = @og&.fork_lightweight
     og_branch_snapshots = []
     all_drops = []
 
     branches.each do |branch_logic|
       # Restore graph to pre-branch state before analyzing each branch
-      @og.restore_from(og_snapshot) if @og && og_snapshot
+      @og&.restore_lightweight(og_snapshot) if og_snapshot
       with_new_scope(current_scope) do
         og_push_scope
         all_drops << branch_logic.call
-        og_branch_snapshots << (@og&.fork)
+        og_branch_snapshots << (@og&.fork_lightweight)
         og_pop_scope
       end
     end
 
     if merge_to_parent
       # Restore to base, then merge all branch results
-      @og.restore_from(og_snapshot) if @og && og_snapshot
-      og_branch_snapshots.each { |snap| og_merge(snap) }
+      @og&.restore_lightweight(og_snapshot) if og_snapshot
+      og_branch_snapshots.each do |snap|
+        next unless snap
+        # Lightweight merge: just apply moved states
+        snap[:node_states].each do |path, state|
+          node = @og.nodes[path]
+          next unless node
+          if node.state != state
+            node.state = :moved if state == :moved
+          end
+        end
+      end
     else
-      # Restore the initial state (e.g. for WHILE loops)
-      @og.restore_from(og_snapshot) if @og && og_snapshot
+      @og&.restore_lightweight(og_snapshot) if og_snapshot
     end
 
     all_drops

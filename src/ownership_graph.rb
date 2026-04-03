@@ -39,6 +39,7 @@ class OwnershipGraph
     @nodes = {}           # path => Node
     @edges = []           # Array of Edge
     @edges_by_target = Hash.new { |h, k| h[k] = [] }  # target_path => [Edge]
+    @edges_by_source = Hash.new { |h, k| h[k] = [] }  # source_path => [Edge]
     @children = Hash.new { |h, k| h[k] = Set.new }    # parent_path => Set of child paths
   end
 
@@ -47,11 +48,22 @@ class OwnershipGraph
   def add_edge(edge)
     @edges << edge
     @edges_by_target[edge.to] << edge
+    @edges_by_source[edge.from] << edge
+  end
+
+  def remove_edge(edge)
+    @edges.delete(edge)
+    @edges_by_target[edge.to]&.delete(edge)
+    @edges_by_source[edge.from]&.delete(edge)
   end
 
   def rebuild_target_index!
     @edges_by_target = Hash.new { |h, k| h[k] = [] }
-    @edges.each { |e| @edges_by_target[e.to] << e }
+    @edges_by_source = Hash.new { |h, k| h[k] = [] }
+    @edges.each do |e|
+      @edges_by_target[e.to] << e
+      @edges_by_source[e.from] << e
+    end
   end
 
   # ── Core Operations ───────────────────────────────────────────────
@@ -109,8 +121,8 @@ class OwnershipGraph
 
   # Remove all borrow edges from a borrower.
   def release_borrow(borrower)
-    @edges.reject! { |e| e.from == borrower && (e.kind == :borrows || e.kind == :borrows_mut) }
-    rebuild_target_index!
+    to_remove = @edges_by_source[borrower]&.select { |e| e.kind == :borrows || e.kind == :borrows_mut } || []
+    to_remove.each { |e| remove_edge(e) }
   end
 
   # Mark a path for heap promotion (escapes the current frame).
@@ -133,8 +145,8 @@ class OwnershipGraph
 
     # Remove borrow edges from/to dropped paths
     dropped_set = to_cleanup.to_set
-    @edges.reject! { |e| dropped_set.include?(e.from) || dropped_set.include?(e.to) }
-    rebuild_target_index!
+    to_remove = @edges.select { |e| dropped_set.include?(e.from) || dropped_set.include?(e.to) }
+    to_remove.each { |e| remove_edge(e) }
 
     to_cleanup
   end
@@ -158,7 +170,7 @@ class OwnershipGraph
 
   # Does this path alias another variable's backing data? (skip cleanup)
   def aliases?(path)
-    @edges.any? { |e| e.from == path && e.kind == :aliases }
+    @edges_by_source[path]&.any? { |e| e.kind == :aliases } || false
   end
 
   # Does this variable need cleanup? (owns heap data and not aliased)
@@ -182,22 +194,43 @@ class OwnershipGraph
     snapshot = OwnershipGraph.new
     @nodes.each { |k, v| snapshot.nodes[k] = v.dup }
     snapshot.instance_variable_set(:@edges, @edges.map(&:dup))
+    # Snapshot children index (avoids recomputing from node paths)
+    children_copy = Hash.new { |h, k| h[k] = Set.new }
+    @children.each { |k, v| children_copy[k] = v.dup }
+    snapshot.instance_variable_set(:@children, children_copy)
     snapshot
   end
 
-  # Restore graph state from a snapshot (destructive — replaces all nodes/edges).
+  # Lightweight snapshot: only saves node states, not full graph.
+  # Use for branches that won't declare new nodes (IF/ELSE in flat code).
+  def fork_lightweight
+    states = {}
+    @nodes.each { |k, v| states[k] = v.state }
+    { node_states: states, edge_count: @edges.size }
+  end
+
+  # Restore from lightweight snapshot: reset states and truncate edges.
+  def restore_lightweight(snapshot)
+    snapshot[:node_states].each do |path, state|
+      node = @nodes[path]
+      node.state = state if node
+    end
+    target_count = snapshot[:edge_count]
+    while @edges.size > target_count
+      removed = @edges.pop
+      @edges_by_target[removed.to]&.delete(removed)
+      @edges_by_source[removed.from]&.delete(removed)
+    end
+  end
+
+  # Restore graph state from a snapshot (destructive).
   def restore_from(snapshot)
     @nodes = {}
+    snapshot.nodes.each { |k, v| @nodes[k] = v.dup }
     @children = Hash.new { |h, k| h[k] = Set.new }
-    snapshot.nodes.each do |k, v|
-      @nodes[k] = v.dup
-      if k.include?('.')
-        parent = k.rpartition('.').first
-        @children[parent].add(k)
-      end
-    end
+    children_snap = snapshot.instance_variable_get(:@children)
+    children_snap&.each { |k, v| @children[k] = v.dup }
     # Preserve alias edges (permanent facts) across branch analysis.
-    # Only restore borrow/move/owns edges from the snapshot.
     alias_edges = @edges.select { |e| e.kind == :aliases }
     @edges = snapshot.instance_variable_get(:@edges).map(&:dup) + alias_edges
     rebuild_target_index!
@@ -214,24 +247,25 @@ class OwnershipGraph
       theirs = other.nodes[path]
       next unless mine && theirs
 
-      # If one branch moved/dropped and the other didn't, flag it
       if mine.state != theirs.state
         case [mine.state, theirs.state]
         when [:live, :moved], [:moved, :live]
-          # Variable moved in one branch but not the other — must be moved in both or neither
           errors << "variable '#{path}' is moved in one branch but live in the other"
         when [:live, :dropped], [:dropped, :live]
-          # Dropped in one branch — ok if both branches drop before join
         end
-        # Take the more restrictive state
         mine.state = :moved if theirs.moved?
       end
     end
 
-    # Merge edges: union of both edge sets
-    other_edges = other.instance_variable_get(:@edges)
-    @edges = (@edges + other_edges).uniq { |e| [e.from, e.to, e.kind] }
-    rebuild_target_index!
+    # Merge edges: add new ones from other
+    existing = @edges.map { |e| [e.from, e.to, e.kind] }.to_set
+    other.instance_variable_get(:@edges).each do |e|
+      key = [e.from, e.to, e.kind]
+      unless existing.include?(key)
+        existing.add(key)
+        add_edge(e.dup)
+      end
+    end
 
     errors
   end
