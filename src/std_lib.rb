@@ -409,6 +409,7 @@ POOL_METHODS = {
 SET_METHODS = {
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
+    takes_args: [0],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
@@ -495,6 +496,7 @@ INDEX_OPS = {
       takes_value: true,
       allocates: true,
       key_alloc: :heap,
+      val_alloc: :storage,  # use receiver's storage_alloc (frame for local, heap for sharded)
     },
   },
   numeric_map: {

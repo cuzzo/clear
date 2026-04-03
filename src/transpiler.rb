@@ -3049,13 +3049,18 @@ private
     pattern = op[:zig]
     pattern = pattern.gsub("{target}", target).gsub("{index}", index).gsub("{value}", value)
     if pattern.include?("{key_alloc}")
-      pattern = pattern.gsub("{key_alloc}", "#{rt_name}.heapAlloc()")
+      key_alloc_kind = op[:key_alloc] || :heap
+      pattern = pattern.gsub("{key_alloc}", key_alloc_kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()")
     end
     if pattern.include?("{val_alloc}")
-      # String map put(key_alloc, val_alloc, key, val): val_alloc is for internal
-      # value duplication. Frame for local maps, heap for sharded/striped.
-      is_heap = target_ti.sharded? || target_ti.striped?
-      val_alloc = is_heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+      # Registry specifies :storage -> use receiver's storage_alloc, or explicit :heap/:frame
+      val_alloc_kind = op[:val_alloc]
+      val_alloc = case val_alloc_kind
+                  when :storage then storage_alloc_expr(target_ti)
+                  when :heap then "#{rt_name}.heapAlloc()"
+                  when :frame then "#{rt_name}.frameAlloc()"
+                  else storage_alloc_expr(target_ti)
+                  end
       pattern = pattern.gsub("{val_alloc}", val_alloc)
     end
     if pattern.include?("{alloc}")
