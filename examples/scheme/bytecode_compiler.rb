@@ -44,10 +44,44 @@ class BytecodeCompiler
     EQ: EQ, NEQ: nil, LT: LT, GT: GT, LTE: LTE, GTE: GTE,
   }
 
+  LOAD_SLOT = 80; STORE_SLOT = 81
+  MOD_I64 = 89  # new op
+  GTE_I64 = 90  # new op
+  SUB_I64_OP = SUB_I64  # alias for clarity
+
   def initialize
     @ops = []
     @consts = []
     @mutables = Set.new
+    @slots = {}       # var_name -> slot_index
+    @slot_types = {}  # var_name -> :i64, :f64, :str, :any
+    @next_slot = 0
+    @type_stack = []  # tracks type of each expression on the compile stack
+  end
+
+  def alloc_slot(name, type = :any)
+    unless @slots[name]
+      @slots[name] = @next_slot
+      @next_slot += 1
+    end
+    @slot_types[name] = type
+    @slots[name]
+  end
+
+  def var_type(name)
+    @slot_types[name] || :any
+  end
+
+  def push_type(t)
+    @type_stack.push(t)
+  end
+
+  def pop_type
+    @type_stack.pop || :any
+  end
+
+  def peek_type
+    @type_stack.last || :any
   end
 
   def compile_program(source)
@@ -140,8 +174,15 @@ class BytecodeCompiler
     when AST::Literal
       compile_literal(node)
     when AST::Identifier
-      name_idx = add_const(node.name.to_s)
-      emit(LOAD_NAME, name_idx)
+      name = node.name.to_s
+      if @slots[name]
+        emit(LOAD_SLOT, @slots[name])
+        push_type(var_type(name))
+      else
+        name_idx = add_const(name)
+        emit(LOAD_NAME, name_idx)
+        push_type(:any)
+      end
     when AST::BinaryOp
       compile_binary(node)
     when AST::UnaryOp
@@ -189,24 +230,31 @@ class BytecodeCompiler
     when :INT64
       cidx = add_const([:i64, node.value])
       emit(LOAD_CONST, cidx)
+      push_type(:i64)
     when :NUMBER, :FLOAT
       cidx = add_const([:f64, node.value])
       emit(LOAD_CONST, cidx)
+      push_type(:f64)
     when :STRING
       cidx = add_const([:str, node.value])
       emit(LOAD_CONST, cidx)
+      push_type(:str)
     when :BOOL, :TRUE
       cidx = add_const([:bool, true])
       emit(LOAD_CONST, cidx)
+      push_type(:bool)
     when :FALSE
       cidx = add_const([:bool, false])
       emit(LOAD_CONST, cidx)
+      push_type(:bool)
     when :NIL
       cidx = add_const(nil)
       emit(LOAD_CONST, cidx)
+      push_type(:any)
     else
       cidx = add_const([:f64, node.value.to_f])
       emit(LOAD_CONST, cidx)
+      push_type(:f64)
     end
   end
 
@@ -227,28 +275,45 @@ class BytecodeCompiler
     end
 
     compile(node.left)
+    left_type = pop_type
     compile(node.right)
+    right_type = pop_type
+
+    both_i64 = (left_type == :i64 && right_type == :i64)
 
     case op
-    when :ADD then emit(ADD)
-    when :SUB then emit(SUB)
-    when :MUL then emit(MUL)
-    when :DIV then emit(DIV)
-    when :EQ then emit(EQ)
-    when :NEQ then emit(EQ); emit(NOT)
-    when :LT then emit(LT)
-    when :GT then emit(GT)
-    when :LTE then emit(LTE)
-    when :GTE then emit(GTE)
+    when :ADD
+      if both_i64 then emit(ADD_I64); push_type(:i64)
+      else emit(ADD); push_type(left_type == :str ? :str : :f64) end
+    when :SUB
+      if both_i64 then emit(SUB_I64); push_type(:i64)
+      else emit(SUB); push_type(:f64) end
+    when :MUL
+      if both_i64 then emit(MUL_I64); push_type(:i64)
+      else emit(MUL); push_type(:f64) end
+    when :DIV then emit(DIV); push_type(:f64)
+    when :EQ
+      if both_i64 then emit(EQ_I64) else emit(EQ) end
+      push_type(:bool)
+    when :NEQ
+      if both_i64 then emit(EQ_I64) else emit(EQ) end
+      emit(NOT); push_type(:bool)
+    when :LT
+      if both_i64 then emit(LT_I64) else emit(LT) end
+      push_type(:bool)
+    when :GT
+      if both_i64 then emit(GT) else emit(GT) end
+      push_type(:bool)
+    when :LTE then emit(LTE); push_type(:bool)
+    when :GTE
+      if both_i64 then emit(GTE_I64) else emit(GTE) end
+      push_type(:bool)
     when :MOD
-      emit(NATIVE_CALL, NATIVES["modulo"], 2)
-    when :AND
-      # Short-circuit: if left false, skip right
-      # For now, just evaluate both
-    when :OR
-      # Short-circuit
-    else
-      emit(ADD) # fallback
+      if both_i64 then emit(MOD_I64) else emit(NATIVE_CALL, NATIVES["modulo"], 2) end
+      push_type(:i64)
+    when :AND then push_type(:bool)
+    when :OR then push_type(:bool)
+    else emit(ADD); push_type(:any)
     end
   end
 
@@ -273,35 +338,65 @@ class BytecodeCompiler
 
   def compile_bind(node)
     compile(node.value)
-    if @mutables.include?(node.name.to_s)
-      name_idx = add_const(node.name.to_s)
-      emit(SET_NAME, name_idx)
+    val_type = pop_type
+    name = node.name.to_s
+
+    if @mutables.include?(name) && @slots[name]
+      emit(STORE_SLOT, @slots[name])
+    elsif @mutables.include?(name)
+      slot = alloc_slot(name, val_type)
+      emit(STORE_SLOT, slot)
     else
-      name_idx = add_const(node.name.to_s)
-      emit(STORE_NAME, name_idx)
+      slot = alloc_slot(name, val_type)
+      emit(STORE_SLOT, slot)
     end
+    push_type(val_type)  # STORE_SLOT peeks (doesn't pop in exec!)
   end
 
   def compile_vardecl(node)
     @mutables.add(node.name.to_s) if node.mutable
+    name = node.name.to_s
+
     if node.value
       compile(node.value)
+      val_type = pop_type
     else
       cidx = add_const(nil)
       emit(LOAD_CONST, cidx)
+      val_type = :any
     end
-    name_idx = add_const(node.name.to_s)
-    emit(STORE_NAME, name_idx)
+
+    # Infer type from declaration if available
+    if node.type
+      type_str = node.type.to_s
+      if type_str.include?("Int64") && !type_str.include?("[]")
+        val_type = :i64
+      elsif type_str.include?("Float64") && !type_str.include?("[]")
+        val_type = :f64
+      elsif type_str.include?("String")
+        val_type = :str
+      end
+    end
+
+    slot = alloc_slot(name, val_type)
+    emit(STORE_SLOT, slot)
+    push_type(val_type)
   end
 
   def compile_assignment(node)
     compile(node.value)
+    val_type = pop_type
     if node.name.is_a?(String) || node.name.is_a?(Symbol)
-      name_idx = add_const(node.name.to_s)
-      emit(SET_NAME, name_idx)
-    else
-      # Field assignment etc - store result, discard for now
+      name = node.name.to_s
+      if @slots[name]
+        emit(STORE_SLOT, @slots[name])
+        @slot_types[name] = val_type
+      else
+        name_idx = add_const(name)
+        emit(SET_NAME, name_idx)
+      end
     end
+    push_type(val_type)
   end
 
   def compile_if(node)
@@ -334,12 +429,14 @@ class BytecodeCompiler
     loop_start = @ops.length
 
     compile(node.condition)
+    pop_type  # condition type
     emit(JUMP_IF_FALSE)
     jump_exit_idx = @ops.length
     emit(0) # placeholder
 
     node.do_branch.each do |stmt|
       compile(stmt)
+      pop_type
       emit(POP)
     end
 
@@ -347,9 +444,9 @@ class BytecodeCompiler
 
     @ops[jump_exit_idx] = @ops.length
 
-    # While returns nil
     cidx = add_const(nil)
     emit(LOAD_CONST, cidx)
+    push_type(:any)
   end
 
   def compile_for_range(node)

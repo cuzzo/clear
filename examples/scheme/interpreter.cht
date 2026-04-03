@@ -2022,10 +2022,13 @@ END
 
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     MUTABLE stack: Value[]@list = List[];
+    MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;
     MUTABLE ip: Int64 = 0;
     MUTABLE curEnv: Id<Env> = envId;
     MUTABLE running = TRUE;
+    -- Pre-allocate 64 slots
+    FOR si IN (0_i64 ..< 64) DO slots.append(Value.Nil); END
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -2156,16 +2159,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
         ELSE_IF op == 80 THEN
-            -- loadSlot [idx]: push slots[idx] from current env
+            -- loadSlot [idx]: push slots[idx] from local array (O(1), no HashMap)
             slotIdx = ops[ip]; ip += 1;
-            slotVal = pool[curEnv]?.vars["__s" + slotIdx.toString()] OR Value.Nil;
-            pv = slotVal;
+            pv = slots[slotIdx];
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
         ELSE_IF op == 81 THEN
-            -- storeSlot [idx]: peek top, store in slots[idx]
+            -- storeSlot [idx]: peek top, store in local slots array
             slotIdx = ops[ip]; ip += 1;
-            pool[curEnv]?.vars["__s" + slotIdx.toString()] = stack[sp - 1];
+            slots[slotIdx] = stack[sp - 1];
         -- Specialized typed ops: operate on Int64Val directly, no float conversion
         ELSE_IF op == 82 THEN
             -- ADD_I64: pop two Int64Val, push Int64Val
@@ -2194,6 +2196,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         ELSE_IF op == 86 THEN
             -- EQ_I64
             pv = boolVal(getInt(stack[sp - 2]) == getInt(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 89 THEN
+            -- MOD_I64
+            ia = getInt(stack[sp - 2]);
+            ib = getInt(stack[sp - 1]);
+            MUTABLE modR: Int64 = 0;
+            IF ib != 0 THEN modR = ia MOD ib; END
+            pv = Value{ Int64Val: modR };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 90 THEN
+            -- GTE_I64
+            pv = boolVal(getInt(stack[sp - 2]) >= getInt(stack[sp - 1]));
             sp -= 2;
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
