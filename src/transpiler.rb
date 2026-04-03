@@ -604,7 +604,7 @@ private
           cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
           cond = cond_parts.join(" and ")
 
-          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            #{rt_name}.freeSnapshot();\n            #{clause_body_code}\n        }"
+          "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{snapshot_decl}\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_code}\n        }"
         end.join(" else ")
 
         default_code = ""
@@ -613,7 +613,7 @@ private
           @catch_dupe_string_returns = catch_dupe
           default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
           @catch_dupe_string_returns = prev_catch_dupe
-          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
+          default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
         else
           if fn_can_fail
             default_code = " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
@@ -1955,9 +1955,19 @@ private
 
       # 3. Escape promotion — driven by PromotionPlan (Pass C).
       plan = @promotion_plans&.dig(current_tp_ctx&.fn_name)
+      # Functions with CATCH + returns_promoted must dupe string returns on ALL
+      # paths (success + catch) so the caller can uniformly free with heapAlloc.
+      needs_string_dupe = @catch_dupe_string_returns || @current_fn_has_catch
       if plan && !plan.empty?
         filtered = plan.filter_for_return(node.value)
         emit_return_from_plan(val_code, filtered, rt_name, suppress)
+      elsif needs_string_dupe && node.value
+        ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
+        if ret_type&.string?
+          [suppress, "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"].reject(&:empty?).join("\n")
+        else
+          [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
+        end
       else
         [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       end
