@@ -129,10 +129,12 @@ module OwnershipGenerator
     unless is_copy
       if @union_schemas&.key?(type_info&.resolved)
         zig_t = transpile_type(type_info.resolved.to_s)
-        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, rt.heapAlloc(), &#{name});\n"
+        # Use frameAlloc: frame-arena free is a no-op for individual items,
+        # so strings inside the union won't crash. Heap-promoted data is
+        # freed by HashMap/Pool deinit with the correct allocator.
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, rt.frameAlloc(), &#{name});\n"
       end
-      # Strings: no cleanup needed. Frame-arena managed, freed on frame rewind.
-      # Heap-promoted strings in HashMaps are freed by the map's deinit.
+      # Strings: frame-arena managed, freed on frame rewind. No cleanup needed.
     end
 
     "" # Stack type with no custom drop

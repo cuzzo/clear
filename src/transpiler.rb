@@ -419,11 +419,34 @@ private
         next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
         indirect = var_data[:indirect_fields] || Set.new
         fields = var_data[:fields].map do |fname, ftype|
-          zig_t = transpile_type(ftype, is_field: true)  # Union inline struct fields use slices like variant payloads
+          zig_t = transpile_type(ftype, is_field: true)
           zig_t = "*#{zig_t}" if indirect.include?(fname)
           "    #{fname}: #{zig_t},"
         end.join("\n")
-        "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
+
+        # Generate deinit for inline structs that own heap data (@indirect, []T).
+        deinit_lines = []
+        var_data[:fields].each do |fname, ftype|
+          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+          if indirect.include?(fname)
+            # @indirect: cleanup pointee then free pointer
+            zig_t = transpile_type(ftype, is_field: true)
+            deinit_lines << "        CheatLib.cleanup(#{zig_t}, alloc, self.#{fname});"
+            deinit_lines << "        alloc.destroy(self.#{fname});"
+          elsif ft.array? && !ft.string?
+            # Non-string slice: cleanup elements then free buffer
+            elem_zig = transpile_type(ft.element_type)
+            deinit_lines << "        if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (self.#{fname}) |*__e| { CheatLib.cleanup(#{elem_zig}, alloc, __e); } }"
+            deinit_lines << "        if (self.#{fname}.len > 0) alloc.free(self.#{fname});"
+          end
+        end
+
+        if deinit_lines.any?
+          deinit_body = deinit_lines.join("\n")
+          "const #{node.name}_#{var_name} = struct {\n#{fields}\n\n    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {\n#{deinit_body}\n    }\n};"
+        else
+          "const #{node.name}_#{var_name} = struct {\n#{fields}\n};"
+        end
       end
 
       variants = node.variants.map do |var_name, var_data|
@@ -2267,7 +2290,10 @@ private
       val = visit(node.value)
       ti = node.value.type_info
       rt_name = @do_rt_name || "rt"
-      if ti && @union_schemas&.key?(ti.resolved)
+      if ti&.string?
+        # String copy: dupe to heap
+        "try #{rt_name}.heapAlloc().dupe(u8, #{val})"
+      elsif ti && @union_schemas&.key?(ti.resolved)
         zig_t = transpile_type(ti)
         "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
       elsif ti&.array? && !ti&.string?

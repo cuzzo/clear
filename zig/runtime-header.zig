@@ -1650,9 +1650,12 @@ pub const CheatLib = struct {
     pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
         const ptr = @constCast(cptr);
 
-        // 0. Strings: no-op. Strings are frame-arena managed (freed on frame rewind).
-        // Heap-promoted strings in HashMaps are freed by the map's deinit.
-        if (T == []const u8 or T == []u8) return;
+        // 0. Strings: free with the provided allocator. Frame-arena free is
+        // a no-op, so frame strings are safe. Heap strings are freed.
+        if (T == []const u8 or T == []u8) {
+            if (ptr.len > 0) alloc.free(ptr.*);
+            return;
+        }
 
         // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
         if (comptime refInnerType(T) != null) {
@@ -1758,7 +1761,7 @@ pub const CheatLib = struct {
                 } else if (f_info == .pointer and f_info.pointer.size == .slice) {
                     const payload = @field(ptr, field.name);
                     if (FT == []const u8 or FT == []u8) {
-                        // Strings: no-op. Frame-arena managed.
+                        if (payload.len > 0) alloc.free(payload);
                     } else {
                         if (comptime needsCleanup(f_info.pointer.child)) {
                             for (payload) |*elem| {
@@ -1783,7 +1786,8 @@ pub const CheatLib = struct {
                     // Slice variant ([]T): recursively cleanup elements then free buffer.
                     if (f_info == .pointer and f_info.pointer.size == .slice) {
                         if (FT == []const u8 or FT == []u8) {
-                            // Strings: no-op. Frame-arena managed.
+                            const str = @field(ptr, field.name);
+                            if (str.len > 0) alloc.free(str);
                         } else {
                             const payload = @field(ptr, field.name);
                             if (comptime needsCleanup(f_info.pointer.child)) {

@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < data.length() DO
         key = "k" + i.toString();
-        map[key] = Value{ Str: data[i] };
+        map[key] = Value{ Str: COPY data[i] };
         i += 1;
     END
 

@@ -335,6 +335,12 @@ const LamPayload = struct {
     params: []MinValue,
     body: *MinValue,
     env_id: u64,
+
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+        CheatLib.cleanup(MinValue, alloc, self.body);
+        alloc.destroy(self.body);
+        if (self.params.len > 0) alloc.free(self.params);
+    }
 };
 const LamValue = union(enum) {
     Num: f64,
@@ -500,6 +506,15 @@ const SchemeLam = struct {
     params: []SchemeValue,
     body: *SchemeValue,
     env_id: u64,
+
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+        if (comptime CheatLib.needsCleanup(SchemeValue)) {
+            for (self.params) |*e| CheatLib.cleanup(SchemeValue, alloc, e);
+        }
+        if (self.params.len > 0) alloc.free(self.params);
+        CheatLib.cleanup(SchemeValue, alloc, self.body);
+        alloc.destroy(self.body);
+    }
 };
 
 test "BUG: HashMap deinit frees duped strings inside Lambda params" {
