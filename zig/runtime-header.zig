@@ -240,10 +240,13 @@ pub const CheatLib = struct {
             /// The key_alloc/bucket_alloc params are kept for backward compat but ignored.
             /// For tagged union values with []const u8 fields, the string data is
             /// heap-duped so it survives loop-mark arena rewinds.
+            /// TAKES ownership of value. Strings are duped (may be rodata/frame).
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 _ = key_alloc;
                 _ = bucket_alloc;
-                const stored_value = dupeUnionStrings(value, self.alloc) catch value;
+                // Dupe only string payloads (rodata/frame safety). All other
+                // payloads (*T, []T, structs) are taken by move - no copy.
+                const stored_value = dupeStringsOnly(value, self.alloc) catch value;
                 if (self.inner.getPtr(key)) |val_ptr| {
                     freeUnionPayload(val_ptr.*, self.alloc);
                     val_ptr.* = stored_value;
@@ -251,6 +254,21 @@ pub const CheatLib = struct {
                 }
                 const key_copy = try self.alloc.dupe(u8, key);
                 try self.inner.put(self.alloc, key_copy, stored_value);
+            }
+
+            fn dupeStringsOnly(value: V, alloc: std.mem.Allocator) !V {
+                const info = @typeInfo(V);
+                if (info != .@"union") return value;
+                var result = value;
+                inline for (info.@"union".fields) |field| {
+                    if (field.type == []const u8) {
+                        if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
+                            @field(result, field.name) = try alloc.dupe(u8, @field(value, field.name));
+                            return result;
+                        }
+                    }
+                }
+                return value;
             }
 
             /// Deep-copy heap-owning payloads in a tagged union value.
@@ -1859,19 +1877,34 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 9. Structs: recursively clean up RC/link fields
+        // 9. Structs: recursively clean up all owned fields
         const info = @typeInfo(T);
         if (info == .@"struct") {
             inline for (info.@"struct".fields) |field| {
-                if (comptime refInnerType(field.type) != null) {
-                    releaseOne(field.type, alloc, @field(ptr, field.name));
-                }
-                if (comptime @typeInfo(field.type) == .@"struct" and
-                    refInnerType(field.type) == null and
-                    !isArrayList(field.type) and !isStringMap(field.type) and
-                    !isNumericMap(field.type) and !isPool(field.type))
+                const FT = field.type;
+                const f_info = @typeInfo(FT);
+                if (comptime refInnerType(FT) != null) {
+                    releaseOne(FT, alloc, @field(ptr, field.name));
+                } else if (f_info == .pointer and f_info.pointer.size == .one) {
+                    const child_ptr = @field(ptr, field.name);
+                    cleanup(f_info.pointer.child, alloc, child_ptr);
+                    alloc.destroy(child_ptr);
+                } else if (f_info == .pointer and f_info.pointer.size == .slice and
+                    FT != []const u8 and FT != []u8)
                 {
-                    cleanup(field.type, alloc, &@field(ptr, field.name));
+                    const payload = @field(ptr, field.name);
+                    if (comptime needsCleanup(f_info.pointer.child)) {
+                        for (payload) |*elem| {
+                            cleanup(f_info.pointer.child, alloc, elem);
+                        }
+                    }
+                    if (payload.len > 0) alloc.free(payload);
+                } else if (comptime f_info == .@"struct" and
+                    refInnerType(FT) == null and
+                    !isArrayList(FT) and !isStringMap(FT) and
+                    !isNumericMap(FT) and !isPool(FT))
+                {
+                    cleanup(FT, alloc, &@field(ptr, field.name));
                 }
             }
             return;
@@ -1928,6 +1961,10 @@ pub const CheatLib = struct {
         if (ft_info == .@"struct") {
             inline for (ft_info.@"struct".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
+                const fi = @typeInfo(field.type);
+                if (fi == .pointer and fi.pointer.size == .one) return true;
+                if (fi == .pointer and fi.pointer.size == .slice and
+                    field.type != []const u8 and field.type != []u8) return true;
             }
         }
         if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {

@@ -639,4 +639,23 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  # ===========================================================================
+  # Move suppression: _moved = true must be emitted for all OG-tracked moves
+  # ===========================================================================
+  describe "OG-driven move emission" do
+    it "emits _moved = true when non-Copy value is assigned to HashMap" do
+      src = <<~CLEAR
+        STRUCT Env { x: Int64 }
+        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+        FN test!(MUTABLE pool: Env[10]@pool, MUTABLE map: HashMap<Value>) RETURNS Void ->
+            pool.insert(Env{ x: 1 });
+            val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
+            map["key"] = val;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("val_moved = true")
+    end
+  end
 end

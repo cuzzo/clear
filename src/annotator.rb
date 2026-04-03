@@ -1128,7 +1128,16 @@ private
       record_effect(EffectTracker::HEAP)
     end
 
-    # 3. Escape marking: set escaped_return on variables being returned
+    # 3. Move marking: returning a non-Copy value moves it out of the function.
+    # Set was_moved so the transpiler emits _moved = true before return.
+    if node.value.is_a?(AST::Identifier)
+      vti = node.value.type_info
+      if vti && !vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        node.value.was_moved = true
+      end
+    end
+
+    # 4. Escape marking: set escaped_return on variables being returned
     # so the ownership generator suppresses their defer cleanup.
     # PromotionPlan (Pass C) reads these flags to decide what to promote.
     if mark_escaping_collections!(node.value)
@@ -1377,6 +1386,11 @@ private
     end
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type, storage)
+    # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
+    ti = node.type_info
+    if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+    end
     accumulate_stack_bytes(storage, node)
     track_union_alias(node.name, node.value)
     record_capability_binding(node.name, node, final_type, storage)
@@ -1438,6 +1452,10 @@ private
       end
       classify_ownership!(node.symbol)
       og_declare(node.name, node, node.type_info || final_type, storage)
+      ti = node.type_info
+      if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        current_fn_ctx.heap_count += 1 if current_fn_ctx
+      end
         accumulate_stack_bytes(storage, node)
       track_union_alias(node.name, node.value)
       record_capability_binding(node.name, node, final_type, storage)
@@ -2820,6 +2838,7 @@ private
     if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
       lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
       og_move(rhs_name, lhs_name)
+      node.value.was_moved = true
     end
   end
 

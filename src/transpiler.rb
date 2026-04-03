@@ -1020,7 +1020,8 @@ private
                # (frame rewind after function return would dangle key pointers).
                # Values use frameAlloc for frame-local maps, heapAlloc for sharded.
                val_alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
-               return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{val_alloc}, #{key_ref}, #{val_ref});"
+               move_logic = emit_move_suppression(node.value)
+               return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{val_alloc}, #{key_ref}, #{val_ref});\n#{move_logic}"
              end
           end
           arr_ref = visit(target_node)

@@ -124,6 +124,16 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.free(rt, #{name});\n"
     end
 
+    # Non-Copy union on stack: needs cleanup for *T/@indirect fields.
+    # The _moved guard suppresses cleanup when the value is moved (e.g. into HashMap).
+    if @union_schemas&.key?(type_info&.resolved)
+      is_copy = type_info.implicitly_copyable? { |t| @struct_schemas&.dig(t) || @union_schemas&.dig(t) } rescue true
+      unless is_copy
+        zig_t = transpile_type(type_info.resolved.to_s)
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, rt.heapAlloc(), &#{name});\n"
+      end
+    end
+
     "" # Stack type with no custom drop
   end
 
@@ -166,6 +176,16 @@ module OwnershipGenerator
   # Marks the source identifier as moved if it requires affine transfer.
   def emit_move_suppression(rhs_node)
     if rhs_node.is_a?(AST::Identifier)
+      # OG-driven: if annotator marked this node as moved, emit _moved = true
+      # (only if the variable has a _moved guard - locals with cleanup, not parameters).
+      if rhs_node.was_moved
+        sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
+        decl = sym&.reg
+        is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+        return "#{zig_safe_name(rhs_node.name)}_moved = true;" if is_local
+        return ""
+      end
+
       ti = rhs_node.type_info
       return "" unless ti
 
