@@ -1049,6 +1049,11 @@ private
                # Values use frameAlloc for frame-local maps, heapAlloc for sharded.
                val_alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
                move_logic = emit_move_suppression(node.value)
+               # String literals in values must be heap-duped (rodata can't be freed).
+               # This is like Rust's String::from("literal") - the compiler promotes
+               # literals to owned heap data when stored in containers.
+               # TODO: In tight loops, hoist the dupe outside the loop body.
+               val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name)
                return "try #{map_ref}.put(#{rt_name}.heapAlloc(), #{val_alloc}, #{key_ref}, #{val_ref});\n#{move_logic}"
              end
           end
@@ -1309,21 +1314,18 @@ private
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
               binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
 
-              # Emit cleanup for the AS binding (it now owns the data).
+              # Emit cleanup for the AS binding using the source's cleanup allocator.
+              source_ti = node.expr.type_info
+              alloc_expr = source_ti ? cleanup_alloc_expr(source_ti) : "rt.frameAlloc()"
               variant_schema = @union_schemas&.dig(union_lookup, variant)
               if variant_schema && !variant_schema.is_a?(Hash)
-                # Simple payload type (e.g. Value[])
                 payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
                 if payload_t&.array? && !payload_t&.string?
                   elem_zig = transpile_type(payload_t.element_type)
-                  rt_name = @do_rt_name || "rt"
-                  binding_decl += "defer { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{rt_name}.heapAlloc(), __e); } } if (#{c[:binding]}.len > 0) #{rt_name}.heapAlloc().free(#{c[:binding]}); }\n    "
+                  binding_decl += "defer { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc_expr}, __e); } } if (#{c[:binding]}.len > 0) #{alloc_expr}.free(#{c[:binding]}); }\n    "
                 end
               elsif variant_schema.is_a?(Hash) && variant_schema[:kind] == :inline_struct
-                # Inline struct variant (e.g. Lambda{...}) - has deinit
-                struct_name = "#{union_lookup}_#{variant}"
-                rt_name = @do_rt_name || "rt"
-                binding_decl += "defer #{c[:binding]}.deinit(#{rt_name}.heapAlloc());\n    "
+                binding_decl += "defer #{c[:binding]}.deinit(#{alloc_expr});\n    "
               end
             end
             body = "#{binding_decl}#{body}"
@@ -3664,6 +3666,33 @@ private
 
   # these are naming conventions not valid in Zig identifiers.
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
+  # Wrap string literals in heapAlloc.dupe for HashMap value storage.
+  # String literals are rodata - can't be freed by HashMap.deinit.
+  # This is the CLEAR equivalent of Rust's String::from("literal").
+  def heap_dupe_string_literals(val_ref, val_node, rt_name)
+    # Direct string literal: "hello" -> try heapAlloc.dupe(u8, "hello")
+    if val_node.is_a?(AST::Literal) && val_node.type_info&.string?
+      return "try #{rt_name}.heapAlloc().dupe(u8, #{val_ref})"
+    end
+    # Union construction with string literal field: Value{ Str: "hello" }
+    if val_node.is_a?(AST::StructLit)
+      schema = @union_schemas&.dig(val_node.name.to_sym)
+      if schema
+        val_node.fields.each do |fname, fnode|
+          if fnode.type_info&.string? && fnode.is_a?(AST::Literal)
+            # The val_ref already has the Zig StructLit. Replace the literal.
+            if fnode.respond_to?(:value) && fnode.value.is_a?(String)
+              old_str = "\"#{fnode.value}\""
+              new_str = "try #{rt_name}.heapAlloc().dupe(u8, #{old_str})"
+              return val_ref.sub(old_str, new_str)
+            end
+          end
+        end
+      end
+    end
+    val_ref
+  end
+
   def zig_safe_name(name)
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
     # CLEAR's main() must not collide with Zig's pub fn main() entry point.

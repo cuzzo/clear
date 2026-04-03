@@ -693,6 +693,31 @@ RSpec.describe ZigTranspiler do
       # Copy payload: no move needed, source still usable
       expect(zig).not_to include("v_moved = true")
     end
+    it "heap-dupes string literal value in HashMap assignment" do
+      src = <<~CLEAR
+        FN test!(MUTABLE map: HashMap<String>) RETURNS Void ->
+            map["key"] = "hello";
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # String literal "hello" must be heap-duped before storing in HashMap.
+      # Without this, HashMap.deinit tries to free rodata -> crash.
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"hello"/)
+    end
+
+    it "heap-dupes string literal inside union value in HashMap assignment" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String }
+        FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+            map["key"] = Value{ Str: "world" };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"world"/)
+    end
+
     it "emits cleanup on MATCH AS binding when source is moved" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
