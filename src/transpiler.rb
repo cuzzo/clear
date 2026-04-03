@@ -2123,6 +2123,9 @@ private
         if ti&.any_rc?
           return "return #{transpile_rc_retain(ti, node.value.name)};"
         end
+        # TODO: Container borrow deep-copy on return. Blocked because envGet
+        # doesn't have rt in scope. Needs either: (a) envGet to receive rt,
+        # or (b) dupeUnionValue to use the container's own allocator.
       end
 
       # 2. Standard Return with Move Suppression for unique heap

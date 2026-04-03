@@ -1494,14 +1494,19 @@ private
       node.full_type = raw_type
     end
 
-    # 3. Liveness
+    # 3. Propagate container_borrow from declaration to usage site.
+    sym_entry = scope.locals&.[](node.name)
+    decl_node = sym_entry&.reg rescue nil
+    if decl_node.respond_to?(:type_info) && decl_node.type_info&.container_borrow
+      node.type_info.container_borrow = decl_node.type_info.container_borrow
+    end
+
+    # 4. Liveness
     if @og&.moved?(node.name)
-      # TODO: Better error
       error!(node, "Use of moved value '#{node.name}'")
     end
 
-    # 4. Mark variable as read so the transpiler can skip `_ = &x` suppression.
-    # The variable may live in an outer scope; use lookup_scope_for to find it.
+    # 5. Mark variable as read so the transpiler can skip `_ = &x` suppression.
     owner = lookup_scope_for(node.name)
     owner&.mark_read(node.name)
     node.symbol = owner&.locals&.[](node.name)

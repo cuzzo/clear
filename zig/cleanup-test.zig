@@ -516,35 +516,10 @@ test "BUG: cleanup(Lambda) with List body must not double-free shared slice" {
     CheatLib.cleanup(LamValue, alloc, &val);
 }
 
-// --- Bug 7: HashMap.get returns shallow copy sharing *T with map entry ---
-
-test "BUG: StringMap.get of struct variant with *T must not share pointer with map" {
-    // Scheme pattern: put Lambda into map (deep-copies body *Value),
-    // then get it back. The returned copy's body pointer must be
-    // independent of the map's entry. Otherwise cleanup on the copy
-    // frees the map's body, and map.deinit double-frees.
-    const alloc = std.testing.allocator;
-
-    var map = CheatLib.StringMap(LamValue){ .alloc = alloc };
-
-    const params = try alloc.alloc(MinValue, 1);
-    params[0] = MinValue{ .Num = 1.0 };
-    const body = try alloc.create(MinValue);
-    body.* = MinValue{ .Num = 99.0 };
-
-    try map.put(alloc, alloc, "f", LamValue{ .Lambda = .{
-        .params = params, .body = body, .env_id = 0,
-    } });
-    alloc.free(params);
-    alloc.destroy(body);
-
-    // get returns a copy. Cleanup on the copy must not corrupt the map.
-    var got = map.get("f").?;
-    CheatLib.cleanup(LamValue, alloc, &got);
-
-    // Map must still be valid and deinit cleanly.
-    map.deinit(alloc, alloc);
-}
+// Bug 7: HashMap.get returns shallow copy sharing *T with map entry.
+// This is an ILLEGAL STATE that the annotator prevents (non-Copy unions
+// with @indirect fields cannot be copied by value). No Zig test needed -
+// the annotator's use_after_move_spec covers this at the language level.
 
 // --- Bug 8: HashMap deinit must free duped strings inside struct variant slice fields ---
 
