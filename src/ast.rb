@@ -16,6 +16,7 @@ module AST
     attr_accessor :stdlib_allocates  # true when matched stdlib entry has allocates: true
     attr_accessor :was_moved
     attr_accessor :container_borrow     # true when value is borrowed from container (map/list/pool access)
+    attr_accessor :collection_return    # true when return value is a collection needing escape promotion
     attr_accessor :slot_size
     attr_accessor :resource_close_zig   # set by annotator on resource declarations
     attr_accessor :var_used             # true when the variable is read in user code

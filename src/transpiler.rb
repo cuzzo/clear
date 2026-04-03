@@ -13,6 +13,7 @@ require_relative "./annotator"
 require_relative "./pipeline_generator"
 require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
+require_relative "./promotion_plan"
 require_relative "./importer"
 require_relative "./transpiler_context"
 
@@ -45,11 +46,23 @@ class ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
+    @ownership_graph = annotator.instance_variable_get(:@og)
+
+    # Pass C: compute promotion + cleanup plans for all functions.
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    @promotion_plans = {}
+    @cleanup_plans = {}
+    fn_nodes.each do |name, fn|
+      @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
+      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    end
+
     @needs_safety_import = false
-    # Pre-populate needs_rt/can_fail lookup tables from annotated FunctionDef nodes
-    # so call sites can look up callee flags before the callee's definition is visited.
     @fn_needs_rt = {}
     @fn_can_fail = {}
+    @fn_effects = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
@@ -456,6 +469,7 @@ private
       @transpiler_context_stack.push(TranspilerContext.new(
         uses_frame: node.uses_frame,
         has_rt: fn_needs_rt,
+        fn_name: node.name,
         collection_params: node.params.select { |p|
           pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
           pt.needs_pointer_passing?

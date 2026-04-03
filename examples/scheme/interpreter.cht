@@ -231,7 +231,7 @@ FN applyNative(name: String, evaled: Value[]) RETURNS Value @reentrant ->
     IF name == "list" THEN
         MUTABLE litems: Value[]@list = List[];
         FOR li IN (0_i64 ..< evaled.length()) ->
-            litems.append(evaled[li]);
+            litems.append(COPY evaled[li]);
         RETURN Value{ List: litems };
     END
     IF name == "list?" THEN RETURN boolVal(isList?(evaled[0])); END
@@ -287,7 +287,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool
 
     IF formName == "def!" THEN
         defName = getSymName(items[1]);
-        pool[envId]?.vars[defName] = eval!(items[2], envId, pool);
+        pool[envId]?.vars[defName] = eval!(COPY items[2], envId, pool);
         RETURN Value.Nil;
 
     ELSE_IF formName == "let*" THEN
@@ -299,10 +299,10 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool
                 MUTABLE bi: Int64 = 0;
                 WHILE bi < binds.length() DO
                     bName = getSymName(binds[bi]);
-                    pool[letId]?.vars[bName] = eval!(binds[bi + 1], letId, pool);
+                    pool[letId]?.vars[bName] = eval!(COPY binds[bi + 1], letId, pool);
                     bi += 2;
                 END
-                letResult = eval!(items[2], letId, pool);,
+                letResult = eval!(COPY items[2], letId, pool);,
             DEFAULT -> PASS;
         END
         RETURN letResult;
@@ -318,17 +318,17 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool
     ELSE_IF formName == "do" THEN
         MUTABLE doResult: Value = Value.Nil;
         FOR di IN (1_i64 ..< items.length()) ->
-            doResult = eval!(items[di], envId, pool);
+            doResult = eval!(COPY items[di], envId, pool);
         RETURN doResult;
 
     ELSE_IF formName == "if" THEN
-        cond = eval!(items[1], envId, pool);
+        cond = eval!(COPY items[1], envId, pool);
         truthy = isTruthy?(cond);
         IF truthy THEN
-            RETURN eval!(items[2], envId, pool);
+            RETURN eval!(COPY items[2], envId, pool);
         ELSE
             IF items.length() > 3 THEN
-                RETURN eval!(items[3], envId, pool);
+                RETURN eval!(COPY items[3], envId, pool);
             END
             RETURN Value.Nil;
         END
@@ -336,7 +336,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[10000]@pool
     ELSE
         MUTABLE evaled: Value[]@list = List[];
         FOR ei IN (0_i64 ..< items.length()) ->
-            evaled.append(eval!(items[ei], envId, pool));
+            evaled.append(eval!(COPY items[ei], envId, pool));
         f = evaled.remove(0_i64);
         IF isLambda?(f) THEN
             RETURN evalLambdaCall!(f, evaled, pool);
