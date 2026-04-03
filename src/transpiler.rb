@@ -1296,7 +1296,9 @@ private
           cond = "std.meta.activeTag(#{subject}) == .#{variant}"
           # Emit payload binding: `const r = subject.Variant;`
           if c[:binding]
-            binding_decl = "const #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
+            # Use var if MATCH-as-move will emit deinit (needs mutable self)
+            bind_kw = (node.expr.is_a?(AST::Identifier) && node.expr.was_moved) ? "var" : "const"
+            binding_decl = "#{bind_kw} #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
             # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup
             # on source and emit cleanup on the AS binding.
             if node.expr.is_a?(AST::Identifier) && node.expr.was_moved

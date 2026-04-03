@@ -229,7 +229,8 @@ module OwnershipGenerator
       should_suppress ||= is_collection
 
       # Also move for non-copyable types (unions with heap variants, etc.)
-      unless should_suppress
+      # But NOT strings — they have no cleanup guard (frame-arena managed).
+      unless should_suppress || ti.string?
         schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
         should_suppress = !ti.implicitly_copyable?(schema_lookup)
       end
@@ -282,6 +283,7 @@ module OwnershipGenerator
       decl = sym&.reg
       is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
       next unless is_local
+      next if ti.string? # Strings have no cleanup guard (frame-arena managed)
       next if ti.escaped_return && (ti.collection? || ti.string?)
       fn_name = current_tp_ctx&.fn_name
       plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(name)
