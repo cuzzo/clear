@@ -620,4 +620,26 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # Array indexing of non-Copy elements into union construction is a borrow
+  # ===========================================================================
+  describe "Array index in union construction" do
+    context "storing array-indexed string into HashMap via union" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Str: String }
+          FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+              data: String[] = ["alpha", "beta"];
+              map["key"] = Value{ Str: data[0] };
+              RETURN;
+          END
+        CLEAR
+      }
+
+      it "raises error (data[0] is borrowed from array)" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+  end
+
 end

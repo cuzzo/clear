@@ -2082,6 +2082,15 @@ private
       # Apply type param substitution (e.g. T → Number for generic unions)
       expected_type = union_subst.any? ? apply_type_subst(raw_expected, union_subst) : raw_expected
       visit(val_node)
+      # Check for borrowed values (array index, parameter borrows)
+      if val_node.is_a?(AST::GetIndex)
+        vti = val_node.type_info
+        has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
+        unless vti&.primitive? || vti&.generic_instance? || (!has_pointer && !vti&.struct?)
+          root = root_variable_name(val_node)
+          error!(val_node, "Cannot store borrowed value '#{root}[index]' into #{node.name}.#{variant_name}. Use COPY for an explicit deep-copy.")
+        end
+      end
       actual = val_node.type_info
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
