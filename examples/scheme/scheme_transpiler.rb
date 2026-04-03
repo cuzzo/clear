@@ -15,8 +15,9 @@ require "ast"
 class SchemeTranspiler
   def initialize
     @output = []
-    @structs = {}  # name -> [field_name, ...] (ordered)
-    @enums = Set.new    # enum type names
+    @structs = {}       # name -> [field_name, ...] (ordered)
+    @struct_types = {}  # name -> [[field_name, type_str], ...]
+    @enums = Set.new
     @unions = {}  # name -> {variant_name -> has_payload}
     @mutable_stack = [Set.new]  # stack of per-function mutable sets
     @var_types = {}  # var_name -> struct_name (for field access resolution)
@@ -34,6 +35,14 @@ class SchemeTranspiler
   private
 
   def mutables; @mutable_stack.last; end
+
+  def struct_homogeneous_type(name)
+    return nil unless @struct_types[name]
+    types = @struct_types[name].map(&:last).uniq
+    return "i64" if types.all? { |t| t.include?("Int64") && !t.include?("[]") }
+    return "f64" if types.all? { |t| t.include?("Float64") && !t.include?("[]") }
+    nil
+  end
 
   # Restructure function bodies with early returns:
   # [IF cond THEN RETURN val END, ...rest...] -> (if cond val (begin ...rest...))
@@ -111,6 +120,8 @@ class SchemeTranspiler
       case stmt
       when AST::StructDef
         @structs[stmt.name.to_s] = stmt.fields.keys
+        # Preserve field types for typed struct emission
+        @struct_types[stmt.name.to_s] = stmt.fields.map { |name, info| [name, info[:type].to_s] }
       when AST::EnumDef
         @enums.add(stmt.name.to_s)
       when AST::UnionDef
@@ -316,10 +327,15 @@ class SchemeTranspiler
       payload = emit(node.fields.values.first)
       return "(cons (quote #{variant}) #{payload})"
     end
-    # Struct construction: Point{ x: 10, y: 20 } -> (vector 10 20)
+    # Struct construction with type-aware emission
     fields = @structs[name]
     return ";; unknown struct: #{name}" unless fields
     vals = fields.map { |f| node.fields[f] ? emit(node.fields[f]) : "nil" }
+
+    # Typed struct emission blocked by compiler bug #2 (arena lifetime).
+    # TypedI64Arr data inside Pair @indirect gets freed.
+    # Fall back to untyped Vector for now.
+    # TODO: emit typed-struct:i64/f64 when PromotionPlan is fixed.
     "(vector #{vals.join(' ')})"
   end
 
@@ -337,12 +353,14 @@ class SchemeTranspiler
       return "(cons (quote #{field}) nil)"
     end
 
-    # Struct field access: p.x -> (vector-ref p idx)
+    # Struct field access: p.x -> typed or generic access
     target = emit(node.target)
-    # Try to resolve via tracked variable type first
     target_name = node.target.is_a?(AST::Identifier) ? node.target.name.to_s : nil
-    if target_name && @var_types[target_name] && @structs[@var_types[target_name]]
-      idx = @structs[@var_types[target_name]].index(field)
+
+    # Resolve via tracked variable type first
+    struct_name = target_name ? @var_types[target_name] : nil
+    if struct_name && @structs[struct_name]
+      idx = @structs[struct_name].index(field)
       return "(vector-ref #{target} #{idx})" if idx
     end
     # Fallback: search all structs

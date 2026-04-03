@@ -28,6 +28,22 @@ FN nativeDot(a: Float64[], b: Float64[]) RETURNS Float64 ->
     RETURN total;
 END
 
+-- FFI for typed structs: operate on raw Int64[] backing data
+FN nativePointManhattan(a: Int64[], b: Int64[]) RETURNS Int64 ->
+    MUTABLE dx: Int64 = a[0] - b[0];
+    MUTABLE dy: Int64 = a[1] - b[1];
+    IF dx < 0 THEN dx = 0 - dx; END
+    IF dy < 0 THEN dy = 0 - dy; END
+    RETURN dx + dy;
+END
+
+FN nativeTranslate(point: Int64[], dx: Int64, dy: Int64) RETURNS Int64[] ->
+    MUTABLE result: Int64[]@list = List[];
+    result.append(point[0] + dx);
+    result.append(point[1] + dy);
+    RETURN result;
+END
+
 FN nativeContains(arr: Int64[], needle: Int64) RETURNS Bool ->
     FOR i IN (0_i64 ..< arr.length()) DO
         IF arr[i] == needle THEN RETURN TRUE; END
@@ -58,7 +74,7 @@ UNION Value {
     Error { errMsg: String, errKind: String },
     Int64Val: Int64,
     TypedI64Arr: Int64[],
-    TypedF64Arr: Float64[]
+    TypedF64Arr: Float64[],
 }
 
 -- Pure helpers
@@ -1313,6 +1329,50 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value{ TypedI64Arr: typedItems };
 
+    -- Typed struct: (cons 'Tag TypedI64Arr/TypedF64Arr/Vector)
+    ELSE_IF formName == "typed-struct:i64" THEN
+        -- (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
+        tagVal = eval!(items[1], envId, pool);
+        IF isError?(tagVal) THEN RETURN tagVal; END
+        MUTABLE structData: Int64[]@list = List[];
+        FOR fi IN (2_i64 ..< items.length()) DO
+            fval = eval!(items[fi], envId, pool);
+            IF isError?(fval) THEN RETURN fval; END
+            structData.append(getInt(fval));
+        END
+        RETURN Value.Pair{ pairCar: Value{ Symbol: getStr(tagVal) }, pairCdr: Value{ TypedI64Arr: structData } };
+
+    ELSE_IF formName == "typed-struct:f64" THEN
+        tagVal = eval!(items[1], envId, pool);
+        IF isError?(tagVal) THEN RETURN tagVal; END
+        MUTABLE structData: Float64[]@list = List[];
+        FOR fi IN (2_i64 ..< items.length()) DO
+            fval = eval!(items[fi], envId, pool);
+            IF isError?(fval) THEN RETURN fval; END
+            structData.append(getNum(fval));
+        END
+        RETURN Value.Pair{ pairCar: Value{ Symbol: getStr(tagVal) }, pairCdr: Value{ TypedF64Arr: structData } };
+
+    ELSE_IF formName == "typed-struct-ref:i64" THEN
+        sval = eval!(items[1], envId, pool);
+        IF isError?(sval) THEN RETURN sval; END
+        idx = getInt(eval!(items[2], envId, pool));
+        dataVal = pairCdr(sval);
+        RETURN listRef(dataVal, idx);
+
+    ELSE_IF formName == "typed-struct-ref:f64" THEN
+        sval = eval!(items[1], envId, pool);
+        IF isError?(sval) THEN RETURN sval; END
+        idx = getInt(eval!(items[2], envId, pool));
+        dataVal = pairCdr(sval);
+        RETURN listRef(dataVal, idx);
+
+    ELSE_IF formName == "typed-struct-ref:mixed" THEN
+        sval = eval!(items[1], envId, pool);
+        IF isError?(sval) THEN RETURN sval; END
+        idx = getInt(eval!(items[2], envId, pool));
+        RETURN vecRef(sval, idx);
+
     ELSE_IF formName == "typed-list:f64" THEN
         MUTABLE typedFloats: Float64[]@list = List[];
         FOR ti IN (1_i64 ..< items.length()) DO
@@ -1433,6 +1493,42 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type" };
                 END,
             DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires Float64 arrays", errKind: "Type" };
+        END
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "native-manhattan" THEN
+        -- (native-manhattan structA structB) -> Int64 manhattan distance
+        aVal = eval!(items[1], envId, pool);
+        IF isError?(aVal) THEN RETURN aVal; END
+        bVal = eval!(items[2], envId, pool);
+        IF isError?(bVal) THEN RETURN bVal; END
+        MATCH pairCdr(aVal) START
+            Value.TypedI64Arr AS ai ->
+                MATCH pairCdr(bVal) START
+                    Value.TypedI64Arr AS bi ->
+                        RETURN Value{ Int64Val: nativePointManhattan(ai, bi) };,
+                    DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+                END,
+            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+        END
+        RETURN Value.Nil;
+
+    ELSE_IF formName == "native-translate" THEN
+        -- (native-translate struct dx dy) -> new TypedStructI64
+        sVal = eval!(items[1], envId, pool);
+        IF isError?(sVal) THEN RETURN sVal; END
+        dxVal = eval!(items[2], envId, pool);
+        IF isError?(dxVal) THEN RETURN dxVal; END
+        dyVal = eval!(items[3], envId, pool);
+        IF isError?(dyVal) THEN RETURN dyVal; END
+        tagVal = pairCar(sVal);
+        MATCH pairCdr(sVal) START
+            Value.TypedI64Arr AS si ->
+                MUTABLE trData: Int64[]@list = List[];
+                trData.append(si[0] + getInt(dxVal));
+                trData.append(si[1] + getInt(dyVal));
+                RETURN Value.Pair{ pairCar: tagVal, pairCdr: Value{ TypedI64Arr: trData } };,
+            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
         END
         RETURN Value.Nil;
 
@@ -2429,6 +2525,12 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(type-of (int->float 42:i64))", FALSE, rootId, pool, penv) == "Float64", "int->float type";
     ASSERT evalIn!("(type-of (float->int 3.14))", FALSE, rootId, pool, penv) == "Int64", "float->int type";
     ASSERT evalIn!("(float->int 42.9)", TRUE, rootId, pool, penv) == "42", "float->int truncates";
+
+    -- Typed structs: BLOCKED by compiler bug #2 (arena lifetime).
+    -- TypedI64Arr inside Pair{@indirect} gets freed when the special form handler returns.
+    -- The construction + access special forms are implemented but data doesn't survive.
+    -- Fix: PromotionPlan needs to promote Int64[]@list to heap when escaping via @indirect.
+    -- Tests disabled until compiler fix:
 
     print("Interpreter smoke tests PASSED!");
     RETURN;
