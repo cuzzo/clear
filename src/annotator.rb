@@ -1417,6 +1417,8 @@ private
     storage = finalize_decl_storage!(node, final_type)
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
+    # Set cleanup allocator: determines which Zig allocator is used in defer cleanup.
+    set_cleanup_alloc!(node)
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
     node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
@@ -1484,6 +1486,7 @@ private
       storage = finalize_decl_storage!(node, final_type)
       propagate_collection_metadata!(node, final_type)
       propagate_call_flags!(node)
+      set_cleanup_alloc!(node)
       is_resource, resource_close = resolve_resource_close(node, final_type)
       node.resource_close_zig = resource_close
       node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
@@ -3520,6 +3523,31 @@ private
   end
 
   # ── Ownership Graph Operations ─────────────────────────────────
+
+  # Determine which allocator cleanup should use for this binding.
+  # Set once on the type_info, read by the transpiler's emit_cleanup.
+  def set_cleanup_alloc!(node)
+    ti = node.type_info
+    return unless ti
+    # Heap allocator needed for: heap-promoted data, maps (keys duped to heap),
+    # RC/Arc (heap-allocated control blocks), sync (heap-allocated mutexes),
+    # resources, sharded collections, and structs with RC/link fields.
+    needs_heap = ti.heap_promoted || ti.map? || ti.any_rc? || ti.any_sync? ||
+                 ti.resource? || ti.sharded? || ti.striped? || ti.link?
+    # Check if struct has RC/link fields
+    unless needs_heap
+      schema = lookup_type_schema(ti.resolved) rescue nil
+      if schema.is_a?(Hash) && !schema[:kind]
+        needs_heap = schema.any? do |k, v|
+          next false if k.is_a?(Symbol)
+          ft = v.is_a?(Hash) ? v[:type] : v
+          t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+          t.link? || t.any_rc?
+        end
+      end
+    end
+    ti.cleanup_alloc = needs_heap ? :heap : :frame
+  end
 
   def og_declare(name, node, type_info, storage)
     kind = classify_og_kind(type_info)

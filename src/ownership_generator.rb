@@ -1,10 +1,19 @@
 module OwnershipGenerator
+  # Returns the Zig allocator expression for cleanup, based on type_info.cleanup_alloc.
+  def cleanup_alloc_expr(type_info)
+    case type_info&.cleanup_alloc
+    when :heap then "rt.heapAlloc()"
+    when :frame then "rt.frameAlloc()"
+    else "rt.heapAlloc()" # fallback
+    end
+  end
+
   # Generates the `_moved` flag and `defer` cleanup block for a variable.
   def emit_cleanup(name, node)
     type_info = node.type_info
     storage = node.storage
     resource_close = node.resource_close_zig
-
+    alloc = cleanup_alloc_expr(type_info)
 
     # Resources use a simple `defer close()` - use moved-flag to prevent double-close.
     if resource_close
@@ -16,29 +25,21 @@ module OwnershipGenerator
     return "" if type_info&.escaped_return && (type_info.collection? || type_info.string?)
 
     # CleanupPlan-driven: check if the plan says this binding needs heap cleanup.
-    # Covers all heap-promoted bindings (from returns_promoted callees) including
-    # cases that walk_promote_callers missed (IF/MATCH branches, chained calls).
     fn_name = current_tp_ctx&.fn_name
     plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(name.to_s)
     if plan_entry && plan_entry[:alloc] == :heap
       case plan_entry[:kind]
       when :heap_string
         return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
-      when :heap_slice
-        zig_type = type_info.zig_type
-        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-      when :heap_union
-        zig_type = transpile_type(type_info.resolved.to_s)
-        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-      when :heap_struct
-        zig_type = transpile_type(type_info.resolved.to_s)
+      when :heap_slice, :heap_union, :heap_struct
+        zig_type = plan_entry[:kind] == :heap_slice ? type_info.zig_type : transpile_type(type_info.resolved.to_s)
         return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
       end
     end
 
     # ── Simple cases: use unified CheatLib.cleanup ──────────────────
 
-    # Lists (non-sharded, non-heap-promoted): cleanup handles ArrayList.
+    # Lists (non-sharded, non-heap-promoted)
     if type_info&.list_collection? && !type_info&.sharded? && !type_info&.heap_promoted
       zig_type = type_info.zig_type
       elem_type = type_info.element_type
@@ -46,26 +47,28 @@ module OwnershipGenerator
       elem_schema = (@union_schemas ||= {})[elem_resolved]
       if elem_schema && elem_schema.any? { |_, vt| Type.variant_has_heap?(vt) }
         elem_zig = transpile_type(elem_resolved.to_s)
+        # Element cleanup uses heapAlloc (elements may contain heap-promoted data).
+        # ArrayList backing buffer uses frameAlloc (allocated on frame arena).
         return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); };\n"
       end
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.frameAlloc(), &#{name});\n"
     end
 
-    # Sharded/promoted lists: heapAlloc
+    # Sharded/promoted lists
     if type_info&.list_collection?
       zig_type = type_info.zig_type
-      return "defer CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+      return "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
     end
 
     # Pool
     if type_info&.pool?
-      return "defer #{name}.deinit(rt.heapAlloc());\n"
+      return "defer #{name}.deinit(#{alloc});\n"
     end
 
     # Set
     if type_info&.set_collection?
       zig_type = type_info.zig_type
-      return "defer CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+      return "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
     end
 
     # String maps: always heapAlloc (keys duped via heapAlloc)
@@ -77,7 +80,7 @@ module OwnershipGenerator
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
     end
 
-    # Numeric maps: frameAlloc (no key copies, backing array in frame arena)
+    # Numeric maps
     if type_info&.numeric_map?
       zig_type = type_info.zig_type
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.frameAlloc(), &#{name});\n"
@@ -89,7 +92,7 @@ module OwnershipGenerator
       schema = (@struct_schemas ||= {})[resolved]
       if schema && schema.any? { |k, v| !k.is_a?(Symbol) && (ft = v.is_a?(Hash) ? v[:type] : v; t = ft.is_a?(Type) ? ft : Type.new(ft || :Any); t.link? || t.any_rc?) }
         zig_type = transpile_type(resolved.to_s)
-        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
       end
     end
 
@@ -109,30 +112,27 @@ module OwnershipGenerator
       return emit_rc_cleanup(name, type_info)
     end
 
-    # Locked/RwLocked: use specific destroy (they need heap destroy, not field walk)
+    # Locked/RwLocked
     if is_locked
       zig_inner_t = transpile_type(type_info.resolved.to_s)
-      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{name});\n"
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, #{alloc}, #{name});\n"
     end
     if is_write_locked
       zig_inner_t = transpile_type(type_info.resolved.to_s)
-      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.rwLockedDestroy(#{zig_inner_t}, rt.heapAlloc(), #{name});\n"
+      return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.rwLockedDestroy(#{zig_inner_t}, #{alloc}, #{name});\n"
     end
 
-    # Heap-allocated plain structs: use free
+    # Heap-allocated plain structs
     if is_heap
       return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.free(rt, #{name});\n"
     end
 
-    # Non-Copy types on stack: need cleanup with _moved guard.
+    # Non-Copy unions on stack: need cleanup with _moved guard.
     is_copy = type_info&.implicitly_copyable? { |t| @struct_schemas&.dig(t) || @union_schemas&.dig(t) } rescue true
     unless is_copy
       if @union_schemas&.key?(type_info&.resolved)
         zig_t = transpile_type(type_info.resolved.to_s)
-        # Use frameAlloc: frame-arena free is a no-op for individual items,
-        # so strings inside the union won't crash. Heap-promoted data is
-        # freed by HashMap/Pool deinit with the correct allocator.
-        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, rt.frameAlloc(), &#{name});\n"
+        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, #{alloc}, &#{name});\n"
       end
       # Strings: frame-arena managed, freed on frame rewind. No cleanup needed.
     end
@@ -145,6 +145,7 @@ module OwnershipGenerator
     is_optional = type_info.optional?
     is_shared = type_info.shared?
     is_link = type_info.link?
+    alloc = cleanup_alloc_expr(type_info)
 
     base_type = type_info.resolved.to_s
     base_type = base_type.sub(/^\?/, '') if is_optional
@@ -159,9 +160,9 @@ module OwnershipGenerator
       moved_guard += "defer if (!#{name}_moved) CheatLib.#{release_func}(#{transpile_type(base_type)}, #{name});\n"
     elsif is_optional
       release_func = is_shared ? "arcRelease" : "rcRelease"
-      moved_guard += "defer if (!#{name}_moved) { if (#{name}) |_strong_ref| CheatLib.#{release_func}(#{transpile_type(base_type)}, rt.heapAlloc(), _strong_ref); };\n"
+      moved_guard += "defer if (!#{name}_moved) { if (#{name}) |_strong_ref| CheatLib.#{release_func}(#{transpile_type(base_type)}, #{alloc}, _strong_ref); };\n"
     else
-      moved_guard += "defer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+      moved_guard += "defer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
     end
 
     # RC structs: also emit releaseFields on the inner data.
@@ -169,7 +170,7 @@ module OwnershipGenerator
       base_zig = transpile_type(base_type)
       schema = (@struct_schemas ||= {})[type_info.resolved]
       if schema
-        moved_guard += "defer if (!#{name}_moved) CheatLib.releaseFields(#{base_zig}, rt.heapAlloc(), #{name}.ctrl.data.*);\n"
+        moved_guard += "defer if (!#{name}_moved) CheatLib.releaseFields(#{base_zig}, #{alloc}, #{name}.ctrl.data.*);\n"
       end
     end
 
@@ -180,15 +181,11 @@ module OwnershipGenerator
   def emit_move_suppression(rhs_node)
     if rhs_node.is_a?(AST::Identifier)
       # OG-driven: if annotator marked this node as moved, emit _moved = true
-      # (only if the variable has a _moved guard - locals with cleanup, not parameters).
       if rhs_node.was_moved
         sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
         decl = sym&.reg
         is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
         is_takes = sym&.respond_to?(:takes) && sym&.takes
-        # Only emit _moved if the variable has a _moved guard.
-        # Guards are emitted by emit_cleanup for: mutable locals, heap_promoted,
-        # cleanup plan entries, non-Copy unions, TAKES params.
         if is_local || is_takes
           ti = rhs_node.type_info
           # Strings have no cleanup guard (frame-arena managed) - no _moved to set.
@@ -238,13 +235,10 @@ module OwnershipGenerator
       end
 
       # Only emit _moved for local variables (not function parameters).
-      # Parameters don't have var X_moved = false guards.
       if should_suppress
         sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
         decl = sym&.reg
         is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-        # Only emit if the variable has a _moved guard (mutable + defer with _moved).
-        # Check if variable has a _moved guard: mutable locals, heap_promoted, or CleanupPlan.
         fn_name = current_tp_ctx&.fn_name
         plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(rhs_node.name)
         has_moved_guard = is_local && (sym&.mutable || ti.heap_promoted || plan_entry)
@@ -255,10 +249,8 @@ module OwnershipGenerator
   end
 
   # Emit _moved = true statements for arguments consumed by a call or construction.
-  # Called after visit() for FuncCall (TAKES/append), StructLit, UnionVariantLit.
   def emit_consumed_moves(node)
     moves = []
-    # Unwrap VarDecl/BindExpr to get the value expression (FuncCall, StructLit, etc.)
     inner = node
     inner = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     inner = inner.value if inner.is_a?(AST::MoveNode)
@@ -269,9 +261,6 @@ module OwnershipGenerator
     when AST::FuncCall, AST::MethodCall
       consumed = inner.args.select { |a| a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier) } +
         inner.args.select { |a| a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier) }.map(&:value)
-      # Intrinsic append: the value arg is consumed by the collection.
-      # For MethodCall: args = [value], object = list
-      # For FuncCall (UFCS): args = [list, value]
       if inner.respond_to?(:zig_pattern) && inner.zig_pattern.is_a?(String) && inner.zig_pattern.include?("append")
         val_arg = inner.args.last
         val_arg = val_arg.is_a?(AST::MoveNode) ? val_arg.value : val_arg
@@ -289,8 +278,6 @@ module OwnershipGenerator
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
       next unless ti
 
-      # Only emit _moved for local variables that have a _moved guard.
-      # Skip: parameters, immutable-without-plan, escaped variables (no defer).
       sym = arg.respond_to?(:symbol) ? arg.symbol : nil
       decl = sym&.reg
       is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
