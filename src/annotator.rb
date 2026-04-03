@@ -124,6 +124,11 @@ private
     send(method_name, node)
   end
 
+  # Cached outer scope variable set - avoids O(n) flat_map per loop
+  def outer_scope_vars
+    @scope_stack.flat_map { |s| s.locals.keys }.to_set
+  end
+
   def visit_Program(node)
     # PASS 0: Process REQUIRE statements — import symbols from required files
     # before any types or functions in this file are registered.
@@ -868,7 +873,7 @@ private
     error!(node, "FOR range end must be Int64, got #{end_type}") unless end_type == :Int64
 
     # 2. Capture outer-scope variable names before visiting the body.
-    outer_vars = @scope_stack.flat_map { |s| s.locals.keys }.to_set
+    outer_vars = outer_scope_vars
 
     # 3. Analyze body in new scope with loop variable declared as immutable Int64
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
@@ -945,7 +950,7 @@ private
 
     # 2. Capture outer-scope variable names before visiting the body.
     # Used to determine if per-iteration frame marks are safe.
-    outer_vars = @scope_stack.flat_map { |s| s.locals.keys }.to_set
+    outer_vars = outer_scope_vars
 
     # 3. Analyze Body in a New Scope AND increment loop depth
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end

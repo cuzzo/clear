@@ -36,8 +36,22 @@ class OwnershipGraph
   attr_reader :nodes, :edges
 
   def initialize
-    @nodes = {}   # path => Node
-    @edges = []   # Array of Edge
+    @nodes = {}           # path => Node
+    @edges = []           # Array of Edge
+    @edges_by_target = Hash.new { |h, k| h[k] = [] }  # target_path => [Edge]
+    @children = Hash.new { |h, k| h[k] = Set.new }    # parent_path => Set of child paths
+  end
+
+  # ── Edge index helpers ────────────────────────────────────────────
+
+  def add_edge(edge)
+    @edges << edge
+    @edges_by_target[edge.to] << edge
+  end
+
+  def rebuild_target_index!
+    @edges_by_target = Hash.new { |h, k| h[k] = [] }
+    @edges.each { |e| @edges_by_target[e.to] << e }
   end
 
   # ── Core Operations ───────────────────────────────────────────────
@@ -48,6 +62,11 @@ class OwnershipGraph
       path: path, kind: kind, state: :live, storage: storage,
       type_info: type_info, scope_depth: scope_depth, line: line
     )
+    # Register as child of parent path (e.g., "x.child" is child of "x")
+    if path.include?('.')
+      parent = path.rpartition('.').first
+      @children[parent].add(path)
+    end
   end
 
   # Move ownership from source to target. Invalidates source and all children.
@@ -62,7 +81,7 @@ class OwnershipGraph
     )
 
     # Record the move edge
-    @edges << Edge.new(from: to, to: from, kind: :moves)
+    add_edge(Edge.new(from: to, to: from, kind: :moves))
 
     # Invalidate source and all owned children
     invalidate(from)
@@ -78,12 +97,12 @@ class OwnershipGraph
       # Mutable borrow: no other borrows (mutable or immutable) may exist
       conflict = find_borrow_conflict(source)
       return conflict if conflict
-      @edges << Edge.new(from: borrower, to: source, kind: :borrows_mut)
+      add_edge(Edge.new(from: borrower, to: source, kind: :borrows_mut))
     else
       # Immutable borrow: no mutable borrows may exist
       mut_conflict = find_mutable_borrow(source)
       return mut_conflict if mut_conflict
-      @edges << Edge.new(from: borrower, to: source, kind: :borrows)
+      add_edge(Edge.new(from: borrower, to: source, kind: :borrows))
     end
     nil
   end
@@ -91,6 +110,7 @@ class OwnershipGraph
   # Remove all borrow edges from a borrower.
   def release_borrow(borrower)
     @edges.reject! { |e| e.from == borrower && (e.kind == :borrows || e.kind == :borrows_mut) }
+    rebuild_target_index!
   end
 
   # Mark a path for heap promotion (escapes the current frame).
@@ -114,6 +134,7 @@ class OwnershipGraph
     # Remove borrow edges from/to dropped paths
     dropped_set = to_cleanup.to_set
     @edges.reject! { |e| dropped_set.include?(e.from) || dropped_set.include?(e.to) }
+    rebuild_target_index!
 
     to_cleanup
   end
@@ -123,8 +144,7 @@ class OwnershipGraph
     # Check this path and all ancestors
     current = path
     loop do
-      borrows = @edges.select { |e| e.to == current && (e.kind == :borrows || e.kind == :borrows_mut) }
-      return false if borrows.any?
+      return false if @edges_by_target[current].any? { |e| e.kind == :borrows || e.kind == :borrows_mut }
       break unless current.include?('.')
       current = current.rpartition('.').first
     end
@@ -168,11 +188,19 @@ class OwnershipGraph
   # Restore graph state from a snapshot (destructive — replaces all nodes/edges).
   def restore_from(snapshot)
     @nodes = {}
-    snapshot.nodes.each { |k, v| @nodes[k] = v.dup }
+    @children = Hash.new { |h, k| h[k] = Set.new }
+    snapshot.nodes.each do |k, v|
+      @nodes[k] = v.dup
+      if k.include?('.')
+        parent = k.rpartition('.').first
+        @children[parent].add(k)
+      end
+    end
     # Preserve alias edges (permanent facts) across branch analysis.
     # Only restore borrow/move/owns edges from the snapshot.
     alias_edges = @edges.select { |e| e.kind == :aliases }
     @edges = snapshot.instance_variable_get(:@edges).map(&:dup) + alias_edges
+    rebuild_target_index!
   end
 
   # Merge a branch's graph state back. Both branches must agree on
@@ -203,6 +231,7 @@ class OwnershipGraph
     # Merge edges: union of both edge sets
     other_edges = other.instance_variable_get(:@edges)
     @edges = (@edges + other_edges).uniq { |e| [e.from, e.to, e.kind] }
+    rebuild_target_index!
 
     errors
   end
@@ -216,8 +245,9 @@ class OwnershipGraph
 
   # All paths that are children of the given path.
   def owned_children(path)
-    prefix = "#{path}."
-    @nodes.keys.select { |k| k.start_with?(prefix) }.sort
+    result = []
+    collect_descendants(path, result)
+    result.sort
   end
 
   private
@@ -226,24 +256,30 @@ class OwnershipGraph
     node = @nodes[path]
     return unless node
     node.state = :moved
-    # Also invalidate children
-    prefix = "#{path}."
-    @nodes.each { |k, v| v.state = :moved if k.start_with?(prefix) }
+    @children[path].each do |child|
+      @nodes[child]&.state = :moved
+      invalidate(child)  # recurse for nested children
+    end
+  end
+
+  def collect_descendants(path, result)
+    @children[path].each do |child|
+      result << child
+      collect_descendants(child, result)
+    end
   end
 
   def find_borrow_conflict(path)
-    borrows = @edges.select { |e| e.to == path && (e.kind == :borrows || e.kind == :borrows_mut) }
-    return nil if borrows.empty?
-    b = borrows.first
+    b = @edges_by_target[path].find { |e| e.kind == :borrows || e.kind == :borrows_mut }
+    return nil unless b
     borrower_node = @nodes[b.from]
     line_info = borrower_node ? " (declared at line #{borrower_node.line})" : ""
     "cannot borrow '#{path}' mutably: already borrowed by '#{b.from}'#{line_info}"
   end
 
   def find_mutable_borrow(path)
-    mut_borrows = @edges.select { |e| e.to == path && e.kind == :borrows_mut }
-    return nil if mut_borrows.empty?
-    b = mut_borrows.first
+    b = @edges_by_target[path].find { |e| e.kind == :borrows_mut }
+    return nil unless b
     "cannot borrow '#{path}': mutably borrowed by '#{b.from}'"
   end
 end
