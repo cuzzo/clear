@@ -131,10 +131,8 @@ module OwnershipGenerator
         zig_t = transpile_type(type_info.resolved.to_s)
         return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_t}, rt.heapAlloc(), &#{name});\n"
       end
-      # Strings: cleanup frees the heap buffer.
-      if type_info&.string?
-        return "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { if (#{name}.len > 0) rt.heapAlloc().free(#{name}); };\n"
-      end
+      # Strings: no cleanup needed. Frame-arena managed, freed on frame rewind.
+      # Heap-promoted strings in HashMaps are freed by the map's deinit.
     end
 
     "" # Stack type with no custom drop
@@ -191,8 +189,10 @@ module OwnershipGenerator
         # cleanup plan entries, non-Copy unions, TAKES params.
         if is_local || is_takes
           ti = rhs_node.type_info
+          # Strings have no cleanup guard (frame-arena managed) - no _moved to set.
+          return "" if ti&.string?
           # escaped_return suppresses the guard - no _moved to set.
-          return "" if ti&.escaped_return && (ti.collection? || ti.string?)
+          return "" if ti&.escaped_return && ti.collection?
           fn_name = current_tp_ctx&.fn_name
           plan_entry = @cleanup_plans&.dig(fn_name)&.bindings&.dig(rhs_node.name)
           has_guard = sym&.mutable || (ti&.heap_promoted rescue false) || plan_entry ||

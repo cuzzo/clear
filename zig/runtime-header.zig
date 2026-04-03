@@ -1650,11 +1650,9 @@ pub const CheatLib = struct {
     pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
         const ptr = @constCast(cptr);
 
-        // 0. Strings: free the heap-allocated buffer.
-        if (T == []const u8 or T == []u8) {
-            if (ptr.len > 0) alloc.free(ptr.*);
-            return;
-        }
+        // 0. Strings: no-op. Strings are frame-arena managed (freed on frame rewind).
+        // Heap-promoted strings in HashMaps are freed by the map's deinit.
+        if (T == []const u8 or T == []u8) return;
 
         // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
         if (comptime refInnerType(T) != null) {
@@ -1737,9 +1735,12 @@ pub const CheatLib = struct {
             if (param_count == 3) {
                 // deinit(self, key_alloc, bucket_alloc)
                 ptr.deinit(alloc, alloc);
-            } else {
+            } else if (param_count == 2) {
                 // deinit(self, alloc)
                 ptr.deinit(alloc);
+            } else {
+                // deinit(self) - no allocator needed
+                ptr.deinit();
             }
             return;
         }
@@ -1750,16 +1751,19 @@ pub const CheatLib = struct {
             inline for (info.@"struct".fields) |field| {
                 const FT = field.type;
                 const f_info = @typeInfo(FT);
+                // Skip opaque types and function pointers (Zig stdlib internals)
+                if (f_info == .@"opaque" or f_info == .@"fn") continue;
                 if (comptime refInnerType(FT) != null) {
                     releaseOne(FT, alloc, @field(ptr, field.name));
-                } else if (f_info == .pointer and f_info.pointer.size == .one) {
+                } else if (f_info == .pointer and f_info.pointer.size == .one and
+                    @typeInfo(f_info.pointer.child) != .@"opaque" and @typeInfo(f_info.pointer.child) != .@"fn") {
                     const child_ptr = @field(ptr, field.name);
                     cleanup(f_info.pointer.child, alloc, child_ptr);
                     alloc.destroy(child_ptr);
                 } else if (f_info == .pointer and f_info.pointer.size == .slice) {
                     const payload = @field(ptr, field.name);
                     if (FT == []const u8 or FT == []u8) {
-                        if (payload.len > 0) alloc.free(payload);
+                        // Strings: no-op. Frame-arena managed.
                     } else {
                         if (comptime needsCleanup(f_info.pointer.child)) {
                             for (payload) |*elem| {
@@ -1784,9 +1788,7 @@ pub const CheatLib = struct {
                     // Slice variant ([]T): recursively cleanup elements then free buffer.
                     if (f_info == .pointer and f_info.pointer.size == .slice) {
                         if (FT == []const u8 or FT == []u8) {
-                            // String: free the heap-allocated buffer.
-                            const str = @field(ptr, field.name);
-                            if (str.len > 0) alloc.free(str);
+                            // Strings: no-op. Frame-arena managed.
                         } else {
                             const payload = @field(ptr, field.name);
                             if (comptime needsCleanup(f_info.pointer.child)) {
