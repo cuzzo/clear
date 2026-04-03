@@ -1094,7 +1094,6 @@ pub const CheatLib = struct {
     // After a successful read, yields the fiber so other fibers on the same
     // scheduler get a turn. Without this, a single client with pipelined
     // data can monopolize the scheduler indefinitely.
-    // Usage: data = tcpRead(client)
     // Yields after successful read for I/O fairness among concurrent client fibers.
     pub noinline fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
         var buf: [4096]u8 = undefined;

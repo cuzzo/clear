@@ -3852,7 +3852,16 @@ private
           end
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
-        code = "#{preamble}\n#{code}"
+        # When a heap temp is used in a return statement, suppress its
+        # cleanup - ownership transfers to the caller.
+        if stmt.is_a?(AST::ReturnNode) && temps.any? { |t| t[:var] && code.include?(t[:var]) }
+          move_suppression = temps.filter_map { |t|
+            "#{t[:var]}_moved = true;" if code.include?(t[:var])
+          }.join("\n")
+          code = "#{preamble}\n#{move_suppression}\n#{code}"
+        else
+          code = "#{preamble}\n#{code}"
+        end
       end
       ctx.pending_heap_temps = saved_temps if ctx
       # Zig requires non-void expression results to be consumed. Any AST node

@@ -1,0 +1,65 @@
+-- Test: create list via native function, return through eval chain, print.
+-- Reproducer for scheme test 14: (list 1 2 3) prints "(  )".
+
+UNION Value { Nil, Number: Float64, List: Value[], NativeFn: String, Symbol: String }
+
+FN getNum(v: Value) RETURNS Float64 ->
+    MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
+    RETURN 0.0;
+END
+
+FN prStr(v: Value) RETURNS String @reentrant ->
+    MATCH v START
+        Value.Number AS n ->
+            RETURN toInt(n).toString();,
+        Value.List AS items ->
+            MUTABLE out = "(";
+            FOR li IN (0_i64 ..< items.length()) DO
+                IF li > 0 THEN out = out + " "; END
+                out = out + prStr(items[li]);
+            END
+            RETURN out + ")";,
+        DEFAULT -> RETURN "?";
+    END
+    RETURN "?";
+END
+
+FN applyNative(name: String, evaled: Value[]) RETURNS Value ->
+    IF name == "list" THEN
+        MUTABLE litems: Value[]@list = List[];
+        FOR li IN (0_i64 ..< evaled.length()) DO
+            litems.append(evaled[li]);
+        END
+        RETURN Value{ List: litems };
+    END
+    RETURN Value.Nil;
+END
+
+FN evalList!(TAKES items: Value[]) RETURNS Value ->
+    MUTABLE evaled: Value[]@list = List[];
+    FOR ei IN (0_i64 ..< items.length()) DO
+        evaled.append(items[ei]);
+    END
+    f = evaled.remove(0_i64);
+    MATCH f START
+        Value.NativeFn AS s -> RETURN applyNative(s, evaled);,
+        DEFAULT -> RETURN Value.Nil;
+    END
+    RETURN Value.Nil;
+END
+
+FN main() RETURNS Void ->
+    -- Build (list 1 2 3) as [NativeFn("list"), Number(1), Number(2), Number(3)]
+    MUTABLE ast: Value[]@list = List[];
+    ast.append(Value{ NativeFn: "list" });
+    ast.append(Value{ Number: 1.0 });
+    ast.append(Value{ Number: 2.0 });
+    ast.append(Value{ Number: 3.0 });
+
+    result = evalList!(ast);
+    s = prStr(result);
+    print(s);
+    ASSERT s == "(1 2 3)", "list 1 2 3";
+
+    RETURN;
+END
