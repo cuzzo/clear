@@ -583,6 +583,28 @@ class SchemeTranspiler
       "(list-unnest #{left})"
     when AST::IndexOp
       "(list-index #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::CountOp
+      "(list-count #{left})"
+    when AST::SumOp
+      "(list-sum #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::AverageOp
+      "(list-avg #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::MinOp
+      "(list-min #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::MaxOp
+      "(list-max #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::FindOp
+      "(list-find #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::AnyOp
+      "(list-any #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::AllOp
+      "(list-all #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::EachOp, AST::TapOp
+      "(list-each #{left} #{emit_pipeline_expr(right.expression)})"
+    when AST::SkipOp
+      "(list-skip #{left} #{emit(right.expression)})"
+    when AST::TakeWhileOp
+      "(list-take-while #{left} #{emit_pipeline_expr(right.expression)})"
     when AST::BinaryOp
       # Chained pipe: x s> f s> g -> (g (f x))
       if right.op == :SMOOTH
