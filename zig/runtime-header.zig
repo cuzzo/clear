@@ -248,7 +248,7 @@ pub const CheatLib = struct {
                 _ = bucket_alloc;
                 const stored_value = value;
                 if (self.inner.getPtr(key)) |val_ptr| {
-                    freeUnionPayload(val_ptr.*, self.alloc);
+                    CheatLib.cleanup(V, self.alloc, val_ptr);
                     val_ptr.* = stored_value;
                     return;
                 }
@@ -256,26 +256,6 @@ pub const CheatLib = struct {
                 try self.inner.put(self.alloc, key_copy, stored_value);
             }
 
-            fn dupeStringsOnly(value: V, alloc: std.mem.Allocator) !V {
-                const info = @typeInfo(V);
-                if (info != .@"union") return value;
-                var result = value;
-                inline for (info.@"union".fields) |field| {
-                    if (field.type == []const u8) {
-                        if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
-                            @field(result, field.name) = try alloc.dupe(u8, @field(value, field.name));
-                            return result;
-                        }
-                    }
-                }
-                return value;
-            }
-
-            /// Deep-copy heap-owning payloads in a tagged union value.
-            /// Delegates to CheatLib.dupeUnionValue for the actual work.
-            fn dupeUnionStrings(value: V, alloc: std.mem.Allocator) !V {
-                return CheatLib.dupeUnionValue(V, value, alloc);
-            }
 
             pub fn get(self: anytype, key: []const u8) ?V {
                 return self.inner.get(key);
@@ -289,7 +269,8 @@ pub const CheatLib = struct {
                 _ = key_alloc;
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
-                    freeUnionPayload(kv.value, self.alloc);
+                    var val = kv.value;
+                    CheatLib.cleanup(V, self.alloc, &val);
                 }
             }
 
@@ -300,136 +281,15 @@ pub const CheatLib = struct {
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
                 _ = key_alloc;
                 _ = bucket_alloc;
-                // Free keys and any heap-duped strings inside union values.
                 var it = self.inner.iterator();
                 while (it.next()) |entry| {
                     self.alloc.free(entry.key_ptr.*);
-                    freeUnionPayload(entry.value_ptr.*, self.alloc);
+                    CheatLib.cleanup(V, self.alloc, entry.value_ptr);
                 }
                 self.inner.deinit(self.alloc);
             }
 
             /// Free heap-allocated payloads inside tagged union values.
-            /// Handles: strings ([]const u8), slices ([]T), nested StringMaps.
-            /// Recurses into slice elements for nested union cleanup.
-            fn freeUnionPayload(value: V, alloc_: std.mem.Allocator) void {
-                const info = @typeInfo(V);
-                if (info != .@"union") return;
-                inline for (info.@"union".fields) |field| {
-                    if (std.meta.activeTag(value) == @field(std.meta.Tag(V), field.name)) {
-                        const FT = field.type;
-                        const ft_info = @typeInfo(FT);
-
-                        if (FT == []const u8) {
-                            // String: free if non-empty
-                            const slice = @field(value, field.name);
-                            if (slice.len > 0) alloc_.free(slice);
-                        } else if (ft_info == .pointer and ft_info.pointer.size == .slice) {
-                            // Slice (e.g. []Value): free elements recursively, then free slice
-                            const slice = @field(value, field.name);
-                            const ElemT = ft_info.pointer.child;
-                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                                for (slice) |elem| {
-                                    freeUnionPayloadGeneric(ElemT, elem, alloc_);
-                                }
-                            }
-                            if (slice.len > 0) alloc_.free(slice);
-                        } else if (comptime isArrayList(FT)) {
-                            // ArrayList (e.g. ArrayListUnmanaged(JsonValue)): free elements recursively, then deinit
-                            var list = @field(value, field.name);
-                            const ElemT = comptime arrayListElemType(FT).?;
-                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                                for (list.items) |elem| {
-                                    freeUnionPayloadGeneric(ElemT, elem, alloc_);
-                                }
-                            }
-                            list.deinit(alloc_);
-                        } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
-                            // Nested StringMap: deinit it
-                            var map = @field(value, field.name);
-                            var it = map.inner.iterator();
-                            while (it.next()) |entry| {
-                                map.alloc.free(entry.key_ptr.*);
-                                freeUnionPayloadGeneric(@TypeOf(entry.value_ptr.*), entry.value_ptr.*, map.alloc);
-                            }
-                            map.inner.deinit(map.alloc);
-                        } else if (ft_info == .@"struct" and
-                            !CheatLib.isArrayList(FT) and !CheatLib.isStringMap(FT) and
-                            !CheatLib.isNumericMap(FT) and !CheatLib.isPool(FT))
-                        {
-                            freeStructPayload(FT, @field(value, field.name), alloc_);
-                        }
-                        return;
-                    }
-                }
-            }
-
-            /// Standalone version for recursive calls with different union types.
-            fn freeUnionPayloadGeneric(comptime T: type, value: T, alloc_: std.mem.Allocator) void {
-                const info = @typeInfo(T);
-                if (info != .@"union") return;
-                inline for (info.@"union".fields) |field| {
-                    if (std.meta.activeTag(value) == @field(std.meta.Tag(T), field.name)) {
-                        const FT = field.type;
-                        const ft_info = @typeInfo(FT);
-                        if (FT == []const u8) {
-                            const slice = @field(value, field.name);
-                            if (slice.len > 0) alloc_.free(slice);
-                        } else if (ft_info == .pointer and ft_info.pointer.size == .slice) {
-                            const slice = @field(value, field.name);
-                            const ElemT = ft_info.pointer.child;
-                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                                for (slice) |elem| {
-                                    freeUnionPayloadGeneric(ElemT, elem, alloc_);
-                                }
-                            }
-                            if (slice.len > 0) alloc_.free(slice);
-                        } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
-                            var map = @field(value, field.name);
-                            var it = map.inner.iterator();
-                            while (it.next()) |entry| {
-                                map.alloc.free(entry.key_ptr.*);
-                                freeUnionPayloadGeneric(@TypeOf(entry.value_ptr.*), entry.value_ptr.*, map.alloc);
-                            }
-                            map.inner.deinit(map.alloc);
-                        } else if (ft_info == .@"struct" and
-                            !CheatLib.isArrayList(FT) and !CheatLib.isStringMap(FT) and
-                            !CheatLib.isNumericMap(FT) and !CheatLib.isPool(FT))
-                        {
-                            freeStructPayload(FT, @field(value, field.name), alloc_);
-                        }
-                        return;
-                    }
-                }
-            }
-
-            /// Free heap-owned fields in a struct payload (slices, pointers, nested unions).
-            fn freeStructPayload(comptime T: type, value: T, alloc_: std.mem.Allocator) void {
-                const sinfo = @typeInfo(T);
-                if (sinfo != .@"struct") return;
-                inline for (sinfo.@"struct".fields) |sf| {
-                    const SFT = sf.type;
-                    const sf_info = @typeInfo(SFT);
-                    if (SFT == []const u8) {
-                        const s = @field(value, sf.name);
-                        if (s.len > 0) alloc_.free(s);
-                    } else if (sf_info == .pointer and sf_info.pointer.size == .slice and SFT != []u8) {
-                        const s = @field(value, sf.name);
-                        const ElemT = sf_info.pointer.child;
-                        if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                            for (s) |elem| freeUnionPayloadGeneric(ElemT, elem, alloc_);
-                        }
-                        if (s.len > 0) alloc_.free(s);
-                    } else if (sf_info == .pointer and sf_info.pointer.size == .one) {
-                        const child_ptr = @field(value, sf.name);
-                        const ChildT = sf_info.pointer.child;
-                        if (@typeInfo(ChildT) == .@"union" and @typeInfo(ChildT).@"union".tag_type != null) {
-                            freeUnionPayloadGeneric(ChildT, child_ptr.*, alloc_);
-                        }
-                        alloc_.destroy(child_ptr);
-                    }
-                }
-            }
 
             // Delegate to inner for code that still uses raw HashMap API
             pub fn getPtr(self: *Self, key: []const u8) ?*V {
@@ -1789,6 +1649,13 @@ pub const CheatLib = struct {
     /// comptime eliminates the entire function body — zero runtime cost.
     pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
         const ptr = @constCast(cptr);
+
+        // 0. Strings: free the heap-allocated buffer.
+        if (T == []const u8 or T == []u8) {
+            if (ptr.len > 0) alloc.free(ptr.*);
+            return;
+        }
+
         // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
         if (comptime refInnerType(T) != null) {
             releaseOne(T, alloc, ptr.*);
@@ -1889,21 +1756,19 @@ pub const CheatLib = struct {
                     const child_ptr = @field(ptr, field.name);
                     cleanup(f_info.pointer.child, alloc, child_ptr);
                     alloc.destroy(child_ptr);
-                } else if (f_info == .pointer and f_info.pointer.size == .slice and
-                    FT != []const u8 and FT != []u8)
-                {
+                } else if (f_info == .pointer and f_info.pointer.size == .slice) {
                     const payload = @field(ptr, field.name);
-                    if (comptime needsCleanup(f_info.pointer.child)) {
-                        for (payload) |*elem| {
-                            cleanup(f_info.pointer.child, alloc, elem);
+                    if (FT == []const u8 or FT == []u8) {
+                        if (payload.len > 0) alloc.free(payload);
+                    } else {
+                        if (comptime needsCleanup(f_info.pointer.child)) {
+                            for (payload) |*elem| {
+                                cleanup(f_info.pointer.child, alloc, elem);
+                            }
                         }
+                        if (payload.len > 0) alloc.free(payload);
                     }
-                    if (payload.len > 0) alloc.free(payload);
-                } else if (comptime f_info == .@"struct" and
-                    refInnerType(FT) == null and
-                    !isArrayList(FT) and !isStringMap(FT) and
-                    !isNumericMap(FT) and !isPool(FT))
-                {
+                } else if (comptime needsCleanup(FT)) {
                     cleanup(FT, alloc, &@field(ptr, field.name));
                 }
             }
@@ -1917,12 +1782,11 @@ pub const CheatLib = struct {
                     const FT = field.type;
                     const f_info = @typeInfo(FT);
                     // Slice variant ([]T): recursively cleanup elements then free buffer.
-                    // Handles heap-promoted arrays (from promoteList).
                     if (f_info == .pointer and f_info.pointer.size == .slice) {
                         if (FT == []const u8 or FT == []u8) {
-                            // Strings: no-op. String cleanup is handled by
-                            // freeUnionPayload (inside StringMap.deinit) or
-                            // by the caller's explicit string free.
+                            // String: free the heap-allocated buffer.
+                            const str = @field(ptr, field.name);
+                            if (str.len > 0) alloc.free(str);
                         } else {
                             const payload = @field(ptr, field.name);
                             if (comptime needsCleanup(f_info.pointer.child)) {
@@ -1945,10 +1809,8 @@ pub const CheatLib = struct {
     }
 
     /// Returns true if a type needs cleanup (has heap-allocated data).
-    /// Excludes []const u8 at this level — string cleanup inside unions is
-    /// handled by freeUnionPayload (in StringMap.deinit) which already frees
-    /// strings. Including strings here would cause double-frees.
-    fn needsCleanup(comptime FT: type) bool {
+    pub fn needsCleanup(comptime FT: type) bool {
+        if (FT == []const u8 or FT == []u8) return true;
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
         if (isStringMap(FT)) return true;
@@ -2800,105 +2662,16 @@ pub const CheatLib = struct {
                 // Clean up live elements: deinit any StringMap fields.
                 for (self.slots) |*slot| {
                     if (slot.alive) {
-                        deinitFields(&slot.value);
+                        deinitFields(&slot.value, allocator);
                     }
                 }
                 allocator.free(self.slots);
                 allocator.free(self.free_stack);
             }
 
-            /// Deinit StringMap fields inside a struct value (comptime introspection).
-            fn deinitFields(value: *T) void {
-                const info = @typeInfo(T);
-                if (info != .@"struct") return;
-                inline for (info.@"struct".fields) |field| {
-                    const FT = field.type;
-                    const ft_info = @typeInfo(FT);
-                    // Match StringMap(V) by checking for inner + alloc + put
-                    if (ft_info == .@"struct" and
-                        @hasField(FT, "inner") and
-                        @hasField(FT, "alloc") and
-                        @hasDecl(FT, "put"))
-                    {
-                        var map = &@field(value, field.name);
-                        // Free keys and union string values
-                        var it = map.inner.iterator();
-                        while (it.next()) |entry| {
-                            map.alloc.free(entry.key_ptr.*);
-                            freeUnionPayloadGeneric(FT, entry.value_ptr.*, map.alloc);
-                        }
-                        map.inner.deinit(map.alloc);
-                    }
-                }
-            }
-
-            /// Pool's version of freeUnionPayloadGeneric — delegates to StringMap's version.
-            fn freeUnionPayloadGeneric(comptime MapT: type, value: anytype, alloc_: std.mem.Allocator) void {
-                const VT = @TypeOf(value);
-                const v_info = @typeInfo(VT);
-                if (v_info != .@"union") return;
-                if (v_info.@"union".tag_type == null) return;
-                inline for (v_info.@"union".fields) |field| {
-                    if (std.meta.activeTag(value) == @field(std.meta.Tag(VT), field.name)) {
-                        const FT = field.type;
-                        const ft_info = @typeInfo(FT);
-                        if (FT == []const u8) {
-                            const slice = @field(value, field.name);
-                            if (slice.len > 0) alloc_.free(slice);
-                        } else if (ft_info == .pointer and ft_info.pointer.size == .slice) {
-                            const slice = @field(value, field.name);
-                            const ElemT = ft_info.pointer.child;
-                            if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                                for (slice) |elem| {
-                                    freeUnionPayloadGeneric(MapT, elem, alloc_);
-                                }
-                            }
-                            if (slice.len > 0) alloc_.free(slice);
-                        } else if (ft_info == .@"struct" and @hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")) {
-                            var map = @field(value, field.name);
-                            var it = map.inner.iterator();
-                            while (it.next()) |entry| {
-                                map.alloc.free(entry.key_ptr.*);
-                                freeUnionPayloadGeneric(MapT, entry.value_ptr.*, map.alloc);
-                            }
-                            map.inner.deinit(map.alloc);
-                        } else if (ft_info == .@"struct" and
-                            !CheatLib.isArrayList(FT) and !CheatLib.isStringMap(FT) and
-                            !CheatLib.isNumericMap(FT))
-                        {
-                            freeStructPayloadPool(FT, @field(value, field.name), alloc_);
-                        }
-                        return;
-                    }
-                }
-            }
-
-            /// Free heap-owned fields in a struct payload (Pool version).
-            fn freeStructPayloadPool(comptime ST: type, value: ST, alloc_: std.mem.Allocator) void {
-                const sinfo = @typeInfo(ST);
-                if (sinfo != .@"struct") return;
-                inline for (sinfo.@"struct".fields) |sf| {
-                    const SFT = sf.type;
-                    const sf_info = @typeInfo(SFT);
-                    if (SFT == []const u8) {
-                        const s = @field(value, sf.name);
-                        if (s.len > 0) alloc_.free(s);
-                    } else if (sf_info == .pointer and sf_info.pointer.size == .slice and SFT != []u8) {
-                        const s = @field(value, sf.name);
-                        const ElemT = sf_info.pointer.child;
-                        if (@typeInfo(ElemT) == .@"union" and @typeInfo(ElemT).@"union".tag_type != null) {
-                            for (s) |elem| freeUnionPayloadGeneric(ElemT, elem, alloc_);
-                        }
-                        if (s.len > 0) alloc_.free(s);
-                    } else if (sf_info == .pointer and sf_info.pointer.size == .one) {
-                        const child_ptr = @field(value, sf.name);
-                        const ChildT = sf_info.pointer.child;
-                        if (@typeInfo(ChildT) == .@"union" and @typeInfo(ChildT).@"union".tag_type != null) {
-                            freeUnionPayloadGeneric(ChildT, child_ptr.*, alloc_);
-                        }
-                        alloc_.destroy(child_ptr);
-                    }
-                }
+            /// Cleanup all fields of a struct value using CheatLib.cleanup.
+            fn deinitFields(value: *T, alloc: std.mem.Allocator) void {
+                CheatLib.cleanup(T, alloc, value);
             }
 
             /// Insert a value, returning a stable u64 handle. O(1).

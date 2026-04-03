@@ -167,7 +167,7 @@ RSpec.describe SemanticAnnotator do
         # After 'g = f', f should be :moved so the outer scope does not double-close
         src = 'FN f() RETURNS Void -> a = File::open("t"); b = a; RETURN; END'
         # Should not raise (resource move is legal)
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
     end
   end
@@ -337,12 +337,12 @@ RSpec.describe SemanticAnnotator do
     describe "Resource move tracking" do
       it "allows moving a TCPServer to another variable" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); s2 = s; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "allows moving a TCPClient to another variable" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
     end
 
@@ -400,27 +400,27 @@ RSpec.describe SemanticAnnotator do
       # Normal use — should NOT raise
       it "does not raise when using File before any move" do
         src = 'FN f() RETURNS Void -> a = File::open("x"); fileWrite(a, "ok"); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "does not raise when using TCPServer before any move" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "does not raise when using TCPClient before any move" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "does not raise when using TCPClient::connect before any move" do
         src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); tcpWrite(c, "hi"); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "does not raise when using File::create before any move" do
         src = 'FN f() RETURNS Void -> a = File::create("x"); fileWrite(a, "ok"); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
     end
 
@@ -431,13 +431,13 @@ RSpec.describe SemanticAnnotator do
       it "LINK on @shared compiles" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "LINK on @multiowned compiles" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "LINK on non-RC raises error" do
@@ -449,7 +449,7 @@ RSpec.describe SemanticAnnotator do
       it "RESOLVE on @link compiles" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS Void -> x = N{ v: 1 } @shared; w = LINK x; r = RESOLVE w; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "RESOLVE on non-link raises error" do
@@ -518,7 +518,7 @@ RSpec.describe SemanticAnnotator do
         src = 'STRUCT N { v: Int64 }
               FN check(w: N@link) RETURNS Void -> PASS END
               FN f() RETURNS Void -> PASS END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "@link struct field emits WeakRc type" do
@@ -555,14 +555,14 @@ RSpec.describe SemanticAnnotator do
       it "RESOLVE result has optional type, not @link" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; ASSERT r != NIL, "ok"; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "allows passing @link to function expecting @link parameter" do
         src = 'STRUCT N { v: Int64 }
               FN check(w: N@link) RETURNS Void -> PASS END
               FN f() RETURNS Void -> x = N{ v: 1 } @multiowned; w = LINK x; check(w); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
     end
 
@@ -577,17 +577,17 @@ RSpec.describe SemanticAnnotator do
 
       it "allows integer indexing on String@raw" do
         src = 'FN f() RETURNS Void -> buf: String@raw = "hello"; c = buf[0]; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "codepointCount compiles on String" do
         src = 'FN f() RETURNS Void -> s = "hello"; n = s.codepointCount(); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "bytes compiles on String" do
         src = 'FN f() RETURNS Void -> s = "hello"; n = s.bytes(); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
     end
 
@@ -595,25 +595,25 @@ RSpec.describe SemanticAnnotator do
     # String affine move semantics (Rust-like)
     # ------------------------------------------------------------------
     describe "String copy semantics" do
-      it "allows reuse of String variable (strings are Copy)" do
+      it "raises on reuse of moved String (strings are non-Copy)" do
         src = 'FN f() RETURNS Void -> x = "hello"; y = x; z = x; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
-      it "allows String reuse after function call (implicit borrow)" do
+      it "raises on String reuse after move" do
         src = 'FN f(s: String) RETURNS Void -> RETURN; END
               FN g() RETURNS Void -> x = "hello"; y = x; f(x); RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "does not raise on normal string assignment and use" do
         src = 'FN f() RETURNS Void -> x = "hello"; ASSERT x == "hello", "ok"; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
 
       it "does not raise when string is used before move" do
         src = 'FN f() RETURNS Void -> x = "hello"; ASSERT x == "hello", "ok"; y = x; RETURN; END'
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(/moved/)
       end
     end
 

@@ -38,16 +38,13 @@ test "cleanup: Num variant is no-op" {
     CheatLib.cleanup(TestValue, std.heap.page_allocator, &val);
 }
 
-test "cleanup: Str variant - string cleanup handled by StringMap.freeUnionPayload" {
-    // cleanup does NOT free bare Str variants (mixed provenance).
-    // String cleanup inside collections is handled by StringMap.freeUnionPayload
-    // and the ArrayList element cleanup path.
+test "cleanup: Str variant frees heap-allocated string" {
+    // cleanup frees string variants (strings are owned, non-Copy).
     const alloc = std.testing.allocator;
     const s = try alloc.dupe(u8, "hello");
     var val = TestValue{ .Str = s };
     CheatLib.cleanup(TestValue, alloc, &val);
-    // cleanup is a no-op for Str - must free manually
-    alloc.free(s);
+    // cleanup freed the string - no manual free needed.
 }
 
 test "cleanup: Array variant frees backing buffer" {
@@ -84,10 +81,7 @@ test "cleanup: nested Array with heap Str elements" {
 
     var val = TestValue{ .Array = list };
 
-    // cleanup frees the list backing but not bare Str variant strings.
-    // Str strings inside StringMap values ARE freed by freeUnionPayload.
-    // For top-level Array, we must free manually.
-    alloc.free(val.Array.items[0].Str);
+    // cleanup frees everything: list backing + string elements.
     CheatLib.cleanup(TestValue, alloc, &val);
 }
 
@@ -147,9 +141,7 @@ test "promote: Array of Str elements dupes strings to heap" {
     try std.testing.expect(val.Array.items.len == 2);
     try std.testing.expectEqualStrings("hello", val.Array.items[0].Str);
 
-    // Free promoted strings manually (cleanup doesn't handle bare Str variants)
-    ctx.rt.heapAlloc().free(val.Array.items[0].Str);
-    // Then cleanup frees the list backing
+    // cleanup frees everything: list backing + promoted strings.
     CheatLib.cleanup(TestValue, ctx.rt.heapAlloc(), &val);
 }
 
