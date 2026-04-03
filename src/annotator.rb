@@ -693,35 +693,14 @@ private
       schema[:type_params].zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
     end
 
-    # MATCH-as-move: if the source is a simple Identifier (not GetIndex/GetField)
-    # and any AS binding extracts a non-Copy payload from an owned source,
-    # mark the source as consumed BEFORE branch analysis.
-    # GetIndex sources (items[1]) cannot be moved out of - only Identifier sources.
-    if is_union && node.expr.is_a?(AST::Identifier)
+    # MATCH TAKES: if the source is explicitly consumed (MATCH TAKES expr START),
+    # mark the source as moved BEFORE branch analysis. Without TAKES, the source
+    # is implicitly borrowed and AS bindings are borrowed views into it.
+    if node.takes && is_union && node.expr.is_a?(AST::Identifier)
       source_name = node.expr.name
       if @og[source_name] && @og[source_name].kind != :borrowed
-        has_ref_as = node.cases.any? do |c|
-          next false unless c[:binding]
-          variant_name = case c[:value]
-                         when AST::GetField then c[:value].field
-                         when AST::MethodCall then c[:value].name
-                         end
-          next false unless variant_name
-          raw = schema&.dig(:variants, variant_name)
-          next false unless raw
-          if raw.is_a?(Hash) && raw[:kind] == :inline_struct
-            Type.variant_has_heap?(raw)
-          else
-            pt = raw.is_a?(Type) ? raw : Type.new(raw || :Any)
-            # Move if payload has mutable/owned reference data (non-string
-            # slices, collections). Strings and primitives are safe.
-            (pt.array? && !pt.string?) || pt.collection? || pt.map?
-          end
-        end
-        if has_ref_as
-          node.expr.was_moved = true if node.expr.is_a?(AST::Identifier)
-          og_set_moved(source_name)
-        end
+        node.expr.was_moved = true
+        og_set_moved(source_name)
       end
     end
 
@@ -778,27 +757,10 @@ private
                   og_declare(c[:binding], nil, payload_type, :stack)
                   classify_ownership!(current_scope.locals[c[:binding]])
                 end
-                # MATCH AS inherits borrow from source: if the MATCH subject
-                # is borrowed (or derived from a borrow), the AS binding is also borrowed.
-                # If the source is owned, MATCH AS consumes it (move).
-                source_name = root_variable_name(node.expr)
-                if source_name && @og[source_name]&.kind == :borrowed
+                # MATCH AS: borrow view into the source union's payload.
+                # MATCH TAKES: owned extraction - source is consumed.
+                unless node.takes
                   @og[c[:binding]]&.kind = :borrowed
-                elsif source_name && @og[source_name] && @og[source_name].kind != :borrowed
-                  # Owned source with non-Copy payload: MATCH AS is a move.
-                  # Copy payloads (Float64, String, etc.) don't need a move.
-                  # Use resolved payload type (after generic substitution).
-                  resolved_payload = union_subst.any? && raw_payload ? (apply_type_subst(raw_payload, union_subst) rescue raw_payload) : raw_payload
-                  is_payload_copy = if resolved_payload.is_a?(Hash) && resolved_payload[:kind] == :inline_struct
-                    !Type.variant_has_heap?(resolved_payload)
-                  else
-                    pt = resolved_payload.is_a?(Type) ? resolved_payload : Type.new(resolved_payload || :Any)
-                    pt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
-                  end
-                  unless is_payload_copy
-                    node.expr.was_moved = true if node.expr.is_a?(AST::Identifier)
-                    og_set_moved(source_name)
-                  end
                 end
               end
             end

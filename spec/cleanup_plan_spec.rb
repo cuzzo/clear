@@ -145,13 +145,34 @@ RSpec.describe CleanupPlan do
   # =========================================================================
   # MATCH AS bindings (the double-free bug fix)
   # =========================================================================
-  describe "MATCH AS binding" do
-    context "slice payload (e.g. Value.List AS items)" do
+  describe "MATCH AS binding (borrow)" do
+    context "MATCH AS without TAKES is a borrow - no cleanup" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "eval!")
           UNION Value { Nil, Num: Float64, List: Value[] }
           FN eval!(TAKES ast: Value) RETURNS Value ->
               MATCH ast START
+                  Value.List AS items -> RETURN Value.Nil;,
+                  DEFAULT -> RETURN Value.Nil;
+              END
+              RETURN Value.Nil;
+          END
+        CLEAR
+      end
+
+      it "does NOT mark AS binding for cleanup (borrow)" do
+        expect(plan.lookup("items")).to be_nil
+      end
+    end
+  end
+
+  describe "MATCH TAKES binding (move)" do
+    context "MATCH TAKES with slice payload" do
+      let(:plan) do
+        cleanup_for(<<~CLEAR, "eval!")
+          UNION Value { Nil, Num: Float64, List: Value[] }
+          FN eval!(TAKES ast: Value) RETURNS Value ->
+              MATCH TAKES ast START
                   Value.List AS items -> RETURN Value.Nil;,
                   DEFAULT -> RETURN Value.Nil;
               END

@@ -1262,6 +1262,7 @@ class Parser
 
   def parse_match_statement
     tok = consume(:KEYWORD, 'MATCH')
+    takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
     exhaustive = match?(:KEYWORD, 'IFF') && consume(:KEYWORD, 'IFF')
     expr = parse_expression
     consume(:KEYWORD, 'START')
@@ -1311,7 +1312,7 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !!exhaustive)
+    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !!exhaustive, !!takes)
   end
 
   def parse_struct_pattern

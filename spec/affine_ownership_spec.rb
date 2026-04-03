@@ -557,11 +557,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "MATCH AS on owned TAKES parameter produces owned binding" do
+    context "MATCH AS on owned TAKES parameter is still a borrow" do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
-          FN good(TAKES v: Value) RETURNS Value ->
+          FN bad(TAKES v: Value) RETURNS Value ->
               MATCH v START
                   Value.List AS items ->
                       RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
@@ -572,7 +572,27 @@ RSpec.describe SemanticAnnotator do
         CLEAR
       }
 
-      it "allows storing MATCH AS owned binding into union variant" do
+      it "rejects storing borrowed MATCH AS binding into union variant" do
+        expect { ast }.to raise_error(/borrow|cannot.*store|cannot.*move/)
+      end
+    end
+
+    context "MATCH TAKES on owned parameter produces owned binding" do
+      let(:code) {
+        <<~CLEAR
+          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+          FN good(TAKES v: Value) RETURNS Value ->
+              MATCH TAKES v START
+                  Value.List AS items ->
+                      RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
+                  DEFAULT -> RETURN Value.Nil;
+              END
+              RETURN Value.Nil;
+          END
+        CLEAR
+      }
+
+      it "allows storing MATCH TAKES AS binding into union variant" do
         expect { ast }.not_to raise_error
       end
     end

@@ -264,7 +264,7 @@ END
 -- eval: dispatch by AST type (no penv needed — Lambda stores body directly)
 
 FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
-    MATCH ast START
+    MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
         Value.List AS items ->

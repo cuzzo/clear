@@ -658,7 +658,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("val_moved = true")
     end
 
-    it "emits source_moved = true after MATCH AS on owned non-Copy payload" do
+    it "does NOT emit source_moved for MATCH AS (implicit borrow)" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
@@ -672,7 +672,24 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # MATCH AS of non-Copy payload on TAKES param must suppress cleanup on source
+      # MATCH AS without TAKES is a borrow - source is NOT consumed
+      expect(zig).not_to include("v_moved = true")
+    end
+
+    it "emits source_moved = true for MATCH TAKES" do
+      src = <<~CLEAR
+        STRUCT Env { x: Int64 }
+        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+            pool.insert(Env{ x: 1 });
+            MATCH TAKES v START
+                Value.Lambda AS lam -> RETURN Value.Nil;,
+                DEFAULT -> RETURN Value.Nil;
+            END
+            RETURN Value.Nil;
+        END
+      CLEAR
+      zig = transpile(src)
       expect(zig).to include("v_moved = true")
     end
 
@@ -718,7 +735,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"world"/)
     end
 
-    it "emits cleanup on MATCH AS binding when source is moved" do
+    it "MATCH AS without TAKES does NOT emit cleanup on binding (borrow)" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
         FN test!() RETURNS Void ->
@@ -731,9 +748,25 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # MATCH-as-move transfers ownership to items.
-      # items must get defer cleanup to free the []Value slice.
-      expect(zig).to match(/items.*len.*alloc\.free|cleanup.*items/)
+      # MATCH AS is a borrow - no cleanup on items, source retains ownership
+      expect(zig).not_to include("items_moved")
+    end
+
+    it "MATCH TAKES emits cleanup on AS binding" do
+      src = <<~CLEAR
+        UNION Value { Num: Float64, List: Value[] }
+        FN test!() RETURNS Void ->
+            result = Value{ Num: 1.0 };
+            MATCH TAKES result START
+                Value.List AS items -> RETURN;,
+                DEFAULT -> RETURN;
+            END
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # MATCH TAKES transfers ownership - items must get defer cleanup
+      expect(zig).to match(/items_moved|cleanup.*items/)
     end
   end
 end

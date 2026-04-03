@@ -492,7 +492,7 @@ module AST
   # default_case: [ASTNode] or nil
   # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
   # default_drops: drop-array for default branch (or nil), filled by annotator
-  MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive) { include Locatable }
+  MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) { include Locatable }
 
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
