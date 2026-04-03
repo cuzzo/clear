@@ -163,9 +163,15 @@ module UnionAnalysis
 
     node.fields.each do |fname, val_node|
       visit(val_node)
-      # Cannot capture a borrowed value into a struct/union variant.
+      # Cannot capture a borrowed value that references caller memory.
+      # Value types (primitives, enums, Id<T>) are safe - no pointers.
+      # Reference types (slices, *T, strings, collections) may dangle.
       if val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
-        error!(val_node, "Cannot store borrowed value '#{val_node.name}' into #{node.union_name}.#{node.variant_name}. Parameters are implicit borrows unless TAKES.")
+        vti = val_node.type_info
+        has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
+        unless vti&.primitive? || vti&.generic_instance? || (!has_pointer && !vti&.struct?)
+          error!(val_node, "Cannot store borrowed value '#{val_node.name}' into #{node.union_name}.#{node.variant_name}. Parameters are implicit borrows unless TAKES.")
+        end
       end
       expected_type = expected_fields[fname]
       actual = val_node.type_info
