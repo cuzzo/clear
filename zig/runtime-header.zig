@@ -241,12 +241,12 @@ pub const CheatLib = struct {
             /// For tagged union values with []const u8 fields, the string data is
             /// heap-duped so it survives loop-mark arena rewinds.
             /// TAKES ownership of value. Strings are duped (may be rodata/frame).
+            /// TAKES ownership of value. No implicit copies. Caller must
+            /// ensure all data (including strings) is heap-owned.
             pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 _ = key_alloc;
                 _ = bucket_alloc;
-                // Dupe only string payloads (rodata/frame safety). All other
-                // payloads (*T, []T, structs) are taken by move - no copy.
-                const stored_value = dupeStringsOnly(value, self.alloc) catch value;
+                const stored_value = value;
                 if (self.inner.getPtr(key)) |val_ptr| {
                     freeUnionPayload(val_ptr.*, self.alloc);
                     val_ptr.* = stored_value;

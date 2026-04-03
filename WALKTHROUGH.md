@@ -428,12 +428,9 @@ Strings in CLEAR are Copy (like Rust's `&str` — a pointer + length). Assignmen
 
 ```ruby clear
 x = "hello";
-y = x;                         -- x is copied (strings are Copy)
-z = x;                         -- OK — strings can be reused
-
--- String interpolation
-name = "World";
-greeting = "Hello, ${name}!";  -- "Hello, World!"
+y = x;                         -- x is moved (strings are owned, non-Copy)
+-- z = x;                      -- would be use-after-move error
+z = COPY y;                    -- OK: explicit deep-copy
 
 -- String concatenation
 full = "foo" + "bar";          -- "foobar" (single allocation, no intermediate)

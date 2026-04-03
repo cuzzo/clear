@@ -21,7 +21,7 @@ const TestValue = union(enum) {
 
 fn makeRuntime() !struct { rt: Runtime, ebr: ebr_mod.EbrContext } {
     var ebr = ebr_mod.EbrContext{};
-    var arena_buf: [4096]u8 = undefined;
+    var arena_buf: [16384]u8 = undefined;
     var rt = try Runtime.initFromSlice(&arena_buf, &ebr, std.heap.page_allocator, 0);
     rt.wireAllocator();
     return .{ .rt = rt, .ebr = ebr };

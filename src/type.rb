@@ -841,8 +841,8 @@ class Type
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
-    return true if string?  # Strings are slice headers (ptr+len) — trivially copyable
-    return true if array? && !list_collection? && !pool? && !set_collection?
+    # Strings are NOT Copy - they reference frame/heap data.
+    return true if array? && !list_collection? && !pool? && !set_collection? && !string?
     if lookup_arg || lookup_block
       resolver = lookup_arg || lookup_block
       schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)

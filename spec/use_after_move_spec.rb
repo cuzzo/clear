@@ -126,10 +126,10 @@ RSpec.describe "Use-after-move detection" do
   end
 
   # =========================================================================
-  # 6. Strings are Copy — no error.
+  # 6. Strings are owned (non-Copy). Assignment moves.
   # =========================================================================
-  it "allows reuse of string values" do
-    expect_no_error(<<~CLEAR)
+  it "raises on reuse of moved string" do
+    expect_error(<<~CLEAR, /moved/)
       FN main() RETURNS Void ->
           s = "hello";
           s2 = s;

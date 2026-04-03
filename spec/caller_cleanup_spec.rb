@@ -63,9 +63,9 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
       CLEAR
     end
 
-    it "does NOT emit cleanup (string provenance unknown at comptime)" do
+    it "emits cleanup for non-Copy union with string variant" do
       main_body = fn_body(zig, "clearMain")
-      expect(main_body).not_to include("cleanup(Value")
+      expect(main_body).to include("cleanup(Value")
     end
   end
 
