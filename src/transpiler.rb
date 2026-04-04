@@ -1565,6 +1565,8 @@ private
         end
       end.join("\n        ")
 
+      rt_name = @do_rt_name || "rt"
+
       # Escape promotions: frame-allocated data captured by BG fibers must be
       # promoted to heap before the fiber spawns. Uses the same escape system
       # as return values — needs_escape_promotion? / escape_promote_code.
@@ -1594,8 +1596,6 @@ private
         t = type_obj.is_a?(Type) ? type_obj : nil
         "#{name}_moved = true;" if t&.resource? || capture_close_zig[name]
       end.join("\n")
-
-      rt_name = @do_rt_name || "rt"
 
       # Flatten ThenChain nodes in the body into individual steps.
       # Each flat step is { expr: ASTNode, binding: String|nil }.
