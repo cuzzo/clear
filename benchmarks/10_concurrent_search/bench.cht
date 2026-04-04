@@ -20,7 +20,7 @@
 --           zig build-exe zig/bench.zig zig/switch.S zig/onRoot.S \
 --               --name bench_clear -O ReleaseFast -lc
 
-STRUCT SearchResult { filename: String, count: Int64 }
+STRUCT SearchResult { file_idx: Int64, count: Int64 }
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
@@ -51,7 +51,7 @@ FN main() RETURNS Void ->
     MUTABLE results: SearchResult[]@list = [];
     FOR j IN (0_i64 ..< n) DO
         c: Int64 = NEXT futures[j];
-        results.append(SearchResult{ filename: COPY files[j], count: c });
+        results.append(SearchResult{ file_idx: j, count: c });
     END
 
     -- Selection sort: find top-10 by swapping into the first 10 positions.
@@ -63,9 +63,9 @@ FN main() RETURNS Void ->
             END
         END
         IF best != k THEN
-            tmp = COPY results[k];
-            results[k] = COPY results[best];
-            results[best] = GIVE tmp;
+            tmp = results[k];
+            results[k] = results[best];
+            results[best] = tmp;
         END
     END
 
@@ -73,7 +73,7 @@ FN main() RETURNS Void ->
     print("Top 10 files by '", needle, "' count:");
     FOR p IN (0_i64 ..< 10) DO
         r = results[p];
-        print("  ", r.filename, "  ", r.count);
+        print("  ", files[r.file_idx], "  ", r.count);
     END
 
     elapsed = timestampMs() - t0;
