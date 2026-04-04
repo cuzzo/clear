@@ -586,6 +586,28 @@ RSpec.describe SemanticAnnotator do
         FLUX
         expect { run(code) }.not_to raise_error
       end
+
+      it "handles method calls on struct.list[index].field without crash" do
+        code = <<~FLUX
+          STRUCT Node { keys: Int64[]@list, vals: String[]@list }
+          STRUCT DB { nodes: Node[]@list }
+          FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
+              RETURN db.nodes[idx].keys.length();
+          END
+        FLUX
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "handles mutation through struct.list[index].field" do
+        code = <<~FLUX
+          STRUCT Node { keys: Int64[]@list, vals: String[]@list }
+          STRUCT DB { nodes: Node[]@list }
+          FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS Void ->
+              db.nodes[idx].keys.append(key);
+          END
+        FLUX
+        expect { run(code) }.not_to raise_error
+      end
     end
 
     context "Resolved Type Correctness" do

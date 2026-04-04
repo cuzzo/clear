@@ -343,7 +343,10 @@ module AST
     def wildcard?; field == '*' end
     def name; target.name end
   end
-  GetIndex     = Struct.new(:token, :target, :index) { include Locatable }
+  GetIndex     = Struct.new(:token, :target, :index) do
+    include Locatable
+    def name; target.name end
+  end
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) { include Locatable }
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
