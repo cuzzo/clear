@@ -994,12 +994,13 @@ private
                # String literals in map values must be heap-duped (rodata can't be freed)
                val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name)
                move_logic = emit_move_suppression(node.value)
-               # Non-Copy union values stored without ownership transfer must be
-               # duped — the source may be cleaned up independently (e.g. list
-               # element stored into a persistent HashMap).
-               # Skip when: value is already a COPY (dupeUnionValue already emitted),
-               # or ownership is being transferred via _moved.
-               if move_logic.empty? && !node.value.is_a?(AST::CopyNode)
+               # Non-Copy union values BORROWED from another owner must be duped —
+               # the source may be cleaned up independently (e.g. list element
+               # stored into a persistent HashMap). Only dupe when the value is
+               # a borrow (identifier, index, field access) — NOT when it's a
+               # freshly constructed value (struct literal, COPY, inline ctor).
+               val_is_borrow = node.value.is_a?(AST::Identifier) || node.value.is_a?(AST::GetIndex)
+               if move_logic.empty? && val_is_borrow
                  val_ti = node.value.type_info rescue nil
                  if val_ti && @union_schemas&.key?(val_ti.resolved)
                    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
