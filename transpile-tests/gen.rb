@@ -15,11 +15,12 @@ class TestGenerator < ZigTranspiler
     # 1. Parse AST
     tokens = Lexer.new(cheat_code).tokenize
     ast = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
-    annotator.annotate!(ast)
 
     # 1b. Rewrite pipeline operators into plain AST nodes.
     PipelineRewriter.new.rewrite!(ast)
+
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
+    annotator.annotate!(ast)
 
     # 2. Pre-populate needs_rt/can_fail tables, promotion plans, and cleanup plans.
     @fn_needs_rt = {}

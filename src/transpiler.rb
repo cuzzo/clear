@@ -46,11 +46,13 @@ class ZigTranspiler
 
     tokens    = Lexer.new(cheat_code).tokenize
     ast       = Parser.new(tokens, cheat_code).parse
+
+    # Pass 1b: Rewrite pipeline operators into plain AST nodes.
+    # Runs BEFORE annotation so the annotator sees normal ForEach/If/MethodCall nodes.
+    PipelineRewriter.new.rewrite!(ast)
+
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
     annotator.annotate!(ast)
-
-    # Pass B2: Rewrite pipeline operators into plain AST nodes.
-    PipelineRewriter.new.rewrite!(ast)
 
     @ownership_graph = annotator.instance_variable_get(:@og)
 
@@ -1944,30 +1946,6 @@ private
         args = type_arg_strs + (needs_rt ? [rt_name] : []) + ufcs_args + args_zig
         fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
 
-        # CATCH snapshot: pipeline steps rewritten to FuncCall carry pipe_lhs.
-        # Capture the LHS before calling so CATCH can access it as 'snapshot'.
-        if node.respond_to?(:pipe_lhs) && node.pipe_lhs && @current_fn_has_catch && can_fail
-          lhs_node = node.pipe_lhs
-          lhs_t = lhs_node.respond_to?(:full_type) ? Type.new(lhs_node.full_type) : nil
-          if lhs_t && !lhs_t.void?
-            zig_type = transpile_type(lhs_t.resolved.to_s)
-            @snapshot_counter = (@snapshot_counter || 0) + 1
-            snap_var = "__snap_#{@snapshot_counter}"
-            snap_label = "__snap_blk#{@snapshot_counter}"
-            @current_fn_snapshot_types ||= Set.new
-            @current_fn_snapshot_types << lhs_t.resolved.to_s
-            lhs_code = visit(lhs_node)
-            call_zig = "#{fn_zig}(#{args.join(', ')})"
-            return "#{snap_label}: {\n" \
-                   "    const #{snap_var} = #{lhs_code};\n" \
-                   "    break :#{snap_label} #{call_zig} catch |__snap_err| {\n" \
-                   "        #{rt_name}.captureSnapshot(#{zig_type}, &#{snap_var});\n" \
-                   "        return __snap_err;\n" \
-                   "    };\n" \
-                   "}"
-          end
-        end
-
         is_tail_self_call = @current_tail_call_fn == node.name
         llvm_backend = !(@default_stack_size == "Large")
         call_code = if is_tail_self_call && llvm_backend
@@ -2531,9 +2509,63 @@ private
       return transpile_concurrent(node)
     end
 
-    # Simple function pipes (x s> f, x s> f(y)) are rewritten to FuncCalls
-    # by PipelineRewriter. If we reach here, it's an unhandled operator.
-    raise "Transpiler Error: Invalid Pipe Destination #{rhs.class}"
+    # Construct a synthetic FuncCall for simple function pipes: x s> f -> f(x)
+    synthetic_call = if rhs.is_a?(AST::Identifier)
+       AST::FuncCall.new(rhs.token, rhs.name, [lhs])
+    elsif rhs.is_a?(AST::FuncCall)
+       AST::FuncCall.new(rhs.token, rhs.name, [lhs] + rhs.args)
+    else
+       raise "Transpiler Error: Invalid Pipe Destination #{rhs.class}"
+    end
+
+    if rhs.respond_to?(:zig_pattern)
+      synthetic_call.zig_pattern = rhs.zig_pattern
+    end
+    if rhs.respond_to?(:full_type)
+      synthetic_call.full_type = rhs.full_type
+    end
+    if rhs.respond_to?(:coerced_type)
+      synthetic_call.coerced_type = rhs.coerced_type
+    end
+
+    # CATCH snapshot: capture pipeline LHS before call for error recovery.
+    lhs_type = lhs.respond_to?(:full_type) ? lhs.full_type : nil
+    lhs_t = lhs_type ? Type.new(lhs_type) : nil
+    rhs_fn_name = rhs.is_a?(AST::Identifier) ? rhs.name : (rhs.is_a?(AST::FuncCall) ? rhs.name : nil)
+    rhs_can_fail = rhs_fn_name && (@fn_can_fail || {})[rhs_fn_name]
+
+    if @current_fn_has_catch && rhs_can_fail && lhs_t && !lhs_t.void?
+      zig_type = transpile_type(lhs_t.resolved.to_s)
+      rt_name = @do_rt_name || "rt"
+      @snapshot_counter = (@snapshot_counter || 0) + 1
+      snap_var = "__snap_#{@snapshot_counter}"
+      snap_label = "__snap_blk#{@snapshot_counter}"
+
+      @current_fn_snapshot_types ||= Set.new
+      @current_fn_snapshot_types << lhs_t.resolved.to_s
+
+      lhs_code = visit(lhs)
+
+      if rhs.is_a?(AST::Identifier)
+        call_zig = "#{rhs.name}(#{rt_name}, #{snap_var})"
+      elsif rhs.is_a?(AST::FuncCall)
+        extra_args = rhs.args.map { |a| visit(a) }.join(', ')
+        call_zig = "#{rhs.name}(#{rt_name}, #{snap_var}#{extra_args.empty? ? '' : ', ' + extra_args})"
+      else
+        return visit(synthetic_call)
+      end
+
+      return "#{snap_label}: {\n" \
+             "    const #{snap_var} = #{lhs_code};\n" \
+             "    break :#{snap_label} #{call_zig} catch |__snap_err| {\n" \
+             "        #{rt_name}.captureSnapshot(#{zig_type}, &#{snap_var});\n" \
+             "        return __snap_err;\n" \
+             "    };\n" \
+             "}"
+    end
+
+    # Normal path: no CATCH blocks or non-failing step
+    visit(synthetic_call)
   end
 
   # --- ERROR HANDLING (OR RESCUE) ---
