@@ -835,6 +835,23 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "Heap-promoted value assigned to HashMap is NOT hoisted" do
+    it "stores directly without __hpt wrapper" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String }
+        FN makeValue() RETURNS Value -> RETURN Value{ Str: COPY "hello" }; END
+        FN main() RETURNS Void ->
+            MUTABLE map: HashMap<Value> = {};
+            map["key"] = makeValue();
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      fn_body = zig[zig.index("fn clearMain")..zig.index("// ----")]
+      expect(fn_body).not_to include("__hpt")
+    end
+  end
+
   describe "Heap-promoted return value is NOT hoisted into temp" do
     it "returns directly from heap_promoted function without __hpt wrapper" do
       src = <<~CLEAR

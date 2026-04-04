@@ -895,7 +895,9 @@ private
 
           target = visit(node.name.target)
           field  = node.name.field
+          current_tp_ctx&.bind_value_node = node.value
           value  = visit(node.value)
+          current_tp_ctx&.bind_value_node = nil
           return "#{target}.#{field} = #{value};"
         elsif node.name.is_a?(AST::GetIndex)
           # Check if target is a Map
@@ -907,7 +909,9 @@ private
              # Auto-deref Arc/Rc-wrapped maps
              map_ref = "#{map_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
              key_ref  = visit(node.name.index)
+             current_tp_ctx&.bind_value_node = node.value
              val_ref  = visit(node.value)
+             current_tp_ctx&.bind_value_node = nil
              rt_name  = @do_rt_name || "rt"
 
              if map_ft.numeric_map?
