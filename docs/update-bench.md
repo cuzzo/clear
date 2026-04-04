@@ -34,35 +34,27 @@
 
 ## Known Bugs
 
-### 1. Epoll fd corruption on fiber migration (pre-existing)
+### 1. Epoll fd corruption on fiber migration (partially fixed)
 
 When a fiber moves between schedulers (via work-stealing), its TCP fd
-is registered with the old scheduler's epoll. The new scheduler
-re-registers it, causing two epoll instances to watch the same fd.
-Result: double-push to ready queue, use-after-free.
+was registered with the old scheduler's epoll. Fixed in commit 62926ee2:
+registerFd now tracks epoll_fd/epoll_io_fd on the Task and unregisters
+from the old scheduler before registering with the new one.
 
-- **Workaround**: `spawnPinned` with `@sharded` map capture auto-pins
-  fibers. BG blocks that capture resources use `submitSpawn` on the
-  accepting scheduler.
-- **Proper fix**: unregister fds from old scheduler's epoll on steal,
-  or track fd-to-scheduler affinity in the runtime.
-- **Impact**: TCP servers limited to single-scheduler I/O throughput.
+- **Status**: Basic migration works (verified by test_tcp_charAt_stall.zig:
+  32 clients x 1000 msgs across 8 schedulers). The `spawnPinned`
+  workaround may no longer be necessary for most cases.
+- **Remaining risk**: Double-push race (task pushed to ready queue while
+  already in it) documented in tcp-fairness-test.zig. Guard: skip push
+  if task is already Ready (in_inbox flag partially addresses this).
 
-### 2. String@raw charAt causes stall under concurrent TCP load
+### 2. ~~String@raw charAt causes stall under concurrent TCP load~~ RESOLVED
 
-`CheatLib.charAt` (O(1) byte access) works correctly in isolation and
-passes all tests (50 workers x 10K rounds). But under concurrent TCP
-connections (2+), the server stalls after processing the first batch.
-
-- **Root cause**: Not yet confirmed. Suspected scheduler starvation -
-  the fast non-allocating charAt path completes so quickly that
-  cooperative yield points don't trigger effectively. With
-  `charAtCodepoint` (which allocates per call), the slower pace gives
-  other fibers time to be scheduled.
-- **Workaround**: Don't use `String@raw` on TCP server data. The
-  `charAtCodepoint` path works reliably under all loads.
-- **Impact**: TCP RESP parsers use O(n) UTF-8 charAt instead of O(1)
-  byte access. ~3x slower parsing per command.
+Was caused by epoll fd corruption on fiber migration (Bug #1), fixed
+in commit 62926ee2 (registerFd unregisters from old scheduler's epoll).
+Verified with test_tcp_charAt_stall.zig: 32 clients x 1000 msgs with
+charAt fast-path across 8 schedulers, 5/5 passes in both Debug and
+ReleaseFast modes. String@raw is safe for TCP servers.
 
 ### 3. EXTERN zero-arg function trampoline broken
 
