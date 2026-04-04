@@ -4,14 +4,24 @@
 -- iteration, fill it, sum it, and discard it. 10000 outer iterations.
 -- Total: 100M element writes + 100M element reads.
 --
--- C:     malloc + indexed write + inline sum + free.
--- Rust:  Vec::with_capacity + push + iter.sum().
--- CLEAR: Float64[10000]@list + indexed write + inline sum.
---        Frame arena rewound each iteration.
+-- CLEAR runs three variants:
+--   1. Regular FOR loops (checkYield + frame marks per iteration)
+--   2. Outer FOR + inner TIGHT (frame rewind per outer, no yield on inner)
+--   3. C/Rust: malloc/Vec + raw indexed writes
 
-FN main() RETURNS Void ->
-    n = 10000;
-    t0 = timestampMs();
+FN benchRegular(n: Int64) RETURNS Float64 ->
+    MUTABLE total: Float64 = 0.0;
+    FOR outer IN (0_i64 ..< n) DO
+        MUTABLE vals: Float64[10000]@list = [];
+        FOR inner IN (0_i64 ..< n) -> vals[inner] = inner + 0.0;
+        MUTABLE s: Float64 = 0.0;
+        FOR inner IN (0_i64 ..< n) -> s += vals[inner];
+        total = total + s;
+    END
+    RETURN total;
+END
+
+FN benchTight(n: Int64) RETURNS Float64 ->
     MUTABLE total: Float64 = 0.0;
     FOR outer IN (0_i64 ..< n) DO
         MUTABLE vals: Float64[10000]@list = [];
@@ -22,8 +32,30 @@ FN main() RETURNS Void ->
         TIGHT WHILE inner < n DO s += vals[inner]; inner += 1; END
         total = total + s;
     END
-    ASSERT total > 0.0, "total must be positive";
-    elapsed = timestampMs() - t0;
-    print("Time: ${elapsed.toString()} ms");
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    n = 10000;
+
+    -- Warmup
+    warmR = benchRegular(100);
+    warmT = benchTight(100);
+
+    -- Regular loops
+    t0 = timestampMs();
+    totalR = benchRegular(n);
+    regularMs = timestampMs() - t0;
+
+    -- Tight inner loops
+    t1 = timestampMs();
+    totalT = benchTight(n);
+    tightMs = timestampMs() - t1;
+
+    ASSERT totalR == totalT, "results must match";
+    ASSERT totalR > 0.0, "total must be positive";
+
+    print("Regular FOR:  ${regularMs.toString()} ms");
+    print("TIGHT inner:  ${tightMs.toString()} ms");
     RETURN;
 END
