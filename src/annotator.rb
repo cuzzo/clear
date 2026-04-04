@@ -1358,7 +1358,15 @@ private
     node.stdlib_allocates = true if matched_def[:allocates]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail])
 
-    # 5. Collection type narrowing (e.g., append narrows Any[] → T[])
+    # 5. Flag mutable access through list indexing.
+    #    When a mutating intrinsic (e.g., append, remove) is called on a receiver
+    #    that chains through a GetIndex, the GetIndex must emit pointer access
+    #    instead of by-value getAt().
+    if matched_def[:mutates_receiver] && node.is_a?(AST::MethodCall)
+      mark_chain_needs_mut_ref!(node.object)
+    end
+
+    # 6. Collection type narrowing (e.g., append narrows Any[] → T[])
     narrow_collection_type!(matched_def, args)
     # Ownership for TAKES args (e.g., append value) is handled uniformly
     # by verify_function_signature! via the takes: true flag in STD_LIB.
@@ -1748,6 +1756,9 @@ private
     # 1. Analyze the access itself (resolves types, checks bounds if possible)
     visit(index_node)
 
+    # 1b. Flag mutable access through list indexing in the target chain.
+    mark_chain_needs_mut_ref!(index_node)
+
     # 2. Check Mutability of the owner
     if index_node.target.is_a?(AST::Identifier)
       var_name = index_node.target.name
@@ -1780,6 +1791,9 @@ private
   def visit_assignment_field(field_node, assignment_node)
     # 1. Analyze field access
     visit(field_node)
+
+    # 1b. Flag mutable access through list indexing in the target chain.
+    mark_chain_needs_mut_ref!(field_node)
 
     # 2. Check Mutability of the owner
     # @alwaysMutable (RefCell) allows field mutation through const bindings.
@@ -3120,6 +3134,18 @@ private
       end
     end
     drops
+  end
+
+  # Walk a GetField/GetIndex chain and flag any GetIndex nodes as needing
+  # mutable pointer access.  Called when the chain leads to mutation
+  # (field assignment, mutating method call, etc.) so the transpiler can
+  # emit `.items[idx]` instead of by-value `getAt(list, idx)`.
+  def mark_chain_needs_mut_ref!(node)
+    curr = node
+    while curr
+      curr.needs_mut_ref = true if curr.is_a?(AST::GetIndex)
+      curr = curr.respond_to?(:target) ? curr.target : nil
+    end
   end
 
   def get_path_to_root(node)

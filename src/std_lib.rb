@@ -17,6 +17,7 @@ STD_LIB = {
     zig: "try {0}.append({alloc}, {1})",
     narrows_collection: true,  # narrows Any[] element type from arg 1
     allocates: true,
+    mutates_receiver: true,
   },
 
   "remove" => {
@@ -24,6 +25,7 @@ STD_LIB = {
     return: :infer_element_type,
     return_alloc: :heap,  # removed element may contain heap data
     zig: "{0}.orderedRemove(@intCast({1}))",
+    mutates_receiver: true,
   },
 
 

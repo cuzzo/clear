@@ -1167,7 +1167,14 @@ private
         # String indexing: returns a single-char string ([]const u8), not a byte
         "CheatLib.charAt(#{target}, #{index})"
       else
-        "CheatLib.getAt(#{target}, #{index})"
+        if node.needs_mut_ref
+          # Mutable pointer access: the annotator flagged this GetIndex as part
+          # of a mutation chain (e.g., list[i].field.append() or list[i].field = val).
+          # Access the backing array directly to get a mutable reference.
+          "#{target}.items[@as(usize, @intCast(#{index}))]"
+        else
+          "CheatLib.getAt(#{target}, #{index})"
+        end
       end
 
     # TODO: See where drops live
