@@ -321,6 +321,7 @@ module AST
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
+    attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     def wildcard?; false end
     def name; self[:name].to_s end
   end

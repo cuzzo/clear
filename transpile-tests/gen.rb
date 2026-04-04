@@ -18,6 +18,9 @@ class TestGenerator < ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
+    # 1b. Rewrite pipeline operators into plain AST nodes.
+    PipelineRewriter.new.rewrite!(ast)
+
     # 2. Pre-populate needs_rt/can_fail tables, promotion plans, and cleanup plans.
     @fn_needs_rt = {}
     @fn_can_fail = {}
