@@ -2718,7 +2718,10 @@ private
     when AST::StructLit
       node.fields.values.flat_map { |v| collect_escaping_identifiers(v) }
     when AST::FuncCall, AST::MethodCall
-      node.args.flat_map { |a| collect_escaping_identifiers(a) }
+      # Only collect args that transfer ownership (TAKES/GIVE).
+      # Borrowed args don't escape - caller retains ownership.
+      node.args.select { |a| a.respond_to?(:was_moved) && a.was_moved }
+               .flat_map { |a| collect_escaping_identifiers(a) }
     when AST::CopyNode
       []  # COPY creates a new value; the source doesn't escape
     else

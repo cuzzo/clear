@@ -835,6 +835,24 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "RETURN fn(borrowed_arg) does NOT suppress borrowed arg cleanup" do
+    it "does not set _moved on borrowed args in return function call" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String, List: Value[] }
+        FN consume(items: Value[]) RETURNS Value -> RETURN Value.Nil; END
+        FN main() RETURNS Void ->
+            MUTABLE evaled: Value[]@list = List[];
+            evaled.append(Value{ Str: COPY "hello" });
+            result = consume(evaled);
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # consume takes items as borrow (not TAKES). evaled cleanup must fire.
+      expect(zig).not_to include("evaled_moved = true")
+    end
+  end
+
   describe "Heap-promoted value assigned to HashMap is NOT hoisted" do
     it "stores directly without __hpt wrapper" do
       src = <<~CLEAR
