@@ -52,11 +52,13 @@ module OwnershipGenerator
       "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{close_stmt};\n"
 
     when :list_with_elem_cleanup
-      # List with union elements needing heap cleanup
+      # List with union elements needing cleanup. Frame-scoped lists use
+      # frameAlloc for element cleanup (no-op free, reclaimed by rewind).
       ti = node&.type_info
       zig_type = ti&.zig_type || "UNKNOWN"
       elem_zig = ti&.element_type ? transpile_type(ti.element_type.resolved.to_s) : "UNKNOWN"
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); };\n"
+      elem_alloc = alloc_expr_from_plan(entry)
+      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{elem_alloc}, __e); } #{name}.deinit(rt.frameAlloc()); };\n"
 
     when :list
       ti = node&.type_info

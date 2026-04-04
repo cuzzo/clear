@@ -1,0 +1,40 @@
+-- Test: @list used in union constructor return must not crash on cleanup.
+-- Bug: defer cleanup tries to heap-free frame-arena Values after the
+-- list is deep-copied into the return value.
+
+STRUCT Pair {
+    car: String,
+    cdr: String
+}
+
+UNION Val {
+    Nil,
+    Str: String,
+    List: Val[],
+    Pair: Pair
+}
+
+FN makeStr!(prefix: String, suffix: String) RETURNS String ->
+    RETURN prefix + suffix;
+END
+
+FN buildList!() RETURNS Val ->
+    MUTABLE items: Val[]@list = List[];
+    -- Use dynamically built strings (frame-arena allocated, not rodata)
+    items.append(Val{ Str: makeStr!("hel", "lo") });
+    items.append(Val{ Str: makeStr!("wor", "ld") });
+    RETURN Val{ List: items };
+END
+
+FN main() RETURNS Void ->
+    result = buildList!();
+    MATCH result START
+        Val.List AS elems ->
+            MATCH elems[0] START
+                Val.Str AS s -> ASSERT s == "hello", "first element";,
+                DEFAULT -> ASSERT FALSE, "should be Str";
+            END,
+        DEFAULT -> ASSERT FALSE, "should be List";
+    END
+    print("PASS");
+END
