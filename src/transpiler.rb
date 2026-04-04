@@ -1920,7 +1920,7 @@ private
           zig_t = arg_type.is_a?(Type) ? arg_type.zig_type : (arg_type ? Type.new(arg_type).zig_type : "@TypeOf(__ext#{tid}_args[#{field_i}])")
           "a#{field_i}: #{zig_t}"
         }.join(", ")
-        alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
+        alloc_field = has_alloc ? "alloc: std.mem.Allocator" : ""
         arg_tuple = runtime_args_zig.empty? ? ".{}" : ".{ #{runtime_args_zig.join(', ')} }"
 
         alloc_zig = case alloc_kind
@@ -1929,13 +1929,19 @@ private
                     else nil
                     end
         alloc_init = has_alloc ? ", .alloc = #{alloc_zig}" : ""
-        err_field = is_error_union ? "err: ?anyerror = null, " : ""
+        err_field = is_error_union ? "err: ?anyerror = null" : ""
         err_check = is_error_union ? "if (__ext#{tid}_frame.err) |e| return e; " : ""
 
         field_inits = runtime_indices.each_with_index.map { |_, fi| ".a#{fi} = __ext#{tid}_args[#{fi}]" }.join(', ')
+        # Combine all struct fields, filtering empties to avoid stray commas.
+        all_fields_void = [alloc_field, arg_fields].reject(&:empty?).join(", ")
+        all_fields_void = all_fields_void.empty? ? "" : "#{all_fields_void}, "
+        all_fields_ret = [alloc_field, arg_fields, err_field].reject(&:empty?).join(", ")
+        all_fields_ret = all_fields_ret.empty? ? "" : "#{all_fields_ret}, "
+
         if is_void && !is_error_union
           "{ const __ext#{tid}_args = #{arg_tuple}; " \
-          "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, " \
+          "const __Ext#{tid} = struct { #{all_fields_void}" \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "_ = #{native_call}; } }; " \
@@ -1943,7 +1949,7 @@ private
           "#{trampoline_call(tid, rt_name, node)}; }"
         else
           "blk_ext#{tid}: { const __ext#{tid}_args = #{arg_tuple}; " \
-          "const __Ext#{tid} = struct { #{alloc_field}#{arg_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
+          "const __Ext#{tid} = struct { #{all_fields_ret}ret: #{inner_zig} = undefined, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
           "f.ret = #{native_call}; } }; " \
