@@ -134,8 +134,10 @@ pub const CheatLib = struct {
 
     // Byte-level character access: returns a single-byte slice ([]const u8).
     // Used by CLEAR's String@raw buf[i] indexing.
-    pub fn charAt(str: []const u8, index: anytype) []const u8 {
-        const i: usize = @intCast(index);
+    pub noinline fn charAt(str: []const u8, index: anytype) []const u8 {
+        const idx = @as(i64, @intCast(index));
+        if (idx < 0) return "";
+        const i: usize = @intCast(idx);
         if (i >= str.len) return "";
         return str[i .. i + 1];
     }
