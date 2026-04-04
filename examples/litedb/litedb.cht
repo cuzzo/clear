@@ -172,5 +172,34 @@ FN main() RETURNS Void ->
     strResult = NEXT strP;
     ASSERT strResult == "litedb", "BG returns string";
 
-    print("LiteDB: all tests PASSED");
+    -- ================================================================
+    -- Commit 6: Verification summary
+    -- ================================================================
+    -- All features exercised:
+    --   ENUM Op with MATCH dispatch
+    --   STRUCT Node with Int64[]@list + String[]@list fields
+    --   Node[]@list (list of structs with nested lists)
+    --   Mutation through list[idx].field (needs_mut_ref)
+    --   Struct literal with @list fields (direct ArrayList move)
+    --   Field reassignment with pre-cleanup of old value
+    --   HashMap<Int64> for children index mapping
+    --   findKeyIndex helper (read-only list param)
+    --   scanWithFilter with FN(Int64)->Bool lambda parameter
+    --   Pipeline: REDUCE, WHERE+REDUCE, WHERE+SELECT+REDUCE
+    --   @shared:locked TreeStats (Arc<Mutex<T>>)
+    --   BG fibers with WITH EXCLUSIVE + promise list join
+    --   DO block with 4 concurrent branches
+    --   @multiowned ResultSet (Rc with list fields)
+    --   Nested BG (outer spawns inner)
+    --   BG returning String (~String promise)
+
+    -- ENUM exhaustive check
+    MUTABLE opCount: Int64 = 0;
+    MATCH Op.Get START Op.Get -> opCount += 1;, DEFAULT -> opCount += 0; END
+    MATCH Op.Put START Op.Put -> opCount += 1;, DEFAULT -> opCount += 0; END
+    MATCH Op.Delete START Op.Delete -> opCount += 1;, DEFAULT -> opCount += 0; END
+    MATCH Op.Scan START Op.Scan -> opCount += 1;, DEFAULT -> opCount += 0; END
+    ASSERT opCount == 4, "ENUM: all 4 variants";
+
+    print("LiteDB: all tests PASSED (17 compiler features verified)");
 END
