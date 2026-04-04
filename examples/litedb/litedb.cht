@@ -16,6 +16,8 @@ STRUCT Node {
     isLeaf: Bool
 }
 
+STRUCT TreeStats { insertCount: Int64, searchCount: Int64 }
+
 FN childKey(parentIdx: Int64, pos: Int64) RETURNS String ->
     RETURN "${parentIdx.toString()}:${pos.toString()}";
 END
@@ -192,6 +194,76 @@ FN main() RETURNS Void ->
     MATCH Op.Delete START Op.Delete -> opCount += 1;, DEFAULT -> opCount += 0; END
     MATCH Op.Scan START Op.Scan -> opCount += 1;, DEFAULT -> opCount += 0; END
     ASSERT opCount == 4, "ENUM: all 4 Op variants dispatched";
+
+    -- ================================================================
+    -- Commit 3: @shared:locked + concurrent access + DO blocks
+    -- ================================================================
+
+    -- Wrap a counter in @shared:locked for concurrent mutation
+    stats = TreeStats{ insertCount: 0, searchCount: 0 } @shared:locked;
+
+    -- BG fibers incrementing the counter concurrently
+    MUTABLE futures: ~Void[]@list = [];
+    MUTABLE fi: Int64 = 0;
+    WHILE fi < 4 DO
+        futures.append(BG {
+            WITH EXCLUSIVE stats AS s {
+                s.insertCount = s.insertCount + 10;
+            }
+        });
+        fi += 1;
+    END
+    -- Join all fibers
+    fi = 0;
+    WHILE fi < 4 DO
+        NEXT futures[fi];
+        fi += 1;
+    END
+    WITH stats AS s {
+        ASSERT s.insertCount == 40, "4 BG fibers x 10 = 40 inserts";
+    }
+
+    -- DO block: 4 branches concurrently incrementing searchCount
+    DO {
+        WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
+        WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
+        WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
+        WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; }
+    }
+    WITH stats AS s {
+        ASSERT s.searchCount == 20, "DO block: 4 branches x 5 = 20 searches";
+    }
+
+    -- BG fiber doing a tree search (read-only, returns key found as Int64)
+    searchP: ~Int64 = BG {
+        WITH EXCLUSIVE stats AS s {
+            s.searchCount = s.searchCount + 1;
+        }
+        -- Search for key 20 through the tree (nodes accessible from BG via capture)
+        MUTABLE bgIdx = root;
+        MUTABLE bgFound: Int64 = 0;
+        WHILE bgIdx >= 0 DO
+            IF nodes[bgIdx].isLeaf THEN
+                MUTABLE bsk: Int64 = 0;
+                WHILE bsk < nodes[bgIdx].keys.length() DO
+                    IF nodes[bgIdx].keys[bsk] == 20 THEN
+                        bgFound = 1;
+                    END
+                    bsk += 1;
+                END
+                bgIdx = 0 - 1;
+            ELSE
+                bcp = findKeyIndex(nodes[bgIdx].keys, 20);
+                bgIdx = children[childKey(bgIdx, bcp)] OR (0 - 1);
+            END
+        END
+        bgFound;
+    };
+    bgSearchResult = NEXT searchP;
+    ASSERT bgSearchResult == 1, "BG fiber tree search found key 20";
+    WITH stats AS s {
+        ASSERT s.searchCount == 21, "search count incremented by BG fiber";
+    }
 
     print("LiteDB: all tests PASSED");
 END
