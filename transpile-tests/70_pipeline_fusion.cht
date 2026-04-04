@@ -94,6 +94,75 @@ FN test_single_stage_unfused() RETURNS Void ->
     RETURN;
 END
 
+FN test_where_average() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+    -- values > 5: 6,7,8,9 -> avg = 30/4 = 7.5
+    result = data s> WHERE _ > 5.0 s> AVERAGE _;
+    ASSERT result == 7.5, "WHERE + AVERAGE fusion";
+    RETURN;
+END
+
+FN test_where_any() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i));
+    -- any > 3? yes (4)
+    yes = data s> WHERE _ > 0.0 s> ANY _ > 3.0;
+    ASSERT yes == TRUE, "WHERE + ANY fusion (true)";
+    no = data s> WHERE _ > 0.0 s> ANY _ > 10.0;
+    ASSERT no == FALSE, "WHERE + ANY fusion (false)";
+    RETURN;
+END
+
+FN test_where_all() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+    -- all > 0? yes (1,2,3,4,5)
+    yes = data s> WHERE _ > 0.0 s> ALL _ > 0.0;
+    ASSERT yes == TRUE, "WHERE + ALL fusion (true)";
+    no = data s> WHERE _ > 0.0 s> ALL _ > 3.0;
+    ASSERT no == FALSE, "WHERE + ALL fusion (false)";
+    RETURN;
+END
+
+FN test_where_find() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+    -- find first > 5 after filtering > 3
+    result = data s> WHERE _ > 3.0 s> FIND _ > 5.0;
+    ASSERT result == 6.0, "WHERE + FIND fusion";
+    RETURN;
+END
+
+FN test_take_while_sum() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
+    -- take while < 5, then sum: 0+1+2+3+4 = 10
+    result = data s> TAKE_WHILE _ < 5.0 s> SUM _;
+    ASSERT result == 10.0, "TAKE_WHILE + SUM fusion";
+    RETURN;
+END
+
+FN test_long_chain() RETURNS Void ->
+    -- 4-stage chain: WHERE + SELECT + WHERE + SUM
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 20_i64) -> data.append(toFloat(i));
+    -- filter > 5 -> [6..19], double -> [12..38], filter > 20 -> [22,24,26,28,30,32,34,36,38]
+    -- sum = 22+24+26+28+30+32+34+36+38 = 270
+    result = data s> WHERE _ > 5.0 s> SELECT _ * 2.0 s> WHERE _ > 20.0 s> SUM _;
+    ASSERT result == 270.0, "4-stage WHERE+SELECT+WHERE+SUM";
+    RETURN;
+END
+
+FN test_select_average() RETURNS Void ->
+    MUTABLE data: Float64[]@list = [];
+    FOR i IN (0_i64 ..< 4_i64) -> data.append(toFloat(i + 1_i64));
+    -- [1,2,3,4] -> *10 -> [10,20,30,40] -> avg = 25
+    result = data s> SELECT _ * 10.0 s> AVERAGE _;
+    ASSERT result == 25.0, "SELECT + AVERAGE fusion";
+    RETURN;
+END
+
 FN main() RETURNS Void ->
     test_where_sum();
     test_select_sum();
@@ -104,5 +173,12 @@ FN main() RETURNS Void ->
     test_select_then_where();
     test_chained_selects();
     test_single_stage_unfused();
+    test_where_average();
+    test_where_any();
+    test_where_all();
+    test_where_find();
+    test_take_while_sum();
+    test_long_chain();
+    test_select_average();
     RETURN;
 END

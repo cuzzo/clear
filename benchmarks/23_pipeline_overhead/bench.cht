@@ -54,6 +54,28 @@ FN chainedPipeline(data: Float64[]) RETURNS Float64 ->
     RETURN data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
 END
 
+-- ============================================================
+-- Test 3: Long chain — 4-stage pipeline vs handwritten
+-- ============================================================
+
+FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
+    MUTABLE sum: Float64 = 0.0;
+    FOR i IN (0_i64 ..< data.length()) DO
+        v = data[i];
+        IF v > 200.0 THEN
+            doubled = v * 2.0;
+            IF doubled < 1500.0 THEN
+                sum += doubled;
+            END
+        END
+    END
+    RETURN sum;
+END
+
+FN longChainedPipeline(data: Float64[]) RETURNS Float64 ->
+    RETURN data s> WHERE _ > 200.0 s> SELECT _ * 2.0 s> WHERE _ < 1500.0 s> SUM _;
+END
+
 FN main() RETURNS Void ->
     n = 10000000;
     iters = 20;
@@ -92,6 +114,19 @@ FN main() RETURNS Void ->
     chainMs = timestampMs() - t3;
     chainRssKb = currentMemoryKb();
 
+    -- ---- Test 3: Long chain (4-stage) ----
+    warmL1 = longFusedLoop(data);
+    warmL2 = longChainedPipeline(data);
+    ASSERT warmL1 == warmL2, "long chain results must match";
+
+    t4 = timestampMs();
+    FOR r IN (0_i64 ..< iters) -> accum += longFusedLoop(data);
+    longFusedMs = timestampMs() - t4;
+
+    t5 = timestampMs();
+    FOR r IN (0_i64 ..< iters) -> accum += longChainedPipeline(data);
+    longChainMs = timestampMs() - t5;
+
     ASSERT accum != 0.0, "prevent dead code elimination";
 
     -- ---- Report ----
@@ -99,9 +134,10 @@ FN main() RETURNS Void ->
     print("Iterations: ${iters.toString()}");
     print("Handwritten loop: ${sumLoopMs.toString()} ms");
     print("SUM pipeline: ${sumPipeMs.toString()} ms");
-    print("Fused loop: ${fusedMs.toString()} ms");
-    print("Chained pipeline: ${chainMs.toString()} ms");
-    print("RSS after: ${sumRssKb.toString()} KB");
+    print("Fused loop (2-stage): ${fusedMs.toString()} ms");
+    print("Chained pipeline (2-stage): ${chainMs.toString()} ms");
+    print("Fused loop (4-stage): ${longFusedMs.toString()} ms");
+    print("Chained pipeline (4-stage): ${longChainMs.toString()} ms");
     print("Peak RSS: ${peakMemoryKb().toString()} KB");
 
     RETURN;
