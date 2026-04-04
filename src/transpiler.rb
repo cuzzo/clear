@@ -1310,7 +1310,12 @@ private
       cmp       = node.inclusive ? "<=" : "<"
       @for_counter = (@for_counter || 0) + 1
       iter_var  = "__for_#{@for_counter}"
-      if current_tp_ctx&.has_rt
+      if node.mark_per_iter && current_tp_ctx&.has_rt
+        # Loop-local frame allocs: unwind arena each iteration AND yield at back-edge.
+        mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
+        mark_var = "__loop_mark_#{mark_id}"
+        "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
+      elsif current_tp_ctx&.has_rt
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
       else
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n}\n}"
