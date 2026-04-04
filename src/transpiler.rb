@@ -2051,7 +2051,7 @@ private
       needs_string_dupe = @catch_dupe_string_returns || @current_fn_has_catch
       if plan && !plan.empty?
         filtered = plan.filter_for_return(node.value)
-        emit_return_from_plan(val_code, filtered, rt_name, suppress)
+        emit_return_from_plan(val_code, filtered, rt_name, suppress, node)
       elsif needs_string_dupe && node.value
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
@@ -2813,7 +2813,7 @@ private
 
   # Emit return code from a PromotionPlan. Zero decisions here — the plan
   # already decided what to promote.
-  def emit_return_from_plan(val_code, plan, rt_name, suppress)
+  def emit_return_from_plan(val_code, plan, rt_name, suppress, ret_node = nil)
     parts = [suppress]
 
     plan.var_promotes.each do |vp|
@@ -2828,7 +2828,7 @@ private
       end
     end
 
-    if plan.struct_promote
+    if plan.struct_promote && (!ret_node || plan.needs_promote?(ret_node))
       zig_type = transpile_type(plan.struct_promote)
       parts << "var __ret = #{val_code};"
       parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"

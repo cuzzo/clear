@@ -26,13 +26,25 @@ class PromotionPlan
   # Emits: try CheatLib.promote(<struct_promote>, rt, &__ret);
   attr_reader :struct_promote
 
+  # Set of ReturnNode object_ids that need struct_promote.
+  # When set, only returns in this set get promoteFields.
+  # When nil, all returns get it (backward compat for struct returns).
+  attr_reader :promote_return_ids
+
   # Variables whose defer cleanup must be suppressed.
   attr_reader :suppress_defers
 
-  def initialize(var_promotes: [], struct_promote: nil, suppress_defers: [])
+  def initialize(var_promotes: [], struct_promote: nil, promote_return_ids: nil, suppress_defers: [])
     @var_promotes = var_promotes.freeze
     @struct_promote = struct_promote
+    @promote_return_ids = promote_return_ids&.freeze
     @suppress_defers = suppress_defers.freeze
+  end
+
+  # Check if a specific return node needs struct_promote.
+  def needs_promote?(ret_node)
+    return true if @promote_return_ids.nil?  # nil = all returns (backward compat)
+    @promote_return_ids.include?(ret_node.object_id)
   end
 
   EMPTY = new.freeze
@@ -53,6 +65,7 @@ class PromotionPlan
     PromotionPlan.new(
       var_promotes: relevant,
       struct_promote: @struct_promote,
+      promote_return_ids: @promote_return_ids,
       suppress_defers: @suppress_defers.select { |d| relevant_names.include?(d) },
     )
   end
@@ -98,6 +111,7 @@ class PromotionPlan
     suppress_defers = []
     handled_fields = Set.new
     struct_promote = nil
+    promote_return_ids = Set.new
 
     return_nodes.each do |ret_node|
       val = ret_node.value
@@ -119,17 +133,24 @@ class PromotionPlan
           handled_fields << fname.to_s
         end
 
-        # Union constructor with heap variants (strings, slices, @indirect):
-        # promote the entire return value so frame data survives frame rewind.
-        # promote() handles unions natively (dupes strings, slices, pointers).
-        # Skip when all fields are already COPY'd (already heap-owned).
+        # Union constructor with frame-allocated heap data: promote so it
+        # survives frame rewind. Per-return-node: only this specific return
+        # gets promoteFields. Skip when fields are already heap-owned.
         if var_promotes.empty?
-          all_fields_copied = val.fields.all? { |_, fval| fval.is_a?(AST::CopyNode) || fval.is_a?(AST::Literal) }
-          unless all_fields_copied
+          needs_promote = val.fields.any? do |_, fval|
+            next false if fval.is_a?(AST::CopyNode) || fval.is_a?(AST::Literal)
+            fti = fval.type_info
+            fti = Type.new(fti) if fti && !fti.is_a?(Type)
+            fti&.string? || fti&.array? || fti&.collection?
+          end
+          if needs_promote
             ret_schema = schema_lookup.call(ret_type.resolved) rescue nil
             if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
               has_heap = (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-              struct_promote ||= zig_type_for(ret_type) if has_heap
+              if has_heap
+                struct_promote ||= zig_type_for(ret_type)
+                promote_return_ids << ret_node.object_id
+              end
             end
           end
         end
@@ -170,6 +191,7 @@ class PromotionPlan
       new(
         var_promotes: var_promotes.uniq { |vp| vp[:var] },
         struct_promote: struct_promote,
+        promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
         suppress_defers: suppress_defers.uniq,
       )
     end
