@@ -644,6 +644,19 @@ RSpec.describe SemanticAnnotator do
         expect(get_index.needs_mut_ref).to eq(true)
       end
 
+      it "flags field_pre_cleanup on field reassignment of list type" do
+        code = <<~FLUX
+          STRUCT Node { vals: String[]@list }
+          MUTABLE nodes: Node[]@list = [];
+          nodes.append(Node{ vals: [] });
+          MUTABLE nv: String[]@list = [];
+          nodes[0].vals = nv;
+        FLUX
+        ast = run(code)
+        assignment = ast.statements.last
+        expect(assignment.field_pre_cleanup).not_to be_nil
+      end
+
       it "skips CopyNode for list values targeting @list struct fields" do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list }

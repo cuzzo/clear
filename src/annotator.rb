@@ -1814,7 +1814,16 @@ private
       end
     end
 
-    # 4. Type Check
+    # 4. Flag pre-cleanup for field reassignment of heap-backed types.
+    #    When overwriting a field that holds heap data (list, string list, etc.),
+    #    the old value must be freed before the new value is written.
+    field_ti = field_node.type_info
+    field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+    if field_ti&.list_collection?
+      assignment_node.field_pre_cleanup = field_ti.zig_type
+    end
+
+    # 5. Type Check
     validate_assignment_type(assignment_node, field_node.resolved_type, assignment_node.value.resolved_type)
 
     # Assignments are statements (void), not expressions that produce a value.

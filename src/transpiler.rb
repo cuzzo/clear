@@ -922,7 +922,16 @@ private
           value  = visit(node.value)
           current_tp_ctx&.bind_value_node = nil
           move_logic = emit_move_suppression(node.value)
-          code = "#{target}.#{field} = #{value};"
+          # Pre-cleanup: free old field value before overwriting with new one.
+          # The annotator sets field_pre_cleanup with the Zig type when the
+          # field holds heap-backed data (list, etc.) that would leak.
+          rt_name = @do_rt_name || "rt"
+          pre_cleanup = if node.field_pre_cleanup
+            "CheatLib.cleanup(#{node.field_pre_cleanup}, #{rt_name}.frameAlloc(), &#{target}.#{field});\n"
+          else
+            ""
+          end
+          code = "#{pre_cleanup}#{target}.#{field} = #{value};"
           return move_logic.empty? ? code : "#{code}\n#{move_logic}"
         elsif node.name.is_a?(AST::GetIndex)
           # Check if target is a Map

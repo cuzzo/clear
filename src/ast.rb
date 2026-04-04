@@ -52,6 +52,7 @@ module AST
     attr_accessor :container_borrow     # true when value is borrowed from container (map/list/pool access)
     attr_accessor :needs_mut_ref        # true when GetIndex must emit pointer access (mutation through indexed element)
     attr_accessor :target_is_list_field # true when value targets a struct/union @list field (skip .items conversion)
+    attr_accessor :field_pre_cleanup    # Zig type string — emit CheatLib.cleanup of old field value before assignment
     attr_accessor :collection_return    # true when return value is a collection needing escape promotion
     attr_accessor :slot_size
     attr_accessor :resource_close_zig   # set by annotator on resource declarations
