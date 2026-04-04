@@ -921,7 +921,9 @@ private
           current_tp_ctx&.bind_value_node = node.value
           value  = visit(node.value)
           current_tp_ctx&.bind_value_node = nil
-          return "#{target}.#{field} = #{value};"
+          move_logic = emit_move_suppression(node.value)
+          code = "#{target}.#{field} = #{value};"
+          return move_logic.empty? ? code : "#{code}\n#{move_logic}"
         elsif node.name.is_a?(AST::GetIndex)
           # Check if target is a Map
           target_node = node.name.target
