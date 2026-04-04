@@ -186,7 +186,10 @@ module OwnershipGenerator
     end
 
     # RC structs: also emit releaseFields on the inner data.
-    if type_info.any_rc? && !is_link && !is_optional
+    # Skip when a sync layer is present (@shared:locked, etc.) — the Arc/Rc
+    # release already handles Locked/RwLocked inner cleanup via arcDeinitInner.
+    # Emitting releaseFields(BaseType) would use the wrong type (BaseType vs Locked(BaseType)).
+    if type_info.any_rc? && !is_link && !is_optional && !type_info.sync
       base_zig = transpile_type(base_type)
       schema = (@struct_schemas ||= {})[type_info.resolved]
       if schema

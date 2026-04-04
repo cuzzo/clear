@@ -2158,10 +2158,15 @@ private
         "try CheatLib.localCreate(#{zig_base}, rt.heapAlloc(), #{inner_code})"
       elsif sync_fn && own_fn
         # Two-layer: sync wraps T, ownership wraps the sync type.
+        # lockedCreate/rwLockedCreate/refCellCreate return *Locked(T) (heap pointer),
+        # but arcCreate/rcCreate expect Locked(T) (value). Dereference and free the
+        # intermediate allocation — the Arc/Rc makes its own heap copy.
         <<~ZIG.chomp
           blk_cap: {
               const __cap_inner = try CheatLib.#{sync_fn}(#{zig_base}, rt.heapAlloc(), #{inner_code});
-              break :blk_cap try CheatLib.#{own_fn}(#{sync_type}, rt.heapAlloc(), __cap_inner);
+              const __cap_val = __cap_inner.*;
+              rt.heapAlloc().destroy(__cap_inner);
+              break :blk_cap try CheatLib.#{own_fn}(#{sync_type}, rt.heapAlloc(), __cap_val);
           }
         ZIG
       elsif sync_fn

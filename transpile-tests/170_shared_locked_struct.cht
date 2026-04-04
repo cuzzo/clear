@@ -1,0 +1,40 @@
+-- Test: @shared:locked on a struct with BG and DO blocks
+-- Verifies that the two-layer capability wrapping (Arc<Mutex<T>>)
+-- compiles and works correctly for concurrent access patterns.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    c = Counter{ value: 0 } @shared:locked;
+
+    -- WITH EXCLUSIVE for mutation
+    WITH EXCLUSIVE c AS inner {
+        inner.value = 42;
+    }
+    WITH c AS inner {
+        ASSERT inner.value == 42, "value is 42 after WITH EXCLUSIVE";
+    }
+
+    -- BG fiber captures @shared:locked and mutates
+    p = BG {
+        WITH EXCLUSIVE c AS inner {
+            inner.value = inner.value + 1;
+        }
+    };
+    NEXT p;
+    WITH c AS inner {
+        ASSERT inner.value == 43, "value is 43 after BG increment";
+    }
+
+    -- DO block with concurrent WITH EXCLUSIVE branches
+    DO {
+        WITH EXCLUSIVE c AS inner { inner.value = inner.value + 10; },
+        WITH EXCLUSIVE c AS inner { inner.value = inner.value + 10; },
+        WITH EXCLUSIVE c AS inner { inner.value = inner.value + 10; }
+    }
+    WITH c AS inner {
+        ASSERT inner.value == 73, "value is 73 after DO block";
+    }
+
+    print("170: shared locked struct PASSED");
+END
