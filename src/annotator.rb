@@ -2053,23 +2053,7 @@ private
       # Apply type param substitution (e.g. T → Number for generic unions)
       expected_type = union_subst.any? ? apply_type_subst(raw_expected, union_subst) : raw_expected
       visit(val_node)
-      # Check for borrowed values (array index, parameter borrows)
-      if val_node.is_a?(AST::GetIndex)
-        vti = val_node.type_info
-        has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
-        unless vti&.primitive? || vti&.generic_instance? || (!has_pointer && !vti&.struct?)
-          root = root_variable_name(val_node)
-          error!(val_node, "Cannot store borrowed value '#{root}[index]' into #{node.name}.#{variant_name}. Use COPY for an explicit deep-copy.")
-        end
-      end
-      # Check borrowed Identifier (parameter, local from container access)
-      if val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
-        vti = val_node.type_info
-        has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
-        unless vti&.primitive? || vti&.generic_instance? || (!has_pointer && !vti&.struct?)
-          error!(val_node, "Cannot store borrowed value '#{val_node.name}' into #{node.name}.#{variant_name}. Use COPY for an explicit deep-copy.")
-        end
-      end
+      reject_borrowed_value!(val_node, "#{node.name}.#{variant_name}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}")
       if owned
@@ -2125,6 +2109,7 @@ private
         raw_expected
       end
 
+      reject_borrowed_value!(val_node, "#{node.name}.#{field_name}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
       if owned
@@ -3578,6 +3563,26 @@ private
     return if current_fn_ctx&.type_params&.include?(vt.resolved)
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
     og_set_moved(node.name)
+  end
+
+  # Reject storing a borrowed value into an owned container (struct, union, TAKES param).
+  # Borrows can't outlive the scope they reference. Use COPY for owned data.
+  def reject_borrowed_value!(val_node, container_desc)
+    borrowed_name = nil
+    if val_node.is_a?(AST::GetIndex)
+      borrowed_name = "#{root_variable_name(val_node)}[index]"
+    elsif val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
+      borrowed_name = val_node.name
+    end
+    return unless borrowed_name
+    vti = val_node.type_info
+    return if vti&.primitive?
+    return if vti&.generic_instance?
+    # Skip generic type parameters - can't determine borrowability at annotation time.
+    return if current_fn_ctx&.type_params&.include?(vti&.resolved)
+    has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
+    return if !has_pointer && !vti&.struct?
+    error!(val_node, "Cannot store borrowed value '#{borrowed_name}' into #{container_desc}. Use COPY for an explicit deep-copy.")
   end
   def og_set_live(name)  = (@og[name]&.state = :live)
   def og_escape(name)    = @og.escape(name)

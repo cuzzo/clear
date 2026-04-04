@@ -163,23 +163,7 @@ module UnionAnalysis
 
     node.fields.each do |fname, val_node|
       visit(val_node)
-      # Cannot capture a borrowed value that references caller memory.
-      # Check Identifiers (parameters, locals) and GetIndex (array/list elements).
-      borrowed_name = nil
-      if val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
-        borrowed_name = val_node.name
-      elsif val_node.is_a?(AST::GetIndex)
-        # Array/list indexing always produces a borrow - can't move out of an index
-        root = root_variable_name(val_node)
-        borrowed_name = "#{root}[index]" if root
-      end
-      if borrowed_name
-        vti = val_node.type_info
-        has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
-        unless vti&.primitive? || vti&.generic_instance? || (!has_pointer && !vti&.struct?)
-          error!(val_node, "Cannot store borrowed value '#{borrowed_name}' into #{node.union_name}.#{node.variant_name}. Use COPY for an explicit deep-copy.")
-        end
-      end
+      reject_borrowed_value!(val_node, "#{node.union_name}.#{node.variant_name}.#{fname}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = ensure_owned_value!(val_node, expected_fields[fname], "#{node.union_name}.#{node.variant_name}.#{fname}")
       if owned
@@ -194,6 +178,7 @@ module UnionAnalysis
                node.union_name, node.variant_name, fname,
                expected_type.resolved, actual&.resolved)
       end
+      move_if_not_copyable!(val_node)
     end
   end
 end

@@ -800,6 +800,24 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "Borrow rejection in struct construction" do
+    it "rejects container index borrow stored in struct field" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String }
+        STRUCT Pair { a: Value, b: Value }
+        FN consume!(TAKES items: Value[]) RETURNS Pair ->
+            RETURN Pair{ a: items[0], b: Value.Nil };
+        END
+        FN main() RETURNS Void ->
+            MUTABLE list: Value[]@list = List[];
+            p = consume!(list);
+            RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/Cannot store borrowed value/)
+    end
+  end
+
   describe "Inline struct variant fields get implicit COPY" do
     it "implicit-copies @list into inline struct variant []T field" do
       src = <<~CLEAR
