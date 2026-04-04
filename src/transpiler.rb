@@ -3103,19 +3103,7 @@ private
   # the accepting scheduler to keep epoll fd registration consistent.
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
     task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
-    if node.captures_resource
-      # Resource capture (TCP fd): spawn on the accepting scheduler to keep
-      # epoll fd registration consistent. spawnBest/spawnPinned would
-      # distribute to a different scheduler, causing epoll corruption.
-      <<~ZIG.chomp
-        try #{rt_name}.getSched().submitSpawn(
-                    @intFromPtr(&Runtime.entryWrapper),
-                    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-                    #{ctx_var},
-                    #{task_cfg},
-                );
-      ZIG
-    elsif node.pinned
+    if node.pinned
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
