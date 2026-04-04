@@ -1806,6 +1806,16 @@ pub const CheatLib = struct {
                             }
                             if (payload.len > 0) alloc.free(payload);
                         }
+                    } else if (f_info == .pointer and f_info.pointer.size == .one and
+                        @typeInfo(f_info.pointer.child) != .@"opaque" and @typeInfo(f_info.pointer.child) != .@"fn")
+                    {
+                        // Single pointer (*T): cleanup pointee then free pointer.
+                        const pointee = @field(ptr, field.name);
+                        const ChildT = f_info.pointer.child;
+                        if (comptime needsCleanup(ChildT)) {
+                            cleanup(ChildT, alloc, pointee);
+                        }
+                        alloc.destroy(pointee);
                     } else if (comptime needsCleanup(FT)) {
                         cleanup(FT, alloc, &@field(ptr, field.name));
                     }
@@ -1879,6 +1889,22 @@ pub const CheatLib = struct {
                         }
                         @field(result, field.name) = buf;
                     }
+                    return result;
+                } else if (ft_info == .pointer and ft_info.pointer.size == .one and
+                    @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
+                {
+                    // Single pointer (*T): allocate new pointee and deep-copy.
+                    // Handles @indirect fields in union variants.
+                    const src_ptr = @field(value, field.name);
+                    const ChildT = ft_info.pointer.child;
+                    const new_ptr = try alloc.create(ChildT);
+                    // Use dupeStructSlices for struct pointees (deep-copies string/slice fields).
+                    // Use dupeUnionValue for union pointees.
+                    if (@typeInfo(ChildT) == .@"struct")
+                        new_ptr.* = dupeStructSlices(ChildT, src_ptr.*, alloc) catch src_ptr.*
+                    else
+                        new_ptr.* = dupeUnionValue(ChildT, src_ptr.*, alloc) catch src_ptr.*;
+                    @field(result, field.name) = new_ptr;
                     return result;
                 } else if (ft_info == .@"struct" and
                     !isArrayList(FT) and !isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
