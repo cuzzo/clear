@@ -1,0 +1,35 @@
+-- Test: GIVE inside a function call argument must compile.
+-- Bug: GIVE generates a blk: expression that breaks when wrapped
+-- in the @hasField(@TypeOf(...)) template for slice coercion.
+
+UNION Val {
+    Nil,
+    Str: String,
+    List: Val[]
+}
+
+FN consume!(TAKES items: Val[]) RETURNS Val ->
+    IF items.length() == 0 THEN RETURN Val.Nil; END
+    RETURN COPY items[0];
+END
+
+FN eval!(TAKES ast: Val) RETURNS Val @reentrant ->
+    MATCH TAKES ast START
+        Val.List AS items ->
+            RETURN consume!(GIVE items);,
+        DEFAULT -> RETURN Val.Nil;
+    END
+    RETURN Val.Nil;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE list: Val[]@list = List[];
+    list.append(Val{ Str: "hello" });
+    ast = Val{ List: list };
+    result = eval!(COPY ast);
+    MATCH result START
+        Val.Str AS s -> ASSERT s == "hello", "give in func arg";,
+        DEFAULT -> ASSERT FALSE, "should be Str";
+    END
+    print("PASS");
+END

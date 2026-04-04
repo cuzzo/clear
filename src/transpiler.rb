@@ -1817,7 +1817,13 @@ private
           is_collection_param = a.is_a?(AST::Identifier) && current_tp_ctx&.collection_params&.include?(a.name)
           (is_capture || is_collection_param) ? arg_code : "&#{arg_code}"
         elsif a.type_info&.array? && !a.is_a?(AST::CopyNode)
-          "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
+          # GIVE/MoveNode produces a blk: expression that can't be used in @TypeOf.
+          # It already yields a slice (not ArrayList), so skip the @hasField check.
+          if a.is_a?(AST::MoveNode)
+            arg_code
+          else
+            "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
+          end
         else
           arg_code
         end
