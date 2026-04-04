@@ -1676,8 +1676,22 @@ pub const CheatLib = struct {
             return;
         }
 
-        // Note: generic slice cleanup removed — slices may be borrowed views.
-        // Heap-promoted slices inside unions are cleaned up by freeUnionPayload.
+        // 2b. Slices: recursively cleanup elements then free the buffer.
+        // The compiler guarantees cleanup is only called on owned slices
+        // (COPY results, TAKES params) via _moved guards.
+        if (comptime blk: {
+            const ti = @typeInfo(T);
+            break :blk ti == .pointer and ti.pointer.size == .slice and T != []const u8 and T != []u8;
+        }) {
+            const ElemT = @typeInfo(T).pointer.child;
+            if (comptime needsCleanup(ElemT)) {
+                for (ptr.*) |*elem| {
+                    cleanup(ElemT, alloc, elem);
+                }
+            }
+            if (ptr.len > 0) alloc.free(ptr.*);
+            return;
+        }
 
         // 3. StringMap(V) — string-keyed hashmap wrapper
         if (comptime isStringMap(T)) {
@@ -4022,4 +4036,5 @@ pub fn spawnOsThread(user_fn: TaskFn, args: ?*anyopaque) !void {
         }
     }.run, .{ user_fn, args }) catch return error.ThreadSpawnFailed;
 }
+
 

@@ -1,0 +1,25 @@
+-- Test: COPY on Val[] (slice of unions) must deep-copy elements.
+-- Verifies cleanup([]Val, ...) works for owned slices in the runtime.
+
+UNION Val {
+    Nil,
+    Str: String,
+    Num: Float64
+}
+
+FN copySlice!(src: Val[]) RETURNS Val ->
+    copied: Val[] = COPY src;
+    RETURN COPY copied[0];
+END
+
+FN main() RETURNS Void ->
+    MUTABLE items: Val[]@list = List[];
+    items.append(Val{ Str: "hello" });
+    items.append(Val{ Str: "world" });
+    result = copySlice!(items);
+    MATCH result START
+        Val.Str AS s -> ASSERT s == "hello", "deep copy preserves string";,
+        DEFAULT -> ASSERT FALSE, "should be Str";
+    END
+    print("PASS");
+END

@@ -605,3 +605,30 @@ test "BUG: Pool deinit frees duped strings inside Lambda params in HashMap value
     // Do NOT free originals - map took ownership.
     pool.deinit(alloc);
 }
+
+test "cleanup: owned slice of tagged unions frees elements and buffer" {
+    const alloc = std.testing.allocator;
+
+    var buf = try alloc.alloc(TestValue, 2);
+    buf[0] = TestValue{ .Str = try alloc.dupe(u8, "hello") };
+    buf[1] = TestValue{ .Str = try alloc.dupe(u8, "world") };
+
+    // cleanup([]TestValue, ...) must free each element's string then free the buffer.
+    CheatLib.cleanup([]TestValue, alloc, &buf);
+}
+
+test "dupeUnionValue deep-copies string variant independently" {
+    const alloc = std.testing.allocator;
+
+    const original = TestValue{ .Str = try alloc.dupe(u8, "hello") };
+    const copied = try CheatLib.dupeUnionValue(TestValue, original, alloc);
+
+    try std.testing.expectEqualStrings("hello", copied.Str);
+    try std.testing.expect(copied.Str.ptr != original.Str.ptr);
+
+    // Clean up both independently - no double-free if deep copy worked.
+    var orig_mut = original;
+    CheatLib.cleanup(TestValue, alloc, &orig_mut);
+    var copy_mut = copied;
+    CheatLib.cleanup(TestValue, alloc, &copy_mut);
+}
