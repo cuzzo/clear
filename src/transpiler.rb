@@ -779,6 +779,13 @@ private
         rhs = @current_rhs_is_move ? node.value.value : node.value
         if rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)
           visit(node.value)
+        elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
+          # T[N]@list: pre-allocate N slots. Allocator from CleanupPlan.
+          fn_name = current_tp_ctx&.fn_name
+          entry = @cleanup_plans&.dig(fn_name)&.lookup(node.name)
+          alloc_kind = entry ? entry[:alloc] : :frame
+          alloc = alloc_kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+          "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{node.full_type.capacity})"
         else
           "#{node.full_type.zig_type}{}"
         end
@@ -811,6 +818,11 @@ private
 
       safe_name = zig_safe_name(node.name)
       decl = "#{keyword} #{safe_name}#{annotation} = #{value_code};"
+
+      # T[N]@list: expand len to capacity so indexed writes (arr[i] = val) work.
+      if node.full_type&.list_collection? && node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
+        decl += "\n#{safe_name}.expandToCapacity();"
+      end
 
       # 2. Cleanup & Move Suppression (must be computed before suppression decision)
       affine_logic = emit_cleanup(safe_name, node)
