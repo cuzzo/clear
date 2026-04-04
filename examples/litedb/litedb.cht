@@ -33,15 +33,15 @@ END
 FN main() RETURNS Void ->
     MUTABLE nodes: Node[]@list = [];
     MUTABLE children: HashMap<Int64> = {};
+    MUTABLE root: Int64 = 0;
+    maxKeys = 3;
 
-    -- Create root leaf (node 0)
+    -- Create root leaf
     nodes.append(Node{ keys: [], vals: [], numChildren: 0, isLeaf: TRUE });
-    rootIdx = 0;
 
-    -- Test 1: ENUM smoke test
-    op = Op.Get;
+    -- ENUM smoke test
     MUTABLE opName = "";
-    MATCH op START
+    MATCH Op.Get START
         Op.Get -> opName = "get";,
         Op.Put -> opName = "put";,
         Op.Delete -> opName = "delete";,
@@ -49,88 +49,149 @@ FN main() RETURNS Void ->
     END
     ASSERT opName == "get", "ENUM: Op.Get dispatches correctly";
 
-    -- Test 2: Append keys in sorted order and verify
-    nodes[rootIdx].keys.append(10);
-    nodes[rootIdx].vals.append("ten");
-    nodes[rootIdx].keys.append(20);
-    nodes[rootIdx].vals.append("twenty");
-    nodes[rootIdx].keys.append(30);
-    nodes[rootIdx].vals.append("thirty");
+    -- Insert keys 10, 20, 30, 40 with splitting at maxKeys=3
+    -- When 4th key makes a leaf exceed maxKeys, split:
+    --   left gets first half, right gets second half, median promoted to parent
+    MUTABLE ki: Int64 = 0;
+    WHILE ki < 4 DO
+        key = (ki + 1) * 10;
+        val = key.toString();
 
-    ASSERT nodes[rootIdx].keys.length() == 3, "leaf has 3 keys";
-    ASSERT nodes[rootIdx].keys[0] == 10, "key 0 is 10";
-    ASSERT nodes[rootIdx].keys[1] == 20, "key 1 is 20";
-    ASSERT nodes[rootIdx].keys[2] == 30, "key 2 is 30";
-    ASSERT nodes[rootIdx].vals[0] == "ten", "val 0 is ten";
-    ASSERT nodes[rootIdx].vals[2] == "thirty", "val 2 is thirty";
-
-    -- Test 3: findKeyIndex on sorted keys
-    ASSERT findKeyIndex(nodes[rootIdx].keys, 10) == 0, "findKeyIndex(10) == 0";
-    ASSERT findKeyIndex(nodes[rootIdx].keys, 15) == 1, "findKeyIndex(15) == 1";
-    ASSERT findKeyIndex(nodes[rootIdx].keys, 20) == 1, "findKeyIndex(20) == 1";
-    ASSERT findKeyIndex(nodes[rootIdx].keys, 35) == 3, "findKeyIndex(35) == 3";
-
-    -- Test 4: Search by key (linear scan through leaf)
-    MUTABLE found = "";
-    MUTABLE si: Int64 = 0;
-    WHILE si < nodes[rootIdx].keys.length() DO
-        IF nodes[rootIdx].keys[si] == 20 THEN
-            found = COPY nodes[rootIdx].vals[si];
+        -- Navigate to the correct leaf
+        MUTABLE cur = root;
+        WHILE nodes[cur].isLeaf == FALSE DO
+            cp = findKeyIndex(nodes[cur].keys, key);
+            cur = children[childKey(cur, cp)] OR (0 - 1);
         END
-        si += 1;
-    END
-    ASSERT found == "twenty", "search: key 20 found";
 
-    -- Search for non-existent key
-    found = "";
-    si = 0;
-    WHILE si < nodes[rootIdx].keys.length() DO
-        IF nodes[rootIdx].keys[si] == 99 THEN
-            found = COPY nodes[rootIdx].vals[si];
+        -- Sorted insert into leaf by rebuilding keys/vals
+        MUTABLE pos2 = findKeyIndex(nodes[cur].keys, key);
+        MUTABLE nk: Int64[]@list = [];
+        MUTABLE nv: String[]@list = [];
+        MUTABLE jj: Int64 = 0;
+        WHILE jj < nodes[cur].keys.length() DO
+            IF jj == pos2 THEN
+                nk.append(key);
+                nv.append(COPY val);
+            END
+            nk.append(nodes[cur].keys[jj]);
+            nv.append(COPY nodes[cur].vals[jj]);
+            jj += 1;
         END
-        si += 1;
-    END
-    ASSERT found == "", "search: key 99 not found";
+        IF pos2 == nodes[cur].keys.length() THEN
+            nk.append(key);
+            nv.append(COPY val);
+        END
 
-    -- Test 5: Update existing key value
-    si = 0;
-    WHILE si < nodes[rootIdx].keys.length() DO
-        IF nodes[rootIdx].keys[si] == 20 THEN
-            nodes[rootIdx].vals[si] = "TWENTY";
+        -- Split if overfull
+        IF nk.length() > maxKeys THEN
+            mid = nk.length() / 2;
+            -- Build left half
+            MUTABLE lk: Int64[]@list = [];
+            MUTABLE lv: String[]@list = [];
+            MUTABLE ri2: Int64 = 0;
+            WHILE ri2 < mid DO
+                lk.append(nk[ri2]);
+                lv.append(COPY nv[ri2]);
+                ri2 += 1;
+            END
+            -- Median
+            medKey = nk[mid];
+            medVal = COPY nv[mid];
+            -- Build right half
+            MUTABLE rk: Int64[]@list = [];
+            MUTABLE rv: String[]@list = [];
+            ri2 = mid + 1;
+            WHILE ri2 < nk.length() DO
+                rk.append(nk[ri2]);
+                rv.append(COPY nv[ri2]);
+                ri2 += 1;
+            END
+            -- Left stays at cur, right is new node
+            rightIdx = nodes.length();
+            nodes.append(Node{ keys: rk, vals: rv, numChildren: 0, isLeaf: TRUE });
+            nodes[cur].keys = lk;
+            nodes[cur].vals = lv;
+            -- New root
+            MUTABLE rootKeys: Int64[]@list = [];
+            MUTABLE rootVals: String[]@list = [];
+            rootKeys.append(medKey);
+            rootVals.append(medVal);
+            newRoot = nodes.length();
+            nodes.append(Node{ keys: rootKeys, vals: rootVals, numChildren: 2, isLeaf: FALSE });
+            children[childKey(newRoot, 0)] = cur;
+            children[childKey(newRoot, 1)] = rightIdx;
+            root = newRoot;
+        ELSE
+            nodes[cur].keys = nk;
+            nodes[cur].vals = nv;
         END
-        si += 1;
+        ki += 1;
     END
-    found = "";
-    si = 0;
-    WHILE si < nodes[rootIdx].keys.length() DO
-        IF nodes[rootIdx].keys[si] == 20 THEN
-            found = COPY nodes[rootIdx].vals[si];
-        END
-        si += 1;
-    END
-    ASSERT found == "TWENTY", "search: key 20 updated";
 
-    -- Test 6: ENUM dispatch on all variants
+    -- Verify tree after inserting [10, 20, 30, 40]
+    -- mid = 4/2 = 2, so median = keys[2] = 30
+    -- Expected: root(30) -> left(10, 20), right(40)
+    ASSERT nodes[root].isLeaf == FALSE, "root is internal after split";
+    ASSERT nodes[root].keys[0] == 30, "root median is 30";
+    ASSERT nodes[root].numChildren == 2, "root has 2 children";
+
+    -- Verify children
+    lc = children[childKey(root, 0)] OR (0 - 1);
+    rc = children[childKey(root, 1)] OR (0 - 1);
+    ASSERT lc >= 0, "left child exists";
+    ASSERT rc >= 0, "right child exists";
+    ASSERT nodes[lc].keys[0] == 10, "left child first key is 10";
+    ASSERT nodes[lc].keys[1] == 20, "left child second key is 20";
+    ASSERT nodes[rc].keys[0] == 40, "right child has key 40";
+
+    -- Search for key 20 (left subtree)
+    MUTABLE searchIdx = root;
+    MUTABLE searchResult = "";
+    WHILE searchIdx >= 0 DO
+        IF nodes[searchIdx].isLeaf THEN
+            MUTABLE sk: Int64 = 0;
+            WHILE sk < nodes[searchIdx].keys.length() DO
+                IF nodes[searchIdx].keys[sk] == 20 THEN
+                    searchResult = COPY nodes[searchIdx].vals[sk];
+                END
+                sk += 1;
+            END
+            searchIdx = 0 - 1;
+        ELSE
+            cp3 = findKeyIndex(nodes[searchIdx].keys, 20);
+            searchIdx = children[childKey(searchIdx, cp3)] OR (0 - 1);
+        END
+    END
+    ASSERT searchResult == "20", "tree search: key 20 found in left subtree";
+
+    -- Search for key 40 (right subtree)
+    searchIdx = root;
+    searchResult = "";
+    WHILE searchIdx >= 0 DO
+        IF nodes[searchIdx].isLeaf THEN
+            MUTABLE sk2: Int64 = 0;
+            WHILE sk2 < nodes[searchIdx].keys.length() DO
+                IF nodes[searchIdx].keys[sk2] == 40 THEN
+                    searchResult = COPY nodes[searchIdx].vals[sk2];
+                END
+                sk2 += 1;
+            END
+            searchIdx = 0 - 1;
+        ELSE
+            cp4 = findKeyIndex(nodes[searchIdx].keys, 40);
+            searchIdx = children[childKey(searchIdx, cp4)] OR (0 - 1);
+        END
+    END
+    ASSERT searchResult == "40", "tree search: key 40 found in right subtree";
+
+    -- ENUM dispatch on all variants
     MUTABLE opCount: Int64 = 0;
     MATCH Op.Get START Op.Get -> opCount += 1;, DEFAULT -> opCount += 0; END
     MATCH Op.Put START Op.Put -> opCount += 1;, DEFAULT -> opCount += 0; END
     MATCH Op.Delete START Op.Delete -> opCount += 1;, DEFAULT -> opCount += 0; END
     MATCH Op.Scan START Op.Scan -> opCount += 1;, DEFAULT -> opCount += 0; END
-    ASSERT opCount == 4, "ENUM: all 4 Op variants dispatch correctly";
+    ASSERT opCount == 4, "ENUM: all 4 Op variants dispatched";
 
-    -- Test 7: Children HashMap
-    children[childKey(0, 0)] = 1;
-    children[childKey(0, 1)] = 2;
-    ASSERT (children[childKey(0, 0)] OR (0 - 1)) == 1, "child 0:0 is node 1";
-    ASSERT (children[childKey(0, 1)] OR (0 - 1)) == 2, "child 0:1 is node 2";
-    ASSERT (children[childKey(0, 2)] OR (0 - 1)) == 0 - 1, "child 0:2 not set";
-
-    -- Test 8: Multiple nodes
-    nodes.append(Node{ keys: [], vals: [], numChildren: 0, isLeaf: TRUE });
-    nodes[1].keys.append(40);
-    nodes[1].vals.append("forty");
-    ASSERT nodes[1].keys[0] == 40, "node 1 key 0 is 40";
-    ASSERT nodes.length() == 2, "2 nodes total";
-
-    print("Commit 1: all tests PASSED");
+    print("LiteDB: all tests PASSED");
 END
