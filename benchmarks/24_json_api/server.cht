@@ -22,9 +22,13 @@ END
 
 FN generateJson(id: Int64) RETURNS String ->
     sz = sizeForId(id);
-    MUTABLE parts: String[]@list = [];
-    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
-    RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
+    MUTABLE result = "{\"id\":${id.toString()},\"data\":[";
+    FOR i IN (1_i64 ..= sz) DO
+        IF i > 1 -> result = result + ",";
+        result = result + i.toString();
+    END
+    result = result + "]}";
+    RETURN result;
 END
 
 FN parseJsonArraySum(content: String) RETURNS Int64 ->
@@ -43,7 +47,9 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE
-            MUTABLE resp = "";
+            -- Parse and respond to each command in the read buffer.
+            -- Each response is written immediately to avoid accumulating
+            -- frame-arena allocations across commands in a single read.
             MUTABLE pos: Int64 = 0;
             WHILE pos < data.length() DO
                 -- Find end of line
@@ -66,23 +72,22 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
                     id = toInt(toNumber(idStr) OR 0.0);
                     json = generateJson(id);
                     writeFile("data/${id.toString()}.json", json);
-                    resp = resp + "+OK\r\n";
+                    tcpWrite(client, "+OK\r\n");
                 ELSE_IF startsWith?(line, "GET:") THEN
                     idStr = substr(line, 4, line.length() - 4);
                     id = toInt(toNumber(idStr) OR 0.0);
                     content = readFile("data/${id.toString()}.json");
                     sum = parseJsonArraySum(content) OR RAISE;
-                    resp = resp + ":${sum.toString()}\r\n";
+                    tcpWrite(client, ":${sum.toString()}\r\n");
                 ELSE_IF line == "QUIT" THEN
-                    resp = resp + "+OK\r\n";
+                    tcpWrite(client, "+OK\r\n");
                     running = FALSE;
                 ELSE_IF line == "READY?" THEN
-                    resp = resp + "+READY\r\n";
+                    tcpWrite(client, "+READY\r\n");
                 ELSE
-                    resp = resp + "-ERR unknown command\r\n";
+                    tcpWrite(client, "-ERR unknown command\r\n");
                 END
             END
-            IF resp.length() > 0 -> tcpWrite(client, resp);
         END
     END
 END
