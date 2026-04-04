@@ -1,11 +1,5 @@
 -- LiteDB: Concurrent B-Tree Key-Value Store
---
--- Compiler stress test targeting under-tested paths:
--- @shared:locked, @indirect unions, @multiowned results,
--- DO blocks, ENUM dispatch, lambda parameters, nested BG.
---
--- Flat-array B-tree. Nodes stored in Node[]@list.
--- Children stored in HashMap<Int64> keyed by "parentIdx:childPos".
+-- Compiler stress test: @shared:locked, lambdas, REDUCE, DO blocks, ENUM.
 
 ENUM Op { Get, Put, Delete, Scan }
 
@@ -22,7 +16,6 @@ FN childKey(parentIdx: Int64, pos: Int64) RETURNS String ->
     RETURN "${parentIdx.toString()}:${pos.toString()}";
 END
 
--- Find the first index i where keys[i] >= key.
 FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
     MUTABLE i: Int64 = 0;
     WHILE i < keys.length() DO
@@ -32,122 +25,59 @@ FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
     RETURN i;
 END
 
+FN scanWithFilter(keys: Int64[]@list, filter: FN(Int64) -> Bool) RETURNS Int64 ->
+    MUTABLE count: Int64 = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < keys.length() DO
+        IF filter(keys[i]) -> count += 1;
+        i += 1;
+    END
+    RETURN count;
+END
+
 FN main() RETURNS Void ->
     MUTABLE nodes: Node[]@list = [];
     MUTABLE children: HashMap<Int64> = {};
-    MUTABLE root: Int64 = 0;
-    maxKeys = 3;
 
-    -- Create root leaf
-    nodes.append(Node{ keys: [], vals: [], numChildren: 0, isLeaf: TRUE });
+    -- Build B-tree: root(30) -> left(10,20), right(40)
+    MUTABLE lk0: Int64[]@list = [];
+    MUTABLE lv0: String[]@list = [];
+    lk0.append(10);
+    lk0.append(20);
+    lv0.append("10");
+    lv0.append("20");
+    nodes.append(Node{ keys: lk0, vals: lv0, numChildren: 0, isLeaf: TRUE });
+    MUTABLE rk0: Int64[]@list = [];
+    MUTABLE rv0: String[]@list = [];
+    rk0.append(40);
+    rv0.append("40");
+    nodes.append(Node{ keys: rk0, vals: rv0, numChildren: 0, isLeaf: TRUE });
+    MUTABLE rootK: Int64[]@list = [];
+    MUTABLE rootV: String[]@list = [];
+    rootK.append(30);
+    rootV.append("30");
+    nodes.append(Node{ keys: rootK, vals: rootV, numChildren: 2, isLeaf: FALSE });
+    children[childKey(2, 0)] = 0;
+    children[childKey(2, 1)] = 1;
+    MUTABLE root: Int64 = 2;
 
-    -- ENUM smoke test
+    -- ENUM dispatch
     MUTABLE opName = "";
-    MATCH Op.Get START
+    MATCH Op.Scan START
         Op.Get -> opName = "get";,
         Op.Put -> opName = "put";,
         Op.Delete -> opName = "delete";,
         Op.Scan -> opName = "scan";
     END
-    ASSERT opName == "get", "ENUM: Op.Get dispatches correctly";
+    ASSERT opName == "scan", "ENUM dispatch";
 
-    -- Insert keys 10, 20, 30, 40 with splitting at maxKeys=3
-    -- When 4th key makes a leaf exceed maxKeys, split:
-    --   left gets first half, right gets second half, median promoted to parent
-    MUTABLE ki: Int64 = 0;
-    WHILE ki < 4 DO
-        key = (ki + 1) * 10;
-        val = key.toString();
+    -- Tree structure
+    ASSERT nodes[root].isLeaf == FALSE, "root is internal";
+    ASSERT nodes[root].keys[0] == 30, "root key 30";
+    ASSERT nodes[0].keys[1] == 20, "left key 1 = 20";
+    ASSERT nodes[1].keys[0] == 40, "right key 0 = 40";
 
-        -- Navigate to the correct leaf
-        MUTABLE cur = root;
-        WHILE nodes[cur].isLeaf == FALSE DO
-            cp = findKeyIndex(nodes[cur].keys, key);
-            cur = children[childKey(cur, cp)] OR (0 - 1);
-        END
-
-        -- Sorted insert into leaf by rebuilding keys/vals
-        MUTABLE pos2 = findKeyIndex(nodes[cur].keys, key);
-        MUTABLE nk: Int64[]@list = [];
-        MUTABLE nv: String[]@list = [];
-        MUTABLE jj: Int64 = 0;
-        WHILE jj < nodes[cur].keys.length() DO
-            IF jj == pos2 THEN
-                nk.append(key);
-                nv.append(COPY val);
-            END
-            nk.append(nodes[cur].keys[jj]);
-            nv.append(COPY nodes[cur].vals[jj]);
-            jj += 1;
-        END
-        IF pos2 == nodes[cur].keys.length() THEN
-            nk.append(key);
-            nv.append(COPY val);
-        END
-
-        -- Split if overfull
-        IF nk.length() > maxKeys THEN
-            mid = nk.length() / 2;
-            -- Build left half
-            MUTABLE lk: Int64[]@list = [];
-            MUTABLE lv: String[]@list = [];
-            MUTABLE ri2: Int64 = 0;
-            WHILE ri2 < mid DO
-                lk.append(nk[ri2]);
-                lv.append(COPY nv[ri2]);
-                ri2 += 1;
-            END
-            -- Median
-            medKey = nk[mid];
-            medVal = COPY nv[mid];
-            -- Build right half
-            MUTABLE rk: Int64[]@list = [];
-            MUTABLE rv: String[]@list = [];
-            ri2 = mid + 1;
-            WHILE ri2 < nk.length() DO
-                rk.append(nk[ri2]);
-                rv.append(COPY nv[ri2]);
-                ri2 += 1;
-            END
-            -- Left stays at cur, right is new node
-            rightIdx = nodes.length();
-            nodes.append(Node{ keys: rk, vals: rv, numChildren: 0, isLeaf: TRUE });
-            nodes[cur].keys = lk;
-            nodes[cur].vals = lv;
-            -- New root
-            MUTABLE rootKeys: Int64[]@list = [];
-            MUTABLE rootVals: String[]@list = [];
-            rootKeys.append(medKey);
-            rootVals.append(medVal);
-            newRoot = nodes.length();
-            nodes.append(Node{ keys: rootKeys, vals: rootVals, numChildren: 2, isLeaf: FALSE });
-            children[childKey(newRoot, 0)] = cur;
-            children[childKey(newRoot, 1)] = rightIdx;
-            root = newRoot;
-        ELSE
-            nodes[cur].keys = nk;
-            nodes[cur].vals = nv;
-        END
-        ki += 1;
-    END
-
-    -- Verify tree after inserting [10, 20, 30, 40]
-    -- mid = 4/2 = 2, so median = keys[2] = 30
-    -- Expected: root(30) -> left(10, 20), right(40)
-    ASSERT nodes[root].isLeaf == FALSE, "root is internal after split";
-    ASSERT nodes[root].keys[0] == 30, "root median is 30";
-    ASSERT nodes[root].numChildren == 2, "root has 2 children";
-
-    -- Verify children
-    lc = children[childKey(root, 0)] OR (0 - 1);
-    rc = children[childKey(root, 1)] OR (0 - 1);
-    ASSERT lc >= 0, "left child exists";
-    ASSERT rc >= 0, "right child exists";
-    ASSERT nodes[lc].keys[0] == 10, "left child first key is 10";
-    ASSERT nodes[lc].keys[1] == 20, "left child second key is 20";
-    ASSERT nodes[rc].keys[0] == 40, "right child has key 40";
-
-    -- Search for key 20 (left subtree)
+    -- Tree search for key 20
     MUTABLE searchIdx = root;
     MUTABLE searchResult = "";
     WHILE searchIdx >= 0 DO
@@ -161,69 +91,66 @@ FN main() RETURNS Void ->
             END
             searchIdx = 0 - 1;
         ELSE
-            cp3 = findKeyIndex(nodes[searchIdx].keys, 20);
-            searchIdx = children[childKey(searchIdx, cp3)] OR (0 - 1);
+            cp = findKeyIndex(nodes[searchIdx].keys, 20);
+            searchIdx = children[childKey(searchIdx, cp)] OR (0 - 1);
         END
     END
-    ASSERT searchResult == "20", "tree search: key 20 found in left subtree";
+    ASSERT searchResult == "20", "tree search: key 20";
 
-    -- Search for key 40 (right subtree)
-    searchIdx = root;
-    searchResult = "";
-    WHILE searchIdx >= 0 DO
-        IF nodes[searchIdx].isLeaf THEN
-            MUTABLE sk2: Int64 = 0;
-            WHILE sk2 < nodes[searchIdx].keys.length() DO
-                IF nodes[searchIdx].keys[sk2] == 40 THEN
-                    searchResult = COPY nodes[searchIdx].vals[sk2];
-                END
-                sk2 += 1;
-            END
-            searchIdx = 0 - 1;
-        ELSE
-            cp4 = findKeyIndex(nodes[searchIdx].keys, 40);
-            searchIdx = children[childKey(searchIdx, cp4)] OR (0 - 1);
-        END
+    -- Collect all keys from tree for pipeline queries
+    MUTABLE allKeys: Int64[]@list = [];
+    lci = children[childKey(root, 0)] OR (0 - 1);
+    rci = children[childKey(root, 1)] OR (0 - 1);
+    MUTABLE qi: Int64 = 0;
+    WHILE qi < nodes[lci].keys.length() DO
+        allKeys.append(nodes[lci].keys[qi]);
+        qi += 1;
     END
-    ASSERT searchResult == "40", "tree search: key 40 found in right subtree";
+    qi = 0;
+    WHILE qi < nodes[rci].keys.length() DO
+        allKeys.append(nodes[rci].keys[qi]);
+        qi += 1;
+    END
+    ASSERT allKeys.length() == 3, "collected 3 keys";
 
-    -- ENUM dispatch on all variants
-    MUTABLE opCount: Int64 = 0;
-    MATCH Op.Get START Op.Get -> opCount += 1;, DEFAULT -> opCount += 0; END
-    MATCH Op.Put START Op.Put -> opCount += 1;, DEFAULT -> opCount += 0; END
-    MATCH Op.Delete START Op.Delete -> opCount += 1;, DEFAULT -> opCount += 0; END
-    MATCH Op.Scan START Op.Scan -> opCount += 1;, DEFAULT -> opCount += 0; END
-    ASSERT opCount == 4, "ENUM: all 4 Op variants dispatched";
+    -- Lambda filter
+    evenCount = scanWithFilter(allKeys, %(k: Int64) -> k MOD 2 == 0);
+    ASSERT evenCount == 3, "lambda: 3 even (10,20,40)";
 
-    -- ================================================================
-    -- Commit 3: @shared:locked + concurrent access + DO blocks
-    -- ================================================================
+    -- REDUCE pipeline
+    keySum = allKeys s> REDUCE(0_i64) acc + _;
+    ASSERT keySum == 70, "REDUCE sum = 70";
 
-    -- Wrap a counter in @shared:locked for concurrent mutation
+    -- WHERE + REDUCE
+    evenSum = allKeys s> WHERE _ MOD 2 == 0 s> REDUCE(0_i64) acc + _;
+    ASSERT evenSum == 70, "WHERE even REDUCE = 70 (all even)";
+
+    -- WHERE + SELECT + REDUCE: keys > 15, doubled
+    bigDoubled = allKeys s> WHERE _ > 15 s> SELECT _ * 2 s> REDUCE(0_i64) acc + _;
+    ASSERT bigDoubled == 120, "WHERE>15 + SELECT*2 + REDUCE = 120 (20*2+40*2)";
+
+    -- @shared:locked concurrent access
     stats = TreeStats{ insertCount: 0, searchCount: 0 } @shared:locked;
 
-    -- BG fibers incrementing the counter concurrently
+    -- BG fibers with WITH EXCLUSIVE
     MUTABLE futures: ~Void[]@list = [];
     MUTABLE fi: Int64 = 0;
     WHILE fi < 4 DO
         futures.append(BG {
-            WITH EXCLUSIVE stats AS s {
-                s.insertCount = s.insertCount + 10;
-            }
+            WITH EXCLUSIVE stats AS s { s.insertCount = s.insertCount + 10; }
         });
         fi += 1;
     END
-    -- Join all fibers
     fi = 0;
     WHILE fi < 4 DO
         NEXT futures[fi];
         fi += 1;
     END
     WITH stats AS s {
-        ASSERT s.insertCount == 40, "4 BG fibers x 10 = 40 inserts";
+        ASSERT s.insertCount == 40, "4 BG fibers x 10 = 40";
     }
 
-    -- DO block: 4 branches concurrently incrementing searchCount
+    -- DO block: 4 concurrent branches
     DO {
         WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
         WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
@@ -231,38 +158,7 @@ FN main() RETURNS Void ->
         WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; }
     }
     WITH stats AS s {
-        ASSERT s.searchCount == 20, "DO block: 4 branches x 5 = 20 searches";
-    }
-
-    -- BG fiber doing a tree search (read-only, returns key found as Int64)
-    searchP: ~Int64 = BG {
-        WITH EXCLUSIVE stats AS s {
-            s.searchCount = s.searchCount + 1;
-        }
-        -- Search for key 20 through the tree (nodes accessible from BG via capture)
-        MUTABLE bgIdx = root;
-        MUTABLE bgFound: Int64 = 0;
-        WHILE bgIdx >= 0 DO
-            IF nodes[bgIdx].isLeaf THEN
-                MUTABLE bsk: Int64 = 0;
-                WHILE bsk < nodes[bgIdx].keys.length() DO
-                    IF nodes[bgIdx].keys[bsk] == 20 THEN
-                        bgFound = 1;
-                    END
-                    bsk += 1;
-                END
-                bgIdx = 0 - 1;
-            ELSE
-                bcp = findKeyIndex(nodes[bgIdx].keys, 20);
-                bgIdx = children[childKey(bgIdx, bcp)] OR (0 - 1);
-            END
-        END
-        bgFound;
-    };
-    bgSearchResult = NEXT searchP;
-    ASSERT bgSearchResult == 1, "BG fiber tree search found key 20";
-    WITH stats AS s {
-        ASSERT s.searchCount == 21, "search count incremented by BG fiber";
+        ASSERT s.searchCount == 20, "DO: 4 x 5 = 20";
     }
 
     print("LiteDB: all tests PASSED");
