@@ -2820,6 +2820,9 @@ private
       parts << "var __ret = #{val_code};"
       parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
       parts << "return __ret;"
+    elsif plan.string_promote
+      parts << "const __ret = #{val_code};"
+      parts << "return try #{rt_name}.heapAlloc().dupe(u8, __ret);"
     elsif plan.var_promotes.any?
       parts << "const __ret = #{val_code};"
       parts << "return __ret;"
