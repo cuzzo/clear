@@ -643,6 +643,20 @@ RSpec.describe SemanticAnnotator do
         expect(get_index).to be_a(AST::GetIndex)
         expect(get_index.needs_mut_ref).to eq(true)
       end
+
+      it "skips CopyNode for list values targeting @list struct fields" do
+        code = <<~FLUX
+          STRUCT Node { keys: Int64[]@list }
+          MUTABLE keys: Int64[]@list = [];
+          keys.append(1);
+          Node{ keys: keys };
+        FLUX
+        ast = run(code)
+        struct_lit = ast.statements.last
+        val_node = struct_lit.fields["keys"]
+        # Should NOT be wrapped in CopyNode — list field gets the ArrayList directly
+        expect(val_node).not_to be_a(AST::CopyNode)
+      end
     end
 
     context "Resolved Type Correctness" do

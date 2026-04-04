@@ -997,10 +997,11 @@ private
         else
           visit(v)
         end
-        # @list (ArrayListUnmanaged) → slice conversion for struct/union fields expecting []T
-        # Skip when value is CopyNode - the copy already produces a slice.
+        # @list (ArrayListUnmanaged) → slice conversion for struct/union fields expecting []T.
+        # Skip when: value is CopyNode (copy already produces a slice), or
+        # target field is @list (expects ArrayList, not slice — flagged by annotator).
         vt = v.type_info.is_a?(Type) ? v.type_info : nil
-        val_code = "#{val_code}.items" if vt&.list_collection? && !v.is_a?(AST::CopyNode)
+        val_code = "#{val_code}.items" if vt&.list_collection? && !v.is_a?(AST::CopyNode) && !v.target_is_list_field
         ".#{k} = #{val_code}"
       end.join(", ")
 

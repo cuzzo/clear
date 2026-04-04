@@ -2139,6 +2139,11 @@ private
         val_node.coerced_type = expected_type
       end
 
+      # Flag @list fields so the transpiler passes the ArrayList directly
+      # instead of converting to a slice via .items.
+      et = expected_type.is_a?(Type) ? expected_type : nil
+      val_node.target_is_list_field = true if et&.list_collection?
+
       # Move: struct literal captures non-Copy values.
       move_if_not_copyable!(val_node)
     end
@@ -2530,6 +2535,12 @@ private
     return nil unless vti
 
     if vti.list_collection?
+      # When the target field is also @list (ArrayList), skip CopyNode wrapping.
+      # The move mechanism will transfer the ArrayList struct directly.
+      # CopyNode produces a slice which is the wrong type for ArrayList fields.
+      et = expected_type.is_a?(Type) ? expected_type : nil
+      return nil if et&.list_collection?
+
       copy = AST::CopyNode.new(val_node.token, val_node)
       copy.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type || :Any)
       elem = vti.element_type
