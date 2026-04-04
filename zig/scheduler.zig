@@ -411,6 +411,19 @@ pub const Scheduler = struct {
         if (task.in_inbox.load(.acquire)) return;
         task.in_inbox.store(true, .release);
 
+        // Fast path: if resuming on the SAME scheduler we're running on,
+        // push directly to the ready queue.  Skips the SPSC ring, the
+        // dirty_mask atomic OR, and the eventfd syscall.
+        // NOTE: in_inbox stays true until the scheduler dequeues the task
+        // in run(). This prevents a cross-thread submitResume from pushing
+        // a duplicate through the SPSC ring while the task sits in the
+        // ready queue.
+        if (scheduler_running and self == active_scheduler) {
+            task.status.store(.Ready, .release);
+            self.ready_queue.push(self.allocator, task) catch unreachable;
+            return;
+        }
+
         const sender_idx = if (scheduler_running) active_scheduler.index else 0;
         std.debug.assert(sender_idx < self.channels.len);
         const ring = self.ensureChannel(sender_idx) catch return;
@@ -508,7 +521,7 @@ pub const Scheduler = struct {
                     },
                     .Resume => {
                         const task: *Task = @ptrCast(@alignCast(msg.task.?));
-                        task.in_inbox.store(false, .release);
+                        // in_inbox stays true until run() dequeues the task.
                         task.status.store(.Ready, .release);
                         self.ready_queue.push(self.allocator, task) catch unreachable;
                     },
@@ -592,6 +605,12 @@ pub const Scheduler = struct {
                 // the len() check and this pop() (TOCTOU race). Not an error.
                 const task = self.ready_queue.pop() orelse continue;
                 self.current_task = task;
+
+                // Clear the double-push guard now that the task is
+                // dequeued.  Keeping in_inbox true from submitResume
+                // until here prevents duplicate pushes via concurrent
+                // cross-thread resumes while the task sat in the queue.
+                task.in_inbox.store(false, .release);
 
                 // Set task identity for the control plane.
                 // If this task overflows its stack, __zig_alloc_segment

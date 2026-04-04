@@ -145,6 +145,7 @@ pub fn main() !void {
         workers[i].join();
     }
 
+
     // 10. Dump allocation profile (if profiling was enabled at compile time).
     const profiling_enabled = if (@hasDecl(@import("root"), "CLEAR_PROFILE"))
         @import("root").CLEAR_PROFILE
