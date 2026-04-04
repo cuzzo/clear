@@ -994,6 +994,21 @@ private
                # String literals in map values must be heap-duped (rodata can't be freed)
                val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name)
                move_logic = emit_move_suppression(node.value)
+               # Non-Copy union values stored without ownership transfer must be
+               # duped — the source may be cleaned up independently (e.g. list
+               # element stored into a persistent HashMap).
+               # Skip when: value is already a COPY (dupeUnionValue already emitted),
+               # or ownership is being transferred via _moved.
+               if move_logic.empty? && !node.value.is_a?(AST::CopyNode)
+                 val_ti = node.value.type_info rescue nil
+                 if val_ti && @union_schemas&.key?(val_ti.resolved)
+                   schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+                   unless val_ti.implicitly_copyable?(schema_lookup)
+                     zig_t = transpile_type(val_ti)
+                     val_ref = "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
+                   end
+                 end
+               end
                code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
                return move_logic.empty? ? code : "#{code}\n#{move_logic}"
              end

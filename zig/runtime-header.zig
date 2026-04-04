@@ -2755,7 +2755,10 @@ pub const CheatLib = struct {
             /// Pre-allocate all slots and build the free stack.
             pub fn initCapacity(allocator: std.mem.Allocator, cap: u32) !Self {
                 const slots = try allocator.alloc(Slot, cap);
-                @memset(slots, Slot{});
+                // Zero the entire buffer so alive=false for all slots.
+                // @memset with Slot{} leaves value=undefined which may not
+                // zero the alive field (Zig fills undefined with 0xAA in debug).
+                @memset(std.mem.sliceAsBytes(slots), 0);
                 const free_stack = try allocator.alloc(u32, cap);
                 // Fill free stack so index 0 is popped first (LIFO: push N-1..0)
                 for (0..cap) |i| {
@@ -2770,8 +2773,11 @@ pub const CheatLib = struct {
             }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-                // Clean up live elements: deinit any StringMap fields.
-                for (self.slots) |*slot| {
+                // Only scan slots that could have been used. Slots are allocated
+                // from the free stack in LIFO order (0, 1, 2, ...) so the highest
+                // possible used index is capacity - free_top.
+                const max_used = self.capacity - self.free_top;
+                for (self.slots[0..max_used]) |*slot| {
                     if (slot.alive) {
                         deinitFields(&slot.value, allocator);
                     }
