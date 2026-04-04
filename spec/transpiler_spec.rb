@@ -785,6 +785,21 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "Heap-promoted temporary from function call gets cleanup" do
+    it "emits cleanup for heap string temporary passed to print" do
+      src = <<~CLEAR
+        FN makeStr() RETURNS String -> RETURN COPY "hello"; END
+        FN main() RETURNS Void ->
+            print(makeStr());
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The temp from makeStr() is heap-allocated. Must be freed after print.
+      expect(zig).to match(/heapAlloc\(\)\.free|defer.*makeStr|__hpt/)
+    end
+  end
+
   describe "TAKES parameter returned in union suppresses cleanup" do
     it "emits items_moved = true when TAKES slice is returned inside union" do
       src = <<~CLEAR
