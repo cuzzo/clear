@@ -2004,7 +2004,18 @@ pub const CheatLib = struct {
             inline for (info.@"union".fields) |field| {
                 if (comptime needsPromotion(field.type)) {
                     if (std.meta.activeTag(value.*) == @field(std.meta.Tag(T), field.name)) {
-                        try promote(field.type, rt, &@field(value, field.name));
+                        const FT = field.type;
+                        const ft_info = @typeInfo(FT);
+                        if (ft_info == .pointer and ft_info.pointer.size == .one and
+                            @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
+                        {
+                            const ChildT = ft_info.pointer.child;
+                            if (comptime needsPromotion(ChildT)) {
+                                try promote(ChildT, rt, @field(value, field.name));
+                            }
+                        } else {
+                            try promote(FT, rt, &@field(value, field.name));
+                        }
                         return;
                     }
                 }
@@ -2015,8 +2026,18 @@ pub const CheatLib = struct {
         // 5. Structs: walk fields recursively
         if (info == .@"struct") {
             inline for (info.@"struct".fields) |field| {
-                if (comptime needsPromotion(field.type)) {
-                    try promote(field.type, rt, &@field(value, field.name));
+                const FT = field.type;
+                const ft_info = @typeInfo(FT);
+                if (ft_info == .pointer and ft_info.pointer.size == .one and
+                    @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
+                {
+                    // Single pointer (*T) from @indirect: promote the pointee.
+                    const ChildT = ft_info.pointer.child;
+                    if (comptime needsPromotion(ChildT)) {
+                        try promote(ChildT, rt, @field(value, field.name));
+                    }
+                } else if (comptime needsPromotion(FT)) {
+                    try promote(FT, rt, &@field(value, field.name));
                 }
             }
             return;
@@ -2031,6 +2052,9 @@ pub const CheatLib = struct {
         if (isArrayList(FT)) return true;
         if (isStringMap(FT)) return true;
         const ft_info = @typeInfo(FT);
+        // Single pointer (*T) from @indirect: return true without recursing
+        // to avoid infinite comptime recursion on self-referential types.
+        if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
         if (ft_info == .@"struct") {
             inline for (ft_info.@"struct".fields) |field| {
                 if (comptime needsPromotion(field.type)) return true;

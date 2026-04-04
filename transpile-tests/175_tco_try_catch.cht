@@ -1,0 +1,116 @@
+-- Test: try/catch pattern - Error matched, handleCatch returns Tco with
+-- @indirect field containing frame-allocated string, eval resolves Tco.
+
+UNION Value {
+    Nil, TrueVal, FalseVal,
+    Number: Float64, Str: String, Symbol: String,
+    List: Value[],
+    Error { errMsg: String, errKind: String },
+    Tco { tcoAst: Value @indirect, tcoEnv: Int64 },
+}
+
+FN getStr(v: Value) RETURNS String ->
+    MATCH v START
+        Value.Str AS s -> RETURN s;,
+        DEFAULT -> RETURN "";
+    END
+    RETURN "";
+END
+
+FN getSymName(v: Value) RETURNS String ->
+    MATCH v START
+        Value.Symbol AS s -> RETURN s;,
+        DEFAULT -> RETURN "";
+    END
+    RETURN "";
+END
+
+FN isError?(v: Value) RETURNS Bool ->
+    MATCH v START
+        Value.Error -> RETURN TRUE;,
+        DEFAULT -> RETURN FALSE;
+    END
+    RETURN FALSE;
+END
+
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS Value ->
+    MATCH catchExpr START
+        Value.List AS catchItems ->
+            RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: 0 };,
+        DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+    END
+    RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+END
+
+FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
+    MATCH TAKES ast START
+        Value.Str AS s -> RETURN Value{ Str: COPY s };,
+        Value.List AS listItems ->
+            ownedItems: Value[] = GIVE listItems;
+            result = evalList!(ownedItems);
+            MATCH result START
+                Value.Tco AS tco ->
+                    RETURN eval!(COPY tco.tcoAst);,
+                DEFAULT -> RETURN result;
+            END,
+        DEFAULT -> RETURN Value.Nil;
+    END
+    RETURN Value.Nil;
+END
+
+FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
+    IF items.length() == 0 THEN RETURN Value.Nil; END
+    formName = getSymName(items[0]);
+
+    IF formName == "raise" THEN
+        msg = eval!(COPY items[1]);
+        IF isError?(msg) THEN RETURN msg; END
+        kind = eval!(COPY items[2]);
+        IF isError?(kind) THEN RETURN kind; END
+        RETURN Value.Error{ errMsg: COPY getStr(msg), errKind: COPY getStr(kind) };
+
+    ELSE_IF formName == "try" THEN
+        MUTABLE tryResult: Value = eval!(COPY items[1]);
+        MATCH tryResult START
+            Value.Error AS e ->
+                RETURN handleCatch!(items[2], e.errMsg, e.errKind);,
+            DEFAULT -> RETURN tryResult;
+        END
+        RETURN tryResult;
+    END
+    RETURN Value.Nil;
+END
+
+FN prStr(v: Value, readably: Bool) RETURNS String ->
+    MATCH v START
+        Value.Nil -> RETURN "nil";,
+        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
+        Value.Error AS e -> RETURN "error:" + e.errMsg;,
+        DEFAULT -> RETURN "?";
+    END
+    RETURN "";
+END
+
+FN main() RETURNS Void ->
+    MUTABLE raiseForm: Value[]@list = List[];
+    raiseForm.append(Value{ Symbol: "raise" });
+    raiseForm.append(Value{ Str: "x" });
+    raiseForm.append(Value{ Str: "E" });
+
+    MUTABLE catchForm: Value[]@list = List[];
+    catchForm.append(Value{ Symbol: "catch" });
+    catchForm.append(Value{ Symbol: "e" });
+    catchForm.append(Value{ Str: "ok" });
+
+    MUTABLE tryForm: Value[]@list = List[];
+    tryForm.append(Value{ Symbol: "try" });
+    tryForm.append(Value{ List: raiseForm });
+    tryForm.append(Value{ List: catchForm });
+
+    ast = Value{ List: tryForm };
+    result = eval!(COPY ast);
+    str = prStr(result, FALSE);
+    ASSERT str == "ok", "try/catch returns ok";
+
+    print("175: tco try/catch PASSED");
+END

@@ -1,0 +1,46 @@
+-- Test: promoteFields follows through @indirect pointers.
+-- A function returns a union with an @indirect field containing a frame-allocated
+-- string. promoteFields must promote the string through the *T pointer to heap.
+
+UNION Value {
+    Nil, Str: String,
+    Wrapped { inner: String @indirect },
+    Error { errMsg: String, errKind: String },
+}
+
+FN handleCatch!(msg: String, kind: String) RETURNS Value ->
+    RETURN Value.Wrapped{ inner: "caught:" + msg + ":" + kind };
+END
+
+FN tryEval!(input: Value) RETURNS Value ->
+    MATCH input START
+        Value.Error AS e ->
+            RETURN handleCatch!(e.errMsg, e.errKind);,
+        DEFAULT -> RETURN input;
+    END
+    RETURN Value.Nil;
+END
+
+FN prStr(v: Value) RETURNS String ->
+    MATCH v START
+        Value.Nil -> RETURN "nil";,
+        Value.Str AS s -> RETURN s;,
+        Value.Wrapped AS w -> RETURN w.inner;,
+        Value.Error AS e -> RETURN "error:" + e.errMsg;
+    END
+    RETURN "";
+END
+
+FN main() RETURNS Void ->
+    err = Value.Error{ errMsg: "x", errKind: "E" };
+    result = tryEval!(COPY err);
+    str = prStr(result);
+    ASSERT str == "caught:x:E", "indirect string promoted through pointer";
+
+    ok = Value{ Str: "hello" };
+    result2 = tryEval!(COPY ok);
+    str2 = prStr(result2);
+    ASSERT str2 == "hello", "non-error passthrough";
+
+    print("174: union indirect promotion PASSED");
+END

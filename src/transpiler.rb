@@ -3624,6 +3624,11 @@ private
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
         if stmt.is_a?(AST::ReturnNode) && temps.any? { |t| t[:var] && code.include?(t[:var]) }
+          # Suppress cleanup for __hpt vars used anywhere in a return expression.
+          # The returned value may borrow from the HPT (e.g. prStr returning a
+          # Str variant's slice). Zig defers run after the return value is set
+          # but the caller reads freed memory. Suppressing cleanup transfers
+          # ownership to the caller's scope.
           move_suppression = temps.filter_map { |t|
             "#{t[:var]}_moved = true;" if code.include?(t[:var])
           }.join("\n")
