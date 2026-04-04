@@ -669,6 +669,43 @@ test "needsCleanup: recursive union with 17 variants compiles" {
     try std.testing.expect(CheatLib.needsCleanup(RecValue_Pair));
 }
 
+test "cleanupAlloc: mixed-provenance strings in union list" {
+    // Simulates an @list containing Val.Str elements where some strings
+    // are heap-allocated and some are frame-allocated. cleanup with heapAlloc
+    // would crash on frame strings. cleanup with frameAlloc would leak heap
+    // strings. cleanupAlloc handles both by checking pointer provenance.
+    const alloc = std.testing.allocator;
+    var ebr = ebr_mod.EbrContext{};
+    var arena_buf: [16384]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
+    rt.wireAllocator();
+
+    const frame = rt.frameAlloc();
+    const safe = rt.cleanupAlloc();
+
+    // Build an ArrayList with mixed-provenance TestValue.Str elements.
+    var items = std.ArrayListUnmanaged(TestValue){};
+
+    // Element 1: heap-allocated string (from COPY)
+    const heap_str = try alloc.dupe(u8, "heap-owned");
+    try items.append(frame, TestValue{ .Str = heap_str });
+
+    // Element 2: frame-allocated string (from concat)
+    const frame_str = try std.mem.concat(frame, u8, &.{ "frame", "-owned" });
+    try items.append(frame, TestValue{ .Str = frame_str });
+
+    // Element 3: no string (Number — trivial cleanup)
+    try items.append(frame, TestValue{ .Num = 42.0 });
+
+    // Cleanup with cleanupAlloc: should free heap_str, skip frame_str, skip Num.
+    for (items.items) |*elem| {
+        CheatLib.cleanup(TestValue, safe, elem);
+    }
+    items.deinit(frame);
+    // testing.allocator detects leaks (heap_str must be freed)
+    // and panics on invalid frees (frame_str must NOT be freed with heap).
+}
+
 test "cleanup: recursive union Str variant" {
     const alloc = std.testing.allocator;
     var val = RecValue{ .Str = try alloc.dupe(u8, "test") };

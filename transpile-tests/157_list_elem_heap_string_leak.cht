@@ -1,0 +1,20 @@
+-- Test: @list with union elements containing string literals must not leak.
+-- String literals stored in union fields may get heap-duped.
+
+UNION Val {
+    Nil,
+    Str: String,
+    Pair { car: String, cdr: String }
+}
+
+FN buildAndDiscard!() RETURNS Void ->
+    MUTABLE items: Val[]@list = List[];
+    items.append(Val{ Str: "hello" });
+    items.append(Val{ Str: "world" });
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    buildAndDiscard!();
+    print("PASS");
+END

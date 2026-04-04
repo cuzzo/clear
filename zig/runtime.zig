@@ -289,6 +289,38 @@ pub const Runtime = struct {
         return fp.__pinned_local_alloc orelse self.heap_allocator;
     }
 
+    /// Allocator for cleanup of mixed-provenance data. free checks if the
+    /// pointer is in the frame arena (skip) or heap (delegate to heapAlloc).
+    /// Used by list_with_elem_cleanup where elements may contain frame strings,
+    /// heap-duped strings, or rodata — all in the same list.
+    pub fn cleanupAlloc(self: *Runtime) std.mem.Allocator {
+        return std.mem.Allocator{
+            .ptr = self,
+            .vtable = &CleanupAllocatorVTable,
+        };
+    }
+
+    const CleanupAllocatorVTable = std.mem.Allocator.VTable{
+        .alloc = smartAlloc, // reuse frame allocator for alloc (shouldn't be called)
+        .resize = smartResize,
+        .free = cleanupFree,
+        .remap = smartRemap,
+    };
+
+    fn cleanupFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
+        const self: *Runtime = @ptrCast(@alignCast(ctx));
+        const p = @intFromPtr(buf.ptr);
+        // Check if pointer is in the frame arena's static block — if so, skip.
+        // Frame arena data is reclaimed by rewind, not individual free.
+        const frame_mem = self.overflow_arena.static_block;
+        const frame_base = @intFromPtr(frame_mem.ptr);
+        if (p >= frame_base and p < frame_base + frame_mem.len) {
+            return; // frame-arena owned — no-op
+        }
+        // Everything else (heap, overflow): delegate to real heap allocator.
+        self.heap_allocator.rawFree(buf, buf_align, ret_addr);
+    }
+
     // TODO: Deprecate
     pub fn globalAlloc(self: *Runtime) std.mem.Allocator {
         return self.heap_allocator;
