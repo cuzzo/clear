@@ -94,6 +94,12 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                         ELSE
                             resp = resp + "*0\r\n";
                         END
+                    ELSE_IF arg0 == "CLIENT" || arg0 == "client" THEN
+                        resp = resp + "+OK\r\n";
+                    ELSE_IF arg0 == "FLUSHALL" || arg0 == "flushall" THEN
+                        resp = resp + "+OK\r\n";
+                    ELSE_IF arg0 == "FLUSHDB" || arg0 == "flushdb" THEN
+                        resp = resp + "+OK\r\n";
                     ELSE_IF arg0 == "DBSIZE" || arg0 == "dbsize" THEN
                         resp = resp + ":0\r\n";
                     ELSE_IF arg0 == "QUIT" || arg0 == "quit" THEN
