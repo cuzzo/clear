@@ -317,23 +317,10 @@ module FunctionAnalysis
           end
         end
 
-        # Implicit COPY for @list passed to TAKES []T param.
-        # The callee owns the slice buffer and will free it with heapAlloc.
-        # Frame-allocated list buffers can't be freed, so copy to heap first.
+        # Ensure @list args to TAKES params are heap-owned (implicit COPY).
         if inner_node.is_a?(AST::Identifier)
-          arg_ti = inner_node.type_info
-          arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
-          if arg_ti&.list_collection? && !arg_node.is_a?(AST::CopyNode)
-            copy_wrapper = AST::CopyNode.new(inner_node.token, inner_node)
-            copy_wrapper.full_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
-            elem = arg_ti.element_type
-            if elem
-              es = lookup_type_schema(elem.resolved) rescue nil
-              copy_wrapper.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
-                (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-            end
-            node.args[i] = copy_wrapper
-          end
+          owned = ensure_owned_value!(inner_node, param[:type])
+          node.args[i] = owned if owned
         end
 
         if inner_node.is_a?(AST::Identifier)

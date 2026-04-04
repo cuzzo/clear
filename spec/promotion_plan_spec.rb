@@ -200,14 +200,14 @@ RSpec.describe PromotionPlan do
         STRUCT User { name: String, age: Int64 }
         FN build(first: String, last: String) RETURNS User ->
             name = first + " " + last;
-            RETURN User{ name: name, age: 42 };
+            RETURN User{ name: COPY name, age: 42 };
         END
         FN main() RETURNS Void -> u = build("a", "b"); RETURN; END
       CLEAR
     end
 
-    it "is empty (string concat lives in caller frame, no promotion)" do
-      expect(plan).to be_empty
+    it "has struct_promote (COPY field triggers returns_promoted)" do
+      expect(plan.struct_promote).to eq("User")
     end
   end
 end

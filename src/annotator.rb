@@ -2070,37 +2070,11 @@ private
           error!(val_node, "Cannot store borrowed value '#{val_node.name}' into #{node.name}.#{variant_name}. Use COPY for an explicit deep-copy.")
         end
       end
-      # Implicit move into union fields. Non-Copy values must be owned.
-      # @list/collection: implicit COPY (move = copy for frame-allocated data).
-      # Rodata strings: implicit COPY (auto-dupe to heap).
-      # Non-rodata strings: reject (require explicit COPY).
-      # NOTE: implicit MOVE is currently implemented as COPY for collections
-      # and rodata strings. True zero-copy move requires heap-alloc-from-start
-      # optimization (future copy elision).
-      unless val_node.is_a?(AST::CopyNode)
-        vti = val_node.type_info
-        vti = Type.new(vti) if vti && !vti.is_a?(Type)
-
-        if vti&.list_collection?
-          # @list -> []T: implicit copy (frame buffer can't be moved to heap)
-          copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
-          copy_wrapper.full_type = expected_type
-          elem = vti.element_type
-          if elem
-            es = lookup_type_schema(elem.resolved) rescue nil
-            copy_wrapper.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
-              (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-          end
-          node.fields[variant_name] = copy_wrapper
-          val_node = copy_wrapper
-        elsif vti&.string? && vti&.rodata?
-          copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
-          copy_wrapper.full_type = Type.new(Type::STRING_TYPE, location: :heap)
-          node.fields[variant_name] = copy_wrapper
-          val_node = copy_wrapper
-        elsif vti&.string? && val_node.is_a?(AST::Identifier)
-          error!(val_node, "Cannot store string variable '#{val_node.name}' into #{node.name}.#{variant_name} without COPY. Strings are frame-arena managed; use COPY for heap ownership.")
-        end
+      # Ensure value is owned data (implicit COPY for @list/rodata strings).
+      owned = ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}")
+      if owned
+        node.fields[variant_name] = owned
+        val_node = owned
       end
       actual = val_node.type_info
       unless expected_type.accepts?(actual)
@@ -2158,29 +2132,11 @@ private
         raw_expected
       end
 
-      # Implicit move into struct fields. Non-Copy values must be owned.
-      # Same rules as union construction (see above).
-      unless val_node.is_a?(AST::CopyNode)
-        vti = val_node.type_info
-        vti = Type.new(vti) if vti && !vti.is_a?(Type)
-
-        if vti&.list_collection?
-          copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
-          copy_wrapper.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type)
-          elem = vti.element_type
-          if elem
-            es = lookup_type_schema(elem.resolved) rescue nil
-            copy_wrapper.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
-              (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-          end
-          node.fields[field_name] = copy_wrapper
-          val_node = copy_wrapper
-        elsif vti&.string? && vti&.rodata?
-          copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
-          copy_wrapper.full_type = Type.new(Type::STRING_TYPE, location: :heap)
-          node.fields[field_name] = copy_wrapper
-          val_node = copy_wrapper
-        end
+      # Ensure value is owned data (implicit COPY for @list/rodata strings).
+      owned = ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
+      if owned
+        node.fields[field_name] = owned
+        val_node = owned
       end
 
       # Simple Type Check
@@ -2568,6 +2524,50 @@ private
 
     # Consume the source variable — it is affinely transferred
     og_set_moved(node.value.name)
+  end
+
+  # Ensure a value node is owned data suitable for storage in structs, unions,
+  # and TAKES parameters. Returns a replacement CopyNode if wrapping is needed,
+  # or nil if the value is already owned.
+  #
+  # Rules:
+  # - @list (list_collection): wrap in CopyNode (frame buffer -> heap copy)
+  # - Rodata string: wrap in CopyNode (auto-dupe to heap)
+  # - Non-rodata string variable: error (require explicit COPY)
+  # - Already CopyNode: no-op
+  #
+  # +val_node+:      the AST value node being stored
+  # +expected_type+: the target field/param type (Type or Symbol)
+  # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
+  def ensure_owned_value!(val_node, expected_type, container_desc = nil)
+    return nil if val_node.is_a?(AST::CopyNode)
+    vti = val_node.type_info
+    vti = Type.new(vti) if vti && !vti.is_a?(Type)
+    return nil unless vti
+
+    if vti.list_collection?
+      copy = AST::CopyNode.new(val_node.token, val_node)
+      copy.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type || :Any)
+      elem = vti.element_type
+      if elem
+        es = lookup_type_schema(elem.resolved) rescue nil
+        copy.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
+          (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      end
+      return copy
+    end
+
+    if vti.string? && vti.rodata?
+      copy = AST::CopyNode.new(val_node.token, val_node)
+      copy.full_type = Type.new(Type::STRING_TYPE, location: :heap)
+      return copy
+    end
+
+    if vti.string? && val_node.is_a?(AST::Identifier) && container_desc
+      error!(val_node, "Cannot store string variable '#{val_node.name}' into #{container_desc} without COPY. Strings are frame-arena managed; use COPY for heap ownership.")
+    end
+
+    nil
   end
 
   def visit_CopyNode(node)

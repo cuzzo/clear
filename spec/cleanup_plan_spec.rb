@@ -509,14 +509,14 @@ RSpec.describe CleanupPlan do
       <<~CLEAR
         STRUCT Pair { name: String, value: Float64 }
         FN f(s: String) RETURNS Void ->
-            p = Pair{ name: s, value: 1.0 };
+            p = Pair{ name: COPY s, value: 1.0 };
             RETURN;
         END
       CLEAR
     end
     let(:plan) { cleanup_for(src, "f") }
 
-    it "classifies struct as needing cleanup when string field is not rodata" do
+    it "classifies struct as needing cleanup when string field is COPY" do
       entry = plan.lookup("p")
       expect(entry).not_to be_nil
       expect(entry[:kind]).to eq(:struct_with_cleanup_fields)

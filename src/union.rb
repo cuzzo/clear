@@ -180,31 +180,11 @@ module UnionAnalysis
           error!(val_node, "Cannot store borrowed value '#{borrowed_name}' into #{node.union_name}.#{node.variant_name}. Use COPY for an explicit deep-copy.")
         end
       end
-      # Implicit move into inline struct variant fields.
-      # Same rules as struct/union construction in visit_StructLit:
-      # @list -> implicit COPY, rodata strings -> implicit COPY.
-      unless val_node.is_a?(AST::CopyNode)
-        vti = val_node.type_info
-        vti = Type.new(vti) if vti && !vti.is_a?(Type)
-
-        if vti&.list_collection?
-          expected_ft = expected_fields[fname]
-          copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
-          copy_wrapper.full_type = expected_ft.is_a?(Type) ? expected_ft : Type.new(expected_ft || :Any)
-          elem = vti.element_type
-          if elem
-            es = lookup_type_schema(elem.resolved) rescue nil
-            copy_wrapper.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
-              (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-          end
-          node.fields[fname] = copy_wrapper
-          val_node = copy_wrapper
-        elsif vti&.string? && vti&.rodata?
-          copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
-          copy_wrapper.full_type = Type.new(Type::STRING_TYPE, location: :heap)
-          node.fields[fname] = copy_wrapper
-          val_node = copy_wrapper
-        end
+      # Ensure value is owned data (implicit COPY for @list/rodata strings).
+      owned = ensure_owned_value!(val_node, expected_fields[fname], "#{node.union_name}.#{node.variant_name}.#{fname}")
+      if owned
+        node.fields[fname] = owned
+        val_node = owned
       end
 
       expected_type = expected_fields[fname]
