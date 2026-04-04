@@ -422,6 +422,13 @@ module AST
   CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) { include Locatable }
   # RECOVER(default): pipeline operator that replaces errors with a default value.
   RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }
+
+  # BlockExpr: sequence of statements that produces a value.
+  # Used by pipeline rewriter to express loops-that-return-a-value.
+  # Transpiles to Zig labeled block: blk: { stmts; break :blk result; }
+  # body: Array of statement AST nodes
+  # result: AST node whose value is the block's result
+  BlockExpr      = Struct.new(:token, :body, :result) { include Locatable }
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked | :local

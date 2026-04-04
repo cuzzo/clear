@@ -2381,6 +2381,13 @@ private
 
       "(#{left} #{op_str} #{right})"
 
+    when AST::BlockExpr
+      @block_expr_counter = (@block_expr_counter || 0) + 1
+      label = "__blk_#{@block_expr_counter}"
+      body_code = transpile_block(node.body)
+      result_code = visit(node.result)
+      "#{label}: {\n#{body_code}\nbreak :#{label} #{result_code};\n}"
+
     when AST::Assert
       cond = visit(node.condition)
       "CheatLib.assert(#{cond}, \"#{node.message}\")"
