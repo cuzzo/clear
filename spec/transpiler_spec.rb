@@ -602,7 +602,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("saveFrameMark")
     end
 
-    it "does NOT emit saveFrameMark for uses_alloc function returning String" do
+    it "emits saveFrameMark + preserveAndRewind for uses_alloc function returning String" do
       src = <<~CLEAR
         FN f(s: String) RETURNS String ->
           parts = split(s, ",");
@@ -614,10 +614,11 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The function f returns a reference type (String) — frame mark would
-      # invalidate the returned data, so it must NOT be emitted.
-      f_fn = zig[/fn clearF\b.*?^}/m] || zig
-      expect(f_fn).not_to include("saveFrameMark")
+      # String-returning functions that use frame: save mark in prologue,
+      # wrap body in labeled block, preserveAndRewind on return.
+      expect(zig).to include("saveFrameMark")
+      expect(zig).to include("preserveAndRewind")
+      expect(zig).to include("__pr_body")
     end
 
     it "emits saveFrameMark for function returning an ENUM value (value type)" do

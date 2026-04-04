@@ -147,42 +147,43 @@ pub const CheatArena = struct {
     }
 
     pub fn rewind(self: *CheatArena, mark: Mark) void {
+        self.softRewind(mark);
+        self.trimExcess(mark);
+    }
+
+    /// Reset cursor and block index to mark position WITHOUT freeing blocks.
+    /// Used by preserveAndRewind to keep source data alive during copy.
+    pub fn softRewind(self: *CheatArena, mark: Mark) void {
         const has_static = (self.static_block.len > 0);
-
-        var keep_count: usize = 0;
-        var new_index: usize = 0;
-
         if (has_static) {
-            if (mark.block_index == 0) {
-                // Rewinding to Static Block -> Free ALL dynamic blocks
-                keep_count = 0;
-                new_index = 0;
-            } else {
-                // Rewinding to Dynamic Block N -> Internal Index is N-1
-                new_index = mark.block_index - 1;
-                keep_count = new_index + 1;
-            }
+            self.current_block_index = if (mark.block_index == 0) 0 else mark.block_index - 1;
         } else {
-            // Standard behavior (No static block)
-            new_index = mark.block_index;
-            // If we have blocks, we keep up to the current index
-            keep_count = if (self.blocks.items.len > 0) new_index + 1 else 0;
+            self.current_block_index = mark.block_index;
         }
-
-        self.current_block_index = new_index;
         self.cursor = mark.cursor;
+    }
+
+    /// Free blocks and large objects allocated after the current position.
+    pub fn trimExcess(self: *CheatArena, mark: Mark) void {
+        const has_static = (self.static_block.len > 0);
+        // Keep blocks up to current_block_index (which may have advanced from softRewind
+        // if a new allocation overflowed into the next block).
+        const keep_count = if (self.blocks.items.len == 0)
+            @as(usize, 0)
+        else if (has_static)
+            self.current_block_index + 1
+        else
+            self.current_block_index + 1;
 
         const large_align = std.mem.Alignment.fromByteUnits(16);
 
         // Free Large Objects
         while (self.large_objects.items.len > mark.large_obj_count) {
             const popped = self.large_objects.pop().?;
-            // Use stored alignment
             self.child_allocator.rawFree(popped.slice, popped.alignment, @returnAddress());
         }
 
         // Trim Blocks
-        // If we are back to using the static block (blocks.len == 0), we free ALL dynamic blocks.
         while (self.blocks.items.len > keep_count) {
             const popped = self.blocks.pop().?;
             self.child_allocator.rawFree(popped, large_align, @returnAddress());

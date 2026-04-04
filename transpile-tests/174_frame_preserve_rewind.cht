@@ -1,0 +1,69 @@
+-- Test: frame arena preserve-and-rewind for String-returning functions.
+-- Functions returning String now save a frame mark and call preserveAndRewind
+-- on return, reclaiming all intermediate allocations while preserving the result.
+
+-- Pattern 1: Simple string concat return
+FN greet(name: String) RETURNS String ->
+    RETURN "Hello, " + name + "!";
+END
+
+-- Pattern 2: Loop builds intermediates, returns final string
+FN buildCsv(n: Int64) RETURNS String ->
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
+    RETURN join(parts, ",");
+END
+
+-- Pattern 3: Multiple early returns (IF/ELSE_IF chain)
+FN classify(n: Int64) RETURNS String ->
+    IF n < 0 THEN
+        RETURN "negative:" + n.toString();
+    ELSE_IF n == 0 THEN
+        RETURN "zero";
+    ELSE_IF n < 10 THEN
+        RETURN "small:" + n.toString();
+    ELSE
+        RETURN "large:" + n.toString();
+    END
+END
+
+-- Pattern 4: String-returning function called in loop (the bench 24 pattern)
+FN formatItem(id: Int64) RETURNS String ->
+    sz = ((id * 7 + 13) MOD 97) + 3;
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    RETURN "{" + join(parts, ",") + "}";
+END
+
+-- Pattern 5: String literal return (rodata, no frame alloc in function)
+FN getLabel() RETURNS String ->
+    RETURN "label";
+END
+
+FN main() RETURNS Void ->
+    -- Pattern 1: simple concat
+    ASSERT greet("World") == "Hello, World!";
+
+    -- Pattern 2: loop-built string
+    ASSERT buildCsv(5) == "1,2,3,4,5";
+
+    -- Pattern 3: multiple return paths
+    ASSERT classify(-3) == "negative:-3";
+    ASSERT classify(0) == "zero";
+    ASSERT classify(7) == "small:7";
+    ASSERT classify(42) == "large:42";
+
+    -- Pattern 4: string-returning function called in a loop
+    MUTABLE total: Int64 = 0;
+    FOR i IN (1_i64 ..= 100) DO
+        result = formatItem(i);
+        total += result.length();
+    END
+    ASSERT total > 0;
+
+    -- Pattern 5: literal
+    ASSERT getLabel() == "label";
+
+    print("PASS");
+    RETURN;
+END

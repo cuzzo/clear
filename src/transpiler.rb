@@ -533,19 +533,28 @@ private
       # Frame mark save/restore: rewind the frame arena on return so each
       # function call is a self-cleaning scope. Triggered by direct frame
       # allocations (uses_frame) OR stdlib calls that use {alloc} (uses_alloc).
-      # SKIP for functions returning reference types — returned data lives
-      # on the caller's frame and must survive past return. Safe for value
-      # types: primitives, Void, enums, unions (returned by copy, not pointer).
+      # Value types (primitives, Void, enums, unions): defer restoreFrameMark on return.
+      # String returns: save mark but NO defer — each return site calls
+      # preserveAndRewind to copy the result past the mark before rewind.
       uses_frame_or_alloc = node.uses_frame || node.uses_alloc
       ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
       returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
                            @enum_schemas&.key?(ret_type_obj.resolved) ||
                            @union_schemas&.key?(ret_type_obj.resolved)
+      returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
+      has_promotion = @promotion_plans&.dig(node.name)&.then { |p| !p.empty? }
       prologue = if fn_needs_rt
-        (uses_frame_or_alloc && returns_value_type) ? "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n" : "_ = &rt;"
+        if uses_frame_or_alloc && returns_value_type
+          "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
+        elsif uses_frame_or_alloc && returns_string && !has_promotion
+          "const frame_mark = rt.saveFrameMark();\n"
+        else
+          "_ = &rt;"
+        end
       else
         nil
       end
+      @current_fn_preserve_rewind = (fn_needs_rt && uses_frame_or_alloc && returns_string && !has_promotion)
 
       # @nonReentrant: insert a StackGuard that errors at runtime on unexpected recursion.
       if node.reentrant == :non_reentrant
@@ -602,12 +611,25 @@ private
       @transpiler_context_stack.pop
 
       if !has_catch
-        <<~ZIG
-          #{signature} {
-              #{prologue}
-              #{body}
-          }
-        ZIG
+        if @current_fn_preserve_rewind
+          rt_name = @do_rt_name || "rt"
+          <<~ZIG
+            #{signature} {
+                #{prologue}
+                const __pr_val = __pr_body: {
+                #{body}
+                };
+                return try #{rt_name}.preserveAndRewind(frame_mark, __pr_val);
+            }
+          ZIG
+        else
+          <<~ZIG
+            #{signature} {
+                #{prologue}
+                #{body}
+            }
+          ZIG
+        end
       else
         rt_name = @do_rt_name || "rt"
 
@@ -2150,6 +2172,8 @@ private
         else
           [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
         end
+      elsif @current_fn_preserve_rewind
+        [suppress, "break :__pr_body #{val_code};"].reject(&:empty?).join("\n")
       else
         [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
       end
