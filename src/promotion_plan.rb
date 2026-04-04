@@ -331,52 +331,27 @@ class CleanupPlan
   end
 
   def self.body_calls_promoted?(body, promoted)
-    nodes = body.is_a?(Array) ? body : [body]
-    nodes.any? do |node|
-      case node
-      when AST::ReturnNode
-        val = node.value
-        val.is_a?(AST::FuncCall) && promoted.include?(val.name)
-      when AST::IfStatement
-        body_calls_promoted?(node.then_branch, promoted) ||
-          body_calls_promoted?(node.else_branch, promoted)
-      when AST::MatchStatement
-        (node.cases || []).any? { |c| body_calls_promoted?(c[:body], promoted) } ||
-          (node.default_case && body_calls_promoted?(node.default_case, promoted))
-      else
-        node.respond_to?(:body) && node.body && body_calls_promoted?(node.body, promoted)
+    found = false
+    AST.walk_body(body) do |node|
+      if node.is_a?(AST::ReturnNode) && node.value.is_a?(AST::FuncCall) && promoted.include?(node.value.name)
+        found = true
       end
     end
+    found
   end
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
 
   def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
-    nodes = body.is_a?(Array) ? body : [body]
-    nodes.each do |node|
-      case node
-      when AST::VarDecl, AST::BindExpr
-        # Skip reassignments (mode: :assign) - only declarations create entries
-        next if node.is_a?(AST::BindExpr) && node.mode == :assign
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+      next if node.is_a?(AST::BindExpr) && node.mode == :assign
 
-        var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-        ti = node.type_info
-        ti = Type.new(ti) if ti && !ti.is_a?(Type)
-
-        cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
-        bindings[var_name] = cleanup if cleanup
-
-      when AST::IfStatement
-        walk_bindings(node.then_branch, promoted_fns, schema_lookup, bindings)
-        walk_bindings(node.else_branch, promoted_fns, schema_lookup, bindings)
-      when AST::MatchStatement
-        (node.cases || []).each { |c| walk_bindings(c[:body], promoted_fns, schema_lookup, bindings) }
-        walk_bindings(node.default_case, promoted_fns, schema_lookup, bindings) if node.default_case
-      when AST::WhileLoop
-        walk_bindings(node.do_branch, promoted_fns, schema_lookup, bindings)
-      else
-        walk_bindings(node.body, promoted_fns, schema_lookup, bindings) if node.respond_to?(:body) && node.body
-      end
+      var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+      ti = node.type_info
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
+      bindings[var_name] = cleanup if cleanup
     end
   end
 
@@ -429,74 +404,46 @@ class CleanupPlan
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
   def self.walk_match_as_bindings(body, schema_lookup, bindings)
-    return unless body
-    nodes = body.is_a?(Array) ? body : [body]
-    nodes.each do |node|
-      case node
-      when AST::MatchStatement
-        next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::MatchStatement)
+      next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
 
-        # Resolve the union schema for the MATCH source
-        source_ti = node.expr.type_info
-        source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
-        union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
-        schema = schema_lookup.call(union_lookup) rescue nil
-        next unless schema.is_a?(Hash) && schema[:kind] == :union
+      source_ti = node.expr.type_info
+      source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
+      union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
+      schema = schema_lookup.call(union_lookup) rescue nil
+      next unless schema.is_a?(Hash) && schema[:kind] == :union
 
-        # Determine allocator from source's cleanup_alloc
-        source_alloc = source_ti&.cleanup_alloc || :frame
+      (node.cases || []).each do |c|
+        next unless c[:binding]
+        variant_name = case c[:value]
+                       when AST::GetField then c[:value].field
+                       when AST::MethodCall then c[:value].name
+                       else nil
+                       end
+        next unless variant_name
 
-        (node.cases || []).each do |c|
-          next unless c[:binding]
-          variant_name = case c[:value]
-                         when AST::GetField then c[:value].field
-                         when AST::MethodCall then c[:value].name
-                         else nil
-                         end
-          next unless variant_name
+        variant_type = (schema[:variants] || {})[variant_name]
+        next unless variant_type
 
-          variant_type = (schema[:variants] || {})[variant_name]
-          next unless variant_type
-
-          # Classify the payload
-          if variant_type.is_a?(Hash) && variant_type[:kind] == :inline_struct
-            # Inline struct variant with deinit
-            has_heap = Type.variant_has_heap?(variant_type)
-            if has_heap
-              bindings[c[:binding]] = {
-                needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
-                has_moved_guard: true, source_kind: :match_as
-              }
-            end
-          else
-            pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type || :Any)
-            # Match the annotator's move criteria (annotator.rb ~line 717):
-            # slices, collections, maps need cleanup when extracted from a moved union
-            needs_as_cleanup = (pt.array? && !pt.string?) || pt.collection? || pt.map?
-
-            if needs_as_cleanup
-              if pt.array? && !pt.string?
-                # Always heap: slice contents are heap-allocated via COPY/promoteList.
-                bindings[c[:binding]] = {
-                  needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
-                  has_moved_guard: true, source_kind: :match_as
-                }
-              end
-            end
+        if variant_type.is_a?(Hash) && variant_type[:kind] == :inline_struct
+          has_heap = Type.variant_has_heap?(variant_type)
+          if has_heap
+            bindings[c[:binding]] = {
+              needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
+              has_moved_guard: true, source_kind: :match_as
+            }
           end
-
-          # Recurse into branch body
-          walk_match_as_bindings(c[:body], schema_lookup, bindings)
+        else
+          pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type || :Any)
+          needs_as_cleanup = (pt.array? && !pt.string?) || pt.collection? || pt.map?
+          if needs_as_cleanup && pt.array? && !pt.string?
+            bindings[c[:binding]] = {
+              needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
+              has_moved_guard: true, source_kind: :match_as
+            }
+          end
         end
-        walk_match_as_bindings(node.default_case, schema_lookup, bindings) if node.default_case
-
-      when AST::IfStatement
-        walk_match_as_bindings(node.then_branch, schema_lookup, bindings)
-        walk_match_as_bindings(node.else_branch, schema_lookup, bindings)
-      when AST::WhileLoop
-        walk_match_as_bindings(node.do_branch, schema_lookup, bindings)
-      else
-        walk_match_as_bindings(node.body, schema_lookup, bindings) if node.respond_to?(:body) && node.body
       end
     end
   end

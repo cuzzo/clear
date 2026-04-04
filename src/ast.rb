@@ -4,6 +4,40 @@ require_relative "type"
 # AST
 # ==========================================
 module AST
+  # Walk all statements in a body, recursing into control flow branches.
+  # Yields each statement node. Handles IfStatement, MatchStatement,
+  # WhileLoop, ForRange, ForEach, and generic nodes with .body.
+  # Adding a new control flow node type requires updating only this method.
+  def self.walk_body(body, &visitor)
+    return unless body
+    nodes = body.is_a?(Array) ? body : [body]
+    nodes.each do |node|
+      yield node
+      case node
+      when IfStatement
+        walk_body(node.then_branch, &visitor)
+        walk_body(node.else_branch, &visitor)
+      when MatchStatement
+        (node.cases || []).each { |c| walk_body(c[:body], &visitor) }
+        walk_body(node.default_case, &visitor) if node.default_case
+      when WhileLoop
+        walk_body(node.do_branch, &visitor)
+      when ForRange, ForEach
+        walk_body(node.body, &visitor)
+      when BgBlock, BgStreamBlock
+        walk_body(node.body, &visitor)
+      when FunctionDef
+        walk_body(node.body, &visitor)
+      when TestBlock
+        walk_body(node.setup, &visitor)
+        node.whens&.each do |w|
+          walk_body(w.setup, &visitor)
+          w.tests&.each { |t| walk_body(t.body, &visitor) }
+        end
+      end
+    end
+  end
+
   module Locatable
     def line; token.line; end
     def column; token.column; end

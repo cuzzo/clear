@@ -3348,51 +3348,26 @@ private
 
   def collect_return_nodes(body)
     returns = []
-    body = [body] unless body.is_a?(Array)
-    body.each do |node|
-      case node
-      when AST::ReturnNode
-        returns << node
-      when AST::IfStatement
-        returns += collect_return_nodes(node.then_branch)
-        returns += collect_return_nodes(node.else_branch)
-      when AST::WhileLoop
-        b = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
-        returns += collect_return_nodes(b)
-      else
-        # Don't descend into nested FunctionDef
-      end
-    end
+    AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     returns
   end
 
   def walk_promote_callers(nodes)
-    nodes = [nodes] unless nodes.is_a?(Array)
-    nodes.each do |node|
+    AST.walk_body(nodes) do |node|
       case node
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      when Array
-        node.each { |n| walk_promote_callers([n]) }
       when AST::FunctionDef
         @_walk_current_fn = node
-        walk_promote_callers(node.body)
       when AST::VarDecl, AST::BindExpr
-        # If value is a FuncCall from a returns_promoted function, set heap_promoted
         val = node.value
         if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
           node.type_info.heap_promoted = true if node.type_info
-          # For reassignment (BindExpr mode=assign), also propagate to the declaration.
-          # The declaration is the original VarDecl/BindExpr for this variable name.
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             var_name = node.name
             decl = find_decl_in_body(@_walk_current_fn&.body, var_name) if @_walk_current_fn
             decl.type_info.heap_promoted = true if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
           end
         end
-        walk_promote_callers([val]) if val
       when AST::Assignment
-        # Reassignment: result = makeList() inside IF/MATCH branches.
-        # Use the target identifier's symbol to find the declaration node.
         val = node.value
         if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
           target = node.name
@@ -3400,25 +3375,6 @@ private
           decl = sym&.reg
           decl.type_info.heap_promoted = true if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
         end
-        walk_promote_callers([val]) if val
-      when AST::IfStatement
-        walk_promote_callers(node.then_branch)
-        walk_promote_callers(node.else_branch)
-      when AST::MatchStatement
-        node.cases&.each { |c| walk_promote_callers(c[:body]) }
-        walk_promote_callers(node.default_case) if node.default_case
-      when AST::WhileLoop
-        b = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
-        walk_promote_callers(b)
-      when AST::ForRange, AST::ForEach
-        walk_promote_callers(node.body)
-      when AST::BgBlock, AST::BgStreamBlock
-        walk_promote_callers(node.body)
-      when AST::TestBlock
-        walk_promote_callers(node.setup)
-        node.whens&.each { |w| walk_promote_callers(w.setup); w.tests&.each { |t| walk_promote_callers(t.body) } }
-      else
-        node.each_pair { |_, v| walk_promote_callers([v]) if v.is_a?(Array) } if node.respond_to?(:each_pair)
       end
     end
   end
