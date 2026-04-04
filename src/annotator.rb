@@ -2081,14 +2081,7 @@ private
         error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
       end
       # Move: union literal captures non-Copy values.
-      if val_node.is_a?(AST::Identifier)
-        vt = val_node.type_info
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        is_generic = current_fn_ctx&.type_params&.include?(vt&.resolved)
-        if vt && !is_generic && !vt.implicitly_copyable? { |t| lookup_type_schema(t) }
-          og_set_moved(val_node.name)
-        end
-      end
+      move_if_not_copyable!(val_node)
       node.full_type = if node.type_args&.any?
         :"#{node.name}<#{node.type_args.join(',')}>"
       else
@@ -2148,15 +2141,7 @@ private
       end
 
       # Move: struct literal captures non-Copy values.
-      # Skip generic type parameters (T) — can't determine copyability at annotation time.
-      if val_node.is_a?(AST::Identifier)
-        vt = val_node.type_info
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        is_generic = current_fn_ctx&.type_params&.include?(vt&.resolved)
-        if vt && !is_generic && !vt.implicitly_copyable? { |t| lookup_type_schema(t) }
-          og_set_moved(val_node.name)
-        end
-      end
+      move_if_not_copyable!(val_node)
     end
 
     # Set full_type to the generic instance name or plain struct name
@@ -3582,6 +3567,18 @@ private
 
   def og_move(from, to)  = @og.transfer(from, to)
   def og_set_moved(name) = (@og[name]&.state = :moved)
+
+  # Mark an identifier as moved if its type is non-Copy.
+  # Skips generic type params (can't determine copyability at annotation time).
+  def move_if_not_copyable!(node)
+    return unless node.is_a?(AST::Identifier)
+    vt = node.type_info
+    vt = Type.new(vt) if vt && !vt.is_a?(Type)
+    return if vt.nil?
+    return if current_fn_ctx&.type_params&.include?(vt.resolved)
+    return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+    og_set_moved(node.name)
+  end
   def og_set_live(name)  = (@og[name]&.state = :live)
   def og_escape(name)    = @og.escape(name)
   def og_drop(name)      = @og.drop(name)
