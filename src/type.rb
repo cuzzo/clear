@@ -719,7 +719,9 @@ class Type
   # Bounded stream: ~T[N] — a fixed array of N promises consumed one-by-one via NEXT.
   # Distinct from a single promise (~T): NEXT can be called N times, not exactly once.
   def bounded_stream?
-    tense? && tense_type.fixed?
+    # ~T[N] is a bounded stream of N elements. ~String is NOT a bounded stream
+    # even though String is internally []const u8 (a fixed array) - it's a Promise.
+    tense? && tense_type.fixed? && !tense_type.string?
   end
 
   # Shared promise: ~T@shared — a memoized promise backed by Arc-style ref counting.
