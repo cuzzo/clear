@@ -1,0 +1,22 @@
+-- Test: union constructor return with frame-arena data must be promoted.
+-- Bug: PromotionPlan doesn't handle union constructor returns, so
+-- frame-allocated strings inside the union are invalidated by frame rewind.
+
+UNION Val {
+    Nil,
+    Str: String,
+    Pair { car: String, cdr: String }
+}
+
+FN makeStr!(a: String, b: String) RETURNS Val ->
+    RETURN Val{ Str: a + b };
+END
+
+FN main() RETURNS Void ->
+    v = makeStr!("hel", "lo");
+    MATCH v START
+        Val.Str AS s -> ASSERT s == "hello", "union return with frame string";,
+        DEFAULT -> ASSERT FALSE, "should be Str";
+    END
+    print("PASS");
+END

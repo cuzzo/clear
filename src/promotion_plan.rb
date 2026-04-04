@@ -103,8 +103,8 @@ class PromotionPlan
       val = ret_node.value
       next unless val
 
-      if val.is_a?(AST::StructLit)
-        # Walk struct fields: find escaped variables to promote per-variable.
+      if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
+        # Walk struct/union fields: find escaped variables to promote per-variable.
         val.fields.each do |fname, fval|
           next unless fval.is_a?(AST::Identifier)
           ti = fval.type_info
@@ -117,6 +117,17 @@ class PromotionPlan
           var_promotes << { var: fval.name, zig_type: ti.zig_type }
           suppress_defers << fval.name
           handled_fields << fname.to_s
+        end
+
+        # Union constructor with heap variants (strings, slices, @indirect):
+        # promote the entire return value so frame data survives frame rewind.
+        # promote() handles unions natively (dupes strings, slices, pointers).
+        if var_promotes.empty?
+          ret_schema = schema_lookup.call(ret_type.resolved) rescue nil
+          if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
+            has_heap = (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+            struct_promote ||= zig_type_for(ret_type) if has_heap
+          end
         end
 
       elsif val.is_a?(AST::Identifier)
