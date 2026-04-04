@@ -288,4 +288,64 @@ RSpec.describe Lexer do
       expect(tokens[1].value).to eq("/=")
     end
   end
+
+  describe "? predicate suffix" do
+    it "includes ? in identifier when followed by (" do
+      tokens = Lexer.new("check?(x)").tokenize
+      expect(tokens[0].type).to eq(:VAR_ID)
+      expect(tokens[0].value).to eq("check?")
+      expect(tokens[1].value).to eq("(")
+    end
+
+    it "does NOT include ? when not followed by (" do
+      tokens = Lexer.new("value?").tokenize
+      expect(tokens[0].type).to eq(:VAR_ID)
+      expect(tokens[0].value).to eq("value")
+      expect(tokens[1].type).to eq(:CHAR)
+      expect(tokens[1].value).to eq("?")
+    end
+
+    it "does NOT include ? before . (optional chaining)" do
+      tokens = Lexer.new("value?.field").tokenize
+      expect(tokens[0].value).to eq("value")
+      expect(tokens[1].value).to eq("?")
+      expect(tokens[2].value).to eq(".")
+    end
+
+    it "preserves ? in pipeline RHS (parser restores from OptionalUnwrap)" do
+      require_relative "../src/parser"
+      require_relative "../src/annotator"
+      src = <<~CLEAR
+        FN check?(n: Float64) RETURNS Bool -> RETURN n > 0.0; END
+        FN main() RETURNS Void -> result = 5.0 s> check?; RETURN; END
+      CLEAR
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
+      bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
+      expect(bind.value).to be_a(AST::BinaryOp)
+      expect(bind.value.right).to be_a(AST::Identifier)
+      expect(bind.value.right.name).to eq("check?")
+    end
+  end
+
+  describe "! mutation suffix" do
+    it "includes ! in identifier" do
+      tokens = Lexer.new("mutate!(x)").tokenize
+      expect(tokens[0].type).to eq(:VAR_ID)
+      expect(tokens[0].value).to eq("mutate!")
+    end
+
+    it "includes ! without parens (pipeline)" do
+      tokens = Lexer.new("x s> mutate!").tokenize
+      expect(tokens[2].type).to eq(:VAR_ID)
+      expect(tokens[2].value).to eq("mutate!")
+    end
+
+    it "does NOT include != (not-equal operator)" do
+      tokens = Lexer.new("x != y").tokenize
+      expect(tokens[0].value).to eq("x")
+      expect(tokens[1].value).to eq("!=")
+    end
+  end
 end

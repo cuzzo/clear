@@ -1069,6 +1069,11 @@ class Parser
     when 's>'
       # SMOOTH binds Level 1, but its RHS allows chained pipe operators
       rhs = parse_expression(next_prec)
+      # Predicate suffix: x s> isPositive? parses as OptionalUnwrap(Identifier).
+      # Unwrap and restore the ? suffix as part of the function name.
+      if rhs.is_a?(AST::OptionalUnwrap) && rhs.target.is_a?(AST::Identifier)
+        rhs = AST::Identifier.new(rhs.token, "#{rhs.target.name}?")
+      end
       return AST::BinaryOp.new(op_token, lhs, :SMOOTH, rhs)
 
     when '..<'
