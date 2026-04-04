@@ -137,7 +137,7 @@ pub const SmartEventFd = struct {
     }
 };
 
-const STACK_CACHE_LIMIT: usize = 16;
+const STACK_CACHE_LIMIT: usize = 128;
 
 
 pub const Scheduler = struct {

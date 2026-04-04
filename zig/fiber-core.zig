@@ -193,8 +193,9 @@ pub const Fiber = struct {
         //});
         //std.debug.print("Entry function: 0x{x}\n", .{entry_fn});
 
-        // Fill stack with pattern to debug
-        @memset(memory, 0xCC);
+        // Fill stack with pattern to detect usage in debug builds only.
+        // In release builds this is 16KB * N_fibers of wasted writes.
+        if (builtin.mode == .Debug) @memset(memory, 0xCC);
 
         const stack = Stack{ .memory = memory };
         const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
