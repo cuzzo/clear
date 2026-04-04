@@ -1,0 +1,36 @@
+-- Test: function call result used as argument must not leak heap data.
+-- Bug: f(g()) where g returns a union with heap data - the temporary
+-- Value from g() is passed by value to f() with no cleanup defer.
+
+UNION Val {
+    Nil,
+    Str: String,
+    Lambda { params: Val[], body: Val @indirect, envId: Int64 }
+}
+
+FN getStr(v: Val) RETURNS String ->
+    MATCH v START
+        Val.Str AS s -> RETURN s;,
+        DEFAULT -> RETURN "nil";
+    END
+    RETURN "nil";
+END
+
+FN makeLambda!() RETURNS Val ->
+    MUTABLE params: Val[]@list = List[];
+    params.append(Val{ Str: "x" });
+    RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
+END
+
+FN wrapStr!(v: Val) RETURNS String ->
+    RETURN getStr(v);
+END
+
+FN main() RETURNS Void ->
+    -- g() returns Lambda with heap data, f() extracts a string.
+    -- The Lambda temporary from makeLambda!() is never cleaned up.
+    s = wrapStr!(makeLambda!());
+    s2 = wrapStr!(makeLambda!());
+    s3 = wrapStr!(makeLambda!());
+    print("PASS");
+END
