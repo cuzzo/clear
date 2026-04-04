@@ -800,6 +800,41 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "Inline struct variant fields get implicit COPY" do
+    it "implicit-copies @list into inline struct variant []T field" do
+      src = <<~CLEAR
+        STRUCT Env { vars: HashMap<Value> }
+        UNION Value {
+            Nil, Number: Float64, Symbol: String, List: Value[],
+            Lambda { params: Value[], body: Value @indirect, envId: Id<Env> }
+        }
+        FN main() RETURNS Void ->
+            MUTABLE pool: Env[10]@pool = [];
+            rootId: Id<Env> = pool.insert(Env{ vars: {} });
+            MUTABLE p: Value[]@list = List[];
+            p.append(Value.Nil);
+            v = Value.Lambda{ params: p, body: Value.Nil, envId: rootId };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # @list params field should be implicit-copied (not raw .items)
+      expect(zig).to match(/heapAlloc|__buf|__src/)
+    end
+
+    it "implicit-copies rodata string into inline struct variant field" do
+      src = <<~CLEAR
+        UNION Value { Nil, Named { name: String, id: Int64 } }
+        FN main() RETURNS Void ->
+            v = Value.Named{ name: "hello", id: 1_i64 };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8/)
+    end
+  end
+
   describe "Heap-promoted return value is NOT hoisted into temp" do
     it "returns directly from heap_promoted function without __hpt wrapper" do
       src = <<~CLEAR
