@@ -9,12 +9,9 @@
 -- JSON format: {"id":N,"data":[1,2,3,...,size]}
 -- Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
 
--- Direct std.json FFI -- no json_native.zig shim needed for parsing.
-EXTERN STRUCT ParseOptions {};
-EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
-EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions) RETURNS !T EFFECTS :alloc:heap FROM "std.json";
-
+-- FFI via json_native.zig shim for ensureDir and parseJsonArraySum.
 EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
+EXTERN FN parseJsonArraySum(content: String) RETURNS Int64 FROM "json_native";
 
 FN sizeForId(id: Int64) RETURNS Int64 ->
     RETURN ((id * 7 + 13) MOD 997) + 10;
@@ -22,23 +19,12 @@ END
 
 FN generateJson(id: Int64) RETURNS String ->
     sz = sizeForId(id);
-    MUTABLE result = "{\"id\":${id.toString()},\"data\":[";
-    FOR i IN (1_i64 ..= sz) DO
-        IF i > 1 -> result = result + ",";
-        result = result + i.toString();
-    END
-    result = result + "]}";
-    RETURN result;
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END
 
-FN parseJsonArraySum(content: String) RETURNS Int64 ->
-    record = parseFromSliceLeaky(JsonRecord, content, ParseOptions{}) OR RAISE;
-    MUTABLE sum: Int64 = 0;
-    FOR i IN (0_i64 ..< record.data.length()) DO
-        sum += record.data[i];
-    END
-    RETURN sum;
-END
+-- parseJsonArraySum is now called directly as nativeParseJsonArraySum via FFI
 
 FN handleClient!(client: TCPClient) RETURNS Void ->
     MUTABLE running: Bool = TRUE;
@@ -47,9 +33,7 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE
-            -- Parse and respond to each command in the read buffer.
-            -- Each response is written immediately to avoid accumulating
-            -- frame-arena allocations across commands in a single read.
+            MUTABLE resp = "";
             MUTABLE pos: Int64 = 0;
             WHILE pos < data.length() DO
                 -- Find end of line
@@ -72,22 +56,23 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
                     id = toInt(toNumber(idStr) OR 0.0);
                     json = generateJson(id);
                     writeFile("data/${id.toString()}.json", json);
-                    tcpWrite(client, "+OK\r\n");
+                    resp = resp + "+OK\r\n";
                 ELSE_IF startsWith?(line, "GET:") THEN
                     idStr = substr(line, 4, line.length() - 4);
                     id = toInt(toNumber(idStr) OR 0.0);
                     content = readFile("data/${id.toString()}.json");
-                    sum = parseJsonArraySum(content) OR RAISE;
-                    tcpWrite(client, ":${sum.toString()}\r\n");
+                    sum = parseJsonArraySum(content);
+                    resp = resp + ":${sum.toString()}\r\n";
                 ELSE_IF line == "QUIT" THEN
-                    tcpWrite(client, "+OK\r\n");
+                    resp = resp + "+OK\r\n";
                     running = FALSE;
                 ELSE_IF line == "READY?" THEN
-                    tcpWrite(client, "+READY\r\n");
+                    resp = resp + "+READY\r\n";
                 ELSE
-                    tcpWrite(client, "-ERR unknown command\r\n");
+                    resp = resp + "-ERR unknown command\r\n";
                 END
             END
+            IF resp.length() > 0 -> tcpWrite(client, resp);
         END
     END
 END
@@ -97,10 +82,16 @@ FN main() RETURNS Void ->
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
+    -- Cache for parsed JSON sums (also pins BG fibers to the main scheduler,
+    -- preventing fiber stealing which corrupts epoll fd registration).
+    MUTABLE cache: HashMap<Int64>@sharded(32):locked = {};
+
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
         tasks.append(BG {
+            -- Reference cache to pin BG to main scheduler (prevents fiber stealing)
+            n = cache.count();
             handleClient!(client);
         });
     END

@@ -18,6 +18,7 @@ FN heavyCompute(seed: Int64, n: Int64) RETURNS Int64 ->
         x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
         x = x %* x %+ 1_i64;
     END
+    IF x < 0 -> x = 0 - x;
     RETURN x MOD 1000000000;
 END
 
@@ -51,8 +52,8 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
                     END
                     idStr = substr(rest, 0_i64, colonPos);
                     nStr = substr(rest, colonPos + 1, rest.length() - colonPos - 1);
-                    MUTABLE id = toInt(toNumber(idStr) OR 1.0);
-                    MUTABLE n = toInt(toNumber(nStr) OR 1.0);
+                    MUTABLE id = toInt(toNumber(idStr) OR 0.0);
+                    MUTABLE n = toInt(toNumber(nStr) OR 0.0);
                     IF n < 1 THEN n = 1; END
                     result = heavyCompute(id, n);
                     resp = resp + ":${result.toString()}\r\n";
@@ -74,9 +75,16 @@ FN main() RETURNS Void ->
     server = TCPServer::listen(6390);
     print("CLEAR pathological server listening on port 6390");
 
+    -- Pin BG fibers to the main scheduler to prevent work-stealing
+    -- which corrupts epoll fd registration.
+    MUTABLE pin: HashMap<Int64>@sharded(32):locked = {};
+
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
-        tasks.append(BG { handleClient!(client); });
+        tasks.append(BG {
+            n = pin.count();
+            handleClient!(client);
+        });
     END
 END
