@@ -104,9 +104,15 @@ module OwnershipGenerator
     when :heap_slice, :heap_union, :heap_struct
       ti = node&.type_info
       zig_type = if entry[:kind] == :heap_slice
-        # COPY produces a slice ([]T), not an ArrayList. Use slice type for cleanup.
-        elem_zig = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
-        "[]#{elem_zig}"
+        # COPY produces a bare slice ([]T). Function returns may produce ArrayList.
+        # Check source: CopyNode value -> slice, otherwise use type_info's zig_type.
+        is_copy_value = node.respond_to?(:value) && node.value.is_a?(AST::CopyNode)
+        if is_copy_value && !ti&.list_collection?
+          elem_zig = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
+          "[]#{elem_zig}"
+        else
+          ti&.zig_type || "UNKNOWN"
+        end
       else
         transpile_type((ti&.resolved || :Any).to_s)
       end
