@@ -915,7 +915,7 @@ RSpec.describe ZigTranspiler do
       expect(lines).to eq(1)
     end
 
-    it "deep-copies @list of unions (dupeUnionValue per element, not memcpy)" do
+    it "deep-copies @list of non-Copy unions (dupeUnionValue per element)" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String, List: Value[] }
         FN main() RETURNS Void ->
@@ -926,8 +926,25 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Elements are unions with heap data - must use dupeUnionValue, not memcpy
+      # Non-Copy union elements need deep copy
       expect(zig).to include("dupeUnionValue")
+    end
+
+    it "shallow-copies @list of Copy unions into union field (memcpy)" do
+      src = <<~CLEAR
+        UNION Num { Int: Int64, Float: Float64 }
+        UNION Wrapper { Nil, Items: Num[] }
+        FN main() RETURNS Void ->
+            MUTABLE items: Num[]@list = List[];
+            items.append(Num{ Int: 42_i64 });
+            w = Wrapper{ Items: items };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Copy union elements - memcpy is safe, no dupeUnionValue needed
+      expect(zig).not_to include("dupeUnionValue")
+      expect(zig).to include("@memcpy")
     end
   end
 end

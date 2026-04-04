@@ -2079,6 +2079,12 @@ private
           # @list -> []T: implicit copy (frame buffer can't be moved to heap)
           copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
           copy_wrapper.full_type = expected_type
+          elem = vti.element_type
+          if elem
+            es = lookup_type_schema(elem.resolved) rescue nil
+            copy_wrapper.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
+              (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+          end
           node.fields[variant_name] = copy_wrapper
           val_node = copy_wrapper
         elsif vti&.string? && vti&.rodata?
@@ -2155,6 +2161,12 @@ private
         if vti&.list_collection?
           copy_wrapper = AST::CopyNode.new(val_node.token, val_node)
           copy_wrapper.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type)
+          elem = vti.element_type
+          if elem
+            es = lookup_type_schema(elem.resolved) rescue nil
+            copy_wrapper.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
+              (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+          end
           node.fields[field_name] = copy_wrapper
           val_node = copy_wrapper
         elsif vti&.string? && vti&.rodata?
@@ -2559,6 +2571,21 @@ private
     node.storage = :stack
     # Mark as heap usage - COPY allocates via heapAlloc
     current_fn_ctx.heap_count += 1 if current_fn_ctx
+
+    # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
+    # For list/array types, check if element type is a non-Copy union.
+    vti = node.value.type_info
+    vti = Type.new(vti) if vti && !vti.is_a?(Type)
+    if vti && (vti.list_collection? || (vti.array? && !vti.string?))
+      elem = vti.element_type
+      if elem
+        schema = lookup_type_schema(elem.resolved) rescue nil
+        if schema.is_a?(Hash) && schema[:kind] == :union
+          has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+          node.deep_copy = has_heap
+        end
+      end
+    end
   end
 
   # Infer return type for list.remove(i) — returns the element type.

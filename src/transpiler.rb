@@ -2094,8 +2094,8 @@ private
         elem_type = ti.element_type
         elem_zig = transpile_type(elem_type)
         empty_expr = ti&.list_collection? ? "@as([]#{elem_zig}, &.{})" : src_expr
-        # Check if elements need deep copy (unions with heap variants)
-        needs_deep = elem_type && @union_schemas&.key?(elem_type.resolved)
+        # Annotator sets deep_copy when elements are non-Copy unions with heap variants.
+        needs_deep = node.respond_to?(:deep_copy) && node.deep_copy
         if needs_deep
           "blk_copy: {\n    const __src = #{src_expr};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeUnionValue(#{elem_zig}, __src[__i], #{rt_name}.heapAlloc()); }\n        break :blk_copy __buf;\n    } else break :blk_copy #{empty_expr};\n}"
         else
