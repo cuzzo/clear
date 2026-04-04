@@ -2088,13 +2088,19 @@ private
         "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
       elsif ti&.string?
         "try #{rt_name}.heapAlloc().dupe(u8, #{val})"
-      elsif ti&.list_collection?
-        # @list: copy the .items buffer to heap
-        elem_zig = transpile_type(ti.element_type)
-        "blk_copy: {\n    const __src = #{val}.items;\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy @as([]#{elem_zig}, &.{});\n}"
-      elsif ti&.array? && !ti&.string?
-        elem_zig = transpile_type(ti.element_type)
-        "blk_copy: {\n    const __src = #{val};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy __src;\n}"
+      elsif ti&.list_collection? || (ti&.array? && !ti&.string?)
+        # @list or slice: copy buffer to heap. Deep-copy union elements.
+        src_expr = ti&.list_collection? ? "#{val}.items" : val
+        elem_type = ti.element_type
+        elem_zig = transpile_type(elem_type)
+        empty_expr = ti&.list_collection? ? "@as([]#{elem_zig}, &.{})" : src_expr
+        # Check if elements need deep copy (unions with heap variants)
+        needs_deep = elem_type && @union_schemas&.key?(elem_type.resolved)
+        if needs_deep
+          "blk_copy: {\n    const __src = #{src_expr};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeUnionValue(#{elem_zig}, __src[__i], #{rt_name}.heapAlloc()); }\n        break :blk_copy __buf;\n    } else break :blk_copy #{empty_expr};\n}"
+        else
+          "blk_copy: {\n    const __src = #{src_expr};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy #{empty_expr};\n}"
+        end
       else
         val
       end

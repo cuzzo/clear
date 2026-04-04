@@ -914,5 +914,20 @@ RSpec.describe ZigTranspiler do
       lines = zig.scan(/heapAlloc\(\)\.dupe/).length
       expect(lines).to eq(1)
     end
+
+    it "deep-copies @list of unions (dupeUnionValue per element, not memcpy)" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String, List: Value[] }
+        FN main() RETURNS Void ->
+            MUTABLE items: Value[]@list = List[];
+            items.append(Value{ Str: COPY "hello" });
+            v = Value{ List: items };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Elements are unions with heap data - must use dupeUnionValue, not memcpy
+      expect(zig).to include("dupeUnionValue")
+    end
   end
 end
