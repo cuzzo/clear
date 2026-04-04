@@ -24,7 +24,7 @@ END
 FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
     MUTABLE evaled: Value[]@list = List[];
     FOR ei IN (0_i64 ..< items.length()) DO
-        evaled.append(eval!(items[ei]));
+        evaled.append(eval!(COPY items[ei]));
     END
     RETURN Value.Nil;
 END

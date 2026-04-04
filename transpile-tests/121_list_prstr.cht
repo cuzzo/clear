@@ -28,7 +28,7 @@ FN applyNative(name: String, evaled: Value[]) RETURNS Value ->
     IF name == "list" THEN
         MUTABLE litems: Value[]@list = List[];
         FOR li IN (0_i64 ..< evaled.length()) DO
-            litems.append(evaled[li]);
+            litems.append(COPY evaled[li]);
         END
         RETURN Value{ List: litems };
     END
