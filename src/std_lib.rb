@@ -72,13 +72,18 @@ STD_LIB = {
     { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
 
-  # charAt(string, index) → String — i-th codepoint (UTF-8 aware, O(n))
-  "charAt" => {
-    args: [STRING_TYPE, :Int64],
-    return: STRING_TYPE, return_alloc: :frame,
-    zig: "try CheatLib.charAtCodepoint({alloc}, {0}, {1})",
-    allocates: true,
-  },
+  # charAt(string, index) → String
+  # String@raw: O(1) byte indexing, no allocation, no UTF-8 iteration.
+  # String:     O(n) UTF-8 codepoint indexing, allocates result.
+  "charAt" => [
+    { args: [{type: STRING_TYPE, sync: :raw}, :Int64],
+      return: STRING_TYPE,
+      zig: "CheatLib.charAt({0}, {1})" },
+    { args: [STRING_TYPE, :Int64],
+      return: STRING_TYPE, return_alloc: :frame,
+      zig: "try CheatLib.charAtCodepoint({alloc}, {0}, {1})",
+      allocates: true },
+  ],
 
   # codepointCount(string) → Int64 — number of Unicode codepoints (O(n))
   "codepointCount" => {

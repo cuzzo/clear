@@ -1840,6 +1840,30 @@ RSpec.describe SemanticAnnotator do
         expect(result).to eq(:Void)
       end
     end
+
+    context "charAt capability dispatch (String@raw vs String)" do
+      def transpile_fn(src)
+        ZigTranspiler.new.transpile("FN main() RETURNS Void ->\n#{src}\nRETURN;\nEND")
+      end
+
+      it "emits CheatLib.charAt (O(1) byte access) for String@raw" do
+        out = transpile_fn(<<~CLEAR)
+          data: String@raw = "hello";
+          ch = charAt(data, 1);
+        CLEAR
+        expect(out).to include("CheatLib.charAt(")
+        expect(out).not_to include("charAtCodepoint")
+      end
+
+      it "emits CheatLib.charAtCodepoint (UTF-8) for regular String" do
+        out = transpile_fn(<<~CLEAR)
+          data = "hello";
+          ch = charAt(data, 1);
+        CLEAR
+        expect(out).to include("charAtCodepoint")
+        expect(out).not_to include("CheatLib.charAt(data")
+      end
+    end
   end
 
   # Higher-Order specs moved to spec/higher_order_spec.rb

@@ -39,7 +39,7 @@ END
 FN handleClient!(client: TCPClient) RETURNS Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
-        data = tcpRead(client);
+        data: String@raw = tcpRead(client);
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE

@@ -25,7 +25,7 @@ END
 FN handleClient!(client: TCPClient) RETURNS Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
-        data = tcpRead(client);
+        data: String@raw = tcpRead(client);
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE
@@ -45,7 +45,7 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
                 IF line.length() == 0 THEN
                     -- skip
                 ELSE_IF startsWith?(line, "WORK:") THEN
-                    rest = substr(line, 5_i64, line.length() - 5);
+                    rest: String@raw = substr(line, 5_i64, line.length() - 5);
                     MUTABLE colonPos: Int64 = 0;
                     WHILE colonPos < rest.length() && charAt(rest, colonPos) != ":" DO
                         colonPos += 1;

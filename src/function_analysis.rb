@@ -680,11 +680,23 @@ module FunctionAnalysis
       # Arity check
       next false if args.size != config[:args].size
 
-      # Type check each argument
+      # Type check each argument, including capability constraints.
+      # Hash args like { type: :String, sync: :raw } check both the base
+      # type and the capability. This allows the registry to dispatch to
+      # different Zig implementations based on the argument's capability.
       args.each_with_index.all? do |arg, i|
-        expected = config[:args][i].is_a?(Hash) ? config[:args][i][:type] : config[:args][i]
-        actual = arg.resolved_type
-        is_safe_autocast?(actual, expected)
+        spec = config[:args][i]
+        if spec.is_a?(Hash)
+          expected = spec[:type]
+          next false unless is_safe_autocast?(arg.resolved_type, expected)
+          # Check capability constraints (sync, ownership, etc.)
+          arg_type = arg.type_info.is_a?(Type) ? arg.type_info : nil
+          next false if spec[:sync] && arg_type&.sync != spec[:sync]
+          next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
+          true
+        else
+          is_safe_autocast?(arg.resolved_type, spec)
+        end
       end
     end
   end
