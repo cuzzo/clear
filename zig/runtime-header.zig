@@ -2523,13 +2523,15 @@ pub const CheatLib = struct {
     }
 
     // -----------------------------------------------------------------------
-    // InfStream(T): A lazy rendezvous generator stream. Corresponds to ~T[INF] in CLEAR.
+    // InfStream(T): A buffered generator stream. Corresponds to ~T[INF] in CLEAR.
     //
-    // Generator and consumer rendezvous on each value via a single-slot channel:
-    //   - Generator calls push(val): writes val, blocks until consumer reads it.
-    //   - Consumer calls next(): blocks until generator pushes, reads val, wakes generator.
+    // Lock-free SPSC ring buffer between producer and consumer fibers.
+    // Producer fills the buffer without blocking; blocks only when full.
+    // Consumer reads without blocking; blocks only when empty.
+    // Context switches happen only at buffer-full/buffer-empty boundaries,
+    // reducing overhead by ~BUF_SIZE compared to single-slot rendezvous.
     //
-    // Both sides run as green fibers in the same scheduler. Blocking = fiber yield.
+    // Both sides run as green fibers on the same scheduler. Blocking = fiber yield.
     // The generator is expected to loop forever (BG STREAM { WHILE TRUE DO YIELD; END }).
     //
     // Lifecycle:
@@ -2541,58 +2543,72 @@ pub const CheatLib = struct {
     pub fn InfStream(comptime T: type) type {
         return struct {
             const Self = @This();
+            const BUF_SIZE: u32 = 64; // must be power of 2
+            const MASK: u32 = BUF_SIZE - 1;
 
             pub const Inner = struct {
-                slot: T = undefined,
-                // 0 = empty (no value available), 1 = value ready (generator is waiting)
-                state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
-                // Spinlock protecting consumer_task and producer_task
+                buf: [BUF_SIZE]T = undefined,
+                // Producer writes head, consumer reads head.
+                head: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                // Consumer writes tail, producer reads tail.
+                tail: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                // Spinlock protecting task pointers (only used for block/wake)
                 lock: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
                 consumer_task: ?*Task = null,
                 producer_task: ?*Task = null,
                 sched: *fp.Scheduler,
-                // Set by deinit() to signal the generator fiber to stop.
                 closed: bool = false,
-                // Terminal error from generator fiber (set before close).
                 err: ?anyerror = null,
             };
 
             inner: *Inner,
             alloc: std.mem.Allocator,
 
-            /// Allocate an Inner on the heap and return the InfStream handle.
             pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
                 inner.* = .{ .sched = sched };
                 return Self{ .inner = inner, .alloc = alloc };
             }
 
-            /// Generator fiber calls this to yield a value.
-            /// Writes val into the slot, wakes the consumer, then blocks until val is consumed.
-            /// Returns error.StreamClosed if deinit() was called while the generator was blocked.
+            /// Generator pushes a value. Lock-free fast path when buffer has space.
+            /// Blocks (yields fiber) only when buffer is full.
             pub fn push(self: *Self, val: T) error{StreamClosed}!void {
                 const inner = self.inner;
 
-                // Write value and mark slot as ready (state = 1)
-                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                if (inner.closed) { inner.lock.store(0, .release); return error.StreamClosed; }
-                inner.slot = val;
-                inner.state.store(1, .release);
-                if (inner.consumer_task) |consumer| {
-                    inner.consumer_task = null;
-                    inner.lock.store(0, .release);
-                    inner.sched.schedule(consumer);
-                } else {
-                    inner.lock.store(0, .release);
-                }
-
-                // Block until consumer reads the value (state returns to 0)
                 while (true) {
+                    if (inner.closed) return error.StreamClosed;
+
+                    const h = inner.head.load(.monotonic);
+                    const t = inner.tail.load(.acquire);
+
+                    if (h -% t < BUF_SIZE) {
+                        // Buffer has space — write without locking.
+                        inner.buf[h & MASK] = val;
+                        inner.head.store(h +% 1, .release);
+
+                        // Wake consumer if it was blocked (buffer was empty).
+                        if (h == t) {
+                            // Buffer was empty, consumer might be waiting.
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.consumer_task) |consumer| {
+                                inner.consumer_task = null;
+                                inner.lock.store(0, .release);
+                                inner.sched.schedule(consumer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
+                        }
+                        return;
+                    }
+
+                    // Buffer full — block until consumer drains at least one slot.
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                     if (inner.closed) { inner.lock.store(0, .release); return error.StreamClosed; }
-                    if (inner.state.load(.acquire) == 0) {
+                    // Re-check after acquiring lock (consumer may have drained).
+                    const t2 = inner.tail.load(.acquire);
+                    if (h -% t2 < BUF_SIZE) {
                         inner.lock.store(0, .release);
-                        return; // Value was consumed — proceed to next YIELD
+                        continue; // Retry — space available now.
                     }
                     const task = inner.sched.getCurrent();
                     task.status.store(.Blocked, .release);
@@ -2602,31 +2618,50 @@ pub const CheatLib = struct {
                 }
             }
 
-            /// Consumer calls this to receive the next yielded value.
-            /// Blocks until the generator calls push().
-            /// Returns error if the generator fiber failed.
+            /// Consumer reads the next value. Lock-free fast path when buffer has data.
+            /// Blocks (yields fiber) only when buffer is empty.
             pub fn next(self: *Self) anyerror!T {
                 const inner = self.inner;
 
                 while (true) {
-                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                    if (inner.closed) {
-                        if (inner.err) |err| {
-                            inner.lock.store(0, .release);
-                            return err;
-                        }
-                    }
-                    if (inner.state.load(.acquire) == 1) {
-                        const val = inner.slot;
-                        inner.state.store(0, .release);
-                        if (inner.producer_task) |producer| {
-                            inner.producer_task = null;
-                            inner.lock.store(0, .release);
-                            inner.sched.schedule(producer);
-                        } else {
-                            inner.lock.store(0, .release);
+                    const t = inner.tail.load(.monotonic);
+                    const h = inner.head.load(.acquire);
+
+                    if (h != t) {
+                        // Buffer has data — read without locking.
+                        const val = inner.buf[t & MASK];
+                        inner.tail.store(t +% 1, .release);
+
+                        // Wake producer if it was blocked (buffer was full).
+                        if (h -% t == BUF_SIZE) {
+                            // Buffer was full, producer might be waiting.
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.producer_task) |producer| {
+                                inner.producer_task = null;
+                                inner.lock.store(0, .release);
+                                inner.sched.schedule(producer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
                         }
                         return val;
+                    }
+
+                    // Buffer empty — check for close/error, then block.
+                    if (inner.closed) {
+                        if (inner.err) |err| return err;
+                    }
+
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    if (inner.closed) {
+                        inner.lock.store(0, .release);
+                        if (inner.err) |err| return err;
+                    }
+                    // Re-check after acquiring lock (producer may have pushed).
+                    const h2 = inner.head.load(.acquire);
+                    if (h2 != t) {
+                        inner.lock.store(0, .release);
+                        continue; // Retry — data available now.
                     }
                     const task = inner.sched.getCurrent();
                     task.status.store(.Blocked, .release);
@@ -2640,12 +2675,10 @@ pub const CheatLib = struct {
             pub fn close(_: *Self) void {}
 
             /// Signal the generator fiber to stop.
-            /// Sets the closed flag and wakes the generator if it is blocked in push().
-            /// The generator will see closed=true, return error.StreamClosed, and free Inner
-            /// itself before exiting — so this function must NOT free Inner to avoid UAF.
+            /// Sets closed flag and wakes the producer if blocked.
+            /// The producer will see closed=true, return error.StreamClosed, and free Inner.
             pub fn deinit(self: *Self) void {
                 const inner = self.inner;
-                // Acquire lock, mark closed, and wake any blocked producer.
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 inner.closed = true;
                 if (inner.producer_task) |producer| {
@@ -2655,7 +2688,6 @@ pub const CheatLib = struct {
                 } else {
                     inner.lock.store(0, .release);
                 }
-                // Inner will be freed by the generator fiber when it exits via error.StreamClosed.
             }
         };
     }
