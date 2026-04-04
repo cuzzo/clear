@@ -151,11 +151,11 @@ RSpec.describe CleanupPlan do
         CLEAR
       end
 
-      it "marks TAKES slice param for cleanup with frame alloc" do
+      it "marks TAKES slice param for cleanup with heap alloc (callee owns buffer)" do
         entry = plan.lookup("items")
         expect(entry).not_to be_nil
         expect(entry[:kind]).to eq(:takes_slice)
-        expect(entry[:alloc]).to eq(:frame)
+        expect(entry[:alloc]).to eq(:heap)
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:source_kind]).to eq(:takes_param)
       end

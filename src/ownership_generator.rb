@@ -130,12 +130,11 @@ module OwnershipGenerator
       "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
 
     when :takes_slice
-      # TAKES slice: clean up elements with heapAlloc (element payloads like strings
-      # are heap-allocated via COPY), but don't free the buffer itself (it's owned
-      # by the caller's frame arena via ArrayList).
+      # TAKES slice: callee owns the buffer. Clean up elements then free buffer.
+      # Caller ensures buffer is heap-owned (via implicit COPY of @list).
       ti = node&.type_info
       elem_zig = ti&.element_type ? transpile_type(ti.element_type.resolved.to_s) : "UNKNOWN"
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } } };\n"
+      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); };\n"
 
     when :match_as_slice
       # The element type and cleanup are emitted by the MATCH transpiler

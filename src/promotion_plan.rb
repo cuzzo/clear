@@ -416,9 +416,10 @@ class CleanupPlan
           has_moved_guard: true, source_kind: :takes_param
         }
       elsif ti.array? && !ti.string?
-        # TAKES slice param (e.g. Value[]): needs cleanup of elements + buffer
+        # TAKES slice param: callee owns the buffer. Caller must pass a
+        # heap-owned buffer (via implicit COPY of @list or explicit COPY).
         bindings[name] = {
-          needs_cleanup: true, alloc: :frame, kind: :takes_slice,
+          needs_cleanup: true, alloc: :heap, kind: :takes_slice,
           has_moved_guard: true, source_kind: :takes_param
         }
       end

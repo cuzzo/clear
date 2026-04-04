@@ -181,9 +181,11 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks source as moved at call site" do
+    it "implicit-copies @list to TAKES param (source not consumed)" do
       body = fn_body(zig, "clearMain")
-      expect(body).to include("vals_moved = true")
+      # @list is implicit-copied for TAKES: callee gets heap buffer,
+      # source list is NOT consumed (its defer still fires).
+      expect(body).to include("heapAlloc")
     end
   end
 

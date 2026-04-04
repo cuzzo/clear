@@ -966,8 +966,9 @@ private
           visit(v)
         end
         # @list (ArrayListUnmanaged) → slice conversion for struct/union fields expecting []T
+        # Skip when value is CopyNode - the copy already produces a slice.
         vt = v.type_info.is_a?(Type) ? v.type_info : nil
-        val_code = "#{val_code}.items" if vt&.list_collection?
+        val_code = "#{val_code}.items" if vt&.list_collection? && !v.is_a?(AST::CopyNode)
         ".#{k} = #{val_code}"
       end.join(", ")
 
@@ -1778,7 +1779,7 @@ private
           is_capture = @do_capture_map&.key?(a.is_a?(AST::Identifier) ? a.name : nil)
           is_collection_param = a.is_a?(AST::Identifier) && current_tp_ctx&.collection_params&.include?(a.name)
           (is_capture || is_collection_param) ? arg_code : "&#{arg_code}"
-        elsif a.type_info&.array?
+        elsif a.type_info&.array? && !a.is_a?(AST::CopyNode)
           "(if (@hasField(@TypeOf(#{arg_code}), \"items\")) #{arg_code}.items else #{arg_code})"
         else
           arg_code
