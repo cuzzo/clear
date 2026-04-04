@@ -1,6 +1,6 @@
 -- Dynamic Spawn Benchmark — CLEAR
 --
--- Spawns 10K individual BG blocks, each does CPU-bound work (10K LCG
+-- Spawns 100K individual BG blocks, each does CPU-bound work (10K LCG
 -- iterations).  Measures per-spawn overhead + parallel execution.
 --
 -- This is CLEAR's individual-spawn path — each BG block pays GPA alloc
@@ -16,10 +16,10 @@ END
 FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0_i64 ..< 10000) -> futures.append(BG { doWork(i); });
+    FOR i IN (0_i64 ..< 100000) -> futures.append(BG { doWork(i); });
 
     MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< 10000) DO
+    FOR j IN (0_i64 ..< 100000) DO
         result = NEXT futures[j];
         total = total %+ result;
     END
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
 
     checksum = total MOD 1000000000;
     print("Checksum: ${checksum.toString()}");
-    print("Tasks: 10000");
+    print("Tasks: 100000");
     print("Iterations: 10000");
     print("Time: ${elapsed.toString()} ms");
     RETURN;

@@ -1,6 +1,6 @@
 // Dynamic Spawn Benchmark — Go
 //
-// Spawns 10K goroutines, each does CPU-bound work (10K LCG iterations).
+// Spawns 100K goroutines, each does CPU-bound work (10K LCG iterations).
 // Measures goroutine spawn overhead + parallel execution.
 //
 // Build: go build -o bench_go .
@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	nTasks     = 10_000
+	nTasks     = 100_000
 	iterations = 10_000
 )
 

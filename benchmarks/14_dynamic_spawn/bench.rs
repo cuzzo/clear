@@ -1,6 +1,6 @@
 // Dynamic Spawn Benchmark — Rust / Tokio
 //
-// Spawns 10K Tokio tasks, each does CPU-bound work (10K LCG iterations).
+// Spawns 100K Tokio tasks, each does CPU-bound work (10K LCG iterations).
 // Measures task spawn overhead + parallel execution.
 //
 // Build: cargo build --release
@@ -9,7 +9,7 @@
 use std::time::Instant;
 use tokio::task::JoinSet;
 
-const N_TASKS: usize = 10_000;
+const N_TASKS: usize = 100_000;
 const ITERATIONS: usize = 10_000;
 
 fn do_work(seed: i64) -> i64 {
