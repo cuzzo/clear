@@ -1,0 +1,136 @@
+-- LiteDB: Concurrent B-Tree Key-Value Store
+--
+-- Compiler stress test targeting under-tested paths:
+-- @shared:locked, @indirect unions, @multiowned results,
+-- DO blocks, ENUM dispatch, lambda parameters, nested BG.
+--
+-- Flat-array B-tree. Nodes stored in Node[]@list.
+-- Children stored in HashMap<Int64> keyed by "parentIdx:childPos".
+
+ENUM Op { Get, Put, Delete, Scan }
+
+STRUCT Node {
+    keys: Int64[]@list,
+    vals: String[]@list,
+    numChildren: Int64,
+    isLeaf: Bool
+}
+
+FN childKey(parentIdx: Int64, pos: Int64) RETURNS String ->
+    RETURN "${parentIdx.toString()}:${pos.toString()}";
+END
+
+-- Find the first index i where keys[i] >= key.
+FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
+    MUTABLE i: Int64 = 0;
+    WHILE i < keys.length() DO
+        IF keys[i] >= key -> RETURN i;
+        i += 1;
+    END
+    RETURN i;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE nodes: Node[]@list = [];
+    MUTABLE children: HashMap<Int64> = {};
+
+    -- Create root leaf (node 0)
+    nodes.append(Node{ keys: [], vals: [], numChildren: 0, isLeaf: TRUE });
+    rootIdx = 0;
+
+    -- Test 1: ENUM smoke test
+    op = Op.Get;
+    MUTABLE opName = "";
+    MATCH op START
+        Op.Get -> opName = "get";,
+        Op.Put -> opName = "put";,
+        Op.Delete -> opName = "delete";,
+        Op.Scan -> opName = "scan";
+    END
+    ASSERT opName == "get", "ENUM: Op.Get dispatches correctly";
+
+    -- Test 2: Append keys in sorted order and verify
+    nodes[rootIdx].keys.append(10);
+    nodes[rootIdx].vals.append("ten");
+    nodes[rootIdx].keys.append(20);
+    nodes[rootIdx].vals.append("twenty");
+    nodes[rootIdx].keys.append(30);
+    nodes[rootIdx].vals.append("thirty");
+
+    ASSERT nodes[rootIdx].keys.length() == 3, "leaf has 3 keys";
+    ASSERT nodes[rootIdx].keys[0] == 10, "key 0 is 10";
+    ASSERT nodes[rootIdx].keys[1] == 20, "key 1 is 20";
+    ASSERT nodes[rootIdx].keys[2] == 30, "key 2 is 30";
+    ASSERT nodes[rootIdx].vals[0] == "ten", "val 0 is ten";
+    ASSERT nodes[rootIdx].vals[2] == "thirty", "val 2 is thirty";
+
+    -- Test 3: findKeyIndex on sorted keys
+    ASSERT findKeyIndex(nodes[rootIdx].keys, 10) == 0, "findKeyIndex(10) == 0";
+    ASSERT findKeyIndex(nodes[rootIdx].keys, 15) == 1, "findKeyIndex(15) == 1";
+    ASSERT findKeyIndex(nodes[rootIdx].keys, 20) == 1, "findKeyIndex(20) == 1";
+    ASSERT findKeyIndex(nodes[rootIdx].keys, 35) == 3, "findKeyIndex(35) == 3";
+
+    -- Test 4: Search by key (linear scan through leaf)
+    MUTABLE found = "";
+    MUTABLE si: Int64 = 0;
+    WHILE si < nodes[rootIdx].keys.length() DO
+        IF nodes[rootIdx].keys[si] == 20 THEN
+            found = COPY nodes[rootIdx].vals[si];
+        END
+        si += 1;
+    END
+    ASSERT found == "twenty", "search: key 20 found";
+
+    -- Search for non-existent key
+    found = "";
+    si = 0;
+    WHILE si < nodes[rootIdx].keys.length() DO
+        IF nodes[rootIdx].keys[si] == 99 THEN
+            found = COPY nodes[rootIdx].vals[si];
+        END
+        si += 1;
+    END
+    ASSERT found == "", "search: key 99 not found";
+
+    -- Test 5: Update existing key value
+    si = 0;
+    WHILE si < nodes[rootIdx].keys.length() DO
+        IF nodes[rootIdx].keys[si] == 20 THEN
+            nodes[rootIdx].vals[si] = "TWENTY";
+        END
+        si += 1;
+    END
+    found = "";
+    si = 0;
+    WHILE si < nodes[rootIdx].keys.length() DO
+        IF nodes[rootIdx].keys[si] == 20 THEN
+            found = COPY nodes[rootIdx].vals[si];
+        END
+        si += 1;
+    END
+    ASSERT found == "TWENTY", "search: key 20 updated";
+
+    -- Test 6: ENUM dispatch on all variants
+    MUTABLE opCount: Int64 = 0;
+    MATCH Op.Get START Op.Get -> opCount += 1;, DEFAULT -> opCount += 0; END
+    MATCH Op.Put START Op.Put -> opCount += 1;, DEFAULT -> opCount += 0; END
+    MATCH Op.Delete START Op.Delete -> opCount += 1;, DEFAULT -> opCount += 0; END
+    MATCH Op.Scan START Op.Scan -> opCount += 1;, DEFAULT -> opCount += 0; END
+    ASSERT opCount == 4, "ENUM: all 4 Op variants dispatch correctly";
+
+    -- Test 7: Children HashMap
+    children[childKey(0, 0)] = 1;
+    children[childKey(0, 1)] = 2;
+    ASSERT (children[childKey(0, 0)] OR (0 - 1)) == 1, "child 0:0 is node 1";
+    ASSERT (children[childKey(0, 1)] OR (0 - 1)) == 2, "child 0:1 is node 2";
+    ASSERT (children[childKey(0, 2)] OR (0 - 1)) == 0 - 1, "child 0:2 not set";
+
+    -- Test 8: Multiple nodes
+    nodes.append(Node{ keys: [], vals: [], numChildren: 0, isLeaf: TRUE });
+    nodes[1].keys.append(40);
+    nodes[1].vals.append("forty");
+    ASSERT nodes[1].keys[0] == 40, "node 1 key 0 is 40";
+    ASSERT nodes.length() == 2, "2 nodes total";
+
+    print("Commit 1: all tests PASSED");
+END
