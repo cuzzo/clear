@@ -1645,7 +1645,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(src)
       expect(out).to include("base: f64,")
       expect(out).to include(".base = base")
-      expect(out).to include("ctx.base")
+      expect(out).to include("__ctx_0.base")
       expect(out).to include("p.next()")
     end
   end
@@ -1707,7 +1707,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.Promise(f64).spawn(")
         expect(out).to include("spawnBest(")
         expect(out).to include("break :")
-        expect(out).to include("ctx.inner.result = 42")
+        expect(out).to include("__ctx_0.inner.result = 42")
       end
 
       it "BgBlock captures outer variable by value (no pointer)" do
@@ -1718,8 +1718,8 @@ RSpec.describe SemanticAnnotator do
         # Initialized as .x = x  (not .x = &x)
         expect(out).to include(".x = x")
         # Accessed without deref: ctx.x (not ctx.x.*)
-        expect(out).to include("ctx.x")
-        expect(out).not_to include("ctx.x.*")
+        expect(out).to include("__ctx_0.x")
+        expect(out).not_to include("__ctx_0.x.*")
       end
 
       it "NextExpr emits .next() on the promise" do
@@ -1761,7 +1761,7 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("socketClose(ctx.client)")
+      expect(out).to include("socketClose(__ctx_0.client)")
       expect(out).to include("client_moved = true")
     end
 
@@ -1774,7 +1774,7 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("ctx.file.close()")
+      expect(out).to include("__ctx_0.file.close()")
     end
 
     it "emits client_moved = true in the outer scope for TCPClient captured by BG" do

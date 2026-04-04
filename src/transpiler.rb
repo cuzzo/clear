@@ -1505,10 +1505,10 @@ private
           const #{ctx_type} = struct {
               wg: *CheatHeader.WaitGroup,
               #{capture_fields}
-              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+              fn run(__raw_rt_do#{id}_#{i}: *anyopaque, __raw_args_do#{id}_#{i}: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_do#{id}_#{i})));
                   #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
-                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_do#{id}_#{i}.?)));
                   defer ctx.wg.done();
                   #{body_code}
               }
@@ -1612,7 +1612,11 @@ private
       last_step  = flat_steps.pop
       pre_steps  = flat_steps
 
-      stmt_code, result_line = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h) do
+      # Use a unique __rt name per BG block to avoid Zig shadowing errors
+      # when BG blocks are nested (inner fn run sees outer fn run's scope).
+      bg_rt = "__rt_bg#{id}"
+
+      stmt_code, result_line = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h, rt_override: bg_rt) do
         stmts = pre_steps.map { |step|
           code = visit(step[:expr])
           if step[:binding]
@@ -1655,7 +1659,9 @@ private
         [stmts, result]
       end
 
-      arena_init = node.arena_mode ? "__rt.arena_mode = true;" : ""
+      # bg_rt already defined above
+
+      arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
 
       # Defer-free for promoted captures inside the fiber.
       # Strings need explicit free (duped to heap); collections are freed
@@ -1679,18 +1685,18 @@ private
                 inner: *#{promise_zig}.Inner,
                 alloc: std.mem.Allocator,
                 #{capture_fields}
-                fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                    const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                    #{(stmt_code + result_line + capture_frees + arena_init).include?("__rt") ? "" : "_ = &__rt;"}
+                fn run(__raw_rt_#{id}: *anyopaque, __raw_args_#{id}: ?*anyopaque) anyerror!void {
+                    const #{bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_#{id})));
+                    #{(stmt_code + result_line + capture_frees + arena_init).include?(bg_rt) ? "" : "_ = &#{bg_rt};"}
                     #{arena_init}
-                    const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
-                    defer ctx.alloc.destroy(ctx);
-                    defer ctx.inner.wg.done();
-                    errdefer |fiber_err| ctx.inner.result = fiber_err;
-                    #{capture_frees}
-                    #{stmt_code}
-                    #{result_line}
-                    #{is_void ? "ctx.inner.result = {};" : ""}
+                    const __ctx_#{id} = @as(*@This(), @ptrCast(@alignCast(__raw_args_#{id}.?)));
+                    defer __ctx_#{id}.alloc.destroy(__ctx_#{id});
+                    defer __ctx_#{id}.inner.wg.done();
+                    errdefer |fiber_err| __ctx_#{id}.inner.result = fiber_err;
+                    #{capture_frees.gsub(/\bctx\./, "__ctx_#{id}.")}
+                    #{stmt_code.gsub(/\bctx\./, "__ctx_#{id}.")}
+                    #{result_line.gsub(/\bctx\./, "__ctx_#{id}.")}
+                    #{is_void ? "__ctx_#{id}.inner.result = {};" : ""}
                 }
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
@@ -1758,10 +1764,10 @@ private
                 stream_inner: *#{stream_zig}.Inner,
                 alloc: std.mem.Allocator,
                 #{capture_fields}
-                fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                    const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                fn run(__raw_rt_sg#{id}: *anyopaque, __raw_args_sg#{id}: ?*anyopaque) anyerror!void {
+                    const __rt = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_sg#{id})));
                     #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
-                    const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                    const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_sg#{id}.?)));
                     defer ctx.alloc.destroy(ctx);
                     #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
                     var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
@@ -3369,11 +3375,11 @@ private
 
   # Temporarily installs a new fiber capture map and rt alias, runs the block, then restores.
   # Used by both DoBlock (per-branch) and BgBlock to rewrite identifier access inside fiber bodies.
-  def with_fiber_capture_map(new_entries, &blk)
+  def with_fiber_capture_map(new_entries, rt_override: "__rt", &blk)
     prev_map = @do_capture_map || {}
     prev_rt  = @do_rt_name
     @do_capture_map = prev_map.merge(new_entries)
-    @do_rt_name     = "__rt"
+    @do_rt_name     = rt_override
     result = blk.call
     @do_capture_map = prev_map
     @do_rt_name     = prev_rt
