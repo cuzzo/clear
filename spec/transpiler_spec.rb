@@ -1069,4 +1069,26 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("@memcpy")
     end
   end
+
+  # ===========================================================================
+  # EXTERN method trampoline
+  # ===========================================================================
+  describe "EXTERN method calls use onRootStack trampoline" do
+    it "emits method trampoline for EXTERN FN on EXTERN STRUCT" do
+      src = <<~CLEAR
+        EXTERN STRUCT Dir {} FROM "std.fs";
+        EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+        EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
+        FN main() RETURNS Void ->
+          cwd().makePath("data");
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("__ExtM")
+      expect(zig).to include("self_val")
+      expect(zig).to include("onRootStack")
+      expect(zig).to include(".makePath")
+    end
+  end
 end

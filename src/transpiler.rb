@@ -1809,12 +1809,71 @@ private
       result
 
     when AST::FuncCall, AST::MethodCall
-      # EXTERN method dispatch: obj.method() → direct method call (no UFCS, no module prefix)
+      # EXTERN method dispatch: obj.method() → trampoline to g0 stack via onRootStack.
       if node.is_a?(AST::MethodCall) && node.instance_variable_get(:@extern_method)
         obj_code = visit(node.object)
-        args_code = node.args.map { |a| visit(a) }.join(", ")
-        call = args_code.empty? ? "#{obj_code}.#{node.name}()" : "#{obj_code}.#{node.name}(#{args_code})"
-        return call
+        args_zig = node.args.map { |a| visit(a) }
+        rt_name = @do_rt_name || "rt"
+        @extern_trampoline_counter = (@extern_trampoline_counter || 0) + 1
+        tid = @extern_trampoline_counter
+
+        effects = node.extern_effects || {}
+        alloc_kind = effects.is_a?(Hash) ? effects[:alloc] : nil
+        has_alloc = !!alloc_kind
+        ret_type = node.full_type
+        ret_type_obj = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type || :Void)
+        is_error_union = ret_type_obj.error_union?
+        inner_zig = is_error_union ? ret_type_obj.payload_type.zig_type : ret_type_obj.zig_type
+        is_void = (inner_zig == "void")
+
+        obj_type = node.object.type_info
+        obj_zig = obj_type.is_a?(Type) ? obj_type.zig_type : Type.new(obj_type).zig_type
+
+        # Build native call: f.self_val.methodName([alloc,] args...)
+        native_args = args_zig.each_index.map { |i| "f.a#{i}" }
+        native_args.unshift("f.alloc") if has_alloc
+        native_call = "f.self_val.#{node.name}(#{native_args.join(', ')})"
+        native_call = "(#{native_call} catch |err| { f.err = err; return; })" if is_error_union
+
+        # Trampoline struct fields
+        arg_fields = args_zig.each_with_index.map { |_, i|
+          arg_type = node.args[i]&.type_info
+          zig_t = arg_type.is_a?(Type) ? arg_type.zig_type : (arg_type ? Type.new(arg_type).zig_type : "@TypeOf(__extm#{tid}_args[#{i}])")
+          "a#{i}: #{zig_t}"
+        }.join(", ")
+        self_field = "self_val: #{obj_zig}"
+        alloc_field = has_alloc ? "alloc: std.mem.Allocator, " : ""
+        err_field = is_error_union ? "err: ?anyerror = null, " : ""
+        err_check = is_error_union ? "if (__extm#{tid}_frame.err) |e| return e; " : ""
+
+        all_fields = [self_field, alloc_field + arg_fields].reject(&:empty?).join(", ")
+        arg_tuple = args_zig.empty? ? ".{}" : ".{ #{args_zig.join(', ')} }"
+        alloc_zig = case alloc_kind
+                    when :frame then "#{rt_name}.frameAlloc()"
+                    when :heap  then "#{rt_name}.heapAlloc()"
+                    else nil
+                    end
+        alloc_init = has_alloc ? ", .alloc = #{alloc_zig}" : ""
+        field_inits = args_zig.each_index.map { |i| ".a#{i} = __extm#{tid}_args[#{i}]" }.join(', ')
+
+        if is_void && !is_error_union
+          return "{ const __extm#{tid}_args = #{arg_tuple}; " \
+          "const __ExtM#{tid} = struct { #{all_fields}, " \
+          "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
+          "f.self_val.#{node.name}(#{native_args.join(', ')}) catch {}; } }; " \
+          "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}#{field_inits.empty? ? '' : ', ' + field_inits}#{alloc_init} }; " \
+          "#{trampoline_call_method(tid, rt_name, node)}; }"
+        else
+          return "blk_extm#{tid}: { const __extm#{tid}_args = #{arg_tuple}; " \
+          "const __ExtM#{tid} = struct { #{all_fields}, #{err_field}ret: #{inner_zig} = undefined, " \
+          "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
+          "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
+          "f.ret = #{native_call}; } }; " \
+          "var __extm#{tid}_frame = __ExtM#{tid}{ .self_val = #{obj_code}, #{field_inits}#{alloc_init} }; " \
+          "#{trampoline_call_method(tid, rt_name, node)}; " \
+          "#{err_check}break :blk_extm#{tid} __extm#{tid}_frame.ret; }"
+        end
       end
 
       # Pool method dispatch: pool.insert/get/remove bypass UFCS
@@ -1951,9 +2010,10 @@ private
         all_fields_void = all_fields_void.empty? ? "" : "#{all_fields_void}, "
         all_fields_ret = [alloc_field, arg_fields, err_field].reject(&:empty?).join(", ")
         all_fields_ret = all_fields_ret.empty? ? "" : "#{all_fields_ret}, "
+        args_decl = runtime_args_zig.any? ? "const __ext#{tid}_args = #{arg_tuple}; " : ""
 
         if is_void && !is_error_union
-          "{ const __ext#{tid}_args = #{arg_tuple}; " \
+          "{ #{args_decl}" \
           "const __Ext#{tid} = struct { #{all_fields_void}" \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \
@@ -1961,7 +2021,7 @@ private
           "var __ext#{tid}_frame = __Ext#{tid}{ #{field_inits}#{alloc_init} }; " \
           "#{trampoline_call(tid, rt_name, node)}; }"
         else
-          "blk_ext#{tid}: { const __ext#{tid}_args = #{arg_tuple}; " \
+          "blk_ext#{tid}: { #{args_decl}" \
           "const __Ext#{tid} = struct { #{all_fields_ret}ret: #{inner_zig} = undefined, " \
           "fn run(ptr: ?*anyopaque) callconv(.c) void { " \
           "const f: *@This() = @ptrCast(@alignCast(ptr)); " \

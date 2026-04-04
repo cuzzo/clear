@@ -9,12 +9,14 @@
 -- JSON format: {"id":N,"data":[1,2,3,...,size]}
 -- Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
 
--- Direct std.json FFI for JSON parsing (:safe = runs on fiber stack, no onRootStack).
--- json_native.zig shim only for ensureDir (cwd().makePath EXTERN method call is broken).
+-- Direct FFI -- no shim .zig files needed.
 EXTERN STRUCT ParseOptions {};
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
 EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions) RETURNS !T EFFECTS :alloc:heap FROM "std.json";
-EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
+
+EXTERN STRUCT Dir {} FROM "std.fs";
+EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
 
 FN sizeForId(id: Int64) RETURNS Int64 ->
     RETURN ((id * 7 + 13) MOD 997) + 10;
@@ -88,7 +90,7 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-    ensureDir("data");
+    cwd().makePath("data");
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
