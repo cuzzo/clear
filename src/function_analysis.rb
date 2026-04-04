@@ -214,18 +214,16 @@ module FunctionAnalysis
         node.heap_promoted_call = true
       else
         # Union return types with heap variants need heap_promoted_call
-        # when the callee returns heap-owned data (returns_promoted or
-        # TAKES parameters that transfer heap ownership to return value).
+        # when the callee allocates at all (frame, heap, or alloc).
+        # If it allocates, the return may contain promoted or heap data.
         ret_type = node.type_info
         if ret_type
           ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
           schema = lookup_type_schema(ret_sym)
           if schema.is_a?(Hash) && schema[:kind] == :union
             has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-            # Set heap_promoted_call if callee returns promoted data OR
-            # callee takes TAKES params (return values are heap-owned).
-            callee_heap = callee_node&.returns_promoted || callee_node&.uses_heap
-            node.heap_promoted_call = true if has_heap && callee_heap
+            callee_allocates = callee_node&.returns_promoted || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
+            node.heap_promoted_call = true if has_heap && callee_allocates
           end
         end
       end
