@@ -2211,6 +2211,11 @@ private
       end
 
     when AST::Identifier
+      # JOIN lambda param mapping
+      if @join_param_map && @join_param_map[node.name]
+        return @join_param_map[node.name]
+      end
+
       # [FIX] Handle '_' Identifier acting as a Placeholder
       if node.name == "_" && @placeholder_name
         return @placeholder_name
@@ -2490,6 +2495,26 @@ private
     elsif node.right.is_a?(AST::MaxOp)
       return transpile_max(node.left, node.right, node)
 
+    elsif node.right.is_a?(AST::TakeWhileOp)
+      return transpile_take_while(node.left, node.right.expression, node)
+
+    elsif node.right.is_a?(AST::WindowOp)
+      return transpile_window(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::JoinOp)
+      return transpile_join(node.left, node.right, node)
+
+    elsif node.right.is_a?(AST::RecoverOp)
+      default_code = visit(node.right.default_expr)
+      left_code = visit(node.left).sub(/^try /, '')
+      return "(#{left_code} catch #{default_code})"
+
+    elsif node.right.is_a?(AST::TapOp)
+      return transpile_tap(node)
+
+    elsif node.right.is_a?(AST::SkipOp)
+      return transpile_skip(node.left, node.right, node)
+
     elsif node.right.is_a?(AST::ShardOp)
       # SHARD is consumed by the subsequent CONCURRENT EACH — not visited standalone.
       # The ConcurrentOp handler reads the ShardOp from its LHS.
@@ -2538,6 +2563,17 @@ private
         return "try #{left_raw}"
       else
         # Non-error type: just return the value
+        return left
+      end
+    end
+
+    # Handle OR EXIT "message": set error context message + propagate
+    if node.right.is_a?(AST::OrExit)
+      rt_name = @do_rt_name || "rt"
+      msg_code = visit(node.right.message)
+      if t_left.error_union?
+        return "(#{left_raw} catch |__exit_err| {\n#{rt_name}.__error.message = #{msg_code};\n#{rt_name}.__error.clear_line = #{node.token.line};\nreturn __exit_err;\n})"
+      else
         return left
       end
     end
