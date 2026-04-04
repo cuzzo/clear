@@ -3724,15 +3724,32 @@ private
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
         if stmt.is_a?(AST::ReturnNode) && temps.any? { |t| t[:var] && code.include?(t[:var]) }
-          # Suppress cleanup for __hpt vars used anywhere in a return expression.
-          # The returned value may borrow from the HPT (e.g. prStr returning a
-          # Str variant's slice). Zig defers run after the return value is set
-          # but the caller reads freed memory. Suppressing cleanup transfers
-          # ownership to the caller's scope.
-          move_suppression = temps.filter_map { |t|
-            "#{t[:var]}_moved = true;" if code.include?(t[:var])
-          }.join("\n")
-          code = "#{preamble}\n#{move_suppression}\n#{code}"
+          rt_name = @do_rt_name || "rt"
+          direct_return = temps.any? { |t| code.strip == "return #{t[:var]};" || code.strip == "return try #{t[:var]};" }
+          if direct_return
+            # Direct return of an HPT: ownership transfers to caller, skip cleanup.
+            move_suppression = temps.filter_map { |t|
+              "#{t[:var]}_moved = true;" if code.include?(t[:var])
+            }.join("\n")
+            code = "#{preamble}\n#{move_suppression}\n#{code}"
+          else
+            # Indirect return (e.g. return prStr(HPT)): the result may borrow
+            # from the HPT. Capture it, promote to independent copy, then let
+            # HPT cleanup run normally (no leak).
+            ret_ti = stmt.value&.type_info rescue nil
+            if ret_ti&.string?
+              # Extract the return expression and save to a local, dupe it,
+              # then return the dupe. HPT defers clean up the original.
+              ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
+              code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
+            else
+              # Non-string return with HPT: suppress cleanup (safe fallback).
+              move_suppression = temps.filter_map { |t|
+                "#{t[:var]}_moved = true;" if code.include?(t[:var])
+              }.join("\n")
+              code = "#{preamble}\n#{move_suppression}\n#{code}"
+            end
+          end
         else
           code = "#{preamble}\n#{code}"
         end

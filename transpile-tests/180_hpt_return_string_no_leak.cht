@@ -1,0 +1,29 @@
+-- Test: returning a string from a function that wraps an HPT call must
+-- not leak the HPT. The returned string must be promoted to an independent
+-- copy so the HPT can be cleaned up.
+
+UNION Value { Nil, Str: String, Number: Float64 }
+
+FN getStr(v: Value) RETURNS String ->
+    MATCH v START
+        Value.Str AS s -> RETURN s;,
+        DEFAULT -> RETURN "nil";
+    END
+    RETURN "nil";
+END
+
+FN makeValue!(s: String) RETURNS Value ->
+    RETURN Value{ Str: COPY s };
+END
+
+FN wrapAndGet!(input: String) RETURNS String ->
+    -- makeValue! returns a heap Value (HPT). getStr borrows from it.
+    -- The HPT must be cleaned up, and the returned string must survive.
+    RETURN getStr(makeValue!(input));
+END
+
+FN main() RETURNS Void ->
+    result = wrapAndGet!("hello");
+    ASSERT result == "hello", "returned string matches";
+    print("180: hpt return string no leak PASSED");
+END
