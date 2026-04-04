@@ -2923,11 +2923,16 @@ private
       # assignment) is an error. Plain variable declarations get borrow marking
       # via register_container_borrow! instead.
       if node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
-        container = find_container_source(node.value)
-        if container
-          source_name = root_variable_name(node.value)
-          if source_name && @og[source_name]&.kind == :borrowed
-            error!(node, "Cannot move borrowed value from '#{source_name}' (container index is a borrow). Use COPY for an explicit deep-copy.")
+        vti = node.value.type_info
+        vti = Type.new(vti) if vti && !vti.is_a?(Type)
+        is_copy = vti&.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
+        unless is_copy
+          container = find_container_source(node.value)
+          if container
+            source_name = root_variable_name(node.value)
+            if source_name && @og[source_name]&.kind == :borrowed
+              error!(node, "Cannot move borrowed value from '#{source_name}' (container index is a borrow). Use COPY for an explicit deep-copy.")
+            end
           end
         end
       end
