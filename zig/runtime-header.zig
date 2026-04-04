@@ -1844,7 +1844,7 @@ pub const CheatLib = struct {
 
     /// Returns true if a type needs cleanup (has heap-allocated data).
     pub fn needsCleanup(comptime FT: type) bool {
-        @setEvalBranchQuota(10000);
+        @setEvalBranchQuota(100000);
         if (FT == []const u8 or FT == []u8) return true;
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
@@ -1852,27 +1852,20 @@ pub const CheatLib = struct {
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
         const ft_info = @typeInfo(FT);
+        // Pointers and non-string slices trivially need cleanup (heap data).
+        // Check BEFORE recursing to avoid exponential blowup on recursive types.
+        if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
+        if (ft_info == .pointer and ft_info.pointer.size == .slice) return true;
         // Types with deinit manage their own lifecycle — don't recurse into fields.
         if (ft_info == .@"struct" and @hasDecl(FT, "deinit")) return true;
-        // Note: non-string slices excluded from needsCleanup. Slice cleanup
-        // inside unions is handled by the union cleanup handler directly.
-        // Including slices here causes over-freeing in ArrayList element recursion.
         if (ft_info == .@"struct") {
             inline for (ft_info.@"struct".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
-                const fi = @typeInfo(field.type);
-                if (fi == .pointer and fi.pointer.size == .one) return true;
-                if (fi == .pointer and fi.pointer.size == .slice and
-                    field.type != []const u8 and field.type != []u8) return true;
             }
         }
         if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
             inline for (ft_info.@"union".fields) |field| {
                 if (comptime needsCleanup(field.type)) return true;
-                // Non-string slice variants need cleanup (heap buffers from promoteList).
-                const fi = @typeInfo(field.type);
-                if (fi == .pointer and fi.pointer.size == .slice and
-                    field.type != []const u8 and field.type != []u8) return true;
             }
         }
         return false;

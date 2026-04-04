@@ -632,3 +632,53 @@ test "dupeUnionValue deep-copies string variant independently" {
     var copy_mut = copied;
     CheatLib.cleanup(TestValue, alloc, &copy_mut);
 }
+
+// Recursive union type similar to the interpreter's Value (17 variants,
+// @indirect pointers, slices of self). needsCleanup must handle this
+// without exceeding comptime branch limits.
+const RecValue_Pair = struct { car: *RecValue, cdr: *RecValue };
+const RecValue_Lambda = struct { params: []RecValue, body: *RecValue, env_id: u64 };
+const RecValue_Tco = struct { ast: *RecValue, env_id: u64 };
+const RecValue_Error = struct { msg: []const u8, kind: []const u8 };
+const RecValue = union(enum) {
+    Nil: void,
+    TrueVal: void,
+    FalseVal: void,
+    Number: f64,
+    Str: []const u8,
+    Symbol: []const u8,
+    List: []RecValue,
+    Vector: []RecValue,
+    Pair: RecValue_Pair,
+    Lambda: RecValue_Lambda,
+    NativeFn: i64,
+    EnvRef: u64,
+    Tco: RecValue_Tco,
+    Error: RecValue_Error,
+    Int64Val: i64,
+    TypedI64Arr: []i64,
+    TypedF64Arr: []f64,
+};
+
+test "needsCleanup: recursive union with 17 variants compiles" {
+    // This test verifies needsCleanup handles deeply recursive types
+    // without exceeding comptime branch limits. If it compiles, it passes.
+    try std.testing.expect(CheatLib.needsCleanup(RecValue));
+    try std.testing.expect(CheatLib.needsCleanup([]RecValue));
+    try std.testing.expect(CheatLib.needsCleanup(RecValue_Lambda));
+    try std.testing.expect(CheatLib.needsCleanup(RecValue_Pair));
+}
+
+test "cleanup: recursive union Str variant" {
+    const alloc = std.testing.allocator;
+    var val = RecValue{ .Str = try alloc.dupe(u8, "test") };
+    CheatLib.cleanup(RecValue, alloc, &val);
+}
+
+test "cleanup: recursive union slice" {
+    const alloc = std.testing.allocator;
+    var buf = try alloc.alloc(RecValue, 2);
+    buf[0] = RecValue{ .Str = try alloc.dupe(u8, "a") };
+    buf[1] = RecValue{ .Number = 42.0 };
+    CheatLib.cleanup([]RecValue, alloc, &buf);
+}
