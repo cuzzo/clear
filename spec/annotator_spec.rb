@@ -1367,6 +1367,35 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Pool Id<T> is implicitly copyable" do
+      it "allows assigning Id<T> to a variable (Id is Copy)" do
+        src = <<~CLEAR
+          STRUCT Node { value: Int64 }
+          FN main() RETURNS Void ->
+              MUTABLE pool: Node[100]@pool = [];
+              id1: Id<Node> = pool.insert(Node{ value: 1 });
+              id2: Id<Node> = pool.insert(Node{ value: 2 });
+              copy_of_id = id1;
+              RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "rejects moving non-Copy borrowed value into struct field" do
+        src = <<~CLEAR
+          UNION Value { Nil, Str: String }
+          STRUCT Pair { a: Value, b: Value }
+          FN f(v: Value) RETURNS Void ->
+              p = Pair{ a: v, b: Value.Nil };
+              RETURN;
+          END
+          FN main() RETURNS Void -> f(Value.Nil); RETURN; END
+        CLEAR
+        expect { run(src) }.to raise_error(/Cannot store borrowed value/)
+      end
+    end
+
     context "Break and Continue" do
       context "Inside Loop" do
         let(:code) {

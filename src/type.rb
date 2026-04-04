@@ -847,6 +847,8 @@ class Type
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
+    # Pool Id<T> handles are u64 indices — always Copy.
+    return true if generic_instance? && generic_base == :Id
     # String literals (rodata) are Copy - static data, never freed.
     return true if string? && rodata?
     # Non-literal strings are NOT Copy - they reference frame/heap data.
