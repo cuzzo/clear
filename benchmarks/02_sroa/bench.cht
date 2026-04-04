@@ -78,7 +78,7 @@ FN main() RETURNS Void ->
     -- TIGHT: pure compute loop — no arena cleanup needed, no yield overhead.
     -- Eliminates saveLoopMark/restoreLoopMark (the dominant cost in the previous
     -- version) and checkYield. See benchmark comments above.
-    TIGHT WHILE i < 10000000 DO
+    TIGHT WHILE i < 100000000 DO
         -- Inputs fed from acc: same recurrence as the C baseline, prevents
         -- constant folding and matches the serial dependency chain.
         -- CLEAR emits all 130 field initialisations here. C's SROA pass

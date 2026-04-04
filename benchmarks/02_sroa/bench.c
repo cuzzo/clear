@@ -55,7 +55,7 @@ static double sum3(BigVec v) {
 
 int main(void) {
     /* volatile prevents the compiler from evaluating the loop at compile time */
-    volatile int64_t limit = 10000000;
+    volatile int64_t limit = 100000000;
 
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
