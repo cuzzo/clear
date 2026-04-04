@@ -792,7 +792,10 @@ private
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
-        visit(node.value)
+        current_tp_ctx&.bind_value_node = node.value
+        val = visit(node.value)
+        current_tp_ctx&.bind_value_node = nil
+        val
       end
 
       safe_name = zig_safe_name(node.name)
@@ -833,7 +836,9 @@ private
       else
         # Transpile as reassignment — clean up old value for non-Copy types.
         safe = zig_safe_name(node.name)
+        current_tp_ctx&.bind_value_node = node.value
         value_str = visit(node.value)
+        current_tp_ctx&.bind_value_node = nil
         move_logic = emit_move_suppression(node.value)
 
         fn_name = current_tp_ctx&.fn_name
@@ -1933,12 +1938,26 @@ private
 
         is_tail_self_call = @current_tail_call_fn == node.name
         llvm_backend = !(@default_stack_size == "Large")
-        if is_tail_self_call && llvm_backend
-          call = "@call(.always_tail, #{fn_zig}, .{#{args.join(', ')}})"
-          call
+        call_code = if is_tail_self_call && llvm_backend
+          "@call(.always_tail, #{fn_zig}, .{#{args.join(', ')}})"
         else
           call = "#{fn_zig}(#{args.join(', ')})"
           can_fail ? "try #{call}" : call
+        end
+
+        # Heap-promoted temp hoisting: capture heap-allocated return values
+        # into temp vars with defer cleanup. Skip when:
+        # - Direct bind value (VarDecl/BindExpr handles cleanup)
+        # - TAKES/GIVE (ownership transfers to callee)
+        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call &&
+           !node.equal?(current_tp_ctx&.bind_value_node) && !node.was_moved && !current_tp_ctx&.inside_give
+          ctx = current_tp_ctx
+          ctx.heap_temp_counter += 1
+          tmp = "__hpt_#{ctx.heap_temp_counter}"
+          ctx.pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info }
+          tmp
+        else
+          call_code
         end
       end
 
@@ -1968,6 +1987,9 @@ private
           suppress = "#{zig_safe_name(ident.name)}_moved = true;\n#{suppress}"
         end
       end
+      # Set bind_value_node so heap_promoted_call hoisting is skipped -
+      # the return transfers ownership to the caller, no temp needed.
+      current_tp_ctx&.bind_value_node = node.value
       val_code = if node.value.nil?
         ""
       elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
@@ -1975,6 +1997,7 @@ private
       else
         visit(node.value)
       end
+      current_tp_ctx&.bind_value_node = nil
 
       # 3. Escape promotion — driven by PromotionPlan (Pass C).
       plan = @promotion_plans&.dig(current_tp_ctx&.fn_name)
