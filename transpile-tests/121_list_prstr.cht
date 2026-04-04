@@ -38,7 +38,7 @@ END
 FN evalList!(TAKES items: Value[]) RETURNS Value ->
     MUTABLE evaled: Value[]@list = List[];
     FOR ei IN (0_i64 ..< items.length()) DO
-        evaled.append(items[ei]);
+        evaled.append(COPY items[ei]);
     END
     f = evaled.remove(0_i64);
     MATCH f START
