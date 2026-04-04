@@ -2226,7 +2226,16 @@ private
       # This ensures GIVE f; as a statement correctly suppresses the local defer.
       if node.value.is_a?(AST::Identifier)
         safe_name = zig_safe_name(node.value.name)
-        "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
+        # Only emit _moved = true when the cleanup plan declared a moved guard.
+        # Copy types (e.g., unions with only primitive variants) have no cleanup
+        # entry, so no _moved variable exists — just pass the value directly.
+        fn_name = current_tp_ctx&.fn_name
+        entry = @cleanup_plans&.dig(fn_name)&.lookup(safe_name)
+        if entry && entry[:has_moved_guard]
+          "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
+        else
+          safe_name
+        end
       else
         # GIVE expr (non-identifier): ownership transfers to callee.
         saved = current_tp_ctx&.inside_give
