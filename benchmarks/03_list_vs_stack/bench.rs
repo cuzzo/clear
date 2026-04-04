@@ -4,15 +4,10 @@
 //   Vec::with_capacity(N) does ONE heap allocation upfront. After that,
 //   push() is a bounds-checked write with zero allocator calls.
 //   The sum loop is a tight iterator that LLVM can auto-vectorize.
-//
-//   Rust does pay one malloc per outer iteration (unlike C's zero),
-//   but the allocator is the system default (very fast for fixed sizes).
-//
-// This sits between C (pure stack, zero alloc) and CLEAR (GPA + try-per-push).
 
 use std::time::Instant;
 
-const N: usize = 1000;
+const N: usize = 10000;
 
 fn main() {
     let start = Instant::now();

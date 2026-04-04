@@ -1,21 +1,25 @@
 -- Heap Array Benchmark
 --
--- All three languages allocate a 1000-element heap array per outer
--- iteration, fill it, sum it, and discard it. 1000 outer iterations.
+-- All three languages allocate a 10000-element heap array per outer
+-- iteration, fill it, sum it, and discard it. 10000 outer iterations.
+-- Total: 100M element writes + 100M element reads.
 --
--- C:     malloc + indexed write (arr[i] = val). Zero overhead per element.
--- Rust:  Vec::with_capacity + push. Bounds check per push, no realloc.
--- CLEAR: Float64[1000]@list + indexed write. Pre-allocated and expanded
---        to full capacity. Frame arena rewound each iteration.
+-- C:     malloc + indexed write + inline sum + free.
+-- Rust:  Vec::with_capacity + push + iter.sum().
+-- CLEAR: Float64[10000]@list + indexed write + inline sum.
+--        Frame arena rewound each iteration.
 
 FN main() RETURNS Void ->
+    n = 10000;
     t0 = timestampMs();
     MUTABLE total: Float64 = 0.0;
-    FOR outer IN (0_i64 ..< 1000) DO
-        MUTABLE vals: Float64[1000]@list = [];
+    FOR outer IN (0_i64 ..< n) DO
+        MUTABLE vals: Float64[10000]@list = [];
         MUTABLE inner: Int64 = 0;
-        TIGHT WHILE inner < 1000 DO vals[inner] = inner + 0.0; inner += 1; END
-        s = vals s> SUM _;
+        TIGHT WHILE inner < n DO vals[inner] = inner + 0.0; inner += 1; END
+        MUTABLE s: Float64 = 0.0;
+        inner = 0;
+        TIGHT WHILE inner < n DO s += vals[inner]; inner += 1; END
         total = total + s;
     END
     ASSERT total > 0.0, "total must be positive";

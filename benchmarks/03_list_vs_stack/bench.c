@@ -3,9 +3,9 @@
  *
  * Allocates a heap array each outer iteration via malloc, fills it,
  * sums it, and frees it. Apples-to-apples comparison with Rust
- * (Vec::with_capacity) and CLEAR (Float64[1000]@list).
+ * (Vec::with_capacity) and CLEAR (Float64[10000]@list).
  *
- * 1000 outer iterations × 1000 element fills + sums:
+ * 10000 outer iterations × 10000 element fills + sums:
  *   - 1 malloc + 1 free per outer iteration
  *   - 0 reallocs (pre-allocated to exact size)
  */
@@ -16,7 +16,7 @@
 #include <assert.h>
 #include <time.h>
 
-#define N 1000
+#define N 10000
 
 int main(void) {
     struct timespec start, end;
