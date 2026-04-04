@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const N = 100000
+const N = 1000000
 
 func readMemory() (hwmKB, rssKB int64) {
 	f, err := os.Open("/proc/self/status")

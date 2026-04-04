@@ -20,7 +20,7 @@
 #include <time.h>
 #include <assert.h>
 
-#define N 100000
+#define N 1000000
 
 static double elapsed_ms(struct timespec a, struct timespec b) {
     return (b.tv_sec - a.tv_sec) * 1e3 + (b.tv_nsec - a.tv_nsec) / 1e6;

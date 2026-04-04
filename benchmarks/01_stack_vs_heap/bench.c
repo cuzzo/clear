@@ -15,14 +15,14 @@ int main() {
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    int64_t result = fib(35);
-    assert(result == 9227465);
+    int64_t result = fib(40);
+    assert(result == 102334155);
 
     clock_gettime(CLOCK_MONOTONIC, &end);
     double elapsed = (end.tv_sec - start.tv_sec) + 
                     (end.tv_nsec - start.tv_nsec) / 1e9;
 
-    printf("Fib(35) = %ld\n", result);
+    printf("Fib(40) = %ld\n", result);
     printf("Time: %.4f seconds\n", elapsed);
     return 0;
 }

@@ -9,8 +9,8 @@ fn fib(n: i64) -> i64 {
 
 fn main() {
     let start = Instant::now();
-    let result = fib(35);
-    assert_eq!(result, 9227465);
+    let result = fib(40);
+    assert_eq!(result, 102334155);
     let duration = start.elapsed();
 
     println!("Fib(35) = {}", result);

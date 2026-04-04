@@ -8,10 +8,10 @@ END
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
-    r = fib(35);
+    r = fib(40);
     elapsed = timestampMs() - t0;
-    ASSERT r == 9227465, "Fib(35) calculation error";
-    print("Fib(35) = ${r.toString()}");
+    ASSERT r == 102334155, "Fib(40) calculation error";
+    print("Fib(40) = ${r.toString()}");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

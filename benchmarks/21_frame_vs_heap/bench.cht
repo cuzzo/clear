@@ -40,7 +40,7 @@ FN benchHeap(n: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    n = 100000;
+    n = 1000000;
 
     -- Warm up
     benchFrame(1000);

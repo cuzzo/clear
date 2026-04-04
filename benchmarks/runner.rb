@@ -145,7 +145,24 @@ def run_bench(dir)
     results[:clear] = measure_min("#{jemalloc_preload}BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs)
   end
 
-  # 6. Reporting
+  # 6. Capture peak RSS for each lang via /usr/bin/time
+  peak_rss = {}
+  [:c, :go, :rust, :clear].each do |lang|
+    bin = case lang
+          when :c     then "#{dir}/bench_c"
+          when :go    then "#{dir}/bench_go"
+          when :rust  then "#{dir}/bench_rust"
+          when :clear then "#{dir}/bench_clear"
+          end
+    next unless bin && File.exist?(bin)
+    env = lang == :clear ? "#{jemalloc_preload}CLEAR_THREADS=#{threads} " : ""
+    output = `#{env}/usr/bin/time -v #{bin} 2>&1`
+    if output =~ /Maximum resident set size.*?:\s*(\d+)/
+      peak_rss[lang] = $1.to_i
+    end
+  end
+
+  # 7. Reporting
   puts "\nRESULTS for #{dir}:"
 
   rust_label = File.exist?("#{dir}/Cargo.toml") ? "Rust (tokio)" : "Rust (threads)"
@@ -154,7 +171,8 @@ def run_bench(dir)
   baseline_label = { c: "C", go: "Go", rust: "Rust" }
 
   results.each do |lang, t|
-    puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s"
+    rss_str = peak_rss[lang] ? "  RSS: #{peak_rss[lang]} KB" : ""
+    puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s#{rss_str}"
   end
 
   [:c, :go, :rust].each do |k|
@@ -162,6 +180,11 @@ def run_bench(dir)
     overhead = (results[:clear] / results[k]) * 100 - 100
     sign = overhead >= 0 ? "+" : ""
     puts "CLEAR vs #{baseline_label[k]}:         #{sign}#{'%.2f' % overhead}%"
+  end
+
+  if peak_rss[:clear] && peak_rss[:c]
+    ratio = ((peak_rss[:clear].to_f / peak_rss[:c]) * 100).round(1)
+    puts "CLEAR RSS / C RSS:     #{ratio}%"
   end
 end
 
