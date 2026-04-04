@@ -26,16 +26,12 @@ class PromotionPlan
   # Emits: try CheatLib.promote(<struct_promote>, rt, &__ret);
   attr_reader :struct_promote
 
-  # String return promotion: dupe frame string to heap before return.
-  attr_reader :string_promote
-
   # Variables whose defer cleanup must be suppressed.
   attr_reader :suppress_defers
 
-  def initialize(var_promotes: [], struct_promote: nil, string_promote: false, suppress_defers: [])
+  def initialize(var_promotes: [], struct_promote: nil, suppress_defers: [])
     @var_promotes = var_promotes.freeze
     @struct_promote = struct_promote
-    @string_promote = string_promote
     @suppress_defers = suppress_defers.freeze
   end
 
@@ -91,15 +87,8 @@ class PromotionPlan
     ret_type = ret_type_sym.is_a?(Type) ? ret_type_sym : Type.new(ret_type_sym)
     return EMPTY if ret_type.resolved == :Void
 
-    # Strings don't need promotion when they're rodata or caller-frame.
-    # But functions marked returns_promoted DO need string promotion —
-    # the caller's __hpt cleanup uses heapAlloc().free().
-    if ret_type.string?
-      if fn_node.returns_promoted
-        return new(string_promote: true)
-      end
-      return EMPTY
-    end
+    # Strings don't need promotion (rodata or caller-frame).
+    return EMPTY if ret_type.string?
 
     # Collect all ReturnNodes from the function body.
     return_nodes = collect_returns(fn_node.body)
