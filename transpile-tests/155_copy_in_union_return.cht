@@ -1,0 +1,26 @@
+-- Test: RETURN UnionType{ field: COPY expr } must not double-promote.
+-- Bug: COPY heap-dupes the field, then promoteFields dupes again. First leaks.
+
+UNION Val {
+    Nil,
+    Str: String,
+    Pair { car: String, cdr: String }
+}
+
+FN extractStr!(v: Val) RETURNS Val ->
+    MATCH v START
+        Val.Str AS s -> RETURN Val{ Str: COPY s };,
+        DEFAULT -> RETURN Val.Nil;
+    END
+    RETURN Val.Nil;
+END
+
+FN main() RETURNS Void ->
+    input = Val{ Str: "hello" };
+    result = extractStr!(input);
+    MATCH result START
+        Val.Str AS s -> ASSERT s == "hello", "copy in union return";,
+        DEFAULT -> ASSERT FALSE, "should be Str";
+    END
+    print("PASS");
+END

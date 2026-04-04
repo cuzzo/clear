@@ -122,11 +122,15 @@ class PromotionPlan
         # Union constructor with heap variants (strings, slices, @indirect):
         # promote the entire return value so frame data survives frame rewind.
         # promote() handles unions natively (dupes strings, slices, pointers).
+        # Skip when all fields are already COPY'd (already heap-owned).
         if var_promotes.empty?
-          ret_schema = schema_lookup.call(ret_type.resolved) rescue nil
-          if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
-            has_heap = (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-            struct_promote ||= zig_type_for(ret_type) if has_heap
+          all_fields_copied = val.fields.all? { |_, fval| fval.is_a?(AST::CopyNode) || fval.is_a?(AST::Literal) }
+          unless all_fields_copied
+            ret_schema = schema_lookup.call(ret_type.resolved) rescue nil
+            if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
+              has_heap = (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+              struct_promote ||= zig_type_for(ret_type) if has_heap
+            end
           end
         end
 
