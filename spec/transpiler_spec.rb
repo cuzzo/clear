@@ -800,6 +800,25 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "Heap-promoted return value is NOT hoisted into temp" do
+    it "returns directly from heap_promoted function without __hpt wrapper" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String }
+        FN makeValue() RETURNS Value -> RETURN Value{ Str: COPY "hello" }; END
+        FN wrapper() RETURNS Value -> RETURN makeValue(); END
+        FN main() RETURNS Void ->
+            v = wrapper();
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # wrapper() should return makeValue() directly, not via __hpt temp
+      fn_body = zig[zig.index("fn wrapper")..zig.index("fn clearMain")]
+      expect(fn_body).not_to include("__hpt")
+      expect(fn_body).to include("return try makeValue")
+    end
+  end
+
   describe "TAKES parameter returned in union suppresses cleanup" do
     it "emits items_moved = true when TAKES slice is returned inside union" do
       src = <<~CLEAR
