@@ -532,7 +532,7 @@ RSpec.describe ZigTranspiler do
   end
 
   describe "@list to slice conversion in struct/union literals" do
-    it "appends .items when assigning @list to union slice field" do
+    it "implicit-copies @list into union slice field (heap buffer)" do
       src = <<~CLEAR
         UNION Wrapper { Items: Int64[] }
         FN main() RETURNS Void ->
@@ -542,12 +542,13 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include(".Items = vals.items")
+      # @list is implicit-copied: buffer is heap-allocated so union cleanup works
+      expect(zig).to match(/heapAlloc|__buf|__src/)
     end
   end
 
   describe "@list frame-escape through struct returns" do
-    it "emits promote(ArrayList) for @list nested in returned struct" do
+    it "implicit-copies @list in struct field (heap buffer via CopyNode)" do
       src = <<~CLEAR
         STRUCT Pair { items: Int64[], count: Int64 }
         FN build() RETURNS Pair ->
@@ -561,10 +562,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("CheatLib.promoteList(i64, rt, &vals)")
-      promote_pos = zig.index("CheatLib.promoteList(")
-      return_pos  = zig.index("return __ret")
-      expect(promote_pos).to be < return_pos
+      # @list field is implicit-copied by annotator (CopyNode wraps vals)
+      expect(zig).to match(/heapAlloc|__buf|__src/)
     end
 
     it "suppresses defer deinit for escaped @list in struct return" do
@@ -843,6 +842,77 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # result holds a heap-duped string - needs cleanup
       expect(zig).to match(/result.*=.*consume|heapAlloc\(\)\.dupe/)
+    end
+  end
+
+  describe "Union construction auto-dupes rodata strings" do
+    it "dupes string literal in union variant construction" do
+      src = <<~CLEAR
+        UNION Value { Nil, Symbol: String }
+        FN main() RETURNS Void ->
+            v = Value{ Symbol: "hello" };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"hello"/)
+    end
+
+    it "dupes rodata string variable in union variant construction" do
+      src = <<~CLEAR
+        UNION Value { Nil, Symbol: String }
+        FN main() RETURNS Void ->
+            s = "hello";
+            v = Value{ Symbol: s };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*s\b/)
+    end
+
+    it "implicit-copies @list into union []T field" do
+      src = <<~CLEAR
+        UNION Value { Nil, List: Value[] }
+        FN main() RETURNS Void ->
+            MUTABLE items: Value[]@list = List[];
+            items.append(Value.Nil);
+            v = Value{ List: items };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # @list should be implicit-copied via CopyNode (emits slice copy)
+      expect(zig).to match(/heapAlloc|alloc.*__src/)
+    end
+
+    it "implicit-copies @list into struct []T field" do
+      src = <<~CLEAR
+        UNION Value { Nil }
+        STRUCT Container { items: Value[] }
+        FN main() RETURNS Void ->
+            MUTABLE list: Value[]@list = List[];
+            list.append(Value.Nil);
+            c = Container{ items: list };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/heapAlloc|alloc.*__src/)
+    end
+
+    it "does NOT dupe heap string (COPY) in union - already owned" do
+      src = <<~CLEAR
+        UNION Value { Nil, Symbol: String }
+        FN main() RETURNS Void ->
+            v = Value{ Symbol: COPY "hello" };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # COPY already dupes - should not double-dupe
+      lines = zig.scan(/heapAlloc\(\)\.dupe/).length
+      expect(lines).to eq(1)
     end
   end
 end

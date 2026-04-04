@@ -2088,6 +2088,10 @@ private
         "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
       elsif ti&.string?
         "try #{rt_name}.heapAlloc().dupe(u8, #{val})"
+      elsif ti&.list_collection?
+        # @list: copy the .items buffer to heap
+        elem_zig = transpile_type(ti.element_type)
+        "blk_copy: {\n    const __src = #{val}.items;\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy @as([]#{elem_zig}, &.{});\n}"
       elsif ti&.array? && !ti&.string?
         elem_zig = transpile_type(ti.element_type)
         "blk_copy: {\n    const __src = #{val};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy __src;\n}"

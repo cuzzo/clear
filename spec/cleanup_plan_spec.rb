@@ -345,10 +345,10 @@ RSpec.describe CleanupPlan do
         CLEAR
       end
 
-      it "marks for heap cleanup (union may contain promoted slice)" do
+      it "marks for heap cleanup (union has non-Copy variants)" do
         entry = plan.lookup("v")
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:kind]).to eq(:heap_union)
+        expect(entry[:kind]).to eq(:non_copy_union)
       end
     end
   end
@@ -497,9 +497,10 @@ RSpec.describe CleanupPlan do
     end
     let(:plan) { cleanup_for(src, "f") }
 
-    it "does not classify struct as needing cleanup when all string fields are rodata" do
+    it "classifies struct as needing cleanup (rodata strings auto-duped to heap)" do
       entry = plan.lookup("p")
-      expect(entry).to be_nil
+      expect(entry).not_to be_nil
+      expect(entry[:kind]).to eq(:struct_with_cleanup_fields)
     end
   end
 

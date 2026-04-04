@@ -39,16 +39,10 @@ RSpec.describe PromotionPlan do
       CLEAR
     end
 
-    it "promotes the ArrayList variable" do
-      expect(plan.var_promotes.map { |vp| vp[:var] }).to include("vals")
-    end
-
-    it "suppresses defer for the escaped variable" do
-      expect(plan.suppress_defers).to include("vals")
-    end
-
-    it "is not empty" do
-      expect(plan).not_to be_empty
+    it "is empty (implicit COPY in struct field handles promotion)" do
+      # @list fields are now implicit-copied by the annotator, so
+      # PromotionPlan no longer needs to promote them on return.
+      expect(plan).to be_empty
     end
   end
 
