@@ -518,6 +518,7 @@ module AST
     include Locatable
     attr_accessor :returns_promoted  # true when BG body's result calls a function with returns_promoted
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
+    attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
