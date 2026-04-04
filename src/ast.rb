@@ -429,6 +429,13 @@ module AST
   # body: Array of statement AST nodes
   # result: AST node whose value is the block's result
   BlockExpr      = Struct.new(:token, :body, :result) { include Locatable }
+
+  # StringConcat: flattened string concatenation.
+  # parts: Array of AST nodes (strings, identifiers, expressions)
+  # Rewritten from chained BinaryOp(:ADD) on string types.
+  # Any backend emits a single allocation covering all parts.
+  StringConcat   = Struct.new(:token, :parts) { include Locatable }
+
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked | :local

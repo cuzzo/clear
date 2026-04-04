@@ -15,6 +15,7 @@ require_relative "./ownership_generator"
 require_relative "./zig_type_mapper"
 require_relative "./promotion_plan"
 require_relative "./pipeline_rewriter"
+require_relative "./string_concat_rewriter"
 require_relative "./importer"
 require_relative "./transpiler_context"
 
@@ -53,6 +54,10 @@ class ZigTranspiler
 
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
     annotator.annotate!(ast)
+
+    # Pass 2b: Flatten chained string + into StringConcat nodes.
+    # Runs AFTER annotation (needs type_info to identify string + vs numeric +).
+    StringConcatRewriter.new.rewrite!(ast)
 
     @ownership_graph = annotator.instance_variable_get(:@og)
 
@@ -2365,6 +2370,12 @@ private
       body_code = transpile_block(node.body)
       result_code = visit(node.result)
       "#{label}: {\n#{body_code}\nbreak :#{label} #{result_code};\n}"
+
+    when AST::StringConcat
+      rt_ref = @do_rt_name || "rt"
+      alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+      parts_zig = node.parts.map { |p| visit(p) }
+      "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
 
     when AST::Assert
       cond = visit(node.condition)

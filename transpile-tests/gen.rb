@@ -22,6 +22,9 @@ class TestGenerator < ZigTranspiler
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
 
+    # 2b. Flatten chained string + into StringConcat nodes.
+    StringConcatRewriter.new.rewrite!(ast)
+
     # 2. Pre-populate needs_rt/can_fail tables, promotion plans, and cleanup plans.
     @fn_needs_rt = {}
     @fn_can_fail = {}
