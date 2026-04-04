@@ -2407,8 +2407,7 @@ END
 -- Test helpers: create fresh interpreter, run input, return result string.
 
 FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String ->
-    result = runTest!(input, rootId, pool, penv);
-    RETURN prStr(result, readable);
+    RETURN prStr(runTest!(input, rootId, pool, penv), readable);
 END
 
 FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String ->
@@ -2557,9 +2556,7 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(+ 1 2)", TRUE, rootId, pool, penv) == "3", "add";
     ASSERT evalIn!("(if true 1 2)", TRUE, rootId, pool, penv) == "1", "if";
     ASSERT evalSeqIn!(["(define f (lambda (x) (* x 2)))", "(f 21)"], TRUE, rootId, pool, penv) == "42", "lambda";
-    tryCatchResult = evalIn!("(try (raise \"x\" \"E\") (catch e \"ok\"))", FALSE, rootId, pool, penv);
-    print("try/catch got: [" + tryCatchResult + "]");
-    ASSERT tryCatchResult == "ok", "try/catch";
+    ASSERT evalIn!("(try (raise \"x\" \"E\") (catch e \"ok\"))", FALSE, rootId, pool, penv) == "ok", "try/catch";
 
     -- Typed values: Int64Val
     ASSERT evalIn!("42:i64", TRUE, rootId, pool, penv) == "42", "typed i64 literal";
