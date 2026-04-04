@@ -1,18 +1,6 @@
-// Benchmark 23: Pipeline Overhead — Go Baseline
-//
-// Test 1: Simple sum of 10M float64 values, 20 iterations.
-// Test 2: Fused filter (>500.0) + square + sum, 20 iterations.
-//
-// Data: deterministic LCG
-//   state = state * 6364136223846793005 + (i + 1442695040888963407)
-//   val = abs(state % 1000) as float64
-//
-// Run: go run bench.go
-
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -20,21 +8,15 @@ import (
 	"time"
 )
 
-const (
-	N    = 10_000_000
-	ITER = 20
-)
+const N = 10000000
+const ITER = 20
 
 func readMemory() (vmHWM, vmRSS int64) {
-	f, err := os.Open("/proc/self/status")
+	data, err := os.ReadFile("/proc/self/status")
 	if err != nil {
 		return 0, 0
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "VmHWM:") {
 			vmHWM = parseKB(line)
 		} else if strings.HasPrefix(line, "VmRSS:") {
@@ -45,9 +27,9 @@ func readMemory() (vmHWM, vmRSS int64) {
 }
 
 func parseKB(line string) int64 {
-	fields := strings.Fields(line)
-	if len(fields) >= 2 {
-		v, _ := strconv.ParseInt(fields[1], 10, 64)
+	parts := strings.Fields(line)
+	if len(parts) >= 2 {
+		v, _ := strconv.ParseInt(parts[1], 10, 64)
 		return v
 	}
 	return 0
@@ -85,37 +67,77 @@ func fusedLoop(data []float64) float64 {
 	return sum
 }
 
+func longFusedLoop(data []float64) float64 {
+	sum := 0.0
+	for _, v := range data {
+		if v > 200.0 {
+			doubled := v * 2.0
+			if doubled < 1500.0 {
+				sum += doubled
+			}
+		}
+	}
+	return sum
+}
+
 func main() {
 	data := buildData(N)
 	accum := 0.0
 
-	// ---- Test 1: Simple sum, 20 iterations ----
+	// Test 1: sum handwritten
 	t0 := time.Now()
 	for r := 0; r < ITER; r++ {
 		accum += sumLoop(data)
 	}
-	sumMs := time.Since(t0).Milliseconds()
-	_, sumRSS := readMemory()
+	sumLoopMs := time.Since(t0).Milliseconds()
 
-	// ---- Test 2: Fused filter+square+sum, 20 iterations ----
+	// Test 1b: sum pipeline-equivalent
 	t1 := time.Now()
+	for r := 0; r < ITER; r++ {
+		accum += sumLoop(data)
+	}
+	sumPipeMs := time.Since(t1).Milliseconds()
+
+	// Test 2: fused handwritten
+	t2 := time.Now()
 	for r := 0; r < ITER; r++ {
 		accum += fusedLoop(data)
 	}
-	fusedMs := time.Since(t1).Milliseconds()
-	fusedHWM, _ := readMemory()
+	fusedMs := time.Since(t2).Milliseconds()
 
-	// Prevent DCE
+	// Test 2b: fused pipeline-equivalent
+	t3 := time.Now()
+	for r := 0; r < ITER; r++ {
+		accum += fusedLoop(data)
+	}
+	chainMs := time.Since(t3).Milliseconds()
+
+	// Test 3: long chain handwritten
+	t4 := time.Now()
+	for r := 0; r < ITER; r++ {
+		accum += longFusedLoop(data)
+	}
+	longFusedMs := time.Since(t4).Milliseconds()
+
+	// Test 3b: long chain pipeline-equivalent
+	t5 := time.Now()
+	for r := 0; r < ITER; r++ {
+		accum += longFusedLoop(data)
+	}
+	longChainMs := time.Since(t5).Milliseconds()
+
 	if accum == 0.0 {
 		fmt.Println("unexpected zero")
-		return
+		os.Exit(1)
 	}
 
-	// ---- Report ----
-	fmt.Printf("Elements: %d\n", N)
-	fmt.Printf("Iterations: %d\n", ITER)
-	fmt.Printf("Handwritten loop: %d ms\n", sumMs)
-	fmt.Printf("Fused loop: %d ms\n", fusedMs)
-	fmt.Printf("RSS after: %d KB\n", sumRSS)
-	fmt.Printf("Peak RSS: %d KB\n", fusedHWM)
+	hwm, _ := readMemory()
+
+	fmt.Printf("Handwritten loop: %d ms\n", sumLoopMs)
+	fmt.Printf("SUM pipeline: %d ms\n", sumPipeMs)
+	fmt.Printf("Fused loop (2-stage): %d ms\n", fusedMs)
+	fmt.Printf("Chained pipeline (2-stage): %d ms\n", chainMs)
+	fmt.Printf("Fused loop (4-stage): %d ms\n", longFusedMs)
+	fmt.Printf("Chained pipeline (4-stage): %d ms\n", longChainMs)
+	fmt.Printf("Peak RSS: %d KB\n", hwm)
 }

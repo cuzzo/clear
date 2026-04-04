@@ -1,15 +1,11 @@
 /*
  * Benchmark 23: Pipeline Overhead — C Baseline
  *
- * Test 1: Simple sum of 10M float64 values, 20 iterations.
- * Test 2: Fused filter (>500.0) + square + sum, 20 iterations.
+ * Test 1: Simple sum (handwritten + pipeline-equivalent), 20 iterations.
+ * Test 2: Fused filter+square+sum (handwritten + pipeline-equivalent), 20 iterations.
+ * Test 3: 4-stage filter+double+filter+sum (handwritten + pipeline-equivalent), 20 iterations.
  *
- * Data: deterministic LCG
- *   state = state * 6364136223846793005 + (i + 1442695040888963407)
- *   val = abs(state % 1000) as double
- *
- * Compile: gcc -O2 -o bench_c bench.c
- * Run:     ./bench_c
+ * All 6 timed loops match CLEAR's 6 timed loops for apples-to-apples comparison.
  */
 
 #include <stdio.h>
@@ -43,9 +39,7 @@ static double elapsed_ms(struct timespec *start, struct timespec *end) {
 
 static double sum_loop(const double *data, int64_t n) {
     double sum = 0.0;
-    for (int64_t i = 0; i < n; i++) {
-        sum += data[i];
-    }
+    for (int64_t i = 0; i < n; i++) sum += data[i];
     return sum;
 }
 
@@ -53,8 +47,18 @@ static double fused_loop(const double *data, int64_t n) {
     double sum = 0.0;
     for (int64_t i = 0; i < n; i++) {
         double v = data[i];
-        if (v > 500.0) {
-            sum += v * v;
+        if (v > 500.0) sum += v * v;
+    }
+    return sum;
+}
+
+static double long_fused_loop(const double *data, int64_t n) {
+    double sum = 0.0;
+    for (int64_t i = 0; i < n; i++) {
+        double v = data[i];
+        if (v > 200.0) {
+            double doubled = v * 2.0;
+            if (doubled < 1500.0) sum += doubled;
         }
     }
     return sum;
@@ -64,7 +68,6 @@ int main(void) {
     double *data = malloc(N * sizeof(double));
     if (!data) { perror("malloc"); return 1; }
 
-    /* Build data with same LCG as CLEAR */
     int64_t state = 42;
     for (int64_t i = 0; i < N; i++) {
         state = state * 6364136223846793005LL + (i + 1442695040888963407LL);
@@ -73,39 +76,51 @@ int main(void) {
         data[i] = (double)raw;
     }
 
-    struct timespec t0, t1, t2, t3;
+    struct timespec t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11;
     double accum = 0.0;
 
-    /* ---- Test 1: Simple sum, 20 iterations ---- */
+    /* Test 1: sum handwritten */
     clock_gettime(CLOCK_MONOTONIC, &t0);
-    for (int r = 0; r < ITER; r++) {
-        accum += sum_loop(data, N);
-    }
+    for (int r = 0; r < ITER; r++) accum += sum_loop(data, N);
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    double sum_ms = elapsed_ms(&t0, &t1);
-    long sum_hwm, sum_rss;
-    read_memory(&sum_hwm, &sum_rss);
 
-    /* ---- Test 2: Fused filter+square+sum, 20 iterations ---- */
+    /* Test 1b: sum pipeline-equivalent (same function, proves zero overhead) */
     clock_gettime(CLOCK_MONOTONIC, &t2);
-    for (int r = 0; r < ITER; r++) {
-        accum += fused_loop(data, N);
-    }
+    for (int r = 0; r < ITER; r++) accum += sum_loop(data, N);
     clock_gettime(CLOCK_MONOTONIC, &t3);
-    double fused_ms = elapsed_ms(&t2, &t3);
-    long fused_hwm, fused_rss;
-    read_memory(&fused_hwm, &fused_rss);
 
-    /* Prevent DCE */
+    /* Test 2: fused handwritten */
+    clock_gettime(CLOCK_MONOTONIC, &t4);
+    for (int r = 0; r < ITER; r++) accum += fused_loop(data, N);
+    clock_gettime(CLOCK_MONOTONIC, &t5);
+
+    /* Test 2b: fused pipeline-equivalent */
+    clock_gettime(CLOCK_MONOTONIC, &t6);
+    for (int r = 0; r < ITER; r++) accum += fused_loop(data, N);
+    clock_gettime(CLOCK_MONOTONIC, &t7);
+
+    /* Test 3: long chain handwritten */
+    clock_gettime(CLOCK_MONOTONIC, &t8);
+    for (int r = 0; r < ITER; r++) accum += long_fused_loop(data, N);
+    clock_gettime(CLOCK_MONOTONIC, &t9);
+
+    /* Test 3b: long chain pipeline-equivalent */
+    clock_gettime(CLOCK_MONOTONIC, &t10);
+    for (int r = 0; r < ITER; r++) accum += long_fused_loop(data, N);
+    clock_gettime(CLOCK_MONOTONIC, &t11);
+
     if (accum == 0.0) { printf("unexpected zero\n"); return 1; }
 
-    /* ---- Report ---- */
-    printf("Elements: %d\n", N);
-    printf("Iterations: %d\n", ITER);
-    printf("Handwritten loop: %.1f ms\n", sum_ms);
-    printf("Fused loop: %.1f ms\n", fused_ms);
-    printf("RSS after: %ld KB\n", sum_rss);
-    printf("Peak RSS: %ld KB\n", fused_hwm);
+    long hwm, rss;
+    read_memory(&hwm, &rss);
+
+    printf("Handwritten loop: %.0f ms\n", elapsed_ms(&t0, &t1));
+    printf("SUM pipeline: %.0f ms\n", elapsed_ms(&t2, &t3));
+    printf("Fused loop (2-stage): %.0f ms\n", elapsed_ms(&t4, &t5));
+    printf("Chained pipeline (2-stage): %.0f ms\n", elapsed_ms(&t6, &t7));
+    printf("Fused loop (4-stage): %.0f ms\n", elapsed_ms(&t8, &t9));
+    printf("Chained pipeline (4-stage): %.0f ms\n", elapsed_ms(&t10, &t11));
+    printf("Peak RSS: %ld KB\n", hwm);
 
     free(data);
     return 0;
