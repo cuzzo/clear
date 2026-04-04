@@ -345,10 +345,10 @@ RSpec.describe CleanupPlan do
         CLEAR
       end
 
-      it "marks for heap cleanup (union has non-Copy variants)" do
+      it "marks for heap cleanup (union returned from promoted function)" do
         entry = plan.lookup("v")
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:kind]).to eq(:non_copy_union)
+        expect(entry[:kind]).to eq(:heap_union)
       end
     end
   end

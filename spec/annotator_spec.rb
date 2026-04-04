@@ -1350,6 +1350,23 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "returns_promoted for struct/union with implicit COPY fields" do
+      it "sets returns_promoted when returning union with implicit-copied @list field" do
+        src = <<~CLEAR
+          UNION Value { Nil, List: Value[] }
+          FN makeList() RETURNS Value ->
+              MUTABLE items: Value[]@list = List[];
+              items.append(Value.Nil);
+              RETURN Value{ List: items };
+          END
+          FN main() RETURNS Void -> v = makeList(); RETURN; END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
+        expect(fn.returns_promoted).to be true
+      end
+    end
+
     context "Break and Continue" do
       context "Inside Loop" do
         let(:code) {
