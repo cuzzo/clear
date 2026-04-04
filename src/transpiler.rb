@@ -3434,6 +3434,28 @@ private
       end
       return
     end
+    # ForRange/ForEach: the loop variable is locally defined, not an outer capture.
+    if node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
+      var_name = node.var_name.is_a?(String) ? node.var_name : node.var_name.to_s
+      new_bound = locally_bound | Set[var_name]
+      walk_do_identifiers(node.start_expr, result, locally_bound) if node.respond_to?(:start_expr) && node.start_expr
+      walk_do_identifiers(node.end_expr, result, locally_bound) if node.respond_to?(:end_expr) && node.end_expr
+      walk_do_identifiers(node.collection, result, locally_bound) if node.respond_to?(:collection) && node.collection
+      walk_body_with_bindings(node.body, result, new_bound)
+      return
+    end
+    # WhileLoop/IfStatement: walk body statements tracking local bindings.
+    if node.is_a?(AST::WhileLoop)
+      walk_do_identifiers(node.condition, result, locally_bound) if node.condition
+      walk_body_with_bindings(node.do_branch, result, locally_bound)
+      return
+    end
+    if node.is_a?(AST::IfStatement)
+      walk_do_identifiers(node.condition, result, locally_bound)
+      walk_body_with_bindings(node.then_branch, result, locally_bound)
+      walk_body_with_bindings(node.else_branch, result, locally_bound) if node.else_branch
+      return
+    end
     # WithBlock: visit var_nodes as outer refs but exclude aliases from capture.
     if node.is_a?(AST::WithBlock)
       node.capabilities.each do |cap|
@@ -3447,6 +3469,19 @@ private
     node.members.each do |m|
       child = node.send(m)
       do_walk_child(child, result, locally_bound)
+    end
+  end
+
+  # Walk a body (array of statements), accumulating local bindings from
+  # VarDecl/BindExpr so inner identifiers are not incorrectly captured.
+  def walk_body_with_bindings(stmts, result, locally_bound)
+    return unless stmts.is_a?(Array)
+    lb = locally_bound
+    stmts.each do |stmt|
+      walk_do_identifiers(stmt, result, lb)
+      if (stmt.is_a?(AST::BindExpr) || stmt.is_a?(AST::VarDecl)) && stmt.name.is_a?(String)
+        lb = lb | Set[stmt.name]
+      end
     end
   end
 
