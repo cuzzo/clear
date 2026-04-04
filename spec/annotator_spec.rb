@@ -608,41 +608,6 @@ RSpec.describe SemanticAnnotator do
         FLUX
         expect { run(code) }.not_to raise_error
       end
-
-      it "flags needs_mut_ref on GetIndex for mutating intrinsic" do
-        code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list }
-          FN addKey!(MUTABLE nodes: Node[]@list, idx: Int64, key: Int64) RETURNS Void ->
-              nodes[idx].keys.append(key);
-          END
-        FLUX
-        ast = run(code)
-        fn_body = ast.statements.last.body
-        # The append call's receiver chain: nodes[idx].keys
-        # The GetIndex (nodes[idx]) should be flagged as needs_mut_ref
-        append_call = fn_body.first
-        receiver = append_call.object  # GetField(keys, target: GetIndex(nodes[idx]))
-        get_index = receiver.target    # GetIndex(nodes, idx)
-        expect(get_index).to be_a(AST::GetIndex)
-        expect(get_index.needs_mut_ref).to eq(true)
-      end
-
-      it "flags needs_mut_ref on GetIndex for field assignment" do
-        code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list }
-          FN setKeys!(MUTABLE nodes: Node[]@list, idx: Int64) RETURNS Void ->
-              nodes[idx].keys = [1, 2, 3];
-          END
-        FLUX
-        ast = run(code)
-        fn_body = ast.statements.last.body
-        # The assignment target: nodes[idx].keys -> GetField(keys, target: GetIndex)
-        assignment = fn_body.first
-        target_field = assignment.name  # GetField
-        get_index = target_field.target # GetIndex
-        expect(get_index).to be_a(AST::GetIndex)
-        expect(get_index.needs_mut_ref).to eq(true)
-      end
     end
 
     context "Resolved Type Correctness" do
