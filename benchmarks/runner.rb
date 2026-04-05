@@ -297,21 +297,33 @@ def run_server_bench(dir)
     Process.wait(pid) rescue nil
 
     # Parse results from client output
+    results[srv[:key]] ||= {}
+    r = results[srv[:key]]
     if output =~ /SET phase:\s+(\d+) ms/
-      results[srv[:key]] = { set_ms: $1.to_i }
+      r[:set_ms] = $1.to_i
     end
     if output =~ /GET phase:\s+(\d+) ms/
-      results[srv[:key]][:get_ms] = $1.to_i if results[srv[:key]]
+      r[:get_ms] = $1.to_i
+    end
+    # Phase-based output (bench 25 pathological): collect throughput per phase
+    output.scan(/Phase \d+: (\S+).*?\n\s+Time: (\d+) ms\n\s+Throughput: ([\d.]+) req\/s/m).each do |name, time_ms, throughput|
+      r[:phases] ||= []
+      r[:phases] << { name: name, time_ms: time_ms.to_i, throughput: throughput.to_f.round(0).to_i }
     end
     if output =~ /Peak RSS \(VmHWM\):\s+(\d+) KB/
-      results[srv[:key]][:peak_rss_kb] = $1.to_i if results[srv[:key]]
+      r[:peak_rss_kb] = $1.to_i
     end
-    if output =~ /RSS after GETs:\s+(\d+) KB/
-      results[srv[:key]][:rss_after_kb] = $1.to_i if results[srv[:key]]
+    if output =~ /RSS after(?: GETs)?:\s+(\d+) KB/
+      r[:rss_after_kb] = $1.to_i
     end
-    if output =~ /Verified:\s+(\d+)\s*\/\s*(\d+)/
-      results[srv[:key]][:verified] = $1.to_i if results[srv[:key]]
-      results[srv[:key]][:total] = $2.to_i if results[srv[:key]]
+    # Sum all Verified lines (multi-phase benchmarks have one per phase)
+    verified_sum = 0; total_sum = 0
+    output.scan(/Verified:\s+(\d+)\s*\/\s*(\d+)/).each do |v, t|
+      verified_sum += v.to_i; total_sum += t.to_i
+    end
+    if total_sum > 0
+      r[:verified] = verified_sum
+      r[:total] = total_sum
     end
   end
 
@@ -321,15 +333,42 @@ def run_server_bench(dir)
   puts "\n#{'=' * 60}"
   puts "RESULTS for #{dir}:"
   puts "#{'=' * 60}"
-  puts "#{'%-22s' % 'Server'} #{'%8s' % 'SET(ms)'} #{'%8s' % 'GET(ms)'} #{'%10s' % 'Peak RSS'} #{'%10s' % 'RSS After'} #{'%10s' % 'Verified'}"
-  puts "-" * 70
 
-  results.each do |key, r|
-    label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
-    verified = r[:verified] && r[:total] ? "#{r[:verified]}/#{r[:total]}" : "?"
-    peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
-    rss  = r[:rss_after_kb] ? "#{r[:rss_after_kb]} KB" : "?"
-    puts "#{'%-22s' % label} #{'%8s' % (r[:set_ms] || '?')} #{'%8s' % (r[:get_ms] || '?')} #{'%10s' % peak} #{'%10s' % rss} #{'%10s' % verified}"
+  has_phases = results.any? { |_, r| r[:phases]&.any? }
+
+  if has_phases
+    # Phase-based display (bench 25 pathological)
+    phase_names = results.values.flat_map { |r| (r[:phases] || []).map { |p| p[:name] } }.uniq
+    header = "%-22s" % "Server"
+    phase_names.each { |pn| header += " %12s" % "#{pn}(r/s)" }
+    header += " %10s %10s" % ["Peak RSS", "Verified"]
+    puts header
+    puts "-" * header.length
+
+    results.each do |key, r|
+      label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
+      verified = r[:verified] && r[:total] ? "#{r[:verified]}/#{r[:total]}" : "?"
+      peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
+      line = "%-22s" % label
+      phase_names.each do |pn|
+        phase = (r[:phases] || []).find { |p| p[:name] == pn }
+        line += " %12s" % (phase ? phase[:throughput].to_s : "?")
+      end
+      line += " %10s %10s" % [peak, verified]
+      puts line
+    end
+  else
+    # Standard SET/GET display
+    puts "#{'%-22s' % 'Server'} #{'%8s' % 'SET(ms)'} #{'%8s' % 'GET(ms)'} #{'%10s' % 'Peak RSS'} #{'%10s' % 'RSS After'} #{'%10s' % 'Verified'}"
+    puts "-" * 70
+
+    results.each do |key, r|
+      label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
+      verified = r[:verified] && r[:total] ? "#{r[:verified]}/#{r[:total]}" : "?"
+      peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
+      rss  = r[:rss_after_kb] ? "#{r[:rss_after_kb]} KB" : "?"
+      puts "#{'%-22s' % label} #{'%8s' % (r[:set_ms] || '?')} #{'%8s' % (r[:get_ms] || '?')} #{'%10s' % peak} #{'%10s' % rss} #{'%10s' % verified}"
+    end
   end
 
   # Memory comparison
