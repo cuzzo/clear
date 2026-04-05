@@ -1010,7 +1010,29 @@ private
                    end
                  end
                end
-               code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
+               # Struct values with @list fields need list promotion from frame
+               # to heap before storing in a HashMap. HashMap cleanup uses
+               # heapAlloc but the list backing may be on the frame arena.
+               # Only promote list fields (not strings — COPY already handles those).
+               val_ti = node.value.type_info rescue nil
+               val_type_sym = val_ti&.resolved
+               schema = val_type_sym && @struct_schemas&.dig(val_type_sym)
+               list_fields = schema ? schema.select { |k, v|
+                 next false if k.is_a?(Symbol)
+                 ft = v.is_a?(Hash) ? Type.new(v[:type] || :Any) : Type.new(v || :Any)
+                 ft.list_collection?
+               }.map { |k, _| k.to_s } : []
+               if list_fields.any?
+                 zig_t = transpile_type(val_ti)
+                 promote_calls = list_fields.map { |f|
+                   elem_ti = schema[f].is_a?(Hash) ? Type.new(schema[f][:type]) : Type.new(schema[f])
+                   elem_zig = transpile_type(elem_ti.element_type)
+                   "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &__map_val.#{f});"
+                 }.join("\n")
+                 code = "var __map_val: #{zig_t} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, __map_val);"
+               else
+                 code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
+               end
                return move_logic.empty? ? code : "#{code}\n#{move_logic}"
              end
           end
