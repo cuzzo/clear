@@ -27,9 +27,15 @@
 #include <assert.h>
 #include <time.h>
 
+/* Cached scale factor — resolved once, used everywhere. */
+static double _bench_scale = 0.0;
 static double get_bench_scale() {
-    const char *s = getenv("BENCH_SCALE");
-    return s ? atof(s) : 1.0;
+    if (_bench_scale == 0.0) {
+        const char *s = getenv("BENCH_SCALE");
+        _bench_scale = s ? atof(s) : 1.0;
+        if (_bench_scale <= 0.0) _bench_scale = 1.0;
+    }
+    return _bench_scale;
 }
 
 #define N_BASE   1000000
@@ -37,10 +43,7 @@ static double get_bench_scale() {
 /* 2M buckets → ~50% load factor for 1M items; power-of-2 for cheap masking */
 #define CAP_BASE (1u << 21)
 #define CAP      ( (uint32_t)(CAP_BASE * get_bench_scale()) > (1u << 10) ? (uint32_t)(CAP_BASE * get_bench_scale()) : (1u << 10) )
-/* Note: MASK needs to be updated if CAP is scaled, but CAP must remain power of 2 for masking to work.
-   Actually, for simplicity, let's keep CAP the same or scale it to next power of 2.
-   Actually, if we scale N, we should probably scale CAP too if we want to keep load factor same.
-   But CAP MUST be power of 2. */
+#define MASK     (CAP - 1)
 
 
 /* ---- String-keyed variant (FNV-1a) ---- */
