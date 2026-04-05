@@ -205,15 +205,21 @@ module CapabilityHelper
     else
       current_scope.declare_with_new_capability(cap)
     end
-    # RESTRICT borrows the variable in the graph so verify_unrestricted! detects conflicts.
+    # Register borrows and create alias bindings for RESTRICT and BORROWED.
     if cap[:capability] == :RESTRICT
       @og.borrow("__restrict_#{var_name}", var_name, mutable: true)
+      # Create alias binding if AS was used (for plain locals without sync)
+      if cap[:alias] && !syn
+        alias_name = cap[:alias]
+        is_mutable = !!cap[:alias_mutable]
+        resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
+        current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
+        current_scope.locals[alias_name].non_escaping = true
+        og_declare(alias_name, nil, resolved_type, :stack)
+      end
     elsif cap[:capability] == :BORROWED
-      # BORROWED is an immutable borrow. Multiple immutable borrows are OK,
-      # but a mutable borrow (RESTRICT) cannot coexist.
       alias_name = cap[:alias] || var_name
       resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
-      # Declare the alias as an immutable, non-escaping local
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       current_scope.locals[alias_name].non_escaping = true
       og_declare(alias_name, nil, resolved_type, :stack)

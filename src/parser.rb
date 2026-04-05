@@ -2026,13 +2026,17 @@ class Parser
       # Parse variable (supports foo, foo.bar, foo.bar.baz, etc.)
       var_node = parse_var_id
 
-      # Optional alias binding: WITH EXCLUSIVE lockedVar AS alias { }
+      # Optional alias binding: WITH EXCLUSIVE lockedVar AS [MUTABLE] alias { }
       alias_name = nil
+      alias_mutable = false
       if match!(:KEYWORD, 'AS')
+        if match!(:KEYWORD, 'MUTABLE')
+          alias_mutable = true
+        end
         alias_name = consume(:VAR_ID).value
       end
 
-      capabilities << { capability: capability, var_node: var_node, alias: alias_name }
+      capabilities << { capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable }
 
       # Check for comma (continue) or opening brace (done)
       break unless match!(:CHAR, ',')

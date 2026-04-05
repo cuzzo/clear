@@ -1440,6 +1440,7 @@ private
       rw_write_caps    = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE && c[:resolved_type]&.write_locked? }
       rw_read_caps     = node.capabilities.select { |c| c[:capability] == :write_locked_read }
       borrowed_caps    = node.capabilities.select { |c| c[:capability] == :BORROWED }
+      restrict_alias_caps = node.capabilities.select { |c| c[:capability] == :RESTRICT && c[:alias] && !c[:resolved_type]&.any_sync? }
 
       # --- Rc/Arc (multiowned/shared) bindings ---
       rc_bindings = rc_caps.map do |cap|
@@ -1509,6 +1510,20 @@ private
         all_sync_caps.map { |c| [(c[:alias] || c[:var_node].name), true] }.to_h
       )
 
+      # --- RESTRICT alias bindings for plain locals (mutable borrow) ---
+      restrict_bindings = restrict_alias_caps.map do |cap|
+        var_node   = cap[:var_node]
+        alias_name = cap[:alias]
+        source_zig = visit(var_node)
+        if cap[:alias_mutable]
+          # Mutable borrow: pointer to source, mutations write through
+          "const #{zig_safe_name(alias_name)} = &#{source_zig};\n_ = #{zig_safe_name(alias_name)};"
+        else
+          # Immutable borrow: value copy (read-only)
+          "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
+        end
+      end.join("\n")
+
       # --- BORROWED bindings: immutable reference, zero allocation ---
       borrowed_bindings = borrowed_caps.map do |cap|
         var_node   = cap[:var_node]
@@ -1522,7 +1537,7 @@ private
       @rc_unwrap_map     = prev_rc_map
       @locked_unwrap_map = prev_locked_map
 
-      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings, borrowed_bindings].reject(&:empty?).join("\n")
+      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings, restrict_bindings, borrowed_bindings].reject(&:empty?).join("\n")
       "{\n#{all_bindings}\n#{body}\n}"
 
     when AST::DoBlock
