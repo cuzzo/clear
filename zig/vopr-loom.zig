@@ -108,7 +108,7 @@ const LoomHarness = struct {
 
     fn initPrng(allocator: std.mem.Allocator, seed: u64) !LoomHarness {
         const q = try allocator.create(RunQueue);
-        q.* = RunQueue.init();
+        q.* = RunQueue.initWithAllocator(allocator) catch unreachable;
         const rng = std.Random.DefaultPrng.init(seed);
         var h = LoomHarness{
             .queue = q,
@@ -125,7 +125,7 @@ const LoomHarness = struct {
 
     fn initExhaustive(allocator: std.mem.Allocator, schedule: []const u8) !LoomHarness {
         const q = try allocator.create(RunQueue);
-        q.* = RunQueue.init();
+        q.* = RunQueue.initWithAllocator(allocator) catch unreachable;
         var h = LoomHarness{
             .queue = q,
             .allocator = allocator,
@@ -145,6 +145,7 @@ const LoomHarness = struct {
                 stack.* = &.{};
             }
         }
+        self.queue.deinit();
         self.allocator.destroy(self.queue);
     }
 
@@ -255,7 +256,8 @@ const LoomHarness = struct {
         fc.__fiber = null;
         fc.__fiber_parent_ctx = null;
         fc.__fiber_stack_limit = null;
-        self.queue.* = RunQueue.init();
+        self.queue.deinit();
+        self.queue.* = RunQueue.initWithAllocator(self.allocator) catch unreachable;
         for (&self.done) |*d| d.* = false;
         for (&self.result_counts) |*c| c.* = 0;
         for (&self.results) |*row| for (row) |*slot| {
@@ -583,8 +585,11 @@ test "loom: queue wraparound" {
     // Verifies modular arithmetic in pop() and stealOne().
     const allocator = std.testing.allocator;
     const q = try allocator.create(RunQueue);
-    defer allocator.destroy(q);
-    q.* = RunQueue.init();
+    defer {
+        q.deinit();
+        allocator.destroy(q);
+    }
+    q.* = RunQueue.initWithAllocator(allocator) catch unreachable;
 
     // Advance bottom/top near u32 max to test wrapping
     const near_max: u32 = std.math.maxInt(u32) - 10;

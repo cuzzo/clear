@@ -85,35 +85,91 @@ pub const AtomicInbox = struct {
     }
 };
 
-// TODO: Rename to Deque
+// Dynamic Chase-Lev Work-Stealing Deque (Chase & Lev, 2005)
+//
+// Growable circular buffer: starts at INITIAL_LOG_SIZE (64 slots = 512 bytes),
+// doubles on push when full. Only the owner thread grows; thieves read the
+// array pointer with acquire ordering. Old arrays are leaked (tiny, bounded
+// by log2(max_tasks) arrays total).
 pub const RunQueue = struct {
-    // Fixed size ring buffer for MVP
-    buffer: [65536]Atomic(?*Task) = undefined,
-    mask: u32 = 65535,
+    const INITIAL_LOG_SIZE: u5 = 6; // 2^6 = 64 slots
+
+    // Heap-allocated circular array. Replaced atomically on grow.
+    // Thieves load this with acquire; owner stores with release on grow.
+    buffer: []Atomic(?*Task),
+    mask: u32,
+    log_size: u5,
+    allocator: std.mem.Allocator,
+
+    // Old buffers kept alive so thieves don't read freed memory.
+    // Bounded by log2(max_tasks) entries (one per doubling).
+    old_buffers: std.ArrayListUnmanaged([]Atomic(?*Task)) = .{},
 
     top: Atomic(u32) = Atomic(u32).init(0),
     bottom: Atomic(u32) = Atomic(u32).init(0),
 
     pub fn init() RunQueue {
-        var q = RunQueue{};
-        for (&q.buffer) |*slot| slot.* = Atomic(?*Task).init(null);
-        return q;
+        // Placeholder — real init happens in initWithAllocator.
+        // The scheduler calls initWithAllocator after construction.
+        return .{
+            .buffer = &.{},
+            .mask = 0,
+            .log_size = 0,
+            .allocator = undefined,
+        };
     }
 
-    // push (bottom) - lock free
-    pub fn push(self: *RunQueue, alloc: std.mem.Allocator, task: *Task) !void {
-        _ = alloc; // Don't need allocator for fixed buffer
+    pub fn initWithAllocator(alloc: std.mem.Allocator) !RunQueue {
+        const size = @as(u32, 1) << INITIAL_LOG_SIZE;
+        const buf = try alloc.alloc(Atomic(?*Task), size);
+        for (buf) |*slot| slot.* = Atomic(?*Task).init(null);
+        return .{
+            .buffer = buf,
+            .mask = size - 1,
+            .log_size = INITIAL_LOG_SIZE,
+            .allocator = alloc,
+        };
+    }
 
-        // Chase-Lev Push Bottom
+    pub fn deinit(self: *RunQueue) void {
+        // Free current buffer
+        if (self.buffer.len > 0) self.allocator.free(self.buffer);
+        // Free old buffers
+        for (self.old_buffers.items) |old| self.allocator.free(old);
+        self.old_buffers.deinit(self.allocator);
+    }
+
+    fn grow(self: *RunQueue, b: u32, t: u32) !void {
+        const new_log = self.log_size + 1;
+        const new_size = @as(u32, 1) << @as(u5, new_log);
+        const new_buf = try self.allocator.alloc(Atomic(?*Task), new_size);
+        for (new_buf) |*slot| slot.* = Atomic(?*Task).init(null);
+        // Copy live elements from old buffer
+        const new_mask = new_size - 1;
+        var i = t;
+        while (i != b) : (i +%= 1) {
+            new_buf[i & new_mask].store(self.buffer[i & self.mask].load(.monotonic), .monotonic);
+        }
+        // Retire old buffer (don't free — thieves may still read it)
+        self.old_buffers.append(self.allocator, self.buffer) catch {};
+        self.buffer = new_buf;
+        self.mask = new_mask;
+        self.log_size = @as(u5, new_log);
+    }
+
+    // push (bottom) - owner only. Grows if full.
+    pub fn push(self: *RunQueue, alloc: std.mem.Allocator, task: *Task) !void {
+        _ = alloc;
         const b = self.bottom.load(.monotonic);
         const t = self.top.load(.acquire);
 
-        if (b -% t > self.mask) return error.QueueFull; // MVP limitation
+        if (b -% t > self.mask) {
+            try self.grow(b, t);
+        }
 
         self.buffer[b & self.mask].store(task, .monotonic);
         self.bottom.store(b +% 1, .release);
     }
-
 
     // Chase-Lev Pop Bottom (owner-side dequeue)
     // Ref: "Dynamic Circular Work-Stealing Deque" (Chase & Lev, 2005)
@@ -128,10 +184,6 @@ pub const RunQueue = struct {
         if (b -% t_check == 0) return null;
 
         const new_b = b -% 1;
-        // seq_cst store: ensures the bottom decrement is visible to thieves
-        // BEFORE we read top. This is the critical synchronization point
-        // in the Chase-Lev algorithm. Without seq_cst here, the CPU can
-        // reorder this store past the top load, causing double-reads.
         self.bottom.store(new_b, .seq_cst);
 
         const t = self.top.load(.seq_cst);
@@ -139,15 +191,12 @@ pub const RunQueue = struct {
 
         const size = new_b -% t;
         if (size > self.mask) {
-            // Queue is empty (new_b wrapped past t)
             self.bottom.store(b, .monotonic);
             return null;
         }
 
         if (t == new_b) {
-            // Last element — race with thief. CAS to claim it.
             if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
-                // Lost race — thief got it.
                 self.bottom.store(t +% 1, .monotonic);
                 return null;
             }
@@ -160,7 +209,7 @@ pub const RunQueue = struct {
     // Safe length check
     pub fn len(self: *RunQueue) usize {
         const b = self.bottom.load(.monotonic);
-        const t = self.top.load(.monotonic); // TODO: May need to be .seq_cast
+        const t = self.top.load(.monotonic);
         return b -% t;
     }
 
@@ -173,18 +222,12 @@ pub const RunQueue = struct {
         const size = b -% t;
         if (size == 0 or size > self.mask) return null;
 
-        // Read the task pointer.
         const task = self.buffer[t & self.mask].load(.acquire);
 
-        // CAS to claim the slot BEFORE dereferencing the task pointer.
-        // Without this ordering, the owner can pop() and free() the task
-        // between our read and dereference, causing use-after-free.
         if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
-            return null;  // Lost race with another thief or owner
+            return null;
         }
 
-        // Now we own the slot. Safe to dereference.
-        // If pinned, push it back — the task must stay on its owning scheduler.
         if (task) |t_ptr| {
             if (t_ptr.config.pinned) {
                 self.push(std.heap.c_allocator, t_ptr) catch {};
@@ -204,7 +247,7 @@ pub const RunQueue = struct {
 
         while (stolen_count < target) {
             const task = victim.stealOne() orelse break;
-            self.push(alloc, task) catch break; // queue full — stop stealing
+            self.push(alloc, task) catch break;
             stolen_count += 1;
         }
 

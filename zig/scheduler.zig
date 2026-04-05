@@ -229,7 +229,7 @@ pub const Scheduler = struct {
         var sched = Scheduler{
             .stack_pool = stack_pool,
             .fiber_pool = .{},
-            .ready_queue = .{},
+            .ready_queue = try RunQueue.initWithAllocator(allocator),
             .stack_cache = .{},
             .sleeping_queue = .{},
             .event_fd = efd,
@@ -257,11 +257,6 @@ pub const Scheduler = struct {
         // scheduler from epoll_wait.  Use a sentinel user_data value (1) to
         // distinguish from the eventfd sentinel (0) and task pointers (>4096).
         try sched.poller.registerPersistent(ring.fd, 1);
-
-        // Initialize the RunQueue buffer to null. The default `= undefined`
-        // leaves 65536 slots as garbage; in ReleaseFast, stealOne() can read
-        // garbage pointers from uninitialized slots, causing use-after-free.
-        for (&sched.ready_queue.buffer) |*slot| slot.* = std.atomic.Value(?*Task).init(null);
 
         return sched;
     }
@@ -306,6 +301,7 @@ pub const Scheduler = struct {
                  self.allocator.destroy(task);
              }
         }
+        self.ready_queue.deinit();
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
