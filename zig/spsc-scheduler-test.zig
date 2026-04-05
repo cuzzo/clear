@@ -525,3 +525,97 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
     );
     sched.run();
 }
+
+// ========================================================================
+// LAYER 7: Pinned fiber sendAndWait deadlock test
+// ========================================================================
+// Reproduces: a pinned fiber on the main scheduler sends a RemoteCall
+// via SPSC to a worker, then yield-polls for completion (the same
+// mechanism used by PartitionedStringMap.sendAndWait). The main
+// scheduler's fast-path tight loop (pop fiber, fiber yields, push fiber)
+// must not prevent the worker from processing the remote call.
+//
+// PASS: all remote calls complete
+// FAIL: deadlock (timeout)
+
+test "L7: pinned fiber sendAndWait yield-poll to remote scheduler" {
+    initGlobals();
+    defer deinitGlobals();
+
+    var threads: [2]std.Thread = undefined;
+    startWorkers(&threads, 2);
+    defer stopWorkers(&threads, 2);
+
+    var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var rt = try Runtime.init(alloc, 1024 * 1024, &global_ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const RcCtx = struct {
+        value: i64 = 0,
+        done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        fn execute(raw: *anyopaque) void {
+            const c: *@This() = @ptrCast(@alignCast(raw));
+            c.value = 42;
+            c.done.store(true, .release);
+        }
+    };
+
+    const MainFn = struct {
+        outer_rt: *Runtime,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            _ = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            const n = fp.global_registry.count();
+            if (n < 2) return error.NotEnoughSchedulers;
+
+            const my_idx = fp.active_scheduler.index;
+            const target_idx = (my_idx + 1) % n;
+            const target = fp.global_registry.slots[target_idx].load(.acquire).?;
+
+            // Ensure channel exists
+            if (target.channels[my_idx] == null) {
+                target.channels[my_idx] = target.allocator.create(spsc.DefaultRing) catch @panic("OOM");
+                target.channels[my_idx].?.* = .{};
+            }
+            const ring = target.channels[my_idx].?;
+
+            // Send 10 remote calls, each using sendAndWait-style yield-poll.
+            for (0..10) |_| {
+                var ctx = RcCtx{};
+                const msg = spsc.Message{
+                    .tag = .RemoteCall,
+                    .rc_func = @ptrCast(&RcCtx.execute),
+                    .rc_ctx = @ptrCast(&ctx),
+                };
+                while (!ring.push(msg))
+                    std.atomic.spinLoopHint();
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .release);
+                target.event_fd.notify();
+
+                // Yield-poll: same mechanism as sendAndWait.
+                // This is the code path that deadlocks when the main scheduler
+                // never reaches the slow path.
+                while (!ctx.done.load(.acquire)) {
+                    const task = fp.active_scheduler.getCurrent();
+                    task.status.store(.Ready, .release);
+                    task.base.yield();
+                }
+
+                if (ctx.value != 42) return error.WrongResult;
+            }
+        }
+    };
+
+    var runner = MainFn{ .outer_rt = &rt };
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
+        &runner, .{ .stack_size = .Standard, .pinned = true },
+    );
+    sched.run();
+}
