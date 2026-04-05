@@ -60,6 +60,19 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   transpile_flag = module_mode ? '--test' : ''
   transpile_flag += " --default-stack #{default_stack}" if default_stack
   transpile_flag += " --strict" if strict_test
+
+  # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.cht
+  source_text = File.read(source)
+  pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
+  pkg_flags = pkg_requires.map do |pkg_name|
+    pkg_path = File.join(source_dir, "packages", pkg_name, "src", "lib.cht")
+    unless File.exist?(pkg_path)
+      error "Package '#{pkg_name}' not found at #{pkg_path}"
+    end
+    "--pkg #{pkg_name}=#{pkg_path}"
+  end.join(" ")
+  transpile_flag += " #{pkg_flags}" if pkg_flags.length > 0
+
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(ZIG_DIR, tmp_name)
 
@@ -75,11 +88,17 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   if profile
     zig_code = "pub const CLEAR_PROFILE = true;\n" + zig_code
   end
+  # When packages are present, rewrite package @import("name") to @import("name.zig")
+  # so all files live in zig/ as file-path imports (avoids Zig module system complexity).
+  if pkg_requires.any?
+    pkg_requires.each do |pkg_name|
+      zig_code = zig_code.gsub("@import(\"#{pkg_name}\")", "@import(\"#{pkg_name}.zig\")")
+    end
+  end
   File.write(tmp_zig, zig_code)
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
   # and check if a matching .zig file exists in the source directory.
-  source_text = File.read(source)
   extern_modules = source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
   ffi_modules = extern_modules.select { |m|
     # Skip standard library modules (std.json, std.fs, etc.)
@@ -89,28 +108,54 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # Copy FFI modules to zig/ for compilation
   ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(ZIG_DIR, "#{m}.zig")) }
 
-  # Build Zig command (runs from zig/ directory where runtime files live)
-  if module_mode
-    # Test mode: zig test with same imports as standalone (runtime-header.zig)
-    cmd_parts = [ZIG, 'test']
-    if ffi_modules.any?
-      ffi_modules.each { |m| cmd_parts += ['--dep', m] }
-      cmd_parts += ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S']
-      ffi_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
-    else
-      cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
+  # Transpile package modules to .zig files
+  pkg_modules = pkg_requires.map do |pkg_name|
+    pkg_path = File.join(source_dir, "packages", pkg_name, "src", "lib.cht")
+    # Collect transitive package deps for nested REQUIRE "pkg:..."
+    pkg_src = File.read(pkg_path)
+    nested_pkgs = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
+    nested_flags = nested_pkgs.map { |np|
+      np_path = File.join(source_dir, "packages", np, "src", "lib.cht")
+      "--pkg #{np}=#{np_path}"
+    }.join(" ")
+    pkg_zig = `ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} 2>/dev/null`
+    unless $?.success?
+      system("ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} > /dev/null")
+      error "Package '#{pkg_name}' transpilation failed"
     end
+    # Rewrite module imports to file-path imports (all files live in zig/).
+    # cheat_runtime → runtime-header.zig, nested packages → name.zig
+    pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime-header.zig")')
+    nested_pkgs.each do |np|
+      pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
+    end
+    pkg_zig_file = File.join(ZIG_DIR, "#{pkg_name}.zig")
+    File.write(pkg_zig_file, pkg_zig)
+    pkg_name
+  end
+
+  # Build Zig command (runs from zig/ directory where runtime files live).
+  # All files use file-path imports (no Zig module system) since everything
+  # lives in zig/.  FFI modules use --dep/-M for named imports.
+  all_modules = ffi_modules  # Only FFI modules need Zig named-module wiring
+
+  if module_mode
+    cmd_parts = [ZIG, 'test']
   else
     cmd_parts = [ZIG, 'build-exe']
-    if ffi_modules.any?
-      ffi_modules.each { |m| cmd_parts += ['--dep', m] }
-      cmd_parts += ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S']
-      ffi_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
-    else
-      cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
-    end
+  end
+
+  if all_modules.any?
+    all_modules.each { |m| cmd_parts += ['--dep', m] }
+    cmd_parts += ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S']
+    all_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
+  else
+    cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
+  end
+
+  unless module_mode
     cmd_parts += ['-O', opt_level] + extra_flags
-    cmd_parts += ['-fno-strip'] if profile  # keep debug info for addr2line
+    cmd_parts += ['-fno-strip'] if profile
     cmd_parts += ['--name', File.basename(output)]
   end
 
@@ -137,6 +182,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # Cleanup temp files
   FileUtils.rm_f(tmp_zig)
   ffi_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
+  pkg_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
 
   unless success
     # Map known Zig errors to CLEAR-level messages
@@ -209,7 +255,7 @@ when 'build'
   puts "Built: #{output_path}"
 
   # Post-build stack verification
-  if stack_check && File.exist?(output_path)
+  if stack_check && File.exist?(output_path) && pkg_requires.empty?
     require_relative 'src/stack_verifier'
     require_relative 'src/transpiler'
 

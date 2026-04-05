@@ -282,6 +282,19 @@ private
       if node.kind == :package
         # Package imports use Zig's named module system (@import).
         # The build system wires the actual module; we just emit the import.
+        # Propagate needs_rt/can_fail from the package so call sites emit correct code.
+        if @importer
+          mod = @importer.compile_package(node.path, caller_dir: @source_dir)
+          if mod&.ast
+            @fn_needs_rt ||= {}
+            @fn_can_fail  ||= {}
+            mod.ast.statements.each do |stmt|
+              next unless stmt.is_a?(AST::FunctionDef)
+              @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
+              @fn_can_fail[stmt.name]  = stmt.can_fail.nil?  ? true : stmt.can_fail
+            end
+          end
+        end
         "const #{node.namespace} = @import(\"#{node.namespace}\");"
       else
         # Local file imports: inline the compiled module as a Zig const struct namespace.
