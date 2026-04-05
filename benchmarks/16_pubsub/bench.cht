@@ -19,7 +19,7 @@ STRUCT Msg { seed: Int64 }
 
 FN processMessage(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
-    FOR i IN (0_i64 ..< 2000) -> x = x * 6364136223846793005_i64 + 1442695040888963407_i64;
+    FOR i IN (0_i64 ..< 2000) -> x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
     RETURN x;
 END
 
@@ -31,7 +31,7 @@ FN subscriberWork(n: Int64) RETURNS Int64 ->
     results = msgs s> CONCURRENT(workers: 32, parallel: TRUE) SELECT processMessage(_.seed);
     -- Manual sum (SUM _ returns Float64, we need Int64)
     MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< results.length()) -> total += results[j];
+    FOR j IN (0_i64 ..< results.length()) -> total = total %+ results[j];
     RETURN total;
 END
 
@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
     MUTABLE total: Int64 = 0;
     FOR j IN (0_i64 ..< 64) DO
         result = NEXT futures[j];
-        total += result;
+        total = total %+ result;
     END
     elapsed = timestampMs() - t0;
 
