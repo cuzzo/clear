@@ -70,19 +70,16 @@ EXTERN method calls (`cwd().makePath("data")`) are also broken.
 
 ## Known Performance Issues
 
-### 1. onRootStack overhead (~500us per call)
+### 1. ~~onRootStack overhead (~500us per call)~~ DEBUNKED
 
-Every `readFile`, `writeFile`, and non-`:safe` EXTERN FFI call goes
-through `onRootStack`, which switches from the fiber stack to the
-scheduler's OS stack and back. Cost: ~500us per round-trip.
+The 500us figure was wrong by 100x. Measured via test_onRootStack.zig:
+- Trampoline cost: 5 ns (ReleaseFast), 17 ns (debug)
+- readFile I/O: 2.2 us (open + fstat + read + close syscalls)
+- readFile on g0: 2.3 us (virtually identical to direct call)
 
-- **Impact**: Benchmark 24 GET is 83x slower than Rust (10000 GETs x
-  500us = 5000ms). Benchmark 24 SET is 7x slower (writeFile per SET).
-- **Fix options**:
-  - `:safe` EFFECTS annotation (runs on fiber stack directly) - but
-    crashes under concurrent load due to std.json's stack usage
-  - Async file I/O via io_uring (avoids stack switch entirely)
-  - Larger fiber stacks for `:safe` handlers (`@service` annotation)
+The bench 24 GET bottleneck at 4 cores is filesystem I/O, not the
+trampoline. At 16+ cores all three languages (CLEAR/Rust/Go) converge
+to within 1% on bench 24.
 
 ### 2. Idle scheduler spinning (benchmarks 12, 14)
 
