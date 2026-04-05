@@ -566,19 +566,12 @@ pub const Scheduler = struct {
             }
 
             // ── Fast path: if the ready_queue has work, run it immediately.
-            // Every 64 fast-path iterations, drain inbox + poll epoll to
-            // pick up newly spawned tasks and wake I/O-blocked fibers.
             if (self.ready_queue.len() > 0) {
                 self.fast_path_counter +%= 1;
-                // Drain RemoteCalls every iteration (O(1) when empty).
                 self.drainRemoteCalls();
                 if (self.fast_path_counter & 63 == 0) {
                     self.drainChannels();
                 }
-                // Non-blocking epoll poll EVERY iteration: wake I/O-blocked
-                // fibers that have data ready. This is critical for I/O servers
-                // where one fiber with pipelined data can monopolize the scheduler.
-                // epoll_wait(timeout=0) is ~100ns when empty — acceptable overhead.
                 self.pollEpollNonBlocking();
             } else {
                 // ── Slow path: no ready work — check all sources.

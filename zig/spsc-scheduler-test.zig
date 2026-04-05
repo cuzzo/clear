@@ -412,7 +412,7 @@ test "L5: PartitionedStringMap cross-scheduler put+get" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Large },
+        &runner, .{ .stack_size = .Large, .pinned = true },
     );
     sched.run();
 
@@ -597,13 +597,18 @@ test "L7: pinned fiber sendAndWait yield-poll to remote scheduler" {
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .seq_cst);
                 target.event_fd.notify();
 
-                // Yield-poll: same mechanism as sendAndWait.
-                // This is the code path that deadlocks when the main scheduler
-                // never reaches the slow path.
+                // Spin-then-yield: same mechanism as sendAndWait.
+                var sw_spins: u32 = 0;
                 while (!ctx.done.load(.acquire)) {
-                    const task = fp.active_scheduler.getCurrent();
-                    task.status.store(.Ready, .release);
-                    task.base.yield();
+                    if (sw_spins < 8192) {
+                        std.atomic.spinLoopHint();
+                        sw_spins += 1;
+                    } else {
+                        const task = fp.active_scheduler.getCurrent();
+                        task.status.store(.Ready, .release);
+                        task.base.yield();
+                        sw_spins = 0;
+                    }
                 }
 
                 if (ctx.value != 42) return error.WrongResult;

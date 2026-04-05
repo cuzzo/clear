@@ -3283,14 +3283,21 @@ pub const CheatLib = struct {
                 }
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
                 target.event_fd.notify();
-                // Yield-poll: yield to scheduler so it can drain channels
-                // (including other fibers' remote results), then resume us.
-                // We re-check done each time we're scheduled.
-                // Cost: ~100ns per yield (register save/restore).
+                // Spin-then-yield for remote completion.  Spin first with
+                // PAUSE (spinLoopHint) which is critical for cross-core
+                // visibility.  Fall back to yield so the scheduler can drain
+                // channels — without yield, two fibers on different schedulers
+                // can deadlock when each spin-waits for the other's shard.
+                var _sw_spins: u32 = 0;
                 while (!done_flag.load(.acquire)) {
-                    const task = fp.active_scheduler.getCurrent();
-                    task.status.store(.Ready, .release);
-                    task.base.yield();
+                    std.atomic.spinLoopHint();
+                    _sw_spins += 1;
+                    if (_sw_spins >= 8192) {
+                        _sw_spins = 0;
+                        const task = fp.active_scheduler.getCurrent();
+                        task.status.store(.Ready, .release);
+                        task.base.yield();
+                    }
                 }
             }
 
