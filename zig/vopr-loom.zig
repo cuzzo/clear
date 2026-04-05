@@ -24,21 +24,27 @@
 //   a = max atomic ops in thread A (owner: pop/push)
 //   b = max atomic ops in thread B (thief: stealOne)
 //
-// Current op counts (from queues.zig):
+// Current op counts (from queues.zig + task.status via SimAtomic):
 //   pop()      = 7 ops max  (2 loads, 1 store, 2 loads, 1 CAS, 1 store)
 //   stealOne() = 4 ops max  (2 loads, 1 load, 1 CAS)
 //   push()     = 4 ops max  (1 load, 1 load, 1 store, 1 store)
+//   epollWake  = 5 ops max  (1 status CAS, 4 push ops)
+//   epollWake+pop = 12 ops  (1 status CAS, 4 push, 7 pop)
 //
-// Scenario          | a  | b | C(a+b,b) | Depth needed
-// ------------------+----+---+----------+-------------
-// pop vs steal      | 7  | 4 |      330 | 11 (2048)
-// pinned steal      | 7  | 8 |    6435* | 15 (32768)
-// push during steal | 11 | 4 |     1365 | 12 (4096)
+// Scenario               | a  | b  | C(a+b,b) | Depth needed
+// -----------------------+----+----+----------+-------------
+// pop vs steal           |  7 |  4 |      330 | 11 (2048)
+// pinned steal           |  7 |  8 |    6435* | 15 (32768)
+// push during steal      | 11 |  4 |     1365 | 12 (4096)
+// epoll wake vs pop      |  5 |  7 |      792 | 10 (1024)
+// epoll wake vs steal    |  5 |  4 |      126 |  8 (256)
+// double epoll fire      |  5 |  5 |      252 |  9 (512)
+// epoll wake+pop vs steal| 12 |  4 |     1820 | 11 (2048)
 //
 // * pinned steal: stealOne hits pinned path, calls push() internally (4 more ops)
 //
-// We use depth 12 for unit tests and depth 14 for the main binary, which
-// covers all scenarios with margin.
+// We use depth 10-14 for unit tests and depth 14 for the main binary,
+// which covers all scenarios with margin.
 //
 // WHEN TO INCREASE DEPTH:
 //   - You add atomic operations to pop(), push(), or stealOne()
@@ -56,6 +62,8 @@ const qs = @import("queues.zig");
 
 // Re-export SimAtomic so queues.zig picks it up via @import("root").SimAtomic
 pub const SimAtomic = @import("vopr-atomic.zig").SimAtomic;
+// Re-export SimPoller so scheduler.zig picks it up via @import("root").SimPoller
+pub const SimPoller = @import("vopr-poller.zig").SimPoller;
 
 const Fiber = fc.Fiber;
 const Context = fc.Context;
@@ -162,7 +170,7 @@ const LoomHarness = struct {
         self.stub_tasks[idx] = Task{
             .base = &self.stub_fibers[idx],
             .user_fn = @ptrCast(&dummyFn),
-            .status = std.atomic.Value(qs.TaskStatus).init(.Ready),
+            .status = qs.Atomic(qs.TaskStatus).init(.Ready),
             .config = .{ .pinned = pinned },
         };
         return &self.stub_tasks[idx];
@@ -234,6 +242,11 @@ const LoomHarness = struct {
             const chosen = self.pickThread();
             self.fibers[chosen].switchTo(&self.main_ctx);
         }
+        // Clear fiber threadlocals so post-run SimAtomic operations
+        // (e.g., queue.len() in invariant checks) don't try to yield
+        // on a dead fiber context.
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
 
         if (steps >= MAX_STEPS) {
             std.debug.print("LOOM: hit step limit ({d})\n", .{MAX_STEPS});
@@ -425,7 +438,9 @@ fn scenarioPinnedSteal(h: *LoomHarness) !void {
     try checkPinnedNotStolen(h);
     try checkNoDuplicates(h);
     // Conservation: 2 tasks pushed. Results + remaining queue must == 2.
-    const total = countResults(h) + h.queue.len();
+    const results = countResults(h);
+    const qlen = h.queue.len();
+    const total = results + qlen;
     if (total < 2) return LoomError.TaskLost;
     if (total > 2) return LoomError.TaskDuplicated;
 }
@@ -495,6 +510,167 @@ fn scenarioAllPinned(h: *LoomHarness) !void {
     const total = countResults(h) + h.queue.len();
     if (total < 4) return LoomError.TaskLost;
     if (total > 4) return LoomError.TaskDuplicated;
+}
+
+// -----------------------------------------------------------------------
+// Epoll integration: thread entry functions
+// -----------------------------------------------------------------------
+// These model the scheduler's epoll wakeup path: CAS Blocked->Ready,
+// then push to queue.  This is the code extracted as wakeTaskFromEpoll()
+// in scheduler.zig.  By running it under Loom's SimAtomic, we get
+// deterministic interleaving at the CAS and push yield points.
+
+/// Thread A: simulate epoll waking a Blocked task (CAS + push).
+/// This is the hot path from scheduler.zig processEpollEvents().
+/// Does NOT record the task as a "result" -- the waker produces the task
+/// into the queue, it doesn't consume it.  Only poppers/stealers consume.
+fn entryEpollWake() callconv(.c) void {
+    const h = harness;
+    const task = &h.stub_tasks[0];
+    // CAS Blocked -> Ready.  Only the CAS winner pushes.
+    if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
+        h.queue.push(std.heap.c_allocator, task) catch {};
+    }
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+/// Thread B: owner pops from queue (races with epoll wake push).
+fn entryEpollPop() callconv(.c) void {
+    const h = harness;
+    const result = h.queue.pop();
+    h.recordResult(1, result);
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+/// Thread B: thief steals from queue (races with epoll wake push).
+fn entryEpollSteal() callconv(.c) void {
+    const h = harness;
+    const result = h.queue.stealOne();
+    h.recordResult(1, result);
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+/// Thread B: simulate second epoll fire on same task (double-fire race).
+/// Both threads try to CAS Blocked->Ready on the same task.
+/// Neither records a consumed result -- they're both producers.
+fn entryEpollWake2() callconv(.c) void {
+    const h = harness;
+    const task = &h.stub_tasks[0];
+    if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
+        h.queue.push(std.heap.c_allocator, task) catch {};
+    }
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+/// Thread A: epoll wake + push, then pop (models a scheduler that wakes
+/// a task from epoll and immediately runs it in the same iteration).
+fn entryEpollWakeThenPop() callconv(.c) void {
+    const h = harness;
+    const task = &h.stub_tasks[0];
+    if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
+        h.queue.push(std.heap.c_allocator, task) catch {};
+    }
+    // Now pop (may get the task we just pushed, or null if thief stole it)
+    h.recordResult(0, h.queue.pop());
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+// -----------------------------------------------------------------------
+// Epoll integration: scenarios
+// -----------------------------------------------------------------------
+
+/// Scenario 7: Epoll wake vs pop.
+/// Thread A (waker): CAS Blocked->Ready + push (epoll wakeup path)
+/// Thread B (popper): pop() from the queue
+/// Task 0 starts Blocked (not in queue). Task 1 starts in queue.
+/// The waker produces task 0 into the queue; the popper consumes.
+/// Invariant: no task appears twice, popped + queue <= 2.
+fn scenarioEpollWakeVsPop(h: *LoomHarness) !void {
+    const blocked_task = h.initStubTask(0, false);
+    blocked_task.status.store(.Blocked, .release);
+    const ready_task = h.initStubTask(1, false);
+    h.queue.push(std.heap.c_allocator, ready_task) catch unreachable;
+
+    try h.createThread(0, @intFromPtr(&entryEpollWake));
+    try h.createThread(1, @intFromPtr(&entryEpollPop));
+    try h.run();
+    // Only thread 1 (popper) records consumed results.
+    // Thread 0 (waker) is a producer -- no results.
+    try checkNoDuplicates(h);
+    const popped = countResults(h);
+    const in_queue = h.queue.len();
+    // 2 tasks total (task 0 Blocked + task 1 in queue). Waker may or may
+    // not have pushed task 0 (CAS could succeed). Popper may or may not
+    // have popped. But consumed + remaining can't exceed 2.
+    if (popped + in_queue > 2) return LoomError.TaskDuplicated;
+}
+
+/// Scenario 8: Epoll wake vs steal.
+/// Thread A (waker): CAS Blocked->Ready + push
+/// Thread B (stealer): stealOne() from the queue
+/// Task 0 starts Blocked. Task 1 starts in queue.
+fn scenarioEpollWakeVsSteal(h: *LoomHarness) !void {
+    const blocked_task = h.initStubTask(0, false);
+    blocked_task.status.store(.Blocked, .release);
+    const ready_task = h.initStubTask(1, false);
+    h.queue.push(std.heap.c_allocator, ready_task) catch unreachable;
+
+    try h.createThread(0, @intFromPtr(&entryEpollWake));
+    try h.createThread(1, @intFromPtr(&entryEpollSteal));
+    try h.run();
+    try checkNoDuplicates(h);
+    const stolen = countResults(h);
+    const in_queue = h.queue.len();
+    if (stolen + in_queue > 2) return LoomError.TaskDuplicated;
+}
+
+/// Scenario 9: Double epoll fire.
+/// Two threads both try CAS Blocked->Ready on the SAME task.
+/// Exactly one must win; the task must appear in the queue exactly once.
+/// Neither thread records results -- both are producers.
+fn scenarioDoubleEpollFire(h: *LoomHarness) !void {
+    const task = h.initStubTask(0, false);
+    task.status.store(.Blocked, .release);
+
+    try h.createThread(0, @intFromPtr(&entryEpollWake));
+    try h.createThread(1, @intFromPtr(&entryEpollWake2));
+    try h.run();
+
+    const in_queue = h.queue.len();
+    // Task must be pushed exactly once (one CAS winner, ONESHOT semantics)
+    if (in_queue == 0) return LoomError.TaskLost;
+    if (in_queue > 1) return LoomError.TaskDuplicated;
+}
+
+/// Scenario 10: Epoll wake-then-pop vs steal.
+/// Thread A: CAS + push, then immediately pop (scheduler fast path)
+/// Thread B: stealOne() concurrently
+/// Tests the case where the scheduler wakes a task and tries to run it
+/// in the same iteration, racing with a thief.
+fn scenarioEpollWakePopVsSteal(h: *LoomHarness) !void {
+    const blocked_task = h.initStubTask(0, false);
+    blocked_task.status.store(.Blocked, .release);
+
+    try h.createThread(0, @intFromPtr(&entryEpollWakeThenPop));
+    try h.createThread(1, @intFromPtr(&entryEpollSteal));
+    try h.run();
+    try checkNoDuplicates(h);
+    // Thread A wakes task (CAS + push) then pops.
+    // Thread B may steal between push and pop.
+    // At most 1 thread ends up with the task.
+    const results = countResults(h);
+    const in_queue = h.queue.len();
+    if (results + in_queue > 1) return LoomError.TaskDuplicated;
 }
 
 // -----------------------------------------------------------------------
@@ -580,6 +756,40 @@ test "loom: exhaustive all-pinned queue" {
     std.debug.print("  all_pinned: {d} interleavings OK\n", .{count});
 }
 
+// -----------------------------------------------------------------------
+// Epoll integration: exhaustive tests
+// -----------------------------------------------------------------------
+// Op counts for epoll scenarios (task.status now uses SimAtomic):
+//   entryEpollWake:        1 CAS + 4 push ops = 5 ops
+//   entryEpollPop:         7 ops (pop)
+//   entryEpollSteal:       4 ops (stealOne)
+//   entryEpollWake2:       1 CAS + 4 push ops = 5 ops
+//   entryEpollWakeThenPop: 1 CAS + 4 push + 7 pop = 12 ops
+
+test "loom: exhaustive epoll wake vs pop" {
+    // wake=5 ops, pop=7 ops. C(12,5)=792. Depth 12 = 4096 schedules.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsPop, "epoll_wake_vs_pop", 12);
+    std.debug.print("  epoll_wake_vs_pop: {d} interleavings OK\n", .{count});
+}
+
+test "loom: exhaustive epoll wake vs steal" {
+    // wake=5 ops, steal=4 ops. C(9,4)=126. Depth 10 = 1024 schedules.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsSteal, "epoll_wake_vs_steal", 10);
+    std.debug.print("  epoll_wake_vs_steal: {d} interleavings OK\n", .{count});
+}
+
+test "loom: exhaustive double epoll fire" {
+    // Both threads: 5 ops each. C(10,5)=252. Depth 10 = 1024 schedules.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioDoubleEpollFire, "double_epoll_fire", 10);
+    std.debug.print("  double_epoll_fire: {d} interleavings OK\n", .{count});
+}
+
+test "loom: exhaustive epoll wake-pop vs steal" {
+    // wake+pop=12 ops, steal=4 ops. C(16,4)=1820. Depth 14 = 16384 schedules.
+    const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakePopVsSteal, "epoll_wake_pop_vs_steal", 14);
+    std.debug.print("  epoll_wake_pop_vs_steal: {d} interleavings OK\n", .{count});
+}
+
 test "loom: queue wraparound" {
     // Push/pop enough to wrap the u32 bottom index near max.
     // Verifies modular arithmetic in pop() and stealOne().
@@ -613,7 +823,7 @@ test "loom: queue wraparound" {
         stub_tasks[i] = Task{
             .base = &stub_fibers[i],
             .user_fn = @ptrCast(&LoomHarness.dummyFn),
-            .status = std.atomic.Value(qs.TaskStatus).init(.Ready),
+            .status = qs.Atomic(qs.TaskStatus).init(.Ready),
             .config = .{},
         };
         // Push wraps around u32 max
@@ -656,6 +866,10 @@ fn runSeed(allocator: std.mem.Allocator, seed: u64) !void {
         .{ .name = "push_during_steal", .func = &scenarioPushDuringSteal },
         .{ .name = "aggressive_pinned", .func = &scenarioAggressivePinned },
         .{ .name = "all_pinned", .func = &scenarioAllPinned },
+        .{ .name = "epoll_wake_vs_pop", .func = &scenarioEpollWakeVsPop },
+        .{ .name = "epoll_wake_vs_steal", .func = &scenarioEpollWakeVsSteal },
+        .{ .name = "double_epoll_fire", .func = &scenarioDoubleEpollFire },
+        .{ .name = "epoll_wake_pop_vs_steal", .func = &scenarioEpollWakePopVsSteal },
     };
 
     for (scenarios) |s| {
@@ -697,6 +911,10 @@ pub fn main() !void {
         .{ .name = "push_during_steal", .func = &scenarioPushDuringSteal },
         .{ .name = "aggressive_pinned", .func = &scenarioAggressivePinned },
         .{ .name = "all_pinned", .func = &scenarioAllPinned },
+        .{ .name = "epoll_wake_vs_pop", .func = &scenarioEpollWakeVsPop },
+        .{ .name = "epoll_wake_vs_steal", .func = &scenarioEpollWakeVsSteal },
+        .{ .name = "double_epoll_fire", .func = &scenarioDoubleEpollFire },
+        .{ .name = "epoll_wake_pop_vs_steal", .func = &scenarioEpollWakePopVsSteal },
     };
     for (exhaustive_scenarios) |s| {
         const count = runExhaustive(allocator, s.func, s.name) catch |err| {

@@ -277,7 +277,7 @@ pub const Task = struct {
     inbox_link: InboxNode = .{ .type = .Resume },
     runtime_ptr: ?*anyopaque = null,
     context: ?*anyopaque = null,
-    status: std.atomic.Value(TaskStatus) = std.atomic.Value(TaskStatus).init(.Ready),
+    status: Atomic(TaskStatus) = Atomic(TaskStatus).init(.Ready),
     config: TaskConfig = .{},
     is_on_root_stack: bool = false,
     /// Debug guard: set to true when inbox_link is pushed to an inbox,

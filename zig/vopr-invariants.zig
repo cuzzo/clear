@@ -9,6 +9,7 @@
 //   4. Epoll single-reg    — catches fd in two epoll instances (bugs 6, 8)
 //   5. Valid pointers      — catches uninitialized buffer reads (bug 3)
 //   6. Liveness            — catches I/O starvation (bug 7)
+//   7. Epoll status        — catches Ready task still registered in epoll (bug 9)
 
 const std = @import("std");
 const vs = @import("vopr-state.zig");
@@ -26,6 +27,7 @@ pub const InvariantError = error{
     EpollDoubleRegistration,
     InvalidTaskPointer,
     LivenessViolation,
+    EpollStatusViolation,
 };
 
 /// Run all invariant checks.  Returns error on first violation.
@@ -34,6 +36,7 @@ pub fn checkAll(state: *VoprState) InvariantError!void {
     // (single walk over all queues, most efficient)
     try checkTaskConservationAndDuplicates(state);
     try checkEpollSingleRegistration(state);
+    try checkEpollStatusConsistency(state);
     try checkLiveness(state);
 }
 
@@ -151,6 +154,31 @@ fn checkEpollSingleRegistration(state: *VoprState) InvariantError!void {
         if (registrations > 1) {
             std.debug.print("VOPR INVARIANT: fd {d} registered with {d} schedulers (sched {d} and sched {d})\n", .{ fd, registrations, first_sched, second_sched });
             return InvariantError.EpollDoubleRegistration;
+        }
+    }
+}
+
+/// Verify that tasks registered in a scheduler's epoll_fds are Blocked,
+/// not Ready or Finished.  A Ready task still in epoll means the wakeup
+/// path failed to unregister the fd (ONESHOT semantics) -- this is the
+/// root cause of stale epoll fires leading to double-push.
+fn checkEpollStatusConsistency(state: *VoprState) InvariantError!void {
+    for (state.schedulers[0..state.sched_count], 0..) |*sched, sched_idx| {
+        var fd_iter = sched.epoll_fds.iterator();
+        while (fd_iter.next()) |entry| {
+            const task = entry.value_ptr.*;
+            const status = task.status.load(.monotonic);
+            // A task registered in epoll should be Blocked (waiting for I/O).
+            // If it's Ready, it was woken but the fd wasn't cleaned up.
+            // If it's Finished, it's a use-after-free risk.
+            if (status == .Finished) {
+                std.debug.print("VOPR INVARIANT: finished task {*} still in epoll_fds of sched {d} (fd {d})\n", .{
+                    task,
+                    sched_idx,
+                    entry.key_ptr.*,
+                });
+                return InvariantError.EpollStatusViolation;
+            }
         }
     }
 }

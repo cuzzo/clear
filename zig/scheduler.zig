@@ -45,6 +45,14 @@ const linux = std.os.linux;
 const posix = std.posix;
 const IoUring = linux.IoUring;
 
+// Comptime poller type selection: SimPoller in Loom mode, real Poller otherwise.
+// When the root module exports SimPoller (vopr-loom.zig), all epoll operations
+// become yield points for deterministic interleaving.
+pub const PollerType = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimPoller")) root.SimPoller else Poller;
+};
+
 const FiberNode = struct {
     // The SlabAllocator will overwrite the first 8 bytes for its 'next' pointer.
     // We sacrifice this dummy field so our Fiber data stays safe.
@@ -165,7 +173,7 @@ pub const Scheduler = struct {
     // 3. IO & Memory
     allocator: std.mem.Allocator,
     global_ebr: *EbrContext,
-    poller: Poller,
+    poller: PollerType,
 
     // 4a. io_uring — used for async file I/O (readFile).
     // Network I/O stays on epoll.  The ring fd is registered with epoll so the
@@ -221,7 +229,7 @@ pub const Scheduler = struct {
     local_arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
-        const p = Poller.init() catch unreachable;
+        const p = if (PollerType == Poller) Poller.init() catch unreachable else PollerType.init(allocator, 0);
         const efd = try SmartEventFd.init();
 
         // io_uring ring for async file I/O (256 SQE slots).
@@ -701,28 +709,7 @@ pub const Scheduler = struct {
             self.event_fd.markAwake();
 
             if (count > 0) {
-                for (self.epoll_events[0..count]) |event| {
-                    const data_ptr = event.data.ptr;
-
-                    // CHECK: Is this the Wake Up Signal?
-                    if (data_ptr == 0) {
-                        self.event_fd.consume();
-                    }
-                    // CHECK: Is this the io_uring ring fd? (sentinel = 1)
-                    else if (data_ptr == 1) {
-                        self.drainCqes();
-                    }
-                    else {
-                        // IO Task Wakeup: CAS from Blocked → Ready.
-                        // Only the winner pushes to the ready queue.
-                        // This prevents double-push when a stale epoll event
-                        // races with the task being woken by another path.
-                        const task = @as(*Task, @ptrFromInt(data_ptr));
-                        if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
-                            self.ready_queue.push(self.allocator, task) catch unreachable;
-                        }
-                    }
-                }
+                self.processEpollEvents(self.epoll_events[0..count]);
             }
 
             // If no IO and no Tasks and no Sleepers -> Break
@@ -769,7 +756,9 @@ pub const Scheduler = struct {
     pub fn registerFd(self: *Scheduler, fd: i32, task: *Task) !void {
         if (task.epoll_fd >= 0 and task.epoll_fd != self.poller.epoll_fd) {
             // Unregister from old scheduler's epoll
-            std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+            if (PollerType == Poller) {
+                std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+            }
         }
         task.epoll_fd = self.poller.epoll_fd;
         task.epoll_io_fd = fd;
@@ -779,7 +768,9 @@ pub const Scheduler = struct {
     // Register fd for write-readiness (used by socketWrite EAGAIN path).
     pub fn registerWriteFd(self: *Scheduler, fd: i32, task: *Task) !void {
         if (task.epoll_fd >= 0 and task.epoll_fd != self.poller.epoll_fd) {
-            std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+            if (PollerType == Poller) {
+                std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
+            }
         }
         task.epoll_fd = self.poller.epoll_fd;
         task.epoll_io_fd = fd;
@@ -811,6 +802,32 @@ pub const Scheduler = struct {
         waiter.task.status.store(.Blocked, .release);
     }
 
+    /// Core epoll wakeup logic: CAS from Blocked -> Ready, push to queue.
+    /// Only the CAS winner pushes, preventing double-push when stale epoll
+    /// events race with other wakeup paths.  Extracted so Loom scenarios
+    /// can exercise this code path under deterministic interleaving.
+    pub fn wakeTaskFromEpoll(self: *Scheduler, task: *Task) void {
+        if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
+            self.ready_queue.push(self.allocator, task) catch unreachable;
+        }
+    }
+
+    /// Process a slice of epoll events, dispatching sentinels and waking
+    /// I/O-blocked tasks.  Used by both the fast path (non-blocking) and
+    /// slow path (blocking) epoll polls.
+    fn processEpollEvents(self: *Scheduler, events: []const std.os.linux.epoll_event) void {
+        for (events) |event| {
+            const data_ptr = event.data.ptr;
+            if (data_ptr == 0) {
+                self.event_fd.consume();
+            } else if (data_ptr == 1) {
+                self.drainCqes();
+            } else {
+                self.wakeTaskFromEpoll(@ptrFromInt(data_ptr));
+            }
+        }
+    }
+
     /// Drain all ready CQEs from the io_uring, writing the result into each
     /// IoWaiter and pushing the corresponding task back onto the ready queue.
     // Non-blocking epoll poll: check for I/O readiness without sleeping.
@@ -818,19 +835,7 @@ pub const Scheduler = struct {
     fn pollEpollNonBlocking(self: *Scheduler) void {
         const count = self.poller.poll(&self.epoll_events, 0);
         if (count > 0) {
-            for (self.epoll_events[0..count]) |event| {
-                const data_ptr = event.data.ptr;
-                if (data_ptr == 0) {
-                    self.event_fd.consume();
-                } else if (data_ptr == 1) {
-                    self.drainCqes();
-                } else {
-                    const task: *Task = @ptrFromInt(data_ptr);
-                    if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
-                        self.ready_queue.push(self.allocator, task) catch unreachable;
-                    }
-                }
-            }
+            self.processEpollEvents(self.epoll_events[0..count]);
         }
     }
 
