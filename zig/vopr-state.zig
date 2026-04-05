@@ -83,7 +83,7 @@ pub const SimScheduler = struct {
 
     pub fn init(allocator: std.mem.Allocator, idx: u32) !SimScheduler {
         const rq = try allocator.create(RunQueue);
-        rq.* = RunQueue.init();
+        rq.* = try RunQueue.initWithAllocator(allocator);
         return SimScheduler{
             .ready_queue = rq,
             .sleeping_queue = .{},
@@ -99,6 +99,9 @@ pub const SimScheduler = struct {
         self.sleeping_queue.deinit(allocator);
         self.epoll_fds.deinit(allocator);
         self.pending_shard_ops.deinit(allocator);
+        allocator.free(self.ready_queue.buffer);
+        for (self.ready_queue.old_buffers.items) |buf| allocator.free(buf);
+        self.ready_queue.old_buffers.deinit(allocator);
         allocator.destroy(self.ready_queue);
     }
 };

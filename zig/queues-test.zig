@@ -136,7 +136,8 @@ fn destroyTask(t: *Task) void {
 }
 
 test "RunQueue: FIFO/LIFO Semantics" {
-    var q = RunQueue.init();
+    var q = try RunQueue.initWithAllocator(std.testing.allocator);
+    defer std.testing.allocator.free(q.buffer);
 
     const t1 = createTask(1);
     const t2 = createTask(2);
@@ -157,9 +158,10 @@ test "RunQueue: FIFO/LIFO Semantics" {
 }
 
 test "RunQueue: Stealing (FIFO)" {
-    var owner_q = RunQueue.init();
-    var thief_q = RunQueue.init();
-    // inbox removed — tryStealFrom no longer needs it
+    var owner_q = try RunQueue.initWithAllocator(std.testing.allocator);
+    defer std.testing.allocator.free(owner_q.buffer);
+    var thief_q = try RunQueue.initWithAllocator(std.testing.allocator);
+    defer std.testing.allocator.free(thief_q.buffer);
 
     // Push 10 items
     var tasks: [10]*Task = undefined;
@@ -229,7 +231,7 @@ fn thiefWorker(my_q: *RunQueue, victim_q: *RunQueue, done: *std.atomic.Value(boo
         }
 
         // 2. Try to steal
-        _ = my_q.tryStealFrom(victim_q, std.testing.allocator);
+        _ = my_q.tryStealFrom(victim_q, std.heap.c_allocator);
 
         // Yield to let others run
         std.Thread.yield() catch {};
@@ -247,13 +249,17 @@ test "RunQueue: Concurrent Thieves" {
     for (0..TOTAL_ITEMS) |i| torture_tasks[i] = createTask(i);
     defer for (torture_tasks) |t| destroyTask(t);
 
-    var owner_q = RunQueue.init();
+    var owner_q = try RunQueue.initWithAllocator(std.testing.allocator);
+    defer std.testing.allocator.free(owner_q.buffer);
     var thief_queues: [THIEF_COUNT]RunQueue = undefined;
     var inbox = AtomicInbox{}; // Dummy inbox
 
     var done_flag = std.atomic.Value(bool).init(false);
 
-    for (0..THIEF_COUNT) |i| thief_queues[i] = RunQueue.init();
+    for (0..THIEF_COUNT) |i| {
+        thief_queues[i] = try RunQueue.initWithAllocator(std.testing.allocator);
+    }
+    defer for (&thief_queues) |*tq| std.testing.allocator.free(tq.buffer);
 
     // Spawn Thieves
     var threads: [THIEF_COUNT]std.Thread = undefined;
@@ -298,32 +304,13 @@ test "RunQueue: Concurrent Thieves" {
     }
 }
 
-test "RunQueue: Steal when thief is full" {
-    // When the thief queue is full, tryStealFrom steals one item from the victim
-    // (via stealOne), then push fails (queue full), so it breaks and returns 0.
-    // NOTE: This is a known task-loss edge case — the stolen task is dropped.
-    // Tracked for v0.2 fix (should put back on victim or use overflow list).
-    var owner_q = RunQueue.init();
-    var thief_q = RunQueue.init();
-
-    const dummy = createTask(999);
-    defer destroyTask(dummy);
-
-    while (true) {
-        thief_q.push(std.testing.allocator, dummy) catch break;
-    }
-
-    const t_steal = createTask(1);
-    defer destroyTask(t_steal);
-    try owner_q.push(std.testing.allocator, t_steal);
-
-    const stolen = thief_q.tryStealFrom(&owner_q, std.testing.allocator);
-    // Returns 0 because push failed, but victim lost 1 item (known issue)
-    try testing.expectEqual(@as(usize, 0), stolen);
-}
+// Removed: "Steal when thief is full" — the RunQueue is now growable (no fixed
+// capacity), so the premise of filling it then testing steal failure no longer
+// applies. The queue doubles on push until OOM.
 
 test "RunQueue: Index Wrapping Behavior" {
-    var q = RunQueue.init();
+    var q = try RunQueue.initWithAllocator(std.testing.allocator);
+    defer std.testing.allocator.free(q.buffer);
 
     // 1. Force near overflow
     const near_max = std.math.maxInt(u32) - 1;
