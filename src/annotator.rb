@@ -526,6 +526,10 @@ private
     # Register the Type Name with its field schema.
     schema = node.fields.transform_values { |f| f[:type] }
 
+    # Track which fields are BORROWED (references, not owned).
+    borrowed_fields = node.fields.select { |_, f| f[:borrowed] }.keys
+    schema[:borrowed_fields] = borrowed_fields.to_set if borrowed_fields.any?
+
     # For generic structs, record the type parameter names so field-type
     # lookups don't reject them as unknown types.
     schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
@@ -1496,6 +1500,10 @@ private
         close_zig: resource_close
       )
       node.symbol = current_scope.locals[node.name]
+      # Struct with BORROWED fields: propagate non_escaping to the binding
+      if node.value.instance_variable_get(:@has_borrowed_fields)
+        node.symbol.non_escaping = true
+      end
       # Propagate @link_source from the value type to the scope entry
       val_ti = node.value&.type_info
       if val_ti&.link?
@@ -2130,6 +2138,9 @@ private
         error!(node, "Struct '#{node.name}' has no field '#{field_name}'")
       end
 
+      # Check if this field is declared BORROWED in the struct definition
+      field_is_borrowed = schema[:borrowed_fields]&.include?(field_name)
+
       # Apply type param substitution (e.g., T → Number)
       expected_type = if raw_expected.is_a?(Type) && type_subst.key?(raw_expected.resolved)
         Type.new(type_subst[raw_expected.resolved])
@@ -2137,9 +2148,14 @@ private
         raw_expected
       end
 
-      reject_borrowed_value!(val_node, "#{node.name}.#{field_name}")
-      # Ensure value is owned data (implicit COPY for @list/rodata strings).
-      owned = ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
+      # BORROWED fields accept borrowed values — skip ownership checks.
+      # Non-borrowed fields require owned data.
+      unless field_is_borrowed
+        reject_borrowed_value!(val_node, "#{node.name}.#{field_name}")
+      end
+      owned = unless field_is_borrowed
+        ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
+      end
       if owned
         node.fields[field_name] = owned
         val_node = owned
@@ -2158,9 +2174,12 @@ private
       et = expected_type.is_a?(Type) ? expected_type : nil
       val_node.target_is_list_field = true if et&.list_collection?
 
-      # Move: struct literal captures non-Copy values.
-      move_if_not_copyable!(val_node)
+      # Move: struct literal captures non-Copy values (skip for borrowed fields).
+      move_if_not_copyable!(val_node) unless field_is_borrowed
     end
+
+    # Non-escaping propagation: structs with BORROWED fields inherit non_escaping.
+    node.instance_variable_set(:@has_borrowed_fields, true) if schema[:borrowed_fields]&.any?
 
     # Set full_type to the generic instance name or plain struct name
     node.full_type = if node.type_args&.any?

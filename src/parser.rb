@@ -1430,6 +1430,10 @@ class Parser
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name = consume(:VAR_ID).value
       consume(:CHAR, ':')
+
+      # Optional BORROWED modifier: field is a reference, not owned
+      borrowed = match!(:KEYWORD, 'BORROWED') ? true : false
+
       type = parse_type_annotation()
 
       default_val = nil
@@ -1437,8 +1441,7 @@ class Parser
         default_val = parse_expression()
       end
 
-      # Store as a hash containing both type and default
-      [name, { type: type, default: default_val }]
+      [name, { type: type, default: default_val, borrowed: borrowed }]
     end
     pairs.to_h
   end
