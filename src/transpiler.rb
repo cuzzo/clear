@@ -1229,6 +1229,21 @@ private
     when AST::HashLit
       transpile_hash_lit(node)
 
+    when AST::Slice
+      target_code = visit(node.target)
+      start_code = visit(node.start)
+      end_code = visit(node.end)
+      target_ti = node.target.type_info
+      exclusive = node.instance_variable_get(:@exclusive)
+      # ArrayList → access .items for slicing; plain slice → direct
+      accessor = (target_ti&.list_collection? || target_ti&.array?) ?
+        "(if (@hasField(@TypeOf(#{target_code}), \"items\")) #{target_code}.items else #{target_code})" : target_code
+      start_zig = "@as(usize, @intCast(#{start_code}))"
+      end_zig = exclusive ? "@as(usize, @intCast(#{end_code}))" : "@as(usize, @intCast(#{end_code})) + 1"
+      elem_zig = node.target.type_info&.element_type ? Type.new(node.target.type_info.element_type).zig_type : "u8"
+      # Zig slicing returns *[N]T; @as coerces to []T for CLEAR's dynamic slice semantics.
+      "@as([]const #{elem_zig}, #{accessor}[#{start_zig}..#{end_zig}])"
+
     when AST::GetIndex
       # 1. Resolve Target and Index
       target = visit(node.target)

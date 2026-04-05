@@ -1,0 +1,40 @@
+-- Test: range slicing with .. (inclusive) and ..< (exclusive).
+-- Slices are borrows of the source array — zero-copy views.
+
+FN main() RETURNS Void ->
+    data: Int64[] = [10, 20, 30, 40, 50];
+
+    -- Inclusive range: items[1..3] = [20, 30, 40]
+    sub = data[1..3];
+    ASSERT sub.length() == 3;
+    ASSERT sub[0] == 20;
+    ASSERT sub[1] == 30;
+    ASSERT sub[2] == 40;
+
+    -- Exclusive range: items[0..<3] = [10, 20, 30]
+    sub2 = data[0..<3];
+    ASSERT sub2.length() == 3;
+    ASSERT sub2[0] == 10;
+    ASSERT sub2[2] == 30;
+
+    -- Full slice: items[0..4] = all 5 elements
+    all = data[0..4];
+    ASSERT all.length() == 5;
+
+    -- Single element slice: items[2..2] = [30]
+    one = data[2..2];
+    ASSERT one.length() == 1;
+    ASSERT one[0] == 30;
+
+    -- String slicing
+    msg = "Hello, World!";
+    hello = msg[0..4];
+    ASSERT hello.length() == 5;
+    ASSERT hello == "Hello";
+
+    world = msg[7..<12];
+    ASSERT world == "World";
+
+    print("PASS");
+    RETURN;
+END
