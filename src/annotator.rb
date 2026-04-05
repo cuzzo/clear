@@ -2543,6 +2543,10 @@ private
   # +expected_type+: the target field/param type (Type or Symbol)
   # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
   def ensure_owned_value!(val_node, expected_type, container_desc = nil)
+    # Non-escaping values (WITH block aliases) cannot be stored in containers
+    if val_node.is_a?(AST::Identifier) && val_node.symbol&.non_escaping
+      error!(val_node, "Cannot store WITH-scoped '#{val_node.name}' into #{container_desc || 'a container'}. WITH bindings cannot escape their block.")
+    end
     return nil if val_node.is_a?(AST::CopyNode)
     vti = val_node.type_info
     vti = Type.new(vti) if vti && !vti.is_a?(Type)
@@ -2702,23 +2706,15 @@ private
       acquire_capability!(node, cap, expanded_capabilities)
     end
 
-    # Collect borrowed alias names for escape checking
-    borrowed_aliases = expanded_capabilities.select { |c| c[:capability] == :BORROWED }
-      .map { |c| c[:alias] || cap_var_name(c[:var_node]) }.to_set
-
     # 2. Enter a child scope for the capability block
     # Inherits parent variables so the WITH body can see enclosing locals,
     # but new declarations inside are isolated to the WITH block.
-    outer_vars = current_scope.locals.keys.to_set
+    # Escape checking is handled by the non_escaping flag on SymbolEntry —
+    # every escape site (ensure_owned_value!, handle_assign_move, RETURN)
+    # checks this flag automatically.
     with_new_scope(current_scope) do
       expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
       node.body.each { |stmt| visit(stmt) }
-
-      # Check: borrowed aliases must not escape via assignment to outer variables
-      unless borrowed_aliases.empty?
-        check_borrow_escape!(node.body, borrowed_aliases, outer_vars)
-      end
-
       finalize_scope(node)
     end
 
@@ -2738,54 +2734,6 @@ private
 
   # Walk statements looking for assignments where a borrowed alias escapes
   # to an outer-scope variable.
-  def check_borrow_escape!(stmts, borrowed_aliases, outer_vars)
-    stmts.each do |stmt|
-      case stmt
-      when AST::Assignment
-        rhs_names = collect_identifier_names_set(stmt.value)
-        if rhs_names.intersect?(borrowed_aliases)
-          target = case stmt.name
-                   when AST::Identifier then stmt.name.name
-                   when String then stmt.name
-                   else nil
-                   end
-          if target && outer_vars.include?(target)
-            error!(stmt, "Cannot assign borrowed value to outer variable '#{target}'. Borrowed values cannot escape their WITH block.")
-          end
-        end
-      when AST::BindExpr
-        rhs_names = collect_identifier_names_set(stmt.value)
-        if rhs_names.intersect?(borrowed_aliases)
-          target = stmt.name.is_a?(String) ? stmt.name : (stmt.name.respond_to?(:name) ? stmt.name.name : nil)
-          if target && outer_vars.include?(target)
-            error!(stmt, "Cannot assign borrowed value to outer variable '#{target}'. Borrowed values cannot escape their WITH block.")
-          end
-        end
-      when AST::IfStatement
-        check_borrow_escape!(stmt.then_branch || [], borrowed_aliases, outer_vars)
-        check_borrow_escape!(stmt.else_branch || [], borrowed_aliases, outer_vars)
-      when AST::WhileLoop
-        check_borrow_escape!(stmt.do_branch || [], borrowed_aliases, outer_vars)
-      when AST::ForRange, AST::ForEach
-        check_borrow_escape!(stmt.body || [], borrowed_aliases, outer_vars)
-      end
-    end
-  end
-
-  def collect_identifier_names_set(node)
-    names = Set.new
-    walk = lambda do |n|
-      case n
-      when AST::Identifier then names << n.name
-      when AST::BinaryOp then walk.call(n.left); walk.call(n.right)
-      when AST::FuncCall then n.args&.each { |a| walk.call(a) }
-      when AST::MethodCall then walk.call(n.object); n.args&.each { |a| walk.call(a) }
-      end
-    end
-    walk.call(node)
-    names
-  end
-
   def visit_DoBlock(node)
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
@@ -3024,6 +2972,10 @@ private
   # and capability tracking. All ownership state is in the OwnershipGraph.
 
   def handle_assign_move(node)
+    # Non-escaping values (WITH block aliases) cannot be moved/consumed
+    if node.value.is_a?(AST::Identifier) && node.value.symbol&.non_escaping
+      error!(node, "Cannot move WITH-scoped '#{node.value.name}'. WITH bindings cannot escape their block.")
+    end
     if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
       # Container indexing of borrowed source into an owned target (HashMap
       # assignment) is an error. Plain variable declarations get borrow marking

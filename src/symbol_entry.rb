@@ -8,7 +8,8 @@ class SymbolEntry
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
                 :takes,          # true if parameter declared with TAKES (callee owns)
-                :link_source     # :shared or :multiowned — tracks which strong ref @link was created from
+                :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
+                :non_escaping    # true for WITH-scoped bindings — cannot be returned, stored, or TAKES'd
 
   def initialize(reg:, type:, mutable:, storage:, sync: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
