@@ -180,5 +180,39 @@ FN main() RETURNS Void ->
     pathCA: String[]@list = shortestPath!(nodes, "c", "a");
     ASSERT pathCA.length() == 0, "no path c->a";
 
-    print("graphdb: all tests PASSED");
+    print("graphdb: sequential tests PASSED");
+
+    -- ================================================================
+    -- Concurrent tests: BG fibers add nodes/edges simultaneously
+    -- ================================================================
+    MUTABLE cNodes: HashMap<Node>@sharded(4):writeLocked = {};
+
+    -- Concurrent node creation: 3 BG fibers each add a node
+    p1 = BG { addNode!(cNodes, "x", "Xena"); };
+    p2 = BG { addNode!(cNodes, "y", "Yara"); };
+    p3 = BG { addNode!(cNodes, "z", "Zane"); };
+    NEXT p1; NEXT p2; NEXT p3;
+
+    ASSERT getLabel(cNodes, "x") == "Xena", "concurrent: x is Xena";
+    ASSERT getLabel(cNodes, "y") == "Yara", "concurrent: y is Yara";
+    ASSERT getLabel(cNodes, "z") == "Zane", "concurrent: z is Zane";
+
+    -- Concurrent edge creation
+    p4 = BG { addEdge!(cNodes, "x", "y", 1.0); };
+    p5 = BG { addEdge!(cNodes, "x", "z", 2.0); };
+    p6 = BG { addEdge!(cNodes, "y", "z", 3.0); };
+    NEXT p4; NEXT p5; NEXT p6;
+
+    -- Verify edges
+    xNeighbors = neighbors!(cNodes, "x");
+    ASSERT xNeighbors.length() == 2, "concurrent: x has 2 neighbors";
+
+    yNeighbors = neighbors!(cNodes, "y");
+    ASSERT yNeighbors.length() == 1, "concurrent: y has 1 neighbor";
+
+    -- Concurrent read while structure is stable
+    pathXZ: String[]@list = shortestPath!(cNodes, "x", "z");
+    ASSERT pathXZ.length() == 2, "concurrent: path x->z has 2 nodes";
+
+    print("graphdb: concurrent tests PASSED");
 END
