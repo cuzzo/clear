@@ -272,7 +272,8 @@ def run_server_bench(dir)
     FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
   end
 
-  threads = ENV['CLEAR_THREADS'] || "1"
+  threads = ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+  threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
   # No jemalloc for server benchmarks — memory comparison is the focus,
   # and jemalloc can conflict with io_uring/epoll in long-running servers.
 
