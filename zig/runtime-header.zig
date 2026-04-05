@@ -1099,9 +1099,11 @@ pub const CheatLib = struct {
     // Usage: data = tcpRead(client)
     // Yields after successful read for I/O fairness among concurrent client fibers.
     pub noinline fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
-        var buf: [4096]u8 = undefined;
-        const n = try CheatLib.read(fd, &buf);
-        const result = try allocator.dupe(u8, buf[0..n]);
+        // Allocate read buffer on the frame arena (not the fiber stack)
+        // to avoid consuming 4 KB of the fiber's limited 16 KB stack space.
+        const buf = try allocator.alloc(u8, 4096);
+        const n = try CheatLib.read(fd, buf);
+        const result = buf[0..n];
         // Cooperative yield: if other fibers are Ready, give them a turn.
         // This prevents a single client with pipelined data from monopolizing
         // the scheduler across multiple read-process-write cycles.

@@ -1518,7 +1518,7 @@ private
 
         # Default: spawnBest distributes across all schedulers (work-stealing).
         # @pinned: pin to the current thread's scheduler via submitSpawn.
-        task_cfg = task_config_zig(branch[:stack_size])
+        task_cfg = task_config_zig(branch[:stack_size], computed_tier: branch[:computed_stack_tier])
         spawn_call = if pinned
           <<~ZIG.chomp
             try #{wg_var}.sched.submitSpawn(
@@ -1822,7 +1822,7 @@ private
                 @intFromPtr(&Runtime.entryWrapper),
                 @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
                 #{ctx_var},
-                #{task_config_zig(node.stack_size)},
+                #{task_config_zig(node.stack_size, computed_tier: node.computed_stack_tier)},
             );
             break :#{blk_label} #{stream_var};
         }
@@ -3222,7 +3222,11 @@ private
   # Exception: when the BG block captures a resource (TCP fd), spawn on
   # the accepting scheduler to keep epoll fd registration consistent.
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
-    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned)
+    # TCP handler fibers need large stacks: socketRead + deep RESP parsing +
+    # anytype monomorphization inflate the call chain beyond 16KB Standard.
+    resource_tier = node.captures_resource ? :large : nil
+    effective_tier = [node.computed_stack_tier, resource_tier].compact.max_by { |t| STACK_SIZE_ZIG_VARIANT.fetch(t, "Standard") == "Large" ? 1 : 0 }
+    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned, computed_tier: effective_tier)
     if node.pinned
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
@@ -3244,8 +3248,22 @@ private
     end
   end
 
-  def task_config_zig(stack_size, pinned: false)
-    variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")
+  # Tier ordering for max() comparison
+  TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
+
+  def task_config_zig(stack_size, pinned: false, computed_tier: nil)
+    default = @default_stack_size || "Standard"
+    if stack_size
+      # User explicitly chose a size - honor it
+      variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
+    elsif computed_tier
+      # Auto-sized: take the MAX of computed tier and build-mode default.
+      # Debug builds use Large default because safety checks inflate frames.
+      computed = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
+      variant = TIER_RANK.fetch(computed, 0) >= TIER_RANK.fetch(default, 0) ? computed : default
+    else
+      variant = default
+    end
     if pinned
       ".{ .stack_size = .#{variant}, .pinned = true }"
     else
