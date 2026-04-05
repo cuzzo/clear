@@ -61,11 +61,11 @@ test "SharedPromise next() returns cached value on second call" {
     sp.resolved = 42.0;
 
     // First call: returns cached value immediately (skips wg.wait() branch).
-    const v1 = sp.next();
+    const v1 = try sp.next();
     try std.testing.expectApproxEqAbs(42.0, v1, 1e-9);
 
     // Second call: still returns cached value.
-    const v2 = sp.next();
+    const v2 = try sp.next();
     try std.testing.expectApproxEqAbs(42.0, v2, 1e-9);
 }
 
@@ -73,8 +73,8 @@ test "SharedPromise with bool type caches correctly" {
     var sp: CheatLib.SharedPromise(bool) = undefined;
     sp.resolved = true;
 
-    const v1 = sp.next();
-    const v2 = sp.next();
+    const v1 = try sp.next();
+    const v2 = try sp.next();
     try std.testing.expect(v1 == true);
     try std.testing.expect(v2 == true);
 }

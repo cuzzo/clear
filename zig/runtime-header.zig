@@ -2747,11 +2747,11 @@ pub const CheatLib = struct {
                 value: T = undefined,
             };
 
-            slots: []Slot,
+            slots: []Slot = &.{},
             /// Stack of free slot indices. Top is at free_stack[free_top - 1].
-            free_stack: []u32,
-            free_top: u32,
-            capacity: u32,
+            free_stack: []u32 = &.{},
+            free_top: u32 = 0,
+            capacity: u32 = 0,
             live_count: u32 = 0,
 
             /// Pre-allocate all slots and build the free stack.
@@ -2999,7 +2999,7 @@ pub const CheatLib = struct {
             const SHARD_SHIFT: u6 = 56;
             const HANDLE_MASK: u64 = (1 << 56) - 1;
 
-            shards: [N]Pool(T),
+            shards: [N]Pool(T) = [_]Pool(T){.{}} ** N,
             round_robin: usize = 0,
 
             pub fn initCapacity(allocator: std.mem.Allocator, total_cap: u32) !Self {
@@ -3454,6 +3454,7 @@ pub const CheatLib = struct {
             const Shard = struct {
                 map: Map = .{},
                 lock: std.Thread.RwLock = .{},
+                ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,
@@ -3544,8 +3545,11 @@ pub const CheatLib = struct {
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {
-                _ = self;
-                return [_]u64{0} ** N;
+                var counts: [N]u64 = undefined;
+                for (self.shards, 0..) |shard, i| {
+                    counts[i] = shard.ops.load(.monotonic);
+                }
+                return counts;
             }
         };
     }

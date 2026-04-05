@@ -104,7 +104,7 @@ fn promiseProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
 fn promiseConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     _ = rt;
     const state = @as(*PromiseTestState, @ptrCast(@alignCast(raw_args.?)));
-    state.result = state.promise.next();
+    state.result = try state.promise.next();
 }
 
 test "Promise(f64): producer writes, consumer next() reads via fiber yield" {
@@ -164,7 +164,7 @@ fn promiseConsumerAfterDone(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*PromiseTestState, @ptrCast(@alignCast(raw_args.?)));
     // By the time the consumer runs (LIFO scheduling), the producer may have
     // already finished.  next() must handle both orderings.
-    state.result = state.promise.next();
+    state.result = try state.promise.next();
 }
 
 test "Promise(f64): next() fast-path when producer finishes first" {
@@ -261,7 +261,7 @@ fn bgCheatMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
         .{},
     );
     // --- Transpiler output for: result: Number = NEXT p ---
-    out.value = p.next();
+    out.value = try p.next();
 }
 
 test "BG pattern: cheatMain-fiber spawns BG-fiber with by-value capture, NEXTs result" {
@@ -344,9 +344,9 @@ fn bgConcurrentMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_c, .{});
 
     // NEXT in reverse order — tests both slow-path (yield) and fast-path (already done).
-    out.c = pc.next();
-    out.b = pb.next();
-    out.a = pa.next();
+    out.c = try pc.next();
+    out.b = try pb.next();
+    out.a = try pa.next();
 }
 
 test "BG pattern: 3 concurrent fibers, NEXT in reverse-spawn order" {
@@ -419,7 +419,7 @@ fn bgIsolationMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     _ = &base; // keep base alive to show mutation doesn't affect fiber
 
     // NEXT — fiber must return 5.0 * 2.0 = 10.0, not 99.0 * 2.0 = 198.0.
-    out.value = p.next();
+    out.value = try p.next();
 }
 
 test "BG pattern: by-value capture is isolated from post-spawn mutation of outer variable" {

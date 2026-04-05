@@ -14,7 +14,7 @@ const Entity = struct {
 };
 
 test "SoaPool: insert + get round-trip" {
-    var pool = CheatLib.SoaPool(Entity){};
+    var pool = try CheatLib.SoaPool(Entity).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id = try pool.insert(std.testing.allocator, .{
@@ -28,7 +28,7 @@ test "SoaPool: insert + get round-trip" {
 }
 
 test "SoaPool: stale handle returns null" {
-    var pool = CheatLib.SoaPool(Entity){};
+    var pool = try CheatLib.SoaPool(Entity).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id = try pool.insert(std.testing.allocator, .{
@@ -40,7 +40,7 @@ test "SoaPool: stale handle returns null" {
 }
 
 test "SoaPool: remove + reinsert reuses slot" {
-    var pool = CheatLib.SoaPool(Entity){};
+    var pool = try CheatLib.SoaPool(Entity).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id1 = try pool.insert(std.testing.allocator, .{
@@ -62,10 +62,10 @@ test "SoaPool: remove + reinsert reuses slot" {
 }
 
 test "SoaPool: count tracks live entries" {
-    var pool = CheatLib.SoaPool(Entity){};
+    var pool = try CheatLib.SoaPool(Entity).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(usize, 0), pool.count());
+    try std.testing.expectEqual(@as(i64, 0), pool.count());
 
     const id1 = try pool.insert(std.testing.allocator, .{
         .x = 0, .y = 0, .vx = 0, .vy = 0, .health = 0,
@@ -74,17 +74,17 @@ test "SoaPool: count tracks live entries" {
         .x = 0, .y = 0, .vx = 0, .vy = 0, .health = 0,
     });
 
-    try std.testing.expectEqual(@as(usize, 2), pool.count());
+    try std.testing.expectEqual(@as(i64, 2), pool.count());
 
     pool.remove(id1);
-    try std.testing.expectEqual(@as(usize, 1), pool.count());
+    try std.testing.expectEqual(@as(i64, 1), pool.count());
 
     pool.remove(id2);
-    try std.testing.expectEqual(@as(usize, 0), pool.count());
+    try std.testing.expectEqual(@as(i64, 0), pool.count());
 }
 
 test "SoaPool: multiple inserts maintain SOA layout" {
-    var pool = CheatLib.SoaPool(Entity){};
+    var pool = try CheatLib.SoaPool(Entity).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     var ids: [10]u64 = undefined;
@@ -107,7 +107,7 @@ test "SoaPool: multiple inserts maintain SOA layout" {
 }
 
 test "SoaPool: iteration skips dead slots" {
-    var pool = CheatLib.SoaPool(Entity){};
+    var pool = try CheatLib.SoaPool(Entity).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id0 = try pool.insert(std.testing.allocator, .{ .x = 10, .y = 0, .vx = 0, .vy = 0, .health = 0 });
@@ -119,7 +119,7 @@ test "SoaPool: iteration skips dead slots" {
     // Iterate live entries, sum x values.
     var sum: f64 = 0;
     for (0..pool.data.len) |i| {
-        if (!pool.alive.items[i]) continue;
+        if (!pool.alive[i]) continue;
         const val = pool.data.get(i);
         sum += val.x;
     }

@@ -14,7 +14,7 @@ const Score = struct { value: f64 };
 // ---------------------------------------------------------------------------
 
 test "ShardedPool.insert returns a valid handle and get retrieves the value" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     const id = try sp.insert(std.testing.allocator, Score{ .value = 42.0 });
@@ -25,7 +25,7 @@ test "ShardedPool.insert returns a valid handle and get retrieves the value" {
 }
 
 test "ShardedPool.get returns null for an out-of-range handle" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     // Handle encodes shard_idx=0, slot_index=999 — pool is empty.
@@ -38,7 +38,7 @@ test "ShardedPool.get returns null for an out-of-range handle" {
 // ---------------------------------------------------------------------------
 
 test "ShardedPool.remove makes get return null (stale handle)" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     const id = try sp.insert(std.testing.allocator, Score{ .value = 10.0 });
@@ -53,23 +53,23 @@ test "ShardedPool.remove makes get return null (stale handle)" {
 // ---------------------------------------------------------------------------
 
 test "ShardedPool.count reflects insertions and removals" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(usize, 0), sp.count());
+    try std.testing.expectEqual(@as(i64, 0), sp.count());
 
     const id_a = try sp.insert(std.testing.allocator, Score{ .value = 1.0 });
     const id_b = try sp.insert(std.testing.allocator, Score{ .value = 2.0 });
     const id_c = try sp.insert(std.testing.allocator, Score{ .value = 3.0 });
 
-    try std.testing.expectEqual(@as(usize, 3), sp.count());
+    try std.testing.expectEqual(@as(i64, 3), sp.count());
 
     sp.remove(id_b);
-    try std.testing.expectEqual(@as(usize, 2), sp.count());
+    try std.testing.expectEqual(@as(i64, 2), sp.count());
 
     sp.remove(id_a);
     sp.remove(id_c);
-    try std.testing.expectEqual(@as(usize, 0), sp.count());
+    try std.testing.expectEqual(@as(i64, 0), sp.count());
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ test "ShardedPool.count reflects insertions and removals" {
 // ---------------------------------------------------------------------------
 
 test "ShardedPool round-robin distributes items across N shards" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     // Insert 8 items — should go 2 per shard with round-robin.
@@ -86,7 +86,7 @@ test "ShardedPool round-robin distributes items across N shards" {
         id.* = try sp.insert(std.testing.allocator, Score{ .value = @floatFromInt(i) });
     }
 
-    try std.testing.expectEqual(@as(usize, 8), sp.count());
+    try std.testing.expectEqual(@as(i64, 8), sp.count());
 
     // Each item must be retrievable by its handle.
     for (ids, 0..) |id, i| {
@@ -101,7 +101,7 @@ test "ShardedPool round-robin distributes items across N shards" {
 // ---------------------------------------------------------------------------
 
 test "ShardedPool removed handle does not alias a later insert" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     const id_first = try sp.insert(std.testing.allocator, Score{ .value = 100.0 });
@@ -119,7 +119,7 @@ test "ShardedPool removed handle does not alias a later insert" {
 // ---------------------------------------------------------------------------
 
 test "ShardedPool handles for different shards are independent" {
-    var sp = CheatLib.ShardedPool(Score, 4){};
+    var sp = try CheatLib.ShardedPool(Score, 4).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     // Insert 4 items — one per shard (round-robin with N=4).
@@ -147,7 +147,7 @@ test "ShardedPool handles for different shards are independent" {
 // ---------------------------------------------------------------------------
 
 test "ShardedPool(T, 8) works with 8 shards" {
-    var sp = CheatLib.ShardedPool(Score, 8){};
+    var sp = try CheatLib.ShardedPool(Score, 8).initCapacity(std.testing.allocator, 64);
     defer sp.deinit(std.testing.allocator);
 
     var ids: [16]u64 = undefined;
@@ -155,7 +155,7 @@ test "ShardedPool(T, 8) works with 8 shards" {
         id.* = try sp.insert(std.testing.allocator, Score{ .value = @floatFromInt(i * 10) });
     }
 
-    try std.testing.expectEqual(@as(usize, 16), sp.count());
+    try std.testing.expectEqual(@as(i64, 16), sp.count());
 
     // Verify all retrievable.
     for (ids, 0..) |id, i| {

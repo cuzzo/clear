@@ -1236,6 +1236,9 @@ pub const Poller = struct {
     // Only works on Linux
     pub fn poll(self: *Poller, events: []std.os.linux.epoll_event, timeout_ms: i32) usize {
         const count = std.os.linux.epoll_wait(self.epoll_fd, events.ptr, @intCast(events.len), timeout_ms);
+        // epoll_wait returns error codes as large usize values (negative isize).
+        // Treat any value above maxInt(isize) as an error and return 0.
+        if (count > std.math.maxInt(isize)) return 0;
         return count;
     }
 };

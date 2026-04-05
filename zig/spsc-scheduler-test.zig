@@ -252,7 +252,7 @@ test "L3: submitResume via SPSC channel" {
                 promises[_fi] = promise;
             }
             var sum: i64 = 0;
-            for (&promises) |*p| sum += p.next();
+            for (&promises) |*p| sum += try p.next();
             // Each fiber returns 42
             if (sum != 420) @panic("L3: wrong sum");
         }
@@ -319,7 +319,13 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
                     .rc_func = @ptrCast(&RcCtx.execute),
                     .rc_ctx = @ptrCast(&ctx),
                 };
-                while (!target.channels[my_idx].push(msg))
+                const ring = target.channels[my_idx] orelse blk: {
+                    const r = target.allocator.create(spsc.DefaultRing) catch @panic("OOM");
+                    r.* = .{};
+                    target.channels[my_idx] = r;
+                    break :blk r;
+                };
+                while (!ring.push(msg))
                     std.Thread.yield() catch {};
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .release);
                 target.event_fd.notify();
@@ -498,7 +504,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
                 }
 
                 var total: i64 = 0;
-                for (&promises) |*p| total += p.next();
+                for (&promises) |*p| total += try p.next();
 
                 const expected: i64 = FIBERS * KEYS;
                 if (total != expected) {

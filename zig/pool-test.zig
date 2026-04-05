@@ -14,7 +14,7 @@ const Point = struct { x: f64, y: f64 };
 // ---------------------------------------------------------------------------
 
 test "Pool.insert returns a valid handle and get retrieves the value" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id = try pool.insert(std.testing.allocator, Point{ .x = 1.0, .y = 2.0 });
@@ -26,7 +26,7 @@ test "Pool.insert returns a valid handle and get retrieves the value" {
 }
 
 test "Pool.get returns null for an out-of-range handle" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     // Handle with index 99 — pool is empty, so index is out of range.
@@ -39,7 +39,7 @@ test "Pool.get returns null for an out-of-range handle" {
 // ---------------------------------------------------------------------------
 
 test "Pool.remove makes get return null (stale handle)" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id = try pool.insert(std.testing.allocator, Point{ .x = 3.0, .y = 4.0 });
@@ -50,7 +50,7 @@ test "Pool.remove makes get return null (stale handle)" {
 }
 
 test "Pool.remove is a no-op for a stale handle" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id = try pool.insert(std.testing.allocator, Point{ .x = 0.0, .y = 0.0 });
@@ -65,7 +65,7 @@ test "Pool.remove is a no-op for a stale handle" {
 // ---------------------------------------------------------------------------
 
 test "Pool.insert reuses a removed slot and generation changes (ABA safety)" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id1 = try pool.insert(std.testing.allocator, Point{ .x = 10.0, .y = 0.0 });
@@ -91,20 +91,20 @@ test "Pool.insert reuses a removed slot and generation changes (ABA safety)" {
 // ---------------------------------------------------------------------------
 
 test "Pool.count reflects live slot count after insert and remove" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(usize, 0), pool.count());
+    try std.testing.expectEqual(@as(i64, 0), pool.count());
 
     const a = try pool.insert(std.testing.allocator, Point{ .x = 1.0, .y = 0.0 });
-    try std.testing.expectEqual(@as(usize, 1), pool.count());
+    try std.testing.expectEqual(@as(i64, 1), pool.count());
 
     const b = try pool.insert(std.testing.allocator, Point{ .x = 2.0, .y = 0.0 });
     _ = b;
-    try std.testing.expectEqual(@as(usize, 2), pool.count());
+    try std.testing.expectEqual(@as(i64, 2), pool.count());
 
     pool.remove(a);
-    try std.testing.expectEqual(@as(usize, 1), pool.count());
+    try std.testing.expectEqual(@as(i64, 1), pool.count());
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ test "Pool.count reflects live slot count after insert and remove" {
 // ---------------------------------------------------------------------------
 
 test "Pool handles multiple items with independent handles" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id_a = try pool.insert(std.testing.allocator, Point{ .x = 1.0, .y = 1.0 });
@@ -136,7 +136,7 @@ test "Pool handles multiple items with independent handles" {
 // ---------------------------------------------------------------------------
 
 test "Pool.get returns a mutable pointer — value can be updated in place" {
-    var pool = CheatLib.Pool(Point){};
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     const id = try pool.insert(std.testing.allocator, Point{ .x = 0.0, .y = 0.0 });
@@ -158,7 +158,7 @@ test "Pool.get returns a mutable pointer — value can be updated in place" {
 
 test "Generational safety prevents type confusion after slot reuse" {
     const User = struct { name: u64 };
-    var pool = CheatLib.Pool(User){};
+    var pool = try CheatLib.Pool(User).initCapacity(std.testing.allocator, 16);
     defer pool.deinit(std.testing.allocator);
 
     // Insert a "User" and save the handle.
@@ -188,7 +188,7 @@ test "RAII pattern: Pool zero-init + deinit (mirrors compiler output)" {
     //   var p = CheatLib.Pool(Point){};
     //   _ = &p;
     //   defer p.deinit(rt.heapAlloc());
-    var p = CheatLib.Pool(Point){};
+    var p = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 16);
     _ = &p;
     defer p.deinit(std.testing.allocator);
 
