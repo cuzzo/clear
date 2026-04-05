@@ -31,6 +31,9 @@ def run_bench(dir)
   has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
   has_go   = File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
 
+  # Clean stale binaries before recompiling
+  %w[bench_c bench_rust bench_go bench_clear].each { |b| FileUtils.rm_f("#{dir}/#{b}") }
+
   # 1. Compile C Baseline
   if has_c
     puts "Compiling C baseline..."
@@ -203,6 +206,9 @@ def run_server_bench(dir)
 
   has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
   has_go   = File.exist?("#{dir}/server.go") && system("command -v go > /dev/null 2>&1")
+
+  # Clean stale binaries before recompiling
+  %w[bench_rust server_go server_clear client_go].each { |b| FileUtils.rm_f("#{dir}/#{b}") }
 
   # 1. Compile everything
   # Client (shared Go binary)
