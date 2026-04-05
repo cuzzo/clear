@@ -3281,7 +3281,7 @@ pub const CheatLib = struct {
                 while (!ring.push(msg)) {
                     std.atomic.spinLoopHint();
                 }
-                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
                 target.event_fd.notify();
                 // Yield-poll: yield to scheduler so it can drain channels
                 // (including other fibers' remote results), then resume us.

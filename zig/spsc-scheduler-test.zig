@@ -327,7 +327,7 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
                 };
                 while (!ring.push(msg))
                     std.Thread.yield() catch {};
-                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .release);
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .seq_cst);
                 target.event_fd.notify();
 
                 while (!ctx.done.load(.acquire)) {
@@ -594,7 +594,7 @@ test "L7: pinned fiber sendAndWait yield-poll to remote scheduler" {
                 };
                 while (!ring.push(msg))
                     std.atomic.spinLoopHint();
-                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .release);
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .seq_cst);
                 target.event_fd.notify();
 
                 // Yield-poll: same mechanism as sendAndWait.

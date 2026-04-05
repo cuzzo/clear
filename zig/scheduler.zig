@@ -111,19 +111,17 @@ pub const SmartEventFd = struct {
 
     // HOT PATH: This is what makes it fast!
     pub fn notify(self: *SmartEventFd) void {
-        // 1. Check if the scheduler is actually sleeping
-        // We utilize 'monotonic' for the load because strict ordering isn't
-        // strictly required here; if we miss a race, the scheduler loops anyway.
-        const is_sleeping = (self.state.load(.seq_cst) == 1);
-
-        // 2. Only pay the syscall tax if absolutely necessary
-        if (is_sleeping) {
-            const val: u64 = 1;
-            const bytes = std.mem.asBytes(&val);
-            // Ignore error, if buffer is full, they are already awake
-            // TODO: This must be fixed before release.
-            _ = std.posix.write(self.fd, bytes) catch {};
-        }
+        // Unconditionally write to eventfd.  The previous optimization
+        // (skip write when target appears awake) raced with the target's
+        // markSleeping/hasChannelMessages/poll sequence, causing missed
+        // wakeups that deadlocked pinned fiber yield-poll loops.
+        //
+        // Cost: ~200ns write() syscall per notify.  Acceptable because
+        // notify is called once per submitSpawn/submitResume/sendAndWait,
+        // each of which already costs 1-10us for SPSC push + channel drain.
+        const val: u64 = 1;
+        const bytes = std.mem.asBytes(&val);
+        _ = std.posix.write(self.fd, bytes) catch {};
     }
 
     // Called by Scheduler loop to reset the signal drain
@@ -403,7 +401,7 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
-        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
+        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
         self.event_fd.notify();
     }
 
@@ -444,7 +442,7 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
-        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .release);
+        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
         self.event_fd.notify();
     }
     /// Lightweight: only process RemoteCall messages. Spawn and Resume are
@@ -546,7 +544,7 @@ pub const Scheduler = struct {
     }
 
     fn hasChannelMessages(self: *Scheduler) bool {
-        return self.dirty_mask.load(.monotonic) != 0;
+        return self.dirty_mask.load(.seq_cst) != 0;
     }
 
     pub fn run(self: *Scheduler) void {
