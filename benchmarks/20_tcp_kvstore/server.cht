@@ -11,7 +11,7 @@
 FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
-        data = tcpRead(client);
+        data: String@raw = tcpRead(client);
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE
@@ -23,13 +23,13 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                 IF ch == "*" THEN
                     -- RESP array: *N\r\n$L\r\nBULK\r\n...
                     pos += 1;
-                    MUTABLE countStr = "";
-                    WHILE pos < data.length() && charAt(data, pos) != "\r" DO
-                        countStr = countStr + charAt(data, pos);
-                        pos += 1;
+                    MUTABLE crPos = pos;
+                    WHILE crPos < data.length() && charAt(data, crPos) != "\r" DO
+                        crPos += 1;
                     END
+                    MUTABLE countStr = substr(data, pos, crPos - pos);
                     MUTABLE argCount = toInt(toNumber(countStr) OR (0.0 - 1.0));
-                    pos += 2;
+                    pos = crPos + 2;
 
                     MUTABLE arg0 = "";
                     MUTABLE arg1 = "";
@@ -38,13 +38,13 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                     WHILE ai < argCount && pos < data.length() DO
                         IF charAt(data, pos) == "$" THEN
                             pos += 1;
-                            MUTABLE lenStr = "";
-                            WHILE pos < data.length() && charAt(data, pos) != "\r" DO
-                                lenStr = lenStr + charAt(data, pos);
-                                pos += 1;
+                            MUTABLE crPos2 = pos;
+                            WHILE crPos2 < data.length() && charAt(data, crPos2) != "\r" DO
+                                crPos2 += 1;
                             END
+                            MUTABLE lenStr = substr(data, pos, crPos2 - pos);
                             MUTABLE len = toInt(toNumber(lenStr) OR (0.0 - 1.0));
-                            pos += 2;
+                            pos = crPos2 + 2;
                             MUTABLE val = substr(data, pos, len);
                             pos += len;
                             pos += 2;
@@ -111,12 +111,13 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                 ELSE_IF ch == "\r" || ch == "\n" THEN
                     pos += 1;
                 ELSE
-                    -- Inline command
-                    MUTABLE cmd = "";
-                    WHILE pos < data.length() && charAt(data, pos) != "\r" && charAt(data, pos) != "\n" DO
-                        cmd = cmd + charAt(data, pos);
-                        pos += 1;
+                    -- Inline command: scan to \r or \n, extract with substr
+                    MUTABLE cmdEnd = pos;
+                    WHILE cmdEnd < data.length() && charAt(data, cmdEnd) != "\r" && charAt(data, cmdEnd) != "\n" DO
+                        cmdEnd += 1;
                     END
+                    MUTABLE cmd = substr(data, pos, cmdEnd - pos);
+                    pos = cmdEnd;
                     WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
                         pos += 1;
                     END

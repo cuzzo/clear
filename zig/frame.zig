@@ -164,16 +164,17 @@ pub const CheatArena = struct {
     }
 
     /// Free blocks and large objects allocated after the current position.
+    /// Uses mark.block_index (not current_block_index) to compute keep_count,
+    /// matching the original rewind logic: when has_static && mark.block_index==0,
+    /// ALL dynamic blocks are freed (keep_count=0).
     pub fn trimExcess(self: *CheatArena, mark: Mark) void {
         const has_static = (self.static_block.len > 0);
-        // Keep blocks up to current_block_index (which may have advanced from softRewind
-        // if a new allocation overflowed into the next block).
         const keep_count = if (self.blocks.items.len == 0)
             @as(usize, 0)
         else if (has_static)
-            self.current_block_index + 1
+            if (mark.block_index == 0) @as(usize, 0) else mark.block_index
         else
-            self.current_block_index + 1;
+            if (self.blocks.items.len > 0) self.current_block_index + 1 else @as(usize, 0);
 
         const large_align = std.mem.Alignment.fromByteUnits(16);
 
