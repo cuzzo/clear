@@ -1029,13 +1029,20 @@ private
                  ft.list_collection?
                }.map { |k, _| k.to_s } : []
                if list_fields.any?
+                 @map_val_counter ||= 0
+                 @map_val_counter += 1
+                 tmp = "__map_val_#{@map_val_counter}"
                  zig_t = transpile_type(val_ti)
+                 # Promote list fields from frame to heap: backing buffer AND elements.
+                 # Uses promote() which handles ArrayLists recursively (backing + elements).
+                 # Don't use promoteFields on the whole struct — it re-dupes strings
+                 # that are already heap-allocated from COPY/literal.
                  promote_calls = list_fields.map { |f|
                    elem_ti = schema[f].is_a?(Hash) ? Type.new(schema[f][:type]) : Type.new(schema[f])
-                   elem_zig = transpile_type(elem_ti.element_type)
-                   "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &__map_val.#{f});"
+                   elem_zig = "std.ArrayListUnmanaged(#{transpile_type(elem_ti.element_type)})"
+                   "try CheatLib.promote(#{elem_zig}, #{rt_name}, &#{tmp}.#{f});"
                  }.join("\n")
-                 code = "var __map_val: #{zig_t} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, __map_val);"
+                 code = "var #{tmp}: #{zig_t} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
                else
                  code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
                end
