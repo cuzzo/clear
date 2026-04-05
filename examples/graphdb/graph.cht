@@ -273,4 +273,6 @@ FN main() RETURNS Void ->
     ASSERT pathXZ.length() == 2, "concurrent: path x->z has 2 nodes";
 
     print("graphdb: concurrent tests PASSED");
+
+    print("graphdb: concurrent tests PASSED");
 END
