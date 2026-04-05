@@ -1,5 +1,7 @@
 require "set"
 
+class CircularDependencyError < StandardError; end
+
 # Orchestrates multi-file compilation with a shared module cache.
 # Prevents circular dependencies and compiles each .cht file exactly once.
 class ModuleImporter
@@ -40,7 +42,8 @@ class ModuleImporter
     return @module_cache[abs_path] if @module_cache.key?(abs_path)
 
     if @compiling.include?(abs_path)
-      raise "Circular dependency: '#{File.basename(path)}' is already being compiled"
+      cycle = @compiling.to_a.map { |p| File.basename(p) }.join(" -> ")
+      raise CircularDependencyError, "Circular dependency detected: #{cycle} -> #{File.basename(path)}"
     end
 
     raise "REQUIRE error: file not found: #{abs_path}" unless File.exist?(abs_path)

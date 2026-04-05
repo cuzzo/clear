@@ -2376,7 +2376,7 @@ RSpec.describe SemanticAnnotator do
         ast       = Parser.new(tokens, main_code).parse
         annotator = SemanticAnnotator.new(importer: compiler, source_dir: dir)
 
-        expect { annotator.annotate!(ast) }.to raise_error(/Circular dependency/)
+        expect { annotator.annotate!(ast) }.to raise_error(CircularDependencyError, /Circular dependency/)
       ensure
         FileUtils.rm_rf(dir)
       end
