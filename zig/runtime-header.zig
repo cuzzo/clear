@@ -959,6 +959,43 @@ pub const CheatLib = struct {
         return std.mem.join(allocator, delimiter, items);
     }
 
+    // replace(str, old, new) -> String with all occurrences replaced
+    pub fn stringReplace(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement: []const u8) ![]const u8 {
+        Runtime.profileAlloc(0);
+        var result = std.ArrayListUnmanaged(u8){};
+        var i: usize = 0;
+        while (i < haystack.len) {
+            if (i + needle.len <= haystack.len and std.mem.eql(u8, haystack[i..][0..needle.len], needle)) {
+                try result.appendSlice(allocator, replacement);
+                i += needle.len;
+            } else {
+                try result.append(allocator, haystack[i]);
+                i += 1;
+            }
+        }
+        return result.items;
+    }
+
+    // lowercase(str) -> new string with all ASCII bytes lowered
+    pub fn stringLowercase(allocator: std.mem.Allocator, str: []const u8) ![]const u8 {
+        Runtime.profileAlloc(str.len);
+        const buf = try allocator.alloc(u8, str.len);
+        for (str, 0..) |c, idx| {
+            buf[idx] = std.ascii.toLower(c);
+        }
+        return buf;
+    }
+
+    // uppercase(str) -> new string with all ASCII bytes uppercased
+    pub fn stringUppercase(allocator: std.mem.Allocator, str: []const u8) ![]const u8 {
+        Runtime.profileAlloc(str.len);
+        const buf = try allocator.alloc(u8, str.len);
+        for (str, 0..) |c, idx| {
+            buf[idx] = std.ascii.toUpper(c);
+        }
+        return buf;
+    }
+
     // shell
 
     pub fn shell(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {

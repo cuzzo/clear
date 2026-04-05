@@ -173,6 +173,30 @@ STD_LIB = {
     zig: "CheatLib.indexOf({0}, {1})"
   },
 
+  # replace("hello world", "world", "CLEAR") -> "hello CLEAR"
+  "replace" => {
+    args: [STRING_TYPE, STRING_TYPE, STRING_TYPE],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.stringReplace({alloc}, {0}, {1}, {2})",
+    allocates: true
+  },
+
+  # lowercase("Hello") -> "hello"
+  "lowercase" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.stringLowercase({alloc}, {0})",
+    allocates: true
+  },
+
+  # uppercase("Hello") -> "HELLO"
+  "uppercase" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.stringUppercase({alloc}, {0})",
+    allocates: true
+  },
+
   # contains?("hello", "ll") -> true
   "contains?" => {
     args: [STRING_TYPE, STRING_TYPE],
