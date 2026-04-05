@@ -2141,9 +2141,9 @@ private
       # Check if this field is declared BORROWED in the struct definition
       field_is_borrowed = schema[:borrowed_fields]&.include?(field_name)
 
-      # Apply type param substitution (e.g., T → Number)
-      expected_type = if raw_expected.is_a?(Type) && type_subst.key?(raw_expected.resolved)
-        Type.new(type_subst[raw_expected.resolved])
+      # Apply type param substitution (e.g., T → Number, T[] → String[])
+      expected_type = if type_subst.any?
+        apply_type_subst(raw_expected, type_subst)
       else
         raw_expected
       end
