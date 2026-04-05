@@ -1517,7 +1517,7 @@ private
         source_zig = visit(var_node)
         if cap[:alias_mutable]
           # Mutable borrow: pointer to source, mutations write through
-          "const #{zig_safe_name(alias_name)} = &#{source_zig};\n_ = #{zig_safe_name(alias_name)};"
+          "const #{zig_safe_name(alias_name)} = &#{source_zig};"
         else
           # Immutable borrow: value copy (read-only)
           "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"

@@ -208,6 +208,11 @@ module CapabilityHelper
     # Register borrows and create alias bindings for RESTRICT and BORROWED.
     if cap[:capability] == :RESTRICT
       @og.borrow("__restrict_#{var_name}", var_name, mutable: true)
+      # Mark source as mutated so transpiler emits `var` (not `const`)
+      # when a mutable borrow exists — needed for &p to yield a mutable pointer.
+      if cap[:alias_mutable]
+        mark_var_mutated(var_name)
+      end
       # Create alias binding if AS was used (for plain locals without sync)
       if cap[:alias] && !syn
         alias_name = cap[:alias]
