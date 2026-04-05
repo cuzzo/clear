@@ -1,7 +1,9 @@
-// SROA Benchmark — Rust Baseline (Perfect)
+// SROA Benchmark — Rust Baseline
 //
-// BigVec is stack-allocated, SROA'd to scalars, x4..x130 eliminated.
-// Runs 100 000 iterations trivially. CLEAR crashes after ~1000.
+// BigVec has 130 f64 fields; sum3() reads only x1,x2,x3.
+// Rust's LLVM aggressively SROA's+DCE's the unused fields even through
+// black_box/volatile — this measures SROA quality, not runtime speed.
+// The Rust number is not directly comparable to C/CLEAR.
 
 use std::time::Instant;
 
@@ -35,6 +37,7 @@ struct BigVec {
     x126: f64, x127: f64, x128: f64, x129: f64, x130: f64,
 }
 
+#[inline(never)]
 fn sum3(v: BigVec) -> f64 {
     v.x1 + v.x2 + v.x3
 }
@@ -48,6 +51,10 @@ fn main() {
         bv.x1 = acc;
         bv.x2 = acc + 1.0;
         bv.x3 = acc + 2.0;
+        // Pass through a volatile read to force the full struct to be materialized
+        // on the stack, matching what C and CLEAR actually do.
+        let ptr = &bv as *const BigVec;
+        let bv = unsafe { std::ptr::read_volatile(ptr) };
         acc += sum3(bv);
     }
 
