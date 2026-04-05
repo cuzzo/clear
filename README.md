@@ -1,5 +1,15 @@
 # CLEAR
 
+CLEAR is a *memory safe* language, with a *declarative concurrency model*, that runs on a Go-like runtime.
+
+It's designed to be:
+
+ 1. Correct
+ 2. Safe
+ 3. Understandable
+ 4. Scalable
+ 5. *BLAZING* fast
+
 ## PROPAGANDA
 
 *Cheating is all you need.*
