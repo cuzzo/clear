@@ -132,6 +132,52 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS S
     RETURN reversed;
 END
 
+-- DFS traversal from a start node. Returns visited node IDs in DFS order.
+FN dfs!(nodes: HashMap<Node>, start: String) RETURNS String[]@list ->
+    MUTABLE stack: String[]@list = [];
+    MUTABLE visited: HashMap<String> = {};
+    MUTABLE result: String[]@list = [];
+
+    stack.append(COPY start);
+
+    MUTABLE iters: Int64 = 0;
+    WHILE iters < 100 && stack.length() > 0 DO
+        iters = iters + 1;
+        -- Pop from end of stack
+        top = COPY stack[stack.length() - 1];
+        -- Shrink stack by rebuilding without last element
+        MUTABLE newStack: String[]@list = [];
+        FOR si IN (0_i64 ..< stack.length() - 1) DO
+            newStack.append(COPY stack[si]);
+        END
+        stack = newStack;
+
+        alreadySeen = visited[top] OR "";
+        IF alreadySeen == "" THEN
+            visited[top] = "1";
+            result.append(COPY top);
+
+            -- Push neighbors in reverse order for consistent DFS ordering
+            dfsNode = nodes[top] OR Node{ label: "", edges: [] };
+            FOR i IN (0_i64 ..< dfsNode.edges.length()) DO
+                idx = dfsNode.edges.length() - 1 - i;
+                neighbor = COPY dfsNode.edges[idx].target;
+                neighborSeen = visited[neighbor] OR "";
+                IF neighborSeen == "" THEN
+                    stack.append(COPY neighbor);
+                END
+            END
+        END
+    END
+    RETURN result;
+END
+
+-- Count nodes reachable from a start node (connected component size).
+FN componentSize!(nodes: HashMap<Node>, start: String) RETURNS Int64 ->
+    reachable: String[]@list = dfs!(nodes, start);
+    RETURN reachable.length();
+END
+
 FN main() RETURNS Void ->
     MUTABLE nodes: HashMap<Node> = {};
 
@@ -179,6 +225,18 @@ FN main() RETURNS Void ->
     -- No reverse path (c has no outgoing edges)
     pathCA: String[]@list = shortestPath!(nodes, "c", "a");
     ASSERT pathCA.length() == 0, "no path c->a";
+
+    -- DFS traversal tests
+    dfsFromA: String[]@list = dfs!(nodes, "a");
+    ASSERT dfsFromA.length() == 3, "DFS from a visits 3 nodes";
+    ASSERT dfsFromA[0] == "a", "DFS starts at a";
+
+    dfsFromC: String[]@list = dfs!(nodes, "c");
+    ASSERT dfsFromC.length() == 1, "DFS from c visits 1 node (no outgoing)";
+
+    -- Component size
+    ASSERT componentSize!(nodes, "a") == 3, "component from a has 3 nodes";
+    ASSERT componentSize!(nodes, "c") == 1, "component from c has 1 node";
 
     print("graphdb: sequential tests PASSED");
 
