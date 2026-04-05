@@ -93,11 +93,8 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS S
         current = COPY queue[head];
         head = head + 1;
 
-        print("iter=" + iters.toString() + " head=" + head.toString() + " qlen=" + queue.length().toString() + " cur=" + current);
         bfsNode = nodes[current] OR Node{ label: "", edges: [] };
-        print("  edges=" + bfsNode.edges.length().toString() + " label=" + bfsNode.label);
         FOR i IN (0_i64 ..< bfsNode.edges.length()) DO
-            print("    edge " + i.toString());
             neighbor = COPY bfsNode.edges[i].target;
             alreadyVisited = visited[neighbor] OR "";
             IF alreadyVisited == "" THEN
@@ -110,7 +107,6 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS S
                 END
             END
         END
-        print("  after FOR, qlen=" + queue.length().toString());
     END
 
     IF found == FALSE THEN
@@ -122,8 +118,9 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS S
     MUTABLE path: String[]@list = [];
     MUTABLE cur = COPY target;
     WHILE cur != source DO
+        nextCur = parent[cur] OR "";
         path.append(COPY cur);
-        cur = parent[cur] OR "";
+        cur = COPY nextCur;
     END
     path.append(COPY source);
 
