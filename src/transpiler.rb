@@ -1084,8 +1084,17 @@ private
         # @list (ArrayListUnmanaged) → slice conversion for struct/union fields expecting []T.
         # Skip when: value is CopyNode (copy already produces a slice), or
         # target field is @list (expects ArrayList, not slice — flagged by annotator).
+        # BORROWED fields always expect slices, so also convert arrays.
         vt = v.type_info.is_a?(Type) ? v.type_info : nil
-        val_code = "#{val_code}.items" if vt&.list_collection? && !v.is_a?(AST::CopyNode) && !v.target_is_list_field
+        needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) && !v.target_is_list_field
+        # For BORROWED fields: the source may be an array literal (ArrayList at runtime)
+        # but the BORROWED field type is a slice. Convert via .items.
+        # Use @hasField check at Zig level to safely handle both ArrayList and slice.
+        field_def = @struct_schemas&.dig(node.name.to_sym, k)
+        if field_def.is_a?(Hash) && field_def[:borrowed] && vt&.array? && !needs_items
+          val_code = "(if (@hasField(@TypeOf(#{val_code}), \"items\")) #{val_code}.items else #{val_code})"
+        end
+        val_code = "#{val_code}.items" if needs_items
         ".#{k} = #{val_code}"
       end.join(", ")
 

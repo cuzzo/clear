@@ -1972,14 +1972,15 @@ private
         @pipeline_accessed_fields << node.field
       end
       # For generic instances (e.g. Pair<Number>), substitute type params into field type.
+      # Handles compound types like T[], ?T, !T via apply_type_subst.
+      # BORROWED fields are stored as plain types in the schema (borrowed_fields tracks which).
       type_obj = Type.new(type)
-      if type_obj.generic_instance? && schema[:type_params] && field_type.is_a?(Type)
+      if type_obj.generic_instance? && schema[:type_params]
         subst = {}
         schema[:type_params].zip(type_obj.generic_args).each do |param, arg|
           subst[param] = arg.resolved
         end
-        resolved_param = field_type.resolved
-        field_type = Type.new(subst[resolved_param]) if subst.key?(resolved_param)
+        field_type = apply_type_subst(field_type, subst) if subst.any?
       end
       node.full_type = field_type
     else

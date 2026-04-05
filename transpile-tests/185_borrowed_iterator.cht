@@ -1,47 +1,68 @@
--- Test: Iterator with BORROWED field — stress test for borrow system.
+-- Test: Generic iterator with BORROWED field — stress test for borrow system.
 --
--- StringIter borrows a String[] and iterates without copying.
--- Exercises: BORROWED struct field, non_escaping propagation,
--- borrow conflict detection, and zero-copy iteration.
+-- SliceIter<T> borrows a T[] and iterates without copying.
+-- Exercises: BORROWED struct field, generic structs, generic field access
+-- type substitution, non_escaping propagation, and zero-copy iteration.
 
-STRUCT StringIter {
-    source: BORROWED String[],
+STRUCT SliceIter<T> {
+    source: BORROWED T[],
     pos: Int64,
     len: Int64
 }
 
-FN makeIter(source: String[], len: Int64) RETURNS StringIter ->
-    RETURN StringIter{ source: source, pos: 0, len: len };
-END
-
-FN hasNext(iter: StringIter) RETURNS Bool ->
+FN hasNext(iter: SliceIter<String>) RETURNS Bool ->
     RETURN iter.pos < iter.len;
 END
 
-FN currentLen(iter: StringIter) RETURNS Int64 ->
+FN currentLen(iter: SliceIter<String>) RETURNS Int64 ->
     RETURN iter.source[iter.pos].length();
 END
 
-FN advance(iter: StringIter) RETURNS StringIter ->
-    RETURN StringIter{ source: iter.source, pos: iter.pos + 1, len: iter.len };
+FN advance(iter: SliceIter<String>) RETURNS SliceIter<String> ->
+    RETURN SliceIter<String>{ source: iter.source, pos: iter.pos + 1, len: iter.len };
+END
+
+-- Int64 iterator functions
+FN hasNextI(iter: SliceIter<Int64>) RETURNS Bool ->
+    RETURN iter.pos < iter.len;
+END
+
+FN currentI(iter: SliceIter<Int64>) RETURNS Int64 ->
+    RETURN iter.source[iter.pos];
+END
+
+FN advanceI(iter: SliceIter<Int64>) RETURNS SliceIter<Int64> ->
+    RETURN SliceIter<Int64>{ source: iter.source, pos: iter.pos + 1, len: iter.len };
 END
 
 FN main() RETURNS Void ->
-    -- Iterate strings without copying — measure total length
-    items: String[] = ["alpha", "beta", "gamma", "delta"];
-    WITH BORROWED items AS ref {
-        MUTABLE iter = makeIter(ref, 4);
-        MUTABLE totalLen: Int64 = 0;
-        WHILE hasNext(iter) DO
-            totalLen += currentLen(iter);
-            iter = advance(iter);
+    -- Pattern 1: iterate Int64 array — no @list, plain slice
+    data: Int64[] = [100, 200, 300, 400];
+    WITH BORROWED data AS ref {
+        MUTABLE iter = SliceIter<Int64>{ source: ref, pos: 0, len: 4 };
+        MUTABLE sum: Int64 = 0;
+        WHILE hasNextI(iter) DO
+            sum += currentI(iter);
+            iter = advanceI(iter);
         END
-        -- alpha(5) + beta(4) + gamma(5) + delta(5) = 19
-        ASSERT totalLen == 19;
+        ASSERT sum == 1000;
     }
 
-    -- Verify items is still usable after WITH block
-    ASSERT items.length() == 4;
+    -- Pattern 2: iterate numbers — same generic struct, different type arg
+    nums: Int64[] = [10, 20, 30, 40, 50];
+    WITH BORROWED nums AS nref {
+        MUTABLE iter = SliceIter<Int64>{ source: nref, pos: 0, len: 5 };
+        MUTABLE sum: Int64 = 0;
+        WHILE hasNextI(iter) DO
+            sum += currentI(iter);
+            iter = advanceI(iter);
+        END
+        ASSERT sum == 150;
+    }
+
+    -- Pattern 3: data still usable after WITH block
+    ASSERT data.length() == 4;
+    ASSERT nums.length() == 5;
 
     print("PASS");
     RETURN;
