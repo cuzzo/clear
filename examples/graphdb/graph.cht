@@ -1,0 +1,88 @@
+-- Concurrent Graph Database in CLEAR
+--
+-- A simple directed weighted graph with labeled nodes.
+-- Exercises: struct with collections in HashMap, union return types,
+-- error propagation, and (later) shared concurrent access.
+--
+-- Design: nodes stored in HashMap<Node> (passed by ref).
+-- Node ID is the string key. Edges stored inside each node.
+
+STRUCT Edge {
+    target: String,
+    weight: Float64,
+}
+
+STRUCT Node {
+    label: String,
+    edges: Edge[]@list,
+}
+
+-- Add a node with the given ID and label.
+FN addNode!(MUTABLE nodes: HashMap<Node>, id: String, label: String) RETURNS Void ->
+    nodes[id] = Node{ label: COPY label, edges: [] };
+    RETURN;
+END
+
+-- Add a directed edge from -> to with a weight.
+FN addEdge!(MUTABLE nodes: HashMap<Node>, from: String, to: String, weight: Float64) RETURNS Void ->
+    node = nodes[from] OR Node{ label: "", edges: [] };
+    -- Build new edges list (workaround: COPY on list-from-struct is broken)
+    MUTABLE edges: Edge[]@list = [];
+    FOR i IN (0_i64 ..< node.edges.length()) DO
+        edges.append(Edge{ target: COPY node.edges[i].target, weight: node.edges[i].weight });
+    END
+    edges.append(Edge{ target: COPY to, weight: weight });
+    nodes[from] = Node{ label: COPY node.label, edges: edges };
+    RETURN;
+END
+
+-- Get neighbor labels for a given node.
+FN neighbors!(nodes: HashMap<Node>, id: String) RETURNS String[]@list ->
+    node = nodes[id] OR Node{ label: "", edges: [] };
+    MUTABLE result: String[]@list = [];
+    FOR i IN (0_i64 ..< node.edges.length()) DO
+        targetId = node.edges[i].target;
+        targetNode = nodes[targetId] OR Node{ label: "?", edges: [] };
+        result.append(COPY targetNode.label);
+    END
+    RETURN result;
+END
+
+-- Get the label of a node by ID.
+FN getLabel(nodes: HashMap<Node>, id: String) RETURNS String ->
+    node = nodes[id] OR Node{ label: "", edges: [] };
+    RETURN node.label;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE nodes: HashMap<Node> = {};
+
+    -- Add nodes
+    addNode!(nodes, "a", "Alice");
+    addNode!(nodes, "b", "Bob");
+    addNode!(nodes, "c", "Carol");
+
+    -- Add edges: Alice -> Bob, Alice -> Carol, Bob -> Carol
+    addEdge!(nodes, "a", "b", 1.0);
+    addEdge!(nodes, "a", "c", 2.0);
+    addEdge!(nodes, "b", "c", 1.5);
+
+    -- Check labels
+    ASSERT getLabel(nodes, "a") == "Alice", "node a is Alice";
+    ASSERT getLabel(nodes, "b") == "Bob", "node b is Bob";
+    ASSERT getLabel(nodes, "c") == "Carol", "node c is Carol";
+
+    -- Check neighbors of Alice
+    aliceNeighbors = neighbors!(nodes, "a");
+    ASSERT aliceNeighbors.length() == 2, "Alice has 2 neighbors";
+
+    -- Check neighbors of Bob
+    bobNeighbors = neighbors!(nodes, "b");
+    ASSERT bobNeighbors.length() == 1, "Bob has 1 neighbor";
+
+    -- Check neighbors of Carol (none)
+    carolNeighbors = neighbors!(nodes, "c");
+    ASSERT carolNeighbors.length() == 0, "Carol has 0 neighbors";
+
+    print("graphdb: sequential smoke tests PASSED");
+END
