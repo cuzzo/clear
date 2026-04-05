@@ -149,6 +149,7 @@ module AllocHelper
       false
     when AST::MethodCall
       if node.respond_to?(:object) && node.object.is_a?(AST::Identifier) && outer_vars.include?(node.object.name)
+        return true if node.name == "append"
         return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
         fn = @fn_nodes&.[](node.name)
         return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
@@ -162,6 +163,9 @@ module AllocHelper
                     when String then node.name
                     end
       if target_name && outer_vars.include?(target_name)
+        # Any assignment to an outer-scope collection (map put, list set)
+        # escapes frame data — the put dupes the key on the frame.
+        return true if node.name.is_a?(AST::GetIndex)
         return true if node_allocates_frame?(node.value)
       end
       false
@@ -172,6 +176,8 @@ module AllocHelper
       false
     when AST::WhileLoop
       loop_frame_escapes_to_outer?(node.do_branch, outer_vars)
+    when AST::ForRange
+      loop_frame_escapes_to_outer?(node.body, outer_vars)
     when AST::IfStatement
       loop_frame_escapes_to_outer?(node.then_branch, outer_vars) ||
         loop_frame_escapes_to_outer?(node.else_branch, outer_vars)
