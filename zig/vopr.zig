@@ -27,6 +27,8 @@ const StepKind = enum {
     DrainSpawns,
     WakeSleepers,
     InjectFault,
+    ShardAccess,
+    DrainShardOps,
 };
 
 const FaultKind = enum {
@@ -39,11 +41,13 @@ const FaultKind = enum {
 /// Pick a weighted step type.
 fn pickStep(random: std.Random) StepKind {
     const roll = random.intRangeAtMost(u8, 0, 99);
-    if (roll < 40) return .PopAndRun;
-    if (roll < 60) return .TrySteal;
-    if (roll < 75) return .PollEpoll;
-    if (roll < 85) return .DrainSpawns;
-    if (roll < 90) return .WakeSleepers;
+    if (roll < 35) return .PopAndRun;
+    if (roll < 50) return .TrySteal;
+    if (roll < 60) return .PollEpoll;
+    if (roll < 70) return .DrainSpawns;
+    if (roll < 75) return .WakeSleepers;
+    if (roll < 85) return .ShardAccess;
+    if (roll < 93) return .DrainShardOps;
     return .InjectFault;
 }
 
@@ -63,11 +67,12 @@ fn executeStep(state: *VoprState, sched_idx: usize, step: StepKind) void {
         .DrainSpawns => executeDrainSpawns(state),
         .WakeSleepers => executeWakeSleepers(state, sched),
         .InjectFault => executeInjectFault(state, sched_idx),
+        .ShardAccess => executeShardAccess(state, sched, @intCast(sched_idx)),
+        .DrainShardOps => executeDrainShardOps(state, sched, @intCast(sched_idx)),
     }
 }
 
 fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) void {
-    _ = sched_idx;
     if (sched.ready_queue.len() == 0) return;
 
     // This exercises the real pop() — the TOCTOU fix (bug 1) means
@@ -115,6 +120,28 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             sim.alive = false;
         }
     } else {
+        // Simulate shard access (30% chance) for pinned tasks only.
+        // PartitionedStringMap requires pinned fibers — unpinned tasks can be
+        // stolen to the shard owner, causing concurrent access (bug #9, caught
+        // by the "stolen task with pending remote shard op" deterministic test).
+        if (state.shard_count > 0 and task.config.pinned and state.random.intRangeAtMost(u8, 0, 2) == 0) {
+            const shard_idx = state.random.intRangeLessThan(usize, 0, state.shard_count);
+            const shard = &state.shards[shard_idx];
+            if (shard.owner_sched == @as(u32, @intCast(sched_idx))) {
+                // LOCAL path: task is on the owner scheduler.
+                // Record access (for invariant checking).
+                shard.last_access_tick = state.tick;
+                shard.last_access_sched = @intCast(sched_idx);
+            } else {
+                // REMOTE path: queue a pending op on the owner's inbox.
+                const owner = &state.schedulers[shard.owner_sched];
+                owner.pending_shard_ops.append(state.allocator, .{
+                    .shard = @intCast(shard_idx),
+                    .source_task = task,
+                }) catch {};
+            }
+        }
+
         // Yield — push back to ready queue
         task.status.store(.Ready, .release);
         sched.ready_queue.push(state.allocator, task) catch unreachable;
@@ -189,6 +216,47 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
         }
     }
     _ = sched_idx;
+}
+
+/// Simulate a task on this scheduler accessing a shard.
+/// If the shard is owned by this scheduler (LOCAL), access directly.
+/// If owned by another scheduler (REMOTE), queue a pending op.
+/// This models sendAndWait: LOCAL calls func directly, REMOTE sends via SPSC.
+fn executeShardAccess(state: *VoprState, sched: *SimScheduler, sched_idx: u32) void {
+    if (state.shard_count == 0) return;
+    if (sched.ready_queue.len() == 0) return;
+
+    // Pick a random shard
+    const shard_idx = state.random.intRangeLessThan(usize, 0, state.shard_count);
+    const shard = &state.shards[shard_idx];
+
+    if (shard.owner_sched == sched_idx) {
+        // LOCAL access: record the access on this scheduler/tick.
+        shard.last_access_tick = state.tick;
+        shard.last_access_sched = sched_idx;
+    } else {
+        // REMOTE access: queue a pending op on the OWNER scheduler's inbox.
+        // In the real system, this goes via SPSC and is processed by drainChannels.
+        const owner = &state.schedulers[shard.owner_sched];
+        // Grab a task pointer for the pending op (any running/ready task on this sched)
+        const task = sched.current_task orelse return;
+        owner.pending_shard_ops.append(state.allocator, .{
+            .shard = @intCast(shard_idx),
+            .source_task = task,
+        }) catch return;
+    }
+}
+
+/// Simulate drainChannels: process pending remote shard ops.
+/// Each processed op accesses the shard (records tick + sched).
+fn executeDrainShardOps(state: *VoprState, sched: *SimScheduler, sched_idx: u32) void {
+    while (sched.pending_shard_ops.items.len > 0) {
+        const op = sched.pending_shard_ops.orderedRemove(0);
+        const shard = &state.shards[op.shard];
+        // The drain happens on the OWNER scheduler's thread.
+        shard.last_access_tick = state.tick;
+        shard.last_access_sched = sched_idx;
+    }
 }
 
 fn executeDrainSpawns(state: *VoprState) void {
@@ -304,6 +372,10 @@ fn runVoprAlloc(seed: u64, max_ticks: u64, allocator: std.mem.Allocator) !void {
     const n_schedulers = 2 + state.random.intRangeAtMost(usize, 0, 4);
     state.initSchedulers(n_schedulers);
 
+    // Initialize shards (simulates PartitionedStringMap ownership)
+    const n_shards = 2 + state.random.intRangeAtMost(usize, 0, vs.MAX_SHARDS - 2);
+    state.initShards(n_shards);
+
     // Spawn 8-32 initial tasks, mix of pinned and unpinned
     const n_tasks = 8 + state.random.intRangeAtMost(usize, 0, 24);
     for (0..n_tasks) |_| {
@@ -334,7 +406,7 @@ fn runVoprAlloc(seed: u64, max_ticks: u64, allocator: std.mem.Allocator) !void {
 
         // Check invariants periodically (every 4 ticks for speed,
         // and always after steals/faults which are the high-risk ops)
-        const check_invariants = (tick & 3 == 0) or step == .TrySteal or step == .InjectFault;
+        const check_invariants = (tick & 3 == 0) or step == .TrySteal or step == .InjectFault or step == .ShardAccess or step == .DrainShardOps;
         if (check_invariants) {
             vi.checkAll(&state) catch |err| {
                 std.debug.print("VOPR FAILED at seed={d} tick={d} sched={d} step={s}: {}\n", .{
@@ -425,4 +497,50 @@ test "vopr: task conservation and pinned affinity" {
     for (0..100) |seed| {
         try runVoprAlloc(seed, 200, std.testing.allocator);
     }
+}
+
+test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAccess" {
+    // Deterministic reproduction of the PartitionedStringMap stolen-fiber bug:
+    //   1. Unpinned task on sched 1 sends REMOTE op for shard 0 (owned by sched 0)
+    //   2. Task is stolen from sched 1 to sched 0
+    //   3. Invariant fires: task is in sched 0's queue AND sched 0 has a pending
+    //      remote op from that same task — concurrent access to shard 0.
+    const allocator = std.testing.allocator;
+    var state = VoprState.init(42, allocator);
+    state.random = state.rng.random();
+    defer state.deinit();
+
+    // 2 schedulers, 2 shards: shard 0 -> sched 0, shard 1 -> sched 1
+    state.initSchedulers(2);
+    state.initShards(2);
+
+    // Spawn an unpinned task on sched 1
+    try state.spawnTask(1, false);
+    const task = &state.tasks[0].?.task;
+
+    // Step 1: Pop the task on sched 1 (makes it current_task/Running)
+    executePopAndRun(&state, &state.schedulers[1], 1);
+    // After PopAndRun, the task yielded back to sched 1's queue (steps_remaining > 0).
+
+    // Step 2: Simulate the task sending a REMOTE shard op to sched 0.
+    // This is what happens inside sendAndWait when the task accesses shard 0
+    // from sched 1 (not the owner).
+    state.schedulers[0].pending_shard_ops.append(allocator, .{
+        .shard = 0,
+        .source_task = task,
+    }) catch unreachable;
+
+    // Step 3: Steal the task from sched 1 to sched 0.
+    const stolen = state.schedulers[0].ready_queue.tryStealFrom(
+        state.schedulers[1].ready_queue, allocator,
+    );
+    try std.testing.expect(stolen > 0);
+
+    // Step 4: Check invariant — should fire ShardConcurrentAccess.
+    // The task is now in sched 0's ready queue, AND sched 0 has a pending
+    // remote op from that task. If sched 0 pops the task and it does a
+    // LOCAL access to shard 0, that races with drainChannels processing
+    // the pending remote op.
+    const result = vi.checkAll(&state);
+    try std.testing.expectError(error.ShardConcurrentAccess, result);
 }

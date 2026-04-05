@@ -19,6 +19,7 @@ const Stack = fc.Stack;
 
 pub const MAX_SCHEDULERS = 8;
 pub const MAX_TASKS = 128;
+pub const MAX_SHARDS = 8;
 // Higher than the real runtime would need because the VOPR's random step
 // selection means any given scheduler gets PollEpoll only ~15% / N_sched
 // of ticks.  In the real runtime, epoll is polled every fast-path iteration.
@@ -37,6 +38,21 @@ pub const SimFd = struct {
     task: *Task,
     ready: bool,
     ready_since_tick: u64,
+};
+
+/// Pending remote shard operation queued via SPSC.
+pub const PendingShardOp = struct {
+    shard: u32,
+    source_task: *Task,
+};
+
+/// Simulated shard state for PartitionedStringMap verification.
+pub const ShardState = struct {
+    owner_sched: u32,
+    /// Tick when the shard was last accessed (for detecting overlap).
+    last_access_tick: u64 = 0,
+    /// Which scheduler accessed it last.
+    last_access_sched: u32 = 0,
 };
 
 /// Heap-allocated SimTask.  Each holds an embedded Task and stub Fiber.
@@ -62,6 +78,8 @@ pub const SimScheduler = struct {
     index: u32,
     active_tasks: usize,
     ticks_since_poll: u32,
+    /// Pending remote shard ops queued to this scheduler (simulated SPSC inbox).
+    pending_shard_ops: std.ArrayListUnmanaged(PendingShardOp) = .{},
 
     pub fn init(allocator: std.mem.Allocator, idx: u32) !SimScheduler {
         const rq = try allocator.create(RunQueue);
@@ -80,6 +98,7 @@ pub const SimScheduler = struct {
     pub fn deinit(self: *SimScheduler, allocator: std.mem.Allocator) void {
         self.sleeping_queue.deinit(allocator);
         self.epoll_fds.deinit(allocator);
+        self.pending_shard_ops.deinit(allocator);
         allocator.destroy(self.ready_queue);
     }
 };
@@ -110,6 +129,10 @@ pub const VoprState = struct {
 
     tick: u64,
     sim_time_ms: i64,
+
+    // Shard simulation for PartitionedStringMap concurrency verification
+    shards: [MAX_SHARDS]ShardState = undefined,
+    shard_count: usize = 0,
 
     // Pending spawns
     pending_spawns: std.ArrayListUnmanaged(PendingSpawn),
@@ -255,6 +278,15 @@ pub const VoprState = struct {
         }) catch unreachable;
         self.schedulers[sched_idx].epoll_fds.put(self.allocator, fd, task) catch unreachable;
         return fd;
+    }
+
+    /// Initialize shard ownership (mirrors PartitionedStringMap.ensureOwnership).
+    /// Assigns shards round-robin to schedulers.
+    pub fn initShards(self: *VoprState, count: usize) void {
+        self.shard_count = count;
+        for (0..count) |i| {
+            self.shards[i] = .{ .owner_sched = @intCast(i % self.sched_count) };
+        }
     }
 
     pub fn allTasksFinished(self: *VoprState) bool {

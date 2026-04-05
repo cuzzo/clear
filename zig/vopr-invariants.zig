@@ -28,6 +28,7 @@ pub const InvariantError = error{
     InvalidTaskPointer,
     LivenessViolation,
     EpollStatusViolation,
+    ShardConcurrentAccess,
 };
 
 /// Run all invariant checks.  Returns error on first violation.
@@ -37,7 +38,58 @@ pub fn checkAll(state: *VoprState) InvariantError!void {
     try checkTaskConservationAndDuplicates(state);
     try checkEpollSingleRegistration(state);
     try checkEpollStatusConsistency(state);
+    try checkShardConcurrency(state);
     try checkLiveness(state);
+}
+
+/// Detect the stolen-fiber shard bug: a task sent a remote op to shard S's
+/// owner via SPSC, then was stolen TO that owner scheduler. Now the task
+/// could do a LOCAL access to shard S while its own remote op is still
+/// pending in the owner's SPSC queue - concurrent access to the same shard.
+///
+/// Invariant: no scheduler's pending_shard_ops queue should contain an op
+/// whose source_task is currently in the SAME scheduler's ready queue or
+/// is its current_task. That means the task was stolen to the owner, and
+/// the remote op races with future local access.
+fn checkShardConcurrency(state: *VoprState) InvariantError!void {
+    for (state.schedulers[0..state.sched_count], 0..) |*sched, sched_idx| {
+        for (sched.pending_shard_ops.items) |op| {
+            // Check if the source task is now on THIS scheduler (stolen here).
+            // Walk the ready queue to find it.
+            const t = sched.ready_queue.top.load(.monotonic);
+            const b = sched.ready_queue.bottom.load(.monotonic);
+            const size = b -% t;
+            if (size > 0 and size <= sched.ready_queue.mask + 1) {
+                var i = t;
+                while (i != b) : (i +%= 1) {
+                    const task_opt = sched.ready_queue.buffer[i & sched.ready_queue.mask].load(.monotonic);
+                    if (task_opt) |task| {
+                        if (task == op.source_task) {
+                            std.debug.print("VOPR INVARIANT: shard {d} owned by sched {d} has pending remote op from task {*}, but that task is NOW in sched {d}'s ready queue (stolen!)\n", .{
+                                op.shard,
+                                sched_idx,
+                                op.source_task,
+                                sched_idx,
+                            });
+                            return InvariantError.ShardConcurrentAccess;
+                        }
+                    }
+                }
+            }
+            // Also check current_task
+            if (sched.current_task) |cur| {
+                if (cur == op.source_task) {
+                    std.debug.print("VOPR INVARIANT: shard {d} owned by sched {d} has pending remote op from task {*}, but that task is sched {d}'s current_task (stolen!)\n", .{
+                        op.shard,
+                        sched_idx,
+                        op.source_task,
+                        sched_idx,
+                    });
+                    return InvariantError.ShardConcurrentAccess;
+                }
+            }
+        }
+    }
 }
 
 /// Walk every scheduler's ready_queue, sleeping_queue, and current_task.
