@@ -74,7 +74,9 @@ module CapabilityHelper
   # Validate that a capability type is legal for the given variable.
   def validate_capability(node, capability_type, var_node)
     var_type = var_node.full_type
-    if !var_node.is_a?(AST::Identifier) && !var_node.is_a?(AST::GetField)
+    allowed = [AST::Identifier, AST::GetField]
+    allowed << AST::GetIndex if capability_type == :BORROWED
+    unless allowed.any? { |t| var_node.is_a?(t) }
       error!(var_node, "WITH #{capability_type} expects an identifier or field, got '#{var_node.class}'.")
     end
 
@@ -94,8 +96,12 @@ module CapabilityHelper
 
     when :RESTRICT
       if var_node.symbol && !var_node.symbol.mutable
-        error!(node, "EXCLUSIVE capability requires a mutable variable, but '#{var_node.name}' is immutable")
+        error!(node, "RESTRICT capability requires a mutable variable, but '#{var_node.name}' is immutable")
       end
+
+    when :BORROWED
+      # BORROWED is an immutable borrow — any variable can be borrowed.
+      # No special validation needed beyond the identity check above.
 
     when :multiowned
       unless var_node.symbol&.storage == :multiowned
@@ -124,7 +130,7 @@ module CapabilityHelper
     visit(var_node)
     cap[:resolved_type] = var_node.full_type
 
-    cap[:old_scope] = lookup_scope_for(var_node.name)
+    cap[:old_scope] = lookup_scope_for(cap_var_name(var_node))
 
     # Infer capability from the variable's storage when not stated explicitly
     if cap[:capability] == :infer
@@ -177,8 +183,17 @@ module CapabilityHelper
   # For locked/write_locked vars, declares the alias as the plain inner type
   # (mutable, stack-allocated) and re-declares the locked var for accessibility.
   # For all others, delegates to scope.declare_with_new_capability.
+  def cap_var_name(var_node)
+    case var_node
+    when AST::Identifier then var_node.name
+    when AST::GetField   then var_node.name
+    when AST::GetIndex   then var_node.target.is_a?(AST::Identifier) ? var_node.target.name : "__idx"
+    else "__unknown"
+    end
+  end
+
   def declare_capability_scope!(cap)
-    var_name = cap[:var_node].name
+    var_name = cap_var_name(cap[:var_node])
     syn = cap[:old_scope]&.locals&.[](var_name)&.sync
     if syn && !cap[:var_node].is_a?(AST::GetField)
       inner_type = cap[:old_scope].resolve_type(var_name)
@@ -192,6 +207,15 @@ module CapabilityHelper
     # RESTRICT borrows the variable in the graph so verify_unrestricted! detects conflicts.
     if cap[:capability] == :RESTRICT
       @og.borrow("__restrict_#{var_name}", var_name, mutable: true)
+    elsif cap[:capability] == :BORROWED
+      # BORROWED is an immutable borrow. Multiple immutable borrows are OK,
+      # but a mutable borrow (RESTRICT) cannot coexist.
+      alias_name = cap[:alias] || var_name
+      resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
+      # Declare the alias as an immutable local (not mutable, no cleanup needed)
+      current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
+      og_declare(alias_name, nil, resolved_type, :stack)
+      @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
     end
   end
 

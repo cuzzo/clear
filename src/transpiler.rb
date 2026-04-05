@@ -1439,6 +1439,7 @@ private
       mutex_caps       = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE && c[:resolved_type]&.locked? }
       rw_write_caps    = node.capabilities.select { |c| c[:capability] == :EXCLUSIVE && c[:resolved_type]&.write_locked? }
       rw_read_caps     = node.capabilities.select { |c| c[:capability] == :write_locked_read }
+      borrowed_caps    = node.capabilities.select { |c| c[:capability] == :BORROWED }
 
       # --- Rc/Arc (multiowned/shared) bindings ---
       rc_bindings = rc_caps.map do |cap|
@@ -1508,12 +1509,20 @@ private
         all_sync_caps.map { |c| [(c[:alias] || c[:var_node].name), true] }.to_h
       )
 
+      # --- BORROWED bindings: immutable reference, zero allocation ---
+      borrowed_bindings = borrowed_caps.map do |cap|
+        var_node   = cap[:var_node]
+        alias_name = cap[:alias] || (var_node.respond_to?(:name) ? var_node.name : "__borrowed")
+        source_zig = visit(var_node)
+        "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
+      end.join("\n")
+
       body = transpile_block(node.body)
 
       @rc_unwrap_map     = prev_rc_map
       @locked_unwrap_map = prev_locked_map
 
-      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings].reject(&:empty?).join("\n")
+      all_bindings = [rc_bindings, mutex_bindings, rw_write_bindings, rw_read_bindings, borrowed_bindings].reject(&:empty?).join("\n")
       "{\n#{all_bindings}\n#{body}\n}"
 
     when AST::DoBlock

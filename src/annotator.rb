@@ -2704,10 +2704,13 @@ private
       finalize_scope(node)
     end
 
-    # Release RESTRICT borrows after the WITH block exits
+    # Release borrows after the WITH block exits
     expanded_capabilities.each do |cap|
+      vname = cap_var_name(cap[:var_node])
       if cap[:capability] == :RESTRICT
-        @og.release_borrow("__restrict_#{cap[:var_node].name}")
+        @og.release_borrow("__restrict_#{vname}")
+      elsif cap[:capability] == :BORROWED
+        @og.release_borrow("__borrowed_#{vname}")
       end
     end
 

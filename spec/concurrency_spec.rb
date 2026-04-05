@@ -1814,4 +1814,82 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # =========================================================================
+  # WITH BORROWED — immutable borrow, zero-copy binding
+  # =========================================================================
+  describe "WITH BORROWED" do
+    it "compiles a basic BORROWED binding" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          name = "hello";
+          WITH BORROWED name AS ref {
+            print(ref);
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "emits a const binding in Zig (zero allocation)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          name = "hello";
+          WITH BORROWED name AS ref {
+            print(ref);
+          }
+          RETURN;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(src)
+      expect(zig).to include("const ref = name;")
+    end
+
+    it "supports multiple BORROWED bindings in one WITH" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          a = "first";
+          b = "second";
+          WITH BORROWED a AS ra, BORROWED b AS rb {
+            print(ra);
+            print(rb);
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "supports borrowing struct fields via dot access" do
+      src = <<~CLEAR
+        STRUCT Pair { x: Float64, y: Float64 }
+        FN main() RETURNS Void ->
+          p = Pair{ x: 1.0, y: 2.0 };
+          WITH BORROWED p AS ref {
+            print(ref.x.toString());
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "allows nested WITH BORROWED blocks" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          outer = "a";
+          WITH BORROWED outer AS r1 {
+            inner = "b";
+            WITH BORROWED inner AS r2 {
+              print(r1);
+              print(r2);
+            }
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+  end
+
 end

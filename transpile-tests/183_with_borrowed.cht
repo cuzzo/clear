@@ -1,0 +1,46 @@
+-- Test: WITH BORROWED — immutable borrow, zero-copy binding.
+-- The borrowed alias is read-only and scoped to the WITH block.
+
+-- Pattern 1: Borrow a local string
+FN main() RETURNS Void ->
+    greeting = "Hello, World!";
+    WITH BORROWED greeting AS ref {
+        ASSERT ref == "Hello, World!";
+        ASSERT ref.length() == 13;
+    }
+
+    -- Pattern 2: Borrow a struct field
+    STRUCT Point { x: Float64, y: Float64 }
+    p = Point{ x: 3.0, y: 4.0 };
+    WITH BORROWED p AS ref {
+        ASSERT ref.x == 3.0;
+        ASSERT ref.y == 4.0;
+    }
+
+    -- Pattern 4: Multiple borrows of different variables
+    a = "first";
+    b = "second";
+    WITH BORROWED a AS ra, BORROWED b AS rb {
+        ASSERT ra == "first";
+        ASSERT rb == "second";
+    }
+
+    -- Pattern 5: Nested WITH BORROWED blocks
+    outer = "outer";
+    WITH BORROWED outer AS ref1 {
+        inner = "inner";
+        WITH BORROWED inner AS ref2 {
+            ASSERT ref1 == "outer";
+            ASSERT ref2 == "inner";
+        }
+    }
+
+    -- Pattern 6: Borrow survives function call (read-only passing)
+    msg = "test message";
+    WITH BORROWED msg AS ref {
+        ASSERT startsWith?(ref, "test");
+    }
+
+    print("PASS");
+    RETURN;
+END
