@@ -796,10 +796,16 @@ private
         # Set: zero-initialize
         "#{node.full_type.zig_type}{}"
       elsif node.full_type&.list_collection?
-        # @list / ShardedList: if the RHS is a function call, use the call result.
-        # Otherwise zero-initialize (empty-list-literal path).
+        # @list / ShardedList: if the RHS is a function call (or OR-wrapped call),
+        # use the call result. Otherwise zero-initialize (empty-list-literal path).
         rhs = @current_rhs_is_move ? node.value.value : node.value
-        if rhs.is_a?(AST::FuncCall) || rhs.is_a?(AST::MethodCall)
+        # Unwrap OR fallback to check if the primary expression is a call.
+        rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
+        if rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
+          # Suppress HPT hoisting for the inner call — the OR catch or the
+          # VarDecl itself handles cleanup. Without this, HPT wraps the call
+          # in try (unwrapping the error), then OR adds catch (expects error).
+          current_tp_ctx&.bind_value_node = rhs_unwrapped
           visit(node.value)
         elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
           # T[N]@list: pre-allocate N slots. Allocator from CleanupPlan.
@@ -3763,6 +3769,8 @@ private
         schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
         preamble = temps.map { |t|
           ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
+          # Error unions are unwrapped by try — use the payload type for the HPT variable.
+          ti = ti.payload_type if ti.error_union? && ti.payload_type
           ti.heap_promoted = true
           zig_t = ti.zig_type
           entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
