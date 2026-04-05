@@ -2403,6 +2403,7 @@ private
           when 0x0D then '\\r'   # carriage return
           when 0x09 then '\\t'   # tab
           when 0x00 then '\\x00' # null
+          when 0x80..0xFF then "\\x#{'%02x' % b}" # non-ASCII byte
           else b.chr
           end
         }.join
@@ -2420,6 +2421,16 @@ private
         end
       when :INT64
         node.value.to_s
+      when :INT8    then "@as(i8, #{node.value})"
+      when :INT16   then "@as(i16, #{node.value})"
+      when :INT32   then "@as(i32, #{node.value})"
+      when :UINT16  then "@as(u16, #{node.value})"
+      when :UINT32  then "@as(u32, #{node.value})"
+      when :UINT64  then "@as(u64, #{node.value})"
+      when :FLOAT32
+        s = node.value.to_s
+        s = "#{s}.0" if node.value == node.value.to_i && !s.include?('.')
+        "@as(f32, #{s})"
       when :BOOLEAN
         node.value.to_s      # "true"/"false" is fine
       when :NIL
@@ -3920,11 +3931,17 @@ if __FILE__ == $0
     source_dir = File.dirname(File.expand_path(script_file))
     transpiler = ZigTranspiler.new
 
+    transpiler.instance_variable_set(:@default_stack_size, options[:default_stack]) if options[:default_stack]
+
     case options[:mode]
     when :module
       puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
+    when :test
+      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
+                                test_mode: true, strict_test: !!options[:strict])
     else
-      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
+      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
+                                use_c_allocator: !!options[:use_c_allocator])
     end
   else
     $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.cht] <script.cht>"
