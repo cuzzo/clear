@@ -280,18 +280,19 @@ def run_server_bench(dir)
   results = {}
 
   servers = []
-  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: "" } if has_rust && File.exist?("#{dir}/bench_rust")
-  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: "" } if has_go && File.exist?("#{dir}/server_go")
-  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: "CLEAR_THREADS=#{threads} " } if has_clear
+  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: {} } if has_rust && File.exist?("#{dir}/bench_rust")
+  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: {} } if has_go && File.exist?("#{dir}/server_go")
+  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: { "CLEAR_THREADS" => threads } } if has_clear
 
   servers.each do |srv|
     # Clean data directory
     FileUtils.rm_rf("data")
     FileUtils.mkdir_p("data")
 
-    # Start server
+    # Start server — use env hash (not string) so spawn doesn't wrap in sh -c,
+    # giving us the real server PID for /proc/<pid>/status RSS tracking.
     puts "\nRunning #{srv[:label]}..."
-    pid = spawn("#{srv[:env]}./#{srv[:bin]}", [:out, :err] => "/dev/null")
+    pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
     sleep 1
 
     # Run client
