@@ -1,14 +1,15 @@
-// Pub-Sub Benchmark — Go
+// Pub-Sub Benchmark -- Go
 //
-// 1 publisher sends 100K messages to N subscribers via buffered channels.
-// Each subscriber processes the message with CPU-bound work (LCG hash).
-// Measures: channel broadcast latency, goroutine scheduling, fan-out overhead.
+// 64 subscribers each independently generate and process 100K messages
+// with CPU-bound work (2000 LCG iterations per message).
+// Total work: 100K * 64 * 2000 = 12.8 billion LCG iterations.
 //
-// This models a market-data ticker: one source, many consumers, each
-// doing independent work on every message.
+// This matches the CLEAR pattern: each subscriber generates its own
+// message sequence (no channels, no shared-memory broadcast).
+// Measures: goroutine parallelism and scheduler efficiency.
 //
 // Build: go build -o bench_go .
-// Run:   ./bench_go
+// Run:   GOMAXPROCS=N ./bench_go
 
 package main
 
@@ -23,11 +24,9 @@ import (
 const (
 	nMessages    = 100_000
 	nSubscribers = 64
-	workPerMsg   = 2_000 // LCG iterations per message per subscriber
-	chanBuf      = 256
+	workPerMsg   = 2_000
 )
 
-// CPU-bound work: iterated LCG hash.
 func processMessage(seed uint64) uint64 {
 	x := seed
 	for i := 0; i < workPerMsg; i++ {
@@ -36,43 +35,29 @@ func processMessage(seed uint64) uint64 {
 	return x
 }
 
+func subscriberWork(n uint64) uint64 {
+	var total uint64
+	for i := uint64(0); i < n; i++ {
+		total += processMessage(i)
+	}
+	return total
+}
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	// Create subscriber channels
-	channels := make([]chan uint64, nSubscribers)
-	for i := range channels {
-		channels[i] = make(chan uint64, chanBuf)
-	}
 
 	var total atomic.Uint64
 	var wg sync.WaitGroup
 
 	t0 := time.Now()
 
-	// Spawn subscribers
 	for i := 0; i < nSubscribers; i++ {
 		wg.Add(1)
-		go func(ch chan uint64) {
+		go func() {
 			defer wg.Done()
-			var localSum uint64
-			for msg := range ch {
-				localSum += processMessage(msg)
-			}
-			total.Add(localSum)
-		}(channels[i])
-	}
-
-	// Publisher: broadcast each message to all subscribers
-	for msg := uint64(0); msg < nMessages; msg++ {
-		for _, ch := range channels {
-			ch <- msg
-		}
-	}
-
-	// Close all channels to signal completion
-	for _, ch := range channels {
-		close(ch)
+			result := subscriberWork(nMessages)
+			total.Add(result)
+		}()
 	}
 
 	wg.Wait()
@@ -81,5 +66,5 @@ func main() {
 	fmt.Printf("Checksum: %d\n", total.Load()%1_000_000_000)
 	fmt.Printf("Messages: %d\n", nMessages)
 	fmt.Printf("Subscribers: %d\n", nSubscribers)
-	fmt.Printf("Time: %.4f s\n", elapsed)
+	fmt.Printf("Time: %.0f ms\n", elapsed*1000)
 }
