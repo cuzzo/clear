@@ -87,114 +87,111 @@ pub const AtomicInbox = struct {
 
 // Dynamic Chase-Lev Work-Stealing Deque (Chase & Lev, 2005)
 //
-// Growable circular buffer: starts at INITIAL_LOG_SIZE (64 slots = 512 bytes),
-// doubles on push when full. Only the owner thread grows; thieves read the
-// array pointer with acquire ordering. Old arrays are leaked (tiny, bounded
-// by log2(max_tasks) arrays total).
+// Growable circular buffer behind an atomic CircularArray pointer.
+// Starts at 64 slots (512B), doubles when full. Only the owner calls
+// push/pop/grow. Thieves call stealOne: pure atomic reads + one CAS.
+//
+// Pinned tasks are NOT stored here — the scheduler routes them to a
+// separate owner-local list, eliminating the thief-pushes-to-victim
+// race that caused data corruption.
 pub const RunQueue = struct {
-    const INITIAL_LOG_SIZE: u5 = 6; // 2^6 = 64 slots
+    pub const INITIAL_LOG_SIZE: u5 = 6; // 2^6 = 64 slots
 
-    // Heap-allocated circular array. Replaced atomically on grow.
-    // Thieves load this with acquire; owner stores with release on grow.
-    buffer: []Atomic(?*Task),
-    mask: u32,
-    log_size: u5,
+    pub const CircularArray = struct {
+        data: []Atomic(?*Task),
+        mask: u32,
+    };
+
+    array: Atomic(?*CircularArray),
     allocator: std.mem.Allocator,
-
-    // Old buffers kept alive so thieves don't read freed memory.
-    // Bounded by log2(max_tasks) entries (one per doubling).
-    old_buffers: std.ArrayListUnmanaged([]Atomic(?*Task)) = .{},
+    old_arrays: std.ArrayListUnmanaged(*CircularArray) = .{},
 
     top: Atomic(u32) = Atomic(u32).init(0),
     bottom: Atomic(u32) = Atomic(u32).init(0),
 
     pub fn init() RunQueue {
-        // Placeholder — real init happens in initWithAllocator.
-        // The scheduler calls initWithAllocator after construction.
-        return .{
-            .buffer = &.{},
-            .mask = 0,
-            .log_size = 0,
-            .allocator = undefined,
-        };
+        return .{ .array = Atomic(?*CircularArray).init(null), .allocator = undefined };
     }
 
     pub fn initWithAllocator(alloc: std.mem.Allocator) !RunQueue {
-        const size = @as(u32, 1) << INITIAL_LOG_SIZE;
-        const buf = try alloc.alloc(Atomic(?*Task), size);
-        for (buf) |*slot| slot.* = Atomic(?*Task).init(null);
-        return .{
-            .buffer = buf,
-            .mask = size - 1,
-            .log_size = INITIAL_LOG_SIZE,
-            .allocator = alloc,
-        };
+        return initWithSize(alloc, INITIAL_LOG_SIZE);
+    }
+
+    pub fn initWithSize(alloc: std.mem.Allocator, log_size: u5) !RunQueue {
+        const arr = try makeArray(alloc, log_size);
+        return .{ .array = Atomic(?*CircularArray).init(arr), .allocator = alloc };
+    }
+
+    fn makeArray(alloc: std.mem.Allocator, log_size: u5) !*CircularArray {
+        const size = @as(u32, 1) << log_size;
+        const data = try alloc.alloc(Atomic(?*Task), size);
+        for (data) |*slot| slot.* = Atomic(?*Task).init(null);
+        const arr = try alloc.create(CircularArray);
+        arr.* = .{ .data = data, .mask = size - 1 };
+        return arr;
+    }
+
+    fn freeArray(self: *RunQueue, arr: *CircularArray) void {
+        self.allocator.free(arr.data);
+        self.allocator.destroy(arr);
     }
 
     pub fn deinit(self: *RunQueue) void {
-        // Free current buffer
-        if (self.buffer.len > 0) self.allocator.free(self.buffer);
-        // Free old buffers
-        for (self.old_buffers.items) |old| self.allocator.free(old);
-        self.old_buffers.deinit(self.allocator);
+        if (self.array.load(.monotonic)) |arr| self.freeArray(arr);
+        for (self.old_arrays.items) |old| self.freeArray(old);
+        self.old_arrays.deinit(self.allocator);
+    }
+
+    pub fn getBuffer(self: *RunQueue) []Atomic(?*Task) {
+        const arr = self.array.load(.monotonic) orelse return &.{};
+        return arr.data;
+    }
+
+    pub fn getMask(self: *RunQueue) u32 {
+        const arr = self.array.load(.monotonic) orelse return 0;
+        return arr.mask;
     }
 
     fn grow(self: *RunQueue, b: u32, t: u32) !void {
-        const new_log = self.log_size + 1;
-        const new_size = @as(u32, 1) << @as(u5, new_log);
-        const new_buf = try self.allocator.alloc(Atomic(?*Task), new_size);
-        for (new_buf) |*slot| slot.* = Atomic(?*Task).init(null);
-        // Copy live elements from old buffer
-        const new_mask = new_size - 1;
+        const old_arr = self.array.load(.monotonic).?;
+        const old_log: u5 = @intCast(@ctz(old_arr.mask + 1));
+        const new_arr = try makeArray(self.allocator, old_log + 1);
         var i = t;
         while (i != b) : (i +%= 1) {
-            new_buf[i & new_mask].store(self.buffer[i & self.mask].load(.monotonic), .monotonic);
+            new_arr.data[i & new_arr.mask].store(
+                old_arr.data[i & old_arr.mask].load(.monotonic), .monotonic);
         }
-        // Retire old buffer (don't free — thieves may still read it)
-        self.old_buffers.append(self.allocator, self.buffer) catch {};
-        self.buffer = new_buf;
-        self.mask = new_mask;
-        self.log_size = @as(u5, new_log);
+        self.old_arrays.append(self.allocator, old_arr) catch {};
+        self.array.store(new_arr, .release);
     }
 
-    // push (bottom) - owner only. Grows if full.
     pub fn push(self: *RunQueue, alloc: std.mem.Allocator, task: *Task) !void {
         _ = alloc;
         const b = self.bottom.load(.monotonic);
         const t = self.top.load(.acquire);
-
-        if (b -% t > self.mask) {
+        var arr = self.array.load(.monotonic).?;
+        if (b -% t > arr.mask) {
             try self.grow(b, t);
+            arr = self.array.load(.monotonic).?;
         }
-
-        self.buffer[b & self.mask].store(task, .monotonic);
+        arr.data[b & arr.mask].store(task, .monotonic);
         self.bottom.store(b +% 1, .release);
     }
 
-    // Chase-Lev Pop Bottom (owner-side dequeue)
-    // Ref: "Dynamic Circular Work-Stealing Deque" (Chase & Lev, 2005)
-    //
-    // The owner decrements bottom, then checks top. A seq_cst fence between
-    // the bottom store and top load is REQUIRED to prevent the owner and a
-    // thief from reading the same element. Without it, the CPU can reorder
-    // the bottom store past the top load, causing a double-read.
     pub fn pop(self: *RunQueue) ?*Task {
         const b = self.bottom.load(.monotonic);
         const t_check = self.top.load(.monotonic);
         if (b -% t_check == 0) return null;
-
         const new_b = b -% 1;
         self.bottom.store(new_b, .seq_cst);
-
         const t = self.top.load(.seq_cst);
-        const task = self.buffer[new_b & self.mask].load(.monotonic);
-
+        const arr = self.array.load(.monotonic).?;
+        const task = arr.data[new_b & arr.mask].load(.monotonic);
         const size = new_b -% t;
-        if (size > self.mask) {
+        if (size > arr.mask) {
             self.bottom.store(b, .monotonic);
             return null;
         }
-
         if (t == new_b) {
             if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
                 self.bottom.store(t +% 1, .monotonic);
@@ -206,51 +203,37 @@ pub const RunQueue = struct {
         return task;
     }
 
-    // Safe length check
     pub fn len(self: *RunQueue) usize {
         const b = self.bottom.load(.monotonic);
         const t = self.top.load(.monotonic);
         return b -% t;
     }
 
-    // Used internally by tryStealFrom.
-    // Skips pinned tasks — they must stay on their owning scheduler's thread.
+    // Steal from top — thief only. Pure atomic reads + one CAS.
+    // No pinned check — pinned tasks are never in this queue.
     pub fn stealOne(self: *RunQueue) ?*Task {
         const t = self.top.load(.acquire);
         const b = self.bottom.load(.seq_cst);
-
+        const arr = self.array.load(.acquire) orelse return null;
         const size = b -% t;
-        if (size == 0 or size > self.mask) return null;
-
-        const task = self.buffer[t & self.mask].load(.acquire);
-
+        if (size == 0 or size > arr.mask) return null;
+        const task = arr.data[t & arr.mask].load(.acquire);
         if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
             return null;
-        }
-
-        if (task) |t_ptr| {
-            if (t_ptr.config.pinned) {
-                self.push(std.heap.c_allocator, t_ptr) catch {};
-                return null;
-            }
         }
         return task;
     }
 
-    // For stealing (Take half, lock free)
     pub fn tryStealFrom(self: *RunQueue, victim: *RunQueue, alloc: std.mem.Allocator) usize {
         const v_len = victim.len();
         if (v_len == 0) return 0;
-
         const target = (v_len + 1) / 2;
         var stolen_count: usize = 0;
-
         while (stolen_count < target) {
             const task = victim.stealOne() orelse break;
             self.push(alloc, task) catch break;
             stolen_count += 1;
         }
-
         return stolen_count;
     }
 };

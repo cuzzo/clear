@@ -59,10 +59,10 @@ fn checkShardConcurrency(state: *VoprState) InvariantError!void {
             const t = sched.ready_queue.top.load(.monotonic);
             const b = sched.ready_queue.bottom.load(.monotonic);
             const size = b -% t;
-            if (size > 0 and size <= sched.ready_queue.mask + 1) {
+            if (size > 0 and size <= sched.ready_queue.getMask() + 1) {
                 var i = t;
                 while (i != b) : (i +%= 1) {
-                    const task_opt = sched.ready_queue.buffer[i & sched.ready_queue.mask].load(.monotonic);
+                    const task_opt = sched.ready_queue.getBuffer()[i & sched.ready_queue.getMask()].load(.monotonic);
                     if (task_opt) |task| {
                         if (task == op.source_task) {
                             std.debug.print("VOPR INVARIANT: shard {d} owned by sched {d} has pending remote op from task {*}, but that task is NOW in sched {d}'s ready queue (stolen!)\n", .{
@@ -107,10 +107,10 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
         const t = sched.ready_queue.top.load(.monotonic);
         const b = sched.ready_queue.bottom.load(.monotonic);
         const size = b -% t;
-        if (size > 0 and size <= sched.ready_queue.mask + 1) {
+        if (size > 0 and size <= sched.ready_queue.getMask() + 1) {
             var i = t;
             while (i != b) : (i +%= 1) {
-                const task_opt = sched.ready_queue.buffer[i & sched.ready_queue.mask].load(.monotonic);
+                const task_opt = sched.ready_queue.getBuffer()[i & sched.ready_queue.getMask()].load(.monotonic);
                 if (task_opt) |task| {
                     // Valid pointer check (bug 3)
                     if (!state.task_registry.contains(task)) {
@@ -133,6 +133,26 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
                                 return InvariantError.PinnedAffinityViolation;
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Walk pinned_queue (owner-local, never stolen)
+        for (sched.pinned_queue.items) |task| {
+            if (!state.task_registry.contains(task)) {
+                return InvariantError.InvalidTaskPointer;
+            }
+            if (seen_map.contains(task)) {
+                std.debug.print("VOPR INVARIANT: duplicate task {*} in pinned_queue of sched {d}\n", .{ task, sched_idx });
+                return InvariantError.DuplicateTask;
+            }
+            seen_map.put(state.allocator, task, @intCast(sched_idx)) catch unreachable;
+            if (task.config.pinned) {
+                if (state.getSimTask(task)) |sim| {
+                    if (sim.owner_sched != @as(u32, @intCast(sched_idx))) {
+                        std.debug.print("VOPR INVARIANT: pinned task {*} on sched {d}, should be on sched {d}\n", .{ task, sched_idx, sim.owner_sched });
+                        return InvariantError.PinnedAffinityViolation;
                     }
                 }
             }

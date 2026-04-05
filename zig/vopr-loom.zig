@@ -427,20 +427,18 @@ fn scenarioPopVsSteal(h: *LoomHarness) !void {
     try checkNoDuplicates(h);
 }
 
+// Pinned tasks no longer enter the RunQueue. This scenario tests
+// steal with 2 non-pinned tasks (replaces old pinned+unpinned mix).
 fn scenarioPinnedSteal(h: *LoomHarness) !void {
-    const pinned = h.initStubTask(0, true);
-    const unpinned = h.initStubTask(1, false);
-    h.queue.push(std.heap.c_allocator, pinned) catch unreachable;
-    h.queue.push(std.heap.c_allocator, unpinned) catch unreachable;
+    const t0 = h.initStubTask(0, false);
+    const t1 = h.initStubTask(1, false);
+    h.queue.push(std.heap.c_allocator, t0) catch unreachable;
+    h.queue.push(std.heap.c_allocator, t1) catch unreachable;
     try h.createThread(0, @intFromPtr(&entryOwnerPop));
     try h.createThread(1, @intFromPtr(&entryThiefSteal));
     try h.run();
-    try checkPinnedNotStolen(h);
     try checkNoDuplicates(h);
-    // Conservation: 2 tasks pushed. Results + remaining queue must == 2.
-    const results = countResults(h);
-    const qlen = h.queue.len();
-    const total = results + qlen;
+    const total = countResults(h) + h.queue.len();
     if (total < 2) return LoomError.TaskLost;
     if (total > 2) return LoomError.TaskDuplicated;
 }
@@ -474,38 +472,30 @@ fn scenarioPushDuringSteal(h: *LoomHarness) !void {
 
 /// Scenario 5: Aggressive pinned push-back under contention.
 /// 3 pinned + 2 unpinned tasks. Owner pops twice, thief steals twice.
-/// The thief's pinned push-back calls push() on the victim's queue
-/// concurrently with the owner's pop() -- both modify `bottom`.
+/// Scenario 5: Heavy contention — 5 non-pinned tasks (replaces aggressive pinned).
 fn scenarioAggressivePinned(h: *LoomHarness) !void {
-    for (0..3) |i| {
-        const task = h.initStubTask(i, true); // pinned
-        h.queue.push(std.heap.c_allocator, task) catch unreachable;
-    }
-    for (3..5) |i| {
-        const task = h.initStubTask(i, false); // unpinned
+    for (0..5) |i| {
+        const task = h.initStubTask(i, false);
         h.queue.push(std.heap.c_allocator, task) catch unreachable;
     }
     try h.createThread(0, @intFromPtr(&entryOwnerDoublePop2));
     try h.createThread(1, @intFromPtr(&entryThiefDoubleSteal));
     try h.run();
-    try checkPinnedNotStolen(h);
     try checkNoDuplicates(h);
     const total = countResults(h) + h.queue.len();
     if (total < 5) return LoomError.TaskLost;
     if (total > 5) return LoomError.TaskDuplicated;
 }
 
-/// Scenario 6: All-pinned queue. Thief steals and pushes back every task.
-/// tryStealFrom should return 0 stolen. No tasks lost.
+/// Scenario 6: 4 non-pinned tasks (replaces all-pinned).
 fn scenarioAllPinned(h: *LoomHarness) !void {
     for (0..4) |i| {
-        const task = h.initStubTask(i, true);
+        const task = h.initStubTask(i, false);
         h.queue.push(std.heap.c_allocator, task) catch unreachable;
     }
     try h.createThread(0, @intFromPtr(&entryOwnerDoublePop2));
     try h.createThread(1, @intFromPtr(&entryThiefDoubleSteal));
     try h.run();
-    try checkPinnedNotStolen(h);
     try checkNoDuplicates(h);
     const total = countResults(h) + h.queue.len();
     if (total < 4) return LoomError.TaskLost;

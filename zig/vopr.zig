@@ -144,7 +144,7 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
 
         // Yield — push back to ready queue
         task.status.store(.Ready, .release);
-        sched.ready_queue.push(state.allocator, task) catch unreachable;
+        sched.enqueueTask(state.allocator, task);
         state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
     }
 
@@ -201,7 +201,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
     // Wake the tasks
     for (to_wake.items) |task| {
         task.status.store(.Ready, .release);
-        sched.ready_queue.push(state.allocator, task) catch unreachable;
+        sched.enqueueTask(state.allocator, task);
         state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
         _ = state.blocked_tasks.remove(task);
 
@@ -263,7 +263,7 @@ fn executeDrainSpawns(state: *VoprState) void {
     while (state.pending_spawns.items.len > 0) {
         const spawn = state.pending_spawns.orderedRemove(0);
         const target = &state.schedulers[spawn.target_sched];
-        target.ready_queue.push(state.allocator, spawn.task) catch unreachable;
+        target.enqueueTask(state.allocator, spawn.task);
         target.active_tasks += 1;
         state.task_registry.put(state.allocator, spawn.task, .InQueue) catch unreachable;
     }
@@ -278,7 +278,7 @@ fn executeWakeSleepers(state: *VoprState, sched: *SimScheduler) void {
         if (state.sim_time_ms >= task.wake_time) {
             _ = sched.sleeping_queue.swapRemove(i);
             task.status.store(.Ready, .release);
-            sched.ready_queue.push(state.allocator, task) catch unreachable;
+            sched.enqueueTask(state.allocator, task);
             state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
         } else {
             i += 1;

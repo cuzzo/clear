@@ -150,6 +150,7 @@ pub const Scheduler = struct {
     // 1. The Manager State
     fiber_pool: std.ArrayListUnmanaged(*Task) = .{},
     ready_queue: RunQueue,
+    pinned_queue: std.ArrayListUnmanaged(*Task) = .{},
     stack_cache: std.ArrayListUnmanaged([]u8) = .{},   // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
 
@@ -300,7 +301,7 @@ pub const Scheduler = struct {
         var i = t;
         while (i < b) : (i += 1) {
              // Access raw slot directly
-             const task_opt = self.ready_queue.buffer[i & self.ready_queue.mask].load(.monotonic);
+             const task_opt = self.ready_queue.getBuffer()[i & self.ready_queue.getMask()].load(.monotonic);
              if (task_opt) |task| {
                  self.freeStack(task.base.stack.memory);
                  self.allocator.destroy(task.base);
@@ -308,6 +309,12 @@ pub const Scheduler = struct {
              }
         }
         self.ready_queue.deinit();
+        for (self.pinned_queue.items) |task| {
+            self.freeStack(task.base.stack.memory);
+            self.allocator.destroy(task.base);
+            self.allocator.destroy(task);
+        }
+        self.pinned_queue.deinit(self.allocator);
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
@@ -422,7 +429,7 @@ pub const Scheduler = struct {
         // ready queue.
         if (scheduler_running and self == active_scheduler) {
             task.status.store(.Ready, .release);
-            self.ready_queue.push(self.allocator, task) catch unreachable;
+            self.enqueueTask(task);
             return;
         }
 
@@ -513,19 +520,27 @@ pub const Scheduler = struct {
                         task.context = msg.args;
                         task.status.store(.Ready, .release);
                         task.config = config;
-                        self.ready_queue.push(self.allocator, task) catch {
-                            self.freeStack(stack_mem);
-                            self.fiber_pool.append(self.allocator, task) catch
+                        if (task.config.pinned) {
+                            self.pinned_queue.append(self.allocator, task) catch {
+                                self.freeStack(stack_mem);
                                 self.allocator.destroy(task);
-                            continue;
-                        };
+                                continue;
+                            };
+                        } else {
+                            self.ready_queue.push(self.allocator, task) catch {
+                                self.freeStack(stack_mem);
+                                self.fiber_pool.append(self.allocator, task) catch
+                                    self.allocator.destroy(task);
+                                continue;
+                            };
+                        }
                         _ = self.active_tasks.fetchAdd(1, .monotonic);
                     },
                     .Resume => {
                         const task: *Task = @ptrCast(@alignCast(msg.task.?));
                         // in_inbox stays true until run() dequeues the task.
                         task.status.store(.Ready, .release);
-                        self.ready_queue.push(self.allocator, task) catch unreachable;
+                        self.enqueueTask(task);
                     },
                     .RemoteCall => {
                         if (self.draining) {
@@ -565,8 +580,10 @@ pub const Scheduler = struct {
                 if (flag.load(.monotonic)) break;
             }
 
-            // ── Fast path: if the ready_queue has work, run it immediately.
-            if (self.ready_queue.len() > 0) {
+            // ── Fast path: if any queue has work, run it immediately.
+            // Every 64 fast-path iterations, drain inbox + poll epoll to
+            // pick up newly spawned tasks and wake I/O-blocked fibers.
+            if (self.hasWork()) {
                 self.fast_path_counter +%= 1;
                 self.drainRemoteCalls();
                 if (self.fast_path_counter & 63 == 0) {
@@ -586,7 +603,7 @@ pub const Scheduler = struct {
                         if (now >= task.wake_time) {
                             _ = self.sleeping_queue.swapRemove(i);
                             task.status.store(.Ready, .release);
-                            self.ready_queue.push(self.allocator, task) catch unreachable;
+                            self.enqueueTask(task);
                         } else {
                             i += 1;
                         }
@@ -595,10 +612,12 @@ pub const Scheduler = struct {
             } // end slow path
 
             // Look for tasks ready to start:
-            if (self.ready_queue.len() > 0) {
-                // pop() can return null if a thief stole the last task between
-                // the len() check and this pop() (TOCTOU race). Not an error.
-                const task = self.ready_queue.pop() orelse continue;
+            if (self.hasWork()) {
+                // Pinned queue first (owner-local, no steal contention).
+                const task = if (self.pinned_queue.items.len > 0)
+                    self.pinned_queue.swapRemove(0)
+                else
+                    (self.ready_queue.pop() orelse continue);
                 self.current_task = task;
 
                 // Clear the double-push guard now that the task is
@@ -634,7 +653,7 @@ pub const Scheduler = struct {
                     },
                     .Ready => {
                         // It yielded, but wants to run again. Put back in queue.
-                        self.ready_queue.push(self.allocator, task) catch unreachable;
+                        self.enqueueTask(task);
                     },
                     .Blocked => {
                         // Do nothing! It is now owned by the WaitGroup/Mutex/Etc.
@@ -645,7 +664,7 @@ pub const Scheduler = struct {
             }
 
             // Look for tasks to steal (ONLY IF IDLE):
-            if (self.ready_queue.len() == 0) {
+            if (!self.hasWork()) {
                 const pair = global_registry.getRandomPair();
                 if (pair.b) |victim| {
                     // Don't steal from myself
@@ -666,7 +685,7 @@ pub const Scheduler = struct {
             // that arrived while we were busy running fibers, without waiting for
             // epoll to fire on the ring fd.
             self.drainCqes();
-            if (self.ready_queue.len() > 0) continue;
+            if (self.hasWork()) continue;
 
             // IF IDLE: Poll for IO
             // Determine timeout based on next timer
@@ -688,7 +707,7 @@ pub const Scheduler = struct {
             // We must check for new work ONE LAST TIME after setting the flag.
             // If we don't do this, a task could arrive between our last check
             // and the 'markSleeping' call, and we would sleep forever.
-            if (self.ready_queue.len() > 0 or self.hasChannelMessages()) {
+            if (self.hasWork() or self.hasChannelMessages()) {
                 self.event_fd.markAwake();
                 continue; // Restart loop to process the new work
             }
@@ -704,7 +723,7 @@ pub const Scheduler = struct {
             }
 
             // If no IO and no Tasks and no Sleepers -> Break
-            if (self.shutdown_on_idle and count == 0 and self.ready_queue.len() == 0 and self.sleeping_queue.items.len == 0) {
+            if (self.shutdown_on_idle and count == 0 and !self.hasWork() and self.sleeping_queue.items.len == 0) {
                 self.scavengeMemory(true);
                 break;
             }
@@ -725,8 +744,20 @@ pub const Scheduler = struct {
     // Cooperative yield: switch to the scheduler only if other fibers are ready.
     // Called from rt.checkYield() every YIELD_BUDGET iterations of a while loop.
     // Zero-cost when no other fiber is waiting (single-fiber programs).
+    fn enqueueTask(self: *Scheduler, task: *Task) void {
+        if (task.config.pinned) {
+            self.pinned_queue.append(self.allocator, task) catch unreachable;
+        } else {
+            self.ready_queue.push(self.allocator, task) catch unreachable;
+        }
+    }
+
+    fn hasWork(self: *Scheduler) bool {
+        return self.ready_queue.len() > 0 or self.pinned_queue.items.len > 0;
+    }
+
     pub noinline fn coopYield(self: *Scheduler) void {
-        if (self.ready_queue.len() > 0) {
+        if (self.hasWork()) {
             const task = self.getCurrent();
             task.status.store(.Ready, .release);
             task.base.yield();
@@ -799,7 +830,7 @@ pub const Scheduler = struct {
     /// can exercise this code path under deterministic interleaving.
     pub fn wakeTaskFromEpoll(self: *Scheduler, task: *Task) void {
         if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
-            self.ready_queue.push(self.allocator, task) catch unreachable;
+            self.enqueueTask(task);
         }
     }
 
@@ -836,7 +867,7 @@ pub const Scheduler = struct {
             const waiter: *IoWaiter = @ptrFromInt(cqe.user_data);
             waiter.result = cqe.res;
             waiter.task.status.store(.Ready, .release);
-            self.ready_queue.push(self.allocator, waiter.task) catch unreachable;
+            self.enqueueTask(waiter.task);
         }
     }
 };

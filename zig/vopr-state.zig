@@ -72,6 +72,7 @@ pub const SimTask = struct {
 /// RunQueue is ~512KB (65536 atomic slots) — cannot live on the stack.
 pub const SimScheduler = struct {
     ready_queue: *RunQueue,
+    pinned_queue: std.ArrayListUnmanaged(*Task) = .{},
     sleeping_queue: std.ArrayListUnmanaged(*Task),
     current_task: ?*Task,
     epoll_fds: std.AutoHashMapUnmanaged(i32, *Task),
@@ -97,12 +98,19 @@ pub const SimScheduler = struct {
 
     pub fn deinit(self: *SimScheduler, allocator: std.mem.Allocator) void {
         self.sleeping_queue.deinit(allocator);
+        self.pinned_queue.deinit(allocator);
         self.epoll_fds.deinit(allocator);
         self.pending_shard_ops.deinit(allocator);
-        allocator.free(self.ready_queue.buffer);
-        for (self.ready_queue.old_buffers.items) |buf| allocator.free(buf);
-        self.ready_queue.old_buffers.deinit(allocator);
+        self.ready_queue.deinit();
         allocator.destroy(self.ready_queue);
+    }
+
+    pub fn enqueueTask(self: *SimScheduler, allocator: std.mem.Allocator, task: *Task) void {
+        if (task.config.pinned) {
+            self.pinned_queue.append(allocator, task) catch unreachable;
+        } else {
+            self.ready_queue.push(allocator, task) catch unreachable;
+        }
     }
 };
 
@@ -242,7 +250,7 @@ pub const VoprState = struct {
         self.task_registry.put(self.allocator, task_ptr, .InQueue) catch unreachable;
         self.total_spawned += 1;
 
-        self.schedulers[target_sched].ready_queue.push(self.allocator, task_ptr) catch unreachable;
+        self.schedulers[target_sched].enqueueTask(self.allocator, task_ptr);
         self.schedulers[target_sched].active_tasks += 1;
     }
 
