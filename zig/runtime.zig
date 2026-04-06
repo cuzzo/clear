@@ -432,7 +432,7 @@ pub const Runtime = struct {
     // budget on every resume.
     pub inline fn checkYield(self: *Runtime) void {
         self.yield_counter = (self.yield_counter +% 1) & YIELD_MASK;
-        if (self.yield_counter == 0) {
+        if (self.yield_counter == 0 and fp.scheduler_running) {
             fp.active_scheduler.coopYield();
         }
     }

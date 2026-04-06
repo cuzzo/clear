@@ -126,6 +126,20 @@ module OwnershipGenerator
     when :heap_struct_plain
       "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.free(rt, #{name});\n"
 
+    when :array_with_struct_strings
+      ti = node&.type_info
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      elem_zig = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
+      is_fixed = ti&.fixed?
+      if is_fixed
+        "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } };\n"
+      else
+        # Dynamic array (User[]) becomes ArrayListUnmanaged via makeList.
+        # Element strings are heap-duped; list backing is frame-allocated
+        # (reclaimed automatically). Only need to free string fields.
+        "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } };\n"
+      end
+
     when :non_copy_union
       ti = node&.type_info
       zig_type = transpile_type((ti&.resolved || :Any).to_s)

@@ -867,6 +867,7 @@ private
 
       # 2. Cleanup & Move Suppression (must be computed before suppression decision)
       affine_logic = emit_cleanup(safe_name, node)
+
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
 
@@ -3083,7 +3084,16 @@ private
     if plan.struct_promote && (!ret_node || plan.needs_promote?(ret_node))
       zig_type = transpile_type(plan.struct_promote)
       parts << "var __ret = #{val_code};"
-      parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
+      if plan.unhandled_promote_fields
+        # Per-field promote: only promote fields not already handled by var_promotes.
+        # Prevents double-promote when struct has both list AND string fields.
+        plan.unhandled_promote_fields.each do |fname|
+          parts << "try CheatLib.promote(@TypeOf(__ret.#{fname}), #{rt_name}, &__ret.#{fname});"
+        end
+      else
+        # Promote all fields (returns_promoted path, no per-variable escapes).
+        parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
+      end
       parts << "return __ret;"
     elsif plan.var_promotes.any?
       parts << "const __ret = #{val_code};"

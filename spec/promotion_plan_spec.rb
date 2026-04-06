@@ -67,8 +67,11 @@ RSpec.describe PromotionPlan do
       expect(plan.var_promotes.map { |vp| vp[:var] }).to include("m")
     end
 
-    it "needs struct-level promote for the string literal field" do
-      expect(plan.struct_promote).not_to be_nil
+    it "does NOT need struct-level promote (CopyNode already owns string)" do
+      # The string literal is wrapped in CopyNode by ensure_owned_value!,
+      # which heap-dupes it. promoteFields would double-dupe. So struct_promote
+      # should be nil when all promotable fields are already CopyNode-handled.
+      expect(plan.struct_promote).to be_nil
     end
 
     it "suppresses defer for the HashMap" do
@@ -206,8 +209,10 @@ RSpec.describe PromotionPlan do
       CLEAR
     end
 
-    it "has struct_promote (COPY field triggers returns_promoted)" do
-      expect(plan.struct_promote).to eq("User")
+    it "does NOT need struct_promote (COPY already owns the string)" do
+      # COPY name heap-dupes the string. No further promotion needed.
+      # promoteFields would double-dupe.
+      expect(plan.struct_promote).to be_nil
     end
   end
 end

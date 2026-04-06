@@ -23,8 +23,13 @@ class PromotionPlan
 
   # Struct-level promotion on __ret AFTER construction.
   # String (Zig type name) or nil.
-  # Emits: try CheatLib.promote(<struct_promote>, rt, &__ret);
+  # Emits per-field promote for each unhandled_promote_fields.
   attr_reader :struct_promote
+
+  # Field names that need promotion (unhandled by var_promotes).
+  # When nil, ALL fields are promoted (backward compat for returns_promoted).
+  # When set, only these fields get per-field promote calls.
+  attr_reader :unhandled_promote_fields
 
   # Set of ReturnNode object_ids that need struct_promote.
   # When set, only returns in this set get promoteFields.
@@ -34,11 +39,12 @@ class PromotionPlan
   # Variables whose defer cleanup must be suppressed.
   attr_reader :suppress_defers
 
-  def initialize(var_promotes: [], struct_promote: nil, promote_return_ids: nil, suppress_defers: [])
+  def initialize(var_promotes: [], struct_promote: nil, promote_return_ids: nil, suppress_defers: [], unhandled_promote_fields: nil)
     @var_promotes = var_promotes.freeze
     @struct_promote = struct_promote
     @promote_return_ids = promote_return_ids&.freeze
     @suppress_defers = suppress_defers.freeze
+    @unhandled_promote_fields = unhandled_promote_fields&.freeze
   end
 
   # Check if a specific return node needs struct_promote.
@@ -67,6 +73,7 @@ class PromotionPlan
       struct_promote: @struct_promote,
       promote_return_ids: @promote_return_ids,
       suppress_defers: @suppress_defers.select { |d| relevant_names.include?(d) },
+      unhandled_promote_fields: @unhandled_promote_fields,
     )
   end
 
@@ -120,6 +127,13 @@ class PromotionPlan
       if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
         # Walk struct/union fields: find escaped variables to promote per-variable.
         val.fields.each do |fname, fval|
+          # CopyNode fields already own their data (heap-duped by the transpiler).
+          # Mark as handled so compute_struct_promote skips them.
+          if fval.is_a?(AST::CopyNode)
+            handled_fields << fname.to_s
+            next
+          end
+
           next unless fval.is_a?(AST::Identifier)
           ti = fval.type_info
           ti = Type.new(ti) if ti && !ti.is_a?(Type)
@@ -179,10 +193,15 @@ class PromotionPlan
     # Union promotion is per-variable via escaped_return.
     schema = schema_lookup.call(ret_type.resolved) rescue nil
     is_union = schema.is_a?(Hash) && schema[:kind] == :union
-    struct_promote ||= if var_promotes.any?
-      compute_struct_promote(ret_type, schema_lookup, handled_fields)
-    elsif fn_node.returns_promoted && !is_union && ret_type.needs_promotion?(schema_lookup)
-      zig_type_for(ret_type)
+    unhandled_fields = nil
+    if struct_promote.nil?
+      if var_promotes.any? || handled_fields.any?
+        struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
+      elsif fn_node.returns_promoted && !is_union && ret_type.needs_promotion?(schema_lookup)
+        struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
+        # Fallback: if compute_struct_promote returns nil but returns_promoted is set,
+        # all fields are already handled (CopyNode). No struct_promote needed.
+      end
     end
 
     if var_promotes.empty? && struct_promote.nil?
@@ -193,6 +212,7 @@ class PromotionPlan
         struct_promote: struct_promote,
         promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
         suppress_defers: suppress_defers.uniq,
+        unhandled_promote_fields: unhandled_fields,
       )
     end
   end
@@ -226,19 +246,21 @@ class PromotionPlan
   end
 
   # Check if struct has promotable fields not already handled per-variable.
+  # Returns [zig_type, unhandled_fields] or [nil, nil].
   def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
     resolved = ret_type.resolved
     schema = schema_lookup.call(resolved) rescue nil
-    return nil unless schema.is_a?(Hash) && !schema[:kind]
+    return [nil, nil] unless schema.is_a?(Hash) && !schema[:kind]
 
-    has_unhandled = schema.any? do |fname, fdef|
-      next false if fname.is_a?(Symbol)
-      next false if handled_fields.include?(fname.to_s)
+    unhandled = []
+    schema.each do |fname, fdef|
+      next if fname.is_a?(Symbol)
+      next if handled_fields.include?(fname.to_s)
       ft = fdef.is_a?(Type) ? fdef : Type.new(fdef.is_a?(Hash) ? (fdef[:type] || :Any) : (fdef || :Any))
-      ft.needs_escape_promotion?
+      unhandled << fname.to_s if ft.needs_escape_promotion?
     end
 
-    has_unhandled ? zig_type_for(ret_type) : nil
+    unhandled.any? ? [zig_type_for(ret_type), unhandled] : [nil, nil]
   end
 
   def self.zig_type_for(type)
@@ -528,12 +550,14 @@ class CleanupPlan
     # ── Collections ────────────────────────────────────────────────
 
     if ti.list_collection? && !ti.sharded? && !ti.heap_promoted
-      # Check if elements need cleanup (union elements with heap variants)
+      # Check if elements need cleanup (union elements with heap variants,
+      # or struct elements with string fields that were heap-duped)
       elem_type = ti.element_type
       elem_resolved = elem_type&.resolved
       elem_schema = schema_lookup.call(elem_resolved) rescue nil
       has_heap_elems = elem_schema.is_a?(Hash) && elem_schema[:kind] == :union &&
         (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      has_heap_elems ||= elem_has_string_fields?(elem_schema)
 
       return {
         needs_cleanup: true, alloc: :frame, kind: has_heap_elems ? :list_with_elem_cleanup : :list,
@@ -563,6 +587,24 @@ class CleanupPlan
 
     if ti.set_collection?
       return { needs_cleanup: true, alloc: ti.cleanup_alloc || :heap, kind: :set, has_moved_guard: false, source_kind: :local }
+    end
+
+    # ── Fixed/dynamic arrays of structs with string fields ──────
+    # String fields in struct literals are heap-duped by ensure_owned_value!.
+    # Without cleanup, those heap strings leak when the array goes out of scope.
+    # Only applies when the RHS is a literal array construction (ListLit).
+    # Pipeline results, function calls, etc. don't own the string fields.
+    val = node.respond_to?(:value) ? node.value : nil
+    if ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
+      elem_type = ti.element_type
+      elem_resolved = elem_type&.resolved
+      elem_schema = schema_lookup.call(elem_resolved) rescue nil
+      if elem_has_string_fields?(elem_schema)
+        return {
+          needs_cleanup: true, alloc: :heap, kind: :array_with_struct_strings,
+          has_moved_guard: true, source_kind: :local
+        }
+      end
     end
 
     # ── RC / Link ─────────────────────────────────────────────────
@@ -679,5 +721,16 @@ class CleanupPlan
     end
 
     nil
+  end
+
+  # Returns true if schema is a plain struct with at least one string field.
+  def self.elem_has_string_fields?(schema)
+    return false unless schema.is_a?(Hash) && !schema[:kind]
+    schema.any? do |k, v|
+      next false if k.is_a?(Symbol)
+      ft = v.is_a?(Hash) ? v[:type] : v
+      t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+      t.string?
+    end
   end
 end
