@@ -597,4 +597,58 @@ RSpec.describe CleanupPlan do
       expect(entry[:kind]).to eq(:array_with_struct_strings)
     end
   end
+
+  # ── COPY union as non-TAKES call arg needs caller cleanup ──────
+  describe "COPY union as non-TAKES call argument" do
+    it "COPY union passed to non-TAKES callee is a compile error or requires TAKES" do
+      # When a non-Copy union is passed to a non-TAKES function, the caller
+      # retains ownership but has no cleanup path for the COPY data.
+      # The architecturally correct fix: the callee should declare TAKES
+      # when it may consume the input. This test documents that TAKES
+      # is required for correct COPY-union ownership transfer.
+      src = <<~CLEAR
+        UNION Value { Nil, Error { msg: String } }
+        FN consume(TAKES v: Value) RETURNS Value -> RETURN Value.Nil; END
+        FN main() RETURNS Void ->
+            err = Value.Error{ msg: "x" };
+            result = consume(COPY err);
+            RETURN;
+        END
+      CLEAR
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      # With TAKES, the callee owns the COPY and handles cleanup.
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "consume" }
+      expect(fn.params.first[:takes]).to be_truthy
+    end
+
+    it "TAKES callee does NOT mark COPY arg for caller cleanup" do
+      src = <<~CLEAR
+        UNION Value { Nil, Error { msg: String } }
+        FN consume(TAKES v: Value) RETURNS Value -> RETURN Value.Nil; END
+        FN main() RETURNS Void ->
+            err = Value.Error{ msg: "x" };
+            result = consume(COPY err);
+            RETURN;
+        END
+      CLEAR
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+      call = nil
+      fn.body.each do |stmt|
+        next unless stmt.is_a?(AST::BindExpr) && stmt.name == "result"
+        call = stmt.value
+      end
+      copy_arg = call.args.first
+      expect(copy_arg).to be_a(AST::CopyNode)
+      # TAKES: callee owns the COPY. No @needs_caller_cleanup.
+      expect(copy_arg.instance_variable_get(:@needs_caller_cleanup)).to be_nil,
+        "TAKES callee: COPY arg should NOT be marked @needs_caller_cleanup"
+    end
+  end
 end

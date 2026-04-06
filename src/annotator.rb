@@ -1293,6 +1293,7 @@ private
     end
 
     resolve_call(node, node.args)
+
   end
 
   def visit_MethodCall(node)

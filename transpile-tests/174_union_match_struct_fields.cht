@@ -12,7 +12,7 @@ FN handleCatch!(msg: String, kind: String) RETURNS Value ->
     RETURN Value.Wrapped{ inner: "caught:" + msg + ":" + kind };
 END
 
-FN tryEval!(input: Value) RETURNS Value ->
+FN tryEval!(TAKES input: Value) RETURNS Value ->
     MATCH input START
         Value.Error AS e ->
             RETURN handleCatch!(e.errMsg, e.errKind);,
