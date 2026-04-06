@@ -651,4 +651,79 @@ RSpec.describe CleanupPlan do
         "TAKES callee: COPY arg should NOT be marked @needs_caller_cleanup"
     end
   end
+
+  # ── HPT: heap_temps plan entries for sub-expression calls ──────────
+
+  def hpt_for(src, fn_name)
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    plan = CleanupPlan.compute(fn_node, fn_nodes: fn_nodes,
+      schema_lookup: ->(name) { annotator.lookup_type_schema(name) })
+    [plan, ast, fn_node]
+  end
+
+  describe "HPT: heap_temps plan entries" do
+    context "sub-expression call gets HPT entry" do
+      it "detects heap FuncCall inside another call's args" do
+        plan, _, _ = hpt_for(<<~CLEAR, "main")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN wrap(v: Value) RETURNS Value -> RETURN v; END
+          FN main() RETURNS Void ->
+              result = wrap(makeVal!());
+              RETURN;
+          END
+        CLEAR
+        expect(plan.heap_temps.size).to be >= 1, "sub-expression makeVal!() should have HPT entry"
+      end
+    end
+
+    context "direct bind call does NOT get HPT" do
+      it "skips FuncCall that is the direct RHS of a binding" do
+        plan, _, _ = hpt_for(<<~CLEAR, "main")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN main() RETURNS Void ->
+              v = makeVal!();
+              RETURN;
+          END
+        CLEAR
+        expect(plan.heap_temps.size).to eq(0), "direct bind call should NOT have HPT entry"
+      end
+    end
+
+    context "direct return gets suppress handling" do
+      it "marks direct return with return_handling: :suppress" do
+        plan, _, fn = hpt_for(<<~CLEAR, "wrapper")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN wrapper() RETURNS Value -> RETURN makeVal!(); END
+          FN main() RETURNS Void -> v = wrapper(); RETURN; END
+        CLEAR
+        suppressed = plan.heap_temps.values.select { |e| e[:return_handling] == :suppress }
+        expect(suppressed.size).to eq(1), "direct return of makeVal!() should have :suppress"
+      end
+    end
+
+    context "nested sub-expression" do
+      it "detects heap call nested in another call" do
+        plan, _, _ = hpt_for(<<~CLEAR, "main")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN wrap(v: Value) RETURNS Value -> RETURN v; END
+          FN outer(v: Value) RETURNS Value -> RETURN v; END
+          FN main() RETURNS Void ->
+              result = outer(wrap(makeVal!()));
+              RETURN;
+          END
+        CLEAR
+        expect(plan.heap_temps.size).to be >= 1, "nested makeVal!() should have HPT entry"
+      end
+    end
+  end
 end
