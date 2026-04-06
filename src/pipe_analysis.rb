@@ -385,7 +385,7 @@ module PipeAnalysis
     sig = node.right.full_type
     func_name = node.right.name
 
-    if sig[:params]
+    if sig.respond_to?(:params) ? sig.params : sig[:params]
       # Named Function or Lambda (both use standard signature format)
       analyze_pipe_to_named_function(node, sig, func_name)
     elsif sig == :Intrinsic || sig == :Nil
@@ -400,7 +400,7 @@ module PipeAnalysis
 
   def analyze_pipe_to_named_function(node, sig, func_name)
     # 1. Validate Arity: Must accept exactly 1 argument (the pipe input)
-    params = sig[:params]
+    params = sig.respond_to?(:params) ? sig.params : sig[:params]
     min_args = params.count { |p| p[:required] }
     max_args = params.size
 
@@ -425,7 +425,7 @@ module PipeAnalysis
     end
 
     # 3. Set Result Type. Unwrap error unions in CATCH functions.
-    result_type = sig[:return][:type]
+    result_type = sig.respond_to?(:return_type) ? sig.return_type : sig[:return][:type]
     if has_catch_blocks? && result_type
       t = result_type.is_a?(Type) ? result_type : Type.new(result_type)
       result_type = t.payload_type.resolved if t.error_union?

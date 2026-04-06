@@ -251,7 +251,7 @@ private
     # Import function signatures that are visible from this call site.
     mod.global_scope.locals.each do |name, entry|
       sig = entry.type
-      next unless sig.is_a?(Hash) && sig.key?(:params)
+      next unless sig.is_a?(FunctionSignature) || (sig.is_a?(Hash) && sig.key?(:params))
 
       # For package imports: skip functions that were themselves imported from
       # another module (they have a pre-existing module_alias). Those functions
@@ -1327,7 +1327,7 @@ private
         node.extern_call = true
         node.extern_effects = method_sig[:extern_effects] if method_sig[:extern_effects]
         node.instance_variable_set(:@extern_method, true)
-        node.full_type = method_sig[:return]&.dig(:type) || :Void
+        node.full_type = method_sig.respond_to?(:return_type) ? (method_sig.return_type || :Void) : (method_sig[:return]&.dig(:type) || :Void)
         record_effect(EffectTracker::EXTERN)
         # Track allocator usage for EFFECTS :alloc methods.
         alloc_kind = method_sig[:extern_effects]&.dig(:alloc)

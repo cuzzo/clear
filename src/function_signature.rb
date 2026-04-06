@@ -92,7 +92,7 @@ class FunctionSignature
   end
 
   def is_a?(klass)
-    return true if klass == Hash  # backward compat: sig.is_a?(Hash) returns true
+    return true if klass == Hash  # many sites check is_a?(Hash) to detect function sigs
     super
   end
 

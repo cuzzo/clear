@@ -124,7 +124,7 @@ module FunctionAnalysis
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
 
-    elsif func_type.is_a?(Hash)
+    elsif func_type.is_a?(FunctionSignature) || func_type.is_a?(Hash)
       node.module_alias = func_type.module_alias if node.respond_to?(:module_alias=) && func_type.module_alias
       if node.respond_to?(:extern_call=) && func_type.extern
         node.extern_call = true

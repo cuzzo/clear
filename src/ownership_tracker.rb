@@ -103,7 +103,7 @@ module OwnershipTracker
     end
 
     func_type = scope.resolve_type(func_name)
-    return unless func_type.is_a?(Hash)
+    return unless func_type.is_a?(FunctionSignature) || func_type.is_a?(Hash)
     # TODO: intrinsics should have a real function signature
     # error!(node, "Missing Function Signature") if !func_type.is_a?(Hash)
 
