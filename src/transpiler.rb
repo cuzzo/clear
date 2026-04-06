@@ -716,14 +716,14 @@ private
       @lambda_counter += 1
       fn_name = "_lambda_#{@lambda_counter}"
 
-      params_zig = (sig[:params] || []).map do |p|
+      params_zig = (sig.respond_to?(:params) ? sig.params : sig[:params] || []).map do |p|
         p_name = p[:name]
         p_type = p[:type]
         type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
         "#{p_name}: #{type_str}"
       end
 
-      ret = sig[:return]&.fetch(:type, nil) || :Void
+      ret = sig.respond_to?(:return_type) ? (sig.return_type || :Void) : (sig[:return]&.fetch(:type, nil) || :Void)
       ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
       ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
 

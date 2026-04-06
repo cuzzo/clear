@@ -244,9 +244,9 @@ private
       # another module (they have a pre-existing module_alias). Those functions
       # live in their own package's Zig module and must be accessed through it.
       # For local file imports (inline struct): re-exporting is fine.
-      next if node.kind == :package && sig[:module_alias]
+      next if node.kind == :package && sig.module_alias
 
-      vis = sig[:visibility] || :package
+      vis = sig.visibility || :package
       importable = (vis == :pub) || (vis == :package && same_dir)
       next unless importable
 
@@ -459,7 +459,7 @@ private
     node.uses_alloc = (ctx.alloc_count > 0)
     node.stack_vars_bytes = ctx.stack_vars_bytes
     # Seed for compute_can_fail! post-pass: direct failure sources.
-    ret_type_obj = signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil
+    ret_type_obj = signature.respond_to?(:return_type) ? signature.return_type : (signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil)
     heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
     @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || node.uses_alloc || heap_ret ||
       (@fn_has_fnptr[node.name] == true) ||

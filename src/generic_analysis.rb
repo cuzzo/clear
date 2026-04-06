@@ -140,7 +140,7 @@ module GenericAnalysis
   # @return Hash — e.g. { T: :Number, K: :String }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     subst = {}
-    signature[:params].each_with_index do |param, i|
+    signature.params.each_with_index do |param, i|
       arg = actual_args[i]
       next unless arg
       param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
@@ -218,12 +218,12 @@ module GenericAnalysis
   # Build a concrete copy of a generic function signature with all type params
   # replaced by their inferred concrete types.
   def substitute_type_params(signature, subst)
-    {
-      params: signature[:params].map { |p| p.merge(type: apply_type_subst(p[:type], subst)) },
-      return: { type:     apply_type_subst(signature[:return][:type], subst),
-                lifetime: signature[:return][:lifetime] },
-      visibility: signature[:visibility]
-    }
+    FunctionSignature.new(
+      params: signature.params.map { |p| p.merge(type: apply_type_subst(p[:type], subst)) },
+      return_type: apply_type_subst(signature.return_type, subst),
+      return_lifetime: signature.return_lifetime,
+      visibility: signature.visibility
+    )
   end
 
   # ==========================================

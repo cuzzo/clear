@@ -50,7 +50,7 @@ module UnionAnalysis
 
       # Visibility check
       if req_vis != :package
-        actual_vis = sig[:visibility] || :package
+        actual_vis = sig.visibility || :package
         unless actual_vis == req_vis
           vis_label = { pub: "PUB", private: "PRIVATE", package: "package" }
           error!(req_tok, :UNION_METHOD_WRONG_VISIBILITY,
@@ -59,15 +59,15 @@ module UnionAnalysis
       end
 
       # Arity check
-      if req[:params].length != sig[:params].length
+      if req[:params].length != sig.params.length
         error!(req_tok, :UNION_METHOD_WRONG_ARITY,
-               union_name, fn_name, req[:params].length, fn_name, sig[:params].length)
+               union_name, fn_name, req[:params].length, fn_name, sig.params.length)
       end
 
       # Parameter type checks
       req[:params].each_with_index do |rp, i|
         req_t  = to_type(rp[:type]).resolved
-        sig_t  = to_type(sig[:params][i][:type]).resolved
+        sig_t  = to_type(sig.params[i][:type]).resolved
         unless req_t == sig_t || req_t == :Any || sig_t == :Any
           error!(req_tok, :UNION_METHOD_PARAM_TYPE,
                  union_name, fn_name, i + 1, req_t, fn_name, sig_t)
@@ -77,7 +77,7 @@ module UnionAnalysis
       # Return type check
       if req[:return_type]
         req_ret = to_type(req[:return_type]).resolved
-        sig_ret = to_type(sig[:return][:type]).resolved
+        sig_ret = to_type(sig.return_type).resolved
         unless req_ret == sig_ret || req_ret == :Any || sig_ret == :Any
           error!(req_tok, :UNION_METHOD_RETURN_TYPE,
                  union_name, fn_name, req_ret, fn_name, sig_ret)
