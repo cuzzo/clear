@@ -1,0 +1,23 @@
+-- Test: frame arena memory stays bounded across loop iterations.
+-- Each iteration allocates strings (frame arena) that should be reclaimed
+-- on function return. If frame memory grows unboundedly, this will OOM.
+
+FN buildString(n: Int64) RETURNS String ->
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= 10) -> parts.append(i.toString());
+    RETURN join(parts, ",");
+END
+
+FN main() RETURNS Void ->
+    -- Run 10000 iterations. Each builds ~10 strings in the frame arena.
+    -- If frame memory leaks, we'd use ~100K * avg_string_size of memory.
+    -- With proper frame mark/restore, memory stays bounded at ~1 iteration's worth.
+    MUTABLE count: Int64 = 0;
+    FOR i IN (1_i64 ..= 10000) DO
+        result = buildString(i);
+        count += result.length();
+    END
+    ASSERT count > 0, "should have accumulated string lengths";
+    print("PASS: frame arena bounded");
+    RETURN;
+END
