@@ -963,6 +963,12 @@ private
             value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.ctrl\.data\./, "#{alias_var}.")
             @locked_unwrap_map = prev_locked_map
 
+            field_ti = node.name.type_info
+            field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+            rt_name = @do_rt_name || "rt"
+            if field_ti&.string?
+              return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\nconst __old = #{alias_var}.#{field};\n#{alias_var}.#{field} = #{value};\nif (__old.len > 0) #{rt_name}.heapAlloc().free(__old);\n}"
+            end
             return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value};\n}"
           end
 
@@ -2398,23 +2404,7 @@ private
       rt_name = @do_rt_name || "rt"
       if ti && @union_schemas&.key?(ti.resolved)
         zig_t = transpile_type(ti)
-        dupe_expr = "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
-        # COPY union as call argument: hoist to a pending temp with cleanup.
-        # The annotator sets @needs_call_arg_cleanup when the union has heap
-        # variants. Without this, the duped strings are orphaned after the call.
-        if node.instance_variable_get(:@needs_call_arg_cleanup)
-          ctx = current_tp_ctx
-          if ctx
-            ctx.heap_temp_counter += 1
-            tmp = "__carg_#{ctx.heap_temp_counter}"
-            ctx.pending_heap_temps << { var: tmp, call: dupe_expr, rt: rt_name, type_info: ti, copy_union: zig_t }
-            tmp
-          else
-            dupe_expr
-          end
-        else
-          dupe_expr
-        end
+        "try CheatLib.dupeUnionValue(#{zig_t}, #{val}, #{rt_name}.heapAlloc())"
       elsif ti&.string?
         "try #{rt_name}.heapAlloc().dupe(u8, #{val})"
       elsif ti&.list_collection? || (ti&.array? && !ti&.string?)

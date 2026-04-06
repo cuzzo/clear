@@ -1280,20 +1280,6 @@ private
     node.args.each { |arg| arg.instance_variable_set(:@is_call_arg, true) if arg.is_a?(AST::StructLit) }
     node.args.each { |arg| visit(arg) }
 
-    # COPY of non-Copy union as call argument: the dupeUnionValue result needs
-    # cleanup at the call site. Mark the arg so the transpiler wraps it in a
-    # temp with defer cleanup. Without this, the duped strings are orphaned.
-    node.args.each_with_index do |arg, i|
-      next unless arg.is_a?(AST::CopyNode)
-      arg_ti = arg.value.type_info
-      arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
-      next unless arg_ti
-      schema = lookup_type_schema(arg_ti.resolved) rescue nil
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        arg.instance_variable_set(:@needs_call_arg_cleanup, true) if has_heap
-      end
-    end
 
     # Handle "native_call" special case
     if node.name == "native_call"

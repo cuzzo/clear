@@ -1092,4 +1092,36 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include(".makePath")
     end
   end
+
+  describe "Interior mutability: string field overwrite frees old value" do
+    it "@alwaysMutable frees old string before overwriting" do
+      src = <<~CLEAR
+        STRUCT Config { theme: String, retries: Int64 }
+        FN main() RETURNS Void ->
+            MUTABLE cfg = Config{ theme: "dark", retries: 3_i64 } @alwaysMutable;
+            cfg.theme = "light";
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Must free old "dark" before assigning "light"
+      expect(zig).to include("__old")
+      expect(zig).to include("free(__old)")
+    end
+
+    it "@locked frees old string before overwriting" do
+      src = <<~CLEAR
+        STRUCT Config { theme: String, retries: Int64 }
+        FN main() RETURNS Void ->
+            MUTABLE cfg = Config{ theme: "dark", retries: 3_i64 } @locked;
+            cfg.theme = "light";
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Must free old string before assigning new one under lock
+      expect(zig).to include("__old")
+      expect(zig).to include("free(__old)")
+    end
+  end
 end
