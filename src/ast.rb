@@ -517,6 +517,7 @@ module AST
     attr_accessor :return_provenance # :heap when BG body calls a returns_promoted function
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
+    attr_accessor :capture_analysis  # CaptureAnalysis with captures hash + safety flags
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.

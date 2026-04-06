@@ -242,6 +242,8 @@ module CapabilityHelper
     :has_shared,       # captures any shared/locked/write_locked/local/multiowned/sharded var
     :has_sharded,      # specifically captures @sharded (for auto-pin reason)
     :has_outer_ref,    # references any outer-scope variable
+    :captures,         # Hash<name => type_obj> for code generation
+    :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
     keyword_init: true
   ) do
     def pin_reason; has_sharded ? :sharded : :shared; end
@@ -253,7 +255,8 @@ module CapabilityHelper
   def analyze_fiber_captures(body_exprs, is_parallel: false)
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
-      has_sharded: false, has_outer_ref: false
+      has_sharded: false, has_outer_ref: false,
+      captures: {}, close_patterns: {}
     )
     _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
     result
@@ -288,7 +291,8 @@ module CapabilityHelper
   def captures_outer_variables?(body, locally_bound)
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
-      has_sharded: false, has_outer_ref: false
+      has_sharded: false, has_outer_ref: false,
+      captures: {}, close_patterns: {}
     )
     _unified_capture_walk(body, locally_bound, result, false)
     result.has_outer_ref
@@ -317,6 +321,13 @@ module CapabilityHelper
         info = current_scope.locals[name]
         if info
           result.has_outer_ref = true
+
+          # Collect capture for code generation (type_info + close pattern).
+          # Use the AST node's type_info (matches transpiler's walk_do_identifiers).
+          result.captures[name] ||= node.type_info
+          if info.close_zig
+            result.close_patterns[name] ||= info.close_zig
+          end
 
           result.has_local   = true if info.sync == :local
           result.has_rc      = true if info.storage == :multiowned
@@ -360,6 +371,10 @@ module CapabilityHelper
           info = current_scope.locals[name]
           next unless info
           result.has_outer_ref = true
+          result.captures[name] ||= var_node.type_info
+          if info.close_zig
+            result.close_patterns[name] ||= info.close_zig
+          end
           result.has_local  = true if info.sync == :local
           result.has_shared = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
           result.has_shared = true if info.storage == :shared

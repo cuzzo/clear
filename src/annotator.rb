@@ -2791,7 +2791,14 @@ private
     node.branches.each do |branch|
       branch[:body].each { |expr| visit(expr) }
 
-      analysis = validate_fiber_captures!(node, branch[:body], branch[:parallel], branch[:pinned])
+      full_analysis = analyze_fiber_captures(branch[:body], is_parallel: branch[:parallel])
+      branch[:capture_analysis] = full_analysis
+
+      if branch[:parallel]
+        error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.") if full_analysis.has_local
+        error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.") if full_analysis.has_rc
+      end
+      analysis = (!branch[:pinned] && !branch[:parallel] && full_analysis.has_shared) ? full_analysis : nil
 
       if analysis && !branch[:pinned]
         branch[:pinned] = true
@@ -2874,8 +2881,19 @@ private
       end
     end
 
-    # Single walk: validate captures, detect shared state, audit capabilities.
-    analysis = validate_fiber_captures!(node, node.body, node.parallel, node.pinned)
+    # Single walk: compute captures, validate safety, detect shared state.
+    # Store on node for transpiler to read (eliminates re-walking).
+    full_analysis = analyze_fiber_captures(node.body, is_parallel: node.parallel)
+    node.capture_analysis = full_analysis
+
+    # Validate: @local in @parallel, @rc in @parallel
+    if node.parallel
+      error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.") if full_analysis.has_local
+      error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.") if full_analysis.has_rc
+    end
+
+    # Auto-pin detection
+    analysis = (!node.pinned && !node.parallel && full_analysis.has_shared) ? full_analysis : nil
 
     # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
     if @current_bg_pinned && !node.pinned && captures_outer_variables?(node.body, locally_bound)
