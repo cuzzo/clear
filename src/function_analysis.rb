@@ -122,13 +122,13 @@ module FunctionAnalysis
       visit_IntrinsicFunc(node, args)
 
     elsif func_type.is_a?(Hash)
-      node.module_alias = func_type[:module_alias] if node.respond_to?(:module_alias=) && func_type[:module_alias]
-      if node.respond_to?(:extern_call=) && func_type[:extern]
+      node.module_alias = func_type.module_alias if node.respond_to?(:module_alias=) && func_type.module_alias
+      if node.respond_to?(:extern_call=) && func_type.extern
         node.extern_call = true
-        node.extern_effects = func_type[:extern_effects] if func_type[:extern_effects]
+        node.extern_effects = func_type.extern_effects if func_type.extern_effects
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
-        alloc_kind = func_type[:extern_effects]&.dig(:alloc)
+        alloc_kind = func_type.extern_effects&.dig(:alloc)
         if alloc_kind && current_fn_ctx
           if alloc_kind == :heap
             current_fn_ctx.heap_count += 1
@@ -138,7 +138,7 @@ module FunctionAnalysis
         end
       end
 
-      if func_type[:extern]
+      if func_type.extern
         args.each do |arg|
           ti = arg.type_info rescue nil
           if ti&.respond_to?(:soa?) && ti.soa?
@@ -148,7 +148,7 @@ module FunctionAnalysis
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
-        params = func_type[:params] || []
+        params = func_type.params || []
         params.each_with_index do |p, i|
           if p[:comptime] && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
@@ -160,12 +160,12 @@ module FunctionAnalysis
         end
       end
 
-      type_params = func_type[:type_params]
+      type_params = func_type.type_params
       if type_params&.any?
         # For EXTERN FN with comptime params, the type bindings come directly from
         # the comptime arguments (e.g. T=JsonRecord), not from inference on resolved_type.
         comptime_type_args ||= []
-        if func_type[:extern] && comptime_type_args.any?
+        if func_type.extern && comptime_type_args.any?
           subst = {}
           type_params.each_with_index { |tp, i| subst[tp] = comptime_type_args[i] if comptime_type_args[i] }
         else
@@ -179,7 +179,7 @@ module FunctionAnalysis
       else
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, func_type)
-        node.full_type = func_type[:return][:type]
+        node.full_type = func_type.return_type
       end
 
 
@@ -256,12 +256,12 @@ module FunctionAnalysis
       end
     end
 
-    {
+    FunctionSignature.new(
       params: params,
-      return: { type: config[:return] },
-      zig: config[:zig],
-      intrinsic: true  # Marker to identify intrinsic signatures
-    }
+      return_type: config[:return],
+      intrinsic: true,
+      zig_pattern: config[:zig]
+    )
   end
 
   def verify_function_signature!(node, signature)
