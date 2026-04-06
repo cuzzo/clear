@@ -2305,13 +2305,12 @@ private
       when :NUMBER then :Float64
       when :INT64 then :Int64
       when :STRING
-        t = if node.storage == :stack
+        # provenance auto-inferred from location: :rodata in Type constructor
+        if node.storage == :stack
           Type.new(:"Byte[#{node.value.length}]", location: :rodata)
         else
           Type.new(Type::STRING_TYPE, location: :rodata)
         end
-        t.provenance = :rodata
-        t
       when :BYTE    then :Byte
       when :INT8    then :Int8
       when :INT16   then :Int16
@@ -2622,9 +2621,8 @@ private
 
     if vti.string? && vti.rodata?
       copy = AST::CopyNode.new(val_node.token, val_node)
-      t = Type.new(Type::STRING_TYPE, location: :heap)
-      t.provenance = :heap
-      copy.full_type = t
+      # provenance auto-inferred from location: :heap in Type constructor
+      copy.full_type = Type.new(Type::STRING_TYPE, location: :heap)
       return copy
     end
 
@@ -3670,18 +3668,14 @@ private
         needs_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
     end
-    ti.cleanup_alloc = needs_heap ? :heap : :frame
-    # Propagate provenance from the value's type_info to the binding's type_info.
-    # The value knows its allocation origin (CopyNode=:heap, Literal=:rodata, concat=:frame).
-    # Only fall back to cleanup_alloc if no provenance is available from the value.
+    alloc = needs_heap ? :heap : :frame
+    ti.cleanup_alloc = alloc  # backward compat (will be removed)
+
+    # Propagate provenance: prefer value's provenance, then computed alloc.
     val = node.respond_to?(:value) ? node.value : nil
     val_ti = val&.type_info
     val_ti = val_ti.is_a?(Type) ? val_ti : nil
-    if val_ti&.provenance
-      ti.provenance ||= val_ti.provenance
-    else
-      ti.provenance ||= ti.cleanup_alloc
-    end
+    ti.provenance ||= val_ti&.provenance || alloc
 
     # Storage allocator: where to allocate NEW data (backing stores, buffers).
     # Determined by the binding's storage location, not its content.

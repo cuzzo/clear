@@ -568,11 +568,11 @@ class CleanupPlan
     end
 
     if ti.pool?
-      return { needs_cleanup: true, alloc: ti.cleanup_alloc || :heap, kind: :pool, has_moved_guard: false, source_kind: :local }
+      return { needs_cleanup: true, alloc: ti.provenance_alloc || :heap, kind: :pool, has_moved_guard: false, source_kind: :local }
     end
 
     if ti.set_collection?
-      return { needs_cleanup: true, alloc: ti.cleanup_alloc || :heap, kind: :set, has_moved_guard: false, source_kind: :local }
+      return { needs_cleanup: true, alloc: ti.provenance_alloc || :heap, kind: :set, has_moved_guard: false, source_kind: :local }
     end
 
     # ── Fixed/dynamic arrays of structs with string fields ──────
@@ -687,7 +687,7 @@ class CleanupPlan
         false
       end
       if has_cleanup_fields
-        alloc = ti.cleanup_alloc || :heap
+        alloc = ti.provenance_alloc || :heap
         return { needs_cleanup: true, alloc: alloc, kind: :struct_with_cleanup_fields, has_moved_guard: true, source_kind: :local }
       end
     end
@@ -698,7 +698,7 @@ class CleanupPlan
     if schema.is_a?(Hash) && schema[:kind] == :union
       is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
       unless is_copy
-        alloc = ti.cleanup_alloc || :frame
+        alloc = ti.provenance_alloc || :frame
         return { needs_cleanup: true, alloc: alloc, kind: :non_copy_union, has_moved_guard: true, source_kind: :local }
       end
     end

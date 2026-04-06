@@ -210,6 +210,14 @@ class Type
       @location = :heap if collection == :pool
     end
     @shard_count = shard_count if shard_count
+
+    # Auto-infer provenance from location when not already set.
+    # This covers the common cases without manual annotation.
+    @provenance ||= case @location
+                    when :rodata then :rodata
+                    when :heap   then :heap
+                    else nil  # :stack/:frame determined by annotator context
+                    end
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
