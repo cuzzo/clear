@@ -46,9 +46,9 @@ END
 
 * SQL solved the problem of writing code once, and it constantly improving as the engine improves.
 * Go proved the engine/run-time being added into the language can be fantastic.
-* Rust proved that affine types can manage memory without a garbage collector simply (it's borrow checker is what gives it a bad reputation for complicated, not Affine types).
+* Rust proved that affine types can manage memory without a garbage collector simply (it's borrow checker is what gives it a bad reputation for being complicated, not Affine types).
 
-Rust & Go need to be combined to build the language of the future: one that can constantly leverage new and better architectures and run your code as fast as possible without you having to tell it *HOW* to do that exactly - like SQL code.
+CLEAR attempts to merge the best of Rust, Go, and SQL to build the language of the future: one that can constantly leverage new and better architectures and run your code as fast as possible without you having to tell it *HOW* to do that exactly - like SQL code.
 
 ### Declarative Concurrency
 
@@ -57,6 +57,12 @@ Concurrency is not hard.  We do it every day in SQL queries as effiently as poss
 Concurrency is only hard when you have to tell the computer exactly how to achieve it efficiently.  CLEAR does tha hard part for you like a SQL engine.
 
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
+
+```ruby clear illustrative
+-- format users in parallel, with back pressure
+users
+  s> CONCURRENT(worker_size: 8, parallel: TRUE) EACH format
+```
 
 ### Profile Guided Optimization
 
