@@ -186,3 +186,12 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 * Zig standard library locks (which CLEAR uses) scale poorly compared to Rust's - see [benchmarks/17_kvstore/README.md](benchmarks/17_kvstore/README.md).
   * Zig will likely fix these issues before a CLEAR v0.3 release.
   * For heavily skewed mixed workloads, this can lead to 2x higher syncronization costs in CLEAR currently.
+
+## VISION
+
+The goal of CLEAR is:
+
+  1. To be able to run a REPL / VM, to live-debug like you can in Ruby, to write working code *faster* than you can even in Ruby/Python.
+  2. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
+  3. For code, even at the highest-level of optimization, to be easily understandable.
+  4. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
