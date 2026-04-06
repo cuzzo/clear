@@ -1,0 +1,33 @@
+-- Build a large list of strings in a loop.
+-- Each iteration creates a string via interpolation and appends to a list.
+-- The list is outer-scope, so loop marks are disabled.
+-- Question: does the frame arena grow unboundedly?
+
+FN main() RETURNS Void ->
+    MUTABLE keys: String[]@list = [];
+    MUTABLE seed: Int64 = 42;
+    FOR i IN (0_i64 ..< 100000) DO
+        seed = seed %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
+        IF seed < 0 -> seed = 0 - seed;
+        bucket = seed MOD 10000;
+        keys.append("b:" + bucket.toString());
+    END
+
+    peak = framePeakBytes();
+    ASSERT keys.length() == 100000, "built 100000 keys";
+
+    -- 10000 strings * ~8 bytes avg = ~80 KB of string data
+    -- + 10000 * 16 bytes list backing = ~160 KB
+    -- + per-iteration intermediates (toString, interpolation)
+    -- Without rewind: intermediates accumulate -> much larger
+    -- With rewind: only live data (strings + list) should remain
+    print("peak=${peak.toString()} keys=${keys.length().toString()}");
+
+    -- Current: intermediates accumulate (~56 bytes/iter), ~5.6 MB for 100K.
+    -- After escape fix (Phase 2): intermediates reclaimed, peak < 2 MB.
+    -- For now assert a ceiling that catches regressions but allows current behavior.
+    ASSERT peak < 10000000, "frame peak < 10 MB for 100K string list";
+
+    print("PASS: large list build bounded");
+    RETURN;
+END

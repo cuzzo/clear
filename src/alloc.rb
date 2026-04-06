@@ -141,7 +141,7 @@ module AllocHelper
     case node
     when AST::FuncCall
       if node.args&.first.is_a?(AST::Identifier) && outer_vars.include?(node.args.first.name)
-        return true if node.name == "append"
+        return true if node.respond_to?(:mutates_receiver) && node.mutates_receiver
         return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
         fn = @fn_nodes&.[](node.name)
         return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
@@ -149,7 +149,7 @@ module AllocHelper
       false
     when AST::MethodCall
       if node.respond_to?(:object) && node.object.is_a?(AST::Identifier) && outer_vars.include?(node.object.name)
-        return true if node.name == "append"
+        return true if node.respond_to?(:mutates_receiver) && node.mutates_receiver
         return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
         fn = @fn_nodes&.[](node.name)
         return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
