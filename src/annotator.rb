@@ -3,6 +3,7 @@ require_relative "./scope"
 require_relative "./parser"
 require_relative "./std_lib"
 require_relative "./function_context"
+require_relative "./function_signature"
 require_relative "./function_analysis"
 require_relative "./pipe_analysis"
 require_relative "./ownership_graph"
@@ -264,7 +265,7 @@ private
   # Registers a native Zig/C function in the current scope.
   # At call sites, no rt is injected and no try is emitted.
   def visit_ExternFnDecl(node)
-    signature = {
+    signature = FunctionSignature.new(
       params: node.params.map { |p| {
         name: p[:name],
         type: p[:type],
@@ -272,16 +273,16 @@ private
         mutable: p[:mutable] || false,
         comptime: p[:comptime] || false
       }},
-      return:     { type: node.return_type || :Any, lifetime: nil },
+      return_type: node.return_type || :Any,
       visibility: :pub,
-      extern:     true,
+      extern: true,
       module_alias: node.from_module,
       extern_effects: node.effects || {},
       fn_type_params: node.fn_type_params || [],
       type_params: (node.fn_type_params || []).any? ? (node.fn_type_params || []) : nil,
       owner_type: node.owner_type,
       owner_type_params: node.owner_type_params || []
-    }
+    )
 
     if node.owner_type
       # EXTERN FN TypeName<T>.method(...) — register as method on the type
@@ -320,7 +321,7 @@ private
   end
 
   def pre_register_function(node)
-    signature = {
+    signature = FunctionSignature.new(
       params: node.params.map { |p| {
         name: p[:name],
         type: p[:type],
@@ -328,13 +329,11 @@ private
         mutable: p[:mutable],
         takes: p[:takes] || false
       }},
-      return: {
-        type: (node.return_type || :Any),
-        lifetime: get_lifetime_path(node)
-      },
+      return_type: (node.return_type || :Any),
+      return_lifetime: get_lifetime_path(node),
       visibility: node.visibility,
       reentrant: node.reentrant == :reentrant
-    }
+    )
 
     current_scope.declare(
       node.name,
@@ -396,15 +395,15 @@ private
     validate_type_annotation!(node, node.return_type) if node.return_type.is_a?(Type)
 
     # 3. Pre-declaration (so the function can be recursive)
-    signature = {
+    signature = FunctionSignature.new(
       params: node.params.map { |p| {
         name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable], takes: p[:takes]
       }},
-      return: { type: declared_return, lifetime: lifetime_path },
+      return_type: declared_return, return_lifetime: lifetime_path,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,
       reentrant: node.reentrant == :reentrant
-    }
+    )
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
     # Register function node BEFORE body analysis so visit_ReturnNode can
@@ -449,10 +448,10 @@ private
     # 5. Finalize Signature
     if (is_implicit_return || declared_return == :Any)
       node.return_type = final_return_type
-      signature[:return][:type] = final_return_type
+      signature.return_type = final_return_type
     end
 
-    signature[:return_strategy] = get_return_strategy(signature[:return][:type])
+    signature.return_strategy = get_return_strategy(signature.return_type)
     node.full_type = signature
     ctx = current_fn_ctx
     node.uses_frame = (ctx.frame_count > 0)
