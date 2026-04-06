@@ -1,0 +1,19 @@
+-- Test: loop assigns frame-allocated expression to outer struct field (Pattern 8).
+-- The struct lives outside the loop. Each iteration assigns a frame string
+-- to a field, which must be heap-promoted so the loop mark rewind doesn't
+-- destroy the value before the next read.
+
+STRUCT State { label: String, count: Int64 }
+
+FN main() RETURNS Void ->
+    MUTABLE s: State = State{ label: "init", count: 0 };
+    FOR i IN (1_i64 ..= 5) DO
+        s.count = s.count + 1;
+        s.label = "step-" + i.toString();
+    END
+    ASSERT s.count == 5;
+    ASSERT s.label == "step-5";
+
+    print("PASS");
+    RETURN;
+END

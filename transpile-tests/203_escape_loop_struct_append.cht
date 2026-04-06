@@ -1,0 +1,21 @@
+-- Test: loop appends struct with String fields to outer list (Pattern 7).
+-- Each iteration builds a struct with frame-arena strings. Appending to
+-- outer list requires the string fields to be heap-promoted so the loop
+-- mark rewind doesn't destroy them.
+
+STRUCT Entry { id: Int64, name: String }
+
+FN main() RETURNS Void ->
+    MUTABLE entries: Entry[]@list = [];
+    FOR i IN (1_i64 ..= 4) DO
+        entries.append(Entry{ id: i, name: "item-" + i.toString() });
+    END
+    ASSERT entries.length() == 4;
+    ASSERT entries[0].name == "item-1";
+    ASSERT entries[1].name == "item-2";
+    ASSERT entries[3].name == "item-4";
+    ASSERT entries[0].id == 1;
+    ASSERT entries[3].id == 4;
+    print("PASS");
+    RETURN;
+END

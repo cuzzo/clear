@@ -1,0 +1,23 @@
+-- Test: MUTABLE string reassignment in loop (Pattern 5).
+-- The frame string grows each iteration via concat. loopPreserveAndRewind
+-- copies the value past the loop mark before rewind so it survives.
+-- The loop mark is still active (bounded frame growth per iteration).
+
+FN main() RETURNS Void ->
+    MUTABLE acc: String = "";
+    FOR i IN (1_i64 ..= 5) DO
+        acc = acc + i.toString();
+    END
+    ASSERT acc == "12345";
+
+    MUTABLE msg: String = "start";
+    MUTABLE n: Int64 = 0;
+    WHILE n < 3 DO
+        msg = msg + "-x";
+        n = n + 1;
+    END
+    ASSERT msg == "start-x-x-x";
+
+    print("PASS");
+    RETURN;
+END

@@ -1,0 +1,53 @@
+-- Test: WHILE loop with large per-iteration frame allocations.
+-- Mimics bench 24 GET path: each iteration allocates ~10KB on the frame
+-- (simulating readFile + parseJsonArraySum), then rewinds.
+-- Verifies frame arena stays bounded regardless of iteration count.
+
+FN parseData(content: String) RETURNS Int64 ->
+    -- Simulate JSON parsing: scan content and compute a value.
+    -- Allocates intermediate strings from the frame.
+    MUTABLE sum = 0_i64;
+    MUTABLE pos = 0_i64;
+    WHILE pos < content.length() DO
+        ch = charAt(content, pos);
+        IF ch == ":" THEN
+            seg = substr(content, pos, 5);
+            sum += seg.length();
+        END
+        pos += 100;
+    END
+    RETURN sum;
+END
+
+FN buildLargePayload(id: Int64) RETURNS String ->
+    -- Simulate generateJson or readFile: build a ~6KB string.
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= 200) -> parts.append(id.toString() + ":" + i.toString());
+    RETURN join(parts, ",");
+END
+
+FN main() RETURNS Void ->
+    MUTABLE i = 0_i64;
+    MUTABLE resp = "";
+
+    -- Outer loop: simulate 500 GET requests (each outer iteration = one request)
+    WHILE i < 500 DO
+        -- Simulate readFile: large frame allocation
+        content = buildLargePayload(i MOD 100 + 1);
+        -- Simulate parseJsonArraySum: more frame allocation
+        sum = parseData(content);
+        -- Accumulate response (inner loop collapsed: resp grows then rewinds)
+        resp = ":" + sum.toString() + "\r\n";
+        i += 1;
+    END
+
+    peak = framePeakBytes();
+
+    -- 500 iterations each allocating ~6KB = would be 3 MB if not rewound.
+    -- With proper loop marks, frame stays bounded: only one iteration live at a time.
+    ASSERT peak < 500000, "frame peak bounded for large-alloc WHILE loop (< 500 KB for 500 iters)";
+    ASSERT resp.length() > 0, "produced response";
+
+    print("PASS: large-alloc loop peak=${peak.toString()} bytes");
+    RETURN;
+END

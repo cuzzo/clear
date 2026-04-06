@@ -1,0 +1,28 @@
+-- Test: frame peak for a function that builds a list in a loop and returns a string.
+-- Pattern from bench 24 generateJson: parts list + element strings must be freed
+-- on function return, not heap-leaked. Repeated calls must stay O(1) frame/heap.
+
+FN buildCsv(n: Int64) RETURNS String ->
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
+    RETURN join(parts, ",");
+END
+
+FN main() RETURNS Void ->
+    -- Call many times: if parts/strings leak, heap grows O(n_calls)
+    FOR k IN (1_i64 ..= 1000) DO
+        result = buildCsv(50);
+        ASSERT result.length() > 0;
+    END
+
+    -- Verify correctness
+    ASSERT buildCsv(5) == "1,2,3,4,5";
+    ASSERT buildCsv(1) == "1";
+
+    -- Frame peak must be bounded (not O(n_calls * 50))
+    peak = framePeakBytes();
+    ASSERT peak < 2000000;
+
+    print("PASS");
+    RETURN;
+END
