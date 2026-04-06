@@ -1,0 +1,43 @@
+-- Test: nested WHILE loops mimicking server request handling pattern.
+-- Outer loop = per-connection/read, inner loop = per-command parsing.
+-- MUTABLE resp string concat in inner loop with function calls per command.
+-- This pattern matches the bench 24 json_api handleClient structure.
+
+FN processCommand(cmd: String) RETURNS String ->
+    -- Simulate work: build a large list, join, return a summary
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= 50) -> parts.append(i.toString());
+    data = join(parts, ",");
+    RETURN ":${data.length().toString()}\r\n";
+END
+
+FN main() RETURNS Void ->
+    MUTABLE totalLen: Int64 = 0;
+
+    -- Outer loop: simulate 50 "reads" (like WHILE running DO tcpRead...)
+    MUTABLE outerIter: Int64 = 0;
+    WHILE outerIter < 50 DO
+        -- Inner loop: simulate parsing 20 commands per read
+        MUTABLE resp = "";
+        MUTABLE pos: Int64 = 0;
+        WHILE pos < 20 DO
+            result = processCommand("GET:" + pos.toString());
+            resp = resp + result;
+            pos += 1;
+        END
+        totalLen += resp.length();
+        outerIter += 1;
+    END
+
+    peak = framePeakBytes();
+
+    -- 50 outer * 20 inner = 1000 processCommand calls.
+    -- Each call builds 50-element list + join (~200 bytes).
+    -- Without frame rewind, this would accumulate ~200 KB+ of dead strings.
+    -- With proper nested loop marks + preserve-and-rewind, peak stays bounded.
+    ASSERT peak < 500000, "frame peak bounded for nested WHILE server pattern";
+    ASSERT totalLen > 0, "response data accumulated";
+
+    print("PASS: nested WHILE server pattern peak=${peak.toString()} bytes");
+    RETURN;
+END
