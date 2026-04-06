@@ -11,10 +11,10 @@ pub fn ensureDir(path: []const u8) void {
 /// Parse a JSON document of the form {"id":N,"data":[1,2,...,N]} and return
 /// the sum of the "data" array. Uses std.json for parsing.
 /// Returns 0 on parse error.
-pub fn parseJsonArraySum(content: []const u8) i64 {
+pub fn parseJsonArraySum(allocator: std.mem.Allocator, content: []const u8) i64 {
     const parsed = std.json.parseFromSlice(
         struct { id: i64, data: []const i64 },
-        std.heap.c_allocator,
+        allocator,
         content,
         .{},
     ) catch return 0;
