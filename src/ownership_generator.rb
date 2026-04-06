@@ -218,63 +218,41 @@ module OwnershipGenerator
   #
   # Sets _moved = true when a binding is consumed.
   # ALL guard decisions come from the CleanupPlan.
+  # Emit _moved = true when a binding's value is consumed (assigned away).
+  # Reads ONLY from the CleanupPlan - no type introspection.
   def emit_move_suppression(rhs_node)
-    if rhs_node.is_a?(AST::Identifier)
-      # OG-driven: if annotator marked this node as moved, emit _moved = true
-      if rhs_node.was_moved
-        sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
-        decl = sym&.reg
-        is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-        is_takes = sym&.respond_to?(:takes) && sym&.takes
-        if is_local || is_takes
-          ti = rhs_node.type_info
-          return "" if ti&.string?
-          return "" if ti&.escaped_return && ti.collection?
+    return "" unless rhs_node.is_a?(AST::Identifier)
 
-          fn_name = current_tp_ctx&.fn_name
-          entry = @cleanup_plans&.dig(fn_name)&.lookup(rhs_node.name)
-          return "#{zig_safe_name(rhs_node.name)}_moved = true;" if entry && entry[:has_moved_guard]
-        end
-        return ""
-      end
+    # RC types: only move on explicit GIVE (not on assignment)
+    ti = rhs_node.type_info
+    if ti && (ti.any_rc? rescue false)
+      return "#{rhs_node.name}_moved = true;" if @current_rhs_is_move
+      return ""
+    end
 
-      ti = rhs_node.type_info
-      return "" unless ti
+    # Escaped returns transfer ownership to caller - no move suppression
+    return "" if ti&.escaped_return && (ti.collection? || ti.string?)
 
-      is_rc = ti.any_rc? rescue false
-      is_sync = ti.any_sync? rescue false
-      is_resource = ti.resource? rescue false
-      is_collection = ti.collection? rescue false
-      is_heap = rhs_node.storage == :heap
+    # Strings are Copy - no move needed
+    return "" if ti&.string?
 
-      return "" if ti.escaped_return && (is_collection || ti.string?)
+    # Consult the plan: if the binding has a moved guard, emit it
+    fn_name = current_tp_ctx&.fn_name
+    entry = @cleanup_plans&.dig(fn_name)&.lookup(rhs_node.name)
+    return "" unless entry && entry[:has_moved_guard]
 
-      # RC types: only move on explicit GIVE
-      if is_rc
-        return "#{rhs_node.name}_moved = true;" if @current_rhs_is_move
-        return ""
-      end
-
-      # Determine if this binding should be moved
-      should_suppress = (ti.requires_move? || is_sync || is_resource) &&
-                        (is_heap || is_resource)
-      should_suppress ||= is_collection
-
-      unless should_suppress || ti.string?
-        schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-        should_suppress = !ti.implicitly_copyable?(schema_lookup)
-      end
-
-      if should_suppress
-        sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
-        decl = sym&.reg
-        is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-        if is_local
-          fn_name = current_tp_ctx&.fn_name
-          entry = @cleanup_plans&.dig(fn_name)&.lookup(rhs_node.name)
-          return "#{rhs_node.name}_moved = true;" if entry && entry[:has_moved_guard]
-        end
-      end
+    # Only emit for was_moved (annotator-marked) or non-Copy types with cleanup
+    if rhs_node.was_moved
+      sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
+      decl = sym&.reg
+      is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+      is_takes = sym&.respond_to?(:takes) && sym&.takes
+      return "#{zig_safe_name(rhs_node.name)}_moved = true;" if is_local || is_takes
+    else
+      sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
+      decl = sym&.reg
+      is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
+      return "#{zig_safe_name(rhs_node.name)}_moved = true;" if is_local
     end
     ""
   end
@@ -303,23 +281,18 @@ module OwnershipGenerator
       name = arg.respond_to?(:name) ? arg.name : nil
       next unless name
       ti = arg.type_info
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      next unless ti
+      next if ti&.string?
+      next if ti&.escaped_return && (ti.collection? || ti&.string?)
 
       sym = arg.respond_to?(:symbol) ? arg.symbol : nil
       decl = sym&.reg
-      is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-      next unless is_local
-      next if ti.string?
-      next if ti.escaped_return && (ti.collection? || ti.string?)
+      next unless decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
 
+      # Consult the plan: if the binding has a moved guard, emit it.
+      # No type introspection - the plan already decided.
       fn_name = current_tp_ctx&.fn_name
       entry = @cleanup_plans&.dig(fn_name)&.lookup(name)
-      next unless entry && entry[:has_moved_guard]
-
-      needs_move = ti.collection? || ti.map? || (ti.requires_move? rescue false) ||
-                   ti.any_rc? || ti.any_sync? || ti.link? || ti.heap_provenance?
-      moves << "#{zig_safe_name(name)}_moved = true;" if needs_move
+      moves << "#{zig_safe_name(name)}_moved = true;" if entry && entry[:has_moved_guard]
     end
 
     moves.join("\n")
