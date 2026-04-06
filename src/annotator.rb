@@ -2835,6 +2835,9 @@ private
     end
 
     node.full_type = :"~#{elem_syms.first}[?]"
+
+    # Compute captures for transpiler (same as BG blocks).
+    node.capture_analysis = analyze_fiber_captures(node.body)
   end
 
   def visit_YieldExpr(node)

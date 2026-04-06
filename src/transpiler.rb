@@ -1601,8 +1601,8 @@ private
         ctx_type = "__DoBranchCtx#{id}_#{i}"
         ctx_var  = "__do#{id}_ctx#{i}"
 
-        # Collect all Identifier nodes referenced in this branch for capture
-        captured = collect_do_identifiers(branch_exprs)
+        analysis = branch[:capture_analysis]
+        captured = analysis&.captures || {}
 
         capture_fields = captured.map do |name, type_obj|
           # Use the full type (including capabilities like Locked/RwLocked) for correct Zig field type.
@@ -1689,7 +1689,9 @@ private
       ctx_var     = "__bg#{id}_ctx"
       blk_label   = "__bg#{id}"
 
-      captured = collect_do_identifiers(node.body)
+      analysis = node.capture_analysis
+      captured = analysis&.captures || {}
+      capture_close_zig = analysis&.close_patterns || {}
 
       # Detect resource captures (TCP fds). BG blocks with resource captures
       # must spawn on the accepting scheduler to keep epoll fd consistent.
@@ -1735,7 +1737,7 @@ private
       # Resources captured by BG fibers transfer ownership — suppress outer defer close.
       # Without this, the outer scope's `defer socketClose(fd)` fires immediately,
       # closing the fd before the fiber reads it.
-      capture_close_zig = @_capture_close_zig || {}
+      # capture_close_zig from analysis above
       resource_moves = captured.filter_map do |name, type_obj|
         t = type_obj.is_a?(Type) ? type_obj : nil
         "#{name}_moved = true;" if t&.resource? || capture_close_zig[name]
@@ -1811,7 +1813,7 @@ private
       # Strings need explicit free (duped to heap); collections are freed
       # via their own deinit in the fiber's normal cleanup path.
       # Resources use the schema-driven close_zig pattern from the symbol entry.
-      capture_close_zig = @_capture_close_zig || {}
+      # capture_close_zig from analysis above
       capture_frees = captured.filter_map do |name, type_obj|
         t = type_obj.is_a?(Type) ? type_obj : (type_obj ? Type.new(type_obj) : nil)
         if t&.string?
@@ -1870,7 +1872,8 @@ private
       blk_label    = "__sg#{id}"
       local_stream = "__sg#{id}_local"
 
-      captured = collect_do_identifiers(node.body)
+      analysis = node.capture_analysis
+      captured = analysis&.captures || {}
 
       capture_fields = captured.map do |name, type_obj|
         zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
@@ -3625,29 +3628,6 @@ private
     result
   end
 
-  # Collect all AST::Identifier nodes in a list of expressions for DO/BG block capture.
-  # Returns a hash of { name => type_info } for each unique outer variable referenced.
-  # Variables declared inside the body (BindExpr/VarDecl) are tracked as locally bound
-  # so they are not incorrectly added as outer captures.
-  def collect_do_identifiers(exprs)
-    result = {}
-    @_capture_close_zig = {}  # name → close_zig pattern (for resource captures)
-    locally_bound = Set.new
-    exprs.each do |e|
-      walk_do_identifiers(e, result, locally_bound)
-      # After processing a declaration, mark the name as locally bound so that
-      # subsequent expressions in the same body don't try to capture it from outside.
-      if (e.is_a?(AST::BindExpr) || e.is_a?(AST::VarDecl)) && e.name.is_a?(String)
-        locally_bound = locally_bound | Set[e.name]
-      end
-      # ThenChain: all step bindings are locally declared inside the fiber.
-      if e.is_a?(AST::ThenChain)
-        e.steps.each { |step| locally_bound = locally_bound | Set[step[:binding]] if step[:binding] }
-      end
-    end
-    result
-  end
-
   # Escape CLEAR variable names that would shadow Zig primitive types
   # (uN, iN, fN patterns like u8, i32, f64) using Zig's @"name" quoting syntax.
   # Strips trailing `!` (mutation) and `?` (predicate) suffixes from CLEAR names —
@@ -3703,90 +3683,6 @@ private
     # CLEAR's main() must not collide with Zig's pub fn main() entry point.
     cleaned = "clearMain" if cleaned == "main"
     cleaned =~ ZIG_PRIMITIVE_RE ? "@\"#{cleaned}\"" : cleaned
-  end
-
-  def walk_do_identifiers(node, result, locally_bound = Set.new)
-    return unless node.is_a?(AST::Locatable)
-    if node.is_a?(AST::Identifier)
-      unless locally_bound.include?(node.name)
-        result[node.name] ||= node.type_info
-        # Capture the resource close pattern from the symbol entry if available.
-        if node.symbol.respond_to?(:close_zig) && node.symbol.close_zig && !@_capture_close_zig.key?(node.name)
-          @_capture_close_zig[node.name] = node.symbol.close_zig
-        end
-      end
-      return
-    end
-    # ThenChain: process steps in order, accumulating bindings into locally_bound
-    # so later steps that reference earlier bindings are NOT captured from outer scope.
-    if node.is_a?(AST::ThenChain)
-      lb = locally_bound
-      node.steps.each do |step|
-        walk_do_identifiers(step[:expr], result, lb)
-        lb = lb | Set[step[:binding]] if step[:binding]
-      end
-      return
-    end
-    # ForRange/ForEach: the loop variable is locally defined, not an outer capture.
-    if node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
-      var_name = node.var_name.is_a?(String) ? node.var_name : node.var_name.to_s
-      new_bound = locally_bound | Set[var_name]
-      walk_do_identifiers(node.start_expr, result, locally_bound) if node.respond_to?(:start_expr) && node.start_expr
-      walk_do_identifiers(node.end_expr, result, locally_bound) if node.respond_to?(:end_expr) && node.end_expr
-      walk_do_identifiers(node.collection, result, locally_bound) if node.respond_to?(:collection) && node.collection
-      walk_body_with_bindings(node.body, result, new_bound)
-      return
-    end
-    # WhileLoop/IfStatement: walk body statements tracking local bindings.
-    if node.is_a?(AST::WhileLoop)
-      walk_do_identifiers(node.condition, result, locally_bound) if node.condition
-      walk_body_with_bindings(node.do_branch, result, locally_bound)
-      return
-    end
-    if node.is_a?(AST::IfStatement)
-      walk_do_identifiers(node.condition, result, locally_bound)
-      walk_body_with_bindings(node.then_branch, result, locally_bound)
-      walk_body_with_bindings(node.else_branch, result, locally_bound) if node.else_branch
-      return
-    end
-    # WithBlock: visit var_nodes as outer refs but exclude aliases from capture.
-    if node.is_a?(AST::WithBlock)
-      node.capabilities.each do |cap|
-        walk_do_identifiers(cap[:var_node], result, locally_bound) if cap[:var_node]
-      end
-      aliases = node.capabilities.filter_map { |cap| cap[:alias] || cap[:var_node]&.name }.to_set
-      new_bound = locally_bound | aliases
-      node.body.each { |stmt| walk_do_identifiers(stmt, result, new_bound) }
-      return
-    end
-    node.members.each do |m|
-      child = node.send(m)
-      do_walk_child(child, result, locally_bound)
-    end
-  end
-
-  # Walk a body (array of statements), accumulating local bindings from
-  # VarDecl/BindExpr so inner identifiers are not incorrectly captured.
-  def walk_body_with_bindings(stmts, result, locally_bound)
-    return unless stmts.is_a?(Array)
-    lb = locally_bound
-    stmts.each do |stmt|
-      walk_do_identifiers(stmt, result, lb)
-      if (stmt.is_a?(AST::BindExpr) || stmt.is_a?(AST::VarDecl)) && stmt.name.is_a?(String)
-        lb = lb | Set[stmt.name]
-      end
-    end
-  end
-
-  def do_walk_child(child, result, locally_bound = Set.new)
-    case child
-    when AST::Locatable
-      walk_do_identifiers(child, result, locally_bound)
-    when Array
-      child.each { |c| do_walk_child(c, result, locally_bound) }
-    when Hash
-      child.each_value { |v| do_walk_child(v, result, locally_bound) }
-    end
   end
 
   # Semi-colon helper

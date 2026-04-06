@@ -532,6 +532,7 @@ module AST
   BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) do
     include Locatable
     attr_accessor :computed_stack_tier
+    attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
   end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
