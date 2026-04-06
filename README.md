@@ -77,7 +77,7 @@ CLEAR is designed such that you can override default compiler behviors if you kn
 
 ### Full Access to the C Standard Library
 
-CLEAR lowers to Zig, which has native access to the entire C standard library.
+CLEAR lowers to Zig, which has native access to the entire C library.
 
 In addition, Zig supports compiling *to* any target *from* any machine. I.e. you can compile for a Mac architecture from your Linux workstation.
 
