@@ -62,6 +62,9 @@ In CLEAR, you describe the strategy you want to employ, and the compiler generat
 -- `notify()` users in parallel, with back pressure
 users
   s> CONCURRENT(worker_size: 8, parallel: TRUE) EACH notify
+
+-- Spawn a short-lived green fiber, do all allocations in an Arena for speed:
+BG { @micro:arena -> foo() }
 ```
 
 ### Profile Guided Optimization
