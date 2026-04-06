@@ -33,12 +33,36 @@ CLEAR is focused on describing intent, and the compiler transforming that into t
 
 ### 2. Annotator (`src/annotator.rb`)
 
- * This is the monolithic monster that does everything else besides lower to Zig.
- * It ensures that the data inside the function is valid.
-   * For example, in CLEAR, functions that mutate must be suffixed with `!`
-   * The annotator is responsible for all these ensurities
- * In addition, it hydrates AST nodes with all data that *can't* be processed in-line by the parser.
-   * A `BG` block might need to know if the code inside `EFFECTS` I/O, etc.
+The annotation phase itself is split into 4 major passes:
+
+ 1.  Type Inference
+ 2.  Ownership Graphing
+ 3.  Escape Analysis & Promoption Planning
+ 4.  Cleanup Planning
+
+#### 2.a) Type Inference
+
+ * This pass is focused on figuring at the type from `x = 1;` or `x = BG { foo() }`
+   * The majority of non-syntax compiler errors happen at this phase.
+
+#### 2.b) Ownership Graphing
+
+ * Affine movement violations are also picked up at this stage.
+ * "Borrow Checking" and "Lifetime Analysis" occur here as well.
+    * This pass ensures no "Double Free".
+
+
+#### 2.c) Escape Analysis & Promotion Planning
+
+ * This manages part 1 of memory lifetime: promoting escaping memory to the heap.
+   * Something allocated on the temporary arena must be promoted to the heap to survive death.
+   * This pass ensures no "Use After Free".
+
+
+#### 2.d) Cleanup Planning
+
+ * All good things must come to an end.  What escapes death in 2.c, must eventually die at the right time.
+   * This pass ensures no "Memory Leaks".
 
 ### 3. Transpiler (`src/transpiler.rb`)
 
@@ -72,15 +96,9 @@ The primary focus of the v0.1 release is to demonstrate that CLEAR "works" by an
 
 It is easier said than done to formally verify that for a concurrent runtime model.
 
-That being said, there are a list of features planned to implement between the v0.1-pre release and v0.1:
-
- * TigerBeetle-style VOPR
- * `WINDOW`, `JOIN`, and `TAKE_WHILE` higher-order functions
  * Ability to turn on Deadlock prevention on syncronization (liveness safety)
  * `FREEZE`: the ability to take any object and re-organize all its heap memory to be contiguous
- * Error Kinds: In Zig, an Error is just an integer, but we want to be able to group them by 6 kinds with standard behaviors:
-    * Transient (Retry), Input (Fix & Retry), System (Stop), NotFound (Create/Stop), Permission (Auth), Canceled (Abort).
-    * In the future, we also need to be able to attach snapshots to errors, but this can wait for v0.2+.
+   * As well as profile support to detect when freezing is optimal for your workloads.
  * DEFAULTS: The ability to set default fields on structs, and to RETURN DEFAULT if a struct is defaultable.
 
 ### v0.2 - The Vision
@@ -95,16 +113,20 @@ The key focus will revolve around `clear profile <myApp.cht>`, which will identi
 
 Further language/runtime features will include:
 
+ * MVCC & LockFree Ring Buffers syncronization capabilities for one-line-ish changes to optimize for read-heavy and write-heavy workloads.
+   * The CHEAT Runtime already has support for MVCC.
+   * But testing it thoroughly enough to include in the language is too much effort to include in the v0.1 release.
  * Runtime as a library: to improve build times
  * io_uring networking
- * Automatic Stack Size detection
  * CI integration
  * STRICT mode compilation
    * Non-slient effects: the compiler currently tracks EFFECTS silently.  In strict mode, it will require these to be annotated explicitly: `clear fix ...` will handle it automatically.
  * An RSpec like testing framework
-   * The goal of CLEAR is to make code easier to test than in any language in the same performance class
+   * The goal of CLEAR is to make code easier to test than in any language in the same performance class.
+   * CLEAR already supports much of what you need.
  * A benchmarking framework
    * Modeled upon Go/Rust frameworks.
+   * CLEAR already has the basic framework for this, but it needs expansion.
 
 ### v0.3 - Usability
 
@@ -112,23 +134,22 @@ The primary focus of v0.3 will be in practicality of using CLEAR non-experimenta
 
 It will focus mainly on the standard library (based on Ruby/Elixir) and ARM support.
 
-Other wish-list items are:
+Other items include:
 
  * NUMA-awareness to scale past 64 cores better than Go.
  * Transforming pipelines to GPU kernels + auto-squish for structs.
  * Control Plane enhancements
    * Ideally to safely migrate sharded/skewed loads to shared on the fly
+ * Actors as an ownership capability alternative to `shared` (Arc), `sharded` (no default Rust equivalent), and `multiOwned` (Rc).
 
 ## What We Are NOT Accepting (The "Hard No" List)
 
  * Standard Library Additions
  * Example programs that don't sufficiently showcase something not already covered.
- * Re-architectures (though one is needed)
+ * Re-architectures:
    * Migrations to MPSC/MPMC: CLEAR intends to be strictly SPSC at the architecture level.
- * Micro-performance improvements
+ * Micro-performance improvements with large change sets
    * If CLEAR allocates an additional frameAlloc somewhere (2ns), and the fix includes 100+ lines of code - it will likely not get approved at this time.
- * Non-trivial runtime changes (zig/)
-   * This is temporary until VOPR is implemented.
 
 ## Commit Standards & Semantic Versioning
 
@@ -145,8 +166,7 @@ Other wish-list items are:
 
  * The foundation of CLEAR was developed by hand
  * But a substantial portion of it has been developed by LLMs
- * Due to rapid development, the core architecture of the annotator is sloppy
-   * LLM code will continue to be accepted gladly, and is perhaps best suited to contribute to the code in its current *ai-slop-ish* state.
+ * LLM code will continue to be accepted gladly, so long as it meets the commit standards.
 
 ## FINAL NOTE
 
