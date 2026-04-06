@@ -1383,8 +1383,9 @@ private
                   binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
                   binding_decl += "defer if (!#{c[:binding]}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{as_alloc}, __e); } } if (#{c[:binding]}.len > 0) #{as_alloc}.free(#{c[:binding]}); };\n    "
                 when :match_as_inline_struct
+                  inline_zig = "#{transpile_type(union_lookup)}_#{variant}"
                   binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
-                  binding_decl += "defer if (!#{c[:binding]}_moved) #{c[:binding]}.deinit(#{as_alloc});\n    "
+                  binding_decl += "defer if (!#{c[:binding]}_moved) CheatLib.cleanup(#{inline_zig}, #{as_alloc}, &#{c[:binding]});\n    "
                 end
               end
             end
