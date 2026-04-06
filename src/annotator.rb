@@ -2265,7 +2265,9 @@ private
     if node.storage == :stack
       node.full_type = :"#{base_type}[#{node.items.size}]"
     else
-      node.full_type = Type.new(:"#{base_type}[]", location: :heap)
+      t = Type.new(:"#{base_type}[]", location: :heap)
+      t.provenance = :frame  # makeList uses frameAlloc for backing
+      node.full_type = t
     end
   end
 
@@ -2297,11 +2299,13 @@ private
       when :NUMBER then :Float64
       when :INT64 then :Int64
       when :STRING
-        if node.storage == :stack
+        t = if node.storage == :stack
           Type.new(:"Byte[#{node.value.length}]", location: :rodata)
         else
           Type.new(Type::STRING_TYPE, location: :rodata)
         end
+        t.provenance = :rodata
+        t
       when :BYTE    then :Byte
       when :INT8    then :Int8
       when :INT16   then :Int16
@@ -2345,6 +2349,9 @@ private
     # mark as frame allocation so needs_rt and loop mark elision are correct.
     if node.op == :ADD && (node.left.type_info&.string? || node.right.type_info&.string?)
       current_fn_ctx.frame_count += 1 if current_fn_ctx
+      # String concat result is frame-allocated.
+      ti = node.type_info
+      ti.provenance = :frame if ti.is_a?(Type)
     end
   end
 
@@ -2609,7 +2616,9 @@ private
 
     if vti.string? && vti.rodata?
       copy = AST::CopyNode.new(val_node.token, val_node)
-      copy.full_type = Type.new(Type::STRING_TYPE, location: :heap)
+      t = Type.new(Type::STRING_TYPE, location: :heap)
+      t.provenance = :heap
+      copy.full_type = t
       return copy
     end
 
@@ -2625,6 +2634,9 @@ private
     # COPY produces an owned deep-copy. The source is NOT consumed.
     node.full_type = node.value.full_type
     node.storage = :stack
+    # COPY always produces heap-owned data.
+    ti = node.type_info
+    ti.provenance = :heap if ti.is_a?(Type)
     # Mark as heap usage - COPY allocates via heapAlloc
     current_fn_ctx.heap_count += 1 if current_fn_ctx
 
@@ -3443,10 +3455,14 @@ private
         val = node.value
         if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
           node.type_info.heap_promoted = true if node.type_info
+          node.type_info.provenance = :heap if node.type_info.is_a?(Type)
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             var_name = node.name
             decl = find_decl_in_body(@_walk_current_fn&.body, var_name) if @_walk_current_fn
-            decl.type_info.heap_promoted = true if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+            if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+              decl.type_info.heap_promoted = true
+              decl.type_info.provenance = :heap
+            end
           end
         end
       when AST::Assignment
@@ -3455,7 +3471,10 @@ private
           target = node.name
           sym = target.respond_to?(:symbol) ? target.symbol : nil
           decl = sym&.reg
-          decl.type_info.heap_promoted = true if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+          if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+            decl.type_info.heap_promoted = true
+            decl.type_info.provenance = :heap
+          end
         end
       end
     end
@@ -3648,6 +3667,17 @@ private
       end
     end
     ti.cleanup_alloc = needs_heap ? :heap : :frame
+    # Propagate provenance from the value's type_info to the binding's type_info.
+    # The value knows its allocation origin (CopyNode=:heap, Literal=:rodata, concat=:frame).
+    # Only fall back to cleanup_alloc if no provenance is available from the value.
+    val = node.respond_to?(:value) ? node.value : nil
+    val_ti = val&.type_info
+    val_ti = val_ti.is_a?(Type) ? val_ti : nil
+    if val_ti&.provenance
+      ti.provenance ||= val_ti.provenance
+    else
+      ti.provenance ||= ti.cleanup_alloc
+    end
 
     # Storage allocator: where to allocate NEW data (backing stores, buffers).
     # Determined by the binding's storage location, not its content.
