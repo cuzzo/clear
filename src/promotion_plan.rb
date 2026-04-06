@@ -512,24 +512,6 @@ class CleanupPlan
   def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
 
-    # COPY creates heap-allocated data. Mark as heap_promoted so the
-    # binding gets cleanup regardless of the underlying type.
-    if node.respond_to?(:value) && node.value.is_a?(AST::CopyNode)
-      ti = Type.new(ti) if !ti.is_a?(Type)
-      if ti.string?
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
-      end
-      resolved = ti.resolved
-      schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :local } if has_heap
-      end
-      if ti.array? && !ti.collection?
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :local }
-      end
-    end
-
     # Container borrows: data owned by container, no cleanup
     if node.respond_to?(:container_borrow) && node.container_borrow
       return nil
@@ -622,9 +604,21 @@ class CleanupPlan
       return { needs_cleanup: true, alloc: :heap, kind: :write_locked, has_moved_guard: true, source_kind: :local }
     end
 
-    # ── Heap-promoted bindings ────────────────────────────────────
+    # ── Heap-provenance bindings ─────────────────────────────────
+    # Unified: replaces CopyNode check, heap_promoted check, and
+    # returns_promoted call check. Provenance is set by the annotator:
+    #   - COPY: :heap
+    #   - Call to returns_promoted function: :heap
+    #   - heap_promoted propagation: :heap
+    # Skip types with dedicated cleanup paths (RC, sync, collections, resources, heap-storage structs).
+    # These are handled by their own classify sections below.
+    heap_prov_eligible = ti.heap_provenance? &&
+      !ti.any_rc? && !ti.link? && !ti.locked? && !ti.write_locked? &&
+      !ti.collection? && !ti.map? && !ti.pool? && !ti.set_collection?
+    storage = node.respond_to?(:storage) ? node.storage : nil
+    heap_prov_eligible = false if storage == :heap  # heap_struct_plain path handles this
 
-    if ti.heap_promoted
+    if heap_prov_eligible
       if ti.string?
         return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
       end
@@ -652,22 +646,10 @@ class CleanupPlan
       end
     end
 
-    # Check if binding receives a call to a returns_promoted function
-    val = node.respond_to?(:value) ? node.value : nil
-    if val.is_a?(AST::FuncCall) && promoted_fns.include?(val.name)
+    # Fallback: heap_promoted without provenance (backward compat during migration)
+    if ti.heap_promoted && !ti.provenance
       if ti.string?
         return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
-      end
-      resolved = ti.resolved
-      schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        if has_heap
-          return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :local }
-        end
-      end
-      if ti.array? && !ti.collection?
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :local }
       end
     end
 

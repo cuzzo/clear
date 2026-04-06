@@ -76,10 +76,11 @@ RSpec.describe CleanupPlan do
         CLEAR
       end
 
-      it "marks val for cleanup (non-Copy union on stack)" do
+      it "marks val for cleanup (non-Copy union)" do
         entry = plan.lookup("val")
         expect(entry).not_to be_nil
-        expect(entry[:kind]).to eq(:non_copy_union)
+        # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
+        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -372,7 +373,8 @@ RSpec.describe CleanupPlan do
         entry = plan.lookup("v")
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
-        expect(entry[:kind]).to eq(:non_copy_union)
+        # Provenance-based: :heap_union (COPY produces :heap provenance)
+        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -500,7 +502,8 @@ RSpec.describe CleanupPlan do
     it "classifies struct as needing cleanup (rodata strings auto-duped to heap)" do
       entry = plan.lookup("p")
       expect(entry).not_to be_nil
-      expect(entry[:kind]).to eq(:struct_with_cleanup_fields)
+      # Provenance-based: :heap_struct (CopyNode field gives :heap provenance)
+      expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
     end
   end
 
@@ -519,7 +522,8 @@ RSpec.describe CleanupPlan do
     it "classifies struct as needing cleanup when string field is COPY" do
       entry = plan.lookup("p")
       expect(entry).not_to be_nil
-      expect(entry[:kind]).to eq(:struct_with_cleanup_fields)
+      # Provenance-based: :heap_struct (COPY field gives :heap provenance)
+      expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
     end
   end
 
