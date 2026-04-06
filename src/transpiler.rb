@@ -73,20 +73,19 @@ class ZigTranspiler
     end
 
     @needs_safety_import = false
-    @fn_needs_rt = {}
-    @fn_can_fail = {}
-    @fn_effects = {}
+    @fn_sigs = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       sig = stmt.full_type
       if sig.is_a?(FunctionSignature)
-        @fn_needs_rt[stmt.name] = sig.needs_rt.nil? ? true : sig.needs_rt
-        @fn_can_fail[stmt.name] = sig.can_fail.nil? ? true : sig.can_fail
-        @fn_effects[stmt.name] = sig.effects || Set.new
+        @fn_sigs[stmt.name] = sig
       else
-        @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
-        @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
-        @fn_effects[stmt.name] = stmt.effects || Set.new
+        # Fallback for gen.rb/specs that don't produce FunctionSignature
+        fs = FunctionSignature.new(params: [], return_type: :Any)
+        fs.needs_rt = stmt.needs_rt
+        fs.can_fail = stmt.can_fail
+        fs.effects = stmt.effects
+        @fn_sigs[stmt.name] = fs
       end
     end
     body = visit(ast)
@@ -160,6 +159,12 @@ class ZigTranspiler
     annotator.annotate!(ast)
 
     @needs_safety_import = false
+    @fn_sigs ||= {}
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      sig = stmt.full_type
+      @fn_sigs[stmt.name] = sig if sig.is_a?(FunctionSignature)
+    end
     body = transpile_module(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
 
@@ -293,15 +298,17 @@ private
         if @importer
           mod = @importer.compile_package(node.path, caller_dir: @source_dir)
           if mod&.ast
-            @fn_needs_rt ||= {}
-            @fn_can_fail  ||= {}
             mod.ast.statements.each do |stmt|
               next unless stmt.is_a?(AST::FunctionDef)
               sig = stmt.full_type
-              nr = sig.is_a?(FunctionSignature) ? sig.needs_rt : stmt.needs_rt
-              cf = sig.is_a?(FunctionSignature) ? sig.can_fail : stmt.can_fail
-              @fn_needs_rt[stmt.name] = nr.nil? ? true : nr
-              @fn_can_fail[stmt.name]  = cf.nil? ? true : cf
+              if sig.is_a?(FunctionSignature)
+                @fn_sigs[stmt.name] = sig
+              else
+                fs = FunctionSignature.new(params: [], return_type: :Any)
+                fs.needs_rt = stmt.needs_rt
+                fs.can_fail = stmt.can_fail
+                @fn_sigs[stmt.name] = fs
+              end
             end
           end
         end
@@ -322,15 +329,17 @@ private
         # Propagate needs_rt/can_fail from imported functions so call sites
         # correctly omit or inject rt and try.
         if mod.ast
-          @fn_needs_rt ||= {}
-          @fn_can_fail  ||= {}
           mod.ast.statements.each do |stmt|
             next unless stmt.is_a?(AST::FunctionDef)
             sig = stmt.full_type
-            nr = sig.is_a?(FunctionSignature) ? sig.needs_rt : stmt.needs_rt
-            cf = sig.is_a?(FunctionSignature) ? sig.can_fail : stmt.can_fail
-            @fn_needs_rt[stmt.name] = nr.nil? ? true : nr
-            @fn_can_fail[stmt.name]  = cf.nil? ? true : cf
+            if sig.is_a?(FunctionSignature)
+              @fn_sigs[stmt.name] = sig
+            else
+              fs = FunctionSignature.new(params: [], return_type: :Any)
+              fs.needs_rt = stmt.needs_rt
+              fs.can_fail = stmt.can_fail
+              @fn_sigs[stmt.name] = fs
+            end
           end
         end
 
@@ -2849,7 +2858,7 @@ private
     lhs_type = lhs.respond_to?(:full_type) ? lhs.full_type : nil
     lhs_t = lhs_type ? Type.new(lhs_type) : nil
     rhs_fn_name = rhs.is_a?(AST::Identifier) ? rhs.name : (rhs.is_a?(AST::FuncCall) ? rhs.name : nil)
-    rhs_can_fail = rhs_fn_name && (@fn_can_fail || {})[rhs_fn_name]
+    rhs_can_fail = rhs_fn_name && @fn_sigs&.dig(rhs_fn_name)&.can_fail
 
     if @current_fn_has_catch && rhs_can_fail && lhs_t && !lhs_t.void?
       zig_type = transpile_type(lhs_t.resolved.to_s)
@@ -3561,7 +3570,7 @@ private
       call_str = "#{fn_name}(#{all_args.join(', ')})"
       call_str = can_fail ? "try #{call_str}" : call_str
 
-      effects = (@fn_effects || {})[expr.name] || Set.new
+      effects = @fn_sigs&.dig(expr.name)&.effects || Set.new
       has_blocking = effects.include?(:BLOCKING)
       has_heap = effects.include?(:HEAP)
 
@@ -3862,16 +3871,16 @@ private
   # Defaults to true (conservative) for unknown/stdlib callees.
   def callee_needs_rt?(name)
     return true if name.nil? || name.empty?
-    val = @fn_needs_rt&.fetch(name, nil)
-    val.nil? ? true : val
+    sig = @fn_sigs&.dig(name)
+    sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true
   end
 
   # Returns true if the named callee returns an error union (!T) and needs try.
   # Defaults to true (conservative) for unknown/stdlib callees.
   def callee_can_fail?(name)
     return true if name.nil? || name.empty?
-    val = @fn_can_fail&.fetch(name, nil)
-    val.nil? ? true : val
+    sig = @fn_sigs&.dig(name)
+    sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
   end
 
   # Collect all Identifier names referenced in an AST subtree.

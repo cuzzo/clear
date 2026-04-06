@@ -25,17 +25,24 @@ class TestGenerator < ZigTranspiler
     # 2b. Flatten chained string + into StringConcat nodes.
     StringConcatRewriter.new.rewrite!(ast)
 
-    # 2. Pre-populate needs_rt/can_fail tables, promotion plans, and cleanup plans.
-    @fn_needs_rt = {}
-    @fn_can_fail = {}
+    # 2. Pre-populate signature table, promotion plans, and cleanup plans.
+    @fn_sigs = {}
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     @promotion_plans = {}
     @cleanup_plans = {}
     fn_nodes.each do |name, fn|
-      @fn_needs_rt[name] = fn.needs_rt.nil? ? true : fn.needs_rt
-      @fn_can_fail[name] = fn.can_fail.nil? ? true : fn.can_fail
+      sig = fn.full_type
+      if sig.is_a?(FunctionSignature)
+        @fn_sigs[name] = sig
+      else
+        fs = FunctionSignature.new(params: [], return_type: :Any)
+        fs.needs_rt = fn.needs_rt
+        fs.can_fail = fn.can_fail
+        fs.effects = fn.effects
+        @fn_sigs[name] = fs
+      end
       @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
       @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     end
