@@ -144,7 +144,7 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 
 ### When fixing a bug:
 
-1. Create a test (ideally at a unit stage) to *PROOVE* the bug exists before attempting to fix it.
+1. Create a test (ideally at a unit stage) to *PROVE* the bug exists before attempting to fix it.
 2. Identify the architecturally appropriate place to fix the bug.
    * Ideally fixing bugs leads to *reducing* overall complexity, not adding complexity by applying a band-aid
 3. Consider: is this the *ONLY* case for this bug, or does this bug have a broader scope
