@@ -1,4 +1,5 @@
 const std = @import("std");
+const is_debug = @import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe;
 
 pub const CheatArena = struct {
     // Growth Strategy
@@ -16,6 +17,8 @@ pub const CheatArena = struct {
 
     current_block_index: usize = 0,
     cursor: usize = 0,
+    // Debug-only: high-water mark for frame arena usage. Compiled away in ReleaseFast.
+    peak_bytes: if (is_debug) usize else void = if (is_debug) 0 else {},
 
     child_allocator: std.mem.Allocator,
 
@@ -52,6 +55,30 @@ pub const CheatArena = struct {
         return MAX_PAGE_SIZE;
     }
 
+    /// Total bytes currently used in the arena. Debug/ReleaseSafe only.
+    pub fn currentBytes(self: *const CheatArena) usize {
+        if (!is_debug) return 0;
+        var total: usize = 0;
+        for (0..self.current_block_index) |i| {
+            if (i < self.blocks.items.len) total += self.blocks.items[i].len;
+        }
+        total += self.cursor;
+        for (self.large_objects.items) |lo| total += lo.slice.len;
+        return total;
+    }
+
+    /// Peak bytes ever allocated. Debug/ReleaseSafe only. Returns 0 in release.
+    pub fn getPeakBytes(self: *const CheatArena) usize {
+        if (!is_debug) return 0;
+        return self.peak_bytes;
+    }
+
+    fn updatePeak(self: *CheatArena) void {
+        if (!is_debug) return;
+        const cur = self.currentBytes();
+        if (cur > self.peak_bytes) self.peak_bytes = cur;
+    }
+
     pub fn alloc(self: *CheatArena, n: usize, alignment: u8, _: usize) ?[*]u8 {
         // Convert u8 -> std.mem.Alignment
         const align_enum = std.mem.Alignment.fromByteUnits(alignment);
@@ -70,6 +97,7 @@ pub const CheatArena = struct {
 
             if (offset + n <= block.len) {
                 self.cursor = offset + n;
+                self.updatePeak();
                 return @as([*]u8, @ptrFromInt(aligned_addr));
             }
         }
@@ -97,6 +125,7 @@ pub const CheatArena = struct {
                     self.child_allocator.rawFree(slice, final_align, @returnAddress());
                     return null;
                 };
+                self.updatePeak();
                 return ptr;
             }
             return null;

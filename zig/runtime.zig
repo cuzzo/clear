@@ -269,6 +269,11 @@ pub const Runtime = struct {
     // Lightweight arena mark for per-loop-iteration rewind.
     // Used by the transpiler for WhileLoop bodies that contain loop-local
     // frame-allocated data (e.g. @list or tcpRead results inside a loop body).
+    /// Peak frame arena bytes allocated. Debug/ReleaseSafe only. Returns 0 in release.
+    pub fn framePeakBytes(self: *Runtime) usize {
+        return self.overflow_arena.getPeakBytes();
+    }
+
     pub fn saveLoopMark(self: *Runtime) CheatArena.Mark {
         return self.overflow_arena.getMark();
     }

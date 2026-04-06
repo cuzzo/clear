@@ -349,6 +349,14 @@ STD_LIB = {
     zig: "CheatLib.timestampMs()"
   },
 
+  # Frame arena peak bytes (debug/safe builds only; returns 0 in release).
+  # Usage: peak = framePeakBytes(); ASSERT peak < 1000000;
+  "framePeakBytes" => {
+    args: [],
+    return: :Int64,
+    zig: "@as(i64, @intCast(rt.framePeakBytes()))"
+  },
+
   # Number of scheduler threads (main + workers). Matches CLEAR_THREADS env var.
   # Usage: workers = threadCount();
   "threadCount" => {
