@@ -1061,8 +1061,11 @@ private
                  # that are already heap-allocated from COPY/literal.
                  promote_calls = list_fields.map { |f|
                    elem_ti = schema[f].is_a?(Hash) ? Type.new(schema[f][:type]) : Type.new(schema[f])
-                   elem_zig = "std.ArrayListUnmanaged(#{transpile_type(elem_ti.element_type)})"
-                   "try CheatLib.promote(#{elem_zig}, #{rt_name}, &#{tmp}.#{f});"
+                   inner_zig = transpile_type(elem_ti.element_type)
+                   # promoteList migrates the backing buffer only. Elements
+                   # populated via COPY are already heap-owned; promote()
+                   # would re-dupe them, leaking the originals.
+                   "try CheatLib.promoteList(#{inner_zig}, #{rt_name}, &#{tmp}.#{f});"
                  }.join("\n")
                  code = "var #{tmp}: #{zig_t} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
                else
