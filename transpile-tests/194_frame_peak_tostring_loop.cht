@@ -1,0 +1,20 @@
+-- Test: toString() inside a loop has bounded frame.
+-- Each toString() allocates a frame-arena string. Without loop marks,
+-- 1000 iterations accumulate dead strings. With marks, frame stays bounded.
+
+FN main() RETURNS Void ->
+    MUTABLE total: Int64 = 0;
+    FOR i IN (1_i64 ..= 1000) DO
+        s = i.toString();
+        total += s.length();
+    END
+    peak = framePeakBytes();
+
+    ASSERT total > 0, "accumulated lengths";
+    -- 1000 toString() calls, each ~1-4 bytes. Without rewind: ~4000 bytes of
+    -- dead strings. With rewind: bounded at 1 iteration's worth.
+    ASSERT peak < 200000, "frame peak bounded for toString loop";
+
+    print("PASS: frame peak bounded in toString loop");
+    RETURN;
+END
