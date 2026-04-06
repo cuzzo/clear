@@ -318,7 +318,7 @@ module OwnershipGenerator
       next unless entry && entry[:has_moved_guard]
 
       needs_move = ti.collection? || ti.map? || (ti.requires_move? rescue false) ||
-                   ti.any_rc? || ti.any_sync? || ti.link? || ti.heap_promoted
+                   ti.any_rc? || ti.any_sync? || ti.link? || ti.heap_provenance?
       moves << "#{zig_safe_name(name)}_moved = true;" if needs_move
     end
 

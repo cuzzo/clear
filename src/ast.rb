@@ -323,7 +323,6 @@ module AST
     attr_accessor :extern_effects    # Set of effect symbols (:Alloc, etc.) from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
-    attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     def wildcard?; false end
     def name; self[:name].to_s end
@@ -334,7 +333,6 @@ module AST
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
-    attr_accessor :heap_promoted_call # true when callee returns heap-promoted collection data
     attr_accessor :extern_call       # true when calling a native EXTERN method
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
@@ -543,7 +541,6 @@ module AST
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
   NextExpr          = Struct.new(:token, :expr) do
     include Locatable
-    attr_accessor :heap_promoted_call
   end
 
   # MatchStatement: pattern-matching on a value.

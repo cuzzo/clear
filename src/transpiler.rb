@@ -771,7 +771,7 @@ private
       end
       has_mutable_cleanup = ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
                             ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
-                            ft&.heap_promoted || ft&.resource? || node.resource_close_zig || struct_has_cleanup
+                            ft&.heap_provenance? || ft&.resource? || node.resource_close_zig || struct_has_cleanup
       forced_var = is_mutable && has_mutable_cleanup
       keyword = if !is_mutable
         "const"
@@ -1005,7 +1005,7 @@ private
              rt_name  = @do_rt_name || "rt"
 
              if map_ft.numeric_map?
-               alloc = (map_ft.escaped_return || map_ft.heap_promoted || map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               alloc = (map_ft.escaped_return || map_ft.heap_provenance? || map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
                if map_ft.sharded? || map_ft.striped?
                  return "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
                else
@@ -2237,7 +2237,9 @@ private
         # into temp vars with defer cleanup. Skip when:
         # - Direct bind value (VarDecl/BindExpr handles cleanup)
         # - TAKES/GIVE (ownership transfers to callee)
-        if node.respond_to?(:heap_promoted_call) && node.heap_promoted_call &&
+        call_ti = node.type_info
+        call_ti = call_ti.is_a?(Type) ? call_ti : nil
+        if call_ti&.heap_provenance? &&
            !node.equal?(current_tp_ctx&.bind_value_node) && !node.was_moved && !current_tp_ctx&.inside_give
           ctx = current_tp_ctx
           ctx.heap_temp_counter += 1
@@ -2888,7 +2890,9 @@ private
   # Check if an expression carries heap_promoted_call, looking through OR wrappers.
   def has_heap_promoted_call?(expr)
     return false unless expr
-    return true if expr.respond_to?(:heap_promoted_call) && expr.heap_promoted_call
+    ti = expr.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    return true if ti&.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return has_heap_promoted_call?(expr.left)
     end
@@ -3866,7 +3870,7 @@ private
           ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
           # Error unions are unwrapped by try — use the payload type for the HPT variable.
           ti = ti.payload_type if ti.error_union? && ti.payload_type
-          ti.heap_promoted = true
+          ti.provenance = :heap
           zig_t = ti.zig_type
           entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
           if entry

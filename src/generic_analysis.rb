@@ -309,7 +309,7 @@ module GenericAnalysis
   # heap_promoted from failableFunc's returns_promoted flag.
   def propagate_call_flags!(node)
     if has_heap_promoted_call?(node.value)
-      node.type_info.heap_promoted = true
+      node.type_info.provenance = :heap if node.type_info.is_a?(Type)
     end
   end
 
@@ -345,9 +345,9 @@ module GenericAnalysis
   # ensures fallback struct values also have their string fields duped to heap.
   def has_heap_promoted_call?(expr)
     return false unless expr
-    # Direct call with heap_promoted_call flag
-    return true if expr.respond_to?(:heap_promoted_call) && expr.heap_promoted_call
-    # OR/OR_RESCUE expression: check the left side
+    ti = expr.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    return true if ti&.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return has_heap_promoted_call?(expr.left)
     end

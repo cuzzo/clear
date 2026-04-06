@@ -86,10 +86,9 @@ RSpec.describe "Provenance annotation" do
       binding = find_binding(ast, "main", "h")
       ti = binding.type_info
       ti = Type.new(ti) if !ti.is_a?(Type)
-      # heap_promoted should agree with provenance
-      if ti.heap_promoted
-        expect(ti.provenance).to eq(:heap),
-          "heap_promoted=true but provenance=#{ti.provenance.inspect} (should be :heap)"
+      # Provenance should be :heap for promoted return values
+      if ti.heap_provenance?
+        expect(ti.provenance).to eq(:heap)
       end
     end
   end

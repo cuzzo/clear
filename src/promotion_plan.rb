@@ -535,7 +535,7 @@ class CleanupPlan
 
     # ── Collections ────────────────────────────────────────────────
 
-    if ti.list_collection? && !ti.sharded? && !ti.heap_promoted
+    if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
       # Check if elements need cleanup (union elements with heap variants,
       # or struct elements with string fields that were heap-duped)
       elem_type = ti.element_type
@@ -650,12 +650,6 @@ class CleanupPlan
       end
     end
 
-    # Fallback: heap_promoted without provenance (backward compat during migration)
-    if ti.heap_promoted && !ti.provenance
-      if ti.string?
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
-      end
-    end
 
     # ── Heap storage plain struct ─────────────────────────────────
     # Must come before struct_with_cleanup_fields because @alwaysMutable

@@ -12,7 +12,6 @@ class Type
   attr_accessor :elem_ownership # Element-level ownership: T@shared[] = Array<Arc<T>>
   attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
   attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
-  attr_accessor :heap_promoted  # true when collection data was promoted to heap (returned from frame-using fn)
   attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
   attr_accessor :cleanup_alloc  # :heap or :frame — which allocator to use for cleanup. Set once, read everywhere.
   attr_accessor :storage_alloc  # :heap or :frame — which allocator for NEW allocations (backing stores, concat buffers).

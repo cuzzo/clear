@@ -2979,7 +2979,6 @@ private
       decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
       bg_value = decl_node.respond_to?(:value) ? decl_node.value : nil
       if bg_value.is_a?(AST::BgBlock) && (bg_value.return_provenance == :heap)
-        node.heap_promoted_call = true
       end
     end
   end
@@ -3460,13 +3459,11 @@ private
         val = node.value
         callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
         if callee && (callee.return_provenance == :heap)
-          node.type_info.heap_promoted = true if node.type_info
           node.type_info.provenance = :heap if node.type_info.is_a?(Type)
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             var_name = node.name
             decl = find_decl_in_body(@_walk_current_fn&.body, var_name) if @_walk_current_fn
             if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
-              decl.type_info.heap_promoted = true
               decl.type_info.provenance = :heap
             end
           end
@@ -3479,7 +3476,6 @@ private
           sym = target.respond_to?(:symbol) ? target.symbol : nil
           decl = sym&.reg
           if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
-            decl.type_info.heap_promoted = true
             decl.type_info.provenance = :heap
           end
         end
@@ -3654,7 +3650,7 @@ private
 
     # Heap allocator needed for: heap-promoted data, maps, RC/Arc, sync,
     # resources, sharded collections, structs with RC/link/string fields.
-    needs_heap = ti.heap_promoted || ti.map? || ti.any_rc? || ti.any_sync? ||
+    needs_heap = ti.heap_provenance? || ti.map? || ti.any_rc? || ti.any_sync? ||
                  ti.resource? || ti.sharded? || ti.striped? || ti.link?
     unless needs_heap
       schema = lookup_type_schema(ti.resolved) rescue nil

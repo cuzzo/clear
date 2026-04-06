@@ -206,16 +206,15 @@ module FunctionAnalysis
     # String returns only get heap_promoted_call from callee.returns_promoted
     # (not from type alone) because stdlib string functions like readFile use
     # frameAlloc internally — the caller shouldn't try to free those.
-    if node.respond_to?(:heap_promoted_call=)
+    if node.type_info.is_a?(Type)
       callee_node = @fn_nodes[func_name]
       if callee_node&.return_provenance == :heap
-        node.heap_promoted_call = true
+        node.type_info.provenance = :heap if node.type_info.is_a?(Type)
       elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
-        node.heap_promoted_call = true
+        node.type_info.provenance = :heap if node.type_info.is_a?(Type)
       else
         # Union return types with heap variants need heap_promoted_call
         # when the callee allocates at all (frame, heap, or alloc).
-        # If it allocates, the return may contain promoted or heap data.
         ret_type = node.type_info
         if ret_type
           ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
@@ -223,7 +222,9 @@ module FunctionAnalysis
           if schema.is_a?(Hash) && schema[:kind] == :union
             has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
             callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
-            node.heap_promoted_call = true if has_heap && callee_allocates
+            if has_heap && callee_allocates
+              node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+            end
           end
         end
       end
