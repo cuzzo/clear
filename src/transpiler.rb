@@ -943,6 +943,14 @@ private
               @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
               value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
               @locked_unwrap_map = prev_locked_map
+              # Free old string field before overwriting to prevent leak.
+              # The struct is heap-owned (@alwaysMutable), so string fields are heap-duped.
+              field_ti = node.name.type_info
+              field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+              rt_name = @do_rt_name || "rt"
+              if field_ti&.string?
+                return "{ const __old = #{zig_var}.get().#{field}; #{zig_var}.get().#{field} = #{value}; if (__old.len > 0) #{rt_name}.heapAlloc().free(__old); }"
+              end
               return "#{zig_var}.get().#{field} = #{value};"
             end
 
