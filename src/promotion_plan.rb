@@ -655,6 +655,9 @@ class CleanupPlan
     # Check if binding receives a call to a returns_promoted function
     val = node.respond_to?(:value) ? node.value : nil
     if val.is_a?(AST::FuncCall) && promoted_fns.include?(val.name)
+      if ti.string?
+        return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
+      end
       resolved = ti.resolved
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash) && schema[:kind] == :union

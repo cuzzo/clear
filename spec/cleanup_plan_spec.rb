@@ -522,4 +522,44 @@ RSpec.describe CleanupPlan do
       expect(entry[:kind]).to eq(:struct_with_cleanup_fields)
     end
   end
+
+  # ── CATCH string return: caller must cleanup heap-duped result ──────
+  describe "CATCH function returning String" do
+    it "gives caller a heap_string cleanup for the result" do
+      plan = cleanup_for(<<~CLEAR, "main")
+        FN riskyOp(mode: String) RETURNS !String ->
+            RETURN "ok:" + mode;
+        END
+        FN handleWithCatch(mode: String) RETURNS String ->
+            result = riskyOp(mode) OR RAISE;
+            RETURN result;
+        CATCH Transient
+            RETURN "recovered";
+        END
+        FN main() RETURNS Void ->
+            r = handleWithCatch("ok");
+            RETURN;
+        END
+      CLEAR
+      entry = plan.lookup("r")
+      expect(entry).not_to be_nil, "CATCH string return should have cleanup"
+      expect(entry[:kind]).to eq(:heap_string)
+    end
+  end
+
+  # ── Array literal of structs with string fields ────────────────────
+  describe "array literal of structs with string fields" do
+    it "gets :array_with_struct_strings cleanup" do
+      plan = cleanup_for(<<~CLEAR, "main")
+        STRUCT Item { name: String, value: Int64 }
+        FN main() RETURNS Void ->
+            items = [Item{ name: "a", value: 1_i64 }];
+            RETURN;
+        END
+      CLEAR
+      entry = plan.lookup("items")
+      expect(entry).not_to be_nil, "struct array literal with string fields should have cleanup"
+      expect(entry[:kind]).to eq(:array_with_struct_strings)
+    end
+  end
 end

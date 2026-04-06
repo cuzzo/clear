@@ -487,6 +487,13 @@ private
           clause_body.each { |stmt| visit(stmt) }
         end
       end
+
+      # CATCH wrappers heap-dupe all string returns (both success and catch paths).
+      # Mark returns_promoted so callers get cleanup for the heap-owned result.
+      ret_type = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
+      if ret_type.string?
+        node.returns_promoted = true
+      end
     end
 
     @function_context_stack.pop
