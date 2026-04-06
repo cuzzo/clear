@@ -277,6 +277,29 @@ pub const Runtime = struct {
         self.overflow_arena.rewind(mark);
     }
 
+    /// Preserve a string across a loop mark rewind. Rewinds the arena to the
+    /// mark, re-allocates the string at the rewound position, then trims excess.
+    /// Used at loop boundaries to reclaim dead MUTABLE string values.
+    pub fn loopPreserveAndRewind(self: *Runtime, mark: CheatArena.Mark, data: []const u8) ![]const u8 {
+        if (self.arena_mode) return data;
+        if (data.len == 0) {
+            self.overflow_arena.rewind(mark);
+            return data;
+        }
+        // softRewind moves cursor back to mark but keeps blocks alive.
+        // We alloc at the rewound position and copy the data there.
+        // No trimExcess — blocks stay allocated and will be reused next
+        // iteration or freed by the function-level frame mark restore.
+        // trimExcess could free blocks the preserved data spans.
+        self.overflow_arena.softRewind(mark);
+        const raw_ptr = self.overflow_arena.alloc(data.len, 1, 0) orelse return error.OutOfMemory;
+        const new_buf = raw_ptr[0..data.len];
+        if (@intFromPtr(new_buf.ptr) != @intFromPtr(data.ptr)) {
+            std.mem.copyForwards(u8, new_buf, data);
+        }
+        return new_buf;
+    }
+
     /// Preserve a slice across a frame mark rewind. Resets the arena cursor
     /// to the saved mark, re-allocates the result at the rewound position,
     /// then trims excess blocks. All intermediate allocations are reclaimed;

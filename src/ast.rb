@@ -312,6 +312,7 @@ module AST
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     include Locatable
     attr_accessor :mark_per_iter
+    attr_accessor :loop_preserve_vars  # Set of MUTABLE string var names needing preserve-and-rewind
     attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
   end
   BreakNode    = Struct.new(:token) { include Locatable }
@@ -554,7 +555,10 @@ module AST
 
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
-  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) { include Locatable }
+  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
+    include Locatable
+    attr_accessor :loop_preserve_vars
+  end
 
   # ForEach: FOR var IN collection DO body END
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops) { include Locatable }

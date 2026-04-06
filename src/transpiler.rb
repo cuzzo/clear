@@ -1472,10 +1472,18 @@ private
       @for_counter = (@for_counter || 0) + 1
       iter_var  = "__for_#{@for_counter}"
       if node.mark_per_iter && current_tp_ctx&.has_rt
-        # Loop-local frame allocs: unwind arena each iteration AND yield at back-edge.
         mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
-        "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
+        if node.loop_preserve_vars&.any?
+          # Loop with MUTABLE string vars: preserve values at loop boundary, then rewind.
+          # No defer restoreLoopMark — the preserve-and-rewind IS the rewind.
+          preserve_stmts = node.loop_preserve_vars.map { |v|
+            "#{zig_safe_name(v)} = try #{rt_ref}.loopPreserveAndRewind(#{mark_var}, #{zig_safe_name(v)});"
+          }.join("\n")
+          "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark();\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{preserve_stmts}\n#{rt_ref}.checkYield();\n}\n}"
+        else
+          "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
+        end
       elsif current_tp_ctx&.has_rt
         "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n#{rt_ref}.checkYield();\n}\n}"
       else
@@ -1491,10 +1499,16 @@ private
         # TIGHT: no yield injection, no arena loop marks — pure computation path.
         "while (#{cond}) {\n #{body} \n}"
       elsif node.mark_per_iter && current_tp_ctx&.has_rt
-        # Loop-local frame allocs: unwind arena each iteration AND yield at back-edge.
         mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
-        "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n #{body} \n#{rt_ref}.checkYield();\n}"
+        if node.loop_preserve_vars&.any?
+          preserve_stmts = node.loop_preserve_vars.map { |v|
+            "#{zig_safe_name(v)} = try #{rt_ref}.loopPreserveAndRewind(#{mark_var}, #{zig_safe_name(v)});"
+          }.join("\n")
+          "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark();\n #{body} \n#{preserve_stmts}\n#{rt_ref}.checkYield();\n}"
+        else
+          "while (#{cond}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n #{body} \n#{rt_ref}.checkYield();\n}"
+        end
       elsif current_tp_ctx&.has_rt
         # Normal loop: inject cooperative yield at back-edge.
         "while (#{cond}) {\n #{body} \n#{rt_ref}.checkYield();\n}"

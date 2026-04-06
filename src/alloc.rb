@@ -130,13 +130,13 @@ module AllocHelper
 
   # Returns true if any frame allocation escapes the loop iteration into
   # an outer-scope variable. If true, mark_per_iter must be false.
-  def loop_frame_escapes_to_outer?(stmts, outer_vars)
+  def loop_frame_escapes_to_outer?(stmts, outer_vars, preserve_vars: nil)
     return false if stmts.nil?
     stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.any? { |s| node_frame_escapes?(s, outer_vars) }
+    stmts.any? { |s| node_frame_escapes?(s, outer_vars, preserve_vars: preserve_vars) }
   end
 
-  def node_frame_escapes?(node, outer_vars)
+  def node_frame_escapes?(node, outer_vars, preserve_vars: nil)
     return false if node.nil?
     case node
     when AST::FuncCall
@@ -170,20 +170,28 @@ module AllocHelper
       end
       false
     when AST::BindExpr
-      if node.name.is_a?(String) && outer_vars.include?(node.name)
-        return true if node_allocates_frame?(node.value)
+      if node.name.is_a?(String) && outer_vars.include?(node.name) && node_allocates_frame?(node.value)
+        if node.mode == :assign && preserve_vars
+          ti = node.type_info
+          ti = Type.new(ti) if ti && !ti.is_a?(Type)
+          if ti&.string?
+            preserve_vars << node.name
+            return false
+          end
+        end
+        return true
       end
       false
     when AST::WhileLoop
-      loop_frame_escapes_to_outer?(node.do_branch, outer_vars)
+      loop_frame_escapes_to_outer?(node.do_branch, outer_vars, preserve_vars: preserve_vars)
     when AST::ForRange
-      loop_frame_escapes_to_outer?(node.body, outer_vars)
+      loop_frame_escapes_to_outer?(node.body, outer_vars, preserve_vars: preserve_vars)
     when AST::IfStatement
-      loop_frame_escapes_to_outer?(node.then_branch, outer_vars) ||
-        loop_frame_escapes_to_outer?(node.else_branch, outer_vars)
+      loop_frame_escapes_to_outer?(node.then_branch, outer_vars, preserve_vars: preserve_vars) ||
+        loop_frame_escapes_to_outer?(node.else_branch, outer_vars, preserve_vars: preserve_vars)
     when AST::MatchStatement
-      node.cases.any? { |c| loop_frame_escapes_to_outer?(c[:body], outer_vars) } ||
-        loop_frame_escapes_to_outer?(node.default_case, outer_vars)
+      node.cases.any? { |c| loop_frame_escapes_to_outer?(c[:body], outer_vars, preserve_vars: preserve_vars) } ||
+        loop_frame_escapes_to_outer?(node.default_case, outer_vars, preserve_vars: preserve_vars)
     else
       false
     end

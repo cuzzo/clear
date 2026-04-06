@@ -923,8 +923,11 @@ private
     # 4. Loop Mark Elision: emit saveLoopMark/restoreLoopMark when the loop body
     # allocates from the frame arena AND those allocations don't target an
     # outer-scope variable (which mark-rewind would corrupt).
-    node.mark_per_iter = loop_allocates_frame?(node.body) &&
-                         !loop_frame_escapes_to_outer?(node.body, outer_vars)
+    preserve_vars = Set.new
+    allocates = loop_allocates_frame?(node.body)
+    escapes = allocates && loop_frame_escapes_to_outer?(node.body, outer_vars, preserve_vars: preserve_vars)
+    node.mark_per_iter = allocates && !escapes
+    node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
 
     node.full_type = :Void
   end
@@ -1035,9 +1038,11 @@ private
     # body actually allocates from the frame arena AND those allocations don't
     # target an outer-scope variable (which mark-rewind would corrupt).
     # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
-    node.mark_per_iter = !node.tight &&
-                         loop_allocates_frame?(node.do_branch) &&
-                         !loop_frame_escapes_to_outer?(node.do_branch, outer_vars)
+    preserve_vars = Set.new
+    allocates = !node.tight && loop_allocates_frame?(node.do_branch)
+    escapes = allocates && loop_frame_escapes_to_outer?(node.do_branch, outer_vars, preserve_vars: preserve_vars)
+    node.mark_per_iter = allocates && !escapes
+    node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
 
     node.full_type = :Void
   end
