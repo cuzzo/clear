@@ -96,10 +96,6 @@ Common patterns:
 
 See `docs/profiling.md` for a full case study.
 
-## Ignored Directories
-
-- `vm/` — Obsolete bytecode VM from the toy implementation. Not part of the current compiler. Ignore entirely.
-
 ## Architecture
 
 The compiler is a 3-pass system written in Ruby:
@@ -107,15 +103,24 @@ The compiler is a 3-pass system written in Ruby:
 2.  **Semantic Analysis:** `src/annotator.rb`, `src/type.rb`, `src/scope.rb`, `src/ownership_tracker.rb`
 3.  **Code Generation:** `src/transpiler.rb` (generates Zig code)
 
+Semantic Analyis consists of three stages:
+1.  Type Inference
+2.  Promotion Planning
+3.  Escape Analysis / Cleanup Planning
+
+The transpiler is supposed to be as dumb as possible so that:
+1.  We can catch as many bugs as possible at unit test time.
+2.  We can support different backends easily besides just Zig.
+
 ## Language Semantics
 
 CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how it's accessed).
 
 ### Key Sigils
-- `&` = Borrow/reference
-- `@` = Pipeline binding
+- `$` = Pipeline binding / test LET lazy binding / interpolation
 - `!` = Mutation suffix
 - `s>` = SMOOTH operator (safe pipeline with error propagation)
+- `_` = Placeholder
 - `!!` = Explicit panic
 
 ### Ownership & Capabilities
@@ -134,6 +139,24 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 - **Arena Memory:** Variables live for their function scope; large objects escape via RVO or page handoffs.
 - **Local Reasoning:** `WITH RESTRICT` ensures that mutable "poisoning" is always visible and scoped.
 - **Fortress Architecture:** Public APIs must be strictly defined and handle all errors.
+
+## Contributing
+
+### When fixing a bug:
+
+1. Create a test (ideally at a unit stage) to *PROOVE* the bug exists before attempting to fix it.
+2. Identify the architecturally appropriate place to fix the bug.
+   * Ideally fixing bugs leads to *reducing* overall complexity, not adding complexity by applying a band-aid
+3. Consider: is this the *ONLY* case for this bug, or does this bug have a broader scope
+   * If the bug has a broader scope, expand the tests to show *ALL* cases you can think of for the bug
+4. Update the code making minimal changes besides fixing the bug at the architecturally correct place to minimize added complexity.
+5. Commit changes to fix bugs as stand-alone bug fixes. Limit including bug fixes as part of other commits.
+
+### When adding a feature:
+
+If you ever encounter a compiler bug, stop everything you're doing, and fix the bug.  See the above section for how to do this appropriately.
+
+If you ever find a limitation in the language that you have to work around, stop, identify the problem, and suggest how the language needs to be improved to fix this limitation focing work arounds.
 
 ## Output
 - Answer is always line 1. Reasoning comes after, never before.
