@@ -656,7 +656,7 @@ private
                           "            _ = &snapshot; _ = &__has_snapshot;"
         end
 
-        catch_dupe = node.returns_promoted && node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+        catch_dupe = (node.return_provenance == :heap || node.returns_promoted) && node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
 
         catch_clauses_zig = node.catch_clauses.map do |clause|
           kind = clause[:kind]

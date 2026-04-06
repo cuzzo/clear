@@ -489,10 +489,10 @@ private
       end
 
       # CATCH wrappers heap-dupe all string returns (both success and catch paths).
-      # Mark returns_promoted so callers get cleanup for the heap-owned result.
       ret_type = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
       if ret_type.string?
         node.returns_promoted = true
+        node.return_provenance = :heap
       end
     end
 
@@ -1189,19 +1189,28 @@ private
     # PromotionPlan (Pass C) reads these flags to decide what to promote.
     if mark_escaping_collections!(node.value)
       fn_node = @fn_nodes[current_fn_ctx&.name]
-      fn_node.returns_promoted = true if fn_node
+      if fn_node
+        fn_node.returns_promoted = true
+        fn_node.return_provenance = :heap
+      end
     end
 
     # RETURN COPY expr or RETURN Struct{ field: COPY ... }: the COPY heap-dupes,
-    # so the caller receives heap-allocated data. Mark returns_promoted.
+    # so the caller receives heap-allocated data.
     if node.value.is_a?(AST::CopyNode)
       fn_node = @fn_nodes[current_fn_ctx&.name]
-      fn_node.returns_promoted = true if fn_node
+      if fn_node
+        fn_node.returns_promoted = true
+        fn_node.return_provenance = :heap
+      end
     elsif node.value.is_a?(AST::StructLit)
       has_copy_field = node.value.fields.any? { |_, v| v.is_a?(AST::CopyNode) }
       if has_copy_field
         fn_node = @fn_nodes[current_fn_ctx&.name]
-        fn_node.returns_promoted = true if fn_node
+        if fn_node
+          fn_node.returns_promoted = true
+          fn_node.return_provenance = :heap
+        end
       end
     end
 
@@ -2860,6 +2869,7 @@ private
     last_expr = node.body.last
     if has_heap_promoted_call?(last_expr)
       node.returns_promoted = true
+      node.return_provenance = :heap
     end
 
     # @arena implies @pinned — thread-local arena memory can't be stolen.
@@ -2973,7 +2983,7 @@ private
       sym = node.expr.symbol
       decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
       bg_value = decl_node.respond_to?(:value) ? decl_node.value : nil
-      if bg_value.is_a?(AST::BgBlock) && bg_value.returns_promoted
+      if bg_value.is_a?(AST::BgBlock) && (bg_value.return_provenance == :heap || bg_value.returns_promoted)
         node.heap_promoted_call = true
       end
     end
@@ -3366,7 +3376,7 @@ private
       schema = lookup_type_schema(ret_sym)
       if schema.is_a?(Hash) && schema[:kind] == :union
         has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        @fn_returns_heap_union[name] = true if has_heap && fn.returns_promoted
+        @fn_returns_heap_union[name] = true if has_heap && (fn.return_provenance == :heap || fn.returns_promoted)
       end
     end
 
@@ -3398,6 +3408,7 @@ private
           callee = @fn_nodes[ret.value.name]
           if callee&.returns_promoted
             fn.returns_promoted = true
+            fn.return_provenance = :heap
             break
           end
         end
@@ -3407,11 +3418,11 @@ private
           root = get_root_object(ret.value)
           if root.is_a?(AST::Identifier)
             root_type = root.resolved_type
-            # Check if any function returns this type with promotion
             if @fn_nodes.any? { |_, cfn| cfn.returns_promoted && cfn.return_type.to_s.delete_prefix("!") == root_type.to_s }
               ret_type = ret.value.respond_to?(:full_type) ? Type.new(ret.value.full_type) : nil
               if ret_type&.string? || ret_type&.collection? || ret_type&.map?
                 fn.returns_promoted = true
+                fn.return_provenance = :heap
                 break
               end
             end
@@ -3420,7 +3431,7 @@ private
       end
     end
 
-    # Step 2: Propagate returns_promoted transitively through call graph.
+    # Step 2: Propagate transitively through call graph.
     changed = true
     while changed
       changed = false
@@ -3432,6 +3443,7 @@ private
           returns = collect_return_nodes(fn.body)
           if returns.any? { |r| r.value.is_a?(AST::FuncCall) && @fn_nodes[r.value.name]&.returns_promoted }
             fn.returns_promoted = true
+            fn.return_provenance = :heap
             changed = true
           end
         end
@@ -3453,7 +3465,8 @@ private
         @_walk_current_fn = node
       when AST::VarDecl, AST::BindExpr
         val = node.value
-        if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
+        callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
+        if callee && (callee.return_provenance == :heap || callee.returns_promoted)
           node.type_info.heap_promoted = true if node.type_info
           node.type_info.provenance = :heap if node.type_info.is_a?(Type)
           if node.is_a?(AST::BindExpr) && node.mode == :assign
@@ -3467,7 +3480,8 @@ private
         end
       when AST::Assignment
         val = node.value
-        if val.is_a?(AST::FuncCall) && @fn_nodes[val.name]&.returns_promoted
+        callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
+        if callee && (callee.return_provenance == :heap || callee.returns_promoted)
           target = node.name
           sym = target.respond_to?(:symbol) ? target.symbol : nil
           decl = sym&.reg

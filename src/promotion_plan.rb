@@ -100,7 +100,7 @@ class PromotionPlan
     # Gate: if the function never allocates AND isn't marked returns_promoted
     # (e.g., CATCH wrapper functions that pass through caller's frame data),
     # nothing needs promotion.
-    return EMPTY unless fn_allocates?(fn_node) || fn_node.returns_promoted
+    return EMPTY unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap || fn_node.returns_promoted
 
     ret_type_sym = fn_node.return_type
     return EMPTY unless ret_type_sym
@@ -201,7 +201,7 @@ class PromotionPlan
     if struct_promote.nil?
       if var_promotes.any? || handled_fields.any?
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
-      elsif fn_node.returns_promoted && !is_union && ret_type.needs_promotion?(schema_lookup)
+      elsif (fn_node.return_provenance == :heap || fn_node.returns_promoted) && !is_union && ret_type.needs_promotion?(schema_lookup)
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
         # Fallback: if compute_struct_promote returns nil but returns_promoted is set,
         # all fields are already handled (CopyNode). No struct_promote needed.
@@ -376,7 +376,7 @@ class CleanupPlan
 
   def self.compute_promoted_fns(fn_nodes)
     promoted = Set.new
-    fn_nodes.each { |name, fn| promoted << name if fn.returns_promoted }
+    fn_nodes.each { |name, fn| promoted << name if fn.return_provenance == :heap || fn.returns_promoted }
 
     changed = true
     while changed
