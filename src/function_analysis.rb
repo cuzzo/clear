@@ -96,6 +96,9 @@ module FunctionAnalysis
       }
     end
 
+    # Return a Hash (not FunctionSignature) because this feeds into
+    # Type.new({ params:, return:, fn_type: true }) which expects a Hash raw.
+    # Converting this requires Type to support FunctionSignature as raw.
     {
       params: normalized_params,
       return: { type: return_type },
