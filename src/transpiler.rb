@@ -2234,18 +2234,15 @@ private
           can_fail ? "try #{call}" : call
         end
 
-        # Heap-promoted temp hoisting: capture heap-allocated return values
-        # into temp vars with defer cleanup. Skip when:
-        # - Direct bind value (VarDecl/BindExpr handles cleanup)
-        # - TAKES/GIVE (ownership transfers to callee)
-        call_ti = node.type_info
-        call_ti = call_ti.is_a?(Type) ? call_ti : nil
-        if call_ti&.heap_provenance? &&
-           !node.equal?(current_tp_ctx&.bind_value_node) && !node.was_moved && !current_tp_ctx&.inside_give
+        # Heap-promoted temp hoisting: CleanupPlan determines which calls need
+        # hoisting. The transpiler just reads the plan and emits the temp.
+        fn_name = current_tp_ctx&.fn_name
+        hpt_entry = @cleanup_plans&.dig(fn_name)&.lookup_heap_temp(node.object_id)
+        if hpt_entry
           ctx = current_tp_ctx
           ctx.heap_temp_counter += 1
           tmp = "__hpt_#{ctx.heap_temp_counter}"
-          ctx.pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info }
+          ctx.pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info, plan_entry: hpt_entry }
           tmp
         else
           call_code
@@ -2461,11 +2458,8 @@ private
         end
       else
         # GIVE expr (non-identifier): ownership transfers to callee.
-        saved = current_tp_ctx&.inside_give
-        current_tp_ctx.inside_give = true if current_tp_ctx
-        result = visit(node.value)
-        current_tp_ctx.inside_give = saved if current_tp_ctx
-        result
+        # HPT suppression for GIVE is handled by the CleanupPlan (inside_move flag).
+        visit(node.value)
       end
 
     when AST::Copy
@@ -3866,14 +3860,18 @@ private
       # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
       temps = ctx&.pending_heap_temps || []
       if temps.any?
-        schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
         preamble = temps.map { |t|
           ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
-          # Error unions are unwrapped by try — use the payload type for the HPT variable.
           ti = ti.payload_type if ti.error_union? && ti.payload_type
           ti.provenance = :heap
           zig_t = ti.zig_type
-          entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
+          # Read classification from plan entry (computed by walk_heap_temps).
+          # Fall back to inline classify for temps not from the plan (e.g., OR wrappers).
+          entry = t[:plan_entry]
+          unless entry
+            schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+            entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
+          end
           if entry
             proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, nil, false)
             cleanup = emit_cleanup_from_entry(t[:var], entry, proxy)
@@ -3882,32 +3880,23 @@ private
           end
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
-        if stmt.is_a?(AST::ReturnNode) && temps.any? { |t| t[:var] && code.include?(t[:var]) }
+        # Return handling: the plan knows if this temp is in a return context.
+        return_handling = temps.filter_map { |t| t[:plan_entry]&.dig(:return_handling) }.first
+        if return_handling
           rt_name = @do_rt_name || "rt"
-          direct_return = temps.any? { |t| code.strip == "return #{t[:var]};" || code.strip == "return try #{t[:var]};" }
-          if direct_return
-            # Direct return of an HPT: ownership transfers to caller, skip cleanup.
-            move_suppression = temps.filter_map { |t|
-              "#{t[:var]}_moved = true;" if code.include?(t[:var])
-            }.join("\n")
+          case return_handling
+          when :suppress
+            # Direct return: ownership transfers to caller, skip cleanup.
+            move_suppression = temps.filter_map { |t| "#{t[:var]}_moved = true;" if code.include?(t[:var]) }.join("\n")
             code = "#{preamble}\n#{move_suppression}\n#{code}"
-          else
-            # Indirect return (e.g. return prStr(HPT)): the result may borrow
-            # from the HPT. Capture it, promote to independent copy, then let
-            # HPT cleanup run normally (no leak).
-            ret_ti = stmt.value&.type_info rescue nil
-            if ret_ti&.string?
-              # Extract the return expression and save to a local, dupe it,
-              # then return the dupe. HPT defers clean up the original.
-              ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
-              code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
-            else
-              # Non-string return with HPT: suppress cleanup (safe fallback).
-              move_suppression = temps.filter_map { |t|
-                "#{t[:var]}_moved = true;" if code.include?(t[:var])
-              }.join("\n")
-              code = "#{preamble}\n#{move_suppression}\n#{code}"
-            end
+          when :dupe_string
+            # Indirect return with string: dupe to frame, let HPT cleanup run.
+            ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
+            code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
+          when :suppress_non_string
+            # Non-string indirect return: suppress cleanup (safe fallback).
+            move_suppression = temps.filter_map { |t| "#{t[:var]}_moved = true;" if code.include?(t[:var]) }.join("\n")
+            code = "#{preamble}\n#{move_suppression}\n#{code}"
           end
         else
           code = "#{preamble}\n#{code}"

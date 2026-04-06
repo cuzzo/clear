@@ -5,9 +5,8 @@ class TranspilerContext
   attr_accessor :uses_frame, :has_rt, :collection_params,
                 :pending_heap_temps,   # Array of temp hashes awaiting emission at statement boundary
                 :heap_temp_counter,    # Monotonic counter for unique temp names
-                :bind_value_node,      # AST node of current VarDecl/BindExpr value (skip hoisting)
-                :inside_give,          # true when visiting inside GIVE expr (skip hoisting)
-                :fn_name               # current function name (for PromotionPlan lookup)
+                :bind_value_node,      # AST node of current VarDecl/BindExpr value (skip hoisting for non-HPT uses)
+                :fn_name               # current function name (for plan lookup)
 
   def initialize(uses_frame:, has_rt:, collection_params: Set.new, fn_name: nil)
     @uses_frame = uses_frame
@@ -17,6 +16,5 @@ class TranspilerContext
     @pending_heap_temps = []
     @heap_temp_counter = 0
     @bind_value_node = nil
-    @inside_give = false
   end
 end

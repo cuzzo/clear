@@ -756,6 +756,10 @@ class CleanupPlan
       when AST::Assignment
         scan_for_hpt(stmt.value, schema_lookup, heap_temps,
                      stmt_node: stmt, is_bind_value: true, inside_move: false, return_type: nil)
+      when AST::FuncCall, AST::MethodCall
+        # Standalone expression statements (e.g., print(makeVal!()))
+        scan_for_hpt(stmt, schema_lookup, heap_temps,
+                     stmt_node: stmt, is_bind_value: false, inside_move: false, return_type: nil)
       end
     end
   end
@@ -768,22 +772,20 @@ class CleanupPlan
       ti = node.type_info rescue nil
       ti = ti.is_a?(Type) ? ti : nil
       if ti&.heap_provenance? && !is_bind_value && !node.was_moved && !inside_move
-        # Unwrap error unions (try unwraps them at Zig level)
-        classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
-        entry = classify_heap_temp(classify_ti, schema_lookup)
-        if entry
-          # Determine return handling
-          return_handling = if stmt_node.is_a?(AST::ReturnNode)
-            if stmt_node.value.equal?(node)
-              :suppress  # direct return: ownership transfers to caller
-            elsif return_type&.string?
-              :dupe_string  # indirect return with string result
-            else
-              :suppress_non_string  # indirect return, non-string
+        # Direct return: ownership transfers to caller, no HPT needed.
+        is_direct_return = stmt_node.is_a?(AST::ReturnNode) && stmt_node.value.equal?(node)
+        unless is_direct_return
+          # Unwrap error unions (try unwraps them at Zig level)
+          classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
+          entry = classify_heap_temp(classify_ti, schema_lookup)
+          if entry
+            # Indirect return: determine how to handle the return value
+            return_handling = if stmt_node.is_a?(AST::ReturnNode)
+              return_type&.string? ? :dupe_string : :suppress_non_string
             end
+            heap_temps[node.object_id] = entry.merge(return_handling: return_handling)
           end
-          heap_temps[node.object_id] = entry.merge(return_handling: return_handling)
-        end
+        end  # unless is_direct_return
       end
       # Recurse into arguments (never bind values, not direct return values)
       args = node.is_a?(AST::MethodCall) ? node.args : node.args

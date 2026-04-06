@@ -697,16 +697,15 @@ RSpec.describe CleanupPlan do
       end
     end
 
-    context "direct return gets suppress handling" do
-      it "marks direct return with return_handling: :suppress" do
+    context "direct return skips HPT (ownership transfers to caller)" do
+      it "does NOT create an HPT entry for direct return" do
         plan, _, fn = hpt_for(<<~CLEAR, "wrapper")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN wrapper() RETURNS Value -> RETURN makeVal!(); END
           FN main() RETURNS Void -> v = wrapper(); RETURN; END
         CLEAR
-        suppressed = plan.heap_temps.values.select { |e| e[:return_handling] == :suppress }
-        expect(suppressed.size).to eq(1), "direct return of makeVal!() should have :suppress"
+        expect(plan.heap_temps.size).to eq(0), "direct return should not create HPT entry"
       end
     end
 
