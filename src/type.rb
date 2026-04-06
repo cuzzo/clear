@@ -17,6 +17,13 @@ class Type
   attr_accessor :cleanup_alloc  # :heap or :frame — which allocator to use for cleanup. Set once, read everywhere.
   attr_accessor :storage_alloc  # :heap or :frame — which allocator for NEW allocations (backing stores, concat buffers).
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
+
+  # Unified provenance: where was this data allocated?
+  #   :rodata — string literal in binary, valid forever, never freed
+  #   :frame  — frame arena, reclaimed on function exit
+  #   :heap   — heap allocated, must be explicitly freed
+  #   nil     — not yet computed (shadow mode: fall back to existing flags)
+  attr_accessor :provenance
   attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
@@ -182,6 +189,7 @@ class Type
       @elem_ownership        = other.elem_ownership
       @elem_sync             = other.elem_sync
       @link_source           = other.link_source
+      @provenance            = other.provenance
     else
       @raw = raw_input
       parse_raw_input
@@ -463,6 +471,30 @@ class Type
 
   def rodata?
     @location == :rodata
+  end
+
+  # Provenance predicates (shadow mode: fall back to existing flags when nil)
+  def heap_provenance?
+    @provenance == :heap
+  end
+
+  def frame_provenance?
+    @provenance == :frame
+  end
+
+  def rodata_provenance?
+    @provenance == :rodata
+  end
+
+  # Returns the allocator symbol for this provenance (:heap or :frame).
+  # Falls back to cleanup_alloc when provenance is not yet set.
+  def provenance_alloc
+    case @provenance
+    when :heap then :heap
+    when :frame then :frame
+    when :rodata then nil  # rodata never freed
+    else @cleanup_alloc    # fallback during migration
+    end
   end
 
   def multiowned?
