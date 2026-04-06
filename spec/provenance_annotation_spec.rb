@@ -95,7 +95,7 @@ RSpec.describe "Provenance annotation" do
   end
 
   describe "CATCH function returning String" do
-    it "marks function as returns_promoted" do
+    it "marks function with return_provenance :heap" do
       ast, _ = annotate(<<~CLEAR)
         FN riskyOp(x: String) RETURNS !String -> RETURN "ok"; END
         FN handle(x: String) RETURNS String ->
@@ -107,7 +107,7 @@ RSpec.describe "Provenance annotation" do
         FN main() RETURNS Void -> s = handle("x"); RETURN; END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "handle" }
-      expect(fn.returns_promoted).to be true
+      expect(fn.return_provenance).to eq(:heap)
     end
   end
 

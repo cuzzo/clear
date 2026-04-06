@@ -208,7 +208,7 @@ module FunctionAnalysis
     # frameAlloc internally — the caller shouldn't try to free those.
     if node.respond_to?(:heap_promoted_call=)
       callee_node = @fn_nodes[func_name]
-      if callee_node&.return_provenance == :heap || callee_node&.returns_promoted
+      if callee_node&.return_provenance == :heap
         node.heap_promoted_call = true
       elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
         node.heap_promoted_call = true
@@ -222,7 +222,7 @@ module FunctionAnalysis
           schema = lookup_type_schema(ret_sym)
           if schema.is_a?(Hash) && schema[:kind] == :union
             has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-            callee_allocates = callee_node&.return_provenance == :heap || callee_node&.returns_promoted || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
+            callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
             node.heap_promoted_call = true if has_heap && callee_allocates
           end
         end

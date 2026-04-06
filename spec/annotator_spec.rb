@@ -1405,7 +1405,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Escape marking for returned collections" do
-      it "sets returns_promoted on function returning @list" do
+      it "sets return_provenance on function returning @list" do
         src = <<~CLEAR
           FN buildList() RETURNS Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
@@ -1415,7 +1415,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         annotated = run(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
-        expect(fn.returns_promoted).to be true
+        expect(fn.return_provenance).to eq(:heap)
       end
 
       it "sets escaped_return on @list variable being returned" do
@@ -1434,8 +1434,8 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "returns_promoted for struct/union with implicit COPY fields" do
-      it "sets returns_promoted when returning union with implicit-copied @list field" do
+    context "return_provenance for struct/union with implicit COPY fields" do
+      it "sets return_provenance when returning union with implicit-copied @list field" do
         src = <<~CLEAR
           UNION Value { Nil, List: Value[] }
           FN makeList() RETURNS Value ->
@@ -1447,7 +1447,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         annotated = run(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
-        expect(fn.returns_promoted).to be true
+        expect(fn.return_provenance).to eq(:heap)
       end
     end
 
