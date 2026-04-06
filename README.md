@@ -59,9 +59,9 @@ Concurrency is only hard when you have to tell the computer exactly how to achie
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
 
 ```ruby clear illustrative
--- format users in parallel, with back pressure
+-- `notify()` users in parallel, with back pressure
 users
-  s> CONCURRENT(worker_size: 8, parallel: TRUE) EACH format
+  s> CONCURRENT(worker_size: 8, parallel: TRUE) EACH notify
 ```
 
 ### Profile Guided Optimization
