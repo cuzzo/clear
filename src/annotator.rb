@@ -1273,6 +1273,11 @@ private
   end
 
   def visit_FuncCall(node)
+    # Mark struct literal args as call arguments so ensure_owned_value!
+    # skips CopyNode wrapping for rodata strings. The struct is a temporary
+    # argument - rodata strings are valid for the call's lifetime. The callee
+    # dupes strings it needs to escape via promoteFields.
+    node.args.each { |arg| arg.instance_variable_set(:@is_call_arg, true) if arg.is_a?(AST::StructLit) }
     node.args.each { |arg| visit(arg) }
 
     # Handle "native_call" special case
@@ -2161,7 +2166,11 @@ private
       unless field_is_borrowed
         reject_borrowed_value!(val_node, "#{node.name}.#{field_name}")
       end
-      owned = unless field_is_borrowed
+      # Skip CopyNode wrapping for rodata strings in call argument structs.
+      # The struct is a temporary - rodata strings are valid for the call's
+      # lifetime. The callee dupes strings it needs to escape.
+      is_call_arg = node.instance_variable_get(:@is_call_arg)
+      owned = unless field_is_borrowed || is_call_arg
         ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
       end
       if owned

@@ -547,6 +547,37 @@ RSpec.describe CleanupPlan do
     end
   end
 
+  # ── Inline struct arg: no CopyNode wrapping for rodata strings ──────
+  describe "struct literal as function argument" do
+    it "does NOT get CopyNode wrapping on rodata string fields" do
+      src = <<~CLEAR
+        STRUCT User { name: String, age: Int64 }
+        FN process(u: User) RETURNS Int64 -> RETURN u.age; END
+        FN main() RETURNS Void ->
+            x = process(User{ name: "Alice", age: 30_i64 });
+            RETURN;
+        END
+      CLEAR
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+      # Find the FuncCall to process
+      call = nil
+      fn.body.each do |stmt|
+        next unless stmt.is_a?(AST::BindExpr)
+        call = stmt.value if stmt.value.is_a?(AST::FuncCall) && stmt.value.name == "process"
+      end
+      expect(call).not_to be_nil
+      struct_arg = call.args.first
+      expect(struct_arg).to be_a(AST::StructLit)
+      # The name field should NOT be a CopyNode (rodata is valid for call lifetime)
+      name_val = struct_arg.fields["name"]
+      expect(name_val).not_to be_a(AST::CopyNode), "rodata string in call-arg struct should not be CopyNode-wrapped"
+    end
+  end
+
   # ── Array literal of structs with string fields ────────────────────
   describe "array literal of structs with string fields" do
     it "gets :array_with_struct_strings cleanup" do
