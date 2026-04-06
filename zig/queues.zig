@@ -252,6 +252,7 @@ pub const TaskConfig = struct {
     timeout_ms: u64 = 0,
     stack_size: StackSize = .Standard,  // Default to Standard
     pinned: bool = false,              // true = cannot be stolen by other schedulers
+    use_arena: bool = false,           // true = expose scheduler local_arena via __pinned_local_alloc (@arena BG blocks only)
 };
 
 pub const Task = struct {

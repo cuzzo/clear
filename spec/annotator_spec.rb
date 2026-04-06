@@ -644,17 +644,18 @@ RSpec.describe SemanticAnnotator do
         expect(get_index.needs_mut_ref).to eq(true)
       end
 
-      it "flags field_pre_cleanup on field reassignment of list type" do
-        code = <<~FLUX
-          STRUCT Node { vals: String[]@list }
-          MUTABLE nodes: Node[]@list = [];
-          nodes.append(Node{ vals: [] });
-          MUTABLE nv: String[]@list = [];
-          nodes[0].vals = nv;
+      it "emits CheatLib.cleanup before field reassignment of list type" do
+        src = <<~FLUX
+          FN test() RETURNS Void ->
+            STRUCT Node { vals: String[]@list }
+            MUTABLE nodes: Node[]@list = [];
+            nodes.append(Node{ vals: [] });
+            MUTABLE nv: String[]@list = [];
+            nodes[0].vals = nv;
+          END
         FLUX
-        ast = run(code)
-        assignment = ast.statements.last
-        expect(assignment.field_pre_cleanup).not_to be_nil
+        zig = ZigTranspiler.new.transpile(src)
+        expect(zig).to include("CheatLib.cleanup(")
       end
 
       it "skips CopyNode for list values targeting @list struct fields" do
@@ -1362,7 +1363,7 @@ RSpec.describe SemanticAnnotator do
         expect(loop_node.mark_per_iter).to be true
       end
 
-      it "does NOT mark loop as safe when outer-scope list is appended" do
+      it "marks loop as safe when outer-scope list is appended (container promoted to heap)" do
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE all: Float64[]@list = [];
@@ -1377,7 +1378,7 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.first
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
-        expect(loop_node.mark_per_iter).to be false
+        expect(loop_node.mark_per_iter).to be true
       end
 
       it "does NOT mark loop as safe when outer var is assigned a frame-allocating call" do

@@ -920,14 +920,19 @@ private
     ], merge_to_parent: false)
     if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
 
-    # 4. Loop Mark Elision: emit saveLoopMark/restoreLoopMark when the loop body
-    # allocates from the frame arena AND those allocations don't target an
-    # outer-scope variable (which mark-rewind would corrupt).
-    preserve_vars = Set.new
+    # 4. Loop Mark: emit saveLoopMark/restoreLoopMark when the loop body
+    # allocates from the frame arena. If any frame data escapes to outer-scope
+    # containers, promote those containers to heap so the rewind is safe.
     allocates = loop_allocates_frame?(node.body)
-    escapes = allocates && loop_frame_escapes_to_outer?(node.body, outer_vars, preserve_vars: preserve_vars)
-    node.mark_per_iter = allocates && !escapes
-    node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
+    if allocates
+      preserve_vars = Set.new
+      escape_actions = collect_loop_escapes(node.body, outer_vars, preserve_vars: preserve_vars)
+      promote_loop_escapes!(escape_actions)
+      node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
+    else
+      node.loop_preserve_vars = nil
+    end
+    node.mark_per_iter = allocates
 
     node.full_type = :Void
   end
@@ -1034,15 +1039,20 @@ private
       validate_tight_body!(node.do_branch, node)
     end
 
-    # 5. Loop Mark Elision: emit saveLoopMark/restoreLoopMark only when the loop
-    # body actually allocates from the frame arena AND those allocations don't
-    # target an outer-scope variable (which mark-rewind would corrupt).
+    # 5. Loop Mark: emit saveLoopMark/restoreLoopMark when the loop body
+    # allocates from the frame arena. If any frame data escapes to outer-scope
+    # containers, promote those containers to heap so the rewind is safe.
     # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
-    preserve_vars = Set.new
     allocates = !node.tight && loop_allocates_frame?(node.do_branch)
-    escapes = allocates && loop_frame_escapes_to_outer?(node.do_branch, outer_vars, preserve_vars: preserve_vars)
-    node.mark_per_iter = allocates && !escapes
-    node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
+    if allocates
+      preserve_vars = Set.new
+      escape_actions = collect_loop_escapes(node.do_branch, outer_vars, preserve_vars: preserve_vars)
+      promote_loop_escapes!(escape_actions)
+      node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
+    else
+      node.loop_preserve_vars = nil
+    end
+    node.mark_per_iter = allocates
 
     node.full_type = :Void
   end
@@ -1865,16 +1875,7 @@ private
       end
     end
 
-    # 4. Flag pre-cleanup for field reassignment of heap-backed types.
-    #    When overwriting a field that holds heap data (list, string list, etc.),
-    #    the old value must be freed before the new value is written.
-    field_ti = field_node.type_info
-    field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-    if field_ti&.list_collection?
-      assignment_node.field_pre_cleanup = field_ti.zig_type
-    end
-
-    # 5. Type Check
+    # 4. Type Check
     validate_assignment_type(assignment_node, field_node.resolved_type, assignment_node.value.resolved_type)
 
     # Assignments are statements (void), not expressions that produce a value.

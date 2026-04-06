@@ -297,11 +297,13 @@ end
 # =========================================================================
 class CleanupPlan
   attr_reader :bindings
-  attr_reader :heap_temps  # Hash<FuncCall.object_id => HPT entry>
+  attr_reader :heap_temps          # Hash<FuncCall.object_id => HPT entry>
+  attr_reader :field_pre_cleanups  # Hash<Assignment.object_id => { zig_type, alloc }>
 
-  def initialize(bindings: {}, heap_temps: {})
-    @bindings = bindings.freeze
-    @heap_temps = heap_temps.freeze
+  def initialize(bindings: {}, heap_temps: {}, field_pre_cleanups: {})
+    @bindings           = bindings.freeze
+    @heap_temps         = heap_temps.freeze
+    @field_pre_cleanups = field_pre_cleanups.freeze
   end
 
   EMPTY = new.freeze
@@ -314,6 +316,11 @@ class CleanupPlan
   # Look up an HPT entry for a FuncCall node by object_id.
   def lookup_heap_temp(call_node_id)
     @heap_temps[call_node_id]
+  end
+
+  # Look up a field pre-cleanup entry for an Assignment node by object_id.
+  def lookup_field_pre_cleanup(assignment_node_id)
+    @field_pre_cleanups[assignment_node_id]
   end
 
   # Compute cleanup plan for a function.
@@ -341,7 +348,13 @@ class CleanupPlan
     heap_temps = {}
     walk_heap_temps(fn_node.body, schema_lookup, heap_temps)
 
-    (bindings.empty? && heap_temps.empty?) ? EMPTY : new(bindings: bindings, heap_temps: heap_temps)
+    # 5. Field pre-cleanups: field assignments that must free the old value
+    #    before overwriting. Alloc is derived from the target binding's entry.
+    field_pre_cleanups = {}
+    walk_field_pre_cleanups(fn_node.body, bindings, field_pre_cleanups)
+
+    (bindings.empty? && heap_temps.empty? && field_pre_cleanups.empty?) ? EMPTY :
+      new(bindings: bindings, heap_temps: heap_temps, field_pre_cleanups: field_pre_cleanups)
   end
 
   # Classify a heap-promoted temporary. Called internally by scan_for_hpt
@@ -823,4 +836,35 @@ class CleanupPlan
                    inside_move: inside_move, return_type: return_type)
     end
   end
+
+  # ── Field pre-cleanup walk ────────────────────────────────────────
+  # Finds field-assignment nodes where the old field value must be freed
+  # before the new value is written. Records { zig_type, alloc } keyed by
+  # node.object_id so the transpiler can look them up without re-inferring.
+  #
+  # The alloc is derived from the target binding's CleanupPlan entry
+  # (already computed in step 1-3 of compute). If the binding uses :heap,
+  # the field cleanup also uses heapAlloc; otherwise frameAlloc.
+  def self.walk_field_pre_cleanups(body, bindings, field_pre_cleanups)
+    AST.walk_body(body) do |stmt|
+      next unless stmt.is_a?(AST::Assignment)
+      next unless stmt.name.is_a?(AST::GetField)
+      target_node = stmt.name.target
+
+      field_ti = stmt.name.type_info rescue nil
+      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+      next unless field_ti&.string? || field_ti&.list_collection?
+
+      # Determine alloc from the target binding when possible.
+      # For non-Identifier targets (e.g. arr[i].field), default to :frame.
+      alloc = if target_node.is_a?(AST::Identifier)
+        target_entry = bindings[target_node.name.to_s]
+        (target_entry && target_entry[:alloc] == :heap) ? :heap : :frame
+      else
+        :frame
+      end
+      field_pre_cleanups[stmt.object_id] = { zig_type: field_ti.zig_type, alloc: alloc }
+    end
+  end
+  private_class_method :walk_field_pre_cleanups
 end

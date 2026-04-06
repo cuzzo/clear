@@ -36,9 +36,10 @@ const STANDARD_STACK_SIZE = fm.STANDARD_STACK_SIZE;
 
 const cp = @import("control-plane.zig");
 
-/// Thread-local allocator for @pinned tasks.  Set by the scheduler
-/// before switching to a pinned task; cleared after the task yields.
-/// The Runtime reads this in heapAlloc() to avoid the global GPA.
+/// Thread-local allocator for @arena BG fibers.  Set by the scheduler
+/// before switching to a use_arena task; cleared after the task yields.
+/// The Runtime reads this in frameAlloc()/heapAlloc() to use the
+/// scheduler's thread-local arena instead of the global heap.
 pub threadlocal var __pinned_local_alloc: ?std.mem.Allocator = null;
 
 const linux = std.os.linux;
@@ -222,9 +223,9 @@ pub const Scheduler = struct {
     /// PartitionedStringMap to determine shard ownership.
     index: u32 = 0,
 
-    // Thread-local arena for @pinned tasks.  Pinned tasks use this
-    // instead of the global heap allocator — zero locks, zero contention.
-    // The arena is backed by the scheduler's own allocator (page-level).
+    // Thread-local arena for @arena BG fibers only (use_arena: true).
+    // Backed by the scheduler's allocator (c_allocator in production, GPA in debug).
+    // Not used by default — only when the CLEAR programmer opts in with @arena.
     local_arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
@@ -249,12 +250,9 @@ pub const Scheduler = struct {
             .current_task = null,
             .active_tasks = std.atomic.Value(usize).init(0),
             .shutdown_on_idle = true,
-            // Use c_allocator as backing for per-scheduler arenas.
-            // This avoids GPA mutex contention when pinned fibers allocate
-            // concurrently on different schedulers — libc malloc has per-thread arenas.
-            // Use the same allocator as the scheduler for arena backing.
-            // When USE_C_ALLOCATOR is set, this is c_allocator (per-thread arenas,
-            // zero contention). When GPA, it's GPA (with leak detection).
+            // local_arena is only used for @arena BG fibers (use_arena: true).
+            // Backed by the scheduler's allocator: c_allocator in production
+            // (per-thread arenas, no lock contention), GPA in debug (leak detection).
             .local_arena = std.heap.ArenaAllocator.init(allocator),
         };
 
@@ -632,9 +630,11 @@ pub const Scheduler = struct {
                 fc.__current_task_fn = @intFromPtr(task.user_fn);
                 fc.__current_task_size = task.base.size_class;
 
-                // For @pinned tasks, expose the thread-local arena so the
-                // Runtime's heapAlloc() can use it instead of the global GPA.
-                if (task.config.pinned) {
+                // For @arena BG blocks, expose the thread-local arena so the
+                // Runtime's frameAlloc() resolves to the lock-free local arena.
+                // Regular @pinned fibers (epoll affinity only) do NOT use this —
+                // they get normal frame arena + loop marks like any other fiber.
+                if (task.config.use_arena) {
                     __pinned_local_alloc = self.local_arena.allocator();
                 }
 

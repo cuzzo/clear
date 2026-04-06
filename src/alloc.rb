@@ -14,6 +14,7 @@ module AllocHelper
     return storage unless node.value.is_a?(AST::StructLit)
 
     node.type_info.location = :stack
+    node.storage            = :stack
     node.value.storage      = :stack
     :stack
   end
@@ -128,33 +129,46 @@ module AllocHelper
     end
   end
 
-  # Returns true if any frame allocation escapes the loop iteration into
-  # an outer-scope variable. If true, mark_per_iter must be false.
-  def loop_frame_escapes_to_outer?(stmts, outer_vars, preserve_vars: nil)
-    return false if stmts.nil?
+  # Collects AST nodes whose frame allocations escape the loop iteration
+  # into outer-scope variables. These nodes need heap promotion so loop
+  # marks can safely rewind without corrupting live data.
+  def collect_loop_escapes(stmts, outer_vars, preserve_vars: nil)
+    return [] if stmts.nil?
     stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.any? { |s| node_frame_escapes?(s, outer_vars, preserve_vars: preserve_vars) }
+    escapes = []
+    stmts.each { |s| collect_node_escapes(s, outer_vars, escapes, preserve_vars: preserve_vars) }
+    escapes
   end
 
-  def node_frame_escapes?(node, outer_vars, preserve_vars: nil)
-    return false if node.nil?
+  def collect_node_escapes(node, outer_vars, escapes, preserve_vars: nil)
+    return if node.nil?
     case node
     when AST::FuncCall
       if node.args&.first.is_a?(AST::Identifier) && outer_vars.include?(node.args.first.name)
-        return true if node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
-        fn = @fn_nodes&.[](node.name)
-        return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
+        if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+          # append(outer_list, value) — the value arg escapes into the container.
+          # Promote the value arg (index 1) and the container's backing (index 0).
+          escapes << { node: node, container: node.args.first.name, kind: :mutates_receiver }
+          return
+        end
+        if (node.respond_to?(:stdlib_allocates) && node.stdlib_allocates) ||
+           (@fn_nodes&.[](node.name)&.respond_to?(:uses_frame) && @fn_nodes[node.name].uses_frame)
+          escapes << { node: node, container: node.args.first.name, kind: :call_escapes }
+          return
+        end
       end
-      false
     when AST::MethodCall
       if node.respond_to?(:object) && node.object.is_a?(AST::Identifier) && outer_vars.include?(node.object.name)
-        return true if node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
-        fn = @fn_nodes&.[](node.name)
-        return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
+        if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+          escapes << { node: node, container: node.object.name, kind: :mutates_receiver }
+          return
+        end
+        if (node.respond_to?(:stdlib_allocates) && node.stdlib_allocates) ||
+           (@fn_nodes&.[](node.name)&.respond_to?(:uses_frame) && @fn_nodes[node.name].uses_frame)
+          escapes << { node: node, container: node.object.name, kind: :call_escapes }
+          return
+        end
       end
-      false
     when AST::Assignment
       target_name = case node.name
                     when AST::Identifier then node.name.name
@@ -163,37 +177,135 @@ module AllocHelper
                     when String then node.name
                     end
       if target_name && outer_vars.include?(target_name)
-        # Any assignment to an outer-scope collection (map put, list set)
-        # escapes frame data — the put dupes the key on the frame.
-        return true if node.name.is_a?(AST::GetIndex)
-        return true if node_allocates_frame?(node.value)
+        if node.name.is_a?(AST::GetIndex) || node_allocates_frame?(node.value)
+          escapes << { node: node, container: target_name, kind: :assignment }
+          return
+        end
       end
-      false
     when AST::BindExpr
       if node.name.is_a?(String) && outer_vars.include?(node.name) && node_allocates_frame?(node.value)
+        # MUTABLE string reassignment is handled by loopPreserveAndRewind
+        # (keeps data on frame, preserves across rewind). NOT heap-promoted
+        # because heap promotion would leak old values.
         if node.mode == :assign && preserve_vars
           ti = node.type_info
           ti = Type.new(ti) if ti && !ti.is_a?(Type)
           if ti&.string?
             preserve_vars << node.name
-            return false
+            return
           end
         end
-        return true
+        escapes << { node: node, container: node.name, kind: :reassignment }
+        return
       end
-      false
     when AST::WhileLoop
-      loop_frame_escapes_to_outer?(node.do_branch, outer_vars, preserve_vars: preserve_vars)
+      collect_loop_escapes(node.do_branch, outer_vars, preserve_vars: preserve_vars).each { |e| escapes << e }
     when AST::ForRange
-      loop_frame_escapes_to_outer?(node.body, outer_vars, preserve_vars: preserve_vars)
+      collect_loop_escapes(node.body, outer_vars, preserve_vars: preserve_vars).each { |e| escapes << e }
     when AST::IfStatement
-      loop_frame_escapes_to_outer?(node.then_branch, outer_vars, preserve_vars: preserve_vars) ||
-        loop_frame_escapes_to_outer?(node.else_branch, outer_vars, preserve_vars: preserve_vars)
+      collect_loop_escapes(node.then_branch, outer_vars, preserve_vars: preserve_vars).each { |e| escapes << e }
+      collect_loop_escapes(node.else_branch, outer_vars, preserve_vars: preserve_vars).each { |e| escapes << e }
     when AST::MatchStatement
-      node.cases.any? { |c| loop_frame_escapes_to_outer?(c[:body], outer_vars, preserve_vars: preserve_vars) } ||
-        loop_frame_escapes_to_outer?(node.default_case, outer_vars, preserve_vars: preserve_vars)
-    else
-      false
+      node.cases.each { |c| collect_loop_escapes(c[:body], outer_vars, preserve_vars: preserve_vars).each { |e| escapes << e } }
+      collect_loop_escapes(node.default_case, outer_vars, preserve_vars: preserve_vars).each { |e| escapes << e }
+    end
+  end
+
+  # Promote frame-escaping loop data to heap. For each escape action,
+  # set the container and escaping expression storage to :heap.
+  # This ensures {alloc} resolves to heapAlloc() in the transpiler
+  # for both the container backing and the escaping values.
+  def promote_loop_escapes!(escape_actions)
+    return if escape_actions.empty?
+
+    escape_actions.each do |action|
+      call_node = action[:node]
+      case action[:kind]
+      when :mutates_receiver
+        # keys.append(value) or append(keys, value)
+        # Promote the container's AST node so {alloc} for backing uses heapAlloc.
+        if call_node.is_a?(AST::MethodCall)
+          promote_expr_to_heap!(call_node.object)
+          promote_expr_to_heap!(call_node.args[0])
+        elsif call_node.is_a?(AST::FuncCall)
+          promote_expr_to_heap!(call_node.args[0])
+          promote_expr_to_heap!(call_node.args[1])
+        end
+      when :call_escapes
+        # stdlib_allocates or uses_frame call on outer container
+        if call_node.is_a?(AST::MethodCall)
+          promote_expr_to_heap!(call_node.object)
+        elsif call_node.is_a?(AST::FuncCall)
+          promote_expr_to_heap!(call_node.args&.first)
+        end
+      when :assignment
+        # outer_map[key] = value or outer.field = value
+        promote_expr_to_heap!(call_node.value) if call_node.respond_to?(:value)
+        if call_node.name.is_a?(AST::GetIndex) && call_node.name.index
+          promote_expr_to_heap!(call_node.name.index)
+        end
+      when :reassignment
+        # MUTABLE string reassignment: handled by loopPreserveAndRewind, NOT heap-promoted.
+        # Heap promotion would leak old values each iteration (loop mark doesn't free heap).
+        nil
+      end
+    end
+  end
+
+  # Set an expression node's storage to :heap so {alloc} resolves to heapAlloc().
+  # Only promotes types where storage controls the ALLOCATOR (strings, collections),
+  # NOT types where storage changes the Zig TYPE (structs, unions -> *T pointer).
+  #
+  # Special case: when node is a FuncCall/MethodCall returning a frame string
+  # (return_provenance != :heap), setting storage alone has no effect because
+  # the call doesn't use {alloc}. Instead mark heap_dupe_result = true so the
+  # transpiler wraps the call in rt.heapAlloc().dupe(u8, result).
+  #
+  # For StructLit: the struct itself is a value type (copied into the container),
+  # but String/collection FIELDS inside it are pointers to the frame arena.
+  # When the struct escapes a loop iteration, those field pointers are invalidated
+  # by the loop mark rewind. Recurse into fields and promote them.
+  def promote_expr_to_heap!(node)
+    return unless node
+    # StructLit: value type, don't change struct's own storage.
+    # Recurse into String/collection fields so pointer fields survive loop rewind.
+    if node.is_a?(AST::StructLit)
+      node.fields.each_value { |v| promote_expr_to_heap!(v) }
+      return
+    end
+    return unless node.respond_to?(:storage=)
+    ti = node.type_info rescue nil
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    # Strings: storage controls which allocator std.mem.concat / dupe uses.
+    # Collections (@list, @pool, HashMap): storage controls backing allocator.
+    # Value types (Int64, Bool, enums, plain unions/structs): copied by value
+    # into the container - no allocator involved, don't change storage.
+    if ti&.string? || ti&.list_collection? || ti&.map?
+      # node.storage = :heap uses @storage_override (node-local) so it does NOT
+      # mutate the shared Type object (e.g. STRING_TYPE, or function return types).
+      node.storage = :heap
+      # For Identifier containers: update the DECLARATION node's type_info so
+      # CleanupPlan.classify_binding sees heap_provenance? = true and emits heapAlloc().
+      # FuncCall/MethodCall type_infos are shared (function return type), so we skip
+      # them — mutating shared Types would corrupt function signatures.
+      if node.is_a?(AST::Identifier)
+        scope = lookup_scope_for(node.name) rescue nil
+        decl_node = scope&.locals&.dig(node.name)&.reg
+        decl_ti = decl_node&.type_info rescue nil
+        if decl_ti.is_a?(Type)
+          decl_ti.provenance = :heap
+          decl_ti.cleanup_alloc = :heap
+        end
+      end
+      # If the node is a call expression returning a frame string, the return
+      # value is in the caller's frame and will be destroyed by the next loop
+      # mark rewind. Heap-dupe the result at the call site instead.
+      if (node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)) && ti&.string?
+        callee_fn = @fn_nodes&.[](node.name)
+        if callee_fn && callee_fn.return_provenance != :heap
+          node.heap_dupe_result = true
+        end
+      end
     end
   end
 end

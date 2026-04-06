@@ -184,7 +184,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "does NOT emit loop marks when loop body has no frame allocations" do
+    it "emits loop marks when loop appends to outer list (container promoted to heap)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE all: Float64[]@list = [];
@@ -197,7 +197,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).not_to include("saveLoopMark")
+      # append has allocates: true -> loop marks enabled, container promoted to heap
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to include("heapAlloc")
     end
   end
 

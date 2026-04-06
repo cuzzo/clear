@@ -20,6 +20,9 @@ pub const CheatArena = struct {
     // Debug-only: high-water mark for frame arena usage. Compiled away in ReleaseFast.
     peak_bytes: if (is_debug) usize else void = if (is_debug) 0 else {},
 
+    // child_allocator: used for all allocations — ArrayList metadata, data blocks,
+    // and large objects. In production, this is c_allocator (libc malloc), which
+    // supports jemalloc/tcmalloc via LD_PRELOAD for page-return behavior.
     child_allocator: std.mem.Allocator,
 
     // An optional pre-allocated buffer (e.g. the 4KB Frame)

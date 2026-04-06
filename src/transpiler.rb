@@ -997,10 +997,15 @@ private
           # The annotator sets field_pre_cleanup with the Zig type when the
           # field holds heap-backed data (list, etc.) that would leak.
           rt_name = @do_rt_name || "rt"
-          pre_cleanup = if node.field_pre_cleanup
-            "CheatLib.cleanup(#{node.field_pre_cleanup}, #{rt_name}.frameAlloc(), &#{target}.#{field});\n"
-          else
-            ""
+          pre_cleanup = begin
+            fn_name = current_tp_ctx&.fn_name
+            fpc = @cleanup_plans&.dig(fn_name)&.lookup_field_pre_cleanup(node.object_id)
+            if fpc
+              alloc_call = fpc[:alloc] == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+              "CheatLib.cleanup(#{fpc[:zig_type]}, #{alloc_call}, &#{target}.#{field});\n"
+            else
+              ""
+            end
           end
           code = "#{pre_cleanup}#{target}.#{field} = #{value};"
           return move_logic.empty? ? code : "#{code}\n#{move_logic}"
@@ -1475,8 +1480,6 @@ private
         mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
         if node.loop_preserve_vars&.any?
-          # Loop with MUTABLE string vars: preserve values at loop boundary, then rewind.
-          # No defer restoreLoopMark — the preserve-and-rewind IS the rewind.
           preserve_stmts = node.loop_preserve_vars.map { |v|
             "#{zig_safe_name(v)} = try #{rt_ref}.loopPreserveAndRewind(#{mark_var}, #{zig_safe_name(v)});"
           }.join("\n")
@@ -2262,6 +2265,13 @@ private
         else
           call = "#{fn_zig}(#{args.join(', ')})"
           can_fail ? "try #{call}" : call
+        end
+
+        # Frame-string escape: callee returns via preserveAndRewind (into caller's frame).
+        # If the result is stored in a container that outlives the loop iteration,
+        # the loop mark rewind would destroy it. Heap-dupe the result at the call site.
+        if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
+          return "try #{rt_name}.heapAlloc().dupe(u8, #{call_code})"
         end
 
         # Heap-promoted temp hoisting: CleanupPlan determines which calls need
@@ -3055,11 +3065,16 @@ private
       end
       target_storage = if force_heap
         :heap
+      elsif node.respond_to?(:storage) && node.storage == :heap
+        # Escape promotion: annotator explicitly set this node to heap.
+        :heap
       elsif node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
         node.object.storage
-      elsif !node.is_a?(AST::MethodCall) && first_arg_type&.list_collection?
-        # For list operations (append, etc.), use the list arg's storage,
-        # not the call result's storage (which is always :stack for Void returns).
+      elsif !node.is_a?(AST::MethodCall) && first_arg_type&.list_collection? &&
+            node.respond_to?(:mutates_receiver) && node.mutates_receiver
+        # For list mutations (function-form append(list, val)), use the list arg's
+        # storage. Read-only list operations (join, etc.) fall through to node.storage
+        # so they produce frame-allocated output, not heap-allocated.
         node.args&.first&.respond_to?(:storage) ? (node.args.first.storage || :stack) : :stack
       else
         node.storage
@@ -3382,11 +3397,8 @@ private
   # Exception: when the BG block captures a resource (TCP fd), spawn on
   # the accepting scheduler to keep epoll fd registration consistent.
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
-    # TCP handler fibers need large stacks: socketRead + deep RESP parsing +
-    # anytype monomorphization inflate the call chain beyond 16KB Standard.
-    resource_tier = node.captures_resource ? :large : nil
-    effective_tier = [node.computed_stack_tier, resource_tier].compact.max_by { |t| STACK_SIZE_ZIG_VARIANT.fetch(t, "Standard") == "Large" ? 1 : 0 }
-    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned, computed_tier: effective_tier)
+    effective_tier = node.computed_stack_tier
+    task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned, use_arena: !!node.arena_mode, computed_tier: effective_tier)
     if node.pinned
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
@@ -3411,7 +3423,7 @@ private
   # Tier ordering for max() comparison
   TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
 
-  def task_config_zig(stack_size, pinned: false, computed_tier: nil)
+  def task_config_zig(stack_size, pinned: false, use_arena: false, computed_tier: nil)
     default = @default_stack_size || "Standard"
     if stack_size
       # User explicitly chose a size - honor it
@@ -3424,11 +3436,10 @@ private
     else
       variant = default
     end
-    if pinned
-      ".{ .stack_size = .#{variant}, .pinned = true }"
-    else
-      ".{ .stack_size = .#{variant} }"
-    end
+    fields = ".stack_size = .#{variant}"
+    fields += ", .pinned = true" if pinned
+    fields += ", .use_arena = true" if use_arena
+    ".{ #{fields} }"
   end
 
   # ── Test Framework Transpilation ─────────────────────────────────

@@ -274,16 +274,23 @@ def run_server_bench(dir)
 
   threads = ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
   threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
-  # No jemalloc for server benchmarks — memory comparison is the focus,
-  # and jemalloc can conflict with io_uring/epoll in long-running servers.
+
+  jemalloc = [
+    "/usr/lib/x86_64-linux-gnu/libjemalloc.so.2",
+    "/usr/lib/x86_64-linux-gnu/libjemalloc.so.1",
+    "/usr/local/lib/libjemalloc.so.2",
+  ].find { |p| File.exist?(p) }
 
   # 2. Run each server with the shared client
   results = {}
 
+  clear_env = { "CLEAR_THREADS" => threads }
+  clear_env["LD_PRELOAD"] = jemalloc if jemalloc
+
   servers = []
   servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: {} } if has_rust && File.exist?("#{dir}/bench_rust")
   servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: {} } if has_go && File.exist?("#{dir}/server_go")
-  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: { "CLEAR_THREADS" => threads } } if has_clear
+  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: clear_env } if has_clear
 
   servers.each do |srv|
     # Clean data directory

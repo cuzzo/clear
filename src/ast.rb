@@ -53,7 +53,6 @@ module AST
     attr_accessor :container_borrow     # true when value is borrowed from container (map/list/pool access)
     attr_accessor :needs_mut_ref        # true when GetIndex must emit pointer access (mutation through indexed element)
     attr_accessor :target_is_list_field # true when value targets a struct/union @list field (skip .items conversion)
-    attr_accessor :field_pre_cleanup    # Zig type string — emit CheatLib.cleanup of old field value before assignment
     attr_accessor :collection_return    # true when return value is a collection needing escape promotion
     attr_accessor :slot_size
     attr_accessor :resource_close_zig   # set by annotator on resource declarations
@@ -230,11 +229,17 @@ module AST
     end
 
     def storage
-      @type_object&.location
+      @storage_override || @type_object&.location
     end
 
     def storage=(val)
-      @type_object.location = val
+      # Use a node-local override rather than mutating @type_object.location.
+      # @type_object may be a shared Type (e.g. STRING_TYPE from std_lib, or the
+      # function return type from FunctionSignature). Mutating it would corrupt every
+      # other AST node that shares the same Type object. The override is node-local
+      # so promote_expr_to_heap! can mark individual call-site nodes as heap without
+      # touching the shared type.
+      @storage_override = val
     end
 
 
@@ -326,6 +331,7 @@ module AST
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
+    attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     def wildcard?; false end
     def name; self[:name].to_s end
   end
@@ -338,6 +344,7 @@ module AST
     attr_accessor :extern_call       # true when calling a native EXTERN method
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
+    attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     def wildcard?; false end
     def name; self[:name].to_s end
   end
