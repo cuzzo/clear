@@ -381,3 +381,8 @@ source s> map...
 MUTABLE s: Stream = db.all s> ... ; -- OKAY
 MUTABLE s: Stream(10) = db.all s> ... ; -- Compiler error, `... returns a single Stream, not a Vector of Streams`.
 ```
+
+##
+
+See [I'm too dumb to open a file in Zig](https://www.openmymind.net/Im-Too-Dumb-For-Zigs-New-IO-Interface/) - for common problems of why being a genius doens't scale - even for something as simple as reading a text file...
+

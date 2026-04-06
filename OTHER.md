@@ -1,3 +1,0 @@
-See [I'm too dumb to open a file in Zig](https://www.openmymind.net/Im-Too-Dumb-For-Zigs-New-IO-Interface/) - for common problems of why being a genius doens't scale - even for something as simple as reading a text file...
-
-
