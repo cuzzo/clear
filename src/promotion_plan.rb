@@ -125,36 +125,37 @@ class PromotionPlan
       next unless val
 
       if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
-        # Walk struct/union fields: find escaped variables to promote per-variable.
+        # Walk struct/union fields: classify by provenance.
         val.fields.each do |fname, fval|
-          # CopyNode fields already own their data (heap-duped by the transpiler).
-          # Mark as handled so compute_struct_promote skips them.
-          if fval.is_a?(AST::CopyNode)
+          fti = fval.type_info
+          fti = Type.new(fti) if fti && !fti.is_a?(Type)
+
+          # Heap-provenance fields already own their data (COPY, heap call result).
+          # Rodata fields are static and never need promotion.
+          # Both are "handled" — compute_struct_promote skips them.
+          if fti&.heap_provenance? || fti&.rodata_provenance?
             handled_fields << fname.to_s
             next
           end
 
           next unless fval.is_a?(AST::Identifier)
-          ti = fval.type_info
-          ti = Type.new(ti) if ti && !ti.is_a?(Type)
-          # Only promote variables marked escaped by the annotator.
-          # This ensures we only promote locally-created frame data,
-          # not function call results or TAKES parameters.
-          next unless ti&.escaped_return
+          # Frame-provenance variables that escape need promotion.
+          next unless fti&.escaped_return
 
-          var_promotes << { var: fval.name, zig_type: ti.zig_type }
+          var_promotes << { var: fval.name, zig_type: fti.zig_type }
           suppress_defers << fval.name
           handled_fields << fname.to_s
         end
 
-        # Union constructor with frame-allocated heap data: promote so it
+        # Union constructor with frame-allocated data: promote so it
         # survives frame rewind. Per-return-node: only this specific return
-        # gets promoteFields. Skip when fields are already heap-owned.
+        # gets promoteFields. Skip when all fields are heap/rodata.
         if var_promotes.empty?
           needs_promote = val.fields.any? do |_, fval|
-            next false if fval.is_a?(AST::CopyNode) || fval.is_a?(AST::Literal)
             fti = fval.type_info
             fti = Type.new(fti) if fti && !fti.is_a?(Type)
+            # Only frame-provenance data needs promotion
+            next false if fti&.heap_provenance? || fti&.rodata_provenance?
             fti&.string? || fti&.array? || fti&.collection?
           end
           if needs_promote
@@ -173,7 +174,10 @@ class PromotionPlan
         # Direct variable return.
         ti = val.type_info
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
-        if ti&.escaped_return && !ti.string?
+        # Frame-provenance data escaping via return needs promotion.
+        # Heap-provenance data is already promoted; rodata never needs it.
+        needs_escape = ti&.escaped_return && !ti&.heap_provenance? && !ti.string?
+        if needs_escape
           if ti.list_collection? || ti.map?
             # Collections: promote in-place (they own their allocator/buffer)
             var_promotes << { var: val.name, zig_type: ti.zig_type }
