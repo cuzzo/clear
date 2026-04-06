@@ -191,7 +191,7 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 
 The goal of CLEAR is:
 
-  1. To be able to run a REPL / VM, to live-debug like you can in Ruby, to write working code *faster* than you can even in Ruby/Python.
+  1. To be able to run a REPL / VM, to live-debug like you can in Ruby, to write working code *faster* than you can even in scripting languages.
   2. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
   3. For code, even at the highest-level of optimization, to be easily understandable.
   4. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
