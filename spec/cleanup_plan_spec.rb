@@ -462,24 +462,34 @@ RSpec.describe CleanupPlan do
   end
 
   # =========================================================================
-  # classify_heap_temp class method
+  # HPT classification (tested through heap_temps entries)
   # =========================================================================
-  describe ".classify_heap_temp" do
-    it "classifies string" do
-      entry = CleanupPlan.classify_heap_temp(Type.new(:String), ->(_) { nil })
-      expect(entry[:kind]).to eq(:heap_string)
-      expect(entry[:alloc]).to eq(:heap)
+  describe "HPT classification via heap_temps" do
+    it "classifies heap string sub-expression" do
+      plan, _, _ = hpt_for(<<~CLEAR, "main")
+        FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
+        FN consume(s: String) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+            consume(makeStr!());
+            RETURN;
+        END
+      CLEAR
+      entries = plan.heap_temps.values
+      expect(entries.size).to eq(1)
+      expect(entries.first[:kind]).to eq(:heap_string)
+      expect(entries.first[:alloc]).to eq(:heap)
     end
 
-    it "classifies slice" do
-      ti = Type.new(:"Int64[]")
-      entry = CleanupPlan.classify_heap_temp(ti, ->(_) { nil })
-      expect(entry[:kind]).to eq(:heap_slice)
-    end
-
-    it "returns nil for primitive" do
-      entry = CleanupPlan.classify_heap_temp(Type.new(:Int64), ->(_) { nil })
-      expect(entry).to be_nil
+    it "does not create entry for primitive return" do
+      plan, _, _ = hpt_for(<<~CLEAR, "main")
+        FN getNum() RETURNS Int64 -> RETURN 42_i64; END
+        FN consume(n: Int64) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+            consume(getNum());
+            RETURN;
+        END
+      CLEAR
+      expect(plan.heap_temps.size).to eq(0)
     end
   end
 

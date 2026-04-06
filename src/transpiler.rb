@@ -818,7 +818,6 @@ private
           # Suppress HPT hoisting for the inner call — the OR catch or the
           # VarDecl itself handles cleanup. Without this, HPT wraps the call
           # in try (unwrapping the error), then OR adds catch (expects error).
-          current_tp_ctx&.bind_value_node = rhs_unwrapped
           visit(node.value)
         elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
           # T[N]@list: pre-allocate N slots. Allocator from CleanupPlan.
@@ -851,9 +850,7 @@ private
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
-        current_tp_ctx&.bind_value_node = node.value
         val = visit(node.value)
-        current_tp_ctx&.bind_value_node = nil
         val
       end
 
@@ -901,9 +898,7 @@ private
       else
         # Transpile as reassignment — clean up old value for non-Copy types.
         safe = zig_safe_name(node.name)
-        current_tp_ctx&.bind_value_node = node.value
         value_str = visit(node.value)
-        current_tp_ctx&.bind_value_node = nil
         move_logic = emit_move_suppression(node.value)
 
         fn_name = current_tp_ctx&.fn_name
@@ -974,9 +969,7 @@ private
 
           target = visit(node.name.target)
           field  = node.name.field
-          current_tp_ctx&.bind_value_node = node.value
           value  = visit(node.value)
-          current_tp_ctx&.bind_value_node = nil
           move_logic = emit_move_suppression(node.value)
           # Pre-cleanup: free old field value before overwriting with new one.
           # The annotator sets field_pre_cleanup with the Zig type when the
@@ -999,9 +992,7 @@ private
              # Auto-deref Arc/Rc-wrapped maps
              map_ref = "#{map_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
              key_ref  = visit(node.name.index)
-             current_tp_ctx&.bind_value_node = node.value
              val_ref  = visit(node.value)
-             current_tp_ctx&.bind_value_node = nil
              rt_name  = @do_rt_name || "rt"
 
              if map_ft.numeric_map?
@@ -2275,9 +2266,7 @@ private
           suppress = "#{zig_safe_name(ident.name)}_moved = true;\n#{suppress}"
         end
       end
-      # Set bind_value_node so heap_promoted_call hoisting is skipped -
       # the return transfers ownership to the caller, no temp needed.
-      current_tp_ctx&.bind_value_node = node.value
       val_code = if node.value.nil?
         ""
       elsif node.value.is_a?(AST::Identifier) && node.value.type_info&.frame? && node.value.type_info&.struct?
@@ -2285,7 +2274,6 @@ private
       else
         visit(node.value)
       end
-      current_tp_ctx&.bind_value_node = nil
 
       # 3. Escape promotion — driven by PromotionPlan (Pass C).
       plan = @promotion_plans&.dig(current_tp_ctx&.fn_name)
@@ -3865,13 +3853,7 @@ private
           ti = ti.payload_type if ti.error_union? && ti.payload_type
           ti.provenance = :heap
           zig_t = ti.zig_type
-          # Read classification from plan entry (computed by walk_heap_temps).
-          # Fall back to inline classify for temps not from the plan (e.g., OR wrappers).
           entry = t[:plan_entry]
-          unless entry
-            schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-            entry = CleanupPlan.classify_heap_temp(ti, schema_lookup)
-          end
           if entry
             proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, nil, false)
             cleanup = emit_cleanup_from_entry(t[:var], entry, proxy)

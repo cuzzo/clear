@@ -344,9 +344,8 @@ class CleanupPlan
     (bindings.empty? && heap_temps.empty?) ? EMPTY : new(bindings: bindings, heap_temps: heap_temps)
   end
 
-  # Classify a heap-promoted temporary (generated during transpilation,
-  # not during annotation). Uses the same classification logic as the
-  # main plan but for synthetically created entries.
+  # Classify a heap-promoted temporary. Called internally by scan_for_hpt
+  # during the walk_heap_temps pass. Not part of the public API.
   def self.classify_heap_temp(ti, schema_lookup)
     return nil unless ti
     ti = Type.new(ti) if !ti.is_a?(Type)
@@ -381,6 +380,7 @@ class CleanupPlan
 
     nil
   end
+  private_class_method :classify_heap_temp
 
   private
 
