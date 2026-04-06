@@ -211,6 +211,19 @@ private
     # which alias shared backing data, and what allocator to use.
     compute_ownership!(node)
 
+    # PASS 10: Copy computed metadata to FunctionSignature objects in scope.
+    # This allows callers to read needs_rt, can_fail, return_provenance from
+    # the signature without needing @fn_nodes.
+    @fn_nodes.each do |name, fn|
+      sig = fn.full_type
+      next unless sig.is_a?(FunctionSignature)
+      sig.needs_rt = fn.needs_rt
+      sig.can_fail = fn.can_fail
+      sig.return_provenance = fn.return_provenance
+      sig.effects = fn.effects
+      sig.stack_tier = fn.stack_tier
+    end
+
     # Determine Program Result Type (Type of the last statement)
     if node.statements.any?
       node.full_type = node.statements.last.full_type

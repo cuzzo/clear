@@ -75,12 +75,16 @@ class ZigTranspiler
     @needs_safety_import = false
     @fn_needs_rt = {}
     @fn_can_fail = {}
-    @fn_effects = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
-      @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
-      @fn_effects[stmt.name] = stmt.effects || Set.new
+      sig = stmt.full_type
+      if sig.is_a?(FunctionSignature)
+        @fn_needs_rt[stmt.name] = sig.needs_rt.nil? ? true : sig.needs_rt
+        @fn_can_fail[stmt.name] = sig.can_fail.nil? ? true : sig.can_fail
+      else
+        @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
+        @fn_can_fail[stmt.name] = stmt.can_fail.nil? ? true : stmt.can_fail
+      end
     end
     body = visit(ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
@@ -290,8 +294,11 @@ private
             @fn_can_fail  ||= {}
             mod.ast.statements.each do |stmt|
               next unless stmt.is_a?(AST::FunctionDef)
-              @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
-              @fn_can_fail[stmt.name]  = stmt.can_fail.nil?  ? true : stmt.can_fail
+              sig = stmt.full_type
+              nr = sig.is_a?(FunctionSignature) ? sig.needs_rt : stmt.needs_rt
+              cf = sig.is_a?(FunctionSignature) ? sig.can_fail : stmt.can_fail
+              @fn_needs_rt[stmt.name] = nr.nil? ? true : nr
+              @fn_can_fail[stmt.name]  = cf.nil? ? true : cf
             end
           end
         end
@@ -316,8 +323,11 @@ private
           @fn_can_fail  ||= {}
           mod.ast.statements.each do |stmt|
             next unless stmt.is_a?(AST::FunctionDef)
-            @fn_needs_rt[stmt.name] = stmt.needs_rt.nil? ? true : stmt.needs_rt
-            @fn_can_fail[stmt.name]  = stmt.can_fail.nil?  ? true : stmt.can_fail
+            sig = stmt.full_type
+            nr = sig.is_a?(FunctionSignature) ? sig.needs_rt : stmt.needs_rt
+            cf = sig.is_a?(FunctionSignature) ? sig.can_fail : stmt.can_fail
+            @fn_needs_rt[stmt.name] = nr.nil? ? true : nr
+            @fn_can_fail[stmt.name]  = cf.nil? ? true : cf
           end
         end
 
