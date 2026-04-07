@@ -669,3 +669,49 @@ module AST
   CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED]
 end
 
+# ==========================================
+# MIR — Mid-level IR nodes
+# ==========================================
+# Inserted into AST statement lists by the MIR pass (future Phase 3).
+# The transpiler handles these alongside AST nodes via `when MIR::Drop`, etc.
+# Each node carries pre-computed decisions so the transpiler is purely mechanical.
+module MIR
+  # Drop: cleanup instruction inserted after variable declarations or before
+  # field overwrites. Emits Zig `defer` cleanup code (or inline cleanup for
+  # field pre-cleanup). Replaces CleanupPlan lookups in transpiler.
+  #
+  # kind:              cleanup template symbol (matches emit_cleanup_from_entry cases):
+  #                    :resource, :list, :list_with_elem_cleanup, :string_map, :numeric_map,
+  #                    :pool, :set, :rc, :locked, :write_locked, :heap_string, :heap_slice,
+  #                    :heap_union, :heap_struct, :heap_struct_plain, :struct_with_cleanup_fields,
+  #                    :struct_rc, :array_with_struct_strings, :non_copy_union, :takes_union,
+  #                    :takes_string, :takes_slice
+  # alloc:             :heap or :frame — which allocator owns this value
+  # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
+  # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
+  Drop = Struct.new(:token, :name, :kind, :alloc, :has_moved_guard, :type_info,
+                     :resource_close_zig) do
+    include AST::Locatable
+    def needs_cleanup; true; end
+  end
+
+  # Promote: escape promotion inserted before return statements.
+  # Emits frame->heap copy/promotion code. Replaces PromotionPlan lookups in transpiler.
+  #
+  # strategy:  :list     — promoteList (dupe backing buffer to heap)
+  #            :string_map — swap allocator to heapAlloc
+  #            :fields   — promoteFields (recursive field promotion)
+  #            :generic  — promote (single value deep copy)
+  Promote = Struct.new(:token, :name, :zig_type, :strategy, :fields) do
+    include AST::Locatable
+    # fields: Set of field names for :fields strategy (nil = all fields)
+  end
+
+  # SuppressCleanup: move suppression marker inserted at consumption points
+  # (TAKES calls, GIVE, return escapes). Emits `x_moved = true;` to prevent
+  # double-free via the defer guard emitted by Drop.
+  SuppressCleanup = Struct.new(:token, :name) do
+    include AST::Locatable
+  end
+end
+
