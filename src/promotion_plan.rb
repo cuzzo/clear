@@ -114,6 +114,14 @@ class PromotionPlan
     return_nodes = collect_returns(fn_node.body)
     return EMPTY if return_nodes.empty?
 
+    # Phase 0: downgrade heap-provenance FuncCall sub-expressions in return
+    # contexts so CleanupPlan.walk_heap_temps does not create suppress_non_string
+    # HPTs for them. They flow inline and are owned by the returned value.
+    return_nodes.each do |ret_node|
+      next unless ret_node.value
+      scan_for_hpt_downgrade(ret_node.value, schema_lookup, ret_node)
+    end
+
     var_promotes = []
     suppress_defers = []
     handled_fields = Set.new
@@ -228,24 +236,8 @@ class PromotionPlan
   end
 
   def self.collect_returns(body)
-    return [] unless body
-    nodes = body.is_a?(Array) ? body : [body]
     returns = []
-    nodes.each do |node|
-      case node
-      when AST::ReturnNode
-        returns << node
-      when AST::IfStatement
-        returns.concat(collect_returns(node.then_branch))
-        returns.concat(collect_returns(node.else_branch))
-      when AST::MatchStatement
-        node.cases&.each { |c| returns.concat(collect_returns(c[:body])) }
-        returns.concat(collect_returns(node.default_case)) if node.default_case
-      else
-        # Walk .body for WhileLoop, ForRange, DoBlock, WithBlock, etc.
-        returns.concat(collect_returns(node.body)) if node.respond_to?(:body) && node.body
-      end
-    end
+    AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     returns
   end
 
@@ -271,6 +263,42 @@ class PromotionPlan
     # Strip error union (!) and optional (?) prefixes - promote operates on the payload type.
     type.resolved.to_s.sub(/^[!?]+/, '')
   end
+
+  # Phase 0 helper: clear heap provenance on non-direct HPT sub-expressions
+  # inside a return expression so CleanupPlan does not create suppress_non_string HPTs.
+  def self.scan_for_hpt_downgrade(node, schema_lookup, ret_node)
+    return unless node
+    case node
+    when AST::FuncCall, AST::MethodCall
+      ti = node.type_info rescue nil
+      ti = ti.is_a?(Type) ? ti : nil
+      if ti&.heap_provenance? && !node.was_moved
+        is_direct = ret_node.value.equal?(node)
+        ti.provenance = nil unless is_direct
+      end
+      node.args.each { |arg| scan_for_hpt_downgrade(arg, schema_lookup, ret_node) }
+      scan_for_hpt_downgrade(node.object, schema_lookup, ret_node) if node.is_a?(AST::MethodCall)
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.each_value { |v| scan_for_hpt_downgrade(v, schema_lookup, ret_node) }
+    when AST::ListLit
+      node.items.each { |v| scan_for_hpt_downgrade(v, schema_lookup, ret_node) }
+    when AST::BinaryOp
+      scan_for_hpt_downgrade(node.left, schema_lookup, ret_node)
+      scan_for_hpt_downgrade(node.right, schema_lookup, ret_node)
+    when AST::UnaryOp
+      scan_for_hpt_downgrade(node.right, schema_lookup, ret_node)
+    when AST::GetField
+      scan_for_hpt_downgrade(node.target, schema_lookup, ret_node)
+    when AST::GetIndex
+      scan_for_hpt_downgrade(node.target, schema_lookup, ret_node)
+      scan_for_hpt_downgrade(node.index, schema_lookup, ret_node)
+    when AST::CopyNode, AST::MoveNode
+      scan_for_hpt_downgrade(node.value, schema_lookup, ret_node)
+    when AST::Cast
+      scan_for_hpt_downgrade(node.value, schema_lookup, ret_node)
+    end
+  end
+  private_class_method :scan_for_hpt_downgrade
 end
 
 # =========================================================================
@@ -764,11 +792,9 @@ class CleanupPlan
                        stmt_node: stmt, is_bind_value: true, inside_move: false, return_type: nil)
         end
       when AST::ReturnNode
-        next unless stmt.value
-        ret_ti = stmt.value.type_info rescue nil
-        ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
-        scan_for_hpt(stmt.value, schema_lookup, heap_temps,
-                     stmt_node: stmt, is_bind_value: false, inside_move: false, return_type: ret_ti)
+        # scan_for_hpt_downgrade (Phase 0 of PromotionPlan.compute) already cleared
+        # heap provenance on all non-direct HPT sub-expressions. Skip here.
+        next
       when AST::Assignment
         scan_for_hpt(stmt.value, schema_lookup, heap_temps,
                      stmt_node: stmt, is_bind_value: true, inside_move: false, return_type: nil)
@@ -827,12 +853,37 @@ class CleanupPlan
       scan_for_hpt(node.right, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
                    inside_move: inside_move, return_type: return_type)
-    when AST::StructLit
+    when AST::StructLit, AST::UnionVariantLit
       node.fields.each_value do |v|
         scan_for_hpt(v, schema_lookup, heap_temps,
                      stmt_node: stmt_node, is_bind_value: false,
                      inside_move: inside_move, return_type: return_type)
       end
+    when AST::ListLit
+      node.items.each do |v|
+        scan_for_hpt(v, schema_lookup, heap_temps,
+                     stmt_node: stmt_node, is_bind_value: false,
+                     inside_move: inside_move, return_type: return_type)
+      end
+    when AST::GetField
+      scan_for_hpt(node.target, schema_lookup, heap_temps,
+                   stmt_node: stmt_node, is_bind_value: false,
+                   inside_move: inside_move, return_type: return_type)
+    when AST::GetIndex
+      scan_for_hpt(node.target, schema_lookup, heap_temps,
+                   stmt_node: stmt_node, is_bind_value: false,
+                   inside_move: inside_move, return_type: return_type)
+      scan_for_hpt(node.index, schema_lookup, heap_temps,
+                   stmt_node: stmt_node, is_bind_value: false,
+                   inside_move: inside_move, return_type: return_type)
+    when AST::UnaryOp
+      scan_for_hpt(node.right, schema_lookup, heap_temps,
+                   stmt_node: stmt_node, is_bind_value: false,
+                   inside_move: inside_move, return_type: return_type)
+    when AST::Cast
+      scan_for_hpt(node.value, schema_lookup, heap_temps,
+                   stmt_node: stmt_node, is_bind_value: false,
+                   inside_move: inside_move, return_type: return_type)
     when AST::CopyNode
       scan_for_hpt(node.value, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
