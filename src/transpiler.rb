@@ -3817,12 +3817,19 @@ private
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
         return_handling = temps.filter_map { |t| t[:plan_entry]&.dig(:return_handling) }.first
-        if return_handling == :dupe_string
-          # HPT arg in a String-returning function: the return string may borrow
-          # from inside the HPT's heap data. Dupe to frame before HPT cleanup runs.
-          rt_name = @do_rt_name || "rt"
+        rt_name = @do_rt_name || "rt"
+        case return_handling
+        when :dupe_string
+          # Return string may borrow from inside HPT heap data. Dupe to frame.
           ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
           code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
+        when :promote_return
+          # Return value may alias into HPT heap data (e.g. a union copy with the
+          # same string ptr). Promote (deep-copy heap fields) before HPT cleanup.
+          raw_type = temps.filter_map { |t| t[:plan_entry]&.dig(:promote_return_type) }.compact.first
+          zig_t = raw_type ? transpile_type(raw_type) : "UNKNOWN"
+          ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
+          code = "#{preamble}\nvar __hpt_ret: #{zig_t} = #{ret_expr};\ntry CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);\nreturn __hpt_ret;"
         else
           code = "#{preamble}\n#{code}"
         end

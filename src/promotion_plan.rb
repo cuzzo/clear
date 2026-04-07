@@ -821,13 +821,34 @@ class CleanupPlan
           classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
           entry = classify_heap_temp(classify_ti, schema_lookup)
           if entry
-            # In a String-returning function, the return string may borrow from
-            # inside this HPT's heap data (e.g. getStr(makeVal!()) returns the
-            # string field OF the Value). Dupe to frame before HPT cleanup runs.
+            # The return value may borrow from inside this HPT's heap data
+            # (e.g. getStr(makeVal!()) returns the Str field OF the Value;
+            # identity(makeVal!()) returns a copy with the same string ptr).
+            # Capture and promote the return value before HPT cleanup runs.
             if stmt_node.is_a?(AST::ReturnNode)
               ret_ti = stmt_node.value&.type_info rescue nil
               ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
-              entry = entry.merge(return_handling: :dupe_string) if ret_ti&.string?
+              if ret_ti&.string?
+                entry = entry.merge(return_handling: :dupe_string)
+              elsif ret_ti
+                resolved = ret_ti.resolved
+                ret_schema = schema_lookup.call(resolved) rescue nil
+                needs_promo = if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
+                  (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+                elsif ret_schema.is_a?(Hash) && !ret_schema[:kind]
+                  ret_schema.any? do |k, v|
+                    next false if k.is_a?(Symbol)
+                    ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+                    ft.needs_escape_promotion?
+                  end
+                else
+                  false
+                end
+                if needs_promo
+                  entry = entry.merge(return_handling: :promote_return,
+                                      promote_return_type: resolved.to_s)
+                end
+              end
             end
             heap_temps[node.object_id] = entry
           end

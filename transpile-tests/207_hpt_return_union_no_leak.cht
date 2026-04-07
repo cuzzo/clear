@@ -1,0 +1,39 @@
+-- Test: RETURN f(g!()) where the return type is a non-Copy union.
+--
+-- Bug: dupe_string only handles the String return case. The same aliasing
+-- problem exists for any type whose heap-referenced fields (string, slice)
+-- are borrowed from an HPT argument.
+--
+-- RETURN identity(makeValue!("hello"))
+--   - makeValue!() returns a heap Value (HPT, contains COPY'd string)
+--   - identity() returns a copy of the Value (slice ptr/len copied verbatim)
+--   - HPT defer frees the original Value's string
+--   - The returned Value.Str is a dangling pointer -> crash on use
+--
+-- The fix: when the return type has heap-referenced fields and the return
+-- expression borrows from an HPT arg, promote the return value before
+-- HPT cleanup runs (same mechanism as PromotionPlan's struct promotion).
+
+UNION Value { Nil, Str: String, Num: Float64 }
+
+FN makeValue!(s: String) RETURNS Value ->
+    RETURN Value{ Str: COPY s };
+END
+
+-- Non-TAKES: borrows v, returns a copy whose Str ptr points into the HPT
+FN identity(v: Value) RETURNS Value ->
+    RETURN v;
+END
+
+FN wrapAndReturn!(input: String) RETURNS Value ->
+    RETURN identity(makeValue!(input));
+END
+
+FN main() RETURNS Void ->
+    result = wrapAndReturn!("hello");
+    MATCH result START
+        Value.Str AS s -> ASSERT s == "hello", "string survives HPT cleanup";,
+        DEFAULT -> ASSERT FALSE, "expected Str variant";
+    END
+    print("207: hpt return union no leak PASSED");
+END
