@@ -786,5 +786,37 @@ RSpec.describe CleanupPlan do
           "direct list item makeVal!() should NOT get HPT — list owns the value"
       end
     end
+
+    context "heap arg to non-TAKES callee in return expression" do
+      it "creates HPT for heap arg passed to the direct-return function" do
+        # Bug: RETURN prStr(runTest!()) — runTest!() is a non-TAKES argument.
+        # scan_for_hpt_downgrade was clearing runTest!()'s provenance because it
+        # recursed into FuncCall args. The HPT must be created so cleanup runs
+        # after prStr() uses the value.
+        plan, _, _ = hpt_for(<<~CLEAR, "caller")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN prStr(v: Value) RETURNS String -> RETURN "result"; END
+          FN caller() RETURNS String -> RETURN prStr(makeVal!()); END
+        CLEAR
+        expect(plan.heap_temps.size).to be >= 1,
+          "makeVal!() is non-TAKES arg to prStr — needs HPT cleanup, not a leak"
+      end
+
+      it "does NOT create HPT for the direct-return FuncCall itself" do
+        # prStr() itself is the direct return — no HPT, caller takes ownership.
+        plan, _, _ = hpt_for(<<~CLEAR, "caller")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN prStr(v: Value) RETURNS String -> RETURN "result"; END
+          FN caller() RETURNS String -> RETURN prStr(makeVal!()); END
+        CLEAR
+        # Only makeVal!() should have an HPT, not prStr()
+        # (prStr itself would classify as heap_string but it IS the direct return)
+        heap_temp_types = plan.heap_temps.values.map { |e| e[:kind] }
+        expect(heap_temp_types).not_to include(:heap_string),
+          "prStr() is the direct return — its result should NOT be an HPT"
+      end
+    end
   end
 end

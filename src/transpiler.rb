@@ -3816,7 +3816,16 @@ private
           end
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
-        code = "#{preamble}\n#{code}"
+        return_handling = temps.filter_map { |t| t[:plan_entry]&.dig(:return_handling) }.first
+        if return_handling == :dupe_string
+          # HPT arg in a String-returning function: the return string may borrow
+          # from inside the HPT's heap data. Dupe to frame before HPT cleanup runs.
+          rt_name = @do_rt_name || "rt"
+          ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
+          code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
+        else
+          code = "#{preamble}\n#{code}"
+        end
       end
       ctx.pending_heap_temps = saved_temps if ctx
       # Zig requires non-void expression results to be consumed. Any AST node

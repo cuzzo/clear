@@ -276,8 +276,9 @@ class PromotionPlan
         is_direct = ret_node.value.equal?(node)
         ti.provenance = nil unless is_direct
       end
-      node.args.each { |arg| scan_for_hpt_downgrade(arg, schema_lookup, ret_node) }
-      scan_for_hpt_downgrade(node.object, schema_lookup, ret_node) if node.is_a?(AST::MethodCall)
+      # Do NOT recurse into FuncCall args: args are passed to a non-TAKES callee
+      # and need their own HPT cleanup. Only struct/list/union literal fields flow
+      # into the return value and need downgrading (handled by those cases below).
     when AST::StructLit, AST::UnionVariantLit
       node.fields.each_value { |v| scan_for_hpt_downgrade(v, schema_lookup, ret_node) }
     when AST::ListLit
@@ -792,9 +793,9 @@ class CleanupPlan
                        stmt_node: stmt, is_bind_value: true, inside_move: false)
         end
       when AST::ReturnNode
-        # scan_for_hpt_downgrade (Phase 0 of PromotionPlan.compute) already cleared
-        # heap provenance on all non-direct HPT sub-expressions. Skip here.
-        next
+        next unless stmt.value
+        scan_for_hpt(stmt.value, schema_lookup, heap_temps,
+                     stmt_node: stmt, is_bind_value: false, inside_move: false)
       when AST::Assignment
         scan_for_hpt(stmt.value, schema_lookup, heap_temps,
                      stmt_node: stmt, is_bind_value: true, inside_move: false)
@@ -814,9 +815,23 @@ class CleanupPlan
       ti = node.type_info rescue nil
       ti = ti.is_a?(Type) ? ti : nil
       if ti&.heap_provenance? && !is_bind_value && !node.was_moved && !inside_move
-        classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
-        entry = classify_heap_temp(classify_ti, schema_lookup)
-        heap_temps[node.object_id] = entry if entry
+        # Direct return: ownership transfers to caller, no HPT needed.
+        is_direct_return = stmt_node.is_a?(AST::ReturnNode) && stmt_node.value.equal?(node)
+        unless is_direct_return
+          classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
+          entry = classify_heap_temp(classify_ti, schema_lookup)
+          if entry
+            # In a String-returning function, the return string may borrow from
+            # inside this HPT's heap data (e.g. getStr(makeVal!()) returns the
+            # string field OF the Value). Dupe to frame before HPT cleanup runs.
+            if stmt_node.is_a?(AST::ReturnNode)
+              ret_ti = stmt_node.value&.type_info rescue nil
+              ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
+              entry = entry.merge(return_handling: :dupe_string) if ret_ti&.string?
+            end
+            heap_temps[node.object_id] = entry
+          end
+        end
       end
       # Recurse into arguments (never bind values, not direct return values)
       args = node.is_a?(AST::MethodCall) ? node.args : node.args
