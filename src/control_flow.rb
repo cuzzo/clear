@@ -632,6 +632,10 @@ class MIRPass
     refine_moved_guards!(fn, cleanup) if cleanup
 
     fn.body = transform_body(fn.body, cleanup, promo)
+
+    # Insert MIR::Drop nodes for TAKES parameters at function body start.
+    # These replace the transpiler's manual TAKES cleanup loop.
+    insert_takes_drops!(fn, cleanup) if cleanup
   end
 
   # Tighten cleanup decisions using ownership dataflow analysis.
@@ -737,6 +741,27 @@ class MIRPass
       stmt
     )
     result << drop
+  end
+
+  # Insert MIR::Drop nodes for TAKES parameters at the start of the
+  # function body. Replaces the transpiler's manual TAKES cleanup loop.
+  def insert_takes_drops!(fn, cleanup)
+    drops = []
+    (fn.deferred_drops || []).each do |dd|
+      param_def = fn.params&.find { |p| p[:name] == dd[:name] }
+      next unless param_def&.dig(:takes)
+
+      entry = cleanup.lookup(dd[:name])
+      next unless entry && entry[:needs_cleanup]
+
+      ti = dd[:type].is_a?(Type) ? dd[:type] : Type.new(dd[:type] || :Any)
+      drop = MIR::Drop.new(
+        fn.token, dd[:name].to_s, entry[:kind], entry[:alloc],
+        entry[:has_moved_guard], ti, entry[:resource_close_zig], nil
+      )
+      drops << drop
+    end
+    fn.body = drops + fn.body if drops.any?
   end
 
   # Insert MIR::Promote before a return statement and annotate the

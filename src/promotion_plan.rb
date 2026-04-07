@@ -260,7 +260,6 @@ end
 #   alloc:          :heap/:frame     - which allocator
 #   kind:           symbol           - drives Zig template selection
 #   has_moved_guard: true/false      - whether var X_moved = false is emitted
-#   source_kind:    symbol           - :local/:takes_param/:match_as/:container_borrow
 #
 # Data sources (all from annotator, no re-inference):
 #   - type_info (cleanup_alloc, collection?, map?, etc.)
@@ -388,7 +387,7 @@ class CleanupPlan
         close_zig = schema[:close_zig]
         bindings[name] = {
           needs_cleanup: true, alloc: :heap, kind: :resource,
-          has_moved_guard: true, source_kind: :takes_param,
+          has_moved_guard: true,
           resource_close_zig: close_zig
         }
       elsif is_union
@@ -396,7 +395,7 @@ class CleanupPlan
         if has_heap
           bindings[name] = {
             needs_cleanup: true, alloc: :heap, kind: :takes_union,
-            has_moved_guard: true, source_kind: :takes_param
+            has_moved_guard: true
           }
         end
       elsif ti.string?
@@ -445,7 +444,7 @@ class CleanupPlan
           if has_heap
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
-              has_moved_guard: true, source_kind: :match_as
+              has_moved_guard: true
             }
           end
         else
@@ -454,7 +453,7 @@ class CleanupPlan
           if needs_as_cleanup && pt.array? && !pt.string?
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
-              has_moved_guard: true, source_kind: :match_as
+              has_moved_guard: true
             }
           end
         end
@@ -488,7 +487,7 @@ class CleanupPlan
 
   def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
     { needs_cleanup: true, alloc: alloc, kind: kind,
-      has_moved_guard: has_moved_guard, source_kind: :local, **extra }
+      has_moved_guard: has_moved_guard, **extra }
   end
 
   def self.classify_resource(_ti, node)

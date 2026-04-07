@@ -106,7 +106,6 @@ RSpec.describe CleanupPlan do
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:source_kind]).to eq(:takes_param)
         expect(entry[:kind]).to eq(:takes_union)
       end
     end
@@ -208,7 +207,6 @@ RSpec.describe CleanupPlan do
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:source_kind]).to eq(:match_as)
         expect(entry[:kind]).to eq(:match_as_slice)
       end
 

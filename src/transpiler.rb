@@ -617,27 +617,12 @@ private
         .map    { |name| "var #{name} = _m_#{name}; _ = &#{name};" }
         .join("\n    ")
 
-      # Emit cleanup for TAKES parameters via CleanupPlan.
-      # Only when the function has rt (cleanup uses rt.heapAlloc/frameAlloc).
-      fn_plan = @cleanup_plans&.dig(node.name)
-      takes_cleanup = if fn_needs_rt
-        (node.deferred_drops || []).filter_map { |drop|
-          param_def = node.params.find { |p| p[:name] == drop[:name] }
-          next unless param_def&.dig(:takes)
-          entry = fn_plan&.lookup(drop[:name])
-          next unless entry && entry[:needs_cleanup]
-          ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
-          proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, entry[:resource_close_zig], false)
-          emit_cleanup_from_entry(zig_safe_name(drop[:name]), entry, proxy)
-        }.reject(&:empty?).join("\n    ")
-      else
-        ""
-      end
+      # TAKES parameter cleanup is now handled by MIR::Drop nodes
+      # inserted at the start of the function body by MIRPass.
 
       prologue_parts = [prologue,
                         param_suppressions.empty? ? nil : param_suppressions,
-                        mutable_param_shadows.empty? ? nil : mutable_param_shadows,
-                        takes_cleanup.empty? ? nil : takes_cleanup].compact
+                        mutable_param_shadows.empty? ? nil : mutable_param_shadows].compact
       prologue = prologue_parts.join("\n    ")
 
       has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
