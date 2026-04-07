@@ -1,12 +1,16 @@
-# control_flow.rb - CFG construction + MIR node insertion
+# control_flow.rb - CFG construction, ownership dataflow, MIR node insertion
 #
-# Two components:
+# Three components:
 #   1. FunctionCFG: builds a control flow graph from an annotated AST function.
 #      Basic blocks contain references to AST statements. Edges represent
-#      branch/join/loop structure. Used as an analysis-only structure for
-#      ownership dataflow (Phase 2b+).
+#      branch/join/loop structure.
 #
-#   2. MIRPass: reads CleanupPlan/PromotionPlan results and inserts MIR nodes
+#   2. OwnershipDataflow: forward dataflow analysis on the CFG. Computes per-
+#      variable ownership state (owned/moved/maybe_moved) at each basic block
+#      boundary. Determines whether cleanup is needed and whether a moved guard
+#      is required. Runs after annotation, uses was_moved flags on AST nodes.
+#
+#   3. MIRPass: reads CleanupPlan/PromotionPlan results and inserts MIR nodes
 #      (Drop, Promote, SuppressCleanup) into AST statement lists. The transpiler
 #      consumes MIR::Drop for variable cleanup. Promote/SuppressCleanup are
 #      inserted but not yet consumed.
@@ -62,7 +66,9 @@ class FunctionCFG
   # Branch points (if/while/match/for) create new blocks with edges.
   def self.build(fn_node)
     cfg = new(fn_node.name)
-    build_body(fn_node.body || [], cfg.entry, cfg.exit_block, cfg)
+    last_block = build_body(fn_node.body || [], cfg.entry, cfg.exit_block, cfg)
+    # Connect fall-through to exit (implicit return at end of function).
+    last_block&.add_successor(cfg.exit_block) if last_block
     cfg
   end
 
@@ -152,6 +158,273 @@ class FunctionCFG
       end
     end
     current_block  # return the current block for fall-through edges
+  end
+end
+
+# ==========================================
+# Ownership Dataflow Analysis
+# ==========================================
+# Forward dataflow on the CFG. Computes per-variable ownership state at each
+# basic block boundary using a worklist algorithm to fixpoint.
+#
+# Lattice (per variable):
+#   :uninit       - variable not yet declared on this path
+#   :owned        - variable holds an owned value (needs cleanup)
+#   :moved        - ownership transferred away (no cleanup)
+#   :maybe_moved  - moved on some paths, owned on others (needs moved guard)
+#
+# Join: owned + moved = maybe_moved; X + uninit = X; X + X = X
+#
+# Output: exit_states[var] tells whether the variable needs cleanup and
+# whether a _moved guard is required at the point where the function returns.
+
+class OwnershipDataflow
+  UNINIT      = :uninit
+  OWNED       = :owned
+  MOVED       = :moved
+  MAYBE_MOVED = :maybe_moved
+
+  attr_reader :block_in, :block_out
+
+  def initialize(cfg, fn_node)
+    @cfg = cfg
+    @fn_node = fn_node
+    @block_in  = {}  # block.id => { var_name => state }
+    @block_out = {}  # block.id => { var_name => state }
+  end
+
+  # Run the forward dataflow to fixpoint. Returns self for chaining.
+  def analyze!
+    # Initialize all blocks to empty state.
+    @cfg.blocks.each do |b|
+      @block_in[b.id]  = {}
+      @block_out[b.id] = {}
+    end
+
+    # Seed entry block with TAKES param ownership.
+    @block_in[@cfg.entry.id] = init_entry_state
+
+    # Worklist: process blocks until no exit state changes.
+    worklist = [@cfg.entry]
+    in_worklist = { @cfg.entry.id => true }
+
+    until worklist.empty?
+      block = worklist.shift
+      in_worklist.delete(block.id)
+
+      # Entry state: join predecessor exits (entry block uses init state).
+      new_in = if block == @cfg.entry
+        @block_in[@cfg.entry.id]
+      else
+        join_predecessors(block)
+      end
+      @block_in[block.id] = new_in
+
+      # Transfer: apply each statement in the block.
+      new_out = apply_transfer(block, dup_state(new_in))
+
+      # If exit state changed, schedule successors.
+      unless new_out == @block_out[block.id]
+        @block_out[block.id] = new_out
+        block.successors.each do |succ|
+          unless in_worklist[succ.id]
+            worklist << succ
+            in_worklist[succ.id] = true
+          end
+        end
+      end
+    end
+
+    self
+  end
+
+  # Ownership state at function exit (join of all paths reaching exit_block).
+  def exit_states
+    @block_in[@cfg.exit_block.id] || {}
+  end
+
+  # Per-variable summary: { name => { needs_cleanup: bool, has_moved_guard: bool } }
+  def cleanup_summary
+    summary = {}
+    exit_states.each do |name, state|
+      case state
+      when OWNED
+        summary[name] = { needs_cleanup: true, has_moved_guard: false }
+      when MAYBE_MOVED
+        summary[name] = { needs_cleanup: true, has_moved_guard: true }
+      when MOVED
+        summary[name] = { needs_cleanup: false, has_moved_guard: false }
+      end
+    end
+    summary
+  end
+
+  # Build CFG + run dataflow for a function node. Returns the analysis.
+  def self.analyze(fn_node)
+    cfg = FunctionCFG.build(fn_node)
+    new(cfg, fn_node).analyze!
+  end
+
+  private
+
+  # TAKES params start as :owned (callee must clean them up).
+  def init_entry_state
+    state = {}
+    (@fn_node.deferred_drops || []).each do |dd|
+      name = dd.is_a?(Hash) ? dd[:name].to_s : dd.to_s
+      param_def = @fn_node.params&.find { |p| p[:name] == name }
+      state[name] = OWNED if param_def&.dig(:takes)
+    end
+    state
+  end
+
+  # Merge predecessor exit states. Variables present on any path are joined.
+  def join_predecessors(block)
+    preds = block.predecessors
+    return {} if preds.empty?
+
+    result = dup_state(@block_out[preds.first.id])
+    preds[1..].each do |pred|
+      pred_out = @block_out[pred.id]
+      all_vars = (result.keys | pred_out.keys)
+      merged = {}
+      all_vars.each do |var|
+        a = result[var] || UNINIT
+        b = pred_out[var] || UNINIT
+        merged[var] = join_state(a, b)
+      end
+      result = merged
+    end
+    result
+  end
+
+  def join_state(a, b)
+    return b if a == UNINIT
+    return a if b == UNINIT
+    return a if a == b
+    MAYBE_MOVED
+  end
+
+  # Process all statements in a block, updating the state map.
+  def apply_transfer(block, state)
+    block.stmts.each do |stmt|
+      transfer_stmt(stmt, state)
+    end
+    state
+  end
+
+  # Transfer function for a single statement.
+  def transfer_stmt(stmt, state)
+    case stmt
+    when AST::VarDecl
+      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+      state[stmt.name.to_s] = OWNED
+
+    when AST::BindExpr
+      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+      state[stmt.name.to_s] = OWNED if stmt.mode == :decl
+
+    when AST::Assignment
+      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+
+    when AST::ReturnNode
+      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+
+    when AST::FuncCall
+      collect_consumed(stmt, state).each { |n| state[n] = MOVED }
+
+    when AST::MethodCall
+      collect_consumed(stmt, state).each { |n| state[n] = MOVED }
+
+    when AST::IfStatement, AST::WhileLoop, AST::ForRange, AST::ForEach, AST::MatchStatement
+      # Control flow headers: only process condition/expr for moves.
+      # Branch bodies are in separate basic blocks (handled by CFG edges).
+      cond = case stmt
+             when AST::IfStatement then stmt.condition
+             when AST::WhileLoop then stmt.condition
+             when AST::MatchStatement then stmt.expr
+             when AST::ForRange then nil  # range bounds don't move
+             when AST::ForEach then stmt.collection
+             end
+      collect_consumed(cond, state).each { |n| state[n] = MOVED } if cond
+
+      # ForEach/ForRange: loop variable is owned in the body block.
+      if stmt.is_a?(AST::ForRange) || stmt.is_a?(AST::ForEach)
+        state[stmt.var_name.to_s] = OWNED
+      end
+    end
+  end
+
+  # Collect identifiers consumed (moved) by an expression.
+  # Two kinds of moves:
+  #   1. Explicit: annotator set was_moved = true (TAKES args, GIVE)
+  #   2. Implicit: non-Copy owned identifier used as RHS value (affine move)
+  # Copy types (primitives, strings, enums) are never moved regardless of was_moved.
+  def collect_consumed(node, state)
+    return [] unless node
+    consumed = []
+    walk_expr(node) do |n|
+      next unless n.is_a?(AST::Identifier)
+      name = n.name.to_s
+      next unless state[name] # only track variables we're analyzing
+      next if copy_type?(n)   # Copy types are never consumed
+      consumed << name if n.was_moved || non_copy_type?(n)
+    end
+    consumed
+  end
+
+  # Returns true if this identifier's type is Copy (no move on assignment).
+  # Primitives, strings, enums, and :Any are Copy.
+  def copy_type?(ident)
+    ti = ident.type_info rescue nil
+    return true unless ti  # unknown type, assume Copy (safe)
+    ti = Type.new(ti) if !ti.is_a?(Type)
+    ti.primitive? || ti.string? || ti.any? || ti.void?
+  end
+
+  # Returns true if this identifier's type is non-Copy (move semantics).
+  def non_copy_type?(ident)
+    !copy_type?(ident)
+  end
+
+  def walk_expr(node, &block)
+    return unless node
+    yield node
+    case node
+    when AST::BinaryOp
+      walk_expr(node.left, &block)
+      walk_expr(node.right, &block)
+    when AST::UnaryOp
+      walk_expr(node.right, &block)
+    when AST::FuncCall
+      node.args&.each { |a| walk_expr(a, &block) }
+    when AST::MethodCall
+      walk_expr(node.object, &block)
+      node.args&.each { |a| walk_expr(a, &block) }
+    when AST::GetField
+      walk_expr(node.target, &block)
+    when AST::GetIndex
+      walk_expr(node.target, &block)
+      walk_expr(node.index, &block)
+    when AST::StructLit
+      node.fields&.each_value { |v| walk_expr(v, &block) }
+    when AST::ListLit
+      node.items&.each { |i| walk_expr(i, &block) }
+    when AST::HashLit
+      node.pairs&.each { |p| walk_expr(p[:value], &block) }
+    when AST::CopyNode
+      walk_expr(node.value, &block)
+    when AST::ReturnNode
+      walk_expr(node.value, &block)
+    when AST::Assignment
+      walk_expr(node.value, &block)
+    when AST::VarDecl, AST::BindExpr
+      walk_expr(node.value, &block)
+    end
+  end
+
+  def dup_state(state)
+    state.dup
   end
 end
 
