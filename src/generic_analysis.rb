@@ -324,12 +324,24 @@ module GenericAnalysis
     node.container_borrow = true
   end
 
-  # Walk through OR/OR_RESCUE to find the root container variable name.
+  # Walk through OR/OR_RESCUE to find the root container/struct variable name.
+  # Returns the root variable name when the expression borrows from a container
+  # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   def find_container_source(expr)
     return nil unless expr
     if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:type_info)
       ti = expr.target.type_info
       if ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?)
+        return root_variable_name(expr.target)
+      end
+    end
+    # Non-Copy field extraction from a struct is a borrow of the parent.
+    # Without this, the extracted variable gets its own cleanup defer while
+    # the parent's cleanup also frees the field -- double-free.
+    if expr.is_a?(AST::GetField) && expr.respond_to?(:type_info)
+      field_ti = expr.type_info rescue nil
+      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+      if field_ti && !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         return root_variable_name(expr.target)
       end
     end

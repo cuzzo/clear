@@ -227,7 +227,7 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment nodes directly with { zig_type:, alloc: }.
-  def self.stamp_field_pre_cleanups!(body, bindings)
+  def self.stamp_field_pre_cleanups!(body, bindings, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
       next unless stmt.name.is_a?(AST::GetField)
@@ -235,7 +235,7 @@ module CleanupClassifier
 
       field_ti = stmt.name.type_info rescue nil
       field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-      next unless field_ti&.string? || field_ti&.list_collection?
+      next unless field_ti&.needs_cleanup?(schema_lookup)
 
       alloc = if target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]

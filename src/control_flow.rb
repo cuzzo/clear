@@ -651,7 +651,7 @@ class MIRPass
     refine_moved_guards!(fn, bindings) if has_bindings
 
     # Stamp field pre-cleanup info directly on Assignment nodes.
-    CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings) if has_bindings
+    CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
 
     fn.body = transform_body(fn.body, bindings, promo)
 
