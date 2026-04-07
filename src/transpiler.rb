@@ -16,6 +16,7 @@ require_relative "./zig_type_mapper"
 require_relative "./promotion_plan"
 require_relative "./pipeline_rewriter"
 require_relative "./string_concat_rewriter"
+require_relative "./control_flow"
 require_relative "./importer"
 require_relative "./transpiler_context"
 
@@ -71,6 +72,10 @@ class ZigTranspiler
       @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
       @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     end
+
+    # Pass D: insert MIR nodes (Drop, Promote, SuppressCleanup) into AST.
+    # Currently no-op in transpiler — nodes are silently ignored.
+    MIRPass.new(cleanup_plans: @cleanup_plans, promotion_plans: @promotion_plans).transform!(ast)
 
     @needs_safety_import = false
     @fn_sigs = {}
@@ -2774,6 +2779,9 @@ private
 
     when AST::ThenChain
       raise "Internal: ThenChain node reached visit() — should be flattened by BgBlock transpiler"
+
+    when MIR::Drop, MIR::Promote, MIR::SuppressCleanup
+      ""  # MIR nodes inserted by MIRPass — not yet consumed by transpiler
 
     else
       raise "Unknown Node: #{node.class}"
