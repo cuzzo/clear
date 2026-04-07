@@ -794,15 +794,20 @@ class MIRPass
       stmt.has_cleanup = true
     end
 
+    # Pre-compute Zig type strings into the entry so the transpiler is
+    # purely mechanical (no type resolution at emit time).
+    drop_entry = entry.dup
+    compute_drop_type_strings!(drop_entry, stmt.type_info, stmt)
+
     # MIR::Alloc: explicit allocation marker for static leak checker.
     result << MIR::Alloc.new(stmt.token, name, entry[:kind], entry[:alloc])
 
     drop = MIR::Drop.new(
       stmt.token, name, entry[:kind], entry[:alloc],
-      entry[:has_moved_guard], stmt.type_info, entry[:resource_close_zig],
-      stmt
+      entry[:has_moved_guard], nil, entry[:resource_close_zig],
+      nil
     )
-    drop.cleanup_entry = entry
+    drop.cleanup_entry = drop_entry
     result << drop
   end
 
@@ -819,16 +824,59 @@ class MIRPass
 
       ti = dd[:type].is_a?(Type) ? dd[:type] : Type.new(dd[:type] || :Any)
 
+      drop_entry = entry.dup
+      compute_drop_type_strings!(drop_entry, ti, nil)
+
       mir_nodes << MIR::Alloc.new(fn.token, dd[:name].to_s, entry[:kind], entry[:alloc])
 
       drop = MIR::Drop.new(
         fn.token, dd[:name].to_s, entry[:kind], entry[:alloc],
-        entry[:has_moved_guard], ti, entry[:resource_close_zig], nil
+        entry[:has_moved_guard], nil, entry[:resource_close_zig], nil
       )
-      drop.cleanup_entry = entry
+      drop.cleanup_entry = drop_entry
       mir_nodes << drop
     end
     fn.body = mir_nodes + fn.body if mir_nodes.any?
+  end
+
+  # Pre-compute zig_type, elem_zig_type, is_fixed into the cleanup entry.
+  # This moves all type resolution out of the transpiler -- build_drop_entry
+  # is eliminated and the transpiler just reads cleanup_entry directly.
+  def compute_drop_type_strings!(entry, ti, source_node)
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+
+    zig_type = case entry[:kind]
+    when :heap_slice
+      is_bare = source_node.respond_to?(:value) && source_node.value.is_a?(AST::CopyNode) && !ti&.list_collection?
+      if is_bare
+        elem = ti&.element_type ? Type.new(ti.element_type).zig_type : "UNKNOWN"
+        "[]#{elem}"
+      else
+        ti&.zig_type
+      end
+    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set
+      ti&.zig_type
+    when :heap_union, :heap_struct, :locked, :write_locked,
+         :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
+      Type.new((ti&.resolved || :Any).to_s).zig_type
+    when :rc
+      ti&.zig_type
+    end
+
+    elem_zig = case entry[:kind]
+    when :list_with_elem_cleanup, :takes_slice
+      et = ti&.element_type
+      if et
+        t = et.is_a?(Type) ? et : Type.new(et)
+        Type.new(t.resolved.to_s).zig_type
+      end
+    when :array_with_struct_strings
+      ti&.element_type ? Type.new(ti.element_type).zig_type : nil
+    end
+
+    entry[:zig_type] = zig_type || entry[:zig_type] || "UNKNOWN"
+    entry[:elem_zig_type] = elem_zig || entry[:elem_zig_type]
+    entry[:is_fixed] = ti&.fixed? if entry[:kind] == :array_with_struct_strings
   end
 
   # Insert MIR::SuppressCleanup after statements that consume ownership of

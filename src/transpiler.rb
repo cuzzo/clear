@@ -222,52 +222,9 @@ private
     fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
   end
 
-  # Build the entry hash for emit_cleanup_from_entry from a MIR::Drop node.
-  # Pre-computes all type strings so emit_cleanup_from_entry is purely mechanical.
-  def build_drop_entry(node)
-    ti = node.type_info
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    src = node.source_node
-
-    zig_type = case node.kind
-    when :heap_slice
-      is_bare = src.respond_to?(:value) && src.value.is_a?(AST::CopyNode) && !ti&.list_collection?
-      if is_bare
-        elem = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
-        "[]#{elem}"
-      else
-        ti&.zig_type
-      end
-    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set
-      ti&.zig_type
-    when :heap_union, :heap_struct, :locked, :write_locked,
-         :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
-      transpile_type((ti&.resolved || :Any).to_s)
-    when :rc
-      ti&.zig_type
-    end
-
-    elem_zig = case node.kind
-    when :list_with_elem_cleanup, :takes_slice
-      et = ti&.element_type
-      et ? transpile_type(et.is_a?(Type) ? et.resolved.to_s : et.to_s) : nil
-    when :array_with_struct_strings
-      ti&.element_type ? transpile_type(ti.element_type) : nil
-    end
-
-    # Start from classifier's pre-computed entry (carries RC fields, etc.)
-    # and overlay with transpiler-computed zig type strings.
-    classifier = node.cleanup_entry || {}
-    entry = classifier.merge(
-      kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
-      needs_cleanup: true, resource_close_zig: node.resource_close_zig,
-      zig_type: zig_type || classifier[:zig_type] || "UNKNOWN",
-      elem_zig_type: elem_zig || classifier[:elem_zig_type],
-      is_fixed: node.kind == :array_with_struct_strings ? ti&.fixed? : nil
-    )
-
-    entry
-  end
+  # NOTE: build_drop_entry has been eliminated. All type resolution
+  # (zig_type, elem_zig_type, is_fixed) is now pre-computed by MIRPass's
+  # compute_drop_type_strings! and stored in MIR::Drop.cleanup_entry.
 
   def visit(node)
     code = visit_node(node)
@@ -2724,8 +2681,7 @@ private
       raise "Internal: ThenChain node reached visit() — should be flattened by BgBlock transpiler"
 
     when MIR::Drop
-      entry = build_drop_entry(node)
-      emit_cleanup_from_entry(zig_safe_name(node.name), entry)
+      emit_cleanup_from_entry(zig_safe_name(node.name), node.cleanup_entry)
 
     when MIR::Promote
       rt_name = @do_rt_name || "rt"

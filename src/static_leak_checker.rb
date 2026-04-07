@@ -11,6 +11,7 @@
 #   ORPHAN         -- MIR node without matching cleanup binding
 #   FRAME_ESCAPE   -- frame-allocated binding escapes via return without promotion
 #   FRAME_OVERFLOW -- loop body allocates from frame arena without per-iteration rewind
+#   ALLOC_MISMATCH -- MIR::Alloc and MIR::Drop disagree on allocator (leak or UAF)
 #   REASSIGN_LEAK  -- mutable reassignment without pre-cleanup (old value leaks)
 #
 # Path sensitivity comes from OwnershipDataflow (run independently on the
@@ -51,6 +52,7 @@ class StaticLeakChecker
       df_summary = df.cleanup_summary
 
       check_completeness!(allocs, drops, takes)
+      check_alloc_consistency!(allocs, drops)
       check_guards!(drops, df_summary)
       check_escapes!(escapes, drops)
       check_frame_escapes!(escapes, promotes)
@@ -79,6 +81,20 @@ class StaticLeakChecker
 
       unless drops.key?(name)
         @errors << error(:LEAK, name, "needs cleanup but no MIR::Drop")
+      end
+    end
+  end
+
+  # MIR::Alloc and MIR::Drop for the same binding must agree on allocator.
+  # Mismatch means init uses one arena but cleanup frees from another --
+  # either a leak (freed from wrong arena) or UAF (wrong arena reclaimed).
+  def check_alloc_consistency!(allocs, drops)
+    allocs.each do |name, alloc_node|
+      drop_node = drops[name]
+      next unless drop_node
+      if alloc_node.alloc != drop_node.alloc
+        @errors << error(:ALLOC_MISMATCH, name,
+          "Alloc uses :#{alloc_node.alloc} but Drop uses :#{drop_node.alloc}")
       end
     end
   end
