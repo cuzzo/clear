@@ -261,8 +261,8 @@ private
     entry = classifier.merge(
       kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
       needs_cleanup: true, resource_close_zig: node.resource_close_zig,
-      zig_type: zig_type || "UNKNOWN",
-      elem_zig_type: elem_zig,
+      zig_type: zig_type || classifier[:zig_type] || "UNKNOWN",
+      elem_zig_type: elem_zig || classifier[:elem_zig_type],
       is_fixed: node.kind == :array_with_struct_strings ? ti&.fixed? : nil
     )
 
@@ -1372,19 +1372,8 @@ private
             # @indirect payload: the union field is *T; deref to bind the inner value.
             payload_access = c[:indirect_payload_as] ? "#{subject}.#{variant}.*" : "#{subject}.#{variant}"
             binding_decl = "#{bind_kw} #{c[:binding]} = #{payload_access}; _ = &#{c[:binding]};\n    "
-            # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup
-            # on source and emit cleanup on the AS binding.
-            if node.expr.is_a?(AST::Identifier) && node.expr.was_moved && c[:match_as_cleanup]
-              src_name = zig_safe_name(node.expr.name)
-              sym = node.expr.respond_to?(:symbol) ? node.expr.symbol : nil
-              decl = sym&.reg
-              is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-              is_takes_param = sym&.respond_to?(:takes) && sym&.takes
-              # Suppress source cleanup
-              binding_decl += "#{src_name}_moved = true;\n    " if (is_local || is_takes_param) && c[:match_as_src_guard]
-              # Emit AS binding cleanup via unified path
-              binding_decl += emit_cleanup_from_entry(c[:binding], c[:match_as_cleanup])
-            end
+            # Match-as cleanup is now handled by MIR nodes (SuppressCleanup + Drop)
+            # inserted into the case body by MIRPass.
             body = "#{binding_decl}#{body}"
           elsif c[:destructure]
             # Union variant destructuring: extract each named field from the payload.
@@ -2754,7 +2743,7 @@ private
     when MIR::SuppressCleanup
       "#{zig_safe_name(node.name)}_moved = true;"
 
-    when MIR::Alloc, MIR::Return
+    when MIR::Alloc, MIR::Return, MIR::ReassignCleanup, MIR::FieldCleanup
       # Metadata-only MIR nodes for static analysis. No code emitted.
       nil
 

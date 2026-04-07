@@ -761,5 +761,20 @@ module MIR
   Return = Struct.new(:token, :escaped_vars) do
     include AST::Locatable
   end
+
+  # ReassignCleanup: verification marker for mutable variable reassignment.
+  # Inserted after BindExpr :assign nodes where the old value needs cleanup
+  # before overwrite. The checker verifies these exist for all reassignment
+  # sites on cleanup-needing bindings.
+  ReassignCleanup = Struct.new(:token, :name, :alloc) do
+    include AST::Locatable
+  end
+
+  # FieldCleanup: verification marker for field overwrite pre-cleanup.
+  # Inserted after Assignment nodes where a GetField target holds a
+  # cleanup-needing value that must be freed before overwrite.
+  FieldCleanup = Struct.new(:token, :target_name, :field, :alloc) do
+    include AST::Locatable
+  end
 end
 

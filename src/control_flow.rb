@@ -729,6 +729,16 @@ class MIRPass
       # Emit the original statement.
       result << stmt
 
+      # Insert MIR verification nodes for reassignment and field pre-cleanup.
+      if stmt.is_a?(AST::BindExpr) && stmt.reassign_cleanup
+        result << MIR::ReassignCleanup.new(stmt.token, stmt.name.to_s, stmt.reassign_cleanup[:alloc])
+      end
+      if stmt.is_a?(AST::Assignment) && stmt.field_pre_cleanup
+        target = stmt.name
+        target_name = target.is_a?(AST::GetField) && target.target.respond_to?(:name) ? target.target.name.to_s : nil
+        result << MIR::FieldCleanup.new(stmt.token, target_name, target.field, stmt.field_pre_cleanup[:alloc]) if target_name
+      end
+
       # Insert Drop after VarDecl / BindExpr (decl mode).
       insert_drop!(result, stmt, bindings)
 
@@ -925,7 +935,9 @@ class MIRPass
     stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc], zig_type: zig_type }
   end
 
-  # Stamp MATCH-AS cleanup info on MatchStatement case hashes.
+  # Insert MIR nodes for MATCH-AS cleanup into case bodies.
+  # Previously stamp-only; now inserts MIR::Alloc + MIR::Drop + MIR::SuppressCleanup
+  # so the checker verifies match_as cleanup like any other binding.
   def stamp_match_as_cleanup!(stmt, bindings)
     return unless bindings
     return unless stmt.is_a?(AST::MatchStatement)
@@ -940,12 +952,21 @@ class MIRPass
       next unless as_entry && as_entry[:needs_cleanup]
 
       has_as_cleanup = true
-      c[:match_as_src_guard] = src_entry&.dig(:needs_cleanup) || false
-      c[:match_as_cleanup] = {
-        kind: as_entry[:kind], alloc: as_entry[:alloc],
-        has_moved_guard: true,
-        zig_type: as_entry[:zig_type], elem_zig_type: as_entry[:elem_zig_type]
-      }
+
+      # Insert MIR nodes at the start of case body for checker coverage.
+      # Order: source suppression, then AS binding Alloc + Drop.
+      mir_prefix = []
+      if src_entry && src_entry[:needs_cleanup]
+        mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
+      end
+      mir_prefix << MIR::Alloc.new(stmt.token, c[:binding].to_s, as_entry[:kind], as_entry[:alloc])
+      drop = MIR::Drop.new(
+        stmt.token, c[:binding].to_s, as_entry[:kind], as_entry[:alloc],
+        true, nil, nil, nil
+      )
+      drop.cleanup_entry = as_entry
+      mir_prefix << drop
+      c[:body] = mir_prefix + (c[:body] || [])
     end
 
     # Ensure source has moved guard so _moved variable exists for suppression.

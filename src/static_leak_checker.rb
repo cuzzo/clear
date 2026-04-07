@@ -11,6 +11,7 @@
 #   ORPHAN         -- MIR node without matching cleanup binding
 #   FRAME_ESCAPE   -- frame-allocated binding escapes via return without promotion
 #   FRAME_OVERFLOW -- loop body allocates from frame arena without per-iteration rewind
+#   REASSIGN_LEAK  -- mutable reassignment without pre-cleanup (old value leaks)
 #
 # Path sensitivity comes from OwnershipDataflow (run independently on the
 # pre-MIR CFG). The checker cross-references the dataflow results with
@@ -36,7 +37,10 @@ class StaticLeakChecker
     promotes = {}
     escapes = Set.new
     suppresses = Set.new
-    collect_mir_nodes(@fn.body, allocs, drops, promotes, escapes, suppresses)
+    reassign_cleanups = {}
+    field_cleanups = []
+    collect_mir_nodes(@fn.body, allocs, drops, promotes, escapes, suppresses,
+                      reassign_cleanups, field_cleanups)
 
     takes = takes_param_names
     has_bindings = !@bindings.empty? || !takes.empty?
@@ -50,10 +54,11 @@ class StaticLeakChecker
       check_guards!(drops, df_summary)
       check_escapes!(escapes, drops)
       check_frame_escapes!(escapes, promotes)
+      check_reassign_completeness!(reassign_cleanups)
     end
 
     # Orphan checks always run (catch rogue MIR nodes).
-    check_orphans!(allocs, drops, suppresses, takes)
+    check_orphans!(allocs, drops, suppresses, reassign_cleanups, field_cleanups, takes)
 
     # Frame overflow checks always run (catch missing loop marks).
     check_frame_overflow!(@fn.body)
@@ -64,12 +69,9 @@ class StaticLeakChecker
   private
 
   # Every binding with needs_cleanup must have MIR::Alloc + MIR::Drop.
-  # Match-as bindings are excluded: their cleanup is handled by
-  # stamp_match_as_cleanup! on the MatchStatement case hash, not MIR::Drop.
   def check_completeness!(allocs, drops, takes)
     @bindings.each do |name, entry|
       next unless entry[:needs_cleanup]
-      next if entry[:match_as]
 
       unless allocs.key?(name) || takes.include?(name)
         @errors << error(:LEAK, name, "needs cleanup but no MIR::Alloc")
@@ -117,6 +119,22 @@ class StaticLeakChecker
     end
   end
 
+  # Every reassignment of a needs_cleanup binding must have a
+  # MIR::ReassignCleanup so the old value is freed before overwrite.
+  def check_reassign_completeness!(reassign_cleanups)
+    reassign_sites = Set.new
+    collect_reassign_sites(@fn.body, reassign_sites)
+
+    reassign_sites.each do |name|
+      entry = @bindings[name]
+      next unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
+      unless reassign_cleanups.key?(name)
+        @errors << error(:REASSIGN_LEAK, name,
+          "reassignment without pre-cleanup (old value leaks)")
+      end
+    end
+  end
+
   # Loops that allocate from the frame arena must have mark_per_iter set
   # so the transpiler emits saveLoopMark/restoreLoopMark. Without it,
   # each iteration grows the arena unboundedly -- eventual overflow.
@@ -152,9 +170,9 @@ class StaticLeakChecker
     end
   end
 
-  # No orphan MIR nodes -- every Alloc/Drop/SuppressCleanup should correspond
-  # to a binding with needs_cleanup or a TAKES parameter.
-  def check_orphans!(allocs, drops, suppresses, takes)
+  # No orphan MIR nodes -- every Alloc/Drop/SuppressCleanup/ReassignCleanup/FieldCleanup
+  # should correspond to a binding with needs_cleanup or a TAKES parameter.
+  def check_orphans!(allocs, drops, suppresses, reassign_cleanups, field_cleanups, takes)
     drops.each do |name, _|
       next if @bindings.dig(name, :needs_cleanup) || takes.include?(name)
       @errors << error(:ORPHAN, name, "MIR::Drop without matching cleanup binding")
@@ -168,6 +186,18 @@ class StaticLeakChecker
     suppresses.each do |name|
       next if @bindings.dig(name, :has_moved_guard) || takes.include?(name)
       @errors << error(:ORPHAN, name, "MIR::SuppressCleanup without matching guarded binding")
+    end
+
+    reassign_cleanups.each do |name, _|
+      next if @bindings.dig(name, :needs_cleanup) || takes.include?(name)
+      @errors << error(:ORPHAN, name, "MIR::ReassignCleanup without matching cleanup binding")
+    end
+
+    field_cleanups.each do |fc|
+      next unless fc.target_name
+      next if @bindings.key?(fc.target_name) || takes.include?(fc.target_name)
+      @errors << error(:ORPHAN, fc.target_name,
+        "MIR::FieldCleanup for #{fc.field} without matching binding")
     end
   end
 
@@ -189,7 +219,8 @@ class StaticLeakChecker
     end
   end
 
-  def collect_mir_nodes(stmts, allocs, drops, promotes, escapes, suppresses)
+  def collect_mir_nodes(stmts, allocs, drops, promotes, escapes, suppresses,
+                        reassign_cleanups, field_cleanups)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
@@ -198,22 +229,51 @@ class StaticLeakChecker
       when MIR::Promote then promotes[stmt.name] = stmt
       when MIR::Return then (stmt.escaped_vars || []).each { |v| escapes << v }
       when MIR::SuppressCleanup then suppresses << stmt.name
+      when MIR::ReassignCleanup then reassign_cleanups[stmt.name] = stmt
+      when MIR::FieldCleanup then field_cleanups << stmt
       when AST::IfStatement
-        collect_mir_nodes(stmt.then_branch, allocs, drops, promotes, escapes, suppresses)
-        collect_mir_nodes(stmt.else_branch, allocs, drops, promotes, escapes, suppresses)
+        collect_mir_nodes(stmt.then_branch, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.else_branch, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
       when AST::WhileLoop
-        collect_mir_nodes(stmt.do_branch, allocs, drops, promotes, escapes, suppresses)
+        collect_mir_nodes(stmt.do_branch, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
       when AST::ForRange, AST::ForEach
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses)
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
       when AST::MatchStatement
-        stmt.cases&.each { |c| collect_mir_nodes(c[:body], allocs, drops, promotes, escapes, suppresses) }
-        collect_mir_nodes(stmt.default_case, allocs, drops, promotes, escapes, suppresses)
+        stmt.cases&.each { |c| collect_mir_nodes(c[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
+        collect_mir_nodes(stmt.default_case, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
       when AST::WithBlock
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses)
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
       when AST::DoBlock
-        stmt.branches&.each { |b| collect_mir_nodes(b[:body], allocs, drops, promotes, escapes, suppresses) }
+        stmt.branches&.each { |b| collect_mir_nodes(b[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
       when AST::BgBlock, AST::BgStreamBlock
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses)
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      end
+    end
+  end
+
+  # Walk the function body for BindExpr :assign nodes to find reassignment sites.
+  def collect_reassign_sites(stmts, sites)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::BindExpr
+        sites << stmt.name.to_s if stmt.mode == :assign
+      when AST::IfStatement
+        collect_reassign_sites(stmt.then_branch, sites)
+        collect_reassign_sites(stmt.else_branch, sites)
+      when AST::WhileLoop
+        collect_reassign_sites(stmt.do_branch, sites)
+      when AST::ForRange, AST::ForEach
+        collect_reassign_sites(stmt.body, sites)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| collect_reassign_sites(c[:body], sites) }
+        collect_reassign_sites(stmt.default_case, sites)
+      when AST::WithBlock
+        collect_reassign_sites(stmt.body, sites)
+      when AST::DoBlock
+        stmt.branches&.each { |b| collect_reassign_sites(b[:body], sites) }
+      when AST::BgBlock, AST::BgStreamBlock
+        collect_reassign_sites(stmt.body, sites)
       end
     end
   end
