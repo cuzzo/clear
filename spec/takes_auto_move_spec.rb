@@ -52,7 +52,7 @@ RSpec.describe "TAKES auto-move" do
     }.to raise_error(CompilerError, /moved/)
   end
 
-  it "emits _moved = true in Zig for TAKES arg" do
+  it "eliminates v cleanup when always consumed by TAKES" do
     zig = transpile(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
       FN consume(TAKES v: Value) RETURNS Float64 ->
@@ -64,7 +64,8 @@ RSpec.describe "TAKES auto-move" do
           RETURN;
       END
     CLEAR
-    expect(zig).to include("v_moved = true")
+    # v is MOVED on all paths (TAKES) → no defer, no _moved guard
+    expect(zig).not_to include("v_moved")
   end
 
   it "RETURN fn(TAKES arg) sets _moved before return" do
@@ -87,7 +88,7 @@ RSpec.describe "TAKES auto-move" do
     expect(body).to include("ast_moved = true")
   end
 
-  it "TAKES + RETURN suppresses caller defer (no double-free)" do
+  it "TAKES + RETURN eliminates caller defer (no double-free)" do
     zig = transpile(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
       FN passthrough(TAKES v: Value) RETURNS Value ->
@@ -100,7 +101,7 @@ RSpec.describe "TAKES auto-move" do
       END
     CLEAR
     body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
-    # v_moved should be set, so v's defer doesn't fire
-    expect(body).to include("v_moved = true")
+    # v is MOVED on all paths (TAKES) → no defer, no _moved guard
+    expect(body).not_to include("v_moved")
   end
 end

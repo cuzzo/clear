@@ -30,11 +30,13 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    expect(zig).to include("f_moved = true;")
+    # f is MOVED on all paths (returned) → no defer, no _moved guard
+    expect(zig).not_to include("f_moved")
+    expect(zig).not_to include("f.close()")
     expect(zig).to include("return f;")
   end
 
-  it "uses _moved flag to suppress defer close() on moved resources (regression)" do
+  it "eliminates f cleanup when always moved to g (regression)" do
     src = <<~CLEAR
       FN moveFile() RETURNS Void ->
         f = File::open("test.txt");
@@ -43,10 +45,13 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    expect(zig).to include("defer if (!f_moved) f.close();")
+    # f is MOVED on all paths → no defer, no _moved guard for f
+    expect(zig).not_to include("f_moved")
+    # g takes ownership → g gets its own defer
+    expect(zig).to include("g.close()")
   end
 
-  it "uses _moved flag to suppress defer close() when GIVEn (regression)" do
+  it "eliminates f cleanup when always GIVEn (regression)" do
     src = <<~CLEAR
       FN giveFile() RETURNS Void ->
         f = File::open("test.txt");
@@ -55,8 +60,8 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    expect(zig).to include("f_moved = true;")
-    expect(zig).to include("defer if (!f_moved) f.close();")
+    # f is MOVED on all paths (GIVEn) → no defer, no _moved guard
+    expect(zig).not_to include("f_moved")
   end
 
   it "emits recursive cleanup for structs containing resources" do

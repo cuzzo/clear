@@ -36,14 +36,10 @@ class PromotionPlan
   # When nil, all returns get it (backward compat for struct returns).
   attr_reader :promote_return_ids
 
-  # Variables whose defer cleanup must be suppressed.
-  attr_reader :suppress_defers
-
-  def initialize(var_promotes: [], struct_promote: nil, promote_return_ids: nil, suppress_defers: [], unhandled_promote_fields: nil)
+  def initialize(var_promotes: [], struct_promote: nil, promote_return_ids: nil, unhandled_promote_fields: nil)
     @var_promotes = var_promotes.freeze
     @struct_promote = struct_promote
     @promote_return_ids = promote_return_ids&.freeze
-    @suppress_defers = suppress_defers.freeze
     @unhandled_promote_fields = unhandled_promote_fields&.freeze
   end
 
@@ -72,7 +68,6 @@ class PromotionPlan
       var_promotes: relevant,
       struct_promote: @struct_promote,
       promote_return_ids: @promote_return_ids,
-      suppress_defers: @suppress_defers.select { |d| relevant_names.include?(d) },
       unhandled_promote_fields: @unhandled_promote_fields,
     )
   end
@@ -114,16 +109,7 @@ class PromotionPlan
     return_nodes = collect_returns(fn_node.body)
     return EMPTY if return_nodes.empty?
 
-    # Phase 0: downgrade heap-provenance FuncCall sub-expressions in return
-    # contexts so CleanupPlan.walk_heap_temps does not create suppress_non_string
-    # HPTs for them. They flow inline and are owned by the returned value.
-    return_nodes.each do |ret_node|
-      next unless ret_node.value
-      scan_for_hpt_downgrade(ret_node.value, schema_lookup, ret_node)
-    end
-
     var_promotes = []
-    suppress_defers = []
     handled_fields = Set.new
     struct_promote = nil
     promote_return_ids = Set.new
@@ -151,7 +137,6 @@ class PromotionPlan
           next unless fti&.escaped_return
 
           var_promotes << { var: fval.name, zig_type: fti.zig_type }
-          suppress_defers << fval.name
           handled_fields << fname.to_s
         end
 
@@ -189,7 +174,6 @@ class PromotionPlan
           if ti.list_collection? || ti.map?
             # Collections: promote in-place (they own their allocator/buffer)
             var_promotes << { var: val.name, zig_type: ti.zig_type }
-            suppress_defers << val.name
           else
             # Structs: promote via __ret copy (source may be const parameter)
             struct_promote ||= zig_type_for(ret_type)
@@ -223,7 +207,6 @@ class PromotionPlan
         var_promotes: var_promotes.uniq { |vp| vp[:var] },
         struct_promote: struct_promote,
         promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
-        suppress_defers: suppress_defers.uniq,
         unhandled_promote_fields: unhandled_fields,
       )
     end
@@ -264,42 +247,6 @@ class PromotionPlan
     type.resolved.to_s.sub(/^[!?]+/, '')
   end
 
-  # Phase 0 helper: clear heap provenance on non-direct HPT sub-expressions
-  # inside a return expression so CleanupPlan does not create suppress_non_string HPTs.
-  def self.scan_for_hpt_downgrade(node, schema_lookup, ret_node)
-    return unless node
-    case node
-    when AST::FuncCall, AST::MethodCall
-      ti = node.type_info rescue nil
-      ti = ti.is_a?(Type) ? ti : nil
-      if ti&.heap_provenance? && !node.was_moved
-        is_direct = ret_node.value.equal?(node)
-        ti.provenance = nil unless is_direct
-      end
-      # Do NOT recurse into FuncCall args: args are passed to a non-TAKES callee
-      # and need their own HPT cleanup. Only struct/list/union literal fields flow
-      # into the return value and need downgrading (handled by those cases below).
-    when AST::StructLit, AST::UnionVariantLit
-      node.fields.each_value { |v| scan_for_hpt_downgrade(v, schema_lookup, ret_node) }
-    when AST::ListLit
-      node.items.each { |v| scan_for_hpt_downgrade(v, schema_lookup, ret_node) }
-    when AST::BinaryOp
-      scan_for_hpt_downgrade(node.left, schema_lookup, ret_node)
-      scan_for_hpt_downgrade(node.right, schema_lookup, ret_node)
-    when AST::UnaryOp
-      scan_for_hpt_downgrade(node.right, schema_lookup, ret_node)
-    when AST::GetField
-      scan_for_hpt_downgrade(node.target, schema_lookup, ret_node)
-    when AST::GetIndex
-      scan_for_hpt_downgrade(node.target, schema_lookup, ret_node)
-      scan_for_hpt_downgrade(node.index, schema_lookup, ret_node)
-    when AST::CopyNode, AST::MoveNode
-      scan_for_hpt_downgrade(node.value, schema_lookup, ret_node)
-    when AST::Cast
-      scan_for_hpt_downgrade(node.value, schema_lookup, ret_node)
-    end
-  end
-  private_class_method :scan_for_hpt_downgrade
 end
 
 # =========================================================================
@@ -326,12 +273,10 @@ end
 # =========================================================================
 class CleanupPlan
   attr_reader :bindings
-  attr_reader :heap_temps          # Hash<FuncCall.object_id => HPT entry>
   attr_reader :field_pre_cleanups  # Hash<Assignment.object_id => { zig_type, alloc }>
 
-  def initialize(bindings: {}, heap_temps: {}, field_pre_cleanups: {})
+  def initialize(bindings: {}, field_pre_cleanups: {})
     @bindings           = bindings.freeze
-    @heap_temps         = heap_temps.freeze
     @field_pre_cleanups = field_pre_cleanups.freeze
   end
 
@@ -340,11 +285,6 @@ class CleanupPlan
   # Look up the cleanup entry for a binding by name.
   def lookup(name)
     @bindings[name.to_s]
-  end
-
-  # Look up an HPT entry for a FuncCall node by object_id.
-  def lookup_heap_temp(call_node_id)
-    @heap_temps[call_node_id]
   end
 
   # Look up a field pre-cleanup entry for an Assignment node by object_id.
@@ -372,57 +312,14 @@ class CleanupPlan
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
     walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
 
-    # 4. Heap-promoted temps: sub-expression FuncCalls with heap provenance
-    #    that need hoisting into named temps with defer cleanup.
-    heap_temps = {}
-    walk_heap_temps(fn_node.body, schema_lookup, heap_temps)
-
-    # 5. Field pre-cleanups: field assignments that must free the old value
+    # 4. Field pre-cleanups: field assignments that must free the old value
     #    before overwriting. Alloc is derived from the target binding's entry.
     field_pre_cleanups = {}
     walk_field_pre_cleanups(fn_node.body, bindings, field_pre_cleanups)
 
-    (bindings.empty? && heap_temps.empty? && field_pre_cleanups.empty?) ? EMPTY :
-      new(bindings: bindings, heap_temps: heap_temps, field_pre_cleanups: field_pre_cleanups)
+    (bindings.empty? && field_pre_cleanups.empty?) ? EMPTY :
+      new(bindings: bindings, field_pre_cleanups: field_pre_cleanups)
   end
-
-  # Classify a heap-promoted temporary. Called internally by scan_for_hpt
-  # during the walk_heap_temps pass. Not part of the public API.
-  def self.classify_heap_temp(ti, schema_lookup)
-    return nil unless ti
-    ti = Type.new(ti) if !ti.is_a?(Type)
-
-    if ti.string?
-      return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :heap_temp }
-    end
-
-    resolved = ti.resolved
-    schema = schema_lookup.call(resolved) rescue nil
-    if schema.is_a?(Hash) && schema[:kind] == :union
-      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      if has_heap
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :heap_temp }
-      end
-    end
-
-    if ti.array? && !ti.collection?
-      return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :heap_temp }
-    end
-
-    if schema.is_a?(Hash) && !schema[:kind]
-      has_escapable = schema.any? do |k, v|
-        next false if k.is_a?(Symbol)
-        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
-        ft.needs_escape_promotion?
-      end
-      if has_escapable
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_struct, has_moved_guard: true, source_kind: :heap_temp }
-      end
-    end
-
-    nil
-  end
-  private_class_method :classify_heap_temp
 
   private
 
@@ -717,148 +614,6 @@ class CleanupPlan
       ft = v.is_a?(Hash) ? v[:type] : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       t.string?
-    end
-  end
-
-  # ── HPT walk: find sub-expression FuncCalls needing heap temp hoisting ──
-
-  def self.walk_heap_temps(body, schema_lookup, heap_temps)
-    AST.walk_body(body) do |stmt|
-      case stmt
-      when AST::VarDecl, AST::BindExpr
-        next if stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
-        val = stmt.value
-        # OR-wrapped calls: the left FuncCall inside OR_RESCUE is the bind value
-        if val.is_a?(AST::BinaryOp) && val.op == :OR_RESCUE
-          scan_for_hpt(val.left, schema_lookup, heap_temps,
-                       stmt_node: stmt, is_bind_value: true, inside_move: false)
-          scan_for_hpt(val.right, schema_lookup, heap_temps,
-                       stmt_node: stmt, is_bind_value: false, inside_move: false)
-        else
-          scan_for_hpt(val, schema_lookup, heap_temps,
-                       stmt_node: stmt, is_bind_value: true, inside_move: false)
-        end
-      when AST::ReturnNode
-        next unless stmt.value
-        scan_for_hpt(stmt.value, schema_lookup, heap_temps,
-                     stmt_node: stmt, is_bind_value: false, inside_move: false)
-      when AST::Assignment
-        scan_for_hpt(stmt.value, schema_lookup, heap_temps,
-                     stmt_node: stmt, is_bind_value: true, inside_move: false)
-      when AST::FuncCall, AST::MethodCall
-        # Standalone expression statements (e.g., print(makeVal!()))
-        scan_for_hpt(stmt, schema_lookup, heap_temps,
-                     stmt_node: stmt, is_bind_value: false, inside_move: false)
-      end
-    end
-  end
-
-  def self.scan_for_hpt(node, schema_lookup, heap_temps, stmt_node:, is_bind_value:, inside_move:)
-    return unless node
-
-    case node
-    when AST::FuncCall, AST::MethodCall
-      ti = node.type_info rescue nil
-      ti = ti.is_a?(Type) ? ti : nil
-      if ti&.heap_provenance? && !is_bind_value && !node.was_moved && !inside_move
-        # Direct return: ownership transfers to caller, no HPT needed.
-        is_direct_return = stmt_node.is_a?(AST::ReturnNode) && stmt_node.value.equal?(node)
-        unless is_direct_return
-          classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
-          entry = classify_heap_temp(classify_ti, schema_lookup)
-          if entry
-            # The return value may borrow from inside this HPT's heap data
-            # (e.g. getStr(makeVal!()) returns the Str field OF the Value;
-            # identity(makeVal!()) returns a copy with the same string ptr).
-            # Capture and promote the return value before HPT cleanup runs.
-            if stmt_node.is_a?(AST::ReturnNode)
-              ret_ti = stmt_node.value&.type_info rescue nil
-              ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
-              if ret_ti&.string?
-                entry = entry.merge(return_handling: :dupe_string)
-              elsif ret_ti
-                resolved = ret_ti.resolved
-                ret_schema = schema_lookup.call(resolved) rescue nil
-                needs_promo = if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
-                  (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-                elsif ret_schema.is_a?(Hash) && !ret_schema[:kind]
-                  ret_schema.any? do |k, v|
-                    next false if k.is_a?(Symbol)
-                    ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
-                    ft.needs_escape_promotion?
-                  end
-                else
-                  false
-                end
-                if needs_promo
-                  entry = entry.merge(return_handling: :promote_return,
-                                      promote_return_type: resolved.to_s)
-                end
-              end
-            end
-            heap_temps[node.object_id] = entry
-          end
-        end
-      end
-      # Recurse into arguments (never bind values, not direct return values)
-      args = node.is_a?(AST::MethodCall) ? node.args : node.args
-      args.each do |arg|
-        scan_for_hpt(arg, schema_lookup, heap_temps,
-                     stmt_node: stmt_node, is_bind_value: false,
-                     inside_move: inside_move)
-      end
-      # MethodCall: also scan the object
-      if node.is_a?(AST::MethodCall)
-        scan_for_hpt(node.object, schema_lookup, heap_temps,
-                     stmt_node: stmt_node, is_bind_value: false,
-                     inside_move: inside_move)
-      end
-    when AST::MoveNode
-      scan_for_hpt(node.value, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: is_bind_value,
-                   inside_move: true)
-    when AST::BinaryOp
-      scan_for_hpt(node.left, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-      scan_for_hpt(node.right, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-    when AST::StructLit, AST::UnionVariantLit
-      node.fields.each_value do |v|
-        scan_for_hpt(v, schema_lookup, heap_temps,
-                     stmt_node: stmt_node, is_bind_value: is_bind_value,
-                     inside_move: inside_move)
-      end
-    when AST::ListLit
-      node.items.each do |v|
-        scan_for_hpt(v, schema_lookup, heap_temps,
-                     stmt_node: stmt_node, is_bind_value: is_bind_value,
-                     inside_move: inside_move)
-      end
-    when AST::GetField
-      scan_for_hpt(node.target, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-    when AST::GetIndex
-      scan_for_hpt(node.target, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-      scan_for_hpt(node.index, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-    when AST::UnaryOp
-      scan_for_hpt(node.right, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-    when AST::Cast
-      scan_for_hpt(node.value, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
-    when AST::CopyNode
-      scan_for_hpt(node.value, schema_lookup, heap_temps,
-                   stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move)
     end
   end
 

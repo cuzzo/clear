@@ -107,9 +107,11 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks source as moved after struct construction" do
+    it "eliminates m cleanup when always moved into struct" do
       body = fn_body(zig, "clearMain")
-      expect(body).to include("m_moved = true")
+      # Dataflow sees m is MOVED on all paths → no defer, no _moved guard
+      expect(body).not_to include("m_moved")
+      expect(body).to include("Container{ .data = m }")
     end
   end
 

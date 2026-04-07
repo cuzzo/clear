@@ -645,7 +645,7 @@ RSpec.describe ZigTranspiler do
   # Move suppression: _moved = true must be emitted for all OG-tracked moves
   # ===========================================================================
   describe "OG-driven move emission" do
-    it "emits _moved = true when non-Copy value is assigned to HashMap" do
+    it "eliminates val cleanup when always moved into HashMap" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
@@ -657,7 +657,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("val_moved = true")
+      # val is MOVED on all paths (assigned to map) → no defer, no _moved guard
+      expect(zig).not_to include("val_moved")
     end
 
     it "does NOT emit source_moved for MATCH AS (implicit borrow)" do
@@ -678,7 +679,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("v_moved = true")
     end
 
-    it "emits source_moved = true for MATCH TAKES" do
+    it "eliminates v cleanup when always consumed by MATCH TAKES" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
@@ -692,7 +693,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("v_moved = true")
+      # v is MOVED on all paths (MATCH TAKES) → no defer, no _moved guard
+      expect(zig).not_to include("v_moved")
     end
 
     it "does NOT emit source_moved for MATCH AS on Copy payload" do

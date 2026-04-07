@@ -64,8 +64,14 @@ class FunctionCFG
   # Build a CFG from an annotated function AST.
   # Each basic block holds references to AST statements (not copies).
   # Branch points (if/while/match/for) create new blocks with edges.
-  def self.build(fn_node)
+  #
+  # @param fn_node [AST::FunctionDef]
+  # @param can_fail_fns [Set<String>, nil] names of functions that can fail.
+  #   When provided, statements containing calls to these functions get an
+  #   error edge to the exit block (models Zig try/error-unwind semantics).
+  def self.build(fn_node, can_fail_fns: nil)
     cfg = new(fn_node.name)
+    cfg.instance_variable_set(:@can_fail_fns, can_fail_fns)
     last_block = build_body(fn_node.body || [], cfg.entry, cfg.exit_block, cfg)
     # Connect fall-through to exit (implicit return at end of function).
     last_block&.add_successor(cfg.exit_block) if last_block
@@ -155,9 +161,61 @@ class FunctionCFG
 
       else
         current_block.stmts << stmt
+        # Error edge: if this statement can fail (contains a try call),
+        # Zig may unwind to the caller. Model this as an edge to exit so
+        # dataflow sees variables as potentially still-owned on error paths.
+        if cfg.instance_variable_get(:@can_fail_fns) &&
+           stmt_can_fail?(stmt, cfg.instance_variable_get(:@can_fail_fns))
+          current_block.add_successor(cfg.exit_block)
+          # Continue in a fresh block for the normal (non-error) path.
+          next_block = cfg.new_block
+          current_block.add_successor(next_block)
+          current_block = next_block
+        end
       end
     end
     current_block  # return the current block for fall-through edges
+  end
+
+  # Check if a statement (or its sub-expressions) contains a call to a
+  # can_fail function. Used to determine whether an error edge is needed.
+  # For functions not in can_fail_fns (stdlib, extern), conservatively
+  # assume they can fail unless they're known user-defined non-failing fns.
+  def self.stmt_can_fail?(node, can_fail_fns)
+    return false unless node && can_fail_fns
+    case node
+    when AST::FuncCall
+      # Known user-defined function: check can_fail. Unknown: assume can fail.
+      return true if can_fail_fns.include?(node.name)
+      node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
+    when AST::MethodCall
+      # UFCS calls: method name matches user-defined function name.
+      return true if can_fail_fns.include?(node.name)
+      stmt_can_fail?(node.object, can_fail_fns) ||
+        node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
+    when AST::VarDecl, AST::BindExpr
+      stmt_can_fail?(node.value, can_fail_fns)
+    when AST::Assignment
+      stmt_can_fail?(node.value, can_fail_fns)
+    when AST::BinaryOp
+      stmt_can_fail?(node.left, can_fail_fns) || stmt_can_fail?(node.right, can_fail_fns)
+    when AST::UnaryOp
+      stmt_can_fail?(node.right, can_fail_fns)
+    when AST::CopyNode, AST::MoveNode, AST::Cast
+      stmt_can_fail?(node.value, can_fail_fns)
+    when AST::GetField
+      stmt_can_fail?(node.target, can_fail_fns)
+    when AST::GetIndex
+      stmt_can_fail?(node.target, can_fail_fns) || stmt_can_fail?(node.index, can_fail_fns)
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.any? { |_, v| stmt_can_fail?(v, can_fail_fns) }
+    when AST::ListLit
+      node.items.any? { |v| stmt_can_fail?(v, can_fail_fns) }
+    when AST::ReturnNode
+      stmt_can_fail?(node.value, can_fail_fns)
+    else
+      false
+    end
   end
 end
 
@@ -260,8 +318,9 @@ class OwnershipDataflow
   end
 
   # Build CFG + run dataflow for a function node. Returns the analysis.
-  def self.analyze(fn_node)
-    cfg = FunctionCFG.build(fn_node)
+  # @param can_fail_fns [Set<String>, nil] names of functions that can fail
+  def self.analyze(fn_node, can_fail_fns: nil)
+    cfg = FunctionCFG.build(fn_node, can_fail_fns: can_fail_fns)
     new(cfg, fn_node).analyze!
   end
 
@@ -517,10 +576,17 @@ class MIRPass
   end
 
   # Computes both plans and inserts MIR nodes into the AST.
+  # Phase 0 hoists heap-promoted temporaries (HPTs) into VarDecl nodes so that
+  # existing classify_binding + MIR::Drop infrastructure handles their cleanup.
   # PromotionPlan must run before CleanupPlan because its Phase 0
   # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
   # that CleanupPlan's HPT walk depends on.
   def transform!(ast)
+    # Phase 0: hoist HPT sub-expression FuncCalls into VarDecl nodes.
+    @fn_nodes.each do |_name, fn|
+      hoist_heap_temps!(fn) if fn.body
+    end
+
     promotion_plans = {}
 
     # Phase 1: compute PromotionPlan for all functions (triggers HPT downgrade).
@@ -559,25 +625,38 @@ class MIRPass
     fn.body = transform_body(fn.body, cleanup, promo)
   end
 
-  # Tighten has_moved_guard decisions using dataflow analysis.
-  # Only removes guards (has_moved_guard: false) for variables that are never
-  # moved on any path. Never removes needs_cleanup - that's the plan's job.
+  # Tighten cleanup decisions using ownership dataflow analysis.
+  #
+  # Two refinements:
+  #   1. Remove unnecessary moved guards: variable is never moved on any path
+  #      → unconditional cleanup, no guard needed.
+  #   2. Eliminate cleanup entirely: variable is moved on ALL paths (including
+  #      error unwind) → no defer needed at all.
+  #
+  # Error edges in the CFG ensure that (2) is safe: if a can_fail call exists
+  # between declaration and GIVE, the dataflow sees MAYBE_MOVED (not MOVED)
+  # and keeps the cleanup.
   def refine_moved_guards!(fn, cleanup)
-    df = OwnershipDataflow.analyze(fn)
+    # Compute which functions can fail for error-edge modeling.
+    can_fail_fns = Set.new
+    @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
+
+    df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns)
     summary = df.cleanup_summary
     bindings = cleanup.instance_variable_get(:@bindings)
     return unless bindings
 
     bindings.each do |var, entry|
-      next unless entry[:needs_cleanup] && entry[:has_moved_guard]
+      next unless entry[:needs_cleanup]
       df_entry = summary[var]
       next unless df_entry # variable not tracked by dataflow - keep plan
 
-      # Only remove unnecessary guards. Never remove cleanup entirely -
-      # the CFG doesn't model loops/error paths precisely enough to guarantee
-      # that a variable is truly consumed on ALL paths.
-      if !df_entry[:has_moved_guard] && df_entry[:needs_cleanup]
-        # Never moved on any path - unconditional cleanup, no guard needed.
+      if !df_entry[:needs_cleanup]
+        # Moved on ALL paths (including error edges) → no cleanup needed.
+        entry[:needs_cleanup] = false
+        entry[:has_moved_guard] = false
+      elsif !df_entry[:has_moved_guard] && entry[:has_moved_guard]
+        # Never moved on any path → unconditional cleanup, no guard needed.
         entry[:has_moved_guard] = false
       end
     end
@@ -690,5 +769,219 @@ class MIRPass
     else
       :generic
     end
+  end
+
+  # ── Phase 0: HPT hoisting ──────────────────────────────────────────
+  #
+  # Walks the function body looking for sub-expression FuncCall/MethodCall
+  # nodes with heap_provenance that aren't bind values, moved, or direct
+  # returns. Hoists each into a VarDecl before the containing statement
+  # and replaces the original call with an Identifier referencing the temp.
+  #
+  # After hoisting, classify_binding + MIR::Drop handle cleanup automatically.
+  # For return statements where the return value borrows from an HPT, the
+  # ReturnNode is annotated with hpt_return_handling.
+
+  def hoist_heap_temps!(fn)
+    @hpt_counter = 0
+    fn.body = hoist_in_body(fn.body)
+  end
+
+  # Process a statement list, returning a new array with hoisted VarDecls
+  # inserted before the statements that used to contain the HPT calls.
+  def hoist_in_body(stmts)
+    return stmts unless stmts.is_a?(Array)
+    result = []
+    stmts.each do |stmt|
+      # Recurse into nested control flow first.
+      hoist_in_branches!(stmt)
+
+      hoisted = []  # VarDecls to insert before this statement
+      case stmt
+      when AST::VarDecl, AST::BindExpr
+        next result << stmt if stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
+        val = stmt.value
+        if val.is_a?(AST::BinaryOp) && val.op == :OR_RESCUE
+          # Left side is the bind value; right side may have HPTs.
+          stmt.value.right = hoist_hpt_in_expr(val.right, stmt, hoisted, is_bind_value: false)
+        else
+          # The top-level value is the bind value. Scan sub-expressions only.
+          stmt.value = hoist_hpt_in_expr(val, stmt, hoisted, is_bind_value: true)
+        end
+      when AST::ReturnNode
+        if stmt.value
+          stmt.value = hoist_hpt_in_expr(stmt.value, stmt, hoisted, is_bind_value: false)
+        end
+      when AST::Assignment
+        stmt.value = hoist_hpt_in_expr(stmt.value, stmt, hoisted, is_bind_value: true)
+      when AST::FuncCall, AST::MethodCall
+        # Standalone expression statement (e.g., print(makeVal!()))
+        replaced = hoist_hpt_in_expr(stmt, stmt, hoisted, is_bind_value: false)
+        stmt = replaced if replaced != stmt  # top-level call itself was hoisted (unlikely but possible)
+      end
+
+      result.concat(hoisted)
+      result << stmt
+    end
+    result
+  end
+
+  # Recurse into control flow branches for HPT hoisting.
+  def hoist_in_branches!(stmt)
+    case stmt
+    when AST::IfStatement
+      stmt.then_branch = hoist_in_body(stmt.then_branch) if stmt.then_branch
+      stmt.else_branch = hoist_in_body(stmt.else_branch) if stmt.else_branch
+    when AST::WhileLoop
+      stmt.do_branch = hoist_in_body(stmt.do_branch) if stmt.do_branch
+    when AST::ForRange, AST::ForEach
+      stmt.body = hoist_in_body(stmt.body) if stmt.body
+    when AST::MatchStatement
+      stmt.cases&.each { |c| c[:body] = hoist_in_body(c[:body]) if c[:body] }
+      stmt.default_case = hoist_in_body(stmt.default_case) if stmt.default_case
+    when AST::WithBlock
+      stmt.body = hoist_in_body(stmt.body) if stmt.body
+    when AST::DoBlock
+      stmt.branches&.each { |b| b[:body] = hoist_in_body(b[:body]) if b[:body] }
+    when AST::BgBlock, AST::BgStreamBlock
+      stmt.body = hoist_in_body(stmt.body) if stmt.body
+    end
+  end
+
+  # Walk an expression tree, replacing HPT FuncCalls with Identifier
+  # references to hoisted VarDecls. Returns the (possibly replaced) node.
+  def hoist_hpt_in_expr(node, stmt_node, hoisted, is_bind_value:, inside_move: false)
+    return node unless node
+
+    case node
+    when AST::FuncCall, AST::MethodCall
+      ti = node.type_info rescue nil
+      ti = ti.is_a?(Type) ? ti : nil
+      if ti&.heap_provenance? && !is_bind_value && !node.was_moved && !inside_move
+        # Direct return: ownership transfers to caller, no HPT needed.
+        is_direct_return = stmt_node.is_a?(AST::ReturnNode) && stmt_node.value.equal?(node)
+        unless is_direct_return
+          # Recurse into args first (nested HPTs get hoisted first).
+          hoist_call_children!(node, stmt_node, hoisted)
+
+          # Create the hoisted VarDecl + replacement Identifier.
+          ident = create_hpt_vardecl(node, stmt_node, hoisted)
+          return ident
+        end
+      end
+      # Not an HPT - recurse into children.
+      hoist_call_children!(node, stmt_node, hoisted)
+      node
+
+    when AST::MoveNode
+      node.value = hoist_hpt_in_expr(node.value, stmt_node, hoisted,
+                                     is_bind_value: is_bind_value, inside_move: true)
+      node
+    when AST::BinaryOp
+      node.left = hoist_hpt_in_expr(node.left, stmt_node, hoisted,
+                                    is_bind_value: false)
+      node.right = hoist_hpt_in_expr(node.right, stmt_node, hoisted,
+                                     is_bind_value: false)
+      node
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.each do |k, v|
+        node.fields[k] = hoist_hpt_in_expr(v, stmt_node, hoisted,
+                                           is_bind_value: is_bind_value)
+      end
+      node
+    when AST::ListLit
+      node.items.map! { |v|
+        hoist_hpt_in_expr(v, stmt_node, hoisted, is_bind_value: is_bind_value)
+      }
+      node
+    when AST::GetField
+      node.target = hoist_hpt_in_expr(node.target, stmt_node, hoisted,
+                                      is_bind_value: false)
+      node
+    when AST::GetIndex
+      node.target = hoist_hpt_in_expr(node.target, stmt_node, hoisted,
+                                      is_bind_value: false)
+      node.index = hoist_hpt_in_expr(node.index, stmt_node, hoisted,
+                                     is_bind_value: false)
+      node
+    when AST::UnaryOp
+      node.right = hoist_hpt_in_expr(node.right, stmt_node, hoisted,
+                                     is_bind_value: false)
+      node
+    when AST::Cast
+      node.value = hoist_hpt_in_expr(node.value, stmt_node, hoisted,
+                                     is_bind_value: false)
+      node
+    when AST::CopyNode
+      node.value = hoist_hpt_in_expr(node.value, stmt_node, hoisted,
+                                     is_bind_value: false)
+      node
+    else
+      node
+    end
+  end
+
+  # Recurse into FuncCall/MethodCall children (args + object).
+  def hoist_call_children!(node, stmt_node, hoisted)
+    node.args.map! { |arg|
+      hoist_hpt_in_expr(arg, stmt_node, hoisted, is_bind_value: false)
+    }
+    if node.is_a?(AST::MethodCall)
+      node.object = hoist_hpt_in_expr(node.object, stmt_node, hoisted,
+                                      is_bind_value: false)
+    end
+  end
+
+  # Create a VarDecl for an HPT FuncCall, add it to hoisted list,
+  # and return an Identifier node that references the temp variable.
+  # Also detects return_handling and annotates the ReturnNode if needed.
+  def create_hpt_vardecl(call_node, stmt_node, hoisted)
+    @hpt_counter += 1
+    tmp_name = "__hpt_#{@hpt_counter}"
+
+    ti = call_node.type_info
+    classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
+
+    # Detect return_handling: return value may borrow from this HPT's heap data.
+    if stmt_node.is_a?(AST::ReturnNode)
+      ret_ti = stmt_node.value&.type_info rescue nil
+      ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
+      if ret_ti&.string?
+        stmt_node.hpt_return_handling = :dupe_string
+      elsif ret_ti
+        resolved = ret_ti.resolved
+        ret_schema = @schema_lookup.call(resolved) rescue nil
+        needs_promo = if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
+          (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        elsif ret_schema.is_a?(Hash) && !ret_schema[:kind]
+          ret_schema.any? do |k, v|
+            next false if k.is_a?(Symbol)
+            ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+            ft.needs_escape_promotion?
+          end
+        else
+          false
+        end
+        if needs_promo
+          stmt_node.hpt_return_handling = :promote_return
+          stmt_node.hpt_return_type = resolved.to_s
+        end
+      end
+    end
+
+    # Build VarDecl node.
+    vardecl = AST::VarDecl.new(call_node.token, tmp_name, nil, call_node, false)
+    # Transfer type info so classify_binding sees it.
+    vardecl.full_type = ti
+    vardecl.storage = call_node.respond_to?(:storage) ? call_node.storage : nil
+    # Mark as HPT-hoisted so the transpiler can emit the correct type annotation.
+    vardecl.hpt_hoisted = true
+    hoisted << vardecl
+
+    # Build replacement Identifier.
+    ident = AST::Identifier.new(call_node.token, tmp_name)
+    ident.full_type = ti
+    ident.storage = call_node.respond_to?(:storage) ? call_node.storage : nil
+    ident
   end
 end

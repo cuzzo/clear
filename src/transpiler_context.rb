@@ -3,8 +3,6 @@
 # for the annotator).
 class TranspilerContext
   attr_accessor :uses_frame, :has_rt, :collection_params,
-                :pending_heap_temps,   # Array of temp hashes awaiting emission at statement boundary
-                :heap_temp_counter,    # Monotonic counter for unique temp names
                 :fn_name               # current function name (for plan lookup)
 
   def initialize(uses_frame:, has_rt:, collection_params: Set.new, fn_name: nil)
@@ -12,7 +10,5 @@ class TranspilerContext
     @has_rt = has_rt
     @collection_params = collection_params
     @fn_name = fn_name
-    @pending_heap_temps = []
-    @heap_temp_counter = 0
   end
 end

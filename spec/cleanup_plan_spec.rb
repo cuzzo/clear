@@ -3,6 +3,7 @@ require_relative "../src/lexer"
 require_relative "../src/parser"
 require_relative "../src/annotator"
 require_relative "../src/promotion_plan"
+require_relative "../src/control_flow"
 
 # Tests CleanupPlan - THE SINGLE AUTHORITY for all cleanup decisions.
 # Every defer/cleanup emission in the transpiler consults this plan.
@@ -464,9 +465,9 @@ RSpec.describe CleanupPlan do
   # =========================================================================
   # HPT classification (tested through heap_temps entries)
   # =========================================================================
-  describe "HPT classification via heap_temps" do
-    it "classifies heap string sub-expression" do
-      plan, _, _ = hpt_for(<<~CLEAR, "main")
+  describe "HPT hoisting via MIRPass" do
+    it "hoists heap string sub-expression into VarDecl" do
+      plan, _, fn = hpt_for(<<~CLEAR, "main")
         FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
         FN consume(s: String) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
@@ -474,14 +475,14 @@ RSpec.describe CleanupPlan do
             RETURN;
         END
       CLEAR
-      entries = plan.heap_temps.values
-      expect(entries.size).to eq(1)
-      expect(entries.first[:kind]).to eq(:heap_string)
-      expect(entries.first[:alloc]).to eq(:heap)
+      expect(count_hoisted_hpts(fn)).to eq(1)
+      hpt_var = fn.body.find { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
+      entry = plan.lookup(hpt_var.name)
+      expect(entry[:kind]).to eq(:heap_string)
     end
 
-    it "does not create entry for primitive return" do
-      plan, _, _ = hpt_for(<<~CLEAR, "main")
+    it "does not hoist primitive return" do
+      _, _, fn = hpt_for(<<~CLEAR, "main")
         FN getNum() RETURNS Int64 -> RETURN 42_i64; END
         FN consume(n: Int64) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
@@ -489,7 +490,7 @@ RSpec.describe CleanupPlan do
             RETURN;
         END
       CLEAR
-      expect(plan.heap_temps.size).to eq(0)
+      expect(count_hoisted_hpts(fn)).to eq(0)
     end
   end
 
@@ -662,25 +663,32 @@ RSpec.describe CleanupPlan do
     end
   end
 
-  # ── HPT: heap_temps plan entries for sub-expression calls ──────────
+  # ── HPT hoisting: MIRPass hoists sub-expression calls into VarDecls ──
 
   def hpt_for(src, fn_name)
     tokens = Lexer.new(src).tokenize
     ast = Parser.new(tokens, src).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
-    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    plan = CleanupPlan.compute(fn_node, fn_nodes: fn_nodes,
-      schema_lookup: ->(name) { annotator.lookup_type_schema(name) })
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir.transform!(ast)
+    fn_node = fn_nodes[fn_name]
+    plan = mir.cleanup_plans[fn_name]
     [plan, ast, fn_node]
   end
 
-  describe "HPT: heap_temps plan entries" do
-    context "sub-expression call gets HPT entry" do
-      it "detects heap FuncCall inside another call's args" do
-        plan, _, _ = hpt_for(<<~CLEAR, "main")
+  # Count hoisted VarDecls (__hpt_N) in a function body.
+  def count_hoisted_hpts(fn_node)
+    fn_node.body.count { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
+  end
+
+  describe "HPT hoisting: MIRPass hoists sub-expression calls into VarDecls" do
+    context "sub-expression call gets hoisted" do
+      it "hoists heap FuncCall inside another call's args" do
+        _, _, fn = hpt_for(<<~CLEAR, "main")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN wrap(v: Value) RETURNS Value -> RETURN v; END
@@ -689,13 +697,13 @@ RSpec.describe CleanupPlan do
               RETURN;
           END
         CLEAR
-        expect(plan.heap_temps.size).to be >= 1, "sub-expression makeVal!() should have HPT entry"
+        expect(count_hoisted_hpts(fn)).to be >= 1, "sub-expression makeVal!() should be hoisted"
       end
     end
 
-    context "direct bind call does NOT get HPT" do
+    context "direct bind call does NOT get hoisted" do
       it "skips FuncCall that is the direct RHS of a binding" do
-        plan, _, _ = hpt_for(<<~CLEAR, "main")
+        _, _, fn = hpt_for(<<~CLEAR, "main")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN main() RETURNS Void ->
@@ -703,25 +711,25 @@ RSpec.describe CleanupPlan do
               RETURN;
           END
         CLEAR
-        expect(plan.heap_temps.size).to eq(0), "direct bind call should NOT have HPT entry"
+        expect(count_hoisted_hpts(fn)).to eq(0), "direct bind call should NOT be hoisted"
       end
     end
 
-    context "direct return skips HPT (ownership transfers to caller)" do
-      it "does NOT create an HPT entry for direct return" do
-        plan, _, fn = hpt_for(<<~CLEAR, "wrapper")
+    context "direct return skips hoisting (ownership transfers to caller)" do
+      it "does NOT hoist direct return" do
+        _, _, fn = hpt_for(<<~CLEAR, "wrapper")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN wrapper() RETURNS Value -> RETURN makeVal!(); END
           FN main() RETURNS Void -> v = wrapper(); RETURN; END
         CLEAR
-        expect(plan.heap_temps.size).to eq(0), "direct return should not create HPT entry"
+        expect(count_hoisted_hpts(fn)).to eq(0), "direct return should not be hoisted"
       end
     end
 
     context "nested sub-expression" do
-      it "detects heap call nested in another call" do
-        plan, _, _ = hpt_for(<<~CLEAR, "main")
+      it "hoists heap call nested in another call" do
+        _, _, fn = hpt_for(<<~CLEAR, "main")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN wrap(v: Value) RETURNS Value -> RETURN v; END
@@ -731,17 +739,13 @@ RSpec.describe CleanupPlan do
               RETURN;
           END
         CLEAR
-        expect(plan.heap_temps.size).to be >= 1, "nested makeVal!() should have HPT entry"
+        expect(count_hoisted_hpts(fn)).to be >= 1, "nested makeVal!() should be hoisted"
       end
     end
 
     context "struct literal as bind target" do
-      it "does NOT create HPT for direct field that is a heap FuncCall" do
-        # Bug: x = Foo{ val: makeVal!() } was creating an HPT for makeVal!()
-        # even though the struct variable x owns the value. This caused a
-        # double-free: HPT defer + struct_with_cleanup_fields cleanup both
-        # freed the same data.
-        plan, _, _ = hpt_for(<<~CLEAR, "main")
+      it "does NOT hoist direct field that is a heap FuncCall" do
+        _, _, fn = hpt_for(<<~CLEAR, "main")
           UNION Value { Nil, Str: String }
           STRUCT Wrapper { val: Value }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
@@ -750,14 +754,12 @@ RSpec.describe CleanupPlan do
               RETURN;
           END
         CLEAR
-        expect(plan.heap_temps.size).to eq(0),
-          "direct struct field makeVal!() should NOT get HPT — struct owns the value"
+        expect(count_hoisted_hpts(fn)).to eq(0),
+          "direct struct field makeVal!() should NOT be hoisted — struct owns the value"
       end
 
-      it "still creates HPT for heap call nested in a function arg within a struct field" do
-        # x = Foo{ val: wrap(makeVal!()) } — makeVal!() is an arg to wrap(),
-        # not a direct field value; wrap() does not take ownership, so HPT is needed.
-        plan, _, _ = hpt_for(<<~CLEAR, "main")
+      it "still hoists heap call nested in a function arg within a struct field" do
+        _, _, fn = hpt_for(<<~CLEAR, "main")
           UNION Value { Nil, Str: String }
           STRUCT Wrapper { val: Value }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
@@ -767,14 +769,14 @@ RSpec.describe CleanupPlan do
               RETURN;
           END
         CLEAR
-        expect(plan.heap_temps.size).to be >= 1,
-          "makeVal!() as arg to wrap() inside a struct field should still get HPT"
+        expect(count_hoisted_hpts(fn)).to be >= 1,
+          "makeVal!() as arg to wrap() inside a struct field should still be hoisted"
       end
     end
 
     context "list literal as bind target" do
-      it "does NOT create HPT for direct list item that is a heap FuncCall" do
-        plan, _, _ = hpt_for(<<~CLEAR, "main")
+      it "does NOT hoist direct list item that is a heap FuncCall" do
+        _, _, fn = hpt_for(<<~CLEAR, "main")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN main() RETURNS Void ->
@@ -782,40 +784,35 @@ RSpec.describe CleanupPlan do
               RETURN;
           END
         CLEAR
-        expect(plan.heap_temps.size).to eq(0),
-          "direct list item makeVal!() should NOT get HPT — list owns the value"
+        expect(count_hoisted_hpts(fn)).to eq(0),
+          "direct list item makeVal!() should NOT be hoisted — list owns the value"
       end
     end
 
     context "heap arg to non-TAKES callee in return expression" do
-      it "creates HPT for heap arg passed to the direct-return function" do
-        # Bug: RETURN prStr(runTest!()) — runTest!() is a non-TAKES argument.
-        # scan_for_hpt_downgrade was clearing runTest!()'s provenance because it
-        # recursed into FuncCall args. The HPT must be created so cleanup runs
-        # after prStr() uses the value.
-        plan, _, _ = hpt_for(<<~CLEAR, "caller")
+      it "hoists heap arg passed to the direct-return function" do
+        _, _, fn = hpt_for(<<~CLEAR, "caller")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN prStr(v: Value) RETURNS String -> RETURN "result"; END
           FN caller() RETURNS String -> RETURN prStr(makeVal!()); END
         CLEAR
-        expect(plan.heap_temps.size).to be >= 1,
-          "makeVal!() is non-TAKES arg to prStr — needs HPT cleanup, not a leak"
+        expect(count_hoisted_hpts(fn)).to be >= 1,
+          "makeVal!() is non-TAKES arg to prStr — needs HPT hoisting"
       end
 
-      it "does NOT create HPT for the direct-return FuncCall itself" do
-        # prStr() itself is the direct return — no HPT, caller takes ownership.
-        plan, _, _ = hpt_for(<<~CLEAR, "caller")
+      it "does NOT hoist the direct-return FuncCall itself" do
+        plan, _, fn = hpt_for(<<~CLEAR, "caller")
           UNION Value { Nil, Str: String }
           FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
           FN prStr(v: Value) RETURNS String -> RETURN "result"; END
           FN caller() RETURNS String -> RETURN prStr(makeVal!()); END
         CLEAR
-        # Only makeVal!() should have an HPT, not prStr()
-        # (prStr itself would classify as heap_string but it IS the direct return)
-        heap_temp_types = plan.heap_temps.values.map { |e| e[:kind] }
-        expect(heap_temp_types).not_to include(:heap_string),
-          "prStr() is the direct return — its result should NOT be an HPT"
+        # Only makeVal!() should be hoisted, not prStr()
+        hoisted = fn.body.select { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
+        hoisted_values = hoisted.map { |v| v.value }
+        expect(hoisted_values.none? { |v| v.is_a?(AST::FuncCall) && v.name == "prStr" }).to be(true),
+          "prStr() is the direct return — should NOT be hoisted"
       end
     end
   end

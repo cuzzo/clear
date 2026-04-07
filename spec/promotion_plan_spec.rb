@@ -74,9 +74,7 @@ RSpec.describe PromotionPlan do
       expect(plan.struct_promote).to be_nil
     end
 
-    it "suppresses defer for the HashMap" do
-      expect(plan.suppress_defers).to include("m")
-    end
+    # suppress_defers removed: collect_escaping_identifiers handles defer suppression
   end
 
   # =========================================================================
@@ -125,9 +123,7 @@ RSpec.describe PromotionPlan do
       expect(plan.struct_promote).to be_nil
     end
 
-    it "suppresses defer" do
-      expect(plan.suppress_defers).to include("vals")
-    end
+    # suppress_defers removed: collect_escaping_identifiers handles defer suppression
   end
 
   # =========================================================================
@@ -149,9 +145,7 @@ RSpec.describe PromotionPlan do
       expect(plan.var_promotes.map { |vp| vp[:var] }).to eq(["m"])
     end
 
-    it "suppresses defer" do
-      expect(plan.suppress_defers).to include("m")
-    end
+    # suppress_defers removed: collect_escaping_identifiers handles defer suppression
   end
 
   # =========================================================================

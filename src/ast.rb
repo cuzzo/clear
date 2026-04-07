@@ -280,7 +280,10 @@ module AST
     attr_accessor :has_promotion     # set by MIRPass when function has escape promotions
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
-  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
+  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
+    include Locatable
+    attr_accessor :hpt_hoisted  # true when this VarDecl was synthesized by HPT hoisting
+  end
   Assignment   = Struct.new(:token, :name, :value) do
     include Locatable
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
@@ -364,6 +367,8 @@ module AST
     include Locatable
     attr_accessor :promote_ret_wrap    # :const or :var — set by MIRPass for return wrapping
     attr_accessor :promote_fields_info # { zig_type:, fields: } — struct/union field promotion on __ret
+    attr_accessor :hpt_return_handling # :dupe_string or :promote_return — set by HPT hoisting
+    attr_accessor :hpt_return_type     # Zig type string for :promote_return
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"

@@ -2289,19 +2289,7 @@ private
           return "try #{rt_name}.heapAlloc().dupe(u8, #{call_code})"
         end
 
-        # Heap-promoted temp hoisting: CleanupPlan determines which calls need
-        # hoisting. The transpiler just reads the plan and emits the temp.
-        fn_name = current_tp_ctx&.fn_name
-        hpt_entry = @cleanup_plans&.dig(fn_name)&.lookup_heap_temp(node.object_id)
-        if hpt_entry
-          ctx = current_tp_ctx
-          ctx.heap_temp_counter += 1
-          tmp = "__hpt_#{ctx.heap_temp_counter}"
-          ctx.pending_heap_temps << { var: tmp, call: call_code, rt: rt_name, type_info: node.type_info, plan_entry: hpt_entry }
-          tmp
-        else
-          call_code
-        end
+        call_code
       end
 
     when AST::ReturnNode
@@ -2359,6 +2347,19 @@ private
         parts.reject(&:empty?).join("\n")
       elsif node.promote_ret_wrap == :const
         [suppress, "const __ret = #{val_code};", "return __ret;"].reject(&:empty?).join("\n")
+      elsif node.hpt_return_handling == :dupe_string
+        # Return string borrows from HPT heap data. Dupe to frame before HPT defer runs.
+        [suppress,
+         "var __hpt_ret: []const u8 = #{val_code};",
+         "__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);",
+         "return __hpt_ret;"].reject(&:empty?).join("\n")
+      elsif node.hpt_return_handling == :promote_return
+        # Return value aliases HPT heap data. Deep-copy before HPT defer runs.
+        zig_t = node.hpt_return_type ? transpile_type(node.hpt_return_type) : "UNKNOWN"
+        [suppress,
+         "var __hpt_ret: #{zig_t} = #{val_code};",
+         "try CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);",
+         "return __hpt_ret;"].reject(&:empty?).join("\n")
       elsif needs_string_dupe && node.value
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
@@ -3782,9 +3783,6 @@ private
 
   def transpile_block(statements)
     statements.map do |stmt|
-      ctx = current_tp_ctx
-      saved_temps = ctx&.pending_heap_temps
-      ctx.pending_heap_temps = [] if ctx
       code = visit(stmt)
       next nil unless code
       # Move suppression: for consumed args (TAKES, append, struct/union construction).
@@ -3796,42 +3794,6 @@ private
           code = "#{code}\n#{consumed}"
         end
       end
-      # Flush heap-promoted temporaries: emit const + defer cleanup before the statement.
-      temps = ctx&.pending_heap_temps || []
-      if temps.any?
-        preamble = temps.map { |t|
-          ti = t[:type_info].is_a?(Type) ? t[:type_info] : Type.new(t[:type_info] || :Any)
-          ti = ti.payload_type if ti.error_union? && ti.payload_type
-          ti.provenance = :heap
-          zig_t = ti.zig_type
-          entry = t[:plan_entry]
-          if entry
-            proxy = Struct.new(:type_info, :storage, :resource_close_zig, :container_borrow).new(ti, :heap, nil, false)
-            cleanup = emit_cleanup_from_entry(t[:var], entry, proxy)
-          else
-            cleanup = ""
-          end
-          "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
-        }.join("\n")
-        return_handling = temps.filter_map { |t| t[:plan_entry]&.dig(:return_handling) }.first
-        rt_name = @do_rt_name || "rt"
-        case return_handling
-        when :dupe_string
-          # Return string may borrow from inside HPT heap data. Dupe to frame.
-          ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
-          code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
-        when :promote_return
-          # Return value may alias into HPT heap data (e.g. a union copy with the
-          # same string ptr). Promote (deep-copy heap fields) before HPT cleanup.
-          raw_type = temps.filter_map { |t| t[:plan_entry]&.dig(:promote_return_type) }.compact.first
-          zig_t = raw_type ? transpile_type(raw_type) : "UNKNOWN"
-          ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
-          code = "#{preamble}\nvar __hpt_ret: #{zig_t} = #{ret_expr};\ntry CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);\nreturn __hpt_ret;"
-        else
-          code = "#{preamble}\n#{code}"
-        end
-      end
-      ctx.pending_heap_temps = saved_temps if ctx
       # Zig requires non-void expression results to be consumed. Any AST node
       # that is an expression (not a declaration, assignment, or control flow)
       # with a non-void return type needs `_ = ` when used as a statement.
