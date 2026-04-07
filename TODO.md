@@ -47,3 +47,4 @@ Vision is clear: Gradual Typing (Ruby/Python) -> Typed (Rust) -> STRICT Typed (H
 
  - [ ] Ability to write custom capabilities
  - [ ] Full Ruby/Elixir Standard Library
+ - [ ] DISTRIBUTED as a topology

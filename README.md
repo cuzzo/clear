@@ -195,3 +195,4 @@ The goal of CLEAR is:
   2. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
   3. For code, even at the highest-level of optimization, to be easily understandable.
   4. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
+  5. To be able to distribute loads across multiple machines natively like BEAM but with native speeds.

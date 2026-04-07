@@ -148,6 +148,7 @@ Other items include:
  * Example programs that don't sufficiently showcase something not already covered.
  * Re-architectures:
    * Migrations to MPSC/MPMC: CLEAR intends to be strictly SPSC at the architecture level.
+   * Migrations away from Cooperative Scheduling: CLEAR aims to enable distribution as a topology as user friendly as BEAM.
  * Micro-performance improvements with large change sets
    * If CLEAR allocates an additional frameAlloc somewhere (2ns), and the fix includes 100+ lines of code - it will likely not get approved at this time.
 
