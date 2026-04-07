@@ -784,12 +784,12 @@ class CleanupPlan
         # OR-wrapped calls: the left FuncCall inside OR_RESCUE is the bind value
         if val.is_a?(AST::BinaryOp) && val.op == :OR_RESCUE
           scan_for_hpt(val.left, schema_lookup, heap_temps,
-                       stmt_node: stmt, is_bind_value: true, inside_move: false, return_type: nil)
+                       stmt_node: stmt, is_bind_value: true, inside_move: false)
           scan_for_hpt(val.right, schema_lookup, heap_temps,
-                       stmt_node: stmt, is_bind_value: false, inside_move: false, return_type: nil)
+                       stmt_node: stmt, is_bind_value: false, inside_move: false)
         else
           scan_for_hpt(val, schema_lookup, heap_temps,
-                       stmt_node: stmt, is_bind_value: true, inside_move: false, return_type: nil)
+                       stmt_node: stmt, is_bind_value: true, inside_move: false)
         end
       when AST::ReturnNode
         # scan_for_hpt_downgrade (Phase 0 of PromotionPlan.compute) already cleared
@@ -797,16 +797,16 @@ class CleanupPlan
         next
       when AST::Assignment
         scan_for_hpt(stmt.value, schema_lookup, heap_temps,
-                     stmt_node: stmt, is_bind_value: true, inside_move: false, return_type: nil)
+                     stmt_node: stmt, is_bind_value: true, inside_move: false)
       when AST::FuncCall, AST::MethodCall
         # Standalone expression statements (e.g., print(makeVal!()))
         scan_for_hpt(stmt, schema_lookup, heap_temps,
-                     stmt_node: stmt, is_bind_value: false, inside_move: false, return_type: nil)
+                     stmt_node: stmt, is_bind_value: false, inside_move: false)
       end
     end
   end
 
-  def self.scan_for_hpt(node, schema_lookup, heap_temps, stmt_node:, is_bind_value:, inside_move:, return_type:)
+  def self.scan_for_hpt(node, schema_lookup, heap_temps, stmt_node:, is_bind_value:, inside_move:)
     return unless node
 
     case node
@@ -814,80 +814,69 @@ class CleanupPlan
       ti = node.type_info rescue nil
       ti = ti.is_a?(Type) ? ti : nil
       if ti&.heap_provenance? && !is_bind_value && !node.was_moved && !inside_move
-        # Direct return: ownership transfers to caller, no HPT needed.
-        is_direct_return = stmt_node.is_a?(AST::ReturnNode) && stmt_node.value.equal?(node)
-        unless is_direct_return
-          # Unwrap error unions (try unwraps them at Zig level)
-          classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
-          entry = classify_heap_temp(classify_ti, schema_lookup)
-          if entry
-            # Indirect return: determine how to handle the return value
-            return_handling = if stmt_node.is_a?(AST::ReturnNode)
-              return_type&.string? ? :dupe_string : :suppress_non_string
-            end
-            heap_temps[node.object_id] = entry.merge(return_handling: return_handling)
-          end
-        end  # unless is_direct_return
+        classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
+        entry = classify_heap_temp(classify_ti, schema_lookup)
+        heap_temps[node.object_id] = entry if entry
       end
       # Recurse into arguments (never bind values, not direct return values)
       args = node.is_a?(AST::MethodCall) ? node.args : node.args
       args.each do |arg|
         scan_for_hpt(arg, schema_lookup, heap_temps,
                      stmt_node: stmt_node, is_bind_value: false,
-                     inside_move: inside_move, return_type: return_type)
+                     inside_move: inside_move)
       end
       # MethodCall: also scan the object
       if node.is_a?(AST::MethodCall)
         scan_for_hpt(node.object, schema_lookup, heap_temps,
                      stmt_node: stmt_node, is_bind_value: false,
-                     inside_move: inside_move, return_type: return_type)
+                     inside_move: inside_move)
       end
     when AST::MoveNode
       scan_for_hpt(node.value, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: is_bind_value,
-                   inside_move: true, return_type: return_type)
+                   inside_move: true)
     when AST::BinaryOp
       scan_for_hpt(node.left, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
       scan_for_hpt(node.right, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
     when AST::StructLit, AST::UnionVariantLit
       node.fields.each_value do |v|
         scan_for_hpt(v, schema_lookup, heap_temps,
-                     stmt_node: stmt_node, is_bind_value: false,
-                     inside_move: inside_move, return_type: return_type)
+                     stmt_node: stmt_node, is_bind_value: is_bind_value,
+                     inside_move: inside_move)
       end
     when AST::ListLit
       node.items.each do |v|
         scan_for_hpt(v, schema_lookup, heap_temps,
-                     stmt_node: stmt_node, is_bind_value: false,
-                     inside_move: inside_move, return_type: return_type)
+                     stmt_node: stmt_node, is_bind_value: is_bind_value,
+                     inside_move: inside_move)
       end
     when AST::GetField
       scan_for_hpt(node.target, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
     when AST::GetIndex
       scan_for_hpt(node.target, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
       scan_for_hpt(node.index, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
     when AST::UnaryOp
       scan_for_hpt(node.right, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
     when AST::Cast
       scan_for_hpt(node.value, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
     when AST::CopyNode
       scan_for_hpt(node.value, schema_lookup, heap_temps,
                    stmt_node: stmt_node, is_bind_value: false,
-                   inside_move: inside_move, return_type: return_type)
+                   inside_move: inside_move)
     end
   end
 

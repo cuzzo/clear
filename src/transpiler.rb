@@ -3816,27 +3816,7 @@ private
           end
           "const #{t[:var]}: #{zig_t} = #{t[:call]};\n#{cleanup}"
         }.join("\n")
-        # Return handling: the plan knows if this temp is in a return context.
-        return_handling = temps.filter_map { |t| t[:plan_entry]&.dig(:return_handling) }.first
-        if return_handling
-          rt_name = @do_rt_name || "rt"
-          case return_handling
-          when :suppress
-            # Direct return: ownership transfers to caller, skip cleanup.
-            move_suppression = temps.filter_map { |t| "#{t[:var]}_moved = true;" if code.include?(t[:var]) }.join("\n")
-            code = "#{preamble}\n#{move_suppression}\n#{code}"
-          when :dupe_string
-            # Indirect return with string: dupe to frame, let HPT cleanup run.
-            ret_expr = code.strip.sub(/\Areturn\s+/, '').sub(/;\s*\z/, '')
-            code = "#{preamble}\nvar __hpt_ret: []const u8 = #{ret_expr};\n__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);\nreturn __hpt_ret;"
-          when :suppress_non_string
-            # Non-string indirect return: suppress cleanup (safe fallback).
-            move_suppression = temps.filter_map { |t| "#{t[:var]}_moved = true;" if code.include?(t[:var]) }.join("\n")
-            code = "#{preamble}\n#{move_suppression}\n#{code}"
-          end
-        else
-          code = "#{preamble}\n#{code}"
-        end
+        code = "#{preamble}\n#{code}"
       end
       ctx.pending_heap_temps = saved_temps if ctx
       # Zig requires non-void expression results to be consumed. Any AST node

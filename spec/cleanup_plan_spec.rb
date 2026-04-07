@@ -734,5 +734,57 @@ RSpec.describe CleanupPlan do
         expect(plan.heap_temps.size).to be >= 1, "nested makeVal!() should have HPT entry"
       end
     end
+
+    context "struct literal as bind target" do
+      it "does NOT create HPT for direct field that is a heap FuncCall" do
+        # Bug: x = Foo{ val: makeVal!() } was creating an HPT for makeVal!()
+        # even though the struct variable x owns the value. This caused a
+        # double-free: HPT defer + struct_with_cleanup_fields cleanup both
+        # freed the same data.
+        plan, _, _ = hpt_for(<<~CLEAR, "main")
+          UNION Value { Nil, Str: String }
+          STRUCT Wrapper { val: Value }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN main() RETURNS Void ->
+              w = Wrapper{ val: makeVal!() };
+              RETURN;
+          END
+        CLEAR
+        expect(plan.heap_temps.size).to eq(0),
+          "direct struct field makeVal!() should NOT get HPT — struct owns the value"
+      end
+
+      it "still creates HPT for heap call nested in a function arg within a struct field" do
+        # x = Foo{ val: wrap(makeVal!()) } — makeVal!() is an arg to wrap(),
+        # not a direct field value; wrap() does not take ownership, so HPT is needed.
+        plan, _, _ = hpt_for(<<~CLEAR, "main")
+          UNION Value { Nil, Str: String }
+          STRUCT Wrapper { val: Value }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN wrap(v: Value) RETURNS Value -> RETURN v; END
+          FN main() RETURNS Void ->
+              w = Wrapper{ val: wrap(makeVal!()) };
+              RETURN;
+          END
+        CLEAR
+        expect(plan.heap_temps.size).to be >= 1,
+          "makeVal!() as arg to wrap() inside a struct field should still get HPT"
+      end
+    end
+
+    context "list literal as bind target" do
+      it "does NOT create HPT for direct list item that is a heap FuncCall" do
+        plan, _, _ = hpt_for(<<~CLEAR, "main")
+          UNION Value { Nil, Str: String }
+          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
+          FN main() RETURNS Void ->
+              items: Value[] = [makeVal!()];
+              RETURN;
+          END
+        CLEAR
+        expect(plan.heap_temps.size).to eq(0),
+          "direct list item makeVal!() should NOT get HPT — list owns the value"
+      end
+    end
   end
 end
