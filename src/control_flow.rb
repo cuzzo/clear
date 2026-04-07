@@ -671,9 +671,17 @@ class MIRPass
       next unless df_entry # variable not tracked by dataflow - keep plan
 
       if !df_entry[:needs_cleanup]
-        # Moved on ALL paths (including error edges) → no cleanup needed.
-        entry[:needs_cleanup] = false
-        entry[:has_moved_guard] = false
+        # Moved on ALL paths (including error edges) → normally no cleanup needed.
+        if entry[:kind] == :takes_union
+          # Exception: MATCH TAKES on unions may extract Copy-type payloads
+          # (strings) where extraction copies the slice header but doesn't
+          # consume the underlying buffer. The source defer must stay with a
+          # guard so branches that extract non-Copy variants can suppress it.
+          entry[:has_moved_guard] = true
+        else
+          entry[:needs_cleanup] = false
+          entry[:has_moved_guard] = false
+        end
       elsif !df_entry[:has_moved_guard] && entry[:has_moved_guard]
         # Never moved on any path → unconditional cleanup, no guard needed.
         entry[:has_moved_guard] = false

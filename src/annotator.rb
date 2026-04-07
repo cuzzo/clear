@@ -2747,7 +2747,9 @@ private
   def visit_CopyNode(node)
     visit(node.value)
     # COPY produces an owned deep-copy. The source is NOT consumed.
-    node.full_type = node.value.full_type
+    # Clone the Type so mutating provenance doesn't affect the inner node.
+    inner_type = node.value.full_type
+    node.full_type = inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type
     node.storage = :stack
     # COPY always produces heap-owned data.
     ti = node.type_info

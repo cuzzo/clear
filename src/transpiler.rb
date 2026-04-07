@@ -1041,7 +1041,12 @@ private
              map_ref  = visit(target_node)
              # Auto-deref Arc/Rc-wrapped maps
              map_ref = "#{map_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
+             # StringMap.put always dupes the key internally, so concat
+             # temporaries for map keys can use frameAlloc (freed at loop rewind).
+             prev = @map_key_visit
+             @map_key_visit = true unless map_ft.numeric_map?
              key_ref  = visit(node.name.index)
+             @map_key_visit = prev
              val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
 
@@ -2611,7 +2616,13 @@ private
         # Check if we are operating on Strings
         # Annotator ensures full_type is set (e.g. "String" or "%String")
         rt_ref = @do_rt_name || "rt"
-        alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+        alloc = if @map_key_visit
+          "#{rt_ref}.frameAlloc()"
+        elsif node.storage == :heap
+          "#{rt_ref}.heapAlloc()"
+        else
+          "#{rt_ref}.frameAlloc()"
+        end
 
         if node.left.type_info&.string? || node.right.type_info&.string?
           # Generate call to runtime helper
@@ -2706,7 +2717,13 @@ private
 
     when AST::StringConcat
       rt_ref = @do_rt_name || "rt"
-      alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+      alloc = if @map_key_visit
+        "#{rt_ref}.frameAlloc()"
+      elsif node.storage == :heap
+        "#{rt_ref}.heapAlloc()"
+      else
+        "#{rt_ref}.frameAlloc()"
+      end
       parts_zig = node.parts.map { |p| visit(p) }
       "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
 
