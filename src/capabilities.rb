@@ -244,6 +244,9 @@ module CapabilityHelper
     :has_outer_ref,    # references any outer-scope variable
     :captures,         # Hash<name => type_obj> for code generation
     :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
+    :pointer_captures, # Set<name> - captures needing *T pointer passing
+    :string_captures,  # Set<name> - string captures needing defer free in fiber
+    :resource_captures, # Set<name> - resource captures needing move suppression
     keyword_init: true
   ) do
     def pin_reason; has_sharded ? :sharded : :shared; end
@@ -256,7 +259,8 @@ module CapabilityHelper
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_outer_ref: false,
-      captures: {}, close_patterns: {}
+      captures: {}, close_patterns: {},
+      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
     _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
     result
@@ -292,7 +296,8 @@ module CapabilityHelper
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_outer_ref: false,
-      captures: {}, close_patterns: {}
+      captures: {}, close_patterns: {},
+      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
     _unified_capture_walk(body, locally_bound, result, false)
     result.has_outer_ref
@@ -324,7 +329,15 @@ module CapabilityHelper
 
           # Collect capture for code generation (type_info + close pattern).
           # Use the AST node's type_info (matches transpiler's walk_do_identifiers).
-          result.captures[name] ||= node.type_info
+          unless result.captures.key?(name)
+            result.captures[name] = node.type_info
+
+            # Pre-compute per-capture metadata for transpiler.
+            t = node.type_info.is_a?(Type) ? node.type_info : (node.type_info ? Type.new(node.type_info) : nil)
+            result.pointer_captures << name if t&.needs_pointer_passing?
+            result.string_captures << name if t&.string?
+            result.resource_captures << name if t&.resource? || info.close_zig
+          end
           if info.close_zig
             result.close_patterns[name] ||= info.close_zig
           end

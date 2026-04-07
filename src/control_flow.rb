@@ -693,9 +693,10 @@ class MIRPass
       # Insert Promote + SuppressCleanup before ReturnNode.
       insert_promotion!(result, stmt, promo) if stmt.is_a?(AST::ReturnNode)
 
-      # Stamp cleanup info on reassignment / match-as nodes.
+      # Stamp cleanup info on reassignment / match-as / map-put nodes.
       stamp_reassign_cleanup!(stmt, bindings)
       stamp_match_as_cleanup!(stmt, bindings)
+      stamp_map_value_promote!(stmt)
 
       # Emit the original statement.
       result << stmt
@@ -757,6 +758,7 @@ class MIRPass
       entry[:has_moved_guard], stmt.type_info, entry[:resource_close_zig],
       stmt
     )
+    drop.cleanup_entry = entry
     result << drop
   end
 
@@ -776,6 +778,7 @@ class MIRPass
         fn.token, dd[:name].to_s, entry[:kind], entry[:alloc],
         entry[:has_moved_guard], ti, entry[:resource_close_zig], nil
       )
+      drop.cleanup_entry = entry
       drops << drop
     end
     fn.body = drops + fn.body if drops.any?
@@ -802,25 +805,64 @@ class MIRPass
     return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
 
     src_entry = bindings[stmt.expr.name.to_s]
+    has_as_cleanup = false
+
     stmt.cases&.each do |c|
       next unless c[:binding]
       as_entry = bindings[c[:binding].to_s]
       next unless as_entry && as_entry[:needs_cleanup]
 
-      c[:match_as_src_guard] = src_entry&.dig(:has_moved_guard) || false
+      has_as_cleanup = true
+      c[:match_as_src_guard] = src_entry&.dig(:needs_cleanup) || false
       c[:match_as_cleanup] = {
         kind: as_entry[:kind], alloc: as_entry[:alloc],
         has_moved_guard: true,
         zig_type: as_entry[:zig_type], elem_zig_type: as_entry[:elem_zig_type]
       }
     end
+
+    # Ensure source has moved guard so _moved variable exists for suppression.
+    # Only set if the source still needs cleanup (dataflow may have eliminated it).
+    src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry[:needs_cleanup]
+  end
+
+  # Stamp map_value_promote on Assignment nodes where a struct value with
+  # list fields is stored into a HashMap. The list backing must be promoted
+  # from frame to heap before the put.
+  def stamp_map_value_promote!(stmt)
+    return unless stmt.is_a?(AST::Assignment)
+    return unless stmt.name.is_a?(AST::GetIndex)
+    target_node = stmt.name.target
+    return unless target_node.respond_to?(:metatype) && target_node.metatype == :hashmap
+
+    val_ti = stmt.value.type_info rescue nil
+    return unless val_ti
+    val_ti = Type.new(val_ti) if val_ti && !val_ti.is_a?(Type)
+    val_type_sym = val_ti.respond_to?(:resolved) ? val_ti.resolved : nil
+    return unless val_type_sym
+
+    schema = @schema_lookup.call(val_type_sym) rescue nil
+    return unless schema.is_a?(Hash) && !schema[:kind]
+
+    promote_fields = schema.filter_map do |k, v|
+      next if k.is_a?(Symbol)
+      ft = v.is_a?(Hash) ? Type.new(v[:type] || :Any) : Type.new(v || :Any)
+      next unless ft.list_collection?
+      { field: k.to_s, elem_zig: Type.new(ft.element_type).zig_type }
+    end
+    return if promote_fields.empty?
+
+    stmt.map_value_promote = {
+      zig_type: val_ti.zig_type,
+      promote_fields: promote_fields
+    }
   end
 
   # Build moved_guard_info: { var_name => bool } for all bindings.
   def stamp_moved_guard_info!(fn, bindings)
     info = {}
     bindings.each do |name, entry|
-      info[name] = true if entry[:has_moved_guard]
+      info[name] = true if entry[:has_moved_guard] && entry[:needs_cleanup]
     end
     fn.moved_guard_info = info unless info.empty?
   end
@@ -1058,7 +1100,7 @@ class MIRPass
         end
         if needs_promo
           stmt_node.hpt_return_handling = :promote_return
-          stmt_node.hpt_return_type = resolved.to_s
+          stmt_node.hpt_return_type = Type.new(resolved).zig_type
         end
       end
     end

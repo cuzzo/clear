@@ -292,6 +292,7 @@ module AST
     include Locatable
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
+    attr_accessor :map_value_promote  # stamped by MIRPass: { zig_type:, promote_fields: [{field:, elem_zig:}] }
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
@@ -581,7 +582,10 @@ module AST
   # default_case: [ASTNode] or nil
   # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
   # default_drops: drop-array for default branch (or nil), filled by annotator
-  MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) { include Locatable }
+  MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
+    include Locatable
+    attr_accessor :string_match  # set by annotator: true when expr is string type (use strEql)
+  end
 
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
@@ -713,6 +717,7 @@ module MIR
   Drop = Struct.new(:token, :name, :kind, :alloc, :has_moved_guard, :type_info,
                      :resource_close_zig, :source_node) do
     include AST::Locatable
+    attr_accessor :cleanup_entry  # full classifier hash with pre-computed RC fields
     def needs_cleanup; true; end
   end
 

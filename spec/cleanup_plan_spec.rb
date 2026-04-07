@@ -167,7 +167,7 @@ RSpec.describe CleanupClassifier do
   # MATCH AS bindings (the double-free bug fix)
   # =========================================================================
   describe "MATCH AS binding (borrow)" do
-    context "MATCH AS without TAKES is a borrow - no cleanup" do
+    context "MATCH AS auto-promotes to TAKES for non-Copy variants" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "eval!")
           UNION Value { Nil, Num: Float64, List: Value[] }
@@ -181,8 +181,9 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "does NOT mark AS binding for cleanup (borrow)" do
-        expect(plan["items"]).to be_nil
+      it "marks AS binding for cleanup (auto-TAKES)" do
+        expect(plan["items"]).not_to be_nil
+        expect(plan["items"][:kind]).to eq(:match_as_slice)
       end
     end
   end

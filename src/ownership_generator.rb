@@ -67,15 +67,16 @@ module OwnershipGenerator
       "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
 
     when :rc
+      rc_alloc = entry[:rc_alloc] ? alloc_expr_from_plan(alloc: entry[:rc_alloc]) : alloc
       case entry[:rc_variant]
       when :link
         guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})")
       when :optional
-        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{entry[:rc_alloc]}, _strong_ref); }")
+        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{rc_alloc}, _strong_ref); }")
       else
-        result = guarded_cleanup(name, zig_type, entry[:rc_alloc] || alloc)
+        result = guarded_cleanup(name, zig_type, rc_alloc)
         if entry[:needs_release_fields]
-          result += "defer if (!#{name}_moved) CheatLib.releaseFields(#{entry[:base_zig]}, #{entry[:rc_alloc]}, #{name}.ctrl.data.*);\n"
+          result += "defer if (!#{name}_moved) CheatLib.releaseFields(#{entry[:base_zig]}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
         end
         result
       end

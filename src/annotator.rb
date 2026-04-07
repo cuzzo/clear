@@ -577,6 +577,19 @@ private
       next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
       synthetic_name = :"#{node.name}_#{var_name}"
       current_scope.declare_type(synthetic_name, var_data[:fields])
+
+      # Pre-compute deinit entries for transpiler: which fields need cleanup.
+      indirect = var_data[:indirect_fields] || Set.new
+      deinit_entries = []
+      var_data[:fields].each do |fname, ftype|
+        ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
+        if indirect.include?(fname)
+          deinit_entries << { field: fname, kind: :indirect, zig_type: ft.zig_type(is_field: true) }
+        elsif ft.array? && !ft.string?
+          deinit_entries << { field: fname, kind: :array, elem_zig_type: Type.new(ft.element_type).zig_type }
+        end
+      end
+      var_data[:deinit_entries] = deinit_entries if deinit_entries.any?
     end
 
     schema = { kind: :union, variants: node.variants }
@@ -717,6 +730,7 @@ private
 
     # Determine whether the subject is an enum or union for exhaustiveness / payload capture
     expr_t    = Type.new(node.expr.resolved_type || :Any)
+    node.string_match = true if expr_t.string?
     type_name = expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved
     schema    = lookup_type_schema(type_name)
     is_enum   = schema.is_a?(Hash) && schema[:kind] == :enum
@@ -732,7 +746,66 @@ private
     # MATCH TAKES: if the source is explicitly consumed (MATCH TAKES expr START),
     # mark the source as moved BEFORE branch analysis. Without TAKES, the source
     # is implicitly borrowed and AS bindings are borrowed views into it.
-    if node.takes && is_union && node.expr.is_a?(AST::Identifier)
+    #
+    # Auto-consume: when an AS binding extracts a non-Copy variant (one with heap
+    # data), auto-promote to TAKES semantics. Without this, source and binding
+    # share heap data leading to double-free or leak.
+    # Auto-TAKES: when ALL cases have AS bindings and the DEFAULT doesn't use
+    # the source, the source can be consumed. This prevents heap data sharing
+    # between source and extracted binding (double-free/leak).
+    auto_takes = false
+    if !node.takes && is_union && node.expr.is_a?(AST::Identifier)
+      # Check if any AS case extracts a non-Copy payload that would share
+      # heap ownership with the source. Strings are Copy in CLEAR, so
+      # extracting a string variant doesn't require consuming the source.
+      has_non_copy_as = node.cases&.any? { |c|
+        next false unless c[:binding]
+        vn = case c[:value]
+             when AST::GetField then c[:value].field
+             when AST::MethodCall then c[:value].name
+             end
+        next false unless vn
+        vt = (schema[:variants] || {})[vn]
+        next false unless vt
+        # Inline struct with heap fields: non-Copy (strings/collections/indirect)
+        if vt.is_a?(Hash) && (vt[:kind] == :inline_struct || vt[:kind] == :indirect_payload)
+          Type.variant_has_heap?(vt)
+        else
+          # Simple payload: only non-Copy if it's a collection/array (not string)
+          t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
+          t && !t.string? && (t.collection? || t.map? || (t.array? && !t.fixed?))
+        end
+      }
+      if has_non_copy_as
+        source_name = node.expr.name
+        # Check no case lacks a binding (all cases extract payloads).
+        all_cases_bind = node.cases&.all? { |c| c[:binding] }
+        # Check DEFAULT doesn't reference the source value.
+        # walk_body only visits statement-level nodes; we need to check
+        # expression sub-trees too (e.g. RETURN input; has input inside).
+        default_refs_source = false
+        if node.default_case
+          check_refs = lambda { |n|
+            next unless n
+            if n.is_a?(AST::Identifier) && n.name == source_name
+              default_refs_source = true
+              next
+            end
+            # Recurse into common expression wrappers
+            check_refs.call(n.value) if n.respond_to?(:value)
+            check_refs.call(n.left) if n.respond_to?(:left)
+            check_refs.call(n.right) if n.respond_to?(:right)
+            check_refs.call(n.condition) if n.respond_to?(:condition) && !n.is_a?(AST::IfStatement)
+            n.args&.each { |a| check_refs.call(a) } if n.respond_to?(:args)
+          }
+          node.default_case.each { |stmt| check_refs.call(stmt) }
+        end
+        auto_takes = all_cases_bind && !default_refs_source
+        auto_takes = false if @og[source_name]&.kind == :borrowed
+      end
+    end
+    if (node.takes || auto_takes) && is_union && node.expr.is_a?(AST::Identifier)
+      node.takes = true if auto_takes
       source_name = node.expr.name
       if @og[source_name] && @og[source_name].kind != :borrowed
         node.expr.was_moved = true

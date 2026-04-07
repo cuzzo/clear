@@ -661,7 +661,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("val_moved")
     end
 
-    it "does NOT emit source_moved for MATCH AS (implicit borrow)" do
+    it "emits source_moved for MATCH AS on non-Copy variant (auto-TAKES)" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
@@ -675,8 +675,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # MATCH AS without TAKES is a borrow - source is NOT consumed
-      expect(zig).not_to include("v_moved = true")
+      # MATCH AS on non-Copy variant auto-promotes to TAKES - source is consumed
+      expect(zig).to include("v_moved = true")
     end
 
     it "keeps v moved guard when can_fail call precedes MATCH TAKES" do
@@ -739,7 +739,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"world"/)
     end
 
-    it "MATCH AS without TAKES does NOT emit cleanup on binding (borrow)" do
+    it "MATCH AS on non-Copy variant emits cleanup on binding (auto-TAKES)" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
         FN test!() RETURNS Void ->
@@ -752,8 +752,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # MATCH AS is a borrow - no cleanup on items, source retains ownership
-      expect(zig).not_to include("items_moved")
+      # MATCH AS auto-TAKES: binding gets cleanup, source suppressed
+      expect(zig).to include("items_moved")
     end
 
     it "MATCH TAKES emits cleanup on AS binding" do

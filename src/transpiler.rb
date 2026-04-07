@@ -254,41 +254,16 @@ private
       ti&.element_type ? transpile_type(ti.element_type) : nil
     end
 
-    entry = {
+    # Start from classifier's pre-computed entry (carries RC fields, etc.)
+    # and overlay with transpiler-computed zig type strings.
+    classifier = node.cleanup_entry || {}
+    entry = classifier.merge(
       kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
       needs_cleanup: true, resource_close_zig: node.resource_close_zig,
       zig_type: zig_type || "UNKNOWN",
       elem_zig_type: elem_zig,
       is_fixed: node.kind == :array_with_struct_strings ? ti&.fixed? : nil
-    }
-
-    # Pre-compute RC-specific fields so emit_cleanup_from_entry needs no type_info.
-    if node.kind == :rc && ti
-      base_type = ti.resolved.to_s
-      base_type = base_type.sub(/^\?/, '') if ti.optional?
-      base_zig = transpile_type(base_type)
-      alloc = cleanup_alloc_expr(ti)
-
-      if ti.link?
-        source = ti.link_source || :multiowned
-        entry[:rc_variant] = :link
-        entry[:rc_release_func] = source == :shared ? "weakArcRelease" : "weakRcRelease"
-        entry[:base_zig] = base_zig
-      elsif ti.optional?
-        entry[:rc_variant] = :optional
-        entry[:rc_release_func] = ti.shared? ? "arcRelease" : "rcRelease"
-        entry[:base_zig] = base_zig
-        entry[:rc_alloc] = alloc
-      else
-        entry[:rc_variant] = :standard
-        entry[:rc_alloc] = alloc
-        if ti.any_rc? && !ti.sync
-          schema = (@struct_schemas ||= {})[ti.resolved]
-          entry[:needs_release_fields] = true if schema
-          entry[:base_zig] = base_zig
-        end
-      end
-    end
+    )
 
     entry
   end
@@ -460,18 +435,17 @@ private
           zig_t = "*#{zig_t}" if indirect.include?(fname)
           "    #{fname}: #{zig_t},"
         end.join("\n")
-        # Generate deinit for inline structs that own heap data (@indirect, []T).
-        deinit_lines = []
-        var_data[:fields].each do |fname, ftype|
-          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          if indirect.include?(fname)
-            zig_t = transpile_type(ftype, is_field: true)
-            deinit_lines << "        CheatLib.cleanup(#{zig_t}, alloc, self.#{fname});"
-            deinit_lines << "        alloc.destroy(self.#{fname});"
-          elsif ft.array? && !ft.string?
-            elem_zig = transpile_type(ft.element_type)
-            deinit_lines << "        if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (self.#{fname}) |*__e| { CheatLib.cleanup(#{elem_zig}, alloc, __e); } }"
-            deinit_lines << "        if (self.#{fname}.len > 0) alloc.free(self.#{fname});"
+        # Deinit entries pre-computed by annotator: read mechanically.
+        deinit_lines = (var_data[:deinit_entries] || []).flat_map do |de|
+          case de[:kind]
+          when :indirect
+            ["        CheatLib.cleanup(#{de[:zig_type]}, alloc, self.#{de[:field]});",
+             "        alloc.destroy(self.#{de[:field]});"]
+          when :array
+            ["        if (comptime CheatLib.needsCleanup(#{de[:elem_zig_type]})) { for (self.#{de[:field]}) |*__e| { CheatLib.cleanup(#{de[:elem_zig_type]}, alloc, __e); } }",
+             "        if (self.#{de[:field]}.len > 0) alloc.free(self.#{de[:field]});"]
+          else
+            []
           end
         end
 
@@ -841,20 +815,11 @@ private
       # Collections/streams are forced to var for deinit even if never reassigned.
       # Types that require `var` in Zig even if the binding itself is never reassigned:
       # collections (deinit mutates), streams, dynamic arrays, and structs with
-      # heap-promoted collection fields (field-level deinit needs mutable access).
-      # Check if struct schema contains collection/string fields needing mutable deinit.
-      struct_has_cleanup = if ft&.struct? && !ft&.any_rc? && !ft&.any_sync?
-        schema = @struct_schemas&.dig(ft.resolved)
-        schema&.any? { |fn, fd|
-          next if fn.is_a?(Symbol)
-          ftype = fd.is_a?(Hash) ? fd[:type] : fd
-          ftype_t = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-          ftype_t.collection? || ftype_t.map? || ftype_t.string?
-        }
-      end
-      has_mutable_cleanup = ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
+      # MIR::Drop follows this binding → cleanup defer needs mutable access.
+      # Also force var for collections, streams, and resources that need internal mutation.
+      has_mutable_cleanup = node.has_cleanup || ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
                             ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
-                            ft&.heap_provenance? || ft&.resource? || node.resource_close_zig || struct_has_cleanup
+                            ft&.heap_provenance? || ft&.resource? || node.resource_close_zig
       forced_var = is_mutable && has_mutable_cleanup
       keyword = if !is_mutable
         "const"
@@ -1120,36 +1085,16 @@ private
                    end
                  end
                end
-               # Struct values with @list fields need list promotion from frame
-               # to heap before storing in a HashMap. HashMap cleanup uses
-               # heapAlloc but the list backing may be on the frame arena.
-               # Only promote list fields (not strings — COPY already handles those).
-               val_ti = node.value.type_info rescue nil
-               val_type_sym = val_ti&.resolved
-               schema = val_type_sym && @struct_schemas&.dig(val_type_sym)
-               list_fields = schema ? schema.select { |k, v|
-                 next false if k.is_a?(Symbol)
-                 ft = v.is_a?(Hash) ? Type.new(v[:type] || :Any) : Type.new(v || :Any)
-                 ft.list_collection?
-               }.map { |k, _| k.to_s } : []
-               if list_fields.any?
+               # Map value promotion: list fields pre-computed by MIRPass stamp.
+               mvp = node.map_value_promote
+               if mvp
                  @map_val_counter ||= 0
                  @map_val_counter += 1
                  tmp = "__map_val_#{@map_val_counter}"
-                 zig_t = transpile_type(val_ti)
-                 # Promote list fields from frame to heap: backing buffer AND elements.
-                 # Uses promote() which handles ArrayLists recursively (backing + elements).
-                 # Don't use promoteFields on the whole struct — it re-dupes strings
-                 # that are already heap-allocated from COPY/literal.
-                 promote_calls = list_fields.map { |f|
-                   elem_ti = schema[f].is_a?(Hash) ? Type.new(schema[f][:type]) : Type.new(schema[f])
-                   inner_zig = transpile_type(elem_ti.element_type)
-                   # promoteList migrates the backing buffer only. Elements
-                   # populated via COPY are already heap-owned; promote()
-                   # would re-dupe them, leaking the originals.
-                   "try CheatLib.promoteList(#{inner_zig}, #{rt_name}, &#{tmp}.#{f});"
+                 promote_calls = mvp[:promote_fields].map { |pf|
+                   "try CheatLib.promoteList(#{pf[:elem_zig]}, #{rt_name}, &#{tmp}.#{pf[:field]});"
                  }.join("\n")
-                 code = "var #{tmp}: #{zig_t} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
+                 code = "var #{tmp}: #{mvp[:zig_type]} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
                else
                  code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
                end
@@ -1479,8 +1424,7 @@ private
             body = "#{bindings}\n    #{body}" unless bindings.empty?
           else
             val = visit(c[:value])
-            expr_type = Type.new(node.expr.resolved_type || :Any)
-            cond = if expr_type.string?
+            cond = if node.string_match
               "CheatLib.strEql(#{subject}, #{val})"
             else
               "#{subject} == #{val}"
@@ -1783,18 +1727,17 @@ private
       captured = analysis&.captures || {}
       capture_close_zig = analysis&.close_patterns || {}
 
-      # Detect resource captures (TCP fds). BG blocks with resource captures
-      # must spawn on the accepting scheduler to keep epoll fd consistent.
-      node.captures_resource = captured.any? { |_, type_obj|
-        t = type_obj.is_a?(Type) ? type_obj : nil
-        t&.resource?
-      }
+      # Pre-computed capture metadata from analysis.
+      pointer_captures = analysis&.pointer_captures || Set.new
+      string_captures = analysis&.string_captures || Set.new
+      resource_captures = analysis&.resource_captures || Set.new
+
+      node.captures_resource = resource_captures.any?
 
       capture_fields = captured.map do |name, type_obj|
         t = type_obj ? Type.new(type_obj) : nil
         zig_t = t ? t.zig_type : "anyopaque"
-        # All maps must be captured by pointer (shared mutable state).
-        if t && t.needs_pointer_passing?
+        if pointer_captures.include?(name)
           "#{name}: *#{zig_t},"
         else
           "#{name}: #{zig_t},"
@@ -1813,9 +1756,8 @@ private
       )
 
       capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
-        captured.map do |name, type_obj|
-          t = type_obj ? Type.new(type_obj) : nil
-          if t && t.needs_pointer_passing?
+        captured.map do |name, _|
+          if pointer_captures.include?(name)
             ".#{name} = &#{name}"
           elsif promoted_names[name]
             ".#{name} = #{promoted_names[name]}"
@@ -1828,9 +1770,8 @@ private
       # Without this, the outer scope's `defer socketClose(fd)` fires immediately,
       # closing the fd before the fiber reads it.
       # capture_close_zig from analysis above
-      resource_moves = captured.filter_map do |name, type_obj|
-        t = type_obj.is_a?(Type) ? type_obj : nil
-        "#{name}_moved = true;" if t&.resource? || capture_close_zig[name]
+      resource_moves = resource_captures.filter_map do |name|
+        "#{name}_moved = true;"
       end.join("\n")
 
       # Flatten ThenChain nodes in the body into individual steps.
@@ -1904,13 +1845,10 @@ private
       # via their own deinit in the fiber's normal cleanup path.
       # Resources use the schema-driven close_zig pattern from the symbol entry.
       # capture_close_zig from analysis above
-      capture_frees = captured.filter_map do |name, type_obj|
-        t = type_obj.is_a?(Type) ? type_obj : (type_obj ? Type.new(type_obj) : nil)
-        if t&.string?
+      capture_frees = captured.filter_map do |name, _|
+        if string_captures.include?(name)
           "defer ctx.alloc.free(ctx.#{name});"
         elsif capture_close_zig[name]
-          # Resource: use the close_zig pattern from the type schema.
-          # {0} is replaced with the context field access.
           "defer #{capture_close_zig[name].gsub('{0}', "ctx.#{name}")};"
         end
       end.compact.join("\n                    ")
@@ -2368,7 +2306,7 @@ private
       if node.promote_ret_wrap == :var && node.promote_fields_info
         # Struct/union-level promotion: wrap return value in __ret, promote fields.
         info = node.promote_fields_info
-        zig_type = transpile_type(info[:zig_type])
+        zig_type = info[:zig_type]
         parts = [suppress]
         parts << "var __ret = #{val_code};"
         if info[:fields]
@@ -2390,7 +2328,7 @@ private
          "return __hpt_ret;"].reject(&:empty?).join("\n")
       elsif node.hpt_return_handling == :promote_return
         # Return value aliases HPT heap data. Deep-copy before HPT defer runs.
-        zig_t = node.hpt_return_type ? transpile_type(node.hpt_return_type) : "UNKNOWN"
+        zig_t = node.hpt_return_type || "UNKNOWN"
         [suppress,
          "var __hpt_ret: #{zig_t} = #{val_code};",
          "try CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);",

@@ -161,7 +161,8 @@ module PromotionClassifier
   end
 
   private_class_method def self.zig_type_for(type)
-    type.resolved.to_s.sub(/^[!?]+/, '')
+    name = type.resolved.to_s.sub(/^[!?]+/, '')
+    Type.new(name).zig_type
   end
 
   private_class_method def self.referenced_vars(node)
@@ -373,15 +374,25 @@ module CleanupClassifier
               zig_type: "#{union_zig}_#{variant_name}"
             }
           end
+        elsif variant_type.is_a?(Hash) && variant_type[:kind] == :indirect_payload
+          # @indirect payload: the extracted value is a simple type (behind a
+          # pointer in the union). No AS binding cleanup needed.
+          next
         else
           pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type || :Any)
-          needs_as_cleanup = (pt.array? && !pt.string?) || pt.collection? || pt.map?
-          if needs_as_cleanup && pt.array? && !pt.string?
+          if pt.array? && !pt.string?
             elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
               has_moved_guard: true,
               elem_zig_type: elem_zig
+            }
+          elsif pt.collection? || pt.map?
+            zig_type = pt.zig_type rescue pt.resolved.to_s
+            bindings[c[:binding]] = {
+              needs_cleanup: true, alloc: :heap, kind: pt.map? ? :string_map : :list,
+              has_moved_guard: true,
+              zig_type: zig_type
             }
           end
         end
@@ -403,7 +414,7 @@ module CleanupClassifier
     classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
       classify_array_struct_strings(ti, node, schema_lookup) ||
-      classify_rc_or_link(ti) ||
+      classify_rc_or_link(ti, schema_lookup) ||
       classify_sync(ti) ||
       classify_heap_provenance(ti, node, schema_lookup) ||
       classify_heap_struct_plain(ti, node) ||
@@ -446,9 +457,37 @@ module CleanupClassifier
     entry(:array_with_struct_strings)
   end
 
-  private_class_method def self.classify_rc_or_link(ti)
-    return entry(:rc) if ti.any_rc? || ti.link?
-    nil
+  private_class_method def self.classify_rc_or_link(ti, schema_lookup)
+    return nil unless ti.any_rc? || ti.link?
+
+    base_type = ti.resolved.to_s
+    base_type = base_type.sub(/^\?/, '') if ti.optional?
+    base_zig = Type.new(base_type).zig_type rescue base_type
+
+    if ti.link?
+      source = ti.link_source || :multiowned
+      entry(:rc,
+        rc_variant: :link,
+        rc_release_func: source == :shared ? "weakArcRelease" : "weakRcRelease",
+        base_zig: base_zig)
+    elsif ti.optional?
+      entry(:rc,
+        rc_variant: :optional,
+        rc_release_func: ti.shared? ? "arcRelease" : "rcRelease",
+        base_zig: base_zig,
+        rc_alloc: ti.provenance_alloc || :heap)
+    else
+      rc_alloc = ti.provenance_alloc || :heap
+      e = entry(:rc, rc_variant: :standard, rc_alloc: rc_alloc)
+      if ti.any_rc? && !ti.sync
+        schema = schema_lookup.call(ti.resolved) rescue nil
+        if schema.is_a?(Hash) && !schema[:kind]
+          e[:needs_release_fields] = true
+          e[:base_zig] = base_zig
+        end
+      end
+      e
+    end
   end
 
   private_class_method def self.classify_sync(ti)
@@ -501,6 +540,7 @@ module CleanupClassifier
       ft = v.is_a?(Hash) ? v[:type] : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       next true if t.link? || t.any_rc?
+      next true if t.collection? || t.map?
       next false unless t.string?
       # Rodata string fields don't need cleanup
       if struct_lit
