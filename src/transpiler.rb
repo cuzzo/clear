@@ -222,8 +222,7 @@ private
   end
 
   # Build the entry hash for emit_cleanup_from_entry from a MIR::Drop node.
-  # Pre-computes zig_type/elem_zig_type so emit_cleanup_from_entry needs no
-  # type derivation.
+  # Pre-computes all type strings so emit_cleanup_from_entry is purely mechanical.
   def build_drop_entry(node)
     ti = node.type_info
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
@@ -231,7 +230,6 @@ private
 
     zig_type = case node.kind
     when :heap_slice
-      # COPY produces bare slice ([]T); function returns produce ArrayList.
       is_bare = src.respond_to?(:value) && src.value.is_a?(AST::CopyNode) && !ti&.list_collection?
       if is_bare
         elem = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
@@ -244,6 +242,8 @@ private
     when :heap_union, :heap_struct, :locked, :write_locked,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
       transpile_type((ti&.resolved || :Any).to_s)
+    when :rc
+      ti&.zig_type
     end
 
     elem_zig = case node.kind
@@ -254,13 +254,43 @@ private
       ti&.element_type ? transpile_type(ti.element_type) : nil
     end
 
-    {
+    entry = {
       kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
       needs_cleanup: true, resource_close_zig: node.resource_close_zig,
       zig_type: zig_type || "UNKNOWN",
       elem_zig_type: elem_zig,
       is_fixed: node.kind == :array_with_struct_strings ? ti&.fixed? : nil
     }
+
+    # Pre-compute RC-specific fields so emit_cleanup_from_entry needs no type_info.
+    if node.kind == :rc && ti
+      base_type = ti.resolved.to_s
+      base_type = base_type.sub(/^\?/, '') if ti.optional?
+      base_zig = transpile_type(base_type)
+      alloc = cleanup_alloc_expr(ti)
+
+      if ti.link?
+        source = ti.link_source || :multiowned
+        entry[:rc_variant] = :link
+        entry[:rc_release_func] = source == :shared ? "weakArcRelease" : "weakRcRelease"
+        entry[:base_zig] = base_zig
+      elsif ti.optional?
+        entry[:rc_variant] = :optional
+        entry[:rc_release_func] = ti.shared? ? "arcRelease" : "rcRelease"
+        entry[:base_zig] = base_zig
+        entry[:rc_alloc] = alloc
+      else
+        entry[:rc_variant] = :standard
+        entry[:rc_alloc] = alloc
+        if ti.any_rc? && !ti.sync
+          schema = (@struct_schemas ||= {})[ti.resolved]
+          entry[:needs_release_fields] = true if schema
+          entry[:base_zig] = base_zig
+        end
+      end
+    end
+
+    entry
   end
 
   def visit(node)
@@ -956,8 +986,7 @@ private
         move_logic = emit_move_suppression(node.value)
 
         if node.reassign_cleanup
-          ti = node.type_info
-          zig_type = ti ? transpile_type(ti.resolved.to_s) : "UNKNOWN"
+          zig_type = node.reassign_cleanup[:zig_type] || "UNKNOWN"
           alloc = alloc_expr_from_plan(node.reassign_cleanup)
           tmp = "__new_#{safe}"
           inner = "const #{tmp} = #{value_str};\nCheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{tmp};"
@@ -2798,7 +2827,7 @@ private
 
     when MIR::Drop
       entry = build_drop_entry(node)
-      emit_cleanup_from_entry(zig_safe_name(node.name), entry, node.type_info)
+      emit_cleanup_from_entry(zig_safe_name(node.name), entry)
 
     when MIR::Promote
       rt_name = @do_rt_name || "rt"

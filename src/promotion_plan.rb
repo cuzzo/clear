@@ -15,99 +15,24 @@ require_relative "type"
 #
 # Ruby just decides WHICH variables/values to call it on.
 
-class PromotionPlan
-  # Per-variable promotions emitted BEFORE the return expression.
-  # Each: { var: "name", zig_type: "std.ArrayListUnmanaged(i64)" }
-  # Emits: try CheatLib.promote(<zig_type>, rt, &<var>);
-  attr_reader :var_promotes
-
-  # Struct-level promotion on __ret AFTER construction.
-  # String (Zig type name) or nil.
-  # Emits per-field promote for each unhandled_promote_fields.
-  attr_reader :struct_promote
-
-  # Field names that need promotion (unhandled by var_promotes).
-  # When nil, ALL fields are promoted (backward compat for returns_promoted).
-  # When set, only these fields get per-field promote calls.
-  attr_reader :unhandled_promote_fields
-
-  # Set of ReturnNode object_ids that need struct_promote.
-  # When set, only returns in this set get promoteFields.
-  # When nil, all returns get it (backward compat for struct returns).
-  attr_reader :promote_return_ids
-
-  def initialize(var_promotes: [], struct_promote: nil, promote_return_ids: nil, unhandled_promote_fields: nil)
-    @var_promotes = var_promotes.freeze
-    @struct_promote = struct_promote
-    @promote_return_ids = promote_return_ids&.freeze
-    @unhandled_promote_fields = unhandled_promote_fields&.freeze
-  end
-
-  # Check if a specific return node needs struct_promote.
-  def needs_promote?(ret_node)
-    return true if @promote_return_ids.nil?  # nil = all returns (backward compat)
-    @promote_return_ids.include?(ret_node.object_id)
-  end
-
-  EMPTY = new.freeze
-
-  def empty?
-    @var_promotes.empty? && @struct_promote.nil?
-  end
-
-  # Return a filtered plan containing only the var_promotes relevant
-  # to a specific return expression (variables referenced in the AST node).
-  def filter_for_return(return_value)
-    return self if @var_promotes.empty?
-
-    referenced = referenced_vars(return_value)
-    relevant = @var_promotes.select { |vp| referenced.include?(vp[:var]) }
-    relevant_names = relevant.map { |vp| vp[:var] }
-
-    PromotionPlan.new(
-      var_promotes: relevant,
-      struct_promote: @struct_promote,
-      promote_return_ids: @promote_return_ids,
-      unhandled_promote_fields: @unhandled_promote_fields,
-    )
-  end
-
-  private
-
-  def referenced_vars(node)
-    vars = Set.new
-    return vars unless node
-    case node
-    when AST::Identifier
-      vars << node.name
-    when AST::StructLit
-      node.fields.each_value { |v| vars.merge(referenced_vars(v)) }
-    end
-    vars
-  end
-
-  # Compute a promotion plan for a single function.
+module PromotionClassifier
+  # Classify escape promotions for a single function.
   #
   # @param fn_node [AST::FunctionDef] the annotated function
   # @param schema_lookup [Proc] lambda(type_name_sym) -> schema hash or nil
-  # @return [PromotionPlan]
-  def self.compute(fn_node, schema_lookup:)
-    # Gate: if the function never allocates AND isn't marked returns_promoted
-    # (e.g., CATCH wrapper functions that pass through caller's frame data),
-    # nothing needs promotion.
-    return EMPTY unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap
+  # @return [Hash] { var_promotes:, struct_promote:, promote_return_ids:, unhandled_promote_fields: }
+  #                or empty hash
+  def self.classify(fn_node, schema_lookup:)
+    return {} unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap
 
     ret_type_sym = fn_node.return_type
-    return EMPTY unless ret_type_sym
+    return {} unless ret_type_sym
     ret_type = ret_type_sym.is_a?(Type) ? ret_type_sym : Type.new(ret_type_sym)
-    return EMPTY if ret_type.resolved == :Void
+    return {} if ret_type.resolved == :Void
+    return {} if ret_type.string?
 
-    # Strings don't need promotion (rodata or caller-frame).
-    return EMPTY if ret_type.string?
-
-    # Collect all ReturnNodes from the function body.
     return_nodes = collect_returns(fn_node.body)
-    return EMPTY if return_nodes.empty?
+    return {} if return_nodes.empty?
 
     var_promotes = []
     handled_fields = Set.new
@@ -119,35 +44,26 @@ class PromotionPlan
       next unless val
 
       if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
-        # Walk struct/union fields: classify by provenance.
         val.fields.each do |fname, fval|
           fti = fval.type_info
           fti = Type.new(fti) if fti && !fti.is_a?(Type)
 
-          # Heap-provenance fields already own their data (COPY, heap call result).
-          # Rodata fields are static and never need promotion.
-          # Both are "handled" — compute_struct_promote skips them.
           if fti&.heap_provenance? || fti&.rodata_provenance?
             handled_fields << fname.to_s
             next
           end
 
           next unless fval.is_a?(AST::Identifier)
-          # Frame-provenance variables that escape need promotion.
           next unless fti&.escaped_return
 
           var_promotes << { var: fval.name, zig_type: fti.zig_type }
           handled_fields << fname.to_s
         end
 
-        # Union constructor with frame-allocated data: promote so it
-        # survives frame rewind. Per-return-node: only this specific return
-        # gets promoteFields. Skip when all fields are heap/rodata.
         if var_promotes.empty?
           needs_promote = val.fields.any? do |_, fval|
             fti = fval.type_info
             fti = Type.new(fti) if fti && !fti.is_a?(Type)
-            # Only frame-provenance data needs promotion
             next false if fti&.heap_provenance? || fti&.rodata_provenance?
             fti&.string? || fti&.array? || fti&.collection?
           end
@@ -164,29 +80,19 @@ class PromotionPlan
         end
 
       elsif val.is_a?(AST::Identifier)
-        # Direct variable return.
         ti = val.type_info
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
-        # Frame-provenance data escaping via return needs promotion.
-        # Heap-provenance data is already promoted; rodata never needs it.
         needs_escape = ti&.escaped_return && !ti&.heap_provenance? && !ti.string?
         if needs_escape
           if ti.list_collection? || ti.map?
-            # Collections: promote in-place (they own their allocator/buffer)
             var_promotes << { var: val.name, zig_type: ti.zig_type }
           else
-            # Structs: promote via __ret copy (source may be const parameter)
             struct_promote ||= zig_type_for(ret_type)
           end
         end
       end
     end
 
-    # Struct-level promote (if not already set by bare-identifier path):
-    # 1. Per-variable promotion found escaped vars AND struct has additional unhandled fields
-    # 2. Function is returns_promoted (CATCH wrapper) with no per-variable escapes
-    # Only apply struct_promote for struct types (not unions).
-    # Union promotion is per-variable via escaped_return.
     schema = schema_lookup.call(ret_type.resolved) rescue nil
     is_union = schema.is_a?(Hash) && schema[:kind] == :union
     unhandled_fields = nil
@@ -195,38 +101,50 @@ class PromotionPlan
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
       elsif (fn_node.return_provenance == :heap) && !is_union && ret_type.needs_promotion?(schema_lookup)
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
-        # Fallback: if compute_struct_promote returns nil but returns_promoted is set,
-        # all fields are already handled (CopyNode). No struct_promote needed.
       end
     end
 
     if var_promotes.empty? && struct_promote.nil?
-      EMPTY
+      {}
     else
-      new(
+      {
         var_promotes: var_promotes.uniq { |vp| vp[:var] },
         struct_promote: struct_promote,
         promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
-        unhandled_promote_fields: unhandled_fields,
-      )
+        unhandled_promote_fields: unhandled_fields
+      }
     end
   end
 
-  private
+  # Filter var_promotes to only those referenced in a return expression.
+  def self.filter_for_return(plan, return_value)
+    return plan if plan[:var_promotes]&.empty?
 
-  def self.fn_allocates?(fn_node)
+    referenced = referenced_vars(return_value)
+    relevant = plan[:var_promotes].select { |vp| referenced.include?(vp[:var]) }
+
+    plan.merge(var_promotes: relevant)
+  end
+
+  # Check if a specific return node needs struct_promote.
+  def self.needs_promote?(plan, ret_node)
+    return true if plan[:promote_return_ids].nil?
+    plan[:promote_return_ids].include?(ret_node.object_id)
+  end
+
+  # ── Private helpers ──────────────────────────────────────────────
+
+  private_class_method def self.fn_allocates?(fn_node)
     fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc
   end
 
-  def self.collect_returns(body)
+  private_class_method def self.collect_returns(body)
     returns = []
     AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     returns
   end
 
-  # Check if struct has promotable fields not already handled per-variable.
-  # Returns [zig_type, unhandled_fields] or [nil, nil].
-  def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
+  private_class_method def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
     resolved = ret_type.resolved
     schema = schema_lookup.call(resolved) rescue nil
     return [nil, nil] unless schema.is_a?(Hash) && !schema[:kind]
@@ -242,11 +160,21 @@ class PromotionPlan
     unhandled.any? ? [zig_type_for(ret_type), unhandled] : [nil, nil]
   end
 
-  def self.zig_type_for(type)
-    # Strip error union (!) and optional (?) prefixes - promote operates on the payload type.
+  private_class_method def self.zig_type_for(type)
     type.resolved.to_s.sub(/^[!?]+/, '')
   end
 
+  private_class_method def self.referenced_vars(node)
+    vars = Set.new
+    return vars unless node
+    case node
+    when AST::Identifier
+      vars << node.name
+    when AST::StructLit
+      node.fields.each_value { |v| vars.merge(referenced_vars(v)) }
+    end
+    vars
+  end
 end
 
 # =========================================================================

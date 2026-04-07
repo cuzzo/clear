@@ -8,7 +8,7 @@ Promotion logic (deciding what frame-allocated data to copy to heap when returni
 
 ### New Architecture (Pass C)
 
-- **PromotionPlan**: callee-side. Decides what to promote on return. 15 unit tests.
+- **PromotionClassifier**: callee-side. Decides what to promote on return. 15 unit tests.
 - **CleanupClassifier**: caller-side. Decides which bindings need defer cleanup. 7 unit tests.
 - **emit_return_from_plan**: transpiler reads plans mechanically. No decisions.
 - Old `emit_return_with_promotion` (78 lines of per-type special cases) deleted.

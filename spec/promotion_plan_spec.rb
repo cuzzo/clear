@@ -4,11 +4,11 @@ require_relative "../src/parser"
 require_relative "../src/annotator"
 require_relative "../src/promotion_plan"
 
-# Tests PromotionPlan (Pass C) — the single object that decides what
-# promotion to emit for each function. Maps 1:1 to bugs found today.
+# Tests PromotionClassifier (Pass C) — classifies what promotion to
+# emit for each function. Maps 1:1 to bugs found today.
 
-RSpec.describe PromotionPlan do
-  # Helper: parse + annotate CLEAR code, return PromotionPlan for named function.
+RSpec.describe PromotionClassifier do
+  # Helper: parse + annotate CLEAR code, return promotion hash for named function.
   def plan_for(src, fn_name)
     tokens = Lexer.new(src).tokenize
     ast = Parser.new(tokens, src).parse
@@ -18,7 +18,7 @@ RSpec.describe PromotionPlan do
     fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
     raise "Function '#{fn_name}' not found" unless fn_node
 
-    PromotionPlan.compute(fn_node, schema_lookup: ->(name) { annotator.lookup_type_schema(name) })
+    PromotionClassifier.classify(fn_node, schema_lookup: ->(name) { annotator.lookup_type_schema(name) })
   end
 
   # =========================================================================
@@ -64,14 +64,14 @@ RSpec.describe PromotionPlan do
     end
 
     it "promotes the HashMap variable" do
-      expect(plan.var_promotes.map { |vp| vp[:var] }).to include("m")
+      expect(plan[:var_promotes].map { |vp| vp[:var] }).to include("m")
     end
 
     it "does NOT need struct-level promote (CopyNode already owns string)" do
       # The string literal is wrapped in CopyNode by ensure_owned_value!,
       # which heap-dupes it. promoteFields would double-dupe. So struct_promote
       # should be nil when all promotable fields are already CopyNode-handled.
-      expect(plan.struct_promote).to be_nil
+      expect(plan[:struct_promote]).to be_nil
     end
 
     # suppress_defers removed: collect_escaping_identifiers handles defer suppression
@@ -116,11 +116,11 @@ RSpec.describe PromotionPlan do
     end
 
     it "promotes the list variable" do
-      expect(plan.var_promotes.map { |vp| vp[:var] }).to eq(["vals"])
+      expect(plan[:var_promotes].map { |vp| vp[:var] }).to eq(["vals"])
     end
 
     it "no struct-level promote needed" do
-      expect(plan.struct_promote).to be_nil
+      expect(plan[:struct_promote]).to be_nil
     end
 
     # suppress_defers removed: collect_escaping_identifiers handles defer suppression
@@ -142,7 +142,7 @@ RSpec.describe PromotionPlan do
     end
 
     it "promotes the map variable" do
-      expect(plan.var_promotes.map { |vp| vp[:var] }).to eq(["m"])
+      expect(plan[:var_promotes].map { |vp| vp[:var] }).to eq(["m"])
     end
 
     # suppress_defers removed: collect_escaping_identifiers handles defer suppression
@@ -206,7 +206,7 @@ RSpec.describe PromotionPlan do
     it "does NOT need struct_promote (COPY already owns the string)" do
       # COPY name heap-dupes the string. No further promotion needed.
       # promoteFields would double-dupe.
-      expect(plan.struct_promote).to be_nil
+      expect(plan[:struct_promote]).to be_nil
     end
   end
 end

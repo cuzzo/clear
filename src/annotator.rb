@@ -1220,7 +1220,7 @@ private
 
     # 4. Escape marking: set escaped_return on variables being returned
     # so the ownership generator suppresses their defer cleanup.
-    # PromotionPlan (Pass C) reads these flags to decide what to promote.
+    # PromotionClassifier (Pass C) reads these flags to decide what to promote.
     if mark_escaping_collections!(node.value)
       fn_node = @fn_nodes[current_fn_ctx&.name]
       if fn_node

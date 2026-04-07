@@ -717,7 +717,7 @@ module MIR
   end
 
   # Promote: escape promotion inserted before return statements.
-  # Emits frame->heap copy/promotion code. Replaces PromotionPlan lookups in transpiler.
+  # Emits frame->heap copy/promotion code. Replaces PromotionClassifier lookups in transpiler.
   #
   # strategy:  :list     — promoteList (dupe backing buffer to heap)
   #            :string_map — swap allocator to heapAlloc

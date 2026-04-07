@@ -35,9 +35,9 @@ module OwnershipGenerator
     guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})")
   end
 
-  # Mechanical Zig template emitter. Entry has everything needed.
-  # type_info is only needed for :rc (complex RC/Arc/link cleanup).
-  def emit_cleanup_from_entry(name, entry, type_info = nil)
+  # Mechanical Zig template emitter. Entry has everything needed - no type
+  # derivation, no schema lookups. All fields are pre-computed by build_drop_entry.
+  def emit_cleanup_from_entry(name, entry)
     alloc = alloc_expr_from_plan(entry)
     zig_type = entry[:zig_type] || "UNKNOWN"
     elem_zig = entry[:elem_zig_type] || "UNKNOWN"
@@ -67,8 +67,18 @@ module OwnershipGenerator
       "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
 
     when :rc
-      return "" unless type_info
-      emit_rc_cleanup(name, type_info)
+      case entry[:rc_variant]
+      when :link
+        guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})")
+      when :optional
+        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{entry[:rc_alloc]}, _strong_ref); }")
+      else
+        result = guarded_cleanup(name, zig_type, entry[:rc_alloc] || alloc)
+        if entry[:needs_release_fields]
+          result += "defer if (!#{name}_moved) CheatLib.releaseFields(#{entry[:base_zig]}, #{entry[:rc_alloc]}, #{name}.ctrl.data.*);\n"
+        end
+        result
+      end
 
     when :locked
       guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})")
@@ -110,46 +120,6 @@ module OwnershipGenerator
     else
       ""
     end
-  end
-
-  # Emit cleanup for RC (Rc/Arc) and link (WeakRc/WeakArc) types.
-  def emit_rc_cleanup(name, type_info)
-    is_optional = type_info.optional?
-    is_shared = type_info.shared?
-    is_link = type_info.link?
-    alloc = cleanup_alloc_expr(type_info)
-
-    base_type = type_info.resolved.to_s
-    base_type = base_type.sub(/^\?/, '') if is_optional
-
-    zig_type = type_info.zig_type
-
-    moved_guard = "var #{name}_moved = false; _ = &#{name}_moved;\n"
-
-    if is_link
-      source = type_info.link_source || :multiowned
-      release_func = source == :shared ? "weakArcRelease" : "weakRcRelease"
-      moved_guard += "defer if (!#{name}_moved) CheatLib.#{release_func}(#{transpile_type(base_type)}, #{name});\n"
-    elsif is_optional
-      release_func = is_shared ? "arcRelease" : "rcRelease"
-      moved_guard += "defer if (!#{name}_moved) { if (#{name}) |_strong_ref| CheatLib.#{release_func}(#{transpile_type(base_type)}, #{alloc}, _strong_ref); };\n"
-    else
-      moved_guard += "defer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
-    end
-
-    # RC structs: also emit releaseFields on the inner data.
-    # Skip when a sync layer is present (@shared:locked, etc.) — the Arc/Rc
-    # release already handles Locked/RwLocked inner cleanup via arcDeinitInner.
-    # Emitting releaseFields(BaseType) would use the wrong type (BaseType vs Locked(BaseType)).
-    if type_info.any_rc? && !is_link && !is_optional && !type_info.sync
-      base_zig = transpile_type(base_type)
-      schema = (@struct_schemas ||= {})[type_info.resolved]
-      if schema
-        moved_guard += "defer if (!#{name}_moved) CheatLib.releaseFields(#{base_zig}, #{alloc}, #{name}.ctrl.data.*);\n"
-      end
-    end
-
-    moved_guard
   end
 
   # ── MOVE SUPPRESSION ──────────────────────────────────────────

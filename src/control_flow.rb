@@ -10,7 +10,7 @@
 #      boundary. Determines whether cleanup is needed and whether a moved guard
 #      is required. Runs after annotation, uses was_moved flags on AST nodes.
 #
-#   3. MIRPass: runs CleanupClassifier/PromotionPlan, inserts MIR nodes
+#   3. MIRPass: runs CleanupClassifier/PromotionClassifier, inserts MIR nodes
 #      (Drop, Promote, SuppressCleanup) into AST statement lists. The transpiler
 #      consumes MIR::Drop for variable cleanup. Promote/SuppressCleanup are
 #      inserted but not yet consumed.
@@ -589,7 +589,7 @@ class MIRPass
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
   # Phase 0 hoists heap-promoted temporaries (HPTs) into VarDecl nodes so that
   # existing classify_binding + MIR::Drop infrastructure handles their cleanup.
-  # PromotionPlan must run before cleanup classification because its Phase 0
+  # PromotionClassifier must run before cleanup classification because its Phase 0
   # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
   # that the classifier depends on.
   def transform!(ast)
@@ -600,9 +600,9 @@ class MIRPass
 
     promotion_plans = {}
 
-    # Phase 1: compute PromotionPlan for all functions (triggers HPT downgrade).
+    # Phase 1: classify promotions for all functions (triggers HPT downgrade).
     @fn_nodes.each do |name, fn|
-      promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: @schema_lookup)
+      promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
     end
 
     # Phase 2: classify cleanup bindings (uses cleared provenance from Phase 1).
@@ -789,7 +789,10 @@ class MIRPass
     entry = bindings[stmt.name.to_s]
     return unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
 
-    stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc] }
+    ti = stmt.type_info
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    zig_type = ti ? (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s) : "UNKNOWN"
+    stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc], zig_type: zig_type }
   end
 
   # Stamp MATCH-AS cleanup info on MatchStatement case hashes.
@@ -831,23 +834,22 @@ class MIRPass
   def insert_promotion!(result, ret_node, promo)
     return unless promo && !promo.empty?
 
-    filtered = promo.filter_for_return(ret_node.value)
+    filtered = PromotionClassifier.filter_for_return(promo, ret_node.value)
 
     # Per-variable promotions.
-    filtered.var_promotes.each do |vp|
+    (filtered[:var_promotes] || []).each do |vp|
       strategy = classify_promote_strategy(vp[:zig_type])
       result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil)
     end
 
     # Struct-level promotion: annotate ReturnNode so transpiler wraps with __ret.
-    if filtered.struct_promote && filtered.needs_promote?(ret_node)
+    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
       ret_node.promote_ret_wrap = :var
       ret_node.promote_fields_info = {
-        zig_type: filtered.struct_promote,
-        fields: filtered.unhandled_promote_fields
+        zig_type: filtered[:struct_promote],
+        fields: filtered[:unhandled_promote_fields]
       }
-    elsif filtered.var_promotes.any?
-      # Per-variable promotes need return value captured after promotion.
+    elsif filtered[:var_promotes]&.any?
       ret_node.promote_ret_wrap = :const
     end
   end
