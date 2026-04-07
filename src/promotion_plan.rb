@@ -438,18 +438,22 @@ module CleanupClassifier
         if variant_type.is_a?(Hash) && variant_type[:kind] == :inline_struct
           has_heap = Type.variant_has_heap?(variant_type)
           if has_heap
+            union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
-              has_moved_guard: true
+              has_moved_guard: true,
+              zig_type: "#{union_zig}_#{variant_name}"
             }
           end
         else
           pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type || :Any)
           needs_as_cleanup = (pt.array? && !pt.string?) || pt.collection? || pt.map?
           if needs_as_cleanup && pt.array? && !pt.string?
+            elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
-              has_moved_guard: true
+              has_moved_guard: true,
+              elem_zig_type: elem_zig
             }
           end
         end

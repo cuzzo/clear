@@ -805,7 +805,11 @@ class MIRPass
       next unless as_entry && as_entry[:needs_cleanup]
 
       c[:match_as_src_guard] = src_entry&.dig(:has_moved_guard) || false
-      c[:match_as_cleanup] = { kind: as_entry[:kind], alloc: as_entry[:alloc] }
+      c[:match_as_cleanup] = {
+        kind: as_entry[:kind], alloc: as_entry[:alloc],
+        has_moved_guard: true,
+        zig_type: as_entry[:zig_type], elem_zig_type: as_entry[:elem_zig_type]
+      }
     end
   end
 

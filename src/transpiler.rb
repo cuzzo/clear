@@ -221,6 +221,48 @@ private
     fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
   end
 
+  # Build the entry hash for emit_cleanup_from_entry from a MIR::Drop node.
+  # Pre-computes zig_type/elem_zig_type so emit_cleanup_from_entry needs no
+  # type derivation.
+  def build_drop_entry(node)
+    ti = node.type_info
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    src = node.source_node
+
+    zig_type = case node.kind
+    when :heap_slice
+      # COPY produces bare slice ([]T); function returns produce ArrayList.
+      is_bare = src.respond_to?(:value) && src.value.is_a?(AST::CopyNode) && !ti&.list_collection?
+      if is_bare
+        elem = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
+        "[]#{elem}"
+      else
+        ti&.zig_type
+      end
+    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set
+      ti&.zig_type
+    when :heap_union, :heap_struct, :locked, :write_locked,
+         :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
+      transpile_type((ti&.resolved || :Any).to_s)
+    end
+
+    elem_zig = case node.kind
+    when :list_with_elem_cleanup, :takes_slice
+      et = ti&.element_type
+      et ? transpile_type(et.is_a?(Type) ? et.resolved.to_s : et.to_s) : nil
+    when :array_with_struct_strings
+      ti&.element_type ? transpile_type(ti.element_type) : nil
+    end
+
+    {
+      kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
+      needs_cleanup: true, resource_close_zig: node.resource_close_zig,
+      zig_type: zig_type || "UNKNOWN",
+      elem_zig_type: elem_zig,
+      is_fixed: node.kind == :array_with_struct_strings ? ti&.fixed? : nil
+    }
+  end
+
   def visit(node)
     code = visit_node(node)
     # SROA path: stack-allocated fixed-array literals are emitted as raw [N]T{...} which
@@ -1382,24 +1424,11 @@ private
               decl = sym&.reg
               is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
-              as_cleanup = c[:match_as_cleanup]
-              begin
-                binding_decl += "#{src_name}_moved = true;\n    " if (is_local || is_takes_param) && c[:match_as_src_guard]
-                as_alloc = alloc_expr_from_plan(as_cleanup)
-                case as_cleanup[:kind]
-                when :match_as_slice
-                  variant_schema = @union_schemas&.dig(union_lookup, variant)
-                  payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
-                  elem_zig = transpile_type(payload_t&.element_type)
-                  binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
-                  binding_decl += "defer if (!#{c[:binding]}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{c[:binding]}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{as_alloc}, __e); } } if (#{c[:binding]}.len > 0) #{as_alloc}.free(#{c[:binding]}); };\n    "
-                when :match_as_inline_struct
-                  inline_zig = "#{transpile_type(union_lookup)}_#{variant}"
-                  binding_decl += "var #{c[:binding]}_moved = false; _ = &#{c[:binding]}_moved;\n    "
-                  binding_decl += "defer if (!#{c[:binding]}_moved) CheatLib.cleanup(#{inline_zig}, #{as_alloc}, &#{c[:binding]});\n    "
-                end
-              end
-            end  # match_as_cleanup
+              # Suppress source cleanup
+              binding_decl += "#{src_name}_moved = true;\n    " if (is_local || is_takes_param) && c[:match_as_src_guard]
+              # Emit AS binding cleanup via unified path
+              binding_decl += emit_cleanup_from_entry(c[:binding], c[:match_as_cleanup])
+            end
             body = "#{binding_decl}#{body}"
           elsif c[:destructure]
             # Union variant destructuring: extract each named field from the payload.
@@ -2768,9 +2797,8 @@ private
       raise "Internal: ThenChain node reached visit() — should be flattened by BgBlock transpiler"
 
     when MIR::Drop
-      entry = { kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
-                needs_cleanup: true, resource_close_zig: node.resource_close_zig }
-      emit_cleanup_from_entry(zig_safe_name(node.name), entry, node.source_node || node)
+      entry = build_drop_entry(node)
+      emit_cleanup_from_entry(zig_safe_name(node.name), entry, node.type_info)
 
     when MIR::Promote
       rt_name = @do_rt_name || "rt"

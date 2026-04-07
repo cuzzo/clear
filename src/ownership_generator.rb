@@ -25,138 +25,90 @@ module OwnershipGenerator
     end
   end
 
-  # Mechanical Zig template emitter. Reads only from the plan entry.
-  # No type checks, no schema lookups. The entry has everything.
-  def emit_cleanup_from_entry(name, entry, node = nil)
+  # Guarded defer: wraps body in moved-guard pattern.
+  def guarded_defer(name, body)
+    "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{body};\n"
+  end
+
+  # Most common pattern: guarded defer calling CheatLib.cleanup.
+  def guarded_cleanup(name, zig_type, alloc)
+    guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})")
+  end
+
+  # Mechanical Zig template emitter. Entry has everything needed.
+  # type_info is only needed for :rc (complex RC/Arc/link cleanup).
+  def emit_cleanup_from_entry(name, entry, type_info = nil)
     alloc = alloc_expr_from_plan(entry)
-    guard = entry[:has_moved_guard]
+    zig_type = entry[:zig_type] || "UNKNOWN"
+    elem_zig = entry[:elem_zig_type] || "UNKNOWN"
 
     case entry[:kind]
     when :resource
-      close_zig = entry[:resource_close_zig]
-      close_stmt = close_zig.gsub("{0}", name)
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{close_stmt};\n"
+      close_stmt = entry[:resource_close_zig].gsub("{0}", name)
+      guarded_defer(name, close_stmt)
 
     when :list_with_elem_cleanup
-      # List with union elements needing cleanup. Elements may contain
-      # mixed-provenance strings (heap-duped, frame-arena, rodata).
-      # cleanupAlloc checks pointer provenance: skips frame, frees heap.
-      ti = node&.type_info
-      zig_type = ti&.zig_type || "UNKNOWN"
-      elem_zig = ti&.element_type ? transpile_type(ti.element_type.resolved.to_s) : "UNKNOWN"
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); };\n"
+      guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); }")
 
     when :list
-      ti = node&.type_info
-      zig_type = ti&.zig_type || "UNKNOWN"
-      if guard
-        "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      if entry[:has_moved_guard]
+        guarded_cleanup(name, zig_type, alloc)
       else
         "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
       end
 
     when :string_map, :numeric_map
-      ti = node&.type_info
-      zig_type = ti&.zig_type || "UNKNOWN"
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      guarded_cleanup(name, zig_type, alloc)
 
     when :pool
       "defer #{name}.deinit(#{alloc});\n"
 
     when :set
-      ti = node&.type_info
-      zig_type = ti&.zig_type || "UNKNOWN"
       "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
 
     when :rc
-      # RC/link/shared map: delegate to existing emit_rc_cleanup
-      ti = node&.type_info
-      return "" unless ti
-      emit_rc_cleanup(name, ti)
+      return "" unless type_info
+      emit_rc_cleanup(name, type_info)
 
     when :locked
-      ti = node&.type_info
-      zig_inner_t = transpile_type(ti.resolved.to_s)
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.lockedDestroy(#{zig_inner_t}, #{alloc}, #{name});\n"
+      guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})")
 
     when :write_locked
-      ti = node&.type_info
-      zig_inner_t = transpile_type(ti.resolved.to_s)
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.rwLockedDestroy(#{zig_inner_t}, #{alloc}, #{name});\n"
+      guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})")
 
-    when :heap_string
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
+    when :heap_string, :takes_string
+      guarded_defer(name, "rt.heapAlloc().free(#{name})")
 
     when :heap_slice, :heap_union, :heap_struct
-      ti = node&.type_info
-      zig_type = if entry[:kind] == :heap_slice
-        # COPY produces a bare slice ([]T). Function returns may produce ArrayList.
-        # Check source: CopyNode value -> slice, otherwise use type_info's zig_type.
-        is_copy_value = node.respond_to?(:value) && node.value.is_a?(AST::CopyNode)
-        if is_copy_value && !ti&.list_collection?
-          elem_zig = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
-          "[]#{elem_zig}"
-        else
-          ti&.zig_type || "UNKNOWN"
-        end
-      else
-        transpile_type((ti&.resolved || :Any).to_s)
-      end
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
+      guarded_cleanup(name, zig_type, "rt.heapAlloc()")
 
-    when :struct_with_cleanup_fields, :struct_rc
-      ti = node&.type_info
-      zig_type = transpile_type((ti&.resolved || :Any).to_s)
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+    when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
+      guarded_cleanup(name, zig_type, alloc)
 
     when :heap_struct_plain
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.free(rt, #{name});\n"
+      guarded_defer(name, "CheatLib.free(rt, #{name})")
 
     when :array_with_struct_strings
-      ti = node&.type_info
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      elem_zig = ti&.element_type ? transpile_type(ti.element_type) : "UNKNOWN"
-      is_fixed = ti&.fixed?
-      if is_fixed
-        "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } };\n"
+      if entry[:is_fixed]
+        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }")
       else
-        # Dynamic array (User[]) becomes ArrayListUnmanaged via makeList.
-        # Element strings are heap-duped; list backing is frame-allocated
-        # (reclaimed automatically). Only need to free string fields.
-        "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } };\n"
+        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } }")
       end
 
-    when :non_copy_union
-      ti = node&.type_info
-      zig_type = transpile_type((ti&.resolved || :Any).to_s)
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
-
     when :takes_union
-      ti = node&.type_info
-      zig_type = ti ? transpile_type(ti.resolved.to_s) : "UNKNOWN"
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) CheatLib.cleanup(#{zig_type}, rt.heapAlloc(), &#{name});\n"
-
-    when :takes_string
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) rt.heapAlloc().free(#{name});\n"
+      guarded_cleanup(name, zig_type, "rt.heapAlloc()")
 
     when :takes_slice
-      # TAKES slice: callee owns the buffer. Clean up elements then free buffer.
-      # Caller ensures buffer is heap-owned (via implicit COPY of @list).
-      ti = node&.type_info
-      elem_zig = ti&.element_type ? transpile_type(ti.element_type.resolved.to_s) : "UNKNOWN"
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) { if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); };\n"
+      guarded_defer(name, "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }")
 
     when :match_as_slice
-      # The element type and cleanup are emitted by the MATCH transpiler
-      # which has access to the variant schema. This entry just provides
-      # the _moved guard decision.
-      "" # MATCH transpiler handles the actual defer
+      guarded_defer(name, "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }")
 
     when :match_as_inline_struct
-      "" # MATCH transpiler handles the actual defer
+      guarded_cleanup(name, zig_type, alloc)
 
     else
-      "" # Unknown kind, no cleanup
+      ""
     end
   end
 
