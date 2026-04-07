@@ -100,7 +100,7 @@ See `docs/profiling.md` for a full case study.
 
 The compiler is a 3-pass system written in Ruby:
 1.  **Parsing:** `src/lexer.rb`, `src/parser.rb`
-2.  **Semantic Analysis:** `src/annotator.rb`, `src/type.rb`, `src/scope.rb`, `src/ownership_tracker.rb`
+2.  **Semantic Analysis:** `src/annotator.rb`, `src/type.rb`, `src/scope.rb`, `src/ownership_graph.rb`
 3.  **Code Generation:** `src/transpiler.rb` (generates Zig code)
 
 Semantic Analyis consists of three stages:
