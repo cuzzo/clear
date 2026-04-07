@@ -687,6 +687,10 @@ class MIRPass
       # Insert Promote + SuppressCleanup before ReturnNode.
       insert_promotion!(result, stmt, promo) if stmt.is_a?(AST::ReturnNode)
 
+      # Stamp cleanup info on reassignment / field-overwrite nodes.
+      stamp_reassign_cleanup!(stmt, cleanup)
+      stamp_field_pre_cleanup!(stmt, cleanup)
+
       # Emit the original statement.
       result << stmt
 
@@ -762,6 +766,30 @@ class MIRPass
       drops << drop
     end
     fn.body = drops + fn.body if drops.any?
+  end
+
+  # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
+  # Replaces CleanupPlan lookup in transpiler's BindExpr handler.
+  def stamp_reassign_cleanup!(stmt, cleanup)
+    return unless cleanup
+    return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
+
+    entry = cleanup.lookup(stmt.name)
+    return unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
+
+    stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc] }
+  end
+
+  # Stamp field_pre_cleanup on Assignment nodes that overwrite heap-backed fields.
+  # Replaces CleanupPlan.lookup_field_pre_cleanup in transpiler's Assignment handler.
+  def stamp_field_pre_cleanup!(stmt, cleanup)
+    return unless cleanup
+    return unless stmt.is_a?(AST::Assignment) && stmt.name.is_a?(AST::GetField)
+
+    fpc = cleanup.lookup_field_pre_cleanup(stmt.object_id)
+    return unless fpc
+
+    stmt.field_pre_cleanup = fpc
   end
 
   # Insert MIR::Promote before a return statement and annotate the

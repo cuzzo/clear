@@ -288,9 +288,14 @@ module AST
   Assignment   = Struct.new(:token, :name, :value) do
     include Locatable
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
+    attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
-  BindExpr     = Struct.new(:token, :name, :type, :value) { include Locatable; attr_accessor :mode }
+  BindExpr     = Struct.new(:token, :name, :type, :value) do
+    include Locatable
+    attr_accessor :mode
+    attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
+  end
   BinaryOp     = Struct.new(:token, :left, :op, :right) { include Locatable }
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do

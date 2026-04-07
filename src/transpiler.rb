@@ -913,12 +913,10 @@ private
         value_str = visit(node.value)
         move_logic = emit_move_suppression(node.value)
 
-        fn_name = current_tp_ctx&.fn_name
-        entry = @cleanup_plans&.dig(fn_name)&.lookup(node.name)
-        if entry && entry[:needs_cleanup] && entry[:kind] != :resource
+        if node.reassign_cleanup
           ti = node.type_info
           zig_type = ti ? transpile_type(ti.resolved.to_s) : "UNKNOWN"
-          alloc = alloc_expr_from_plan(entry)
+          alloc = alloc_expr_from_plan(node.reassign_cleanup)
           tmp = "__new_#{safe}"
           inner = "const #{tmp} = #{value_str};\nCheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{tmp};"
           move_logic.empty? ? "{\n#{inner}\n}" : "{\n#{inner}\n#{move_logic}\n}"
@@ -986,18 +984,15 @@ private
           value  = visit(node.value)
           move_logic = emit_move_suppression(node.value)
           # Pre-cleanup: free old field value before overwriting with new one.
-          # The annotator sets field_pre_cleanup with the Zig type when the
-          # field holds heap-backed data (list, etc.) that would leak.
+          # MIRPass stamps field_pre_cleanup when the field holds heap-backed
+          # data (list, etc.) that would leak on overwrite.
           rt_name = @do_rt_name || "rt"
-          pre_cleanup = begin
-            fn_name = current_tp_ctx&.fn_name
-            fpc = @cleanup_plans&.dig(fn_name)&.lookup_field_pre_cleanup(node.object_id)
-            if fpc
-              alloc_call = fpc[:alloc] == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
-              "CheatLib.cleanup(#{fpc[:zig_type]}, #{alloc_call}, &#{target}.#{field});\n"
-            else
-              ""
-            end
+          fpc = node.field_pre_cleanup
+          pre_cleanup = if fpc
+            alloc_call = fpc[:alloc] == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+            "CheatLib.cleanup(#{fpc[:zig_type]}, #{alloc_call}, &#{target}.#{field});\n"
+          else
+            ""
           end
           code = "#{pre_cleanup}#{target}.#{field} = #{value};"
           return move_logic.empty? ? code : "#{code}\n#{move_logic}"
