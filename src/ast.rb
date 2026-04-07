@@ -699,7 +699,7 @@ end
 module MIR
   # Drop: cleanup instruction inserted after variable declarations or before
   # field overwrites. Emits Zig `defer` cleanup code (or inline cleanup for
-  # field pre-cleanup). Replaces CleanupPlan lookups in transpiler.
+  # field pre-cleanup). Replaces CleanupClassifier lookups in transpiler.
   #
   # kind:              cleanup template symbol (matches emit_cleanup_from_entry cases):
   #                    :resource, :list, :list_with_elem_cleanup, :string_map, :numeric_map,

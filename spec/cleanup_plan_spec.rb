@@ -5,8 +5,8 @@ require_relative "../src/annotator"
 require_relative "../src/promotion_plan"
 require_relative "../src/control_flow"
 
-# Tests CleanupPlan - THE SINGLE AUTHORITY for all cleanup decisions.
-# Every defer/cleanup emission in the transpiler consults this plan.
+# Tests CleanupClassifier - classifies which bindings need cleanup.
+# MIRPass consumes this to insert MIR::Drop nodes and stamp AST.
 #
 # Categories tested:
 # 1. Container borrows (HashMap/List indexing) -> no cleanup
@@ -19,7 +19,7 @@ require_relative "../src/control_flow"
 # 8. Non-Copy unions on stack
 # 9. Negative tests (primitives, Copy unions, strings)
 
-RSpec.describe CleanupPlan do
+RSpec.describe CleanupClassifier do
   def cleanup_for(src, fn_name)
     tokens = Lexer.new(src).tokenize
     ast = Parser.new(tokens, src).parse
@@ -32,7 +32,7 @@ RSpec.describe CleanupPlan do
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
 
-    CleanupPlan.compute(
+    CleanupClassifier.classify(
       fn_node,
       fn_nodes: fn_nodes,
       schema_lookup: ->(name) { annotator.lookup_type_schema(name) },
@@ -59,7 +59,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "does NOT mark val for cleanup (container owns the data)" do
-        expect(plan.lookup("val")).to be_nil
+        expect(plan["val"]).to be_nil
       end
     end
 
@@ -78,7 +78,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks val for cleanup (non-Copy union)" do
-        entry = plan.lookup("val")
+        entry = plan["val"]
         expect(entry).not_to be_nil
         # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
         expect([:non_copy_union, :heap_union]).to include(entry[:kind])
@@ -102,7 +102,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks TAKES union param for cleanup" do
-        entry = plan.lookup("v")
+        entry = plan["v"]
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         expect(entry[:has_moved_guard]).to eq(true)
@@ -121,7 +121,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "does NOT mark borrowed param for cleanup" do
-        expect(plan.lookup("v")).to be_nil
+        expect(plan["v"]).to be_nil
       end
     end
 
@@ -135,7 +135,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks TAKES string param for cleanup" do
-        entry = plan.lookup("s")
+        entry = plan["s"]
         expect(entry).not_to be_nil
         expect(entry[:kind]).to eq(:takes_string)
         expect(entry[:has_moved_guard]).to eq(true)
@@ -153,7 +153,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks TAKES slice param for cleanup with heap alloc (callee owns buffer)" do
-        entry = plan.lookup("items")
+        entry = plan["items"]
         expect(entry).not_to be_nil
         expect(entry[:kind]).to eq(:takes_slice)
         expect(entry[:alloc]).to eq(:heap)
@@ -182,7 +182,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "does NOT mark AS binding for cleanup (borrow)" do
-        expect(plan.lookup("items")).to be_nil
+        expect(plan["items"]).to be_nil
       end
     end
   end
@@ -203,7 +203,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks AS binding for cleanup with _moved guard" do
-        entry = plan.lookup("items")
+        entry = plan["items"]
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         expect(entry[:has_moved_guard]).to eq(true)
@@ -211,7 +211,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "uses heap allocator (slice contents may be heap-allocated via COPY/promote)" do
-        entry = plan.lookup("items")
+        entry = plan["items"]
         expect(entry[:alloc]).to eq(:heap)
       end
     end
@@ -231,7 +231,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "does NOT mark Copy payload for cleanup" do
-        expect(plan.lookup("n")).to be_nil
+        expect(plan["n"]).to be_nil
       end
     end
   end
@@ -252,7 +252,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks for frame cleanup with _moved guard" do
-        entry = plan.lookup("vals")
+        entry = plan["vals"]
         expect(entry[:alloc]).to eq(:frame)
         expect(entry[:has_moved_guard]).to eq(true)
       end
@@ -270,7 +270,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks for heap cleanup with _moved guard" do
-        entry = plan.lookup("m")
+        entry = plan["m"]
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:kind]).to eq(:string_map)
         expect(entry[:has_moved_guard]).to eq(true)
@@ -299,7 +299,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks for heap cleanup" do
-        entry = plan.lookup("list1")
+        entry = plan["list1"]
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:has_moved_guard]).to eq(true)
       end
@@ -324,7 +324,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks for heap cleanup (transitively promoted)" do
-        entry = plan.lookup("result")
+        entry = plan["result"]
         expect(entry[:alloc]).to eq(:heap)
       end
     end
@@ -346,7 +346,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks for heap cleanup (union returned from promoted function)" do
-        entry = plan.lookup("v")
+        entry = plan["v"]
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:kind]).to eq(:heap_union)
       end
@@ -369,7 +369,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "marks for cleanup with _moved guard" do
-        entry = plan.lookup("v")
+        entry = plan["v"]
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         # Provenance-based: :heap_union (COPY produces :heap provenance)
@@ -401,7 +401,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "has no entries" do
-        expect(plan.lookup("x")).to be_nil
+        expect(plan["x"]).to be_nil
       end
     end
 
@@ -416,7 +416,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "has no entries" do
-        expect(plan.lookup("s")).to be_nil
+        expect(plan["s"]).to be_nil
       end
     end
 
@@ -432,7 +432,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "has no entries (all variants are Copy)" do
-        expect(plan.lookup("r")).to be_nil
+        expect(plan["r"]).to be_nil
       end
     end
   end
@@ -453,7 +453,7 @@ RSpec.describe CleanupPlan do
       end
 
       it "pool has _moved guard (resource-like cleanup)" do
-        entry = plan.lookup("pool")
+        entry = plan["pool"]
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:kind]).to eq(:resource)
       end
@@ -475,7 +475,7 @@ RSpec.describe CleanupPlan do
       CLEAR
       expect(count_hoisted_hpts(fn)).to eq(1)
       hpt_var = fn.body.find { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
-      entry = plan.lookup(hpt_var.name)
+      entry = plan[hpt_var.name]
       expect(entry[:kind]).to eq(:heap_string)
     end
 
@@ -509,7 +509,7 @@ RSpec.describe CleanupPlan do
     let(:plan) { cleanup_for(src, "f") }
 
     it "classifies struct as needing cleanup (rodata strings auto-duped to heap)" do
-      entry = plan.lookup("p")
+      entry = plan["p"]
       expect(entry).not_to be_nil
       # Provenance-based: :heap_struct (CopyNode field gives :heap provenance)
       expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
@@ -529,7 +529,7 @@ RSpec.describe CleanupPlan do
     let(:plan) { cleanup_for(src, "f") }
 
     it "classifies struct as needing cleanup when string field is COPY" do
-      entry = plan.lookup("p")
+      entry = plan["p"]
       expect(entry).not_to be_nil
       # Provenance-based: :heap_struct (COPY field gives :heap provenance)
       expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
@@ -554,7 +554,7 @@ RSpec.describe CleanupPlan do
             RETURN;
         END
       CLEAR
-      entry = plan.lookup("r")
+      entry = plan["r"]
       expect(entry).not_to be_nil, "CATCH string return should have cleanup"
       expect(entry[:kind]).to eq(:heap_string)
     end
@@ -601,7 +601,7 @@ RSpec.describe CleanupPlan do
             RETURN;
         END
       CLEAR
-      entry = plan.lookup("items")
+      entry = plan["items"]
       expect(entry).not_to be_nil, "struct array literal with string fields should have cleanup"
       expect(entry[:kind]).to eq(:array_with_struct_strings)
     end
@@ -674,7 +674,7 @@ RSpec.describe CleanupPlan do
     mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir.transform!(ast)
     fn_node = fn_nodes[fn_name]
-    plan = mir.cleanup_plans[fn_name]
+    plan = mir.cleanup_bindings[fn_name]
     [plan, ast, fn_node]
   end
 

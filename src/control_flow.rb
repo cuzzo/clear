@@ -10,7 +10,7 @@
 #      boundary. Determines whether cleanup is needed and whether a moved guard
 #      is required. Runs after annotation, uses was_moved flags on AST nodes.
 #
-#   3. MIRPass: reads CleanupPlan/PromotionPlan results and inserts MIR nodes
+#   3. MIRPass: runs CleanupClassifier/PromotionPlan, inserts MIR nodes
 #      (Drop, Promote, SuppressCleanup) into AST statement lists. The transpiler
 #      consumes MIR::Drop for variable cleanup. Promote/SuppressCleanup are
 #      inserted but not yet consumed.
@@ -576,20 +576,22 @@ class OwnershipDataflow
 end
 
 class MIRPass
-  attr_reader :cleanup_plans
+  # cleanup_bindings: { fn_name => { var_name => entry_hash } }
+  # Exposed for specs that test classification directly.
+  attr_reader :cleanup_bindings
 
   def initialize(fn_nodes:, schema_lookup:)
     @fn_nodes = fn_nodes
     @schema_lookup = schema_lookup
-    @cleanup_plans = {}
+    @cleanup_bindings = {}
   end
 
-  # Computes both plans and inserts MIR nodes into the AST.
+  # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
   # Phase 0 hoists heap-promoted temporaries (HPTs) into VarDecl nodes so that
   # existing classify_binding + MIR::Drop infrastructure handles their cleanup.
-  # PromotionPlan must run before CleanupPlan because its Phase 0
+  # PromotionPlan must run before cleanup classification because its Phase 0
   # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
-  # that CleanupPlan's HPT walk depends on.
+  # that the classifier depends on.
   def transform!(ast)
     # Phase 0: hoist HPT sub-expression FuncCalls into VarDecl nodes.
     @fn_nodes.each do |_name, fn|
@@ -603,12 +605,12 @@ class MIRPass
       promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: @schema_lookup)
     end
 
-    # Phase 2: compute CleanupPlan (uses cleared provenance from Phase 1).
+    # Phase 2: classify cleanup bindings (uses cleared provenance from Phase 1).
     @fn_nodes.each do |name, fn|
-      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
+      @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
     end
 
-    # Phase 3: insert MIR nodes.
+    # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       transform_function!(stmt, promotion_plans[stmt.name])
@@ -618,28 +620,30 @@ class MIRPass
   private
 
   def transform_function!(fn, promo)
-    cleanup = @cleanup_plans[fn.name]
+    bindings = @cleanup_bindings[fn.name]
+    has_bindings = bindings && !bindings.empty?
     promo = nil if promo&.empty?
 
     fn.has_promotion = true if promo
 
-    return unless cleanup || promo
+    return unless has_bindings || promo
 
     # Use dataflow analysis to tighten has_moved_guard decisions.
-    # CleanupPlan conservatively sets has_moved_guard=true for all non-trivial types.
-    # Dataflow precisely tracks which variables are actually consumed on some paths,
-    # so we can remove unnecessary guards for variables that are never moved.
-    refine_moved_guards!(fn, cleanup) if cleanup
+    # The classifier conservatively sets has_moved_guard=true for all non-trivial
+    # types. Dataflow precisely tracks which variables are actually consumed on
+    # some paths, so we can remove unnecessary guards.
+    refine_moved_guards!(fn, bindings) if has_bindings
 
-    fn.body = transform_body(fn.body, cleanup, promo)
+    # Stamp field pre-cleanup info directly on Assignment nodes.
+    CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings) if has_bindings
+
+    fn.body = transform_body(fn.body, bindings, promo)
 
     # Insert MIR::Drop nodes for TAKES parameters at function body start.
-    # These replace the transpiler's manual TAKES cleanup loop.
-    insert_takes_drops!(fn, cleanup) if cleanup
+    insert_takes_drops!(fn, bindings) if has_bindings
 
     # Build moved_guard_info map: { var_name => bool } for all bindings.
-    # Replaces all has_moved_guard lookups in transpiler/ownership_generator.
-    stamp_moved_guard_info!(fn, cleanup)
+    stamp_moved_guard_info!(fn, bindings) if has_bindings
   end
 
   # Tighten cleanup decisions using ownership dataflow analysis.
@@ -653,15 +657,13 @@ class MIRPass
   # Error edges in the CFG ensure that (2) is safe: if a can_fail call exists
   # between declaration and GIVE, the dataflow sees MAYBE_MOVED (not MOVED)
   # and keeps the cleanup.
-  def refine_moved_guards!(fn, cleanup)
+  def refine_moved_guards!(fn, bindings)
     # Compute which functions can fail for error-edge modeling.
     can_fail_fns = Set.new
     @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
 
     df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns)
     summary = df.cleanup_summary
-    bindings = cleanup.instance_variable_get(:@bindings)
-    return unless bindings
 
     bindings.each do |var, entry|
       next unless entry[:needs_cleanup]
@@ -681,60 +683,59 @@ class MIRPass
 
   # Recursively transform a statement list, inserting MIR nodes.
   # Returns a new array (does not mutate the input).
-  def transform_body(stmts, cleanup, promo)
+  def transform_body(stmts, bindings, promo)
     return stmts unless stmts.is_a?(Array)
     result = []
     stmts.each do |stmt|
       # Recurse into nested control flow first.
-      recurse_branches!(stmt, cleanup, promo)
+      recurse_branches!(stmt, bindings, promo)
 
       # Insert Promote + SuppressCleanup before ReturnNode.
       insert_promotion!(result, stmt, promo) if stmt.is_a?(AST::ReturnNode)
 
-      # Stamp cleanup info on reassignment / field-overwrite / match-as nodes.
-      stamp_reassign_cleanup!(stmt, cleanup)
-      stamp_field_pre_cleanup!(stmt, cleanup)
-      stamp_match_as_cleanup!(stmt, cleanup)
+      # Stamp cleanup info on reassignment / match-as nodes.
+      stamp_reassign_cleanup!(stmt, bindings)
+      stamp_match_as_cleanup!(stmt, bindings)
 
       # Emit the original statement.
       result << stmt
 
       # Insert Drop after VarDecl / BindExpr (decl mode).
-      insert_drop!(result, stmt, cleanup)
+      insert_drop!(result, stmt, bindings)
     end
     result
   end
 
   # Recurse into control flow branches to transform nested bodies.
-  def recurse_branches!(stmt, cleanup, promo)
+  def recurse_branches!(stmt, bindings, promo)
     case stmt
     when AST::IfStatement
-      stmt.then_branch = transform_body(stmt.then_branch, cleanup, promo) if stmt.then_branch
-      stmt.else_branch = transform_body(stmt.else_branch, cleanup, promo) if stmt.else_branch
+      stmt.then_branch = transform_body(stmt.then_branch, bindings, promo) if stmt.then_branch
+      stmt.else_branch = transform_body(stmt.else_branch, bindings, promo) if stmt.else_branch
     when AST::WhileLoop
-      stmt.do_branch = transform_body(stmt.do_branch, cleanup, promo) if stmt.do_branch
+      stmt.do_branch = transform_body(stmt.do_branch, bindings, promo) if stmt.do_branch
     when AST::ForRange, AST::ForEach
-      stmt.body = transform_body(stmt.body, cleanup, promo) if stmt.body
+      stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
     when AST::MatchStatement
-      stmt.cases&.each { |c| c[:body] = transform_body(c[:body], cleanup, promo) if c[:body] }
+      stmt.cases&.each { |c| c[:body] = transform_body(c[:body], bindings, promo) if c[:body] }
       if stmt.default_case
-        stmt.default_case = transform_body(stmt.default_case, cleanup, promo)
+        stmt.default_case = transform_body(stmt.default_case, bindings, promo)
       end
     when AST::WithBlock
-      stmt.body = transform_body(stmt.body, cleanup, promo) if stmt.body
+      stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
     when AST::DoBlock
       stmt.branches&.each do |b|
-        b[:body] = transform_body(b[:body], cleanup, promo) if b[:body]
+        b[:body] = transform_body(b[:body], bindings, promo) if b[:body]
       end
     when AST::BgBlock, AST::BgStreamBlock
-      stmt.body = transform_body(stmt.body, cleanup, promo) if stmt.body
+      stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
     end
   end
 
   # Insert a MIR::Drop after a variable declaration that needs cleanup.
-  # Also stamps VarDecl with cleanup_alloc and has_cleanup for transpiler use.
-  def insert_drop!(result, stmt, cleanup)
-    return unless cleanup
+  # Also stamps the declaration with cleanup_alloc and has_cleanup.
+  def insert_drop!(result, stmt, bindings)
+    return unless bindings
     name = case stmt
            when AST::VarDecl then stmt.name.to_s
            when AST::BindExpr then stmt.mode == :decl ? stmt.name.to_s : nil
@@ -742,14 +743,11 @@ class MIRPass
            end
     return unless name
 
-    entry = cleanup.lookup(name)
+    entry = bindings[name]
     return unless entry && entry[:needs_cleanup]
 
-    # Stamp declaration with cleanup info so transpiler doesn't need CleanupPlan.
-    if stmt.is_a?(AST::VarDecl)
-      stmt.cleanup_alloc = entry[:alloc]
-      stmt.has_cleanup = true
-    elsif stmt.is_a?(AST::BindExpr) && stmt.mode == :decl
+    # Stamp declaration with cleanup info for transpiler.
+    if stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)
       stmt.cleanup_alloc = entry[:alloc]
       stmt.has_cleanup = true
     end
@@ -763,14 +761,14 @@ class MIRPass
   end
 
   # Insert MIR::Drop nodes for TAKES parameters at the start of the
-  # function body. Replaces the transpiler's manual TAKES cleanup loop.
-  def insert_takes_drops!(fn, cleanup)
+  # function body.
+  def insert_takes_drops!(fn, bindings)
     drops = []
     (fn.deferred_drops || []).each do |dd|
       param_def = fn.params&.find { |p| p[:name] == dd[:name] }
       next unless param_def&.dig(:takes)
 
-      entry = cleanup.lookup(dd[:name])
+      entry = bindings[dd[:name].to_s]
       next unless entry && entry[:needs_cleanup]
 
       ti = dd[:type].is_a?(Type) ? dd[:type] : Type.new(dd[:type] || :Any)
@@ -784,40 +782,26 @@ class MIRPass
   end
 
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
-  # Replaces CleanupPlan lookup in transpiler's BindExpr handler.
-  def stamp_reassign_cleanup!(stmt, cleanup)
-    return unless cleanup
+  def stamp_reassign_cleanup!(stmt, bindings)
+    return unless bindings
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
-    entry = cleanup.lookup(stmt.name)
+    entry = bindings[stmt.name.to_s]
     return unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
 
     stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc] }
   end
 
-  # Stamp field_pre_cleanup on Assignment nodes that overwrite heap-backed fields.
-  # Replaces CleanupPlan.lookup_field_pre_cleanup in transpiler's Assignment handler.
-  def stamp_field_pre_cleanup!(stmt, cleanup)
-    return unless cleanup
-    return unless stmt.is_a?(AST::Assignment) && stmt.name.is_a?(AST::GetField)
-
-    fpc = cleanup.lookup_field_pre_cleanup(stmt.object_id)
-    return unless fpc
-
-    stmt.field_pre_cleanup = fpc
-  end
-
   # Stamp MATCH-AS cleanup info on MatchStatement case hashes.
-  # Cases with a binding + was_moved source get :match_as_src_guard and :match_as_cleanup.
-  def stamp_match_as_cleanup!(stmt, cleanup)
-    return unless cleanup
+  def stamp_match_as_cleanup!(stmt, bindings)
+    return unless bindings
     return unless stmt.is_a?(AST::MatchStatement)
     return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
 
-    src_entry = cleanup.lookup(stmt.expr.name)
+    src_entry = bindings[stmt.expr.name.to_s]
     stmt.cases&.each do |c|
       next unless c[:binding]
-      as_entry = cleanup.lookup(c[:binding])
+      as_entry = bindings[c[:binding].to_s]
       next unless as_entry && as_entry[:needs_cleanup]
 
       c[:match_as_src_guard] = src_entry&.dig(:has_moved_guard) || false
@@ -825,13 +809,8 @@ class MIRPass
     end
   end
 
-  # Build moved_guard_info: { var_name => bool } for all bindings with cleanup.
-  # Stored on FunctionDef so transpiler can look up has_moved_guard without CleanupPlan.
-  def stamp_moved_guard_info!(fn, cleanup)
-    return unless cleanup
-    bindings = cleanup.instance_variable_get(:@bindings)
-    return unless bindings
-
+  # Build moved_guard_info: { var_name => bool } for all bindings.
+  def stamp_moved_guard_info!(fn, bindings)
     info = {}
     bindings.each do |name, entry|
       info[name] = true if entry[:has_moved_guard]

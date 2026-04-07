@@ -285,7 +285,7 @@ module AllocHelper
       # mutate the shared Type object (e.g. STRING_TYPE, or function return types).
       node.storage = :heap
       # For Identifier containers: update the DECLARATION node's type_info so
-      # CleanupPlan.classify_binding sees heap_provenance? = true and emits heapAlloc().
+      # CleanupClassifier.classify_binding sees heap_provenance? = true and emits heapAlloc().
       # FuncCall/MethodCall type_infos are shared (function return type), so we skip
       # them — mutating shared Types would corrupt function signatures.
       if node.is_a?(AST::Identifier)

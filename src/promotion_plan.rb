@@ -250,10 +250,11 @@ class PromotionPlan
 end
 
 # =========================================================================
-# Pass C (caller side): Cleanup Planning
+# Pass C (caller side): Cleanup Classification
 #
-# THE SINGLE AUTHORITY for all cleanup decisions. Every defer/cleanup
-# emission in the transpiler consults this plan. No re-inference.
+# Classifies each variable binding's cleanup requirements. Pure analysis -
+# no code emission. MIRPass consumes the result to insert MIR::Drop nodes
+# and stamp AST nodes.
 #
 # Per-binding entry:
 #   needs_cleanup:  true/false       - whether a defer is emitted
@@ -270,34 +271,15 @@ end
 #   - MatchStatement cases with bindings + was_moved
 #   - union/struct schemas (for non-Copy checks)
 # =========================================================================
-class CleanupPlan
-  attr_reader :bindings
-  attr_reader :field_pre_cleanups  # Hash<Assignment.object_id => { zig_type, alloc }>
-
-  def initialize(bindings: {}, field_pre_cleanups: {})
-    @bindings           = bindings.freeze
-    @field_pre_cleanups = field_pre_cleanups.freeze
-  end
-
-  EMPTY = new.freeze
-
-  # Look up the cleanup entry for a binding by name.
-  def lookup(name)
-    @bindings[name.to_s]
-  end
-
-  # Look up a field pre-cleanup entry for an Assignment node by object_id.
-  def lookup_field_pre_cleanup(assignment_node_id)
-    @field_pre_cleanups[assignment_node_id]
-  end
-
-  # Compute cleanup plan for a function.
+module CleanupClassifier
+  # Classify all bindings in a function that need cleanup.
   #
   # @param fn_node [AST::FunctionDef]
   # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
-  def self.compute(fn_node, fn_nodes:, schema_lookup:)
-    return EMPTY unless fn_node.body
+  # @return [Hash] { var_name => entry_hash } or empty hash
+  def self.classify(fn_node, fn_nodes:, schema_lookup:)
+    return {} unless fn_node.body
 
     promoted_fns = compute_promoted_fns(fn_nodes)
     bindings = {}
@@ -311,20 +293,34 @@ class CleanupPlan
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
     walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
 
-    # 4. Field pre-cleanups: field assignments that must free the old value
-    #    before overwriting. Alloc is derived from the target binding's entry.
-    field_pre_cleanups = {}
-    walk_field_pre_cleanups(fn_node.body, bindings, field_pre_cleanups)
-
-    (bindings.empty? && field_pre_cleanups.empty?) ? EMPTY :
-      new(bindings: bindings, field_pre_cleanups: field_pre_cleanups)
+    bindings
   end
 
-  private
+  # Walk field assignments that need pre-cleanup (free old value before overwrite).
+  # Stamps Assignment nodes directly with { zig_type:, alloc: }.
+  def self.stamp_field_pre_cleanups!(body, bindings)
+    AST.walk_body(body) do |stmt|
+      next unless stmt.is_a?(AST::Assignment)
+      next unless stmt.name.is_a?(AST::GetField)
+      target_node = stmt.name.target
+
+      field_ti = stmt.name.type_info rescue nil
+      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+      next unless field_ti&.string? || field_ti&.list_collection?
+
+      alloc = if target_node.is_a?(AST::Identifier)
+        target_entry = bindings[target_node.name.to_s]
+        (target_entry && target_entry[:alloc] == :heap) ? :heap : :frame
+      else
+        :frame
+      end
+      stmt.field_pre_cleanup = { zig_type: field_ti.zig_type, alloc: alloc }
+    end
+  end
 
   # ── Promoted function detection ──────────────────────────────────
 
-  def self.compute_promoted_fns(fn_nodes)
+  private_class_method def self.compute_promoted_fns(fn_nodes)
     promoted = Set.new
     fn_nodes.each { |name, fn| promoted << name if fn.return_provenance == :heap }
 
@@ -343,7 +339,7 @@ class CleanupPlan
     promoted
   end
 
-  def self.body_calls_promoted?(body, promoted)
+  private_class_method def self.body_calls_promoted?(body, promoted)
     found = false
     AST.walk_body(body) do |node|
       if node.is_a?(AST::ReturnNode) && node.value.is_a?(AST::FuncCall) && promoted.include?(node.value.name)
@@ -355,7 +351,7 @@ class CleanupPlan
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
 
-  def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
+  private_class_method def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
       next if node.is_a?(AST::BindExpr) && node.mode == :assign
@@ -370,7 +366,7 @@ class CleanupPlan
 
   # ── Walk TAKES parameters ───────────────────────────────────────
 
-  def self.walk_takes_params(fn_node, schema_lookup, bindings)
+  private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
     drops = fn_node.deferred_drops || []
     drops.each do |drop|
       param_def = fn_node.params.find { |p| p[:name] == drop[:name] }
@@ -416,7 +412,7 @@ class CleanupPlan
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
-  def self.walk_match_as_bindings(body, schema_lookup, bindings)
+  private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)
       next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
@@ -467,7 +463,7 @@ class CleanupPlan
   # cleanup entry hash or nil. Order matters: earlier categories take
   # priority (e.g. resource before collection, RC before sync).
 
-  def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
+  private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
     return nil if ti.escaped_return && (ti.collection? || ti.string?)
@@ -485,17 +481,17 @@ class CleanupPlan
 
   # ── Individual classifiers ───────────────────────────────────────
 
-  def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
+  private_class_method def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
     { needs_cleanup: true, alloc: alloc, kind: kind,
       has_moved_guard: has_moved_guard, **extra }
   end
 
-  def self.classify_resource(_ti, node)
+  private_class_method def self.classify_resource(_ti, node)
     return nil unless node.respond_to?(:resource_close_zig) && node.resource_close_zig
     entry(:resource, resource_close_zig: node.resource_close_zig)
   end
 
-  def self.classify_collection(ti, schema_lookup)
+  private_class_method def self.classify_collection(ti, schema_lookup)
     if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
@@ -510,7 +506,7 @@ class CleanupPlan
     nil
   end
 
-  def self.classify_array_struct_strings(ti, node, schema_lookup)
+  private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
     val = node.respond_to?(:value) ? node.value : nil
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
@@ -518,18 +514,18 @@ class CleanupPlan
     entry(:array_with_struct_strings)
   end
 
-  def self.classify_rc_or_link(ti)
+  private_class_method def self.classify_rc_or_link(ti)
     return entry(:rc) if ti.any_rc? || ti.link?
     nil
   end
 
-  def self.classify_sync(ti)
+  private_class_method def self.classify_sync(ti)
     return entry(:locked) if ti.locked?
     return entry(:write_locked) if ti.write_locked?
     nil
   end
 
-  def self.classify_heap_provenance(ti, node, schema_lookup)
+  private_class_method def self.classify_heap_provenance(ti, node, schema_lookup)
     return nil unless ti.heap_provenance?
     return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
     return nil if ti.collection? || ti.map? || ti.pool? || ti.set_collection?
@@ -556,14 +552,14 @@ class CleanupPlan
   end
 
   # @alwaysMutable / @indirect create heap pointers needing CheatLib.free.
-  def self.classify_heap_struct_plain(ti, node)
+  private_class_method def self.classify_heap_struct_plain(ti, node)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
     return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
     entry(:heap_struct_plain)
   end
 
-  def self.classify_struct_cleanup_fields(ti, node, schema_lookup)
+  private_class_method def self.classify_struct_cleanup_fields(ti, node, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
     return nil unless schema.is_a?(Hash) && !schema[:kind]
 
@@ -587,7 +583,7 @@ class CleanupPlan
     entry(:struct_with_cleanup_fields, alloc: ti.provenance_alloc || :heap)
   end
 
-  def self.classify_non_copy_union(ti, schema_lookup)
+  private_class_method def self.classify_non_copy_union(ti, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
     return nil unless schema.is_a?(Hash) && schema[:kind] == :union
     is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
@@ -599,14 +595,14 @@ class CleanupPlan
 
   # ── Schema helpers ───────────────────────────────────────────────
 
-  def self.elem_needs_cleanup?(ti, schema_lookup)
+  private_class_method def self.elem_needs_cleanup?(ti, schema_lookup)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     (elem_schema.is_a?(Hash) && elem_schema[:kind] == :union &&
       (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }) ||
       elem_has_string_fields?(elem_schema)
   end
 
-  def self.elem_has_string_fields?(schema)
+  private_class_method def self.elem_has_string_fields?(schema)
     return false unless schema.is_a?(Hash) && !schema[:kind]
     schema.any? do |k, v|
       next false if k.is_a?(Symbol)
@@ -616,34 +612,4 @@ class CleanupPlan
     end
   end
 
-  # ── Field pre-cleanup walk ────────────────────────────────────────
-  # Finds field-assignment nodes where the old field value must be freed
-  # before the new value is written. Records { zig_type, alloc } keyed by
-  # node.object_id so the transpiler can look them up without re-inferring.
-  #
-  # The alloc is derived from the target binding's CleanupPlan entry
-  # (already computed in step 1-3 of compute). If the binding uses :heap,
-  # the field cleanup also uses heapAlloc; otherwise frameAlloc.
-  def self.walk_field_pre_cleanups(body, bindings, field_pre_cleanups)
-    AST.walk_body(body) do |stmt|
-      next unless stmt.is_a?(AST::Assignment)
-      next unless stmt.name.is_a?(AST::GetField)
-      target_node = stmt.name.target
-
-      field_ti = stmt.name.type_info rescue nil
-      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-      next unless field_ti&.string? || field_ti&.list_collection?
-
-      # Determine alloc from the target binding when possible.
-      # For non-Identifier targets (e.g. arr[i].field), default to :frame.
-      alloc = if target_node.is_a?(AST::Identifier)
-        target_entry = bindings[target_node.name.to_s]
-        (target_entry && target_entry[:alloc] == :heap) ? :heap : :frame
-      else
-        :frame
-      end
-      field_pre_cleanups[stmt.object_id] = { zig_type: field_ti.zig_type, alloc: alloc }
-    end
-  end
-  private_class_method :walk_field_pre_cleanups
 end

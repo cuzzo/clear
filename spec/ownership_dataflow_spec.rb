@@ -174,7 +174,7 @@ RSpec.describe OwnershipDataflow do
   end
 
   describe "zero under-guarding across test suite" do
-    it "never under-guards vs CleanupPlan" do
+    it "never under-guards vs CleanupClassifier" do
       test_files = Dir.glob("transpile-tests/*.cht").sort
       under_guarded = []
 
@@ -195,13 +195,13 @@ RSpec.describe OwnershipDataflow do
 
           fn_nodes.each do |name, fn|
             next unless fn.body
-            cp = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema)
-            next unless cp
+            bindings = CleanupClassifier.classify(fn, fn_nodes: fn_nodes, schema_lookup: schema)
+            next if bindings.empty?
 
             df = OwnershipDataflow.analyze(fn)
             summary = df.cleanup_summary
 
-            cp.instance_variable_get(:@bindings)&.each do |var, entry|
+            bindings.each do |var, entry|
               next unless entry[:needs_cleanup]
               plan_guard = entry[:has_moved_guard] || false
               df_entry = summary[var]
