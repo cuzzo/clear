@@ -17,6 +17,7 @@ require_relative "./promotion_plan"
 require_relative "./pipeline_rewriter"
 require_relative "./string_concat_rewriter"
 require_relative "./control_flow"
+require_relative "./static_leak_checker"
 require_relative "./importer"
 require_relative "./transpiler_context"
 
@@ -2799,6 +2800,10 @@ private
 
     when MIR::SuppressCleanup
       "#{zig_safe_name(node.name)}_moved = true;"
+
+    when MIR::Alloc, MIR::Return
+      # Metadata-only MIR nodes for static analysis. No code emitted.
+      nil
 
     else
       raise "Unknown Node: #{node.class}"

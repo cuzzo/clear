@@ -615,6 +615,22 @@ class MIRPass
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       transform_function!(stmt, promotion_plans[stmt.name])
     end
+
+    # Phase 4: static leak verification on post-MIR bodies.
+    can_fail_fns = Set.new
+    @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
+
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef) && stmt.body
+      bindings = @cleanup_bindings[stmt.name]
+      next unless bindings && !bindings.empty?
+
+      checker = StaticLeakChecker.new(stmt, bindings: bindings, can_fail_fns: can_fail_fns)
+      errors = checker.check!
+      unless errors.empty?
+        raise "StaticLeakChecker failed:\n#{errors.join("\n")}"
+      end
+    end
   end
 
   private
@@ -698,8 +714,11 @@ class MIRPass
       # Recurse into nested control flow first.
       recurse_branches!(stmt, bindings, promo)
 
-      # Insert Promote + SuppressCleanup before ReturnNode.
-      insert_promotion!(result, stmt, promo) if stmt.is_a?(AST::ReturnNode)
+      # Insert Return (escape markers) + Promote before ReturnNode.
+      if stmt.is_a?(AST::ReturnNode)
+        insert_return!(result, stmt, bindings)
+        insert_promotion!(result, stmt, promo)
+      end
 
       # Stamp cleanup info on reassignment / match-as / map-put nodes.
       stamp_reassign_cleanup!(stmt, bindings)
@@ -761,6 +780,9 @@ class MIRPass
       stmt.has_cleanup = true
     end
 
+    # MIR::Alloc: explicit allocation marker for static leak checker.
+    result << MIR::Alloc.new(stmt.token, name, entry[:kind], entry[:alloc])
+
     drop = MIR::Drop.new(
       stmt.token, name, entry[:kind], entry[:alloc],
       entry[:has_moved_guard], stmt.type_info, entry[:resource_close_zig],
@@ -770,10 +792,10 @@ class MIRPass
     result << drop
   end
 
-  # Insert MIR::Drop nodes for TAKES parameters at the start of the
-  # function body.
+  # Insert MIR::Alloc + MIR::Drop nodes for TAKES parameters at the start
+  # of the function body.
   def insert_takes_drops!(fn, bindings)
-    drops = []
+    mir_nodes = []
     (fn.deferred_drops || []).each do |dd|
       param_def = fn.params&.find { |p| p[:name] == dd[:name] }
       next unless param_def&.dig(:takes)
@@ -782,14 +804,17 @@ class MIRPass
       next unless entry && entry[:needs_cleanup]
 
       ti = dd[:type].is_a?(Type) ? dd[:type] : Type.new(dd[:type] || :Any)
+
+      mir_nodes << MIR::Alloc.new(fn.token, dd[:name].to_s, entry[:kind], entry[:alloc])
+
       drop = MIR::Drop.new(
         fn.token, dd[:name].to_s, entry[:kind], entry[:alloc],
         entry[:has_moved_guard], ti, entry[:resource_close_zig], nil
       )
       drop.cleanup_entry = entry
-      drops << drop
+      mir_nodes << drop
     end
-    fn.body = drops + fn.body if drops.any?
+    fn.body = mir_nodes + fn.body if mir_nodes.any?
   end
 
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
@@ -878,9 +903,9 @@ class MIRPass
   # Insert MIR::Promote before a return statement and annotate the
   # ReturnNode for struct-level promotion wrapping.
   #
-  # Defer suppression (x_moved = true) for escaped variables is NOT handled
-  # here - the transpiler's collect_escaping_identifiers in the ReturnNode
-  # handler already emits it with proper has_moved_guard checks.
+  # Defer suppression for escaped variables is handled by MIR::Return
+  # (inserted by insert_return!) and consumed by the transpiler's
+  # collect_escaping_identifiers in the ReturnNode handler.
   def insert_promotion!(result, ret_node, promo)
     return unless promo && !promo.empty?
 
@@ -901,6 +926,41 @@ class MIRPass
       }
     elsif filtered[:var_promotes]&.any?
       ret_node.promote_ret_wrap = :const
+    end
+  end
+
+  # Insert MIR::Return before a ReturnNode to mark which local variables'
+  # ownership escapes to the caller. The checker uses this to know that
+  # escaped vars don't need local cleanup.
+  def insert_return!(result, ret_node, bindings)
+    return unless bindings
+    escaped = collect_return_escapes(ret_node, bindings)
+    return if escaped.empty?
+    result << MIR::Return.new(ret_node.token, escaped)
+  end
+
+  # Walk a return expression and collect variable names whose ownership
+  # transfers to the caller. Mirrors transpiler's collect_escaping_identifiers
+  # but filters to bindings with has_moved_guard (those needing suppression).
+  def collect_return_escapes(ret_node, bindings)
+    return [] unless ret_node.value
+    ids = collect_escaping_ids(ret_node.value)
+    ids.map { |id| id.name.to_s }
+       .select { |n| bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup) }
+       .uniq
+  end
+
+  def collect_escaping_ids(node)
+    return [] unless node
+    case node
+    when AST::Identifier then [node]
+    when AST::MoveNode   then collect_escaping_ids(node.value)
+    when AST::StructLit  then node.fields.values.flat_map { |v| collect_escaping_ids(v) }
+    when AST::FuncCall, AST::MethodCall
+      node.args.select { |a| a.respond_to?(:was_moved) && a.was_moved }
+               .flat_map { |a| collect_escaping_ids(a) }
+    when AST::CopyNode then []
+    else []
     end
   end
 

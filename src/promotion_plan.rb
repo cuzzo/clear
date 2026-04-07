@@ -370,7 +370,7 @@ module CleanupClassifier
             union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
-              has_moved_guard: true,
+              has_moved_guard: true, match_as: true,
               zig_type: "#{union_zig}_#{variant_name}"
             }
           end
@@ -384,14 +384,14 @@ module CleanupClassifier
             elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
-              has_moved_guard: true,
+              has_moved_guard: true, match_as: true,
               elem_zig_type: elem_zig
             }
           elsif pt.collection? || pt.map?
             zig_type = pt.zig_type rescue pt.resolved.to_s
             bindings[c[:binding]] = {
               needs_cleanup: true, alloc: :heap, kind: pt.map? ? :string_map : :list,
-              has_moved_guard: true,
+              has_moved_guard: true, match_as: true,
               zig_type: zig_type
             }
           end

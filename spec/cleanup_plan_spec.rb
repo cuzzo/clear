@@ -4,6 +4,7 @@ require_relative "../src/parser"
 require_relative "../src/annotator"
 require_relative "../src/promotion_plan"
 require_relative "../src/control_flow"
+require_relative "../src/static_leak_checker"
 
 # Tests CleanupClassifier - classifies which bindings need cleanup.
 # MIRPass consumes this to insert MIR::Drop nodes and stamp AST.
@@ -813,6 +814,158 @@ RSpec.describe CleanupClassifier do
         expect(hoisted_values.none? { |v| v.is_a?(AST::FuncCall) && v.name == "prStr" }).to be(true),
           "prStr() is the direct return — should NOT be hoisted"
       end
+    end
+  end
+end
+
+RSpec.describe StaticLeakChecker do
+  def run_checker(src, fn_name)
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+
+    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir.transform!(ast)
+
+    fn = fn_nodes[fn_name]
+    raise "Function '#{fn_name}' not found" unless fn
+    bindings = mir.cleanup_bindings[fn_name] || {}
+
+    can_fail_fns = Set.new
+    fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
+
+    checker = StaticLeakChecker.new(fn, bindings: bindings, can_fail_fns: can_fail_fns)
+    checker.check!
+  end
+
+  context "list variable with cleanup" do
+    it "passes — MIR::Alloc and MIR::Drop are present" do
+      errors = run_checker(<<~CLEAR, "test")
+        FN test() RETURNS Void ->
+            MUTABLE xs: Int64[]@list = List[];
+            xs.append(42);
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to be_empty
+    end
+  end
+
+  context "TAKES parameter" do
+    it "passes — TAKES param has MIR::Alloc and MIR::Drop" do
+      errors = run_checker(<<~CLEAR, "consume")
+        UNION Value { Nil, Num: Float64 }
+        FN consume(TAKES v: Value) RETURNS Void ->
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to be_empty
+    end
+  end
+
+  context "MATCH AS binding" do
+    it "passes — match-as bindings are excluded from completeness check" do
+      errors = run_checker(<<~CLEAR, "test")
+        UNION Value { Nil, List: Value[] }
+        FN test(TAKES v: Value) RETURNS Void ->
+            MATCH TAKES v START
+                Value.List AS items ->
+                    RETURN;,
+                DEFAULT -> RETURN;
+            END
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to be_empty
+    end
+  end
+
+  context "HashMap with cleanup" do
+    it "passes — map variable has correct MIR nodes" do
+      errors = run_checker(<<~CLEAR, "test")
+        FN test() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            m["key"] = 42;
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to be_empty
+    end
+  end
+
+  context "simulated missing Drop" do
+    it "detects LEAK when Drop is removed" do
+      tokens = Lexer.new(<<~CLEAR).tokenize
+        FN test() RETURNS Void ->
+            MUTABLE xs: Int64[]@list = List[];
+            xs.append(42);
+            RETURN;
+        END
+      CLEAR
+      ast = Parser.new(tokens, <<~CLEAR).parse
+        FN test() RETURNS Void ->
+            MUTABLE xs: Int64[]@list = List[];
+            xs.append(42);
+            RETURN;
+        END
+      CLEAR
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir.transform!(ast)
+
+      fn = fn_nodes["test"]
+      bindings = mir.cleanup_bindings["test"]
+
+      # Sabotage: remove all MIR::Drop and MIR::Alloc from the body.
+      fn.body.reject! { |s| s.is_a?(MIR::Drop) || s.is_a?(MIR::Alloc) }
+
+      checker = StaticLeakChecker.new(fn, bindings: bindings)
+      errors = checker.check!
+      expect(errors).to include(a_string_matching(/LEAK.*xs.*no MIR::Drop/))
+      expect(errors).to include(a_string_matching(/LEAK.*xs.*no MIR::Alloc/))
+    end
+  end
+
+  context "simulated orphan Drop" do
+    it "detects ORPHAN when Drop exists without binding" do
+      tokens = Lexer.new(<<~CLEAR).tokenize
+        FN test() RETURNS Void ->
+            x = 42;
+            RETURN;
+        END
+      CLEAR
+      ast = Parser.new(tokens, <<~CLEAR).parse
+        FN test() RETURNS Void ->
+            x = 42;
+            RETURN;
+        END
+      CLEAR
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+
+      fn = fn_nodes["test"]
+
+      # Sabotage: inject a rogue MIR::Drop.
+      rogue_drop = MIR::Drop.new(fn.token, "phantom", :list, :heap, false, nil, nil, nil)
+      fn.body.unshift(rogue_drop)
+
+      checker = StaticLeakChecker.new(fn, bindings: {})
+      errors = checker.check!
+      expect(errors).to include(a_string_matching(/ORPHAN.*phantom/))
     end
   end
 end

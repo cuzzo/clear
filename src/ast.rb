@@ -739,5 +739,25 @@ module MIR
   SuppressCleanup = Struct.new(:token, :name) do
     include AST::Locatable
   end
+
+  # Alloc: marks an allocation point - a variable binding that owns a resource
+  # and will need cleanup. Inserted alongside MIR::Drop for each VarDecl/BindExpr
+  # with cleanup. The StaticLeakChecker verifies every Alloc has exactly one
+  # Drop or Move/Escape on every path through the function.
+  #
+  # kind:  cleanup template symbol (same as Drop - :list, :string_map, etc.)
+  # alloc: :heap or :frame - which allocator owns this value
+  Alloc = Struct.new(:token, :name, :kind, :alloc) do
+    include AST::Locatable
+  end
+
+  # Return: marks function exit where local variable ownership transfers to
+  # the caller. Inserted before ReturnNode. The checker uses this to know
+  # that escaped variables don't need local cleanup (caller takes ownership).
+  #
+  # escaped_vars: [String] variable names whose ownership escapes via return
+  Return = Struct.new(:token, :escaped_vars) do
+    include AST::Locatable
+  end
 end
 
