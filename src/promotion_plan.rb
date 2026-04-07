@@ -565,205 +565,151 @@ class CleanupPlan
     end
   end
 
-  # ── classify_binding: THE single decision point ─────────────────
+  # ── classify_binding: dispatch pipeline ─────────────────────────
+  #
+  # Each classify_* method handles one cleanup category, returning a
+  # cleanup entry hash or nil. Order matters: earlier categories take
+  # priority (e.g. resource before collection, RC before sync).
 
   def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
-
-    # Container borrows: data owned by container, no cleanup
-    if node.respond_to?(:container_borrow) && node.container_borrow
-      return nil
-    end
-
-    # Escaped via return: caller takes ownership, no cleanup
+    return nil if node.respond_to?(:container_borrow) && node.container_borrow
     return nil if ti.escaped_return && (ti.collection? || ti.string?)
 
-    # Resources: close on scope exit
-    if node.respond_to?(:resource_close_zig) && node.resource_close_zig
-      return {
-        needs_cleanup: true, alloc: :heap, kind: :resource,
-        has_moved_guard: true, source_kind: :local,
-        resource_close_zig: node.resource_close_zig
-      }
-    end
+    classify_resource(ti, node) ||
+      classify_collection(ti, schema_lookup) ||
+      classify_array_struct_strings(ti, node, schema_lookup) ||
+      classify_rc_or_link(ti) ||
+      classify_sync(ti) ||
+      classify_heap_provenance(ti, node, schema_lookup) ||
+      classify_heap_struct_plain(ti, node) ||
+      classify_struct_cleanup_fields(ti, node, schema_lookup) ||
+      classify_non_copy_union(ti, schema_lookup)
+  end
 
-    # ── Collections ────────────────────────────────────────────────
+  # ── Individual classifiers ───────────────────────────────────────
 
+  def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
+    { needs_cleanup: true, alloc: alloc, kind: kind,
+      has_moved_guard: has_moved_guard, source_kind: :local, **extra }
+  end
+
+  def self.classify_resource(_ti, node)
+    return nil unless node.respond_to?(:resource_close_zig) && node.resource_close_zig
+    entry(:resource, resource_close_zig: node.resource_close_zig)
+  end
+
+  def self.classify_collection(ti, schema_lookup)
     if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
-      # Check if elements need cleanup (union elements with heap variants,
-      # or struct elements with string fields that were heap-duped)
-      elem_type = ti.element_type
-      elem_resolved = elem_type&.resolved
-      elem_schema = schema_lookup.call(elem_resolved) rescue nil
-      has_heap_elems = elem_schema.is_a?(Hash) && elem_schema[:kind] == :union &&
-        (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      has_heap_elems ||= elem_has_string_fields?(elem_schema)
-
-      return {
-        needs_cleanup: true, alloc: :frame, kind: has_heap_elems ? :list_with_elem_cleanup : :list,
-        has_moved_guard: true, source_kind: :local,
-        elem_needs_cleanup: has_heap_elems
-      }
+      has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
+      return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
+                   alloc: :frame, elem_needs_cleanup: has_heap_elems)
     end
-
-    if ti.list_collection?
-      return { needs_cleanup: true, alloc: :heap, kind: :list, has_moved_guard: !ti.sharded?, source_kind: :local }
-    end
-
-    if ti.map? && !ti.numeric_map?
-      if ti.shared?
-        return { needs_cleanup: true, alloc: :heap, kind: :rc, has_moved_guard: true, source_kind: :local }
-      end
-      return { needs_cleanup: true, alloc: :heap, kind: :string_map, has_moved_guard: true, source_kind: :local }
-    end
-
-    if ti.numeric_map?
-      return { needs_cleanup: true, alloc: :frame, kind: :numeric_map, has_moved_guard: true, source_kind: :local }
-    end
-
-    if ti.pool?
-      return { needs_cleanup: true, alloc: ti.provenance_alloc || :heap, kind: :pool, has_moved_guard: false, source_kind: :local }
-    end
-
-    if ti.set_collection?
-      return { needs_cleanup: true, alloc: ti.provenance_alloc || :heap, kind: :set, has_moved_guard: false, source_kind: :local }
-    end
-
-    # ── Fixed/dynamic arrays of structs with string fields ──────
-    # String fields in struct literals are heap-duped by ensure_owned_value!.
-    # Without cleanup, those heap strings leak when the array goes out of scope.
-    # Only applies when the RHS is a literal array construction (ListLit).
-    # Pipeline results, function calls, etc. don't own the string fields.
-    val = node.respond_to?(:value) ? node.value : nil
-    if ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
-      elem_type = ti.element_type
-      elem_resolved = elem_type&.resolved
-      elem_schema = schema_lookup.call(elem_resolved) rescue nil
-      if elem_has_string_fields?(elem_schema)
-        return {
-          needs_cleanup: true, alloc: :heap, kind: :array_with_struct_strings,
-          has_moved_guard: true, source_kind: :local
-        }
-      end
-    end
-
-    # ── RC / Link ─────────────────────────────────────────────────
-
-    if ti.any_rc? || ti.link?
-      return { needs_cleanup: true, alloc: :heap, kind: :rc, has_moved_guard: true, source_kind: :local }
-    end
-
-    # ── Sync (Locked / RwLocked) ──────────────────────────────────
-
-    if ti.locked?
-      return { needs_cleanup: true, alloc: :heap, kind: :locked, has_moved_guard: true, source_kind: :local }
-    end
-    if ti.write_locked?
-      return { needs_cleanup: true, alloc: :heap, kind: :write_locked, has_moved_guard: true, source_kind: :local }
-    end
-
-    # ── Heap-provenance bindings ─────────────────────────────────
-    # Unified: replaces CopyNode check, heap_promoted check, and
-    # returns_promoted call check. Provenance is set by the annotator:
-    #   - COPY: :heap
-    #   - Call to returns_promoted function: :heap
-    #   - heap_promoted propagation: :heap
-    # Skip types with dedicated cleanup paths (RC, sync, collections, resources, heap-storage structs).
-    # These are handled by their own classify sections below.
-    heap_prov_eligible = ti.heap_provenance? &&
-      !ti.any_rc? && !ti.link? && !ti.locked? && !ti.write_locked? &&
-      !ti.collection? && !ti.map? && !ti.pool? && !ti.set_collection?
-    storage = node.respond_to?(:storage) ? node.storage : nil
-    heap_prov_eligible = false if storage == :heap  # heap_struct_plain path handles this
-
-    if heap_prov_eligible
-      if ti.string?
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_string, has_moved_guard: true, source_kind: :local }
-      end
-      if ti.array? && !ti.collection?
-        return { needs_cleanup: true, alloc: :heap, kind: :heap_slice, has_moved_guard: true, source_kind: :local }
-      end
-
-      resolved = ti.resolved
-      schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        if has_heap
-          return { needs_cleanup: true, alloc: :heap, kind: :heap_union, has_moved_guard: true, source_kind: :local }
-        end
-      end
-      if schema.is_a?(Hash) && !schema[:kind]
-        has_escapable = schema.any? do |k, v|
-          next false if k.is_a?(Symbol)
-          ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
-          ft.needs_escape_promotion?
-        end
-        if has_escapable
-          return { needs_cleanup: true, alloc: :heap, kind: :heap_struct, has_moved_guard: true, source_kind: :local }
-        end
-      end
-    end
-
-
-    # ── Heap storage plain struct ─────────────────────────────────
-    # Must come before struct_with_cleanup_fields because @alwaysMutable
-    # and @indirect create *RefCell(T) / *T heap pointers. These need
-    # CheatLib.free(rt, name), not CheatLib.cleanup(T, alloc, &name).
-
-    storage = node.respond_to?(:storage) ? node.storage : nil
-    is_locked_sync = ti.locked? || ti.write_locked?
-    if storage == :heap && !ti.any_rc? && !is_locked_sync && !ti.link?
-      return { needs_cleanup: true, alloc: :heap, kind: :heap_struct_plain, has_moved_guard: true, source_kind: :local }
-    end
-
-    # ── Struct with RC/link/string fields ─────────────────────────
-
-    resolved = ti.resolved
-    schema = schema_lookup.call(resolved) rescue nil
-    if schema.is_a?(Hash) && !schema[:kind]
-      # Check actual construction values: rodata string fields don't need cleanup.
-      struct_lit = node.respond_to?(:value) && node.value.is_a?(AST::StructLit) ? node.value : nil
-      has_cleanup_fields = schema.any? do |k, v|
-        next false if k.is_a?(Symbol)
-        ft = v.is_a?(Hash) ? v[:type] : v
-        t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-        next true if t.link? || t.any_rc?
-        if t.string?
-          # Check if the actual value for this field is rodata (no cleanup needed)
-          if struct_lit
-            fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
-            fval_ti = fval&.type_info
-            fval_ti = Type.new(fval_ti) if fval_ti && !fval_ti.is_a?(Type)
-            next false if fval_ti&.rodata?
-          end
-          next true
-        end
-        false
-      end
-      if has_cleanup_fields
-        alloc = ti.provenance_alloc || :heap
-        return { needs_cleanup: true, alloc: alloc, kind: :struct_with_cleanup_fields, has_moved_guard: true, source_kind: :local }
-      end
-    end
-
-    # ── Non-Copy unions on stack ──────────────────────────────────
-
-    schema = schema_lookup.call(ti.resolved) rescue nil
-    if schema.is_a?(Hash) && schema[:kind] == :union
-      is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
-      unless is_copy
-        # Use :heap when any variant holds heap data (@indirect, string, collection).
-        # frameAlloc.destroy/*free are no-ops for heap pointers — must use heapAlloc.
-        has_heap_variants = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        alloc = ti.provenance_alloc || (has_heap_variants ? :heap : :frame)
-        return { needs_cleanup: true, alloc: alloc, kind: :non_copy_union, has_moved_guard: true, source_kind: :local }
-      end
-    end
-
+    return entry(:list, has_moved_guard: !ti.sharded?) if ti.list_collection?
+    return entry(:rc) if ti.map? && !ti.numeric_map? && ti.shared?
+    return entry(:string_map) if ti.map? && !ti.numeric_map?
+    return entry(:numeric_map, alloc: :frame) if ti.numeric_map?
+    return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.pool?
+    return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.set_collection?
     nil
   end
 
-  # Returns true if schema is a plain struct with at least one string field.
+  def self.classify_array_struct_strings(ti, node, schema_lookup)
+    val = node.respond_to?(:value) ? node.value : nil
+    return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
+    elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
+    return nil unless elem_has_string_fields?(elem_schema)
+    entry(:array_with_struct_strings)
+  end
+
+  def self.classify_rc_or_link(ti)
+    return entry(:rc) if ti.any_rc? || ti.link?
+    nil
+  end
+
+  def self.classify_sync(ti)
+    return entry(:locked) if ti.locked?
+    return entry(:write_locked) if ti.write_locked?
+    nil
+  end
+
+  def self.classify_heap_provenance(ti, node, schema_lookup)
+    return nil unless ti.heap_provenance?
+    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
+    return nil if ti.collection? || ti.map? || ti.pool? || ti.set_collection?
+    storage = node.respond_to?(:storage) ? node.storage : nil
+    return nil if storage == :heap # heap_struct_plain handles this
+
+    return entry(:heap_string) if ti.string?
+    return entry(:heap_slice) if ti.array? && !ti.collection?
+
+    schema = schema_lookup.call(ti.resolved) rescue nil
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      return entry(:heap_union) if has_heap
+    end
+    if schema.is_a?(Hash) && !schema[:kind]
+      has_escapable = schema.any? do |k, v|
+        next false if k.is_a?(Symbol)
+        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+        ft.needs_escape_promotion?
+      end
+      return entry(:heap_struct) if has_escapable
+    end
+    nil
+  end
+
+  # @alwaysMutable / @indirect create heap pointers needing CheatLib.free.
+  def self.classify_heap_struct_plain(ti, node)
+    storage = node.respond_to?(:storage) ? node.storage : nil
+    return nil unless storage == :heap
+    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
+    entry(:heap_struct_plain)
+  end
+
+  def self.classify_struct_cleanup_fields(ti, node, schema_lookup)
+    schema = schema_lookup.call(ti.resolved) rescue nil
+    return nil unless schema.is_a?(Hash) && !schema[:kind]
+
+    struct_lit = node.respond_to?(:value) && node.value.is_a?(AST::StructLit) ? node.value : nil
+    has_cleanup = schema.any? do |k, v|
+      next false if k.is_a?(Symbol)
+      ft = v.is_a?(Hash) ? v[:type] : v
+      t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+      next true if t.link? || t.any_rc?
+      next false unless t.string?
+      # Rodata string fields don't need cleanup
+      if struct_lit
+        fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
+        fval_ti = fval&.type_info
+        fval_ti = Type.new(fval_ti) if fval_ti && !fval_ti.is_a?(Type)
+        next false if fval_ti&.rodata?
+      end
+      true
+    end
+    return nil unless has_cleanup
+    entry(:struct_with_cleanup_fields, alloc: ti.provenance_alloc || :heap)
+  end
+
+  def self.classify_non_copy_union(ti, schema_lookup)
+    schema = schema_lookup.call(ti.resolved) rescue nil
+    return nil unless schema.is_a?(Hash) && schema[:kind] == :union
+    is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
+    return nil if is_copy
+    has_heap_variants = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    alloc = ti.provenance_alloc || (has_heap_variants ? :heap : :frame)
+    entry(:non_copy_union, alloc: alloc)
+  end
+
+  # ── Schema helpers ───────────────────────────────────────────────
+
+  def self.elem_needs_cleanup?(ti, schema_lookup)
+    elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
+    (elem_schema.is_a?(Hash) && elem_schema[:kind] == :union &&
+      (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }) ||
+      elem_has_string_fields?(elem_schema)
+  end
+
   def self.elem_has_string_fields?(schema)
     return false unless schema.is_a?(Hash) && !schema[:kind]
     schema.any? do |k, v|
