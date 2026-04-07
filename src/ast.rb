@@ -277,6 +277,7 @@ module AST
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
     attr_accessor :stack_vars_bytes  # lower-bound estimate of stack-local variable bytes
+    attr_accessor :has_promotion     # set by MIRPass when function has escape promotions
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) { include Locatable }
@@ -359,7 +360,11 @@ module AST
     def name; target.name end
   end
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
-  ReturnNode   = Struct.new(:token, :value) { include Locatable }
+  ReturnNode   = Struct.new(:token, :value) do
+    include Locatable
+    attr_accessor :promote_ret_wrap    # :const or :var — set by MIRPass for return wrapping
+    attr_accessor :promote_fields_info # { zig_type:, fields: } — struct/union field promotion on __ret
+  end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
   # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)

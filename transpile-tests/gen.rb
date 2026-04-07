@@ -25,13 +25,11 @@ class TestGenerator < ZigTranspiler
     # 2b. Flatten chained string + into StringConcat nodes.
     StringConcatRewriter.new.rewrite!(ast)
 
-    # 2. Pre-populate signature table, promotion plans, and cleanup plans.
+    # 2. Pre-populate signature table.
     @fn_sigs = {}
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    @promotion_plans = {}
-    @cleanup_plans = {}
     fn_nodes.each do |name, fn|
       sig = fn.full_type
       if sig.is_a?(FunctionSignature)
@@ -43,9 +41,12 @@ class TestGenerator < ZigTranspiler
         fs.effects = fn.effects
         @fn_sigs[name] = fs
       end
-      @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
-      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     end
+
+    # Compute plans + insert MIR nodes (Drop, Promote, SuppressCleanup).
+    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir.transform!(ast)
+    @cleanup_plans = mir.cleanup_plans
 
     # 3. Get Raw Zig Body
     @needs_safety_import = false

@@ -508,24 +508,46 @@ class OwnershipDataflow
 end
 
 class MIRPass
-  def initialize(cleanup_plans:, promotion_plans:)
-    @cleanup_plans = cleanup_plans || {}
-    @promotion_plans = promotion_plans || {}
+  attr_reader :cleanup_plans
+
+  def initialize(fn_nodes:, schema_lookup:)
+    @fn_nodes = fn_nodes
+    @schema_lookup = schema_lookup
+    @cleanup_plans = {}
   end
 
-  # Mutates the AST in place, inserting MIR nodes into statement lists.
+  # Computes both plans and inserts MIR nodes into the AST.
+  # PromotionPlan must run before CleanupPlan because its Phase 0
+  # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
+  # that CleanupPlan's HPT walk depends on.
   def transform!(ast)
+    promotion_plans = {}
+
+    # Phase 1: compute PromotionPlan for all functions (triggers HPT downgrade).
+    @fn_nodes.each do |name, fn|
+      promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: @schema_lookup)
+    end
+
+    # Phase 2: compute CleanupPlan (uses cleared provenance from Phase 1).
+    @fn_nodes.each do |name, fn|
+      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
+    end
+
+    # Phase 3: insert MIR nodes.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      transform_function!(stmt)
+      transform_function!(stmt, promotion_plans[stmt.name])
     end
   end
 
   private
 
-  def transform_function!(fn)
+  def transform_function!(fn, promo)
     cleanup = @cleanup_plans[fn.name]
-    promo = @promotion_plans[fn.name]
+    promo = nil if promo&.empty?
+
+    fn.has_promotion = true if promo
+
     return unless cleanup || promo
 
     # Use dataflow analysis to tighten has_moved_guard decisions.
@@ -629,7 +651,12 @@ class MIRPass
     result << drop
   end
 
-  # Insert MIR::Promote and MIR::SuppressCleanup before a return statement.
+  # Insert MIR::Promote before a return statement and annotate the
+  # ReturnNode for struct-level promotion wrapping.
+  #
+  # Defer suppression (x_moved = true) for escaped variables is NOT handled
+  # here - the transpiler's collect_escaping_identifiers in the ReturnNode
+  # handler already emits it with proper has_moved_guard checks.
   def insert_promotion!(result, ret_node, promo)
     return unless promo && !promo.empty?
 
@@ -641,17 +668,16 @@ class MIRPass
       result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil)
     end
 
-    # Struct-level promotion (promoteFields on __ret).
+    # Struct-level promotion: annotate ReturnNode so transpiler wraps with __ret.
     if filtered.struct_promote && filtered.needs_promote?(ret_node)
-      result << MIR::Promote.new(
-        ret_node.token, "__ret", filtered.struct_promote,
-        :fields, filtered.unhandled_promote_fields
-      )
-    end
-
-    # Suppress cleanup for variables whose ownership transfers to caller.
-    filtered.suppress_defers.each do |name|
-      result << MIR::SuppressCleanup.new(ret_node.token, name)
+      ret_node.promote_ret_wrap = :var
+      ret_node.promote_fields_info = {
+        zig_type: filtered.struct_promote,
+        fields: filtered.unhandled_promote_fields
+      }
+    elsif filtered.var_promotes.any?
+      # Per-variable promotes need return value captured after promotion.
+      ret_node.promote_ret_wrap = :const
     end
   end
 

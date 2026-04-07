@@ -62,19 +62,14 @@ class ZigTranspiler
 
     @ownership_graph = annotator.instance_variable_get(:@og)
 
-    # Pass C: compute promotion + cleanup plans for all functions.
+    # Pass C+D: MIRPass computes PromotionPlan (Phase 0 HPT downgrade must
+    # precede CleanupPlan), then CleanupPlan, then inserts MIR nodes.
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    @promotion_plans = {}
-    @cleanup_plans = {}
-    fn_nodes.each do |name, fn|
-      @promotion_plans[name] = PromotionPlan.compute(fn, schema_lookup: schema_lookup)
-      @cleanup_plans[name] = CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    end
-
-    # Pass D: insert MIR nodes (Drop, Promote, SuppressCleanup) into AST.
-    MIRPass.new(cleanup_plans: @cleanup_plans, promotion_plans: @promotion_plans).transform!(ast)
+    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir.transform!(ast)
+    @cleanup_plans = mir.cleanup_plans
     @mir_pass_done = true
 
     @needs_safety_import = false
@@ -213,19 +208,15 @@ private
   # Called from visit_node(Program) to handle specs that bypass `transpile`.
   def ensure_cleanup_plans!(program_node)
     unless @cleanup_plans && !@cleanup_plans.empty?
-      @cleanup_plans ||= {}
-      @promotion_plans ||= {}
       fn_nodes = {}
       program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
       schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-      fn_nodes.each do |name, fn|
-        @promotion_plans[name] ||= PromotionPlan.compute(fn, schema_lookup: schema_lookup)
-        @cleanup_plans[name] ||= CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      unless @mir_pass_done
+        mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+        mir.transform!(program_node)
+        @cleanup_plans = mir.cleanup_plans
+        @mir_pass_done = true
       end
-    end
-    unless @mir_pass_done
-      MIRPass.new(cleanup_plans: @cleanup_plans, promotion_plans: @promotion_plans).transform!(program_node)
-      @mir_pass_done = true
     end
   end
 
@@ -589,7 +580,7 @@ private
                            @enum_schemas&.key?(ret_type_obj.resolved) ||
                            @union_schemas&.key?(ret_type_obj.resolved)
       returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
-      has_promotion = @promotion_plans&.dig(node.name)&.then { |p| !p.empty? }
+      has_promotion = node.has_promotion
       prologue = if fn_needs_rt
         if uses_frame_or_alloc && returns_value_type
           "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
@@ -2348,14 +2339,26 @@ private
         visit(node.value)
       end
 
-      # 3. Escape promotion — driven by PromotionPlan (Pass C).
-      plan = @promotion_plans&.dig(current_tp_ctx&.fn_name)
-      # Functions with CATCH + returns_promoted must dupe string returns on ALL
-      # paths (success + catch) so the caller can uniformly free with heapAlloc.
+      # 3. Escape promotion — driven by MIR nodes (Promote/SuppressCleanup
+      #    inserted before this ReturnNode) + annotations on the ReturnNode.
       needs_string_dupe = @catch_dupe_string_returns || @current_fn_has_catch
-      if plan && !plan.empty?
-        filtered = plan.filter_for_return(node.value)
-        emit_return_from_plan(val_code, filtered, rt_name, suppress, node)
+      if node.promote_ret_wrap == :var && node.promote_fields_info
+        # Struct/union-level promotion: wrap return value in __ret, promote fields.
+        info = node.promote_fields_info
+        zig_type = transpile_type(info[:zig_type])
+        parts = [suppress]
+        parts << "var __ret = #{val_code};"
+        if info[:fields]
+          info[:fields].each do |fname|
+            parts << "try CheatLib.promote(@TypeOf(__ret.#{fname}), #{rt_name}, &__ret.#{fname});"
+          end
+        else
+          parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
+        end
+        parts << "return __ret;"
+        parts.reject(&:empty?).join("\n")
+      elsif node.promote_ret_wrap == :const
+        [suppress, "const __ret = #{val_code};", "return __ret;"].reject(&:empty?).join("\n")
       elsif needs_string_dupe && node.value
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
@@ -2793,8 +2796,21 @@ private
                 needs_cleanup: true, resource_close_zig: node.resource_close_zig }
       emit_cleanup_from_entry(zig_safe_name(node.name), entry, node.source_node || node)
 
-    when MIR::Promote, MIR::SuppressCleanup
-      nil  # Not yet consumed by transpiler
+    when MIR::Promote
+      rt_name = @do_rt_name || "rt"
+      vname = zig_safe_name(node.name)
+      case node.strategy
+      when :list
+        elem = node.zig_type[/ArrayListUnmanaged\((.+)\)/, 1]
+        "try CheatLib.promoteList(#{elem}, #{rt_name}, &#{vname});"
+      when :string_map
+        "#{vname}.alloc = #{rt_name}.heapAlloc();"
+      when :generic
+        "try CheatLib.promote(#{node.zig_type}, #{rt_name}, &#{vname});"
+      end
+
+    when MIR::SuppressCleanup
+      "#{zig_safe_name(node.name)}_moved = true;"
 
     else
       raise "Unknown Node: #{node.class}"
@@ -3152,47 +3168,6 @@ private
     else
       []
     end
-  end
-
-  # Emit return code from a PromotionPlan. Zero decisions here — the plan
-  # already decided what to promote.
-  def emit_return_from_plan(val_code, plan, rt_name, suppress, ret_node = nil)
-    parts = [suppress]
-
-    plan.var_promotes.each do |vp|
-      vname = zig_safe_name(vp[:var])
-      if vp[:zig_type].include?("ArrayListUnmanaged")
-        elem = vp[:zig_type][/ArrayListUnmanaged\((.+)\)/, 1]
-        parts << "try CheatLib.promoteList(#{elem}, #{rt_name}, &#{vname});"
-      elsif vp[:zig_type].include?("StringMap")
-        parts << "#{vname}.alloc = #{rt_name}.heapAlloc();"
-      else
-        parts << "try CheatLib.promote(#{vp[:zig_type]}, #{rt_name}, &#{vname});"
-      end
-    end
-
-    if plan.struct_promote && (!ret_node || plan.needs_promote?(ret_node))
-      zig_type = transpile_type(plan.struct_promote)
-      parts << "var __ret = #{val_code};"
-      if plan.unhandled_promote_fields
-        # Per-field promote: only promote fields not already handled by var_promotes.
-        # Prevents double-promote when struct has both list AND string fields.
-        plan.unhandled_promote_fields.each do |fname|
-          parts << "try CheatLib.promote(@TypeOf(__ret.#{fname}), #{rt_name}, &__ret.#{fname});"
-        end
-      else
-        # Promote all fields (returns_promoted path, no per-variable escapes).
-        parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
-      end
-      parts << "return __ret;"
-    elsif plan.var_promotes.any?
-      parts << "const __ret = #{val_code};"
-      parts << "return __ret;"
-    else
-      parts << "return #{val_code};"
-    end
-
-    parts.reject(&:empty?).join("\n")
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).
