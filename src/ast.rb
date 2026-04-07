@@ -690,7 +690,7 @@ module MIR
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
   # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
   Drop = Struct.new(:token, :name, :kind, :alloc, :has_moved_guard, :type_info,
-                     :resource_close_zig) do
+                     :resource_close_zig, :source_node) do
     include AST::Locatable
     def needs_cleanup; true; end
   end

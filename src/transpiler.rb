@@ -74,8 +74,8 @@ class ZigTranspiler
     end
 
     # Pass D: insert MIR nodes (Drop, Promote, SuppressCleanup) into AST.
-    # Currently no-op in transpiler — nodes are silently ignored.
     MIRPass.new(cleanup_plans: @cleanup_plans, promotion_plans: @promotion_plans).transform!(ast)
+    @mir_pass_done = true
 
     @needs_safety_import = false
     @fn_sigs = {}
@@ -212,15 +212,20 @@ private
   # Compute cleanup plans from the annotated AST if not already done.
   # Called from visit_node(Program) to handle specs that bypass `transpile`.
   def ensure_cleanup_plans!(program_node)
-    return if @cleanup_plans && !@cleanup_plans.empty?
-    @cleanup_plans ||= {}
-    @promotion_plans ||= {}
-    fn_nodes = {}
-    program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-    fn_nodes.each do |name, fn|
-      @promotion_plans[name] ||= PromotionPlan.compute(fn, schema_lookup: schema_lookup)
-      @cleanup_plans[name] ||= CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    unless @cleanup_plans && !@cleanup_plans.empty?
+      @cleanup_plans ||= {}
+      @promotion_plans ||= {}
+      fn_nodes = {}
+      program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+      fn_nodes.each do |name, fn|
+        @promotion_plans[name] ||= PromotionPlan.compute(fn, schema_lookup: schema_lookup)
+        @cleanup_plans[name] ||= CleanupPlan.compute(fn, fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      end
+    end
+    unless @mir_pass_done
+      MIRPass.new(cleanup_plans: @cleanup_plans, promotion_plans: @promotion_plans).transform!(program_node)
+      @mir_pass_done = true
     end
   end
 
@@ -891,11 +896,13 @@ private
         decl += "\n#{safe_name}.expandToCapacity();"
       end
 
-      # 2. Cleanup & Move Suppression (must be computed before suppression decision)
-      affine_logic = emit_cleanup(safe_name, node)
-
+      # 2. Move Suppression (cleanup is now emitted by MIR::Drop nodes)
       move_source_logic = emit_move_suppression(rhs_ident)
       @current_rhs_is_move = false
+
+      # Check if a MIR::Drop follows this VarDecl (cleanup defer will reference the var).
+      fn_name = current_tp_ctx&.fn_name
+      has_mir_drop = @cleanup_plans&.dig(fn_name)&.lookup(node.name.to_s)&.dig(:needs_cleanup)
 
       # Suppression: Zig warns on unused variables and never-mutated vars.
       # - `var` (actually mutated + used): no suppression needed
@@ -908,10 +915,10 @@ private
           "_ = &#{safe_name};"
         end
       else
-        (node.var_used || !affine_logic.empty?) ? "" : "_ = #{safe_name};"
+        (node.var_used || has_mir_drop) ? "" : "_ = #{safe_name};"
       end
 
-      "#{decl} #{suppression}\n#{affine_logic}\n#{move_source_logic}"
+      "#{decl} #{suppression}\n#{move_source_logic}"
 
 
     when AST::BindExpr
@@ -2780,8 +2787,13 @@ private
     when AST::ThenChain
       raise "Internal: ThenChain node reached visit() — should be flattened by BgBlock transpiler"
 
-    when MIR::Drop, MIR::Promote, MIR::SuppressCleanup
-      ""  # MIR nodes inserted by MIRPass — not yet consumed by transpiler
+    when MIR::Drop
+      entry = { kind: node.kind, alloc: node.alloc, has_moved_guard: node.has_moved_guard,
+                needs_cleanup: true, resource_close_zig: node.resource_close_zig }
+      emit_cleanup_from_entry(zig_safe_name(node.name), entry, node.source_node || node)
+
+    when MIR::Promote, MIR::SuppressCleanup
+      nil  # Not yet consumed by transpiler
 
     else
       raise "Unknown Node: #{node.class}"
@@ -3798,6 +3810,7 @@ private
       saved_temps = ctx&.pending_heap_temps
       ctx.pending_heap_temps = [] if ctx
       code = visit(stmt)
+      next nil unless code
       # Move suppression: for consumed args (TAKES, append, struct/union construction).
       # ReturnNode handles its own escape analysis via collect_escaping_identifiers.
       unless stmt.is_a?(AST::ReturnNode)
@@ -3862,7 +3875,7 @@ private
       line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
       code = "// CLR:#{line}\n#{code}" if line
       code
-    end.join("\n")
+    end.compact.join("\n")
   end
 
 

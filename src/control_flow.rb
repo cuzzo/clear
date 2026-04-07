@@ -1,14 +1,159 @@
-# control_flow.rb - MIR node insertion pass
+# control_flow.rb - CFG construction + MIR node insertion
 #
-# Phase 1: Reads existing CleanupPlan/PromotionPlan results and inserts
-# the corresponding MIR nodes (Drop, Promote, SuppressCleanup) into AST
-# statement lists. The transpiler currently ignores these nodes (no-op
-# handlers). In Phase 2+, this pass will be replaced by CFG-based
-# dataflow analysis that computes the decisions directly.
+# Two components:
+#   1. FunctionCFG: builds a control flow graph from an annotated AST function.
+#      Basic blocks contain references to AST statements. Edges represent
+#      branch/join/loop structure. Used as an analysis-only structure for
+#      ownership dataflow (Phase 2b+).
+#
+#   2. MIRPass: reads CleanupPlan/PromotionPlan results and inserts MIR nodes
+#      (Drop, Promote, SuppressCleanup) into AST statement lists. The transpiler
+#      consumes MIR::Drop for variable cleanup. Promote/SuppressCleanup are
+#      inserted but not yet consumed.
 #
 # Runs AFTER annotation + plan computation, BEFORE transpilation.
 
 require_relative "ast"
+
+# ==========================================
+# CFG - Control Flow Graph (analysis only)
+# ==========================================
+
+class BasicBlock
+  attr_accessor :id, :stmts, :successors, :predecessors
+
+  def initialize(id)
+    @id = id
+    @stmts = []
+    @successors = []
+    @predecessors = []
+  end
+
+  def add_successor(block)
+    @successors << block unless @successors.include?(block)
+    block.predecessors << self unless block.predecessors.include?(self)
+  end
+
+  def terminator
+    @stmts.last
+  end
+end
+
+class FunctionCFG
+  attr_reader :blocks, :entry, :exit_block, :fn_name
+
+  def initialize(fn_name)
+    @fn_name = fn_name
+    @blocks = []
+    @block_counter = 0
+    @entry = new_block
+    @exit_block = new_block  # virtual exit - all returns target this
+  end
+
+  def new_block
+    block = BasicBlock.new(@block_counter)
+    @block_counter += 1
+    @blocks << block
+    block
+  end
+
+  # Build a CFG from an annotated function AST.
+  # Each basic block holds references to AST statements (not copies).
+  # Branch points (if/while/match/for) create new blocks with edges.
+  def self.build(fn_node)
+    cfg = new(fn_node.name)
+    build_body(fn_node.body || [], cfg.entry, cfg.exit_block, cfg)
+    cfg
+  end
+
+  private
+
+  def self.build_body(stmts, current_block, exit_target, cfg)
+    stmts = [stmts] unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::IfStatement
+        current_block.stmts << stmt
+        then_block = cfg.new_block
+        else_block = stmt.else_branch ? cfg.new_block : nil
+        join_block = cfg.new_block
+
+        current_block.add_successor(then_block)
+        current_block.add_successor(else_block || join_block)
+
+        then_exit = build_body(stmt.then_branch || [], then_block, exit_target, cfg)
+        then_exit&.add_successor(join_block) if then_exit
+
+        if stmt.else_branch
+          else_exit = build_body(stmt.else_branch, else_block, exit_target, cfg)
+          else_exit&.add_successor(join_block) if else_exit
+        end
+
+        current_block = join_block
+
+      when AST::WhileLoop
+        current_block.stmts << stmt
+        body_block = cfg.new_block
+        after_block = cfg.new_block
+
+        current_block.add_successor(body_block)   # enter loop
+        current_block.add_successor(after_block)   # skip loop
+
+        body_exit = build_body(stmt.do_branch || [], body_block, exit_target, cfg)
+        body_exit&.add_successor(current_block)    # loop back
+        body_exit&.add_successor(after_block)      # break
+
+        current_block = after_block
+
+      when AST::ForRange, AST::ForEach
+        current_block.stmts << stmt
+        body_block = cfg.new_block
+        after_block = cfg.new_block
+
+        current_block.add_successor(body_block)
+        current_block.add_successor(after_block)
+
+        body_exit = build_body(stmt.body || [], body_block, exit_target, cfg)
+        body_exit&.add_successor(current_block)    # loop back
+        body_exit&.add_successor(after_block)      # done
+
+        current_block = after_block
+
+      when AST::MatchStatement
+        current_block.stmts << stmt
+        join_block = cfg.new_block
+
+        (stmt.cases || []).each do |c|
+          case_block = cfg.new_block
+          current_block.add_successor(case_block)
+          case_exit = build_body(c[:body] || [], case_block, exit_target, cfg)
+          case_exit&.add_successor(join_block) if case_exit
+        end
+        if stmt.default_case
+          default_block = cfg.new_block
+          current_block.add_successor(default_block)
+          default_exit = build_body(stmt.default_case, default_block, exit_target, cfg)
+          default_exit&.add_successor(join_block) if default_exit
+        end
+
+        current_block = join_block
+
+      when AST::ReturnNode
+        current_block.stmts << stmt
+        current_block.add_successor(cfg.exit_block)
+        return nil  # no fall-through after return
+
+      when AST::BreakNode
+        current_block.stmts << stmt
+        return nil  # break exits the loop - handled by loop structure
+
+      else
+        current_block.stmts << stmt
+      end
+    end
+    current_block  # return the current block for fall-through edges
+  end
+end
 
 class MIRPass
   def initialize(cleanup_plans:, promotion_plans:)
@@ -31,25 +176,7 @@ class MIRPass
     promo = @promotion_plans[fn.name]
     return unless cleanup || promo
 
-    # Insert Drop nodes for TAKES params at the top of the function body.
-    takes_drops = build_takes_drops(fn, cleanup)
-
-    fn.body = takes_drops + transform_body(fn.body, cleanup, promo)
-  end
-
-  # Build Drop nodes for TAKES parameters (cleanup at function scope exit).
-  def build_takes_drops(fn, cleanup)
-    return [] unless cleanup && fn.deferred_drops
-    drops = []
-    fn.deferred_drops.each do |dd|
-      name = dd.is_a?(Hash) ? dd[:name] : dd.to_s
-      entry = cleanup.lookup(name)
-      next unless entry && entry[:needs_cleanup]
-      drop = MIR::Drop.new(fn.token, name, entry[:kind], entry[:alloc],
-                           entry[:has_moved_guard], nil, entry[:resource_close_zig])
-      drops << drop
-    end
-    drops
+    fn.body = transform_body(fn.body, cleanup, promo)
   end
 
   # Recursively transform a statement list, inserting MIR nodes.
@@ -114,7 +241,8 @@ class MIRPass
 
     drop = MIR::Drop.new(
       stmt.token, name, entry[:kind], entry[:alloc],
-      entry[:has_moved_guard], stmt.type_info, entry[:resource_close_zig]
+      entry[:has_moved_guard], stmt.type_info, entry[:resource_close_zig],
+      stmt
     )
     result << drop
   end
