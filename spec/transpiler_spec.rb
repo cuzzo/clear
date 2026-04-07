@@ -679,7 +679,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("v_moved = true")
     end
 
-    it "eliminates v cleanup when always consumed by MATCH TAKES" do
+    it "keeps v moved guard when can_fail call precedes MATCH TAKES" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
@@ -693,8 +693,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # v is MOVED on all paths (MATCH TAKES) → no defer, no _moved guard
-      expect(zig).not_to include("v_moved")
+      # pool.insert can fail → error unwind leaves v OWNED → moved guard needed
+      expect(zig).to include("v_moved")
     end
 
     it "does NOT emit source_moved for MATCH AS on Copy payload" do

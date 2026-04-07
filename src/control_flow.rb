@@ -160,17 +160,20 @@ class FunctionCFG
         return nil  # break exits the loop - handled by loop structure
 
       else
-        current_block.stmts << stmt
         # Error edge: if this statement can fail (contains a try call),
-        # Zig may unwind to the caller. Model this as an edge to exit so
-        # dataflow sees variables as potentially still-owned on error paths.
+        # Zig may unwind to the caller BEFORE the statement completes.
+        # Place the error edge BEFORE the statement so the dataflow state
+        # on the error path does not include effects of this statement
+        # (e.g., a VarDecl's variable is not yet bound on try-unwind).
         if cfg.instance_variable_get(:@can_fail_fns) &&
            stmt_can_fail?(stmt, cfg.instance_variable_get(:@can_fail_fns))
           current_block.add_successor(cfg.exit_block)
-          # Continue in a fresh block for the normal (non-error) path.
           next_block = cfg.new_block
           current_block.add_successor(next_block)
+          next_block.stmts << stmt
           current_block = next_block
+        else
+          current_block.stmts << stmt
         end
       end
     end
@@ -179,20 +182,23 @@ class FunctionCFG
 
   # Check if a statement (or its sub-expressions) contains a call to a
   # can_fail function. Used to determine whether an error edge is needed.
-  # For functions not in can_fail_fns (stdlib, extern), conservatively
-  # assume they can fail unless they're known user-defined non-failing fns.
+  # Checks node.can_fail (stamped by annotator on stdlib/static calls) and
+  # can_fail_fns set (user-defined functions computed by compute_can_fail!).
   def self.stmt_can_fail?(node, can_fail_fns)
-    return false unless node && can_fail_fns
+    return false unless node
     case node
     when AST::FuncCall
-      # Known user-defined function: check can_fail. Unknown: assume can fail.
-      return true if can_fail_fns.include?(node.name)
+      return true if node.can_fail
+      return true if can_fail_fns&.include?(node.name)
       node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
     when AST::MethodCall
-      # UFCS calls: method name matches user-defined function name.
-      return true if can_fail_fns.include?(node.name)
+      return true if node.can_fail
+      return true if can_fail_fns&.include?(node.name)
       stmt_can_fail?(node.object, can_fail_fns) ||
         node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
+    when AST::StaticCall
+      return true if node.can_fail
+      node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
     when AST::VarDecl, AST::BindExpr
       stmt_can_fail?(node.value, can_fail_fns)
     when AST::Assignment
@@ -262,9 +268,12 @@ class OwnershipDataflow
     # Seed entry block with TAKES param ownership.
     @block_in[@cfg.entry.id] = init_entry_state
 
-    # Worklist: process blocks until no exit state changes.
-    worklist = [@cfg.entry]
-    in_worklist = { @cfg.entry.id => true }
+    # Seed worklist with all blocks so every block is processed at least
+    # once (an empty entry block produces {} which equals the initial {},
+    # and would otherwise fail to schedule successors).
+    worklist = @cfg.blocks.dup
+    in_worklist = {}
+    worklist.each { |b| in_worklist[b.id] = true }
 
     until worklist.empty?
       block = worklist.shift

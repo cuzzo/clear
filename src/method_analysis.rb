@@ -111,6 +111,7 @@ module MethodAnalysis
     if defn[:allocates] && current_fn_ctx
       current_fn_ctx.heap_count += 1
     end
+    node.can_fail = true if defn[:can_fail] || defn[:allocates]
 
     true
   end

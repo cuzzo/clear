@@ -68,7 +68,7 @@ RSpec.describe "TAKES auto-move" do
     expect(zig).not_to include("v_moved")
   end
 
-  it "RETURN fn(TAKES arg) sets _moved before return" do
+  it "RETURN fn(TAKES arg) eliminates cleanup when always moved" do
     zig = transpile(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
       FN makeValue() RETURNS Value ->
@@ -85,7 +85,8 @@ RSpec.describe "TAKES auto-move" do
       END
     CLEAR
     body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
-    expect(body).to include("ast_moved = true")
+    # ast is MOVED on all paths (TAKES) or UNINIT on error path → no cleanup
+    expect(body).not_to include("ast_moved")
   end
 
   it "TAKES + RETURN eliminates caller defer (no double-free)" do
