@@ -1412,9 +1412,10 @@ private
               is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
               fn_name = current_tp_ctx&.fn_name
+              src_entry = @cleanup_plans&.dig(fn_name)&.lookup(node.expr.name)
               as_entry = @cleanup_plans&.dig(fn_name)&.lookup(c[:binding])
               if as_entry && as_entry[:needs_cleanup]
-                binding_decl += "#{src_name}_moved = true;\n    " if is_local || is_takes_param
+                binding_decl += "#{src_name}_moved = true;\n    " if (is_local || is_takes_param) && src_entry&.dig(:has_moved_guard)
                 as_alloc = alloc_expr_from_plan(as_entry)
                 case as_entry[:kind]
                 when :match_as_slice

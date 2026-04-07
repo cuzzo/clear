@@ -43,7 +43,6 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    # This should FAIL currently because it doesn't use the _moved flag for resources
     expect(zig).to include("defer if (!f_moved) f.close();")
   end
 

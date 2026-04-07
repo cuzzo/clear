@@ -226,7 +226,11 @@ module OwnershipGenerator
     # RC types: only move on explicit GIVE (not on assignment)
     ti = rhs_node.type_info
     if ti && (ti.any_rc? rescue false)
-      return "#{rhs_node.name}_moved = true;" if @current_rhs_is_move
+      if @current_rhs_is_move
+        fn_name = current_tp_ctx&.fn_name
+        entry = @cleanup_plans&.dig(fn_name)&.lookup(rhs_node.name)
+        return "#{rhs_node.name}_moved = true;" if entry && entry[:has_moved_guard]
+      end
       return ""
     end
 

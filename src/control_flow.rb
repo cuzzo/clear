@@ -317,36 +317,42 @@ class OwnershipDataflow
   def transfer_stmt(stmt, state)
     case stmt
     when AST::VarDecl
-      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+      # RHS of declaration: non-Copy identifier = ownership transfer.
+      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
       state[stmt.name.to_s] = OWNED
 
     when AST::BindExpr
-      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
       state[stmt.name.to_s] = OWNED if stmt.mode == :decl
 
     when AST::Assignment
-      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
 
     when AST::ReturnNode
-      collect_consumed(stmt.value, state).each { |n| state[n] = MOVED }
+      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
 
-    when AST::FuncCall
-      collect_consumed(stmt, state).each { |n| state[n] = MOVED }
+    when AST::MoveNode
+      # Standalone GIVE statement: GIVE f;
+      inner = stmt.value
+      if inner.is_a?(AST::Identifier)
+        name = inner.name.to_s
+        state[name] = MOVED if state[name]
+      end
 
-    when AST::MethodCall
-      collect_consumed(stmt, state).each { |n| state[n] = MOVED }
+    when AST::FuncCall, AST::MethodCall
+      # Function args: only was_moved (TAKES/GIVE) triggers a move.
+      collect_explicit_moves(stmt, state).each { |n| state[n] = MOVED }
 
     when AST::IfStatement, AST::WhileLoop, AST::ForRange, AST::ForEach, AST::MatchStatement
-      # Control flow headers: only process condition/expr for moves.
-      # Branch bodies are in separate basic blocks (handled by CFG edges).
+      # Control flow headers: only process condition/expr for explicit moves.
       cond = case stmt
              when AST::IfStatement then stmt.condition
              when AST::WhileLoop then stmt.condition
              when AST::MatchStatement then stmt.expr
-             when AST::ForRange then nil  # range bounds don't move
+             when AST::ForRange then nil
              when AST::ForEach then stmt.collection
              end
-      collect_consumed(cond, state).each { |n| state[n] = MOVED } if cond
+      collect_explicit_moves(cond, state).each { |n| state[n] = MOVED } if cond
 
       # ForEach/ForRange: loop variable is owned in the body block.
       if stmt.is_a?(AST::ForRange) || stmt.is_a?(AST::ForEach)
@@ -355,31 +361,102 @@ class OwnershipDataflow
     end
   end
 
-  # Collect identifiers consumed (moved) by an expression.
-  # Two kinds of moves:
-  #   1. Explicit: annotator set was_moved = true (TAKES args, GIVE)
-  #   2. Implicit: non-Copy owned identifier used as RHS value (affine move)
-  # Copy types (primitives, strings, enums) are never moved regardless of was_moved.
-  def collect_consumed(node, state)
+  # Collect identifiers moved by a binding RHS (VarDecl, BindExpr, Assignment, Return).
+  # Both explicit (was_moved) and implicit (non-Copy identifier = ownership transfer).
+  #
+  # Ownership-transferring positions (non-Copy = move):
+  #   - Direct RHS identifier: b = a
+  #   - Struct literal field value: S{ field: a }
+  #   - Union constructor payload: U.Variant(a)
+  #   - List literal items: [a, b]
+  #   - MoveNode: MOVE a
+  # All other positions: only was_moved (set by annotator for TAKES/GIVE).
+  def collect_binding_moves(node, state)
+    return [] unless node
+    consumed = Set.new
+    collect_ownership_transfers(node, state, consumed)
+    consumed.to_a
+  end
+
+  # Recursively find ownership-transferring identifiers.
+  def collect_ownership_transfers(node, state, consumed)
+    return unless node
+
+    case node
+    when AST::Identifier
+      name = node.name.to_s
+      return unless state[name]
+      return if copy_type?(node) # Copy types are never consumed
+      consumed << name
+
+    when AST::StructLit
+      node.fields&.each_value { |v| collect_ownership_transfers(v, state, consumed) }
+
+    when AST::MethodCall
+      # Union constructors: U.Variant(payload) - payload transfers ownership.
+      # Regular method calls in binding RHS: only was_moved args.
+      if node.object.is_a?(AST::Identifier)
+        node.args&.each { |a| collect_ownership_transfers(a, state, consumed) }
+      else
+        collect_explicit_in(node, state, consumed)
+      end
+
+    when AST::FuncCall
+      collect_explicit_in(node, state, consumed)
+
+    when AST::ListLit
+      node.items&.each { |i| collect_ownership_transfers(i, state, consumed) }
+
+    when AST::MoveNode
+      inner = node.value
+      if inner.is_a?(AST::Identifier)
+        name = inner.name.to_s
+        consumed << name if state[name]
+      end
+
+    when AST::CopyNode
+      # COPY does NOT move the source.
+
+    else
+      collect_explicit_in(node, state, consumed)
+    end
+  end
+
+  # Collect only was_moved identifiers from an expression subtree.
+  def collect_explicit_in(node, state, consumed)
+    walk_expr(node) do |n|
+      next unless n.is_a?(AST::Identifier) && n.was_moved
+      name = n.name.to_s
+      next unless state[name]
+      next if copy_type?(n)
+      consumed << name
+    end
+  end
+
+  # Collect only explicitly moved identifiers (was_moved set by annotator).
+  # Used for function calls where non-TAKES args are borrowed, not moved.
+  def collect_explicit_moves(node, state)
     return [] unless node
     consumed = []
     walk_expr(node) do |n|
-      next unless n.is_a?(AST::Identifier)
+      next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
-      next unless state[name] # only track variables we're analyzing
-      next if copy_type?(n)   # Copy types are never consumed
-      consumed << name if n.was_moved || non_copy_type?(n)
+      next unless state[name]
+      next if copy_type?(n)
+      consumed << name
     end
     consumed
   end
 
   # Returns true if this identifier's type is Copy (no move on assignment).
-  # Primitives, strings, enums, and :Any are Copy.
+  # Primitives, strings, enums, :Any, and RC types are Copy-like.
+  # RC assignment is clone (rcRetain), not move. Only GIVE/MOVE transfers
+  # ownership (handled by was_moved from the annotator).
   def copy_type?(ident)
     ti = ident.type_info rescue nil
     return true unless ti  # unknown type, assume Copy (safe)
     ti = Type.new(ti) if !ti.is_a?(Type)
-    ti.primitive? || ti.string? || ti.any? || ti.void?
+    ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? rescue false)
   end
 
   # Returns true if this identifier's type is non-Copy (move semantics).
@@ -411,8 +488,10 @@ class OwnershipDataflow
     when AST::ListLit
       node.items&.each { |i| walk_expr(i, &block) }
     when AST::HashLit
-      node.pairs&.each { |p| walk_expr(p[:value], &block) }
+      node.pairs&.each { |_k, v| walk_expr(v.is_a?(Array) ? v[1] : v, &block) }
     when AST::CopyNode
+      walk_expr(node.value, &block)
+    when AST::MoveNode
       walk_expr(node.value, &block)
     when AST::ReturnNode
       walk_expr(node.value, &block)
@@ -449,7 +528,37 @@ class MIRPass
     promo = @promotion_plans[fn.name]
     return unless cleanup || promo
 
+    # Use dataflow analysis to tighten has_moved_guard decisions.
+    # CleanupPlan conservatively sets has_moved_guard=true for all non-trivial types.
+    # Dataflow precisely tracks which variables are actually consumed on some paths,
+    # so we can remove unnecessary guards for variables that are never moved.
+    refine_moved_guards!(fn, cleanup) if cleanup
+
     fn.body = transform_body(fn.body, cleanup, promo)
+  end
+
+  # Tighten has_moved_guard decisions using dataflow analysis.
+  # Only removes guards (has_moved_guard: false) for variables that are never
+  # moved on any path. Never removes needs_cleanup - that's the plan's job.
+  def refine_moved_guards!(fn, cleanup)
+    df = OwnershipDataflow.analyze(fn)
+    summary = df.cleanup_summary
+    bindings = cleanup.instance_variable_get(:@bindings)
+    return unless bindings
+
+    bindings.each do |var, entry|
+      next unless entry[:needs_cleanup] && entry[:has_moved_guard]
+      df_entry = summary[var]
+      next unless df_entry # variable not tracked by dataflow - keep plan
+
+      # Only remove unnecessary guards. Never remove cleanup entirely -
+      # the CFG doesn't model loops/error paths precisely enough to guarantee
+      # that a variable is truly consumed on ALL paths.
+      if !df_entry[:has_moved_guard] && df_entry[:needs_cleanup]
+        # Never moved on any path - unconditional cleanup, no guard needed.
+        entry[:has_moved_guard] = false
+      end
+    end
   end
 
   # Recursively transform a statement list, inserting MIR nodes.

@@ -129,12 +129,12 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "suppresses list defer after items captured in union" do
+    it "unconditional cleanup for items (copied into union, not moved)" do
       body = fn_body(zig, "clearMain")
-      # items is captured in the union — its defer cleanup must not fire
-      has_items_defer = body.include?("defer") && body.include?("cleanup") && body.include?("items")
-      has_items_moved = body.include?("items_moved")
-      expect(has_items_moved || !has_items_defer).to be(true)
+      # items is COPIED into the union (blk_copy), not moved.
+      # Dataflow: items is never moved -> unconditional cleanup, no _moved guard.
+      expect(body).to include("defer CheatLib.cleanup")
+      expect(body).not_to include("items_moved")
     end
   end
 
