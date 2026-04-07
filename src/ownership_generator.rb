@@ -25,20 +25,6 @@ module OwnershipGenerator
     end
   end
 
-  # ── THE SINGLE CLEANUP EMITTER ────────────────────────────────
-  #
-  # Generates the `_moved` flag and `defer` cleanup block for a variable.
-  # ALL decisions come from the CleanupPlan. No type inference here.
-  def emit_cleanup(name, node)
-    fn_name = current_tp_ctx&.fn_name
-    entry = @cleanup_plans&.dig(fn_name)&.lookup(name.to_s)
-
-    # No plan entry = no cleanup needed.
-    return "" unless entry && entry[:needs_cleanup]
-
-    emit_cleanup_from_entry(name, entry, node)
-  end
-
   # Mechanical Zig template emitter. Reads only from the plan entry.
   # No type checks, no schema lookups. The entry has everything.
   def emit_cleanup_from_entry(name, entry, node = nil)
@@ -217,9 +203,8 @@ module OwnershipGenerator
   # ── MOVE SUPPRESSION ──────────────────────────────────────────
   #
   # Sets _moved = true when a binding is consumed.
-  # ALL guard decisions come from the CleanupPlan.
   # Emit _moved = true when a binding's value is consumed (assigned away).
-  # Reads ONLY from the CleanupPlan - no type introspection.
+  # Guard decisions come from moved_guard_info (stamped by MIRPass).
   def emit_move_suppression(rhs_node)
     return "" unless rhs_node.is_a?(AST::Identifier)
 
@@ -228,8 +213,7 @@ module OwnershipGenerator
     if ti && (ti.any_rc? rescue false)
       if @current_rhs_is_move
         fn_name = current_tp_ctx&.fn_name
-        entry = @cleanup_plans&.dig(fn_name)&.lookup(rhs_node.name)
-        return "#{rhs_node.name}_moved = true;" if entry && entry[:has_moved_guard]
+        return "#{rhs_node.name}_moved = true;" if @moved_guard_info&.dig(fn_name, rhs_node.name)
       end
       return ""
     end
@@ -240,10 +224,9 @@ module OwnershipGenerator
     # Strings are Copy - no move needed
     return "" if ti&.string?
 
-    # Consult the plan: if the binding has a moved guard, emit it
+    # Consult moved_guard_info: if the binding has a moved guard, emit it
     fn_name = current_tp_ctx&.fn_name
-    entry = @cleanup_plans&.dig(fn_name)&.lookup(rhs_node.name)
-    return "" unless entry && entry[:has_moved_guard]
+    return "" unless @moved_guard_info&.dig(fn_name, rhs_node.name)
 
     # Only emit for was_moved (annotator-marked) or non-Copy types with cleanup
     if rhs_node.was_moved
@@ -292,11 +275,9 @@ module OwnershipGenerator
       decl = sym&.reg
       next unless decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
 
-      # Consult the plan: if the binding has a moved guard, emit it.
-      # No type introspection - the plan already decided.
+      # Consult moved_guard_info: if the binding has a moved guard, emit it.
       fn_name = current_tp_ctx&.fn_name
-      entry = @cleanup_plans&.dig(fn_name)&.lookup(name)
-      moves << "#{zig_safe_name(name)}_moved = true;" if entry && entry[:has_moved_guard]
+      moves << "#{zig_safe_name(name)}_moved = true;" if @moved_guard_info&.dig(fn_name, name)
     end
 
     moves.join("\n")

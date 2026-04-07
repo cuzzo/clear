@@ -636,6 +636,10 @@ class MIRPass
     # Insert MIR::Drop nodes for TAKES parameters at function body start.
     # These replace the transpiler's manual TAKES cleanup loop.
     insert_takes_drops!(fn, cleanup) if cleanup
+
+    # Build moved_guard_info map: { var_name => bool } for all bindings.
+    # Replaces all has_moved_guard lookups in transpiler/ownership_generator.
+    stamp_moved_guard_info!(fn, cleanup)
   end
 
   # Tighten cleanup decisions using ownership dataflow analysis.
@@ -687,9 +691,10 @@ class MIRPass
       # Insert Promote + SuppressCleanup before ReturnNode.
       insert_promotion!(result, stmt, promo) if stmt.is_a?(AST::ReturnNode)
 
-      # Stamp cleanup info on reassignment / field-overwrite nodes.
+      # Stamp cleanup info on reassignment / field-overwrite / match-as nodes.
       stamp_reassign_cleanup!(stmt, cleanup)
       stamp_field_pre_cleanup!(stmt, cleanup)
+      stamp_match_as_cleanup!(stmt, cleanup)
 
       # Emit the original statement.
       result << stmt
@@ -727,6 +732,7 @@ class MIRPass
   end
 
   # Insert a MIR::Drop after a variable declaration that needs cleanup.
+  # Also stamps VarDecl with cleanup_alloc and has_cleanup for transpiler use.
   def insert_drop!(result, stmt, cleanup)
     return unless cleanup
     name = case stmt
@@ -738,6 +744,15 @@ class MIRPass
 
     entry = cleanup.lookup(name)
     return unless entry && entry[:needs_cleanup]
+
+    # Stamp declaration with cleanup info so transpiler doesn't need CleanupPlan.
+    if stmt.is_a?(AST::VarDecl)
+      stmt.cleanup_alloc = entry[:alloc]
+      stmt.has_cleanup = true
+    elsif stmt.is_a?(AST::BindExpr) && stmt.mode == :decl
+      stmt.cleanup_alloc = entry[:alloc]
+      stmt.has_cleanup = true
+    end
 
     drop = MIR::Drop.new(
       stmt.token, name, entry[:kind], entry[:alloc],
@@ -790,6 +805,38 @@ class MIRPass
     return unless fpc
 
     stmt.field_pre_cleanup = fpc
+  end
+
+  # Stamp MATCH-AS cleanup info on MatchStatement case hashes.
+  # Cases with a binding + was_moved source get :match_as_src_guard and :match_as_cleanup.
+  def stamp_match_as_cleanup!(stmt, cleanup)
+    return unless cleanup
+    return unless stmt.is_a?(AST::MatchStatement)
+    return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
+
+    src_entry = cleanup.lookup(stmt.expr.name)
+    stmt.cases&.each do |c|
+      next unless c[:binding]
+      as_entry = cleanup.lookup(c[:binding])
+      next unless as_entry && as_entry[:needs_cleanup]
+
+      c[:match_as_src_guard] = src_entry&.dig(:has_moved_guard) || false
+      c[:match_as_cleanup] = { kind: as_entry[:kind], alloc: as_entry[:alloc] }
+    end
+  end
+
+  # Build moved_guard_info: { var_name => bool } for all bindings with cleanup.
+  # Stored on FunctionDef so transpiler can look up has_moved_guard without CleanupPlan.
+  def stamp_moved_guard_info!(fn, cleanup)
+    return unless cleanup
+    bindings = cleanup.instance_variable_get(:@bindings)
+    return unless bindings
+
+    info = {}
+    bindings.each do |name, entry|
+      info[name] = true if entry[:has_moved_guard]
+    end
+    fn.moved_guard_info = info unless info.empty?
   end
 
   # Insert MIR::Promote before a return statement and annotate the

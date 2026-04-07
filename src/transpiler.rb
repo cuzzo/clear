@@ -62,15 +62,18 @@ class ZigTranspiler
 
     @ownership_graph = annotator.instance_variable_get(:@og)
 
-    # Pass C+D: MIRPass computes PromotionPlan (Phase 0 HPT downgrade must
-    # precede CleanupPlan), then CleanupPlan, then inserts MIR nodes.
+    # Pass C+D: MIRPass computes plans, inserts MIR nodes, and stamps
+    # cleanup info on AST nodes. Transpiler reads stamps, not plans.
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir.transform!(ast)
-    @cleanup_plans = mir.cleanup_plans
     @mir_pass_done = true
+
+    # Build moved_guard_info from stamped FunctionDef nodes.
+    @moved_guard_info = {}
+    fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
     @needs_safety_import = false
     @fn_sigs = {}
@@ -206,18 +209,16 @@ private
 
   # Compute cleanup plans from the annotated AST if not already done.
   # Called from visit_node(Program) to handle specs that bypass `transpile`.
-  def ensure_cleanup_plans!(program_node)
-    unless @cleanup_plans && !@cleanup_plans.empty?
-      fn_nodes = {}
-      program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-      unless @mir_pass_done
-        mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-        mir.transform!(program_node)
-        @cleanup_plans = mir.cleanup_plans
-        @mir_pass_done = true
-      end
-    end
+  def ensure_mir_pass!(program_node)
+    return if @mir_pass_done
+    fn_nodes = {}
+    program_node.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir.transform!(program_node)
+    @mir_pass_done = true
+    @moved_guard_info = {}
+    fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
   end
 
   def visit(node)
@@ -236,7 +237,7 @@ private
   def visit_node(node)
     case node
     when AST::Program
-      ensure_cleanup_plans!(node)
+      ensure_mir_pass!(node)
       @emitted_extern_modules = Set.new
       node.statements.map { |stmt|
         code = visit(stmt)
@@ -830,10 +831,8 @@ private
           # in try (unwrapping the error), then OR adds catch (expects error).
           visit(node.value)
         elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
-          # T[N]@list: pre-allocate N slots. Allocator from CleanupPlan.
-          fn_name = current_tp_ctx&.fn_name
-          entry = @cleanup_plans&.dig(fn_name)&.lookup(node.name)
-          alloc_kind = entry ? entry[:alloc] : :frame
+          # T[N]@list: pre-allocate N slots. Allocator from MIRPass stamp.
+          alloc_kind = node.cleanup_alloc || :frame
           alloc = alloc_kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
           "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{node.full_type.capacity})"
         else
@@ -877,8 +876,7 @@ private
       @current_rhs_is_move = false
 
       # Check if a MIR::Drop follows this VarDecl (cleanup defer will reference the var).
-      fn_name = current_tp_ctx&.fn_name
-      has_mir_drop = @cleanup_plans&.dig(fn_name)&.lookup(node.name.to_s)&.dig(:needs_cleanup)
+      has_mir_drop = node.has_cleanup
 
       # Suppression: Zig warns on unused variables and never-mutated vars.
       # - `var` (actually mutated + used): no suppression needed
@@ -906,6 +904,8 @@ private
         proxy.slot_size          = node.slot_size
         proxy.resource_close_zig = node.resource_close_zig
         proxy.var_used           = node.var_used
+        proxy.cleanup_alloc      = node.cleanup_alloc
+        proxy.has_cleanup        = node.has_cleanup
         visit(proxy)
       else
         # Transpile as reassignment — clean up old value for non-Copy types.
@@ -1376,19 +1376,17 @@ private
             binding_decl = "#{bind_kw} #{c[:binding]} = #{payload_access}; _ = &#{c[:binding]};\n    "
             # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup
             # on source and emit cleanup on the AS binding.
-            if node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+            if node.expr.is_a?(AST::Identifier) && node.expr.was_moved && c[:match_as_cleanup]
               src_name = zig_safe_name(node.expr.name)
               sym = node.expr.respond_to?(:symbol) ? node.expr.symbol : nil
               decl = sym&.reg
               is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
               is_takes_param = sym&.respond_to?(:takes) && sym&.takes
-              fn_name = current_tp_ctx&.fn_name
-              src_entry = @cleanup_plans&.dig(fn_name)&.lookup(node.expr.name)
-              as_entry = @cleanup_plans&.dig(fn_name)&.lookup(c[:binding])
-              if as_entry && as_entry[:needs_cleanup]
-                binding_decl += "#{src_name}_moved = true;\n    " if (is_local || is_takes_param) && src_entry&.dig(:has_moved_guard)
-                as_alloc = alloc_expr_from_plan(as_entry)
-                case as_entry[:kind]
+              as_cleanup = c[:match_as_cleanup]
+              begin
+                binding_decl += "#{src_name}_moved = true;\n    " if (is_local || is_takes_param) && c[:match_as_src_guard]
+                as_alloc = alloc_expr_from_plan(as_cleanup)
+                case as_cleanup[:kind]
                 when :match_as_slice
                   variant_schema = @union_schemas&.dig(union_lookup, variant)
                   payload_t = variant_schema.is_a?(Type) ? variant_schema : (Type.new(variant_schema) rescue nil)
@@ -1401,7 +1399,7 @@ private
                   binding_decl += "defer if (!#{c[:binding]}_moved) CheatLib.cleanup(#{inline_zig}, #{as_alloc}, &#{c[:binding]});\n    "
                 end
               end
-            end
+            end  # match_as_cleanup
             body = "#{binding_decl}#{body}"
           elsif c[:destructure]
             # Union variant destructuring: extract each named field from the payload.
@@ -2290,11 +2288,10 @@ private
       rt_name = @do_rt_name || "rt"
       suppress = emit_move_suppression(node.value)
       fn_name = current_tp_ctx&.fn_name
-      fn_plan = @cleanup_plans&.dig(fn_name)
-      if fn_plan
+      guards = @moved_guard_info&.dig(fn_name)
+      if guards
         collect_escaping_identifiers(node.value).each do |ident|
-          entry = fn_plan.lookup(ident.name)
-          next unless entry && entry[:has_moved_guard]
+          next unless guards[ident.name]
           suppress = "#{zig_safe_name(ident.name)}_moved = true;\n#{suppress}"
         end
       end
@@ -2491,19 +2488,17 @@ private
       # This ensures GIVE f; as a statement correctly suppresses the local defer.
       if node.value.is_a?(AST::Identifier)
         safe_name = zig_safe_name(node.value.name)
-        # Only emit _moved = true when the cleanup plan declared a moved guard.
+        # Only emit _moved = true when the moved_guard_info says so.
         # Copy types (e.g., unions with only primitive variants) have no cleanup
         # entry, so no _moved variable exists — just pass the value directly.
         fn_name = current_tp_ctx&.fn_name
-        entry = @cleanup_plans&.dig(fn_name)&.lookup(safe_name)
-        if entry && entry[:has_moved_guard]
+        if @moved_guard_info&.dig(fn_name, node.value.name)
           "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
         else
           safe_name
         end
       else
         # GIVE expr (non-identifier): ownership transfers to callee.
-        # HPT suppression for GIVE is handled by the CleanupPlan (inside_move flag).
         visit(node.value)
       end
 

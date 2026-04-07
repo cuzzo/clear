@@ -46,7 +46,9 @@ class TestGenerator < ZigTranspiler
     # Compute plans + insert MIR nodes (Drop, Promote, SuppressCleanup).
     mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir.transform!(ast)
-    @cleanup_plans = mir.cleanup_plans
+    @mir_pass_done = true
+    @moved_guard_info = {}
+    fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
     # 3. Get Raw Zig Body
     @needs_safety_import = false
