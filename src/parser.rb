@@ -888,8 +888,13 @@ class Parser
           var_data[:indirect_fields] = indirect_fields unless indirect_fields.empty?
           variants[var_name] = var_data
         elsif match!(:CHAR, ':')
-          # Single-type payload: Data: Number
-          variants[var_name] = parse_type_annotation
+          # Single-type payload: Data: Number  (or Data: Number @indirect)
+          vtype = parse_type_annotation
+          if @last_indirect_consumed
+            @last_indirect_consumed = false
+            vtype = { kind: :indirect_payload, type: vtype }
+          end
+          variants[var_name] = vtype
         else
           # Unit variant: Point
           variants[var_name] = nil

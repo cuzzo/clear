@@ -723,7 +723,10 @@ class CleanupPlan
     if schema.is_a?(Hash) && schema[:kind] == :union
       is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
       unless is_copy
-        alloc = ti.provenance_alloc || :frame
+        # Use :heap when any variant holds heap data (@indirect, string, collection).
+        # frameAlloc.destroy/*free are no-ops for heap pointers — must use heapAlloc.
+        has_heap_variants = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        alloc = ti.provenance_alloc || (has_heap_variants ? :heap : :frame)
         return { needs_cleanup: true, alloc: alloc, kind: :non_copy_union, has_moved_guard: true, source_kind: :local }
       end
     end

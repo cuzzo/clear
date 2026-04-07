@@ -998,6 +998,8 @@ class Type
   # Used to determine if a union needs cleanup.
   def self.variant_has_heap?(vt)
     return false unless vt
+    # Single-type payload with @indirect: always heap (stored as *T pointer)
+    return true if vt.is_a?(Hash) && vt[:kind] == :indirect_payload
     if vt.is_a?(Hash) && vt[:kind] == :inline_struct
       # Inline struct: check for @indirect fields or string/collection fields
       return true if vt[:indirect_fields]&.any?

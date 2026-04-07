@@ -414,6 +414,8 @@ private
           "void"
         elsif var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
           "#{node.name}_#{var_name}"
+        elsif var_data.is_a?(Hash) && var_data[:kind] == :indirect_payload
+          "*#{transpile_type(var_data[:type], is_field: true)}"
         else
           transpile_type(var_data, is_field: true)  # Union payloads use slices, not ArrayListUnmanaged
         end
@@ -929,7 +931,9 @@ private
           ti = node.type_info
           zig_type = ti ? transpile_type(ti.resolved.to_s) : "UNKNOWN"
           alloc = alloc_expr_from_plan(entry)
-          "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{value_str}; #{move_logic}"
+          tmp = "__new_#{safe}"
+          inner = "const #{tmp} = #{value_str};\nCheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{tmp};"
+          move_logic.empty? ? "{\n#{inner}\n}" : "{\n#{inner}\n#{move_logic}\n}"
         else
           "#{safe} = #{value_str}; #{move_logic}"
         end
@@ -1144,6 +1148,11 @@ private
           val_code = "(if (@hasField(@TypeOf(#{val_code}), \"items\")) #{val_code}.items else #{val_code})"
         end
         val_code = "#{val_code}.items" if needs_items
+        if v.respond_to?(:needs_heap_create) && v.needs_heap_create
+          zig_t = v.type_info ? transpile_type(v.type_info.resolved.to_s) : "UNKNOWN"
+          rt_name = @do_rt_name || "rt"
+          val_code = "blk_#{k}: { const __p = try #{rt_name}.heapAlloc().create(#{zig_t}); __p.* = #{val_code}; break :blk_#{k} __p; }"
+        end
         ".#{k} = #{val_code}"
       end.join(", ")
 
@@ -1379,7 +1388,9 @@ private
           if c[:binding]
             # Use var if MATCH-as-move will emit deinit (needs mutable self)
             bind_kw = (node.expr.is_a?(AST::Identifier) && node.expr.was_moved) ? "var" : "const"
-            binding_decl = "#{bind_kw} #{c[:binding]} = #{subject}.#{variant}; _ = &#{c[:binding]};\n    "
+            # @indirect payload: the union field is *T; deref to bind the inner value.
+            payload_access = c[:indirect_payload_as] ? "#{subject}.#{variant}.*" : "#{subject}.#{variant}"
+            binding_decl = "#{bind_kw} #{c[:binding]} = #{payload_access}; _ = &#{c[:binding]};\n    "
             # MATCH-as-move: if source was consumed by AS extraction, suppress cleanup
             # on source and emit cleanup on the AS binding.
             if node.expr.is_a?(AST::Identifier) && node.expr.was_moved

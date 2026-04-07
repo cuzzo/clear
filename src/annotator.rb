@@ -787,6 +787,14 @@ private
                   current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
                   og_declare(c[:binding], nil, Type.new(synthetic_type), :stack)
                   classify_ownership!(current_scope.locals[c[:binding]])
+                elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :indirect_payload
+                  # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
+                  inner_type = raw_payload[:type].is_a?(Type) ? raw_payload[:type] : Type.new(raw_payload[:type])
+                  inner_type = union_subst.any? ? apply_type_subst(inner_type, union_subst) : inner_type
+                  current_scope.declare(c[:binding], nil, inner_type, false, false, nil, :stack)
+                  og_declare(c[:binding], nil, inner_type, :stack)
+                  classify_ownership!(current_scope.locals[c[:binding]])
+                  c[:indirect_payload_as] = true  # transpiler must emit subject.Variant.* (deref *T)
                 else
                   payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
                   current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
@@ -2126,9 +2134,17 @@ private
       if raw_expected.is_a?(Hash) && raw_expected[:kind] == :inline_struct
         error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, node.name, variant_name, node.name, variant_name)
       end
+      # @indirect single-type payload: unwrap inner type for type-checking;
+      # mark the value node so the transpiler heap-allocates it via create(*T).
+      indirect_payload = raw_expected.is_a?(Hash) && raw_expected[:kind] == :indirect_payload
+      raw_for_check = indirect_payload ? raw_expected[:type] : raw_expected
       # Apply type param substitution (e.g. T → Number for generic unions)
-      expected_type = union_subst.any? ? apply_type_subst(raw_expected, union_subst) : raw_expected
+      expected_type = union_subst.any? ? apply_type_subst(raw_for_check, union_subst) : raw_for_check
       visit(val_node)
+      if indirect_payload
+        val_node.needs_heap_create = true
+        current_fn_ctx.heap_count += 1 if current_fn_ctx  # heapAlloc().create(*T) needs rt
+      end
       reject_borrowed_value!(val_node, "#{node.name}.#{variant_name}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}")
