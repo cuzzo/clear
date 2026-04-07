@@ -628,7 +628,7 @@ class MIRPass
       checker = StaticLeakChecker.new(stmt, bindings: bindings, can_fail_fns: can_fail_fns)
       errors = checker.check!
       unless errors.empty?
-        raise "StaticLeakChecker failed:\n#{errors.join("\n")}"
+        raise "Your code is correct. This is a compiler error. Sorry for the inconvenience.\n\n#{errors.join("\n")}"
       end
     end
   end
@@ -724,12 +724,16 @@ class MIRPass
       stamp_reassign_cleanup!(stmt, bindings)
       stamp_match_as_cleanup!(stmt, bindings)
       stamp_map_value_promote!(stmt)
+      stamp_map_put_alloc!(stmt)
 
       # Emit the original statement.
       result << stmt
 
       # Insert Drop after VarDecl / BindExpr (decl mode).
       insert_drop!(result, stmt, bindings)
+
+      # Insert SuppressCleanup after statements that consume bindings.
+      insert_suppress_cleanup!(result, stmt, bindings)
     end
     result
   end
@@ -817,6 +821,96 @@ class MIRPass
     fn.body = mir_nodes + fn.body if mir_nodes.any?
   end
 
+  # Insert MIR::SuppressCleanup after statements that consume ownership of
+  # tracked bindings. Replaces the transpiler's emit_move_suppression and
+  # emit_consumed_moves methods.
+  def insert_suppress_cleanup!(result, stmt, bindings)
+    return unless bindings
+    return if stmt.is_a?(AST::ReturnNode) # handled by insert_return!
+
+    names = collect_consumed_names(stmt, bindings)
+    names.each do |name|
+      result << MIR::SuppressCleanup.new(stmt.token, name)
+    end
+  end
+
+  # Collect names of bindings consumed by a statement.
+  # Two consumption paths:
+  #   1. Direct RHS: identifier used as value in assignment/declaration
+  #   2. Nested: identifier passed as TAKES/GIVE arg or used as struct field
+  def collect_consumed_names(stmt, bindings)
+    names = Set.new
+
+    # 1. Direct RHS consumption
+    rhs = case stmt
+          when AST::VarDecl    then stmt.value
+          when AST::BindExpr   then stmt.value
+          when AST::Assignment then stmt.value
+          else nil
+          end
+
+    if rhs
+      is_move = rhs.is_a?(AST::MoveNode)
+      ident = is_move ? rhs.value : rhs
+      add_if_consumed(ident, names, bindings, is_move) if ident.is_a?(AST::Identifier)
+    end
+
+    # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
+    value_expr = case stmt
+                 when AST::VarDecl, AST::BindExpr then stmt.value
+                 when AST::Assignment then stmt.value
+                 else stmt
+                 end
+    value_expr = value_expr.value if value_expr.is_a?(AST::MoveNode)
+    walk_consumed(value_expr, names, bindings)
+
+    names
+  end
+
+  # Recursively walk an expression to find consumed identifiers in
+  # StructLit fields and FuncCall/MethodCall TAKES/GIVE args.
+  def walk_consumed(node, names, bindings)
+    return unless node
+    case node
+    when AST::StructLit
+      node.fields.each_value do |v|
+        if v.is_a?(AST::Identifier)
+          add_if_consumed(v, names, bindings, false)
+        else
+          walk_consumed(v, names, bindings)
+        end
+      end
+    when AST::FuncCall, AST::MethodCall
+      node.args.each do |a|
+        if a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier)
+          add_if_consumed(a.value, names, bindings, true)
+        elsif a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier)
+          add_if_consumed(a, names, bindings, true)
+        end
+      end
+    end
+  end
+
+  # Add identifier to consumed set if it has a moved guard and passes
+  # Copy-type filters. RC types only consume on explicit GIVE (MoveNode).
+  def add_if_consumed(ident, names, bindings, is_move)
+    name = ident.name.to_s
+    entry = bindings[name]
+    return unless entry && entry[:has_moved_guard] && entry[:needs_cleanup]
+
+    ti = ident.type_info
+    return if ti&.string?
+    return if ti&.escaped_return && (ti.collection? || ti.string?)
+
+    # RC types: only consume on explicit GIVE
+    if ti && (ti.any_rc? rescue false)
+      names << name if is_move
+      return
+    end
+
+    names << name
+  end
+
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
   def stamp_reassign_cleanup!(stmt, bindings)
     return unless bindings
@@ -891,6 +985,29 @@ class MIRPass
     }
   end
 
+  # Stamp map_put_alloc on Assignment nodes that store into a HashMap.
+  # Pre-computes allocator decisions so the transpiler is mechanical.
+  #   key_alloc: :heap (StringMap owns key memory) or :frame (numeric maps)
+  #   val_alloc: :heap (sharded/striped) or :frame (frame-local maps)
+  def stamp_map_put_alloc!(stmt)
+    return unless stmt.is_a?(AST::Assignment)
+    return unless stmt.name.is_a?(AST::GetIndex)
+    target_node = stmt.name.target
+    return unless target_node.respond_to?(:metatype) && target_node.metatype == :hashmap
+
+    map_ft = target_node.full_type
+    map_ft = Type.new(map_ft) if map_ft && !map_ft.is_a?(Type)
+    return unless map_ft
+
+    if map_ft.numeric_map?
+      alloc = (map_ft.escaped_return || map_ft.heap_provenance? || map_ft.sharded? || map_ft.striped?) ? :heap : :frame
+      stmt.map_put_alloc = { key_alloc: alloc, val_alloc: alloc }
+    else
+      val_alloc = (map_ft.sharded? || map_ft.striped?) ? :heap : :frame
+      stmt.map_put_alloc = { key_alloc: :heap, val_alloc: val_alloc }
+    end
+  end
+
   # Build moved_guard_info: { var_name => bool } for all bindings.
   def stamp_moved_guard_info!(fn, bindings)
     info = {}
@@ -937,6 +1054,11 @@ class MIRPass
     escaped = collect_return_escapes(ret_node, bindings)
     return if escaped.empty?
     result << MIR::Return.new(ret_node.token, escaped)
+    # Insert SuppressCleanup for each escaped var so the transpiler doesn't
+    # need to re-compute escape analysis.
+    escaped.each do |name|
+      result << MIR::SuppressCleanup.new(ret_node.token, name)
+    end
   end
 
   # Walk a return expression and collect variable names whose ownership

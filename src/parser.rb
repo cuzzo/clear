@@ -516,8 +516,13 @@ class Parser
 
   def parse_tight_stmt
     tight_token = consume(:KEYWORD, 'TIGHT')
+    if match?(:KEYWORD, 'FOR')
+      node = parse_for_range
+      node.tight = true
+      return node
+    end
     unless match?(:KEYWORD, 'WHILE')
-      raise "Expected WHILE after TIGHT (got #{current.value.inspect})"
+      raise "Expected WHILE or FOR after TIGHT (got #{current.value.inspect})"
     end
     # Reuse the standard WHILE pattern; then annotate as tight
     consume(:KEYWORD, 'WHILE')

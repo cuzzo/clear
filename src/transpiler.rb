@@ -909,8 +909,7 @@ private
         decl += "\n#{safe_name}.expandToCapacity();"
       end
 
-      # 2. Move Suppression (cleanup is now emitted by MIR::Drop nodes)
-      move_source_logic = emit_move_suppression(rhs_ident)
+      # 2. Move suppression is now handled by MIR::SuppressCleanup nodes.
       @current_rhs_is_move = false
 
       # Check if a MIR::Drop follows this VarDecl (cleanup defer will reference the var).
@@ -930,7 +929,7 @@ private
         (node.var_used || has_mir_drop) ? "" : "_ = #{safe_name};"
       end
 
-      "#{decl} #{suppression}\n#{move_source_logic}"
+      "#{decl} #{suppression}"
 
 
     when AST::BindExpr
@@ -947,18 +946,18 @@ private
         visit(proxy)
       else
         # Transpile as reassignment — clean up old value for non-Copy types.
+        # Move suppression is handled by MIR::SuppressCleanup nodes.
         safe = zig_safe_name(node.name)
         value_str = visit(node.value)
-        move_logic = emit_move_suppression(node.value)
 
         if node.reassign_cleanup
           zig_type = node.reassign_cleanup[:zig_type] || "UNKNOWN"
           alloc = alloc_expr_from_plan(node.reassign_cleanup)
           tmp = "__new_#{safe}"
           inner = "const #{tmp} = #{value_str};\nCheatLib.cleanup(#{zig_type}, #{alloc}, &#{safe});\n#{safe} = #{tmp};"
-          move_logic.empty? ? "{\n#{inner}\n}" : "{\n#{inner}\n#{move_logic}\n}"
+          "{\n#{inner}\n}"
         else
-          "#{safe} = #{value_str}; #{move_logic}"
+          "#{safe} = #{value_str};"
         end
       end
 
@@ -1019,10 +1018,10 @@ private
           target = visit(node.name.target)
           field  = node.name.field
           value  = visit(node.value)
-          move_logic = emit_move_suppression(node.value)
           # Pre-cleanup: free old field value before overwriting with new one.
           # MIRPass stamps field_pre_cleanup when the field holds heap-backed
           # data (list, etc.) that would leak on overwrite.
+          # Move suppression is handled by MIR::SuppressCleanup nodes.
           rt_name = @do_rt_name || "rt"
           fpc = node.field_pre_cleanup
           pre_cleanup = if fpc
@@ -1031,8 +1030,7 @@ private
           else
             ""
           end
-          code = "#{pre_cleanup}#{target}.#{field} = #{value};"
-          return move_logic.empty? ? code : "#{code}\n#{move_logic}"
+          return "#{pre_cleanup}#{target}.#{field} = #{value};"
         elsif node.name.is_a?(AST::GetIndex)
           # Check if target is a Map
           target_node = node.name.target
@@ -1042,17 +1040,14 @@ private
              map_ref  = visit(target_node)
              # Auto-deref Arc/Rc-wrapped maps
              map_ref = "#{map_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
-             # StringMap.put always dupes the key internally, so concat
-             # temporaries for map keys can use frameAlloc (freed at loop rewind).
-             prev = @map_key_visit
-             @map_key_visit = true unless map_ft.numeric_map?
+             # Allocator decisions are pre-computed by MIRPass (stamp_map_put_alloc!).
+             mpa = node.map_put_alloc || {}
              key_ref  = visit(node.name.index)
-             @map_key_visit = prev
              val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
 
              if map_ft.numeric_map?
-               alloc = (map_ft.escaped_return || map_ft.heap_provenance? || map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               alloc = alloc_expr(mpa[:key_alloc] || :frame, rt_name)
                if map_ft.sharded? || map_ft.striped?
                  return "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
                else
@@ -1061,27 +1056,26 @@ private
                  return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
                end
              else
-               # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing
+               # Shard-direct: putDirect(shard_idx, alloc, key, val) -- no hash, no routing
                # Key comes from the pre-routed queue, not recomputed from the body expression.
                if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
                  return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
                end
-               # The map stores its own allocator from the first put — the allocator
-               # passed here is captured by the map and used for all subsequent ops.
-               # Frame-local maps get frameAlloc (arena, zero-cost cleanup).
-               # Sharded/promoted maps get heapAlloc (GPA, tracked cleanup).
-               key_alloc = "#{rt_name}.heapAlloc()"
-               val_alloc = (map_ft.sharded? || map_ft.striped?) ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+               # Allocators pre-computed by MIRPass. The map stores its own
+               # allocator from the first put -- the allocator passed here is
+               # captured by the map and used for all subsequent ops.
+               key_alloc = alloc_expr(mpa[:key_alloc] || :heap, rt_name)
+               val_alloc = alloc_expr(mpa[:val_alloc] || :frame, rt_name)
                # String literals in map values must be heap-duped (rodata can't be freed)
                val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name)
-               move_logic = emit_move_suppression(node.value)
-               # Non-Copy union values BORROWED from another owner must be duped —
+               # Non-Copy union values BORROWED from another owner must be duped --
                # the source may be cleaned up independently (e.g. list element
                # stored into a persistent HashMap). Only dupe when the value is
-               # a borrow (identifier, index, field access) — NOT when it's a
+               # a borrow (identifier, index, field access) -- NOT when it's a
                # freshly constructed value (struct literal, COPY, inline ctor).
+               val_is_consumed = value_consumed?(node.value)
                val_is_borrow = node.value.is_a?(AST::Identifier) || node.value.is_a?(AST::GetIndex)
-               if move_logic.empty? && val_is_borrow
+               if !val_is_consumed && val_is_borrow
                  val_ti = node.value.type_info rescue nil
                  if val_ti && @union_schemas&.key?(val_ti.resolved)
                    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
@@ -1104,7 +1098,7 @@ private
                else
                  code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
                end
-               return move_logic.empty? ? code : "#{code}\n#{move_logic}"
+               return code
              end
           end
           arr_ref = visit(target_node)
@@ -1119,21 +1113,17 @@ private
 
       # 2. Resolve the Value
       value_str = visit(node.value)
-      move_logic = emit_move_suppression(node.value)
 
-      # 3. Output Zig Code
-      "#{target_str} = #{value_str}; #{move_logic}"
+      # 3. Output Zig Code (move suppression handled by MIR::SuppressCleanup)
+      "#{target_str} = #{value_str};"
 
     when AST::StructLit
       # CHEAT: User{ id: 1 }
       # ZIG:   User{ .id = 1 }
 
-      # Track heap variables that need to be marked as moved
-      move_statements = []
+      # Move suppression is handled by MIR::SuppressCleanup nodes.
       rc_map = @rc_unwrap_map || {}
       field_inits = node.fields.map do |k, v|
-        move_statements << emit_move_suppression(v)
-
         val_code = if v.is_a?(AST::Identifier) && !rc_map.key?(v.name) && v.type_info&.any_rc?
           transpile_rc_retain(v.type_info, v.name)
         else
@@ -1176,12 +1166,9 @@ private
       else
         "#{struct_name}{ #{field_inits} }"
       end
-      move_logic = move_statements.reject(&:empty?).join("\n")
-
       if node.storage == :heap # You set this in the Annotator!
        <<~ZIG
           blk: {
-             #{move_logic}
              const ptr = try rt.heapAlloc().create(#{struct_name});
              ptr.* = #{struct_init};
              break :blk ptr;
@@ -1190,27 +1177,16 @@ private
       elsif node.storage == :frame
         # Large struct (> 128 slots): allocate in the frame arena so it doesn't bloat the
         # fiber stack.  The frame mark is saved/restored by the enclosing function, so no
-        # explicit destroy is needed — O(1) bulk reclaim on function exit.
+        # explicit destroy is needed -- O(1) bulk reclaim on function exit.
         <<~ZIG
           blk: {
-             #{move_logic}
              const ptr = try rt.frameAlloc().create(#{struct_name});
              ptr.* = #{struct_init};
              break :blk ptr;
           }
         ZIG
       else
-        if move_logic.empty?
-          struct_init
-        else
-          # Need a block to execute move logic before struct init
-          <<~ZIG
-            blk: {
-               #{move_logic}
-               break :blk #{struct_init};
-            }
-          ZIG
-        end
+        struct_init
       end
 
 
@@ -1477,7 +1453,10 @@ private
       cmp       = node.inclusive ? "<=" : "<"
       @for_counter = (@for_counter || 0) + 1
       iter_var  = "__for_#{@for_counter}"
-      if node.mark_per_iter && current_tp_ctx&.has_rt
+      if node.tight
+        # TIGHT: no yield injection, no arena loop marks -- pure computation path.
+        "{\nvar #{iter_var}: i64 = #{start_val};\nwhile (#{iter_var} #{cmp} #{end_val}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n #{body} \n}\n}"
+      elsif node.mark_per_iter && current_tp_ctx&.has_rt
         mark_id  = (@loop_mark_counter = (@loop_mark_counter || 0) + 1)
         mark_var = "__loop_mark_#{mark_id}"
         if node.loop_preserve_vars&.any?
@@ -2283,20 +2262,10 @@ private
         end
       end
 
-      # 2. Standard Return with ownership escape analysis.
-      # Walk the return value AST and find ALL identifiers whose ownership
-      # escapes through this return. Emit _moved = true for each so their
-      # cleanup defers are suppressed.
+      # 2. Standard Return.
+      # Escape suppression (_moved = true) is handled by MIR::SuppressCleanup
+      # nodes inserted before this ReturnNode by MIRPass.
       rt_name = @do_rt_name || "rt"
-      suppress = emit_move_suppression(node.value)
-      fn_name = current_tp_ctx&.fn_name
-      guards = @moved_guard_info&.dig(fn_name)
-      if guards
-        collect_escaping_identifiers(node.value).each do |ident|
-          next unless guards[ident.name]
-          suppress = "#{zig_safe_name(ident.name)}_moved = true;\n#{suppress}"
-        end
-      end
       # the return transfers ownership to the caller, no temp needed.
       val_code = if node.value.nil?
         ""
@@ -2313,7 +2282,7 @@ private
         # Struct/union-level promotion: wrap return value in __ret, promote fields.
         info = node.promote_fields_info
         zig_type = info[:zig_type]
-        parts = [suppress]
+        parts = []
         parts << "var __ret = #{val_code};"
         if info[:fields]
           info[:fields].each do |fname|
@@ -2323,33 +2292,31 @@ private
           parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
         end
         parts << "return __ret;"
-        parts.reject(&:empty?).join("\n")
+        parts.join("\n")
       elsif node.promote_ret_wrap == :const
-        [suppress, "const __ret = #{val_code};", "return __ret;"].reject(&:empty?).join("\n")
+        "const __ret = #{val_code};\nreturn __ret;"
       elsif node.hpt_return_handling == :dupe_string
         # Return string borrows from HPT heap data. Dupe to frame before HPT defer runs.
-        [suppress,
-         "var __hpt_ret: []const u8 = #{val_code};",
+        ["var __hpt_ret: []const u8 = #{val_code};",
          "__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);",
-         "return __hpt_ret;"].reject(&:empty?).join("\n")
+         "return __hpt_ret;"].join("\n")
       elsif node.hpt_return_handling == :promote_return
         # Return value aliases HPT heap data. Deep-copy before HPT defer runs.
         zig_t = node.hpt_return_type || "UNKNOWN"
-        [suppress,
-         "var __hpt_ret: #{zig_t} = #{val_code};",
+        ["var __hpt_ret: #{zig_t} = #{val_code};",
          "try CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);",
-         "return __hpt_ret;"].reject(&:empty?).join("\n")
+         "return __hpt_ret;"].join("\n")
       elsif needs_string_dupe && node.value
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
-          [suppress, "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"].reject(&:empty?).join("\n")
+          "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"
         else
-          [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
+          "return #{val_code};"
         end
       elsif @current_fn_preserve_rewind
-        [suppress, "break :__pr_body #{val_code};"].reject(&:empty?).join("\n")
+        "break :__pr_body #{val_code};"
       else
-        [suppress, "return #{val_code};"].reject(&:empty?).join("\n")
+        "return #{val_code};"
       end
 
     when AST::GetField
@@ -2617,17 +2584,9 @@ private
         # Check if we are operating on Strings
         # Annotator ensures full_type is set (e.g. "String" or "%String")
         rt_ref = @do_rt_name || "rt"
-        alloc = if @map_key_visit
-          "#{rt_ref}.frameAlloc()"
-        elsif node.storage == :heap
-          "#{rt_ref}.heapAlloc()"
-        else
-          "#{rt_ref}.frameAlloc()"
-        end
+        alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
 
         if node.left.type_info&.string? || node.right.type_info&.string?
-          # Generate call to runtime helper
-          # We use heapAlloc to ensure the result survives (safe default)
           return "try std.mem.concat(#{alloc}, u8, &.{ #{left}, #{right} })"
         end
       end
@@ -2718,13 +2677,7 @@ private
 
     when AST::StringConcat
       rt_ref = @do_rt_name || "rt"
-      alloc = if @map_key_visit
-        "#{rt_ref}.frameAlloc()"
-      elsif node.storage == :heap
-        "#{rt_ref}.heapAlloc()"
-      else
-        "#{rt_ref}.frameAlloc()"
-      end
+      alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
       parts_zig = node.parts.map { |p| visit(p) }
       "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
 
@@ -3136,31 +3089,20 @@ private
   #
   # ONE code path for ALL return value shapes. Promotion is driven by TYPE,
   # not by AST node kind. The return expression is bound to a temp var (__ret),
-  # frame-allocated fields are promoted to heap, and __ret is returned.
-  #
-  # For direct types (string, list, map): promotes the value itself.
-  # Walk a return value AST and collect all Identifier nodes whose ownership
-  # escapes through the return. Covers: bare identifiers, StructLit fields,
-  # MoveNode targets, and function call arguments.
-  def collect_escaping_identifiers(node)
-    return [] unless node
-    case node
-    when AST::Identifier
-      [node]
-    when AST::MoveNode
-      collect_escaping_identifiers(node.value)
-    when AST::StructLit
-      node.fields.values.flat_map { |v| collect_escaping_identifiers(v) }
-    when AST::FuncCall, AST::MethodCall
-      # Only collect args that transfer ownership (TAKES/GIVE).
-      # Borrowed args don't escape - caller retains ownership.
-      node.args.select { |a| a.respond_to?(:was_moved) && a.was_moved }
-               .flat_map { |a| collect_escaping_identifiers(a) }
-    when AST::CopyNode
-      []  # COPY creates a new value; the source doesn't escape
-    else
-      []
-    end
+  # Check if a value node's ownership is being consumed (moved away).
+  # Used for borrow-dupe decisions on map put values.
+  # Mirrors MIRPass's add_if_consumed logic.
+  def value_consumed?(value_node)
+    return false unless value_node.is_a?(AST::Identifier)
+    fn_name = current_tp_ctx&.fn_name
+    name = value_node.name
+    return false unless @moved_guard_info&.dig(fn_name, name)
+
+    ti = value_node.type_info
+    return false if ti&.string?
+    return false if ti&.escaped_return && (ti.collection? || ti.string?)
+    return false if ti && (ti.any_rc? rescue false)
+    true
   end
 
   # Emit escape promotions for a set of captured variables (used by BG/DO blocks).
@@ -3777,15 +3719,7 @@ private
     statements.map do |stmt|
       code = visit(stmt)
       next nil unless code
-      # Move suppression: for consumed args (TAKES, append, struct/union construction).
-      # ReturnNode handles its own escape analysis via collect_escaping_identifiers.
-      unless stmt.is_a?(AST::ReturnNode)
-        consumed = emit_consumed_moves(stmt)
-        unless consumed.empty?
-          code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-          code = "#{code}\n#{consumed}"
-        end
-      end
+      # Move suppression for consumed args is handled by MIR::SuppressCleanup nodes.
       # Zig requires non-void expression results to be consumed. Any AST node
       # that is an expression (not a declaration, assignment, or control flow)
       # with a non-void return type needs `_ = ` when used as a statement.

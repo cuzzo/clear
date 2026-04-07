@@ -293,6 +293,7 @@ module AST
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
     attr_accessor :map_value_promote  # stamped by MIRPass: { zig_type:, promote_fields: [{field:, elem_zig:}] }
+    attr_accessor :map_put_alloc     # stamped by MIRPass: { key_alloc:, val_alloc: }
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
@@ -592,6 +593,7 @@ module AST
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
     include Locatable
     attr_accessor :loop_preserve_vars
+    attr_accessor :tight
   end
 
   # ForEach: FOR var IN collection DO body END

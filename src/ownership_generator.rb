@@ -25,6 +25,11 @@ module OwnershipGenerator
     end
   end
 
+  # Convert :heap/:frame symbol to Zig allocator expression.
+  def alloc_expr(kind, rt_name = "rt")
+    kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+  end
+
   # Guarded defer: wraps body in moved-guard pattern.
   def guarded_defer(name, body)
     "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{body};\n"
@@ -121,89 +126,6 @@ module OwnershipGenerator
     else
       ""
     end
-  end
-
-  # ── MOVE SUPPRESSION ──────────────────────────────────────────
-  #
-  # Sets _moved = true when a binding is consumed.
-  # Emit _moved = true when a binding's value is consumed (assigned away).
-  # Guard decisions come from moved_guard_info (stamped by MIRPass).
-  def emit_move_suppression(rhs_node)
-    return "" unless rhs_node.is_a?(AST::Identifier)
-
-    # RC types: only move on explicit GIVE (not on assignment)
-    ti = rhs_node.type_info
-    if ti && (ti.any_rc? rescue false)
-      if @current_rhs_is_move
-        fn_name = current_tp_ctx&.fn_name
-        return "#{rhs_node.name}_moved = true;" if @moved_guard_info&.dig(fn_name, rhs_node.name)
-      end
-      return ""
-    end
-
-    # Escaped returns transfer ownership to caller - no move suppression
-    return "" if ti&.escaped_return && (ti.collection? || ti.string?)
-
-    # Strings are Copy - no move needed
-    return "" if ti&.string?
-
-    # Consult moved_guard_info: if the binding has a moved guard, emit it
-    fn_name = current_tp_ctx&.fn_name
-    return "" unless @moved_guard_info&.dig(fn_name, rhs_node.name)
-
-    # Only emit for was_moved (annotator-marked) or non-Copy types with cleanup
-    if rhs_node.was_moved
-      sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
-      decl = sym&.reg
-      is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-      is_takes = sym&.respond_to?(:takes) && sym&.takes
-      return "#{zig_safe_name(rhs_node.name)}_moved = true;" if is_local || is_takes
-    else
-      sym = rhs_node.respond_to?(:symbol) ? rhs_node.symbol : nil
-      decl = sym&.reg
-      is_local = decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-      return "#{zig_safe_name(rhs_node.name)}_moved = true;" if is_local
-    end
-    ""
-  end
-
-  # Emit _moved = true statements for arguments consumed by a call or construction.
-  def emit_consumed_moves(node)
-    moves = []
-    inner = node
-    inner = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) || node.is_a?(AST::ReturnNode)
-    inner = inner.value if inner.is_a?(AST::MoveNode)
-
-    args = case inner
-    when AST::StructLit
-      inner.fields.values.select { |v| v.is_a?(AST::Identifier) }
-    when AST::FuncCall, AST::MethodCall
-      # was_moved is set by the annotator for TAKES params (both user-defined
-      # functions and stdlib intrinsics). No zig_pattern hacks needed.
-      consumed = inner.args.select { |a| a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier) } +
-        inner.args.select { |a| a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier) }.map(&:value)
-      consumed
-    else
-      []
-    end
-
-    args.each do |arg|
-      name = arg.respond_to?(:name) ? arg.name : nil
-      next unless name
-      ti = arg.type_info
-      next if ti&.string?
-      next if ti&.escaped_return && (ti.collection? || ti&.string?)
-
-      sym = arg.respond_to?(:symbol) ? arg.symbol : nil
-      decl = sym&.reg
-      next unless decl.is_a?(AST::VarDecl) || decl.is_a?(AST::BindExpr)
-
-      # Consult moved_guard_info: if the binding has a moved guard, emit it.
-      fn_name = current_tp_ctx&.fn_name
-      moves << "#{zig_safe_name(name)}_moved = true;" if @moved_guard_info&.dig(fn_name, name)
-    end
-
-    moves.join("\n")
   end
 
   def transpile_rc_retain(type_info, name)

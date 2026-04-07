@@ -1001,10 +1001,16 @@ private
     ], merge_to_parent: false)
     if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
 
-    # 4. Loop Mark: emit saveLoopMark/restoreLoopMark when the loop body
+    # 4. TIGHT validation (same as WhileLoop).
+    if node.tight
+      validate_tight_body!(node.body, node)
+    end
+
+    # 5. Loop Mark: emit saveLoopMark/restoreLoopMark when the loop body
     # allocates from the frame arena. If any frame data escapes to outer-scope
     # containers, promote those containers to heap so the rewind is safe.
-    allocates = loop_allocates_frame?(node.body)
+    # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
+    allocates = !node.tight && loop_allocates_frame?(node.body)
     if allocates
       preserve_vars = Set.new
       escape_actions = collect_loop_escapes(node.body, outer_vars, preserve_vars: preserve_vars)

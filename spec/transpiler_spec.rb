@@ -929,7 +929,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # The RETURN Value{ List: items } must set items_moved = true
       # so the TAKES defer doesn't double-free the returned data.
-      expect(zig).to match(/items_moved = true;\s*\n\s*return Value/)
+      expect(zig).to match(/items_moved = true;.*\n(?:.*\n)*?\s*return Value/)
     end
   end
 
