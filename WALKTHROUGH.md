@@ -95,14 +95,14 @@ END
 FN main() RETURNS Void ->
     msg = "Hello";
 
-    process(GIVE msg);              -- OKAY: Explicit transfer
+    process(msg);                   -- OKAY: Implicit transfer (by FN signature)
 
-    print(msg);                     -- COMPILER ERROR: Use after move
+    print(GIVE msg);                -- OKAY: Superfluous, but compiles
     RETURN;
 END
 ```
 
-Explicit `GIVE` at the call site ensures that "data disappearance" is always visible to the reader. For more details, see [docs/sharing-capabilities.md](docs/sharing-capabilities.md).
+For more details, see [docs/sharing-capabilities.md](docs/sharing-capabilities.md).
 
 ### Parameter Ownership
 
