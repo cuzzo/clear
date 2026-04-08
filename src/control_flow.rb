@@ -649,7 +649,8 @@ class MIRPass
     fn.has_promotion = true if promo
 
     has_bg_escapes = body_has_bg_escape_promotes?(fn.body)
-    return unless has_bindings || promo || has_bg_escapes
+    has_catch = fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
+    return unless has_bindings || promo || has_bg_escapes || has_catch
 
     # Use dataflow analysis to tighten has_moved_guard decisions.
     # The classifier conservatively sets has_moved_guard=true for all non-trivial
@@ -660,7 +661,20 @@ class MIRPass
     # Stamp field pre-cleanup info directly on Assignment nodes.
     CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
 
+    @fn_has_catch = has_catch
     fn.body = transform_body(fn.body, bindings, promo)
+
+    # Transform catch clause bodies so MIR::Promote(:catch_string_dupe) is
+    # inserted before string returns in error recovery paths.
+    if has_catch
+      fn.catch_clauses.each do |clause|
+        clause[:body] = transform_body(clause[:body], nil, nil) if clause[:body]
+      end
+      if fn.default_catch.is_a?(Array)
+        fn.default_catch = transform_body(fn.default_catch, nil, nil)
+      end
+    end
+    @fn_has_catch = false
 
     # Insert MIR::Drop nodes for TAKES parameters at function body start.
     insert_takes_drops!(fn, bindings) if has_bindings
@@ -727,6 +741,9 @@ class MIRPass
         insert_promotion!(result, stmt, promo)
         # HPT return promotion: insert MIR::Promote for checker verification.
         result << stmt.hpt_return_promote if stmt.hpt_return_promote
+        # Catch string dupe: heap-dupe string returns so both success and
+        # error paths have consistent allocation for caller cleanup.
+        insert_catch_string_dupe!(result, stmt) if @fn_has_catch
       end
 
       # Stamp cleanup info on reassignment / match-as nodes.
@@ -978,6 +995,18 @@ class MIRPass
       strategy = t.list_collection? ? :list : :bg_string
       result << MIR::Promote.new(bg.token, name, t.zig_type, strategy, nil)
     end
+  end
+
+  # Insert MIR::Promote(:catch_string_dupe) before a ReturnNode in a catch
+  # function when the return value is string-typed. Both success and error
+  # paths must return heap-backed strings for consistent caller cleanup.
+  def insert_catch_string_dupe!(result, ret_node)
+    return unless ret_node.value
+    ft = ret_node.value.respond_to?(:full_type) ? ret_node.value.full_type : nil
+    return unless ft
+    t = Type.new(ft)
+    return unless t.string?
+    result << MIR::Promote.new(ret_node.token, :__catch_ret, "[]const u8", :catch_string_dupe, nil)
   end
 
   # Collect names of bindings consumed by a statement.

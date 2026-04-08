@@ -671,15 +671,10 @@ private
                           "            _ = &snapshot; _ = &__has_snapshot;"
         end
 
-        catch_dupe = (node.return_provenance == :heap) && node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
-
         catch_clauses_zig = node.catch_clauses.map do |clause|
           kind = clause[:kind]
           error_name = clause[:error_name]
-          prev_catch_dupe = @catch_dupe_string_returns
-          @catch_dupe_string_returns = catch_dupe
           clause_body_code = clause[:body].map { |s| visit(s) }.join("\n            ")
-          @catch_dupe_string_returns = prev_catch_dupe
 
           cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
           cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
@@ -690,10 +685,7 @@ private
 
         default_code = ""
         if node.default_catch.is_a?(Array) && node.default_catch.any?
-          prev_catch_dupe = @catch_dupe_string_returns
-          @catch_dupe_string_returns = catch_dupe
           default_body = node.default_catch.map { |s| visit(s) }.join("\n            ")
-          @catch_dupe_string_returns = prev_catch_dupe
           default_code = " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
         else
           if fn_can_fail
@@ -2166,7 +2158,9 @@ private
 
       # 3. Escape promotion — driven by MIR nodes (Promote/SuppressCleanup
       #    inserted before this ReturnNode) + annotations on the ReturnNode.
-      needs_string_dupe = @catch_dupe_string_returns || @current_fn_has_catch
+      # Catch string dupe: driven by MIR::Promote(:catch_string_dupe).
+      needs_string_dupe = @pending_catch_string_dupe
+      @pending_catch_string_dupe = false
       if node.promote_ret_wrap == :var && @pending_ret_field_promote
         # Struct/union-level promotion: driven by MIR::Promote(:ret_fields).
         info = @pending_ret_field_promote
@@ -2645,6 +2639,11 @@ private
         # Code emitted by the BG handler where the scheduler allocator is available.
         @pending_bg_string_promotes ||= Set.new
         @pending_bg_string_promotes << node.name.to_s
+        nil
+      when :catch_string_dupe
+        # Signals that the NEXT ReturnNode needs heap string duping for
+        # consistent caller cleanup across success/error paths.
+        @pending_catch_string_dupe = true
         nil
       when :generic
         vname = zig_safe_name(node.name)
