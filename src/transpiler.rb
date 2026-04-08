@@ -1640,13 +1640,8 @@ private
           end
         end).join(", ")
 
-      # Resources captured by BG fibers transfer ownership — suppress outer defer close.
-      # Without this, the outer scope's `defer socketClose(fd)` fires immediately,
-      # closing the fd before the fiber reads it.
-      # capture_close_zig from analysis above
-      resource_moves = resource_captures.filter_map do |name|
-        "#{name}_moved = true;"
-      end.join("\n")
+      # Resource capture move suppression is handled by MIR::SuppressCleanup nodes
+      # inserted by MIRPass.insert_bg_resource_suppress!.
 
       # Flatten ThenChain nodes in the body into individual steps.
       # Each flat step is { expr: ASTNode, binding: String|nil }.
@@ -1752,7 +1747,6 @@ private
             #{escape_promotions.join("\n            ")}
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
-            #{resource_moves}
             #{bg_spawn_call(node, rt_name, ctx_type, ctx_var)}
             break :#{blk_label} #{promise_var};
         }

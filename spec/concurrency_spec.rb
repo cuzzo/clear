@@ -1748,6 +1748,12 @@ RSpec.describe SemanticAnnotator do
       ast       = Parser.new(tokens, clear_src).parse
       annotator = SemanticAnnotator.new
       annotator.annotate!(ast)
+      StringConcatRewriter.new.rewrite!(ast)
+      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir.transform!(ast)
       t = ZigTranspiler.new
       t.send(:visit, ast)
     end
@@ -1761,8 +1767,11 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
+      # Fiber takes ownership and closes the resource.
       expect(out).to include("socketClose(__ctx_0.client)")
-      expect(out).to include("client_moved = true")
+      # Unconditional BG: resource always moved, no outer defer needed.
+      expect(out).not_to include("client_moved = true")
+      expect(out).not_to include("defer if (!client_moved)")
     end
 
     it "emits defer file.close() for File captured by BG" do
@@ -1777,7 +1786,7 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("__ctx_0.file.close()")
     end
 
-    it "emits client_moved = true in the outer scope for TCPClient captured by BG" do
+    it "unconditional BG capture eliminates outer defer entirely" do
       out = transpile_fn(<<~CLEAR)
         FN f(server: TCPServer) RETURNS Void ->
           client = accept(server);
@@ -1786,10 +1795,9 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      # The outer scope must suppress its own defer close
-      expect(out).to include("client_moved = true")
-      # The fiber takes ownership — the outer defer must be guarded
-      expect(out).to include("defer if (!client_moved)")
+      # Dataflow detects resource is always moved to BG fiber.
+      # No outer cleanup needed - fiber owns and closes the resource.
+      expect(out).not_to include("client_moved")
     end
   end
 

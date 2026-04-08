@@ -485,6 +485,12 @@ class OwnershipDataflow
     when AST::CopyNode
       # COPY does NOT move the source.
 
+    when AST::BgBlock
+      # Resources captured by BG fibers transfer ownership.
+      node.capture_analysis&.resource_captures&.each do |name|
+        consumed << name if state[name]
+      end
+
     else
       collect_explicit_in(node, state, consumed)
     end
@@ -747,6 +753,9 @@ class MIRPass
 
       # Insert SuppressCleanup after statements that consume bindings.
       insert_suppress_cleanup!(result, stmt, bindings)
+
+      # BG blocks that capture resources transfer ownership — suppress outer cleanup.
+      insert_bg_resource_suppress!(result, stmt, bindings)
     end
     result
   end
@@ -891,6 +900,33 @@ class MIRPass
 
     names = collect_consumed_names(stmt, bindings)
     names.each do |name|
+      result << MIR::SuppressCleanup.new(stmt.token, name)
+    end
+  end
+
+  # Insert MIR::SuppressCleanup for resources captured by BG blocks.
+  # When a BG fiber captures a resource (TCP fd, etc.), ownership transfers
+  # to the fiber — the outer scope's defer must not close it.
+  # BG blocks appear as expressions inside VarDecl/BindExpr/Assignment.
+  #
+  # If dataflow determines the resource is ALWAYS moved (unconditional BG),
+  # cleanup is eliminated entirely (no defer emitted) and no SuppressCleanup
+  # is needed. SuppressCleanup is only needed when the BG is conditional
+  # (MAYBE_MOVED) and the binding retains a moved guard.
+  def insert_bg_resource_suppress!(result, stmt, bindings)
+    return unless bindings
+    bg = case stmt
+         when AST::BgBlock then stmt
+         when AST::VarDecl    then stmt.value.is_a?(AST::BgBlock) ? stmt.value : nil
+         when AST::BindExpr   then stmt.value.is_a?(AST::BgBlock) ? stmt.value : nil
+         when AST::Assignment then stmt.value.is_a?(AST::BgBlock) ? stmt.value : nil
+         end
+    return unless bg
+    resource_captures = bg.capture_analysis&.resource_captures
+    return unless resource_captures&.any?
+    resource_captures.each do |name|
+      entry = bindings[name]
+      next unless entry && entry[:has_moved_guard]
       result << MIR::SuppressCleanup.new(stmt.token, name)
     end
   end
