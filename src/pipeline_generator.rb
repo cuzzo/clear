@@ -1,5 +1,15 @@
+# Generates Zig code for pipeline operators (s>) that need special
+# iteration patterns: pool, sharded, SOA sources, and CONCURRENT.
+#
+# For plain-array sources, PipelineRewriter converts most operators
+# into standard AST nodes (ForEach, BlockExpr, IfStatement) before
+# the transpiler runs. This module is still needed for:
+#   - Pool/sharded/SOA sources (all operators)
+#   - CONCURRENT/SHARD (all source types)
+#   - Non-rewritten operators: INDEX, ORDER_BY, LIMIT, SKIP,
+#     UNNEST, DISTINCT, WINDOW, JOIN (all sources)
 module PipelineGenerator
-  # Unique label for each pipeline block — prevents Zig label collisions
+  # Unique label for each pipeline block -- prevents Zig label collisions
   # when pipelines are chained (e.g., a s> SELECT s> WHERE).
   def next_pipe_label
     @pipe_label_counter = (@pipe_label_counter || 0) + 1
@@ -65,10 +75,7 @@ module PipelineGenerator
         loop_open: "for (0..@intCast(#{source_var}.data.len)) |__psi| {\n                const it = #{source_var}.data.get(__psi);",
         loop_close: "}" }
     else
-      # Standard array/list: direct .items or slice
-      { setup: "const pipe_items = if (@hasField(@TypeOf(#{source_var}), \"items\")) #{source_var}.items else #{source_var}[0..];",
-        loop_open: "for (pipe_items) |it| {",
-        loop_close: "}" }
+      raise "BUG: plain-array fused pipeline should have been rewritten by PipelineRewriter"
     end
   end
 
@@ -407,8 +414,7 @@ module PipelineGenerator
         const pipe_items = pipe_mat.items;
       ZIG
     else
-      # Standard array or @list: use .items if available, otherwise treat as slice.
-      # [0..] works for both fixed-size arrays ([N]T → []T) and slices (no-op).
+      # Plain array/list: used by CONCURRENT and non-rewritten operators (INDEX, ORDER_BY, etc.)
       "const pipe_items = if (@hasField(@TypeOf(pipe_src_list), \"items\")) pipe_src_list.items else pipe_src_list[0..];"
     end
   end
@@ -774,21 +780,8 @@ module PipelineGenerator
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
       transpile_each_sharded_list(lhs, body_code, lhs_type)
     else
-      transpile_each_array(lhs, body_code)
+      raise "BUG: plain-array EACH should have been rewritten by PipelineRewriter"
     end
-  end
-
-  def transpile_each_array(list_node, body_code)
-    list_code = visit(list_node)
-    <<~ZIG.chomp
-      {
-          const __each_src = #{list_code};
-          const __each_items = if (@hasField(@TypeOf(__each_src), "items")) __each_src.items else __each_src;
-          for (__each_items) |*__each_item| {
-              #{body_code}
-          }
-      }
-    ZIG
   end
 
   def transpile_each_pool(pool_node, body_code)

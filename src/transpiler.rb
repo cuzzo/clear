@@ -2683,6 +2683,15 @@ private
     end
   end
 
+  # Transpile a SMOOTH (s>) pipeline node into Zig.
+  #
+  # For plain-array sources, most operators are rewritten into standard AST
+  # (ForEach, BlockExpr, IfStatement) by PipelineRewriter before reaching
+  # the transpiler. This method is now only reached for:
+  #   - Pool, sharded, and SOA sources (all operators)
+  #   - CONCURRENT/SHARD (all source types)
+  #   - INDEX, ORDER_BY, LIMIT, SKIP, UNNEST, DISTINCT, WINDOW, JOIN (all sources)
+  #   - Function pipes on pool/sharded/SOA sources
   def transpile_Smooth(node)
     lhs = node.left
     rhs = node.right
@@ -2692,7 +2701,7 @@ private
     fusible = collect_fusible_chain(node)
     return transpile_fused_pipeline(fusible) if fusible
 
-    # Check Higher-Order functions
+    # Dispatch by operator type
     if node.right.is_a?(AST::SelectOp)
       return transpile_select_projection(node.left, node.right.expression)
 
