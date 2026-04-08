@@ -7,7 +7,7 @@
 #   - Pool/sharded/SOA sources (all operators)
 #   - CONCURRENT/SHARD (all source types)
 #   - Non-rewritten operators: INDEX, ORDER_BY, LIMIT, SKIP,
-#     UNNEST, DISTINCT, WINDOW, JOIN (all sources)
+#     WINDOW, JOIN (all sources)
 module PipelineGenerator
   # Unique label for each pipeline block -- prevents Zig label collisions
   # when pipelines are chained (e.g., a s> SELECT s> WHERE).

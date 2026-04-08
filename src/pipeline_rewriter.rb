@@ -13,6 +13,7 @@ class PipelineRewriter
   FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp].freeze
   TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
                    AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
+  LIST_TERMINALS = [AST::UnnestOp, AST::DistinctOp].freeze
 
   def initialize(annotator = nil)
     @annotator = annotator
@@ -111,7 +112,9 @@ class PipelineRewriter
     end
 
     # CASE 1: Fusion candidate (chained fusible stages or ending in a fold/EachOp)
-    is_fold = terminal.nil? || terminal.is_a?(AST::EachOp) || TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
+    is_fold = terminal.nil? || terminal.is_a?(AST::EachOp) ||
+              TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) } ||
+              LIST_TERMINALS.any? { |t| terminal.is_a?(t) }
 
     if stages.any? || (is_fold && terminal)
       if is_fold
@@ -187,7 +190,7 @@ class PipelineRewriter
 
     # Identify the terminal operation.
     right = node.right
-    if TERMINAL_FOLDS.any? { |t| right.is_a?(t) } || right.is_a?(AST::EachOp)
+    if TERMINAL_FOLDS.any? { |t| right.is_a?(t) } || right.is_a?(AST::EachOp) || LIST_TERMINALS.any? { |t| right.is_a?(t) }
       terminal = right
       cursor = node.left
     elsif is_fusible?(right)
@@ -302,7 +305,8 @@ class PipelineRewriter
       decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
       [decl]
-    when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
+    when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp,
+         AST::UnnestOp, AST::DistinctOp
       lit = AST::ListLit.new(token, [], :stack)
       lit.full_type = smooth_node.full_type
       decl = AST::VarDecl.new(token, res_var, nil, lit, true)
@@ -424,6 +428,75 @@ class PipelineRewriter
       [if_stmt]
     when AST::EachOp
       terminal.body.map { |s| replace_placeholder(s, current_val) }
+    when AST::UnnestOp
+      # Nested loop: for each item, iterate over the inner list and append each element
+      inner_expr = replace_placeholder(terminal.expression, current_val)
+      inner_var = next_var("__inner")
+      inner_it_var = next_var("__it")
+
+      inner_bind = AST::BindExpr.new(token, inner_var, nil, inner_expr)
+      inner_bind.full_type = inner_expr.full_type || terminal.expression.full_type
+      inner_bind.storage = :stack
+      inner_bind.instance_variable_set(:@mode, :decl)
+      inner_bind.instance_variable_set(:@var_used, true)
+
+      inner_it = AST::Identifier.new(token, inner_it_var)
+      inner_coll = AST::Identifier.new(token, inner_var)
+      inner_coll.full_type = inner_bind.full_type
+
+      append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
+      append.full_type = :Void
+      append.zig_pattern = STD_LIB["append"][:zig]
+
+      inner_foreach = AST::ForEach.new(token, inner_it_var, inner_coll, [append], nil, false)
+      inner_foreach.full_type = :Void
+      inner_foreach.instance_variable_set(:@var_used, true)
+
+      [inner_bind, inner_foreach]
+    when AST::DistinctOp
+      # Linear scan: check if key already exists in result, append if not
+      key_expr = replace_placeholder(terminal.expression, current_val)
+      found_var = next_var("__found")
+      ex_var = next_var("__ex")
+
+      # var __found = false
+      found_init = AST::Literal.new(token, :BOOLEAN, false)
+      found_init.full_type = :Bool
+      found_decl = AST::VarDecl.new(token, found_var, nil, found_init, true)
+      found_decl.full_type = :Bool
+      found_decl.storage = :stack
+      found_decl.slot_size = 1
+      found_decl.instance_variable_set(:@var_used, true)
+
+      # Inner loop over result: for existing in res { if key == existing_key { found = true; break } }
+      ex_ident = AST::Identifier.new(token, ex_var)
+      ex_key = replace_placeholder(terminal.expression, ex_ident)
+
+      found_ident = AST::Identifier.new(token, found_var)
+      set_found = AST::Assignment.new(token, found_ident.dup, AST::Literal.new(token, :BOOLEAN, true))
+      set_found.full_type = :Void
+
+      eq_check = AST::BinaryOp.new(token, key_expr.dup, :EQ, ex_key)
+      eq_check.full_type = :Bool
+
+      inner_if = AST::IfStatement.new(token, eq_check, [set_found, AST::BreakNode.new(token)], nil)
+      inner_if.full_type = :Void
+
+      inner_foreach = AST::ForEach.new(token, ex_var, res_ident.dup, [inner_if], nil, false)
+      inner_foreach.full_type = :Void
+      inner_foreach.instance_variable_set(:@var_used, true)
+
+      # if !found { res.append(item) }
+      append = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
+      append.full_type = :Void
+      append.zig_pattern = STD_LIB["append"][:zig]
+
+      not_found = AST::UnaryOp.new(token, :NOT, found_ident.dup)
+      not_found.full_type = :Bool
+      outer_if = AST::IfStatement.new(token, not_found, [append], nil)
+      outer_if.full_type = :Void
+
+      [found_decl, inner_foreach, outer_if]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])

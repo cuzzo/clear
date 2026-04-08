@@ -2690,7 +2690,7 @@ private
   # the transpiler. This method is now only reached for:
   #   - Pool, sharded, and SOA sources (all operators)
   #   - CONCURRENT/SHARD (all source types)
-  #   - INDEX, ORDER_BY, LIMIT, SKIP, UNNEST, DISTINCT, WINDOW, JOIN (all sources)
+  #   - INDEX, ORDER_BY, LIMIT, SKIP, WINDOW, JOIN (all sources)
   #   - Function pipes on pool/sharded/SOA sources
   def transpile_Smooth(node)
     lhs = node.left
