@@ -258,7 +258,13 @@ class SchemeTranspiler
     when AST::CapabilityWrap
       # VM ignores capabilities - emit inner value
       emit(node.value)
+    when AST::UnionVariantLit
+      vals = node.fields.values.map { |v| emit(v) }
+      payload = vals.length == 1 ? vals.first : "(vector #{vals.join(' ')})"
+      "(cons (quote #{node.variant_name}) #{payload})"
     when AST::Copy
+      emit(node.value)
+    when AST::CopyNode
       emit(node.value)
     when AST::MoveNode
       # GIVE transfers ownership - identity in VM (GC handles lifetime)
@@ -284,6 +290,30 @@ class SchemeTranspiler
         end
       }
       "(begin #{branches.join(' ')})"
+    when AST::ThenChain
+      # Sequential evaluation: each step optionally binds a name
+      parts = node.steps.map do |step|
+        expr = emit(step[:expr])
+        if step[:binding]
+          "(define #{step[:binding]} #{expr})"
+        else
+          expr
+        end
+      end
+      parts.length == 1 ? parts[0] : "(begin #{parts.join(' ')})"
+    when AST::TestBlock
+      # Run setup + each WHEN's setup + each TEST THAT body sequentially
+      parts = node.setup.map { |n| emit(n) }
+      node.whens.each do |w|
+        parts += w.setup.map { |n| emit(n) }
+        w.tests.each { |t| parts += t.body.map { |n| emit(n) } }
+      end
+      "(begin #{parts.join(' ')})"
+    when AST::StaticCall
+      # Type::method(args) -> (Type_method args...)
+      fn = "#{node.type_name.name}_#{node.method_name}"
+      args = node.args.map { |a| emit(a) }
+      args.empty? ? "(#{fn})" : "(#{fn} #{args.join(' ')})"
     when AST::NextExpr
       # NEXT p -> identity (already resolved in sequential mode)
       emit(node.expr)
@@ -692,9 +722,9 @@ class SchemeTranspiler
     when AST::AllOp
       "(list-all #{left} #{emit_pipeline_expr(right.expression)})"
     when AST::EachOp, AST::TapOp
-      "(list-each #{left} #{emit_pipeline_expr(right.expression)})"
+      "(list-each #{left} #{emit_pipeline_expr(right.body)})"
     when AST::SkipOp
-      "(list-skip #{left} #{emit(right.expression)})"
+      "(list-skip #{left} #{emit(right.count)})"
     when AST::TakeWhileOp
       "(list-take-while #{left} #{emit_pipeline_expr(right.expression)})"
     when AST::BinaryOp
