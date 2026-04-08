@@ -796,6 +796,25 @@ FN pairCdr(v: Value) RETURNS Value ->
     RETURN Value.Nil;
 END
 
+FN isTco?(v: Value) RETURNS Bool ->
+    MATCH v START Value.Tco -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN getTcoAst(v: Value) RETURNS Value ->
+    MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoAst;, DEFAULT -> RETURN Value.Nil; END
+    RETURN Value.Nil;
+END
+
+FN getTcoEnv!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
+    MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoEnv;, DEFAULT ->
+        dummy: Id<Env> = pool.insert(Env{ vars: {} });
+        RETURN dummy;
+    END
+    dummy2: Id<Env> = pool.insert(Env{ vars: {} });
+    RETURN dummy2;
+END
+
 FN isError?(v: Value) RETURNS Bool ->
     MATCH v START Value.Error -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
@@ -915,18 +934,13 @@ END
 
 -- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
         Value.List AS listItems ->
             ownedItems: Value[] = GIVE listItems;
-            result = evalList!(ownedItems, envId, pool);
-            MATCH result START
-                Value.Tco AS tco ->
-                    RETURN eval!(COPY tco.tcoAst, tco.tcoEnv, pool);,
-                DEFAULT -> RETURN result;
-            END,
+            RETURN evalList!(ownedItems, envId, pool);,
         Value.Nil -> RETURN Value.Nil;,
         Value.TrueVal -> RETURN Value.TrueVal;,
         Value.FalseVal -> RETURN Value.FalseVal;,
@@ -938,6 +952,18 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
+END
+
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+    MUTABLE result: Value = evalOnce!(GIVE ast, envId, pool);
+    MUTABLE bouncing = isTco?(result);
+    WHILE bouncing DO
+        tcoAst = getTcoAst(result);
+        tcoEnv = getTcoEnv!(result, pool);
+        result = evalOnce!(tcoAst, tcoEnv, pool);
+        bouncing = isTco?(result);
+    END
+    RETURN result;
 END
 
 FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
