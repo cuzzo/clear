@@ -242,7 +242,7 @@ class StaticLeakChecker
       case stmt
       when MIR::Alloc  then allocs[stmt.name] = stmt
       when MIR::Drop   then drops[stmt.name] = stmt
-      when MIR::Promote then promotes[stmt.name] = stmt
+      when MIR::Promote then promotes[stmt.name || :"__container_promote_#{promotes.size}"] = stmt
       when MIR::Return then (stmt.escaped_vars || []).each { |v| escapes << v }
       when MIR::SuppressCleanup then suppresses << stmt.name
       when MIR::ReassignCleanup then reassign_cleanups[stmt.name] = stmt

@@ -473,6 +473,20 @@ SET_METHODS = {
 }.freeze
 
 MAP_METHODS = {
+  "put" => {
+    arity: 2, tag: :map_method, allocates: true,
+    mutates_receiver: true,
+    takes_args: [1],  # value (arg 1) is TAKES
+    validate: ->(node, args, obj_type, error_fn) {
+      key_type = Type.new(args[0].resolved_type)
+      if obj_type.numeric_map?
+        error_fn.call(node, "HashMap.put: key must be a numeric type, got #{args[0].resolved_type}") unless key_type.numeric?
+      else
+        error_fn.call(node, "HashMap.put: key must be a String, got #{args[0].resolved_type}") unless key_type.string?
+      end
+    },
+    return_type: ->(_) { :Void },
+  },
   "delete" => {
     arity: 1, tag: :map_method,
     validate: ->(node, args, obj_type, error_fn) {

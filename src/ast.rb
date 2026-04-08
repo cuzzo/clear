@@ -292,8 +292,6 @@ module AST
     include Locatable
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
-    attr_accessor :map_value_promote  # stamped by MIRPass: { zig_type:, promote_fields: [{field:, elem_zig:}] }
-    attr_accessor :map_put_alloc     # stamped by MIRPass: { key_alloc:, val_alloc: }
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
@@ -380,8 +378,7 @@ module AST
     include Locatable
     attr_accessor :promote_ret_wrap    # :const or :var — set by MIRPass for return wrapping
     attr_accessor :promote_fields_info # { zig_type:, fields: } — struct/union field promotion on __ret
-    attr_accessor :hpt_return_handling # :dupe_string or :promote_return — set by HPT hoisting
-    attr_accessor :hpt_return_type     # Zig type string for :promote_return
+    attr_accessor :hpt_return_promote  # MIR::Promote node — :hpt_string_dupe or :hpt_promote strategy
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"

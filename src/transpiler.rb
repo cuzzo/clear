@@ -989,7 +989,7 @@ private
           end
           return "#{pre_cleanup}#{target}.#{field} = #{value};"
         elsif node.name.is_a?(AST::GetIndex)
-          # Check if target is a Map
+          # Check if target is a Map -- delegate to shared transpile_map_put.
           target_node = node.name.target
           if target_node.metatype == :hashmap
              map_ft   = Type.new(target_node.full_type)
@@ -997,66 +997,8 @@ private
              map_ref  = visit(target_node)
              # Auto-deref Arc/Rc-wrapped maps
              map_ref = "#{map_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
-             # Allocator decisions are pre-computed by MIRPass (stamp_map_put_alloc!).
-             mpa = node.map_put_alloc || {}
-             key_ref  = visit(node.name.index)
-             val_ref  = visit(node.value)
              rt_name  = @do_rt_name || "rt"
-
-             if map_ft.numeric_map?
-               alloc = alloc_expr(mpa[:key_alloc] || :frame, rt_name)
-               if map_ft.sharded? || map_ft.striped?
-                 return "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
-               else
-                 key_zig = map_ft.key_type.zig_type
-                 val_zig = map_ft.value_type.zig_type
-                 return "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
-               end
-             else
-               # Shard-direct: putDirect(shard_idx, alloc, key, val) -- no hash, no routing
-               # Key comes from the pre-routed queue, not recomputed from the body expression.
-               if @shard_direct_map && target_node.is_a?(AST::Identifier) && target_node.name == @shard_direct_map
-                 return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
-               end
-               # Allocators pre-computed by MIRPass. The map stores its own
-               # allocator from the first put -- the allocator passed here is
-               # captured by the map and used for all subsequent ops.
-               key_alloc = alloc_expr(mpa[:key_alloc] || :heap, rt_name)
-               val_alloc = alloc_expr(mpa[:val_alloc] || :frame, rt_name)
-               # String literals in map values must be heap-duped (rodata can't be freed)
-               val_ref = heap_dupe_string_literals(val_ref, node.value, rt_name)
-               # Non-Copy union values BORROWED from another owner must be duped --
-               # the source may be cleaned up independently (e.g. list element
-               # stored into a persistent HashMap). Only dupe when the value is
-               # a borrow (identifier, index, field access) -- NOT when it's a
-               # freshly constructed value (struct literal, COPY, inline ctor).
-               val_is_consumed = value_consumed?(node.value)
-               val_is_borrow = node.value.is_a?(AST::Identifier) || node.value.is_a?(AST::GetIndex)
-               if !val_is_consumed && val_is_borrow
-                 val_ti = node.value.type_info rescue nil
-                 if val_ti && @union_schemas&.key?(val_ti.resolved)
-                   schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-                   unless val_ti.implicitly_copyable?(schema_lookup)
-                     zig_t = transpile_type(val_ti)
-                     val_ref = "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
-                   end
-                 end
-               end
-               # Map value promotion: list fields pre-computed by MIRPass stamp.
-               mvp = node.map_value_promote
-               if mvp
-                 @map_val_counter ||= 0
-                 @map_val_counter += 1
-                 tmp = "__map_val_#{@map_val_counter}"
-                 promote_calls = mvp[:promote_fields].map { |pf|
-                   "try CheatLib.promoteList(#{pf[:elem_zig]}, #{rt_name}, &#{tmp}.#{pf[:field]});"
-                 }.join("\n")
-                 code = "var #{tmp}: #{mvp[:zig_type]} = #{val_ref};\n#{promote_calls}\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
-               else
-                 code = "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
-               end
-               return code
-             end
+             return transpile_map_put(map_ref, map_ft, node.name.index, node.value, rt_name)
           end
           arr_ref = visit(target_node)
           idx_ref = visit(node.name.index)
@@ -2241,17 +2183,20 @@ private
         parts.join("\n")
       elsif node.promote_ret_wrap == :const
         "const __ret = #{val_code};\nreturn __ret;"
-      elsif node.hpt_return_handling == :dupe_string
-        # Return string borrows from HPT heap data. Dupe to frame before HPT defer runs.
-        ["var __hpt_ret: []const u8 = #{val_code};",
-         "__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);",
-         "return __hpt_ret;"].join("\n")
-      elsif node.hpt_return_handling == :promote_return
-        # Return value aliases HPT heap data. Deep-copy before HPT defer runs.
-        zig_t = node.hpt_return_type || "UNKNOWN"
-        ["var __hpt_ret: #{zig_t} = #{val_code};",
-         "try CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);",
-         "return __hpt_ret;"].join("\n")
+      elsif node.hpt_return_promote
+        # HPT return: MIR::Promote node drives the dupe/promote decision.
+        mir = node.hpt_return_promote
+        case mir.strategy
+        when :hpt_string_dupe
+          ["var __hpt_ret: []const u8 = #{val_code};",
+           "__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);",
+           "return __hpt_ret;"].join("\n")
+        when :hpt_promote
+          zig_t = mir.zig_type
+          ["var __hpt_ret: #{zig_t} = #{val_code};",
+           "try CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);",
+           "return __hpt_ret;"].join("\n")
+        end
       elsif needs_string_dupe && node.value
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
@@ -2399,21 +2344,11 @@ private
       "CheatLib.#{func}(#{base}, #{inner})"
 
     when AST::MoveNode
-      # MOVE expr — if it's an identifier, set the moved flag and return the value.
-      # This ensures GIVE f; as a statement correctly suppresses the local defer.
+      # GIVE/MOVE expr — move suppression is handled by MIR::SuppressCleanup
+      # inserted after the consuming statement by MIRPass.
       if node.value.is_a?(AST::Identifier)
-        safe_name = zig_safe_name(node.value.name)
-        # Only emit _moved = true when the moved_guard_info says so.
-        # Copy types (e.g., unions with only primitive variants) have no cleanup
-        # entry, so no _moved variable exists — just pass the value directly.
-        fn_name = current_tp_ctx&.fn_name
-        if @moved_guard_info&.dig(fn_name, node.value.name)
-          "blk: { #{safe_name}_moved = true; break :blk #{safe_name}; }"
-        else
-          safe_name
-        end
+        zig_safe_name(node.value.name)
       else
-        # GIVE expr (non-identifier): ownership transfers to callee.
         visit(node.value)
       end
 
@@ -2685,14 +2620,21 @@ private
 
     when MIR::Promote
       rt_name = @do_rt_name || "rt"
-      vname = zig_safe_name(node.name)
       case node.strategy
+      when :container_store
+        # Signals that the NEXT statement's value needs a temp + promote.
+        # Consumed by the Assignment handler in the map put path.
+        @pending_container_promote = { zig_type: node.zig_type }
+        nil
       when :list
+        vname = zig_safe_name(node.name)
         elem = node.zig_type[/ArrayListUnmanaged\((.+)\)/, 1]
         "try CheatLib.promoteList(#{elem}, #{rt_name}, &#{vname});"
       when :string_map
+        vname = zig_safe_name(node.name)
         "#{vname}.alloc = #{rt_name}.heapAlloc();"
       when :generic
+        vname = zig_safe_name(node.name)
         "try CheatLib.promote(#{node.zig_type}, #{rt_name}, &#{vname});"
       end
 
@@ -3194,7 +3136,8 @@ private
     "#{label}: {\n            var #{var} = #{zig_init};\n            #{puts_stmts}\n            break :#{label} #{var};\n        }"
   end
 
-  # Emits Zig for map.delete / map.contains / map.count / map.keys / map.values.
+  # Emits Zig for all HashMap methods: put, delete, contains, count, keys, values.
+  # map.put(key, value) is also called for `map[key] = value` syntax via transpile_map_put.
   def transpile_map_method(node)
     obj_code = visit(node.object)
     rt_name  = @do_rt_name || "rt"
@@ -3202,6 +3145,11 @@ private
     # Auto-deref Arc-wrapped maps: map.ctrl.data.* gives the inner map.
     obj_ti = node.object.type_info
     obj_code = "#{obj_code}.ctrl.data.*" if obj_ti&.shared? || obj_ti&.multiowned?
+
+    # map.put(key, value) — stdlib-driven map put.
+    if node.map_method == :put
+      return transpile_map_put(obj_code, map_ft, node.args[0], node.args[1], rt_name)
+    end
 
     # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
     if !map_ft.numeric_map?
@@ -3263,6 +3211,63 @@ private
         "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
       when :values
         "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
+      end
+    end
+  end
+
+  # Shared map put implementation for both `map[k] = v` (Assignment) and `map.put(k, v)` (MethodCall).
+  # Allocator selection is computed from the map's type — no stamps needed.
+  def transpile_map_put(map_ref, map_ft, key_node, val_node, rt_name)
+    key_ref = visit(key_node)
+    val_ref = visit(val_node)
+
+    if map_ft.numeric_map?
+      alloc_sym = (map_ft.escaped_return || map_ft.heap_provenance? || map_ft.sharded? || map_ft.striped?) ? :heap : :frame
+      alloc = alloc_expr(alloc_sym, rt_name)
+      if map_ft.sharded? || map_ft.striped?
+        "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
+      else
+        key_zig = map_ft.key_type.zig_type
+        val_zig = map_ft.value_type.zig_type
+        "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
+      end
+    else
+      # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing.
+      if @shard_direct_map && key_node.respond_to?(:name) && map_ref.include?(@shard_direct_map.to_s)
+        return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
+      end
+
+      key_alloc = alloc_expr(:heap, rt_name)
+      val_alloc_sym = (map_ft.sharded? || map_ft.striped?) ? :heap : :frame
+      val_alloc = alloc_expr(val_alloc_sym, rt_name)
+
+      # String literals in map values must be heap-duped (rodata can't be freed).
+      val_ref = heap_dupe_string_literals(val_ref, val_node, rt_name)
+
+      # Non-Copy union values BORROWED from another owner must be duped.
+      val_is_consumed = value_consumed?(val_node)
+      val_is_borrow = val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
+      if !val_is_consumed && val_is_borrow
+        val_ti = val_node.type_info rescue nil
+        if val_ti && @union_schemas&.key?(val_ti.resolved)
+          schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+          unless val_ti.implicitly_copyable?(schema_lookup)
+            zig_t = transpile_type(val_ti)
+            val_ref = "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
+          end
+        end
+      end
+
+      # Container promotion: MIR::Promote with :container_store consumed via @pending_container_promote.
+      cp = @pending_container_promote
+      @pending_container_promote = nil
+      if cp
+        @container_promote_counter ||= 0
+        @container_promote_counter += 1
+        tmp = "__cp_#{@container_promote_counter}"
+        "var #{tmp}: #{cp[:zig_type]} = #{val_ref};\ntry CheatLib.promote(#{cp[:zig_type]}, #{rt_name}, &#{tmp});\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
+      else
+        "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
       end
     end
   end

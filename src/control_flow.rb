@@ -718,13 +718,16 @@ class MIRPass
       if stmt.is_a?(AST::ReturnNode)
         insert_return!(result, stmt, bindings)
         insert_promotion!(result, stmt, promo)
+        # HPT return promotion: insert MIR::Promote for checker verification.
+        result << stmt.hpt_return_promote if stmt.hpt_return_promote
       end
 
-      # Stamp cleanup info on reassignment / match-as / map-put nodes.
+      # Stamp cleanup info on reassignment / match-as nodes.
       stamp_reassign_cleanup!(stmt, bindings)
       stamp_match_as_cleanup!(stmt, bindings)
-      stamp_map_value_promote!(stmt)
-      stamp_map_put_alloc!(stmt)
+
+      # Insert MIR::Promote before container stores that need frame-to-heap promotion.
+      insert_container_promote!(result, stmt)
 
       # Emit the original statement.
       result << stmt
@@ -893,9 +896,10 @@ class MIRPass
   end
 
   # Collect names of bindings consumed by a statement.
-  # Two consumption paths:
+  # Three consumption paths:
   #   1. Direct RHS: identifier used as value in assignment/declaration
-  #   2. Nested: identifier passed as TAKES/GIVE arg or used as struct field
+  #   2. Standalone GIVE: `GIVE x;` as a statement
+  #   3. Nested: identifier passed as TAKES/GIVE arg or used as struct field
   def collect_consumed_names(stmt, bindings)
     names = Set.new
 
@@ -911,6 +915,11 @@ class MIRPass
       is_move = rhs.is_a?(AST::MoveNode)
       ident = is_move ? rhs.value : rhs
       add_if_consumed(ident, names, bindings, is_move) if ident.is_a?(AST::Identifier)
+    end
+
+    # 2. Standalone GIVE: `GIVE x;` as a bare statement
+    if stmt.is_a?(AST::MoveNode) && stmt.value.is_a?(AST::Identifier)
+      add_if_consumed(stmt.value, names, bindings, true)
     end
 
     # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
@@ -1022,60 +1031,41 @@ class MIRPass
     src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry[:needs_cleanup]
   end
 
-  # Stamp map_value_promote on Assignment nodes where a struct value with
-  # list fields is stored into a HashMap. The list backing must be promoted
-  # from frame to heap before the put.
-  def stamp_map_value_promote!(stmt)
+  # Insert MIR::Promote before indexed Assignment nodes where the container's
+  # INDEX_OPS :set has takes_value and the value type needs frame-to-heap
+  # promotion. Driven by the INDEX_OPS registry in std_lib.rb.
+  def insert_container_promote!(result, stmt)
     return unless stmt.is_a?(AST::Assignment)
     return unless stmt.name.is_a?(AST::GetIndex)
     target_node = stmt.name.target
-    return unless target_node.respond_to?(:metatype) && target_node.metatype == :hashmap
 
+    # Look up the INDEX_OPS :set entry for this container type.
+    target_ti = target_node.type_info rescue nil
+    target_ti = Type.new(target_ti) if target_ti && !target_ti.is_a?(Type)
+    set_op = resolve_container_set_op(target_ti)
+    return unless set_op && set_op[:takes_value]
+
+    # Check if the value type needs frame-to-heap promotion.
     val_ti = stmt.value.type_info rescue nil
     return unless val_ti
     val_ti = Type.new(val_ti) if val_ti && !val_ti.is_a?(Type)
-    val_type_sym = val_ti.respond_to?(:resolved) ? val_ti.resolved : nil
-    return unless val_type_sym
+    return unless val_ti.needs_promotion?(@schema_lookup)
 
-    schema = @schema_lookup.call(val_type_sym) rescue nil
-    return unless schema.is_a?(Hash) && !schema[:kind]
-
-    promote_fields = schema.filter_map do |k, v|
-      next if k.is_a?(Symbol)
-      ft = v.is_a?(Hash) ? Type.new(v[:type] || :Any) : Type.new(v || :Any)
-      next unless ft.list_collection?
-      { field: k.to_s, elem_zig: Type.new(ft.element_type).zig_type }
-    end
-    return if promote_fields.empty?
-
-    stmt.map_value_promote = {
-      zig_type: val_ti.zig_type,
-      promote_fields: promote_fields
-    }
+    result << MIR::Promote.new(stmt.token, nil, val_ti.zig_type, :container_store, nil)
   end
 
-  # Stamp map_put_alloc on Assignment nodes that store into a HashMap.
-  # Pre-computes allocator decisions so the transpiler is mechanical.
-  #   key_alloc: :heap (StringMap owns key memory) or :frame (numeric maps)
-  #   val_alloc: :heap (sharded/striped) or :frame (frame-local maps)
-  def stamp_map_put_alloc!(stmt)
-    return unless stmt.is_a?(AST::Assignment)
-    return unless stmt.name.is_a?(AST::GetIndex)
-    target_node = stmt.name.target
-    return unless target_node.respond_to?(:metatype) && target_node.metatype == :hashmap
-
-    map_ft = target_node.full_type
-    map_ft = Type.new(map_ft) if map_ft && !map_ft.is_a?(Type)
-    return unless map_ft
-
-    if map_ft.numeric_map?
-      alloc = (map_ft.escaped_return || map_ft.heap_provenance? || map_ft.sharded? || map_ft.striped?) ? :heap : :frame
-      stmt.map_put_alloc = { key_alloc: alloc, val_alloc: alloc }
-    else
-      val_alloc = (map_ft.sharded? || map_ft.striped?) ? :heap : :frame
-      stmt.map_put_alloc = { key_alloc: :heap, val_alloc: val_alloc }
-    end
+  # Resolve the INDEX_OPS :set entry for a container type.
+  def resolve_container_set_op(type_info)
+    return nil unless type_info
+    kind = if type_info.numeric_map? then :numeric_map
+           elsif type_info.map? then :string_map
+           elsif type_info.pool? then :pool
+           elsif type_info.array? || type_info.list_collection? then :array
+           end
+    return nil unless kind
+    INDEX_OPS.dig(kind, :set)
   end
+
 
   # Build moved_guard_info: { var_name => bool } for all bindings.
   def stamp_moved_guard_info!(fn, bindings)
@@ -1338,11 +1328,12 @@ class MIRPass
     classify_ti = (ti.error_union? && ti.payload_type) ? ti.payload_type : ti
 
     # Detect return_handling: return value may borrow from this HPT's heap data.
+    # Insert MIR::Promote before the ReturnNode so the checker can verify.
     if stmt_node.is_a?(AST::ReturnNode)
       ret_ti = stmt_node.value&.type_info rescue nil
       ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
       if ret_ti&.string?
-        stmt_node.hpt_return_handling = :dupe_string
+        stmt_node.hpt_return_promote = MIR::Promote.new(stmt_node.token, nil, "[]const u8", :hpt_string_dupe, nil)
       elsif ret_ti
         resolved = ret_ti.resolved
         ret_schema = @schema_lookup.call(resolved) rescue nil
@@ -1358,8 +1349,8 @@ class MIRPass
           false
         end
         if needs_promo
-          stmt_node.hpt_return_handling = :promote_return
-          stmt_node.hpt_return_type = Type.new(resolved).zig_type
+          zig_t = Type.new(resolved).zig_type
+          stmt_node.hpt_return_promote = MIR::Promote.new(stmt_node.token, nil, zig_t, :hpt_promote, nil)
         end
       end
     end
