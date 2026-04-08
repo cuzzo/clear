@@ -255,7 +255,7 @@ when 'build'
   puts "Built: #{output_path}"
 
   # Post-build stack verification
-  if stack_check && File.exist?(output_path) && pkg_requires.empty?
+  if stack_check && File.exist?(output_path) && File.read(source).scan(/REQUIRE\s+"pkg:([^"]+)"/).empty?
     require_relative 'src/stack_verifier'
     require_relative 'src/transpiler'
 
