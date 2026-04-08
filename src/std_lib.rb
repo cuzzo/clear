@@ -17,6 +17,7 @@ STD_LIB = {
     zig: "try {0}.append({alloc}, {1})",
     narrows_collection: true,  # narrows Any[] element type from arg 1
     allocates: true,
+    alloc: :receiver_storage,
     mutates_receiver: true,
   },
 
@@ -38,10 +39,10 @@ STD_LIB = {
   # 2. String.substr(start, len)
   "substr" => {
     args: [STRING_TYPE, :Int64, :Int64],
-    return: STRING_TYPE, return_alloc: :frame, # Returns new string on heap
-    # Call runtime helper: rt.substr(allocator, str, start, len)
+    return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # 3. String Equality
@@ -60,8 +61,8 @@ STD_LIB = {
 
   # toString() (Overloaded)
   "toString" => [
-    { args: [:Int64],   return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, {0})", allocates: true },
-    { args: [:Float64], return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", allocates: true },
+    { args: [:Int64],   return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, {0})", allocates: true, alloc: :node_storage },
+    { args: [:Float64], return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", allocates: true, alloc: :node_storage },
     { args: [STRING_TYPE], return: STRING_TYPE, return_alloc: :frame, zig: "{0}" }
   ],
 
@@ -82,7 +83,7 @@ STD_LIB = {
     { args: [STRING_TYPE, :Int64],
       return: STRING_TYPE, return_alloc: :frame,
       zig: "try CheatLib.charAtCodepoint({alloc}, {0}, {1})",
-      allocates: true },
+      allocates: true, alloc: :node_storage },
   ],
 
   # codepointCount(string) → Int64 — number of Unicode codepoints (O(n))
@@ -119,6 +120,7 @@ STD_LIB = {
     return: STRING_TYPE, return_alloc: :heap,
     zig: "try CheatLib.readFile({alloc}, {0})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # 5. Write File
@@ -131,18 +133,20 @@ STD_LIB = {
 
   # 6. Split (String -> String[])
   "split" => {
-    args: [STRING_TYPE, STRING_TYPE], # str, delimiter
-    return: :"String[]",         # Returns a Heap List of Strings
+    args: [STRING_TYPE, STRING_TYPE],
+    return: :"String[]",
     zig: "try CheatLib.split({alloc}, {0}, {1})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # 7. Join (String[] -> String)
   "join" => {
-    args: [:"String[]", STRING_TYPE], # list, delimiter
+    args: [:"String[]", STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.join({alloc}, {0}, {1})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   "trim" => {
@@ -178,7 +182,8 @@ STD_LIB = {
     args: [STRING_TYPE, STRING_TYPE, STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringReplace({alloc}, {0}, {1}, {2})",
-    allocates: true
+    allocates: true,
+    alloc: :node_storage,
   },
 
   # lowercase("Hello") -> "hello"
@@ -186,7 +191,8 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringLowercase({alloc}, {0})",
-    allocates: true
+    allocates: true,
+    alloc: :node_storage,
   },
 
   # uppercase("Hello") -> "HELLO"
@@ -194,7 +200,8 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringUppercase({alloc}, {0})",
-    allocates: true
+    allocates: true,
+    alloc: :node_storage,
   },
 
   # contains?("hello", "ll") -> true
@@ -245,9 +252,10 @@ STD_LIB = {
 
   "shell" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE, return_alloc: :frame, # Returns %String (Heap String)
+    return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.shell({alloc}, {0})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # Read all bytes from an open File resource into a heap-allocated String.
@@ -257,6 +265,7 @@ STD_LIB = {
     return: STRING_TYPE, return_alloc: :heap,
     zig: "try CheatLib.fileReadAll({alloc}, {0})",
     allocates: true,
+    alloc: :heap,
   },
 
   # Write a String to an open writable File resource (created via File::create).
@@ -275,6 +284,7 @@ STD_LIB = {
     return: :"String[]",
     zig: "try CheatLib.listDir({alloc}, {0})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # List ALL entries (files + directories) with type prefix ("f:" or "d:").
@@ -284,6 +294,7 @@ STD_LIB = {
     return: :"String[]",
     zig: "try CheatLib.listAll({alloc}, {0})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # Get file size in bytes. Returns -1 on error.
@@ -325,6 +336,7 @@ STD_LIB = {
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.socketRead({alloc}, {0})",
     allocates: true,
+    alloc: :node_storage,
   },
 
   # Write a String to a connected TCP client.

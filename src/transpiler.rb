@@ -2932,38 +2932,11 @@ private
     #    {0} -> args_zig[0], {1} -> args_zig[1]
     pattern = node.zig_pattern
 
-    #    {alloc} -> determine allocator automatically
-    #    For method calls, use the object's storage (not the result's storage)
+    #    {alloc} -> resolve from :alloc symbol declared in STD_LIB entry
     if pattern.include?("{alloc}")
-      # Sharded lists are shared across fibers — must stay heap-backed.
-      # Regular @list uses the frame arena (CheatArena grows dynamically via heap pages).
-      # @pool is always heap (explicit location: :heap set in annotator).
-      first_arg_type = node.respond_to?(:args) ? node.args&.first&.type_info : nil
-      force_heap = if node.is_a?(AST::MethodCall)
-        node.object.respond_to?(:type_info) &&
-          (node.object.type_info&.pool? || node.object.type_info&.sharded?)
-      else
-        first_arg_type&.pool? || first_arg_type&.sharded?
-      end
-      target_storage = if force_heap
-        :heap
-      elsif node.respond_to?(:storage) && node.storage == :heap
-        # Escape promotion: annotator explicitly set this node to heap.
-        :heap
-      elsif node.is_a?(AST::MethodCall) && node.object.respond_to?(:storage)
-        node.object.storage
-      elsif !node.is_a?(AST::MethodCall) && first_arg_type&.list_collection? &&
-            node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        # For list mutations (function-form append(list, val)), use the list arg's
-        # storage. Read-only list operations (join, etc.) fall through to node.storage
-        # so they produce frame-allocated output, not heap-allocated.
-        node.args&.first&.respond_to?(:storage) ? (node.args.first.storage || :stack) : :stack
-      else
-        node.storage
-      end
       rt_ref = @do_rt_name || "rt"
-      alloc = target_storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
-      pattern = pattern.gsub("{alloc}", alloc)
+      alloc_sym = node.matched_stdlib_def&.dig(:alloc) || :node_storage
+      pattern = pattern.gsub("{alloc}", resolve_alloc_for_intrinsic(alloc_sym, node, rt_ref))
     end
 
     args_zig.each_with_index do |val, i|
@@ -3249,6 +3222,35 @@ private
     when :receiver_storage
       needs_heap = receiver_type.escaped_return || receiver_type.heap_provenance? ||
                    receiver_type.sharded? || receiver_type.striped?
+      alloc_expr(needs_heap ? :heap : :frame, rt_name)
+    else
+      alloc_expr(:frame, rt_name)
+    end
+  end
+
+  # Resolve an allocator symbol for a STD_LIB intrinsic call.
+  # Reads the :alloc field from the matched stdlib def.
+  def resolve_alloc_for_intrinsic(sym, node, rt_name)
+    case sym
+    when :heap  then alloc_expr(:heap, rt_name)
+    when :frame then alloc_expr(:frame, rt_name)
+    when :node_storage
+      kind = (node.respond_to?(:storage) && node.storage == :heap) ? :heap : :frame
+      alloc_expr(kind, rt_name)
+    when :receiver_storage
+      ti = if node.is_a?(AST::MethodCall)
+        node.object.type_info rescue nil
+      else
+        node.args&.first&.type_info rescue nil
+      end
+      needs_heap = ti&.pool? || ti&.sharded? || ti&.heap_provenance?
+      needs_heap ||= (node.respond_to?(:storage) && node.storage == :heap)
+      # Check receiver/first-arg node storage (annotator sets :heap on escape-promoted nodes).
+      needs_heap ||= if node.is_a?(AST::MethodCall)
+        node.object.respond_to?(:storage) && node.object.storage == :heap
+      elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver
+        node.args&.first&.respond_to?(:storage) && node.args.first.storage == :heap
+      end
       alloc_expr(needs_heap ? :heap : :frame, rt_name)
     else
       alloc_expr(:frame, rt_name)
