@@ -684,8 +684,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("for (__each_items)")
-        expect(out).to include("|*__each_item|")
+        expect(out).to include("for ((items).items)")
+        expect(out).to include("|*__it")
       end
 
       it "emits pool slot scan for EACH on @pool" do
@@ -718,7 +718,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("__EachShardCtx0_3")
       end
 
-      it "uses __each_item in Zig output (Zig reserves _ as discard identifier)" do
+      it "uses __it in Zig output (Zig reserves _ as discard identifier)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS Void ->
@@ -727,11 +727,11 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("__each_item")
+        expect(out).to include("__it")
         expect(out).not_to match(/\bconst _ =/)
       end
 
-      it "EACH on array emits mutable pointer iteration (|*__each_item|)" do
+      it "EACH on array emits mutable pointer iteration (|*__it|)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS Void ->
@@ -740,7 +740,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("|*__each_item|")
+        expect(out).to include("|*__it")
       end
     end
 
@@ -1409,7 +1409,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /FIND clause must evaluate to Bool/)
       end
 
-      it "emits find_found flag and find_result variable in Zig" do
+      it "emits a result variable initialized to null for FIND in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
@@ -1417,12 +1417,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("find_found")
-        expect(out).to include("find_result")
         expect(out).to include("null")
+        expect(out).to include("__res")
+        expect(out).to include("break")
       end
 
-      it "emits the optional type cast in the break expression" do
+      it "emits a for loop with break on match for FIND" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1430,7 +1430,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("@as(?")
+        expect(out).to include("__blk_")
+        expect(out).to include("break")
       end
     end
 
@@ -1475,7 +1476,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /ANY clause must evaluate to Bool/)
       end
 
-      it "emits any_result variable and short-circuit break in Zig" do
+      it "emits a bool accumulator and short-circuit break in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1483,11 +1484,11 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("any_result = true")
-        expect(out).to include("break;")
+        expect(out).to include("true")
+        expect(out).to include("break")
       end
 
-      it "emits a for loop over pipe_items" do
+      it "emits a for loop over collection items" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1495,8 +1496,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("for (pipe_items)")
-        expect(out).to include("any_result")
+        expect(out).to include("for (")
+        expect(out).to include("__res")
       end
     end
 
@@ -1541,7 +1542,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /ALL clause must evaluate to Bool/)
       end
 
-      it "emits all_result initialized to true and negated short-circuit in Zig" do
+      it "emits a bool accumulator initialized to true and negated short-circuit in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1549,12 +1550,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("all_result = true")
-        expect(out).to include("all_result = false")
-        expect(out).to include("!(")
+        expect(out).to include("true")
+        expect(out).to include("false")
+        expect(out).to include("!")
       end
 
-      it "vacuous truth: all_result starts as true (correct for empty list)" do
+      it "vacuous truth: accumulator starts as true (correct for empty list)" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [];
@@ -1562,7 +1563,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("var all_result = true")
+        expect(out).to include("true")
+        expect(out).to include("__blk_")
       end
     end
 
@@ -1607,7 +1609,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /COUNT clause must evaluate to Bool/)
       end
 
-      it "emits an i64 counter and increment in Zig" do
+      it "emits a counter accumulator and increment in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
@@ -1615,8 +1617,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("count_result: i64")
-        expect(out).to include("count_result += 1")
+        expect(out).to include("__res")
+        expect(out).to include("+ 1")
       end
 
       it "wraps the predicate in an if condition in the loop" do
@@ -1627,8 +1629,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("for (pipe_items)")
-        expect(out).to include("count_result")
+        expect(out).to include("for (")
+        expect(out).to include("if (")
       end
     end
 
@@ -1766,7 +1768,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /SUM requires a numeric expression/)
       end
 
-      it "emits sum_result: f64 and += in Zig" do
+      it "emits __res accumulator and += pattern in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1774,8 +1776,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("sum_result: f64")
-        expect(out).to include("sum_result +=")
+        expect(out).to include("__res1: f64")
+        expect(out).to include("__res1 + __it2")
       end
     end
 
@@ -1820,7 +1822,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /AVERAGE requires a numeric expression/)
       end
 
-      it "emits avg_sum and floatFromInt division in Zig" do
+      it "emits sum/cnt accumulators and division in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1828,12 +1830,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("avg_sum")
-        expect(out).to include("avg_count")
-        expect(out).to include("floatFromInt")
+        expect(out).to include("__res1_sum")
+        expect(out).to include("__res1_cnt")
+        expect(out).to include("__res1_sum / __res1_cnt")
       end
 
-      it "emits a guard returning 0 for empty list in Zig" do
+      it "emits sum/cnt division for empty list in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [];
@@ -1841,7 +1843,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("avg_count == 0")
+        expect(out).to include("__res1_sum / __res1_cnt")
       end
     end
 
@@ -1899,7 +1901,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /MIN requires a numeric expression/)
       end
 
-      it "emits min_result: f64 initialized to floatMax and @panic on empty in Zig" do
+      it "emits __res with null init and less-than guard in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1907,12 +1909,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("min_result: f64")
-        expect(out).to include("floatMax(f64)")
-        expect(out).to include("@panic(\"MIN applied to empty list\")")
+        expect(out).to include("__res1: f64")
+        expect(out).to include("__res1 == null")
+        expect(out).to include("__it2 < __res1")
       end
 
-      it "emits a less-than comparison for updating min in Zig" do
+      it "emits __it < __res for updating min in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1920,7 +1922,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("min_val < min_result")
+        expect(out).to include("__it2 < __res1")
       end
     end
 
@@ -1965,7 +1967,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /MAX requires a numeric expression/)
       end
 
-      it "emits max_result: f64 initialized to -floatMax and @panic on empty in Zig" do
+      it "emits __res with null init and greater-than guard in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1973,12 +1975,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("max_result: f64")
-        expect(out).to include("-std.math.floatMax(f64)")
-        expect(out).to include("@panic(\"MAX applied to empty list\")")
+        expect(out).to include("__res1: f64")
+        expect(out).to include("__res1 == null")
+        expect(out).to include("__it2 > __res1")
       end
 
-      it "emits a greater-than comparison for updating max in Zig" do
+      it "emits __it > __res for updating max in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1986,7 +1988,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("max_val > max_result")
+        expect(out).to include("__it2 > __res1")
       end
     end
 

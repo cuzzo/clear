@@ -14,7 +14,7 @@ class PipelineRewriter
   TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
                    AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
 
-  def initialize(annotator)
+  def initialize(annotator = nil)
     @annotator = annotator
     @var_counter = 0
   end
@@ -22,13 +22,14 @@ class PipelineRewriter
   def rewrite!(node)
     return node unless node
 
-    # Recursive walk first so nested pipelines are handled before outer ones.
-    rewrite_children!(node)
-
+    # Handle SMOOTH nodes BEFORE recursing into children.
+    # This preserves pipeline chains (a s> WHERE s> SELECT s> SUM)
+    # so collect_chain can discover and fuse them into a single loop.
     if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
       return rewrite_pipeline(node)
     end
 
+    rewrite_children!(node)
     node
   end
 
@@ -90,32 +91,49 @@ class PipelineRewriter
     source = node.left
     rhs = node.right
 
-    # Collect the chain FIRST
+    # Collect the chain FIRST (before any recursive rewriting).
     chain = collect_chain(node)
     stages = chain[:stages]
     terminal = chain[:terminal]
     real_source = chain[:source]
 
+    # Rewrite the source (it may contain nested pipelines in non-chain positions).
+    # real_source is the non-SMOOTH root of the chain; safe to rewrite recursively.
+    real_source = rewrite!(real_source)
+
+    # Skip rewriting for pool, sharded, and SOA sources — these need special
+    # iteration patterns (alive checks, shard loops, field-slice access) that
+    # the transpiler's pipeline_generator handles at the Zig level.
+    if needs_transpiler_pipeline?(real_source)
+      # Re-attach the rewritten source into the original SMOOTH chain
+      patch_chain_source!(node, real_source)
+      return node
+    end
+
     # CASE 1: Fusion candidate (chained fusible stages or ending in a fold/EachOp)
     is_fold = terminal.nil? || terminal.is_a?(AST::EachOp) || TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
-    
+
     if stages.any? || (is_fold && terminal)
       if is_fold
         return fuse_pipeline(node, real_source, stages, terminal)
       else
         # Fusion chain ending in a standard function call.
-        # Fuse the stages first into a loop that produces a list, 
+        # Fuse the stages first into a loop that produces a list,
         # then pipe that list to the terminal function.
         fused_loop = fuse_pipeline(node, real_source, stages, nil)
-        
+
         # Create a new SMOOTH node for the terminal call
         outer_smooth = AST::BinaryOp.new(node.token, fused_loop, :SMOOTH, terminal.dup)
         outer_smooth.full_type = node.full_type
         outer_smooth.storage   = node.storage
-        
+
         return rewrite_pipeline(outer_smooth)
       end
     end
+
+    # For non-chain cases, source = node.left which may itself be a SMOOTH.
+    # real_source was already rewritten above; use it as the rewritten source.
+    source = real_source
 
     # CASE 2: x s> f(y) -> f(x, y) or f(try x, y)
     needs_try = source.respond_to?(:full_type) && source.full_type && Type.new(source.full_type).error_union?
@@ -438,6 +456,24 @@ class PipelineRewriter
 
   def schema_lookup
     @schema_lookup ||= ->(name) { @annotator&.lookup_type_schema(name) }
+  end
+
+  # Returns true if the source requires the transpiler's pipeline_generator
+  # (pool, sharded, or SOA collections need special iteration patterns).
+  def needs_transpiler_pipeline?(source)
+    ti = source.respond_to?(:type_info) ? source.type_info : nil
+    return false unless ti
+    ti.pool? || ti.soa? || ti.sharded?
+  end
+
+  # Walk the left-spine of SMOOTH nodes and replace the deepest source.
+  # Used when the rewriter skips a pipeline but has already rewritten the source.
+  def patch_chain_source!(node, new_source)
+    cursor = node
+    while cursor.left.is_a?(AST::BinaryOp) && cursor.left.op == :SMOOTH
+      cursor = cursor.left
+    end
+    cursor.left = new_source
   end
 
   def replace_named_placeholder(node, name, replacement)

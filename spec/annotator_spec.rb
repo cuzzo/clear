@@ -3627,7 +3627,7 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(zig).to include("for (nums.items) |n|")
+      expect(zig).to include("for ((nums).items) |n|")
     end
 
     it "rejects non-collection FOR IN" do
