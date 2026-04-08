@@ -648,7 +648,8 @@ class MIRPass
 
     fn.has_promotion = true if promo
 
-    return unless has_bindings || promo
+    has_bg_escapes = body_has_bg_escape_promotes?(fn.body)
+    return unless has_bindings || promo || has_bg_escapes
 
     # Use dataflow analysis to tighten has_moved_guard decisions.
     # The classifier conservatively sets has_moved_guard=true for all non-trivial
@@ -734,6 +735,9 @@ class MIRPass
 
       # Insert MIR::Promote before container stores that need frame-to-heap promotion.
       insert_container_promote!(result, stmt)
+
+      # BG escape promotions: frame-allocated captures must be promoted to heap.
+      insert_bg_escape_promote!(result, stmt)
 
       # Emit the original statement.
       result << stmt
@@ -928,6 +932,51 @@ class MIRPass
       entry = bindings[name]
       next unless entry && entry[:has_moved_guard]
       result << MIR::SuppressCleanup.new(stmt.token, name)
+    end
+  end
+
+  # Quick check: does the function body contain any BG/stream blocks with
+  # captures needing escape promotion? Used to ensure transform_body runs
+  # even for functions with no cleanup bindings.
+  def body_has_bg_escape_promotes?(stmts)
+    return false unless stmts.is_a?(Array)
+    stmts.any? do |stmt|
+      bg = case stmt
+           when AST::BgBlock, AST::BgStreamBlock then stmt
+           when AST::VarDecl, AST::BindExpr, AST::Assignment
+             v = stmt.value
+             (v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)) ? v : nil
+           end
+      next false unless bg
+      captured = bg.capture_analysis&.captures
+      next false unless captured&.any?
+      captured.any? do |_, type_obj|
+        t = type_obj ? Type.new(type_obj) : nil
+        t && t.needs_escape_promotion? && !t.needs_pointer_passing?
+      end
+    end
+  end
+
+  # Insert MIR::Promote for frame-allocated variables captured by BG/stream fibers.
+  # Lists get :list strategy (in-place promoteList). Strings get :bg_string
+  # strategy (transpiler emits dupe inside the BG block where the allocator is available).
+  def insert_bg_escape_promote!(result, stmt)
+    bg = case stmt
+         when AST::BgBlock, AST::BgStreamBlock then stmt
+         when AST::VarDecl, AST::BindExpr, AST::Assignment
+           v = stmt.value
+           (v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)) ? v : nil
+         end
+    return unless bg
+    captured = bg.capture_analysis&.captures
+    return unless captured&.any?
+
+    captured.each do |name, type_obj|
+      t = type_obj ? Type.new(type_obj) : nil
+      next unless t && t.needs_escape_promotion?
+      next if t.needs_pointer_passing?
+      strategy = t.list_collection? ? :list : :bg_string
+      result << MIR::Promote.new(bg.token, name, t.zig_type, strategy, nil)
     end
   end
 

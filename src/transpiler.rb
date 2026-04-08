@@ -1611,14 +1611,14 @@ private
 
       rt_name = @do_rt_name || "rt"
 
-      # Escape promotions: frame-allocated data captured by BG fibers must be
-      # promoted to heap before the fiber spawns. Uses the same escape system
-      # as return values — needs_escape_promotion? / escape_promote_code.
-      # Strings produce a new binding (dupe returns new slice); collections
-      # are promoted in-place (promoteList/mapPromote mutate the original).
-      escape_promotions, promoted_names = emit_capture_escape_promotions(
-        captured, "#{alloc_var}", rt_name, "__bgp_#{id}"
-      )
+      # Consume pending BG string promotes from MIR::Promote(:bg_string) nodes.
+      # List/map promotions are emitted by MIR::Promote(:list/:string_map) as
+      # standalone statements before this BgBlock. Strings need the scheduler
+      # allocator (alloc_var) so they're duped here.
+      bg_string_promotes = @pending_bg_string_promotes || Set.new
+      @pending_bg_string_promotes = nil
+      promoted_names = {}
+      bg_string_promotes.each { |name| promoted_names[name] = "__bgp_#{id}_#{name}" }
 
       capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
         captured.map do |name, _|
@@ -1735,7 +1735,7 @@ private
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
             const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
-            #{escape_promotions.join("\n            ")}
+            #{promoted_names.map { |name, promoted| "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});" }.join("\n            ")}
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
             #{bg_spawn_call(node, rt_name, ctx_type, ctx_var)}
@@ -1761,6 +1761,13 @@ private
 
       analysis = node.capture_analysis
       captured = analysis&.captures || {}
+      string_captures = analysis&.string_captures || Set.new
+
+      # Consume pending BG string promotes from MIR::Promote(:bg_string) nodes.
+      bg_string_promotes = @pending_bg_string_promotes || Set.new
+      @pending_bg_string_promotes = nil
+      promoted_names = {}
+      bg_string_promotes.each { |name| promoted_names[name] = "__sgp_#{id}_#{name}" }
 
       capture_fields = captured.map do |name, type_obj|
         zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
@@ -1768,7 +1775,13 @@ private
       end.join("\n        ")
 
       capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
-        captured.map { |name, _| ".#{name} = #{name}" }).join(", ")
+        captured.map do |name, _|
+          if promoted_names[name]
+            ".#{name} = #{promoted_names[name]}"
+          else
+            ".#{name} = #{name}"
+          end
+        end).join(", ")
 
       rt_name = @do_rt_name || "rt"
 
@@ -1804,6 +1817,7 @@ private
                     const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_sg#{id}.?)));
                     defer ctx.alloc.destroy(ctx);
                     #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
+                    #{string_captures.filter_map { |n| "defer ctx.alloc.free(ctx.#{n});" }.join("\n                    ")}
                     var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
                     defer #{local_stream}.close();
                     errdefer |gen_err| #{local_stream}.inner.err = gen_err;
@@ -1812,6 +1826,7 @@ private
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
             const #{stream_var} = try #{stream_zig}.spawnNew(#{alloc_var}, #{rt_name}.getSched());
+            #{promoted_names.map { |name, promoted| "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});" }.join("\n            ")}
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
             #{ctx_var}.* = .{ #{capture_inits} };
             try #{rt_name}.getSched().submitSpawn(
@@ -2625,6 +2640,12 @@ private
       when :string_map
         vname = zig_safe_name(node.name)
         "#{vname}.alloc = #{rt_name}.heapAlloc();"
+      when :bg_string
+        # Signals that the NEXT BgBlock/BgStreamBlock needs to dupe this string.
+        # Code emitted by the BG handler where the scheduler allocator is available.
+        @pending_bg_string_promotes ||= Set.new
+        @pending_bg_string_promotes << node.name.to_s
+        nil
       when :generic
         vname = zig_safe_name(node.name)
         "try CheatLib.promote(#{node.zig_type}, #{rt_name}, &#{vname});"
@@ -2955,37 +2976,6 @@ private
     return false if ti&.escaped_return && (ti.collection? || ti.string?)
     return false if ti && (ti.any_rc? rescue false)
     true
-  end
-
-  # Emit escape promotions for a set of captured variables (used by BG/DO blocks).
-  # Same logic as emit_escape_promotions but works from a {name => type_info} hash
-  # instead of AST nodes. Returns [promotions_array, promoted_names_hash].
-  # promoted_names maps original names to new bindings for types that produce a new
-  # value (strings); collections are promoted in-place and don't need renaming.
-  def emit_capture_escape_promotions(captured, alloc_expr, rt_name, prefix)
-    promotions = []
-    promoted_names = {}
-
-    captured.each do |name, type_obj|
-      t = type_obj ? Type.new(type_obj) : nil
-      next unless t && t.needs_escape_promotion?
-      next if t.needs_pointer_passing?  # pointer captures (maps/pools) are shared, not moved
-
-      code = t.escape_promote_code(name, rt_name, alloc_expr: alloc_expr)
-      next unless code
-
-      if t.string?
-        # String promotion returns a new slice — bind to a new name.
-        promoted = "#{prefix}_#{name}"
-        promotions << "const #{promoted} = #{code};"
-        promoted_names[name] = promoted
-      else
-        # Collection promotion is in-place — no new binding needed.
-        promotions << code
-      end
-    end
-
-    [promotions, promoted_names]
   end
 
   # Emits Zig for pool.insert / pool.get / pool.remove method calls.
