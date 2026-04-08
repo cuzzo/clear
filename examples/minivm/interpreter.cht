@@ -2148,16 +2148,16 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
         slotLookup = pool[envId]?.vars["__slot_" + symName] OR Value{ Number: 0.0 - 1.0 };
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
-            -- Slot-based load
-            ops.append(Value{ Number: 80.0 }); ops.append(Value{ Number: toFloat(slotNum) });
+            -- LOAD_SLOT
+            ops.append(Value{ Number: 20.0 }); ops.append(Value{ Number: toFloat(slotNum) });
         ELSE
-            -- Name-based load (fallback for builtins/unslotted)
+            -- LOAD_NAME
             cidx = consts.length(); consts.append(COPY ast);
-            ops.append(Value{ Number: 2.0 }); ops.append(Value{ Number: toFloat(cidx) });
+            ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
         END
     ELSE_IF isList?(ast) == FALSE THEN
         cidx = consts.length(); consts.append(COPY ast);
-        ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
+        ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cidx) });
     ELSE
         MATCH ast START Value.List AS items ->
         IF items.length() > 0 THEN
@@ -2165,67 +2165,64 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
 
             IF formName == "quote" THEN
                 cidx = consts.length(); consts.append(COPY items[1]);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
             ELSE_IF formName == "+" || formName == "-" || formName == "*" || formName == "/" || formName == "=" || formName == "<" || formName == ">" || formName == "<=" || formName == ">=" THEN
-                -- Eval sub-args with tree-walker, store results as consts
                 ev1 = eval!(COPY items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
                 ev2 = eval!(COPY items[2], envId, pool);
                 c2 = consts.length(); consts.append(ev2);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c2) });
-                IF formName == "+" THEN ops.append(Value{ Number: 10.0 });
-                ELSE_IF formName == "-" THEN ops.append(Value{ Number: 11.0 });
-                ELSE_IF formName == "*" THEN ops.append(Value{ Number: 12.0 });
-                ELSE_IF formName == "/" THEN ops.append(Value{ Number: 13.0 });
-                ELSE_IF formName == "=" THEN ops.append(Value{ Number: 20.0 });
-                ELSE_IF formName == "<" THEN ops.append(Value{ Number: 21.0 });
-                ELSE_IF formName == ">" THEN ops.append(Value{ Number: 22.0 });
-                ELSE_IF formName == "<=" THEN ops.append(Value{ Number: 23.0 });
-                ELSE_IF formName == ">=" THEN ops.append(Value{ Number: 24.0 });
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c2) });
+                IF formName == "+" THEN ops.append(Value{ Number: 4.0 });
+                ELSE_IF formName == "-" THEN ops.append(Value{ Number: 5.0 });
+                ELSE_IF formName == "*" THEN ops.append(Value{ Number: 6.0 });
+                ELSE_IF formName == "/" THEN ops.append(Value{ Number: 7.0 });
+                ELSE_IF formName == "=" THEN ops.append(Value{ Number: 8.0 });
+                ELSE_IF formName == "<" THEN ops.append(Value{ Number: 9.0 });
+                ELSE_IF formName == ">" THEN ops.append(Value{ Number: 10.0 });
+                ELSE_IF formName == "<=" THEN ops.append(Value{ Number: 11.0 });
+                ELSE_IF formName == ">=" THEN ops.append(Value{ Number: 12.0 });
                 END
 
             ELSE_IF formName == "not" THEN
                 ev1 = eval!(COPY items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
-                ops.append(Value{ Number: 30.0 });
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
+                ops.append(Value{ Number: 13.0 });
 
             ELSE_IF formName == "define" || formName == "def!" THEN
                 ev1 = eval!(COPY items[2], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
-                -- Assign a slot for this variable
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
                 defName = getSymName(items[1]);
                 slotCounter = pool[envId]?.vars["__slotN"] OR Value{ Number: 0.0 };
                 nextSlot = toInt(getNum(slotCounter));
                 pool[envId]?.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
                 pool[envId]?.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
-                ops.append(Value{ Number: 81.0 }); ops.append(Value{ Number: toFloat(nextSlot) });
-                -- Also storeName for env compatibility (tree-walker interop)
+                ops.append(Value{ Number: 21.0 }); ops.append(Value{ Number: toFloat(nextSlot) });
                 cidx = consts.length(); consts.append(Value{ Symbol: COPY defName });
-                ops.append(Value{ Number: 3.0 }); ops.append(Value{ Number: toFloat(cidx) });
+                ops.append(Value{ Number: 2.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
             ELSE_IF formName == "if" THEN
                 ev1 = eval!(COPY items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
-                ops.append(Value{ Number: 41.0 });
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
+                ops.append(Value{ Number: 15.0 });
                 jumpFalseIdx = ops.length(); ops.append(Value{ Number: 0.0 });
                 ev2 = eval!(COPY items[2], envId, pool);
                 c2 = consts.length(); consts.append(ev2);
-                ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c2) });
-                ops.append(Value{ Number: 40.0 });
+                ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c2) });
+                ops.append(Value{ Number: 14.0 });
                 jumpEndIdx = ops.length(); ops.append(Value{ Number: 0.0 });
                 ops[jumpFalseIdx] = Value{ Number: toFloat(ops.length()) };
                 IF items.length() > 3 THEN
                     ev3 = eval!(COPY items[3], envId, pool);
                     c3 = consts.length(); consts.append(ev3);
-                    ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c3) });
+                    ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c3) });
                 ELSE
                     cidx = consts.length(); consts.append(Value.Nil);
-                    ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
+                    ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cidx) });
                 END
                 ops[jumpEndIdx] = Value{ Number: toFloat(ops.length()) };
 
@@ -2233,18 +2230,17 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
                 FOR di IN (1_i64 ..< items.length()) DO
                     evd = eval!(COPY items[di], envId, pool);
                     cd = consts.length(); consts.append(evd);
-                    ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cd) });
-                    IF di < items.length() - 1 THEN ops.append(Value{ Number: 4.0 }); END
+                    ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cd) });
+                    IF di < items.length() - 1 THEN ops.append(Value{ Number: 3.0 }); END
                 END
 
             ELSE
-                -- Generic call: eval fn + args, store as consts
                 FOR ai IN (0_i64 ..< items.length()) DO
                     eva = eval!(COPY items[ai], envId, pool);
                     ca = consts.length(); consts.append(eva);
-                    ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(ca) });
+                    ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(ca) });
                 END
-                ops.append(Value{ Number: 42.0 });
+                ops.append(Value{ Number: 16.0 });
                 ops.append(Value{ Number: toFloat(items.length() - 1) });
             END
         END,
@@ -2252,7 +2248,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
         END
     END
 
-    ops.append(Value{ Number: 71.0 });
+    ops.append(Value{ Number: 19.0 });
     -- Store in env entry-by-entry (Value.Number is inline, survives arena free)
     pool[envId]?.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
     FOR wi IN (0_i64 ..< ops.length()) DO
@@ -2287,23 +2283,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         ip += 1;
 
         MATCH op START
-            1 ->
+            0 ->  -- LOAD_CONST
                 idx = ops[ip]; ip += 1;
                 pv = COPY consts[idx];
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            2 ->
+            1 ->  -- LOAD_NAME
                 idx = ops[ip]; ip += 1;
                 pv = envGet!(curEnv, getSymName(consts[idx]), pool);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            3 ->
+            2 ->  -- STORE_NAME
                 idx = ops[ip]; ip += 1;
                 pool[curEnv]?.vars[getSymName(consts[idx])] = stack[sp - 1];,
-            4 ->
+            3 ->  -- POP
                 sp -= 1;,
-            10 ->
-                -- ADD: handles numbers (i64/f64) and string concatenation
+            4 ->  -- ADD (polymorphic)
                 MATCH stack[sp - 2] START
                     Value.Str AS s1 ->
                         pv = Value{ Str: s1 + getStr(stack[sp - 1]) };,
@@ -2316,64 +2311,62 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            11 ->
+            5 ->  -- SUB
                 pv = Value{ Number: getNum(stack[sp - 2]) - getNum(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            12 ->
+            6 ->  -- MUL
                 pv = Value{ Number: getNum(stack[sp - 2]) * getNum(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            13 ->
+            7 ->  -- DIV
                 pv = Value{ Number: getNum(stack[sp - 2]) / getNum(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            20 ->
+            8 ->  -- EQ
                 pv = boolVal(valEqual?(stack[sp - 2], stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            21 ->
+            9 ->  -- LT
                 pv = boolVal(getNum(stack[sp - 2]) < getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            22 ->
+            10 -> -- GT
                 pv = boolVal(getNum(stack[sp - 2]) > getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            23 ->
+            11 -> -- LTE
                 pv = boolVal(getNum(stack[sp - 2]) <= getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            24 ->
+            12 -> -- GTE
                 pv = boolVal(getNum(stack[sp - 2]) >= getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            30 ->
+            13 -> -- NOT
                 sp -= 1;
                 pv = boolVal(isTruthy?(stack[sp]) == FALSE);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            40 ->
+            14 -> -- JUMP
                 ip = ops[ip];,
-            41 ->
+            15 -> -- JUMP_IF_FALSE
                 target = ops[ip]; ip += 1;
                 sp -= 1;
                 IF isTruthy?(stack[sp]) == FALSE THEN ip = target; END,
-            42 ->
-                -- call [argc]: stack has [fn, arg1, ..., argN]
+            16 -> -- CALL [argc]
                 argc = ops[ip]; ip += 1;
                 fnVal = stack[sp - argc - 1];
                 fnId = getNativeId(fnVal);
                 IF fnId > 0 THEN
-                    -- Native function call
                     MUTABLE cArgs: Value[]@list = List[];
                     cArgs.append(Value.Nil);
                     FOR ci IN (0_i64 ..< argc) DO
@@ -2408,7 +2401,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                     sp += 1;
                 END,
-            61 ->
+            17 -> -- SET_NAME
                 idx = ops[ip]; ip += 1;
                 sp -= 1;
                 setVal = COPY stack[sp];
@@ -2416,7 +2409,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = COPY setVal;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            70 ->
+            18 -> -- NATIVE_CALL [nid] [argc]
                 nid = ops[ip]; ip += 1;
                 argc = ops[ip]; ip += 1;
                 MUTABLE nArgs: Value[]@list = List[];
@@ -2428,53 +2421,53 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = applyNative(nid, nArgs);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            71 ->
+            19 -> -- HALT
                 running = FALSE;,
-            80 ->
+            20 -> -- LOAD_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 pv = slots[slotIdx];
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            81 ->
+            21 -> -- STORE_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 slots[slotIdx] = stack[sp - 1];,
-            82 ->
+            22 -> -- ADD_I64
                 pv = Value{ Int64Val: getInt(stack[sp - 2]) + getInt(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 ->
+            23 -> -- SUB_I64
                 pv = Value{ Int64Val: getInt(stack[sp - 2]) - getInt(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            84 ->
+            24 -> -- MUL_I64
                 pv = Value{ Int64Val: getInt(stack[sp - 2]) * getInt(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            85 ->
+            25 -> -- LT_I64
                 pv = boolVal(getInt(stack[sp - 2]) < getInt(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            86 ->
+            26 -> -- EQ_I64
                 pv = boolVal(getInt(stack[sp - 2]) == getInt(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            87 ->
+            27 -> -- INT_TO_F64
                 sp -= 1;
                 pv = Value{ Number: toFloat(getInt(stack[sp])) };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            88 ->
+            28 -> -- F64_TO_INT
                 sp -= 1;
                 convInt = toInt(getNum(stack[sp]));
                 pv = Value{ Int64Val: convInt };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            89 ->
+            29 -> -- MOD_I64
                 ia = getInt(stack[sp - 2]);
                 ib = getInt(stack[sp - 1]);
                 MUTABLE modR: Int64 = 0;
@@ -2483,27 +2476,27 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            90 ->
+            30 -> -- GTE_I64
                 pv = boolVal(getInt(stack[sp - 2]) >= getInt(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            91 ->
+            31 -> -- GT_I64
                 pv = boolVal(getInt(stack[sp - 2]) > getInt(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            92 ->
+            32 -> -- LTE_I64
                 pv = boolVal(getInt(stack[sp - 2]) <= getInt(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            93 ->
+            33 -> -- NEQ_I64
                 pv = boolVal(getInt(stack[sp - 2]) != getInt(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            94 ->
+            34 -> -- DIV_I64
                 ia = getInt(stack[sp - 2]);
                 ib = getInt(stack[sp - 1]);
                 MUTABLE divR: Int64 = 0;
@@ -2512,16 +2505,16 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            95 ->
+            35 -> -- JUMP_BACK
                 ip = ops[ip];,
-            96 ->
+            36 -> -- CONCAT
                 s1 = prStr(stack[sp - 2], FALSE);
                 s2 = prStr(stack[sp - 1], FALSE);
                 pv = Value{ Str: s1 + s2 };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            97 ->
+            37 -> -- DEFINE_FN
                 sexprIdx = ops[ip]; ip += 1;
                 nameIdx = ops[ip]; ip += 1;
                 sexprStr = getStr(consts[sexprIdx]);
@@ -2583,12 +2576,12 @@ FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void ->
     MUTABLE ops1: Int64[]@list = List[];
     MUTABLE c1: Value[]@list = List[];
     c1.append(Value{ Number: 10.0 }); c1.append(Value{ Number: 4.0 }); c1.append(Value{ Number: 3.0 });
-    ops1.append(1); ops1.append(0);   -- loadConst 10
-    ops1.append(1); ops1.append(1);   -- loadConst 4
-    ops1.append(11);                  -- sub -> 6
-    ops1.append(1); ops1.append(2);   -- loadConst 3
-    ops1.append(12);                  -- mul -> 18
-    ops1.append(71);                  -- halt
+    ops1.append(0); ops1.append(0);   -- LOAD_CONST 10
+    ops1.append(0); ops1.append(1);   -- LOAD_CONST 4
+    ops1.append(5);                   -- SUB -> 6
+    ops1.append(0); ops1.append(2);   -- LOAD_CONST 3
+    ops1.append(6);                   -- MUL -> 18
+    ops1.append(19);                  -- HALT
     ASSERT prStr(exec!(ops1, c1, rootId, pool), TRUE) == "18", "bc: (10-4)*3 = 18";
 
     -- Test 2: if 1 < 2 then 10 else 20 (control flow)
@@ -2596,27 +2589,27 @@ FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void ->
     MUTABLE c2: Value[]@list = List[];
     c2.append(Value{ Number: 1.0 }); c2.append(Value{ Number: 2.0 });
     c2.append(Value{ Number: 10.0 }); c2.append(Value{ Number: 20.0 });
-    ops2.append(1); ops2.append(0);     -- loadConst 1
-    ops2.append(1); ops2.append(1);     -- loadConst 2
-    ops2.append(21);                    -- lt
-    ops2.append(41); ops2.append(11);   -- jumpIfFalse -> 11
-    ops2.append(1); ops2.append(2);     -- loadConst 10 (then)
-    ops2.append(40); ops2.append(13);   -- jump -> 13
-    ops2.append(1); ops2.append(3);     -- loadConst 20 (else)
-    ops2.append(71);                    -- halt
+    ops2.append(0); ops2.append(0);     -- LOAD_CONST 1
+    ops2.append(0); ops2.append(1);     -- LOAD_CONST 2
+    ops2.append(9);                     -- LT
+    ops2.append(15); ops2.append(11);   -- JUMP_IF_FALSE -> 11
+    ops2.append(0); ops2.append(2);     -- LOAD_CONST 10 (then)
+    ops2.append(14); ops2.append(13);   -- JUMP -> 13
+    ops2.append(0); ops2.append(3);     -- LOAD_CONST 20 (else)
+    ops2.append(19);                    -- HALT
     ASSERT prStr(exec!(ops2, c2, rootId, pool), TRUE) == "10", "bc: if 1<2 then 10 else 20";
 
     -- Test 3: define x=5, native +(x, 3) -> 8 (env + native calls)
     MUTABLE ops3: Int64[]@list = List[];
     MUTABLE c3: Value[]@list = List[];
     c3.append(Value{ Number: 5.0 }); c3.append(Value{ Symbol: "x" }); c3.append(Value{ Number: 3.0 });
-    ops3.append(1); ops3.append(0);     -- loadConst 5
-    ops3.append(3); ops3.append(1);     -- storeName "x"
-    ops3.append(4);                     -- pop
-    ops3.append(2); ops3.append(1);     -- loadName "x" -> 5
-    ops3.append(1); ops3.append(2);     -- loadConst 3
-    ops3.append(70); ops3.append(1); ops3.append(2); -- nativeCall +(id=1), argc=2
-    ops3.append(71);                    -- halt
+    ops3.append(0); ops3.append(0);     -- LOAD_CONST 5
+    ops3.append(2); ops3.append(1);     -- STORE_NAME "x"
+    ops3.append(3);                     -- POP
+    ops3.append(1); ops3.append(1);     -- LOAD_NAME "x" -> 5
+    ops3.append(0); ops3.append(2);     -- LOAD_CONST 3
+    ops3.append(18); ops3.append(1); ops3.append(2); -- NATIVE_CALL +(id=1), argc=2
+    ops3.append(19);                    -- HALT
     ASSERT prStr(exec!(ops3, c3, rootId, pool), TRUE) == "8", "bc: define x=5, x+3=8";
 
     RETURN;

@@ -1243,27 +1243,41 @@ private
       end
       is_union = @union_schemas&.key?(union_lookup)
 
-      # Optimization: integer MATCH with all-literal cases -> Zig switch (jump table).
-      # Detects MATCH x START 1 -> ..., 2 -> ..., DEFAULT -> ... END patterns.
+      # Optimization: integer/enum MATCH with all-literal cases -> Zig switch (jump table).
       expr_type = node.expr.resolved_type
+      expr_type_sym = expr_type.is_a?(Type) ? expr_type.resolved : expr_type
+
       is_int_match = !is_union && !node.string_match &&
         (expr_type == :Int64 || expr_type == :Int32 || expr_type == :Int16 || expr_type == :Int8 ||
          (expr_type.is_a?(Type) && expr_type.integer?)) &&
         node.cases.all? { |c| c[:kind] != :when && c[:kind] != :struct_pattern &&
                               c[:value].is_a?(AST::Literal) && (c[:value].type == :INT64 || c[:value].type == :NUMBER) }
 
-      if is_int_match
+      is_enum_match = !is_union && !node.string_match && @enum_schemas&.key?(expr_type_sym) &&
+        node.cases.all? { |c| c[:kind] != :when && c[:kind] != :struct_pattern &&
+                              c[:value].is_a?(AST::GetField) }
+
+      if is_int_match || is_enum_match
         arms = node.cases.map do |c|
-          val = visit(c[:value])
           body = transpile_block(c[:body])
-          "#{val} => {\n    #{body}\n    }"
+          if is_enum_match
+            # Enum: emit .Variant for switch arm
+            ".#{c[:value].field} => {\n    #{body}\n    }"
+          else
+            val = visit(c[:value])
+            "#{val} => {\n    #{body}\n    }"
+          end
         end
-        default_body = if node.default_case && !node.default_case.empty?
-          transpile_block(node.default_case)
-        else
-          "{}"
+        # For enums: check if all variants are covered (exhaustive -> no else needed)
+        enum_exhaustive = is_enum_match && @enum_schemas[expr_type_sym] &&
+          node.cases.map { |c| c[:value].field.to_s }.sort == @enum_schemas[expr_type_sym].map(&:to_s).sort
+
+        if node.default_case && !node.default_case.empty?
+          default_body = transpile_block(node.default_case)
+          arms << "else => {\n    #{default_body}\n    }"
+        elsif !enum_exhaustive
+          arms << "else => {}"
         end
-        arms << "else => {\n    #{default_body}\n    }"
         "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n    }"
       else
       parts = node.cases.map do |c|

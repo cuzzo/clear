@@ -3,20 +3,18 @@
 # Emits Int64[] ops + Value[] consts that exec! consumes directly.
 
 class BytecodeCompiler
-  # Opcode constants (must match interpreter's exec!)
-  LOAD_CONST = 1
-  LOAD_NAME = 2
-  STORE_NAME = 3
-  POP = 4
-  ADD = 10; SUB = 11; MUL = 12; DIV = 13
-  EQ = 20; LT = 21; GT = 22; LTE = 23; GTE = 24
-  NOT = 30
-  JUMP = 40; JUMP_IF_FALSE = 41
-  CALL = 42
-  SET_NAME = 61
-  NATIVE_CALL = 70; HALT = 71
-  ADD_I64 = 82; SUB_I64 = 83; MUL_I64 = 84; LT_I64 = 85; EQ_I64 = 86
-  INT_TO_F64 = 87; F64_TO_INT = 88
+  # Opcode constants - dense numbering for jump table efficiency.
+  # Must match interpreter's exec! MATCH cases exactly.
+  LOAD_CONST  = 0;  LOAD_NAME   = 1;  STORE_NAME  = 2;  POP         = 3
+  ADD         = 4;  SUB         = 5;  MUL         = 6;  DIV         = 7
+  EQ          = 8;  LT          = 9;  GT          = 10; LTE         = 11; GTE = 12
+  NOT         = 13; JUMP        = 14; JUMP_IF_FALSE = 15
+  CALL        = 16; SET_NAME    = 17; NATIVE_CALL = 18; HALT        = 19
+  LOAD_SLOT   = 20; STORE_SLOT  = 21
+  ADD_I64     = 22; SUB_I64     = 23; MUL_I64     = 24; LT_I64      = 25; EQ_I64 = 26
+  INT_TO_F64  = 27; F64_TO_INT  = 28; MOD_I64     = 29; GTE_I64     = 30
+  GT_I64      = 31; LTE_I64     = 32; NEQ_I64     = 33; DIV_I64     = 34
+  JUMP_BACK   = 35; CONCAT      = 36; DEFINE_FN   = 37
 
   # Native function IDs (must match interpreter's setupEnv!)
   NATIVES = {
@@ -43,10 +41,6 @@ class BytecodeCompiler
     ADD: ADD, SUB: SUB, MUL: MUL, DIV: DIV, MOD: nil,
     EQ: EQ, NEQ: nil, LT: LT, GT: GT, LTE: LTE, GTE: GTE,
   }
-
-  LOAD_SLOT = 80; STORE_SLOT = 81
-  MOD_I64 = 89; GTE_I64 = 90; GT_I64 = 91; LTE_I64 = 92; NEQ_I64 = 93
-  DIV_I64 = 94; JUMP_BACK = 95; CONCAT = 96; DEFINE_FN = 97
 
   def initialize
     @ops = []

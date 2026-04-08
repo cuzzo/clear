@@ -626,8 +626,9 @@ RSpec.describe SemanticAnnotator do
             END
           END
         CLEAR
-        expect(out).to include("d == Dir.North")
-        expect(out).to include("d == Dir.South")
+        expect(out).to include("switch (d)")
+        expect(out).to include(".North =>")
+        expect(out).to include(".South =>")
         expect(out).not_to include("activeTag")
       end
 
