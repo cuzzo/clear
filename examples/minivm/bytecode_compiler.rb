@@ -45,9 +45,8 @@ class BytecodeCompiler
   }
 
   LOAD_SLOT = 80; STORE_SLOT = 81
-  MOD_I64 = 89  # new op
-  GTE_I64 = 90  # new op
-  SUB_I64_OP = SUB_I64  # alias for clarity
+  MOD_I64 = 89; GTE_I64 = 90; GT_I64 = 91; LTE_I64 = 92; NEQ_I64 = 93
+  DIV_I64 = 94; JUMP_BACK = 95; CONCAT = 96; DEFINE_FN = 97
 
   def initialize
     @ops = []
@@ -111,49 +110,14 @@ class BytecodeCompiler
   end
 
   def compile_function(stmt)
-    params = stmt.params.map { |p| p.is_a?(Hash) ? p[:name] : p.name }
-
-    # Compile body to sub-bytecode
-    saved_ops = @ops
-    saved_consts = @consts
-    @ops = []
-    @consts = []
-    @mutables = Set.new
-
-    body = stmt.body
-    # Handle early returns
-    compile_body_stmts(body)
-    emit(HALT)
-
-    sub_ops = @ops
-    sub_consts = @consts
-
-    @ops = saved_ops
-    @consts = saved_consts
-
-    # Store compiled function as a constant (encoded as list of ops + consts)
-    # For now, we use NATIVE_CALL pattern - store as a scheme lambda via S-expr
-    # The function is stored as a named constant in the env
-    # Actually, for the bytecode path, emit the function as a named S-expr lambda
-    # that the tree-walker can handle. The bytecode compiler focuses on main() body.
-    #
-    # Simpler approach: compile function body inline, store as named closure.
-    # For now, emit the function definition as LOAD_CONST + STORE_NAME
-    # with the value being a placeholder that the tree-walker handles.
-
-    # Store function name + S-expr representation for the tree-walker fallback
-    # The key insight: we can compile main() to bytecode and leave function defs
-    # as STORE_NAME with lambda values. The CALL opcode invokes them via the
-    # tree-walker. This gives us bytecode speed for the hot loop and tree-walker
-    # for function calls.
-
-    # Encode: store params + body ops as a "compiled lambda" constant
-    param_str = params.join(",")
-    cidx = add_const([:compiled_fn, param_str, sub_ops, sub_consts])
-    emit(LOAD_CONST, cidx)
+    # Emit function as S-expression define for the tree-walker.
+    # main() body runs as bytecode; function defs are registered via eval!
+    # so CALL can invoke them as lambdas.
+    transpiler = SchemeTranspiler.new
+    sexpr = transpiler.emit_function_def(stmt)
+    cidx = add_const([:str, sexpr])
     name_idx = add_const(stmt.name.to_s)
-    emit(STORE_NAME, name_idx)
-    emit(POP)
+    emit(DEFINE_FN, cidx, name_idx)
   end
 
   private
@@ -283,28 +247,33 @@ class BytecodeCompiler
 
     case op
     when :ADD
-      if both_i64 then emit(ADD_I64); push_type(:i64)
-      else emit(ADD); push_type(left_type == :str ? :str : :f64) end
+      if left_type == :str || right_type == :str then emit(CONCAT); push_type(:str)
+      elsif both_i64 then emit(ADD_I64); push_type(:i64)
+      else emit(ADD); push_type(:f64) end
     when :SUB
       if both_i64 then emit(SUB_I64); push_type(:i64)
       else emit(SUB); push_type(:f64) end
     when :MUL
       if both_i64 then emit(MUL_I64); push_type(:i64)
       else emit(MUL); push_type(:f64) end
-    when :DIV then emit(DIV); push_type(:f64)
+    when :DIV
+      if both_i64 then emit(DIV_I64); push_type(:i64)
+      else emit(DIV); push_type(:f64) end
     when :EQ
       if both_i64 then emit(EQ_I64) else emit(EQ) end
       push_type(:bool)
     when :NEQ
-      if both_i64 then emit(EQ_I64) else emit(EQ) end
-      emit(NOT); push_type(:bool)
+      if both_i64 then emit(NEQ_I64) else emit(EQ); emit(NOT) end
+      push_type(:bool)
     when :LT
       if both_i64 then emit(LT_I64) else emit(LT) end
       push_type(:bool)
     when :GT
-      if both_i64 then emit(GT) else emit(GT) end
+      if both_i64 then emit(GT_I64) else emit(GT) end
       push_type(:bool)
-    when :LTE then emit(LTE); push_type(:bool)
+    when :LTE
+      if both_i64 then emit(LTE_I64) else emit(LTE) end
+      push_type(:bool)
     when :GTE
       if both_i64 then emit(GTE_I64) else emit(GTE) end
       push_type(:bool)

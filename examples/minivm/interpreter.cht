@@ -2390,8 +2390,28 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = applyNative(fnId, cArgs);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;
+            ELSE_IF isLambda?(fnVal) THEN
+                -- Lambda call: create env, bind params, eval! body via tree-walker
+                MATCH fnVal START
+                    Value.Lambda AS lam ->
+                        callId: Id<Env> = pool.insert(Env{ vars: {} });
+                        pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
+                        FOR pi IN (0_i64 ..< argc) DO
+                            pname = getSymName(lam.params[pi]);
+                            pool[callId]?.vars[pname] = COPY stack[sp - argc + pi];
+                        END
+                        sp -= argc + 1;
+                        pv = eval!(COPY lam.body, callId, pool);
+                        IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                        sp += 1;,
+                    DEFAULT ->
+                        sp -= argc + 1;
+                        pv = Value.Nil;
+                        IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                        sp += 1;
+                END
             ELSE
-                -- Non-native (lambda) calls not yet supported in bytecode
+                -- Unknown function type
                 sp -= argc + 1;
                 pv = Value.Nil;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -2466,6 +2486,45 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             sp -= 2;
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
+        ELSE_IF op == 91 THEN
+            -- GT_I64
+            pv = boolVal(getInt(stack[sp - 2]) > getInt(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 92 THEN
+            -- LTE_I64
+            pv = boolVal(getInt(stack[sp - 2]) <= getInt(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 93 THEN
+            -- NEQ_I64
+            pv = boolVal(getInt(stack[sp - 2]) != getInt(stack[sp - 1]));
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 94 THEN
+            -- DIV_I64: integer division
+            ia = getInt(stack[sp - 2]);
+            ib = getInt(stack[sp - 1]);
+            MUTABLE divR: Int64 = 0;
+            IF ib != 0 THEN divR = toInt(toFloat(ia) / toFloat(ib)); END
+            pv = Value{ Int64Val: divR };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
+        ELSE_IF op == 95 THEN
+            -- JUMP_BACK: unconditional backward jump (same as JUMP but distinct opcode)
+            ip = ops[ip];
+        ELSE_IF op == 96 THEN
+            -- CONCAT: string concatenation (coerces non-strings via prStr)
+            s1 = prStr(stack[sp - 2], FALSE);
+            s2 = prStr(stack[sp - 1], FALSE);
+            pv = Value{ Str: s1 + s2 };
+            sp -= 2;
+            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+            sp += 1;
         ELSE_IF op == 87 THEN
             -- INT_TO_F64: pop Int64Val, push Number (Float64)
             sp -= 1;
@@ -2479,6 +2538,13 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             pv = Value{ Int64Val: convInt };
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
+        ELSE_IF op == 97 THEN
+            -- DEFINE_FN [sexpr_idx] [name_idx]: eval S-expression define via tree-walker
+            sexprIdx = ops[ip]; ip += 1;
+            nameIdx = ops[ip]; ip += 1;
+            sexprStr = getStr(consts[sexprIdx]);
+            MUTABLE defPenv: HashMap<Value> = {};
+            pv = runTest!(sexprStr, curEnv, pool, defPenv);
         ELSE_IF op == 71 THEN
             running = FALSE;
         END

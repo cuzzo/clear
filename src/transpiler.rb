@@ -588,11 +588,11 @@ private
       has_promotion = node.has_promotion
       prologue = if fn_needs_rt
         if uses_frame_or_alloc && returns_value_type
-          "const frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
+          "@setEvalBranchQuota(100000);\nconst frame_mark = rt.saveFrameMark();\ndefer rt.restoreFrameMark(frame_mark);\n"
         elsif uses_frame_or_alloc && returns_string && !has_promotion
-          "const frame_mark = rt.saveFrameMark();\n"
+          "@setEvalBranchQuota(100000);\nconst frame_mark = rt.saveFrameMark();\n"
         else
-          "_ = &rt;"
+          "@setEvalBranchQuota(100000);\n_ = &rt;"
         end
       else
         nil
@@ -3788,7 +3788,7 @@ private
       discarded = false
       unless statement_node?(stmt)
         if stmt.respond_to?(:resolved_type) && stmt.resolved_type && stmt.resolved_type != :Void
-          unless code.strip.start_with?("_ = ")
+          unless code.strip.start_with?("_ = ") || code.strip.start_with?("const __hpt")
             code = "_ = #{code}"
             discarded = true
           end

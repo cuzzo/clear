@@ -422,7 +422,8 @@ class InterpreterBridge
           rootId = setupEnv!(pool);
           bcOps = loadBytecodeOps!("#{ops_file}", pool);
           bcConsts = loadBytecodeConsts!("#{consts_file}", pool);
-          exec!(bcOps, bcConsts, rootId, pool);
+          bcResult = exec!(bcOps, bcConsts, rootId, pool);
+          print(prStr(bcResult, FALSE));
           RETURN;
       END
     CHT

@@ -32,6 +32,15 @@ class SchemeTranspiler
     @output.join("\n")
   end
 
+  # Emit a single function definition as S-expression (for bytecode compiler)
+  def emit_function_def(stmt)
+    @mutable_stack.push(Set.new)
+    params = stmt.params.map { |p| p.is_a?(Hash) ? p[:name] : p.name }.join(" ")
+    body_expr = emit_body_with_early_returns(stmt.body)
+    @mutable_stack.pop
+    "(define #{stmt.name} (lambda (#{params}) #{body_expr}))"
+  end
+
   private
 
   def mutables; @mutable_stack.last; end
@@ -810,57 +819,93 @@ end
 
 # --- Main (only when run directly) ---
 if $PROGRAM_NAME == __FILE__ && ARGV.empty?
-  $stderr.puts "Usage: ruby scheme_transpiler.rb <file.cht> [--run]"
+  $stderr.puts "Usage: ruby scheme_transpiler.rb <file.cht> [--run] [--bytecode] [--sExpression]"
   exit 1
 end
 
 if $PROGRAM_NAME == __FILE__
   run_mode = ARGV.delete("--run")
+  bytecode_mode = ARGV.delete("--bytecode")
+  sexpr_mode = ARGV.delete("--sExpression")
   source = File.read(ARGV[0])
   transpiler = SchemeTranspiler.new
   scheme = transpiler.transpile(source)
 
-  if run_mode
-  # Read the interpreter source, strip everything from main() onward,
-  # and replace with a main() that executes the transpiled S-expressions.
-  project_root = File.expand_path("../../", __dir__)
-  interp_path = File.join(__dir__, "interpreter.cht")
-  interp_src = File.read(interp_path)
+  if bytecode_mode
+    # Emit bytecode format (ops + consts) for the exec! VM
+    require_relative "bytecode_compiler"
+    compiler = BytecodeCompiler.new
+    result = compiler.compile_program(source)
+    puts compiler.serialize
 
-  # Find main() and strip it + everything after (tests, benchmarks)
-  main_idx = interp_src.index(/^FN main\(\)/)
-  if main_idx
-    interp_base = interp_src[0...main_idx]
+  elsif run_mode
+    project_root = File.expand_path("../../", __dir__)
+    interp_path = File.join(__dir__, "interpreter.cht")
+    interp_src = File.read(interp_path)
+    main_idx = interp_src.index(/^FN main\(\)/)
+    interp_base = main_idx ? interp_src[0...main_idx] : interp_src
+
+    # Compile to bytecode and run via exec!
+    require_relative "bytecode_compiler"
+    compiler = BytecodeCompiler.new
+    begin
+      result = compiler.compile_program(source)
+      bc_txt = compiler.serialize
+      ops_str = bc_txt.lines[0].chomp
+      const_lines = bc_txt.lines[1..].map(&:chomp)
+
+      ops_file = File.join(__dir__, "_bc_ops.txt")
+      consts_file = File.join(__dir__, "_bc_consts.txt")
+      File.write(ops_file, ops_str)
+      File.write(consts_file, const_lines.join("\n"))
+
+      main_code = <<~CHT
+        FN main() RETURNS Void ->
+            MUTABLE pool: Env[50000]@pool = [];
+            MUTABLE penv: HashMap<Value> = {};
+            rootId = setupEnv!(pool);
+            bcOps = loadBytecodeOps!("#{ops_file}", pool);
+            bcConsts = loadBytecodeConsts!("#{consts_file}", pool);
+            bcResult = exec!(bcOps, bcConsts, rootId, pool);
+            print(prStr(bcResult, FALSE));
+            RETURN;
+        END
+      CHT
+
+      tmp_path = File.join(__dir__, "_scheme_run.cht")
+      File.write(tmp_path, interp_base + main_code)
+      system("#{project_root}/clear", "run", tmp_path)
+      File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
+      File.delete(ops_file) if File.exist?(ops_file)
+      File.delete(consts_file) if File.exist?(consts_file)
+    rescue => e
+      # Fallback to S-expression tree-walker on bytecode compilation failure
+      $stderr.puts "Bytecode compilation failed (#{e.message}), falling back to S-expression mode"
+      lines = scheme.each_line.map(&:strip).reject(&:empty?)
+      combined = lines.length == 1 ? lines[0] : "(begin #{lines.join(' ')})"
+      escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+
+      main_code = "FN main() RETURNS Void ->\n"
+      main_code += "    MUTABLE pool: Env[50000]@pool = [];\n"
+      main_code += "    MUTABLE penv: HashMap<Value> = {};\n"
+      main_code += "    rootId = setupEnv!(pool);\n"
+      main_code += "    MUTABLE schemeResult: Value = runTest!(\"#{escaped}\", rootId, pool, penv);\n"
+      main_code += "    IF isError?(schemeResult) THEN print(\"SCHEME ASSERT FAILED: \" + getErrMsg(schemeResult)); END\n"
+      main_code += "    IF isError?(schemeResult) == FALSE THEN print(\"SCHEME: all expressions completed\"); END\n"
+      main_code += "    RETURN;\nEND\n"
+
+      tmp_path = File.join(__dir__, "_scheme_run.cht")
+      File.write(tmp_path, interp_base + main_code)
+      system("#{project_root}/clear", "run", tmp_path)
+      File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
+    end
+
+  elsif sexpr_mode
+    # Emit S-expressions (the default output format)
+    puts scheme
+
   else
-    interp_base = interp_src
-  end
-
-  # Wrap all S-expressions in a single (begin ...) to share one frame arena.
-  # This avoids vector/list values being freed between separate runTest! calls.
-  lines = scheme.each_line.map(&:strip).reject(&:empty?)
-  if lines.length == 1
-    combined = lines[0]
-  else
-    combined = "(begin #{lines.join(' ')})"
-  end
-  escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
-
-  main_code = "FN main() RETURNS Void ->\n"
-  main_code += "    MUTABLE pool: Env[50000]@pool = [];\n"
-  main_code += "    MUTABLE penv: HashMap<Value> = {};\n"
-  main_code += "    rootId = setupEnv!(pool);\n"
-  main_code += "    MUTABLE schemeResult: Value = runTest!(\"#{escaped}\", rootId, pool, penv);\n"
-  main_code += "    IF isError?(schemeResult) THEN print(\"SCHEME ASSERT FAILED: \" + getErrMsg(schemeResult)); END\n"
-  main_code += "    IF isError?(schemeResult) == FALSE THEN print(\"SCHEME: all expressions completed\"); END\n"
-
-  main_code += "    RETURN;\nEND\n"
-
-  tmp_path = File.join(__dir__, "_scheme_run.cht")
-  File.write(tmp_path, interp_base + main_code)
-
-  system("#{project_root}/clear", "run", tmp_path)
-  File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
-  else
+    # Default: emit S-expressions
     puts scheme
   end
 end
