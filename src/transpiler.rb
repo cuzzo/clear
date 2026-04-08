@@ -3050,12 +3050,14 @@ private
     when :insert
       set_type = Type.new(node.object.full_type)
       return transpile_container_set(obj_code, set_type, nil, node.args[0], rt_name)
-    when :"contains?"
-      val_code = visit(node.args[0])
-      "#{obj_code}.contains(#{val_code})"
     when :remove
-      val_code = visit(node.args[0])
-      "#{obj_code}.remove(#{rt_name}.heapAlloc(), #{val_code})"
+      set_type = Type.new(node.object.full_type)
+      result = transpile_container_method(obj_code, set_type, :remove, node.args, rt_name)
+      return result if result
+      # Fallback (should not happen if METHOD_OPS is complete).
+      "#{obj_code}.remove(#{rt_name}.heapAlloc(), #{visit(node.args[0])})"
+    when :"contains?"
+      "#{obj_code}.contains(#{visit(node.args[0])})"
     when :count
       "#{obj_code}.count()"
     end
@@ -3151,67 +3153,21 @@ private
       return transpile_container_set(obj_code, map_ft, node.args[0], node.args[1], rt_name)
     end
 
-    # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
-    if !map_ft.numeric_map?
-      # Always use heapAlloc for string map operations — matches put allocator.
-      case node.map_method
-      when :delete
-        key_code = visit(node.args[0])
-        "#{obj_code}.remove(#{rt_name}.heapAlloc(), #{key_code})"
-      when :"contains?"
-        key_code = visit(node.args[0])
+    # Methods with allocators: delegate to METHOD_OPS registry.
+    result = transpile_container_method(obj_code, map_ft, node.map_method, node.args, rt_name)
+    return result if result
+
+    # Non-allocator methods: trivial inline.
+    case node.map_method
+    when :"contains?"
+      key_code = visit(node.args[0])
+      map_ft.numeric_map? ?
+        "CheatLib.numericMapContains(#{map_ft.key_type.zig_type}, #{map_ft.value_type.zig_type}, #{obj_code}, #{key_code})" :
         "#{obj_code}.contains(#{key_code})"
-      when :count
+    when :count
+      map_ft.numeric_map? ?
+        "CheatLib.numericMapCount(#{map_ft.key_type.zig_type}, #{map_ft.value_type.zig_type}, #{obj_code})" :
         "#{obj_code}.count()"
-      when :keys
-        if map_ft.sharded? || map_ft.striped?
-          # Sharded maps have a direct keys() method that iterates all shards
-          "try #{obj_code}.keys(#{rt_name}.heapAlloc())"
-        else
-          val_zig = map_ft.value_type.zig_type
-          "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
-        end
-      when :values
-        if map_ft.sharded? || map_ft.striped?
-          "try #{obj_code}.values(#{rt_name}.heapAlloc())"
-        else
-          val_zig = map_ft.value_type.zig_type
-          "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
-        end
-      end
-    elsif map_ft.numeric_map?
-      key_zig = map_ft.key_type.zig_type
-      val_zig = map_ft.value_type.zig_type
-      case node.map_method
-      when :delete
-        key_code = visit(node.args[0])
-        "CheatLib.numericMapDelete(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), &#{obj_code}, #{key_code})"
-      when :"contains?"
-        key_code = visit(node.args[0])
-        "CheatLib.numericMapContains(#{key_zig}, #{val_zig}, #{obj_code}, #{key_code})"
-      when :count
-        "CheatLib.numericMapCount(#{key_zig}, #{val_zig}, #{obj_code})"
-      when :keys
-        "try CheatLib.numericMapKeys(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
-      when :values
-        "try CheatLib.numericMapValues(#{key_zig}, #{val_zig}, #{rt_name}.frameAlloc(), #{obj_code})"
-      end
-    else
-      val_zig = map_ft.value_type.zig_type
-      case node.map_method
-      when :delete
-        key_code = visit(node.args[0])
-        "#{obj_code}.remove(#{rt_name}.frameAlloc(), #{key_code})"
-      when :"contains?"
-        key_code = visit(node.args[0])
-        "#{obj_code}.contains(#{key_code})"
-      when :count
-        "#{obj_code}.count()"
-      when :keys
-        "try CheatLib.mapKeys(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
-      when :values
-        "try CheatLib.mapValues(#{val_zig}, #{rt_name}.frameAlloc(), #{obj_code}.inner)"
-      end
     end
   end
 
@@ -3279,6 +3235,7 @@ private
     result.gsub!("{key_zig}", receiver_type.key_type.zig_type) if result.include?("{key_zig}")
     result.gsub!("{val_zig}", receiver_type.value_type.zig_type) if result.include?("{val_zig}")
     # Shard-direct placeholders.
+    result.gsub!("{shard_alloc}", @shard_direct_alloc || "std.heap.c_allocator") if result.include?("{shard_alloc}")
     result.gsub!("{shard_idx}", @shard_direct_idx.to_s) if result.include?("{shard_idx}")
     result.gsub!("{shard_key}", @shard_direct_key.to_s) if result.include?("{shard_key}")
     result
@@ -3321,6 +3278,41 @@ private
     return val_ref if val_ti.implicitly_copyable?(schema_lookup)
     zig_t = transpile_type(val_ti)
     "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
+  end
+
+  # ============================================================================
+  # Generic container method: driven by METHOD_OPS registry in std_lib.rb
+  # ============================================================================
+  # Handles delete, keys, values, remove — any method that takes an allocator.
+  # Non-allocator methods (contains?, count) are NOT in METHOD_OPS and stay inline.
+
+  def transpile_container_method(target_ref, receiver_type, method_name, args, rt_name)
+    kind = container_kind_for(receiver_type)
+    entry = METHOD_OPS.dig(kind, method_name)
+    return nil unless entry
+
+    # Select template: sharded override or default.
+    template = if entry[:sharded_zig] && (receiver_type.sharded? || receiver_type.striped?)
+      entry[:sharded_zig]
+    else
+      entry[:zig]
+    end
+
+    # Resolve allocator symbol: sharded override or default.
+    alloc_sym = if entry[:sharded_alloc] && (receiver_type.sharded? || receiver_type.striped?)
+      entry[:sharded_alloc]
+    else
+      entry[:alloc]
+    end
+
+    # Substitute placeholders.
+    result = template.dup
+    result.gsub!("{target}", target_ref)
+    result.gsub!("{alloc}", resolve_alloc_for_container(alloc_sym, receiver_type, rt_name))
+    result.gsub!("{key_zig}", receiver_type.key_type.zig_type) if result.include?("{key_zig}")
+    result.gsub!("{val_zig}", receiver_type.value_type.zig_type) if result.include?("{val_zig}")
+    args.each_with_index { |a, i| result.gsub!("{#{i}}", visit(a)) }
+    result
   end
 
   # Consume a pending MIR::Promote(:container_store) — wrap value in temp + promote.

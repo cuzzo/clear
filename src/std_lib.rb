@@ -560,7 +560,7 @@ INDEX_OPS = {
       key_alloc: :heap,
       val_alloc: :receiver_storage,
       value_transforms: [:dupe_string_literal, :dupe_borrowed_union, :container_promote],
-      shard_direct_zig: "try {target}.putDirect({shard_idx}, std.heap.c_allocator, {shard_key}, {value})",
+      shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
     },
   },
   numeric_map: {
@@ -611,6 +611,59 @@ INDEX_OPS = {
       allocates: true,
       alloc: :heap,
       value_transforms: [],
+    },
+  },
+}.freeze
+
+# ============================================================================
+# Method Operations Registry — container method Zig patterns with allocators
+# ============================================================================
+# Per-container-kind method entries for operations that take an allocator arg.
+# Methods without allocators (contains?, count, pool.get/remove) are not listed
+# here and remain trivial inline in the transpiler.
+#
+# Fields mirror INDEX_OPS :set: zig, alloc, sharded_zig, sharded_alloc.
+# Positional arg placeholders: {0}, {1}, etc.
+# Note: StringMap.remove ignores key_alloc (uses stored alloc), but we pass
+# :heap for API consistency.
+
+METHOD_OPS = {
+  string_map: {
+    delete: {
+      zig: "{target}.remove({alloc}, {0})",
+      alloc: :heap,
+    },
+    keys: {
+      zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {target}.inner)",
+      alloc: :frame,
+      sharded_zig: "try {target}.keys({alloc})",
+      sharded_alloc: :heap,
+    },
+    values: {
+      zig: "try CheatLib.mapValues({val_zig}, {alloc}, {target}.inner)",
+      alloc: :frame,
+      sharded_zig: "try {target}.values({alloc})",
+      sharded_alloc: :heap,
+    },
+  },
+  numeric_map: {
+    delete: {
+      zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{target}, {0})",
+      alloc: :frame,
+    },
+    keys: {
+      zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {target})",
+      alloc: :frame,
+    },
+    values: {
+      zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {target})",
+      alloc: :frame,
+    },
+  },
+  set_collection: {
+    remove: {
+      zig: "{target}.remove({alloc}, {0})",
+      alloc: :heap,
     },
   },
 }.freeze
