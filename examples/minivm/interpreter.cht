@@ -373,7 +373,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         ib = toInt(getNum(evaled[2]));
         MUTABLE modResult: Int64 = 0;
         IF ib != 0 THEN modResult = ia MOD ib; END
-        RETURN Value{ Number: toFloat(modResult) };
+        RETURN Value{ Int64Val: modResult };
     END
     IF id == 1 THEN
         -- + works on i64, f64, and strings
@@ -394,7 +394,14 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) };
     END
-    IF id == 4 THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
+    IF id == 4 THEN
+        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN
+            ia = getInt(evaled[1]);
+            ib = getInt(evaled[2]);
+            RETURN Value{ Int64Val: toInt(toFloat(ia) / toFloat(ib)) };
+        END
+        RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) };
+    END
     -- Comparison
     IF id == 5 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     IF id == 6 THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
@@ -655,6 +662,31 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
                 RETURN Value{ List: singleItem };
         END
         RETURN Value.Nil;
+    END
+
+    -- String methods: 57=codepointCount, 58=bytes, 59=replace, 60=toUpper, 61=toLower
+    IF id == 57 THEN
+        s = getStr(evaled[1]);
+        RETURN Value{ Int64Val: codepointCount(s) };
+    END
+    IF id == 58 THEN
+        s = getStr(evaled[1]);
+        RETURN Value{ Int64Val: s.length() };
+    END
+    IF id == 59 THEN
+        -- replace(str, old, new)
+        s = getStr(evaled[1]);
+        old = getStr(evaled[2]);
+        new = getStr(evaled[3]);
+        RETURN Value{ Str: replace(s, old, new) };
+    END
+    IF id == 60 THEN
+        s = getStr(evaled[1]);
+        RETURN Value{ Str: uppercase(s) };
+    END
+    IF id == 61 THEN
+        s = getStr(evaled[1]);
+        RETURN Value{ Str: lowercase(s) };
     END
 
     RETURN Value.Nil;
@@ -1139,8 +1171,22 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: rangeItems };
 
     ELSE_IF formName == "list-count" THEN
-        listVal = eval!(COPY items[1], envId, pool);
-        RETURN Value{ Number: toFloat(listLen(listVal)) };
+        IF items.length() > 2 THEN
+            countListVal = eval!(COPY items[1], envId, pool);
+            predFn = eval!(COPY items[2], envId, pool);
+            MUTABLE cnt: Int64 = 0;
+            MATCH countListVal START Value.List AS srcItems ->
+                FOR si IN (0_i64 ..< srcItems.length()) DO
+                    MUTABLE pArgs: Value[]@list = List[];
+                    pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
+                    MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
+                    pResult = resolveTco!(pResult, pool);
+                    IF isTruthy?(pResult) THEN cnt += 1; END
+                END, DEFAULT -> PASS; END
+            RETURN Value{ Int64Val: cnt };
+        END
+        countListVal2 = eval!(COPY items[1], envId, pool);
+        RETURN Value{ Int64Val: listLen(countListVal2) };
 
     ELSE_IF formName == "list-sum" THEN
         listVal = eval!(COPY items[1], envId, pool);
@@ -1894,6 +1940,12 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["readFile"] = Value{ NativeFn: 45 };
     pool[rootId]?.vars["writeFile"] = Value{ NativeFn: 46 };
     pool[rootId]?.vars["shell"] = Value{ NativeFn: 47 };
+    -- String methods: 57-61
+    pool[rootId]?.vars["codepointCount"] = Value{ NativeFn: 57 };
+    pool[rootId]?.vars["bytes"] = Value{ NativeFn: 58 };
+    pool[rootId]?.vars["replace"] = Value{ NativeFn: 59 };
+    pool[rootId]?.vars["uppercase"] = Value{ NativeFn: 60 };
+    pool[rootId]?.vars["lowercase"] = Value{ NativeFn: 61 };
     -- error?, error-message, error-kind, list-append! are special forms
     RETURN rootId;
 END

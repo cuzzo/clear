@@ -706,7 +706,11 @@ class SchemeTranspiler
     when AST::IndexOp
       "(list-index #{left} #{emit_pipeline_expr(right.expression)})"
     when AST::CountOp
-      "(list-count #{left})"
+      if right.expression
+        "(list-count #{left} #{emit_pipeline_expr(right.expression)})"
+      else
+        "(list-count #{left})"
+      end
     when AST::SumOp
       "(list-sum #{left} #{emit_pipeline_expr(right.expression)})"
     when AST::AverageOp
