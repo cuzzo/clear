@@ -11,9 +11,12 @@ require_relative "std_lib"
 # type and storage information so the transpiler can process them correctly.
 class PipelineRewriter
   FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp].freeze
-  TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
-                   AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
-  LIST_TERMINALS = [AST::UnnestOp, AST::DistinctOp].freeze
+  TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp,
+                   AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp].freeze
+  # MinOp, MaxOp, FindOp: null-init + optional unwrap not yet implemented.
+  # UnnestOp, DistinctOp: slice vs ArrayList iteration not yet implemented.
+  # These fall through to the old pipeline_generator path.
+  LIST_TERMINALS = [].freeze
 
   def initialize(annotator = nil)
     @annotator = annotator
@@ -102,12 +105,13 @@ class PipelineRewriter
     # real_source is the non-SMOOTH root of the chain; safe to rewrite recursively.
     real_source = rewrite!(real_source)
 
-    # Skip rewriting for pool, sharded, and SOA sources — these need special
-    # iteration patterns (alive checks, shard loops, field-slice access) that
-    # the transpiler's pipeline_generator handles at the Zig level.
-    if needs_transpiler_pipeline?(real_source)
-      # Re-attach the rewritten source into the original SMOOTH chain
-      patch_chain_source!(node, real_source)
+    # Skip rewriting for pool, sharded, SOA sources, and when the source is
+    # itself a pipeline (e.g. data s> SKIP 2 s> SUM _). These need special
+    # iteration patterns that the transpiler's pipeline_generator handles.
+    if needs_transpiler_pipeline?(real_source) || (real_source.is_a?(AST::BinaryOp) && real_source.op == :SMOOTH)
+      # Only patch if the source actually changed; patching the same object
+      # back into the chain creates a circular reference.
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
     end
 
@@ -120,10 +124,15 @@ class PipelineRewriter
       if is_fold
         return fuse_pipeline(node, real_source, stages, terminal)
       else
-        # Fusion chain ending in a standard function call.
-        # Fuse the stages first into a loop that produces a list,
-        # then pipe that list to the terminal function.
-        fused_loop = fuse_pipeline(node, real_source, stages, nil)
+        # Fusion chain ending in a non-fold terminal (e.g. MIN, MAX, FIND).
+        # Fuse the stages into a loop that produces an intermediate list,
+        # then pipe that list to the terminal via a new SMOOTH node.
+        # Use the source's collection type for the intermediate list (not
+        # the terminal's scalar result type).
+        list_proxy = node.dup
+        list_proxy.full_type = real_source.full_type
+        list_proxy.storage   = real_source.storage
+        fused_loop = fuse_pipeline(list_proxy, real_source, stages, nil)
 
         # Create a new SMOOTH node for the terminal call
         outer_smooth = AST::BinaryOp.new(node.token, fused_loop, :SMOOTH, terminal.dup)
@@ -138,26 +147,31 @@ class PipelineRewriter
     # real_source was already rewritten above; use it as the rewritten source.
     source = real_source
 
-    # CASE 2: x s> f(y) -> f(x, y) or f(try x, y)
+    # CASE 2/3: x s> f(y) -> f(x, y) or x s> f -> f(x)
+    # Skip rewriting when the callee returns an error union — the transpiler's
+    # transpile_Smooth handles error propagation and snapshot semantics for CATCH.
+    # The SMOOTH's full_type may already be unwrapped by CATCH, so also check
+    # the callee's declared return type.
+    result_is_error = node.full_type && Type.new(node.full_type).error_union?
+    result_is_error ||= callee_returns_error?(rhs)
     needs_try = source.respond_to?(:full_type) && source.full_type && Type.new(source.full_type).error_union?
 
-    if rhs.is_a?(AST::FuncCall)
+    if rhs.is_a?(AST::FuncCall) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
       if needs_try
         lhs_node.full_type = Type.new(source.full_type).payload_type
       end
-      
+
       rhs.args.unshift(lhs_node)
       return rhs
     end
 
-    # CASE 3: x s> f -> f(x) or f(try x)
-    if rhs.is_a?(AST::Identifier)
+    if rhs.is_a?(AST::Identifier) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
       if needs_try
         lhs_node.full_type = Type.new(source.full_type).payload_type
       end
-      
+
       call = AST::FuncCall.new(rhs.token, rhs.name, [lhs_node])
       call.full_type = node.full_type
       call.storage   = node.storage
@@ -245,7 +259,48 @@ class PipelineRewriter
     body << foreach
 
     # 4. Result
-    result = build_final_result(terminal, res_var, token, smooth_node)
+    if terminal.is_a?(AST::EachOp)
+      # EACH is void — no result, no BlockExpr wrapper needed.
+      # Return the ForEach directly (or wrap in a sequence if there are init nodes).
+      return foreach if body.length == 1
+      wrapper = AST::BlockExpr.new(token, body, nil)
+      wrapper.full_type = :Void
+      return wrapper
+    end
+
+    # For AVERAGE, guard against division by zero (empty list -> 0.0).
+    # Emit: MUTABLE __resN = 0.0; if cnt > 0 { __resN = sum / cnt; }
+    if terminal.is_a?(AST::AverageOp)
+      avg_var = "#{res_var}_avg"
+      zero = AST::Literal.new(token, :NUMBER, 0.0)
+      zero.full_type = :Float64
+      avg_decl = AST::VarDecl.new(token, avg_var, nil, zero.dup, true)
+      avg_decl.full_type = :Float64
+      avg_decl.storage   = :stack
+      avg_decl.slot_size = 1
+      avg_decl.instance_variable_set(:@var_used, true)
+      avg_decl.var_mutated = true
+      body << avg_decl
+
+      sum_id = AST::Identifier.new(token, "#{res_var}_sum")
+      cnt_id = AST::Identifier.new(token, "#{res_var}_cnt")
+      sum_id.full_type = :Float64
+      cnt_id.full_type = :Float64
+      cond = AST::BinaryOp.new(token, cnt_id.dup, :GT, zero.dup)
+      cond.full_type = :Bool
+      div = AST::BinaryOp.new(token, sum_id, :DIV, cnt_id)
+      div.full_type = :Float64
+      avg_assign = AST::Assignment.new(token, avg_var, div)
+      avg_assign.full_type = :Float64
+      guard = AST::IfStatement.new(token, cond, [avg_assign], nil)
+      guard.full_type = :Void
+      body << guard
+
+      result = AST::Identifier.new(token, avg_var)
+      result.full_type = :Float64
+    else
+      result = build_final_result(terminal, res_var, token, smooth_node)
+    end
 
     block = AST::BlockExpr.new(token, body, result)
     block.full_type = smooth_node.full_type
@@ -256,13 +311,15 @@ class PipelineRewriter
   def build_init(terminal, res_var, token, smooth_node)
     case terminal
     when AST::SumOp, AST::CountOp
-      val = AST::Literal.new(token, :NUMBER, 0.0)
+      is_int = Type.new(smooth_node.full_type).integer?
+      val = AST::Literal.new(token, is_int ? :INT64 : :NUMBER, is_int ? 0 : 0.0)
       val.full_type = smooth_node.full_type
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
       decl.full_type = smooth_node.full_type
       decl.storage   = :stack
       decl.slot_size = 1
       decl.instance_variable_set(:@var_used, true)
+      decl.var_mutated = true
       [decl]
     when AST::AverageOp
       # Two accumulators: sum and count
@@ -271,13 +328,15 @@ class PipelineRewriter
       sum_decl.storage   = :stack
       sum_decl.slot_size = 1
       sum_decl.instance_variable_set(:@var_used, true)
-      
+      sum_decl.var_mutated = true
+
       cnt_decl = AST::VarDecl.new(token, "#{res_var}_cnt", nil, AST::Literal.new(token, :NUMBER, 0.0), true)
       cnt_decl.full_type = :Float64
       cnt_decl.storage   = :stack
       cnt_decl.slot_size = 1
       cnt_decl.instance_variable_set(:@var_used, true)
-      
+      cnt_decl.var_mutated = true
+
       [sum_decl, cnt_decl]
     when AST::AnyOp, AST::AllOp
       init_val = terminal.is_a?(AST::AllOp)
@@ -288,6 +347,7 @@ class PipelineRewriter
       decl.storage   = :stack
       decl.slot_size = 1
       decl.instance_variable_set(:@var_used, true)
+      decl.var_mutated = true
       [decl]
     when AST::ReduceOp
       decl = AST::VarDecl.new(token, res_var, nil, terminal.initial_value.dup, true)
@@ -295,6 +355,7 @@ class PipelineRewriter
       decl.storage   = :stack
       decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
+      decl.var_mutated = true
       [decl]
     when AST::FindOp, AST::MinOp, AST::MaxOp
       val = AST::Literal.new(token, :NIL, nil)
@@ -304,6 +365,7 @@ class PipelineRewriter
       decl.storage   = :stack
       decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
+      decl.var_mutated = true
       [decl]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp,
          AST::UnnestOp, AST::DistinctOp
@@ -374,7 +436,8 @@ class PipelineRewriter
       [assign]
     when AST::CountOp
       expr = replace_placeholder(terminal.expression, current_val)
-      increment = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, AST::Literal.new(token, :NUMBER, 1.0)))
+      one = AST::Literal.new(token, :INT64, 1)
+      increment = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, one))
       increment.full_type = :Void
       if_stmt = AST::IfStatement.new(token, expr, [increment], nil)
       if_stmt.full_type = :Void
@@ -529,6 +592,17 @@ class PipelineRewriter
 
   def schema_lookup
     @schema_lookup ||= ->(name) { @annotator&.lookup_type_schema(name) }
+  end
+
+  # Check if the RHS callee returns an error union (even if the SMOOTH
+  # node's full_type was already unwrapped by a CATCH block).
+  def callee_returns_error?(rhs)
+    ti = rhs.respond_to?(:type_info) ? rhs.type_info : nil
+    return false unless ti
+    raw = ti.raw
+    return false unless raw.is_a?(Hash) && raw[:return].is_a?(Hash)
+    ret_type = raw[:return][:type]
+    ret_type&.error_union? || false
   end
 
   # Returns true if the source requires the transpiler's pipeline_generator
