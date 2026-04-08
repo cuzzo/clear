@@ -1374,14 +1374,18 @@ class MIRPass
       hoisted = []  # VarDecls to insert before this statement
       case stmt
       when AST::VarDecl, AST::BindExpr
-        next result << stmt if stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
-        val = stmt.value
-        if val.is_a?(AST::BinaryOp) && val.op == :OR_RESCUE
-          # Left side is the bind value; right side may have HPTs.
-          stmt.value.right = hoist_hpt_in_expr(val.right, stmt, hoisted, is_bind_value: false)
+        if stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
+          # Scan reassignment RHS for HPTs (sub-expressions only, like Assignment).
+          stmt.value = hoist_hpt_in_expr(stmt.value, stmt, hoisted, is_bind_value: true)
         else
-          # The top-level value is the bind value. Scan sub-expressions only.
-          stmt.value = hoist_hpt_in_expr(val, stmt, hoisted, is_bind_value: true)
+          val = stmt.value
+          if val.is_a?(AST::BinaryOp) && val.op == :OR_RESCUE
+            # Left side is the bind value; right side may have HPTs.
+            stmt.value.right = hoist_hpt_in_expr(val.right, stmt, hoisted, is_bind_value: false)
+          else
+            # The top-level value is the bind value. Scan sub-expressions only.
+            stmt.value = hoist_hpt_in_expr(val, stmt, hoisted, is_bind_value: true)
+          end
         end
       when AST::ReturnNode
         if stmt.value
@@ -1392,7 +1396,31 @@ class MIRPass
       when AST::FuncCall, AST::MethodCall
         # Standalone expression statement (e.g., print(makeVal!()))
         replaced = hoist_hpt_in_expr(stmt, stmt, hoisted, is_bind_value: false)
-        stmt = replaced if replaced != stmt  # top-level call itself was hoisted (unlikely but possible)
+        if replaced != stmt
+          # Entire call was hoisted to a VarDecl with cleanup. The leftover
+          # Identifier is a no-op -- skip it to avoid Zig `_ = __hpt_N` conflicts.
+          result.concat(hoisted)
+          next
+        end
+      when AST::IfStatement
+        # Hoist heap-returning calls out of IF conditions (evaluated once).
+        stmt.condition = hoist_hpt_in_expr(stmt.condition, stmt, hoisted, is_bind_value: false)
+      when AST::WhileLoop
+        # WHILE conditions are evaluated every iteration -- cannot hoist out.
+        # Reject heap-returning calls in WHILE conditions at compile time.
+        check_no_heap_call_in_while_condition!(stmt)
+      when AST::MatchStatement
+        # Hoist heap-returning calls out of MATCH subjects (evaluated once).
+        stmt.expr = hoist_hpt_in_expr(stmt.expr, stmt, hoisted, is_bind_value: false)
+      when AST::ForEach
+        # Hoist heap-returning calls out of FOR-EACH collections (evaluated once).
+        stmt.collection = hoist_hpt_in_expr(stmt.collection, stmt, hoisted, is_bind_value: false)
+      when AST::Assert
+        # Hoist heap-returning calls out of ASSERT conditions and messages.
+        stmt.condition = hoist_hpt_in_expr(stmt.condition, stmt, hoisted, is_bind_value: false)
+        if stmt.message
+          stmt.message = hoist_hpt_in_expr(stmt.message, stmt, hoisted, is_bind_value: false)
+        end
       end
 
       result.concat(hoisted)
@@ -1421,6 +1449,50 @@ class MIRPass
     when AST::BgBlock, AST::BgStreamBlock
       stmt.body = hoist_in_body(stmt.body) if stmt.body
     end
+  end
+
+  # WHILE conditions are evaluated every iteration. Hoisting a heap-returning
+  # call out would change semantics (evaluate once instead of per-iteration),
+  # and leaving it in leaks a heap allocation per iteration with no cleanup.
+  # Reject at compile time; user must assign to a variable.
+  def check_no_heap_call_in_while_condition!(while_node)
+    cond = while_node.condition
+    return unless cond
+    heap_call = find_heap_call_in_expr(cond)
+    return unless heap_call
+    line = heap_call.token&.line || while_node.token&.line || "?"
+    call_name = heap_call.is_a?(AST::MethodCall) ? heap_call.method_name : heap_call.name
+    raise "[Error] (line #{line}) Heap-allocating call '#{call_name}' in WHILE condition " \
+          "leaks every iteration. Assign to a variable before the loop."
+  end
+
+  # Walk an expression looking for a FuncCall/MethodCall with heap_provenance.
+  def find_heap_call_in_expr(node)
+    return nil unless node
+    case node
+    when AST::FuncCall, AST::MethodCall
+      ti = node.type_info rescue nil
+      ti = ti.is_a?(Type) ? ti : nil
+      return node if ti&.heap_provenance?
+      # Check children (args, object).
+      node.args.each do |arg|
+        found = find_heap_call_in_expr(arg)
+        return found if found
+      end
+      if node.is_a?(AST::MethodCall)
+        found = find_heap_call_in_expr(node.object)
+        return found if found
+      end
+    when AST::BinaryOp
+      return find_heap_call_in_expr(node.left) || find_heap_call_in_expr(node.right)
+    when AST::GetField
+      return find_heap_call_in_expr(node.target)
+    when AST::GetIndex
+      return find_heap_call_in_expr(node.target) || find_heap_call_in_expr(node.index)
+    when AST::MoveNode
+      return find_heap_call_in_expr(node.value)
+    end
+    nil
   end
 
   # Walk an expression tree, replacing HPT FuncCalls with Identifier

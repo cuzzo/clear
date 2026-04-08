@@ -69,6 +69,9 @@ class StaticLeakChecker
     # BG capture promotion checks always run (catch missing escape promotions).
     check_bg_capture_promotes!(@fn.body, promotes)
 
+    # Safety net: catch heap-returning calls that HPT hoisting missed.
+    check_unhoisted_heap_calls!(@fn.body)
+
     @errors
   end
 
@@ -368,6 +371,88 @@ class StaticLeakChecker
       when AST::DoBlock
         stmt.branches&.each { |b| check_bg_capture_promotes!(b[:body], promotes) }
       end
+    end
+  end
+
+  # Safety net: walk the post-MIR AST looking for FuncCall/MethodCall nodes
+  # with heap_provenance that are NOT inside a VarDecl/BindExpr value (i.e.,
+  # not hoisted by hoist_heap_temps!). Catches gaps if new AST positions are
+  # added without corresponding HPT hoisting support.
+  def check_unhoisted_heap_calls!(stmts, inside_bind_value: false)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::VarDecl, AST::BindExpr
+        # The value of a VarDecl/BindExpr is a "bind position" -- HPT calls
+        # here are either the bind target itself or already hoisted.
+        scan_expr_for_unhoisted_heap!(stmt.value, inside_bind_value: true) if stmt.value
+      when AST::ReturnNode
+        scan_expr_for_unhoisted_heap!(stmt.value, inside_bind_value: true) if stmt.value
+      when AST::Assignment
+        scan_expr_for_unhoisted_heap!(stmt.value, inside_bind_value: true) if stmt.value
+      when AST::FuncCall, AST::MethodCall
+        scan_expr_for_unhoisted_heap!(stmt, inside_bind_value: false)
+      when AST::IfStatement
+        scan_expr_for_unhoisted_heap!(stmt.condition, inside_bind_value: false) if stmt.condition
+        check_unhoisted_heap_calls!(stmt.then_branch)
+        check_unhoisted_heap_calls!(stmt.else_branch)
+      when AST::WhileLoop
+        # WHILE conditions are rejected by check_no_heap_call_in_while_condition! in MIRPass.
+        check_unhoisted_heap_calls!(stmt.do_branch)
+      when AST::ForRange
+        check_unhoisted_heap_calls!(stmt.body)
+      when AST::ForEach
+        scan_expr_for_unhoisted_heap!(stmt.collection, inside_bind_value: false) if stmt.collection
+        check_unhoisted_heap_calls!(stmt.body)
+      when AST::MatchStatement
+        scan_expr_for_unhoisted_heap!(stmt.expr, inside_bind_value: false) if stmt.expr
+        stmt.cases&.each { |c| check_unhoisted_heap_calls!(c[:body]) }
+        check_unhoisted_heap_calls!(stmt.default_case)
+      when AST::Assert
+        scan_expr_for_unhoisted_heap!(stmt.condition, inside_bind_value: false) if stmt.condition
+        scan_expr_for_unhoisted_heap!(stmt.message, inside_bind_value: false) if stmt.message
+      when AST::WithBlock
+        check_unhoisted_heap_calls!(stmt.body)
+      when AST::DoBlock
+        stmt.branches&.each { |b| check_unhoisted_heap_calls!(b[:body]) }
+      when AST::BgBlock, AST::BgStreamBlock
+        check_unhoisted_heap_calls!(stmt.body)
+      end
+    end
+  end
+
+  # Walk an expression tree looking for unhoisted heap-returning calls.
+  def scan_expr_for_unhoisted_heap!(node, inside_bind_value: false)
+    return unless node
+    case node
+    when AST::FuncCall, AST::MethodCall
+      ti = node.type_info rescue nil
+      ti = ti.is_a?(Type) ? ti : nil
+      if ti&.heap_provenance? && !inside_bind_value && !node.was_moved
+        line = node.token&.line || "?"
+        call_name = node.is_a?(AST::MethodCall) ? node.method_name : node.name
+        @errors << "[UNHOISTED_HEAP_CALL] #{@fn.name} (line #{line}) -- " \
+                   "heap-returning call '#{call_name}' not hoisted to a VarDecl (leak)"
+      end
+      # Recurse into args.
+      node.args.each { |a| scan_expr_for_unhoisted_heap!(a, inside_bind_value: false) }
+      if node.is_a?(AST::MethodCall)
+        scan_expr_for_unhoisted_heap!(node.object, inside_bind_value: false)
+      end
+    when AST::BinaryOp
+      scan_expr_for_unhoisted_heap!(node.left, inside_bind_value: inside_bind_value)
+      scan_expr_for_unhoisted_heap!(node.right, inside_bind_value: inside_bind_value)
+    when AST::GetField
+      scan_expr_for_unhoisted_heap!(node.target, inside_bind_value: false)
+    when AST::GetIndex
+      scan_expr_for_unhoisted_heap!(node.target, inside_bind_value: false)
+      scan_expr_for_unhoisted_heap!(node.index, inside_bind_value: false)
+    when AST::MoveNode
+      scan_expr_for_unhoisted_heap!(node.value, inside_bind_value: inside_bind_value)
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields&.each_value { |v| scan_expr_for_unhoisted_heap!(v, inside_bind_value: inside_bind_value) }
+    when AST::ListLit
+      node.items&.each { |v| scan_expr_for_unhoisted_heap!(v, inside_bind_value: inside_bind_value) }
     end
   end
 
