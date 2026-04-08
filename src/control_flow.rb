@@ -1057,13 +1057,20 @@ class MIRPass
   # Resolve the INDEX_OPS :set entry for a container type.
   def resolve_container_set_op(type_info)
     return nil unless type_info
-    kind = if type_info.numeric_map? then :numeric_map
-           elsif type_info.map? then :string_map
-           elsif type_info.pool? then :pool
-           elsif type_info.array? || type_info.list_collection? then :array
-           end
+    kind = container_kind(type_info)
     return nil unless kind
     INDEX_OPS.dig(kind, :set)
+  end
+
+  # Map a type to its INDEX_OPS container kind symbol.
+  def container_kind(type_info)
+    return nil unless type_info
+    if type_info.numeric_map? then :numeric_map
+    elsif type_info.map? then :string_map
+    elsif type_info.pool? then :pool
+    elsif type_info.set_collection? then :set_collection
+    elsif type_info.array? || type_info.list_collection? then :array
+    end
   end
 
 

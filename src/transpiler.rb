@@ -989,16 +989,17 @@ private
           end
           return "#{pre_cleanup}#{target}.#{field} = #{value};"
         elsif node.name.is_a?(AST::GetIndex)
-          # Check if target is a Map -- delegate to shared transpile_map_put.
+          # Indexed assignment: delegate to registry-driven transpile_container_set.
           target_node = node.name.target
-          if target_node.metatype == :hashmap
-             map_ft   = Type.new(target_node.full_type)
-             target_ti = target_node.type_info
-             map_ref  = visit(target_node)
-             # Auto-deref Arc/Rc-wrapped maps
-             map_ref = "#{map_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
-             rt_name  = @do_rt_name || "rt"
-             return transpile_map_put(map_ref, map_ft, node.name.index, node.value, rt_name)
+          target_ti = target_node.type_info rescue nil
+          receiver_type = target_ti ? Type.new(target_ti) : nil
+          kind = receiver_type ? container_kind_for(receiver_type) : nil
+          if kind && INDEX_OPS.dig(kind, :set)
+            target_ref = visit(target_node)
+            # Auto-deref Arc/Rc-wrapped containers.
+            target_ref = "#{target_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
+            rt_name = @do_rt_name || "rt"
+            return transpile_container_set(target_ref, receiver_type, node.name.index, node.value, rt_name)
           end
           arr_ref = visit(target_node)
           idx_ref = visit(node.name.index)
@@ -3029,8 +3030,8 @@ private
     rt_name  = @do_rt_name || "rt"
     case node.pool_method
     when :insert
-      val_code = visit(node.args[0])
-      "try #{obj_code}.insert(#{rt_name}.heapAlloc(), #{val_code})"
+      pool_type = Type.new(node.object.full_type)
+      return transpile_container_set(obj_code, pool_type, nil, node.args[0], rt_name)
     when :get
       id_code = visit(node.args[0])
       "#{obj_code}.get(#{id_code})"
@@ -3047,8 +3048,8 @@ private
     rt_name  = @do_rt_name || "rt"
     case node.set_method
     when :insert
-      val_code = visit(node.args[0])
-      "try #{obj_code}.insert(#{rt_name}.heapAlloc(), #{val_code})"
+      set_type = Type.new(node.object.full_type)
+      return transpile_container_set(obj_code, set_type, nil, node.args[0], rt_name)
     when :"contains?"
       val_code = visit(node.args[0])
       "#{obj_code}.contains(#{val_code})"
@@ -3136,8 +3137,7 @@ private
     "#{label}: {\n            var #{var} = #{zig_init};\n            #{puts_stmts}\n            break :#{label} #{var};\n        }"
   end
 
-  # Emits Zig for all HashMap methods: put, delete, contains, count, keys, values.
-  # map.put(key, value) is also called for `map[key] = value` syntax via transpile_map_put.
+  # Emits Zig for HashMap methods: put, delete, contains, count, keys, values.
   def transpile_map_method(node)
     obj_code = visit(node.object)
     rt_name  = @do_rt_name || "rt"
@@ -3146,9 +3146,9 @@ private
     obj_ti = node.object.type_info
     obj_code = "#{obj_code}.ctrl.data.*" if obj_ti&.shared? || obj_ti&.multiowned?
 
-    # map.put(key, value) — stdlib-driven map put.
+    # map.put(key, value) — registry-driven container set.
     if node.map_method == :put
-      return transpile_map_put(obj_code, map_ft, node.args[0], node.args[1], rt_name)
+      return transpile_container_set(obj_code, map_ft, node.args[0], node.args[1], rt_name)
     end
 
     # Unified .remove()/.contains()/.count() for StringMap, PartitionedStringMap, ShardedStringMap.
@@ -3215,61 +3215,123 @@ private
     end
   end
 
-  # Shared map put implementation for both `map[k] = v` (Assignment) and `map.put(k, v)` (MethodCall).
-  # Allocator selection is computed from the map's type — no stamps needed.
-  def transpile_map_put(map_ref, map_ft, key_node, val_node, rt_name)
-    key_ref = visit(key_node)
+  # ============================================================================
+  # Generic container set: driven entirely by INDEX_OPS registry in std_lib.rb
+  # ============================================================================
+  # Handles map[k]=v, map.put(k,v), pool.insert(v), set.insert(v).
+  # All allocator selection, value transforms, and template selection
+  # are declared in INDEX_OPS — zero special-case logic here.
+
+  def transpile_container_set(target_ref, receiver_type, index_node, val_node, rt_name)
+    kind = container_kind_for(receiver_type)
+    entry = INDEX_OPS.dig(kind, :set)
+
+    index_ref = index_node ? visit(index_node) : nil
     val_ref = visit(val_node)
 
-    if map_ft.numeric_map?
-      alloc_sym = (map_ft.escaped_return || map_ft.heap_provenance? || map_ft.sharded? || map_ft.striped?) ? :heap : :frame
-      alloc = alloc_expr(alloc_sym, rt_name)
-      if map_ft.sharded? || map_ft.striped?
-        "try #{map_ref}.put(#{alloc}, #{key_ref}, #{val_ref});"
-      else
-        key_zig = map_ft.key_type.zig_type
-        val_zig = map_ft.value_type.zig_type
-        "try CheatLib.numericMapPut(#{key_zig}, #{val_zig}, #{alloc}, &#{map_ref}, #{key_ref}, #{val_ref});"
-      end
+    # Apply declared value transforms from the registry.
+    val_ref = apply_value_transforms(entry[:value_transforms] || [], val_ref, val_node, rt_name)
+
+    # Select template: shard-direct > sharded > default.
+    template = select_set_template(entry, receiver_type, target_ref, index_node)
+
+    # Resolve all placeholders in the template.
+    resolve_set_placeholders(template, target_ref, index_ref, val_ref, entry, receiver_type, rt_name)
+  end
+
+  # Map a Type to its INDEX_OPS container kind symbol.
+  def container_kind_for(type_info)
+    return nil unless type_info
+    if type_info.numeric_map? then :numeric_map
+    elsif type_info.map? then :string_map
+    elsif type_info.pool? then :pool
+    elsif type_info.set_collection? then :set_collection
+    elsif type_info.array? || type_info.list_collection? then :array
+    end
+  end
+
+  # Pick the Zig template string from an INDEX_OPS :set entry.
+  def select_set_template(entry, receiver_type, target_ref, index_node)
+    # Pipeline shard-direct optimization.
+    if entry[:shard_direct_zig] && @shard_direct_map &&
+       index_node&.respond_to?(:name) && target_ref.include?(@shard_direct_map.to_s)
+      return entry[:shard_direct_zig]
+    end
+    # Sharded/striped receivers use a different Zig API shape.
+    if entry[:sharded_zig] && (receiver_type.sharded? || receiver_type.striped?)
+      return entry[:sharded_zig]
+    end
+    entry[:zig]
+  end
+
+  # Substitute all {placeholders} in a container set template.
+  def resolve_set_placeholders(template, target_ref, index_ref, val_ref, entry, receiver_type, rt_name)
+    result = template.dup
+    result.gsub!("{target}", target_ref)
+    result.gsub!("{index}", index_ref) if index_ref
+    result.gsub!("{value}", val_ref)
+    # Allocator placeholders — resolve from entry symbols.
+    alloc_sym = entry[:alloc] if result.include?("{alloc}")
+    result.gsub!("{key_alloc}", resolve_alloc_for_container(entry[:key_alloc], receiver_type, rt_name)) if result.include?("{key_alloc}")
+    result.gsub!("{val_alloc}", resolve_alloc_for_container(entry[:val_alloc], receiver_type, rt_name)) if result.include?("{val_alloc}")
+    result.gsub!("{alloc}", resolve_alloc_for_container(alloc_sym, receiver_type, rt_name)) if result.include?("{alloc}")
+    # Type placeholders for numeric maps.
+    result.gsub!("{key_zig}", receiver_type.key_type.zig_type) if result.include?("{key_zig}")
+    result.gsub!("{val_zig}", receiver_type.value_type.zig_type) if result.include?("{val_zig}")
+    # Shard-direct placeholders.
+    result.gsub!("{shard_idx}", @shard_direct_idx.to_s) if result.include?("{shard_idx}")
+    result.gsub!("{shard_key}", @shard_direct_key.to_s) if result.include?("{shard_key}")
+    result
+  end
+
+  # Resolve an allocator symbol to a Zig allocator expression.
+  def resolve_alloc_for_container(sym, receiver_type, rt_name)
+    case sym
+    when :heap  then alloc_expr(:heap, rt_name)
+    when :frame then alloc_expr(:frame, rt_name)
+    when :receiver_storage
+      needs_heap = receiver_type.escaped_return || receiver_type.heap_provenance? ||
+                   receiver_type.sharded? || receiver_type.striped?
+      alloc_expr(needs_heap ? :heap : :frame, rt_name)
     else
-      # Shard-direct: putDirect(shard_idx, alloc, key, val) — no hash, no routing.
-      if @shard_direct_map && key_node.respond_to?(:name) && map_ref.include?(@shard_direct_map.to_s)
-        return "try #{map_ref}.putDirect(#{@shard_direct_idx}, std.heap.c_allocator, #{@shard_direct_key}, #{val_ref});"
-      end
+      alloc_expr(:frame, rt_name)
+    end
+  end
 
-      key_alloc = alloc_expr(:heap, rt_name)
-      val_alloc_sym = (map_ft.sharded? || map_ft.striped?) ? :heap : :frame
-      val_alloc = alloc_expr(val_alloc_sym, rt_name)
-
-      # String literals in map values must be heap-duped (rodata can't be freed).
-      val_ref = heap_dupe_string_literals(val_ref, val_node, rt_name)
-
-      # Non-Copy union values BORROWED from another owner must be duped.
-      val_is_consumed = value_consumed?(val_node)
-      val_is_borrow = val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
-      if !val_is_consumed && val_is_borrow
-        val_ti = val_node.type_info rescue nil
-        if val_ti && @union_schemas&.key?(val_ti.resolved)
-          schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-          unless val_ti.implicitly_copyable?(schema_lookup)
-            zig_t = transpile_type(val_ti)
-            val_ref = "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
-          end
-        end
-      end
-
-      # Container promotion: MIR::Promote with :container_store consumed via @pending_container_promote.
-      cp = @pending_container_promote
-      @pending_container_promote = nil
-      if cp
-        @container_promote_counter ||= 0
-        @container_promote_counter += 1
-        tmp = "__cp_#{@container_promote_counter}"
-        "var #{tmp}: #{cp[:zig_type]} = #{val_ref};\ntry CheatLib.promote(#{cp[:zig_type]}, #{rt_name}, &#{tmp});\ntry #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{tmp});"
-      else
-        "try #{map_ref}.put(#{key_alloc}, #{val_alloc}, #{key_ref}, #{val_ref});"
+  # Apply an ordered list of value transforms declared in INDEX_OPS.
+  def apply_value_transforms(transforms, val_ref, val_node, rt_name)
+    transforms.each do |t|
+      val_ref = case t
+      when :dupe_string_literal  then heap_dupe_string_literals(val_ref, val_node, rt_name)
+      when :dupe_borrowed_union  then dupe_borrowed_union(val_ref, val_node, rt_name)
+      when :container_promote    then apply_container_promote(val_ref, rt_name)
+      else val_ref
       end
     end
+    val_ref
+  end
+
+  # Dupe a borrowed non-Copy union value before storing into a TAKES container.
+  def dupe_borrowed_union(val_ref, val_node, rt_name)
+    return val_ref if value_consumed?(val_node)
+    return val_ref unless val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
+    val_ti = val_node.type_info rescue nil
+    return val_ref unless val_ti && @union_schemas&.key?(val_ti.resolved)
+    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+    return val_ref if val_ti.implicitly_copyable?(schema_lookup)
+    zig_t = transpile_type(val_ti)
+    "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
+  end
+
+  # Consume a pending MIR::Promote(:container_store) — wrap value in temp + promote.
+  def apply_container_promote(val_ref, rt_name)
+    cp = @pending_container_promote
+    @pending_container_promote = nil
+    return val_ref unless cp
+    @container_promote_counter ||= 0
+    @container_promote_counter += 1
+    tmp = "__cp_#{@container_promote_counter}"
+    "blk_cp: { var #{tmp}: #{cp[:zig_type]} = #{val_ref}; try CheatLib.promote(#{cp[:zig_type]}, #{rt_name}, &#{tmp}); break :blk_cp #{tmp}; }"
   end
 
   # Maps a CLEAR stack_size symbol (or nil) to a Zig TaskConfig struct literal.

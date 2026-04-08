@@ -528,14 +528,23 @@ MAP_METHODS = {
 # ============================================================================
 # Index Operations Registry — container[key] get/set semantics
 # ============================================================================
-# Keyed by container kind (:string_map, :numeric_map, :array, :pool).
-# Each entry has :get and :set with:
-#   zig:             Zig pattern string ({target}, {index}, {value}, {alloc}, {key_alloc})
-#   return_type:     lambda(container_type) -> return type for get
-#   container_borrow: true if get returns a borrowed view (no cleanup)
-#   takes_value:     true if set takes ownership of the value
-#   allocates:       true if set requires an allocator
-#   key_alloc:       :heap/:frame for string map key allocation
+# Keyed by container kind (:string_map, :numeric_map, :array, :pool, :set_collection).
+# Each entry has :get and/or :set with:
+#   zig:               Zig pattern string ({target}, {index}, {value}, {alloc}, {key_alloc}, etc.)
+#   return_type:       lambda(container_type) -> return type for get
+#   container_borrow:  true if get returns a borrowed view (no cleanup)
+#   takes_value:       true if set takes ownership of the value
+#   allocates:         true if set requires an allocator
+#
+# Allocator symbols for :set entries:
+#   :heap              always rt.heapAlloc()
+#   :frame             always rt.frameAlloc()
+#   :receiver_storage  heap if escaped/provenance/sharded/striped, frame otherwise
+#
+# Value transforms (ordered, applied to {value} before substitution):
+#   :dupe_string_literal   heap-dupe string literals (rodata can't be freed)
+#   :dupe_borrowed_union   deep-copy borrowed non-Copy union values
+#   :container_promote     promote frame-allocated sub-collections to heap
 
 INDEX_OPS = {
   string_map: {
@@ -549,7 +558,9 @@ INDEX_OPS = {
       takes_value: true,
       allocates: true,
       key_alloc: :heap,
-      val_alloc: :storage,  # use receiver's storage_alloc (frame for local, heap for sharded)
+      val_alloc: :receiver_storage,
+      value_transforms: [:dupe_string_literal, :dupe_borrowed_union, :container_promote],
+      shard_direct_zig: "try {target}.putDirect({shard_idx}, std.heap.c_allocator, {shard_key}, {value})",
     },
   },
   numeric_map: {
@@ -562,6 +573,9 @@ INDEX_OPS = {
       zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})",
       takes_value: true,
       allocates: true,
+      alloc: :receiver_storage,
+      value_transforms: [],
+      sharded_zig: "try {target}.put({alloc}, {index}, {value})",
     },
   },
   array: {
@@ -573,6 +587,7 @@ INDEX_OPS = {
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
       takes_value: false,
+      value_transforms: [],
     },
   },
   pool: {
@@ -580,6 +595,22 @@ INDEX_OPS = {
       zig: "{target}.get({index})",
       return_type: ->(ct) { :"?#{ct.element_type.resolved}" },
       container_borrow: false,
+    },
+    set: {
+      zig: "try {target}.insert({alloc}, {value})",
+      takes_value: true,
+      allocates: true,
+      alloc: :heap,
+      value_transforms: [:container_promote],
+    },
+  },
+  set_collection: {
+    set: {
+      zig: "try {target}.insert({alloc}, {value})",
+      takes_value: true,
+      allocates: true,
+      alloc: :heap,
+      value_transforms: [],
     },
   },
 }.freeze
