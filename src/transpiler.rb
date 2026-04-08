@@ -457,7 +457,7 @@ private
         if indirect.include?(k)
           # Heap-allocate indirect field: create pointer, assign value
           zig_t = transpile_type(var_data[:fields][k])
-          "blk_#{k}: {\n    const __p = try #{rt_name}.heapAlloc().create(#{zig_t});\n    __p.* = #{val};\n    break :blk_#{k} __p;\n}"
+          "blk_#{k}: {\n    const __p = try #{rt_name}.heapAlloc().create(#{zig_t});\n    errdefer #{rt_name}.heapAlloc().destroy(__p);\n    __p.* = #{val};\n    break :blk_#{k} __p;\n}"
         else
           val
         end
@@ -1034,7 +1034,7 @@ private
         if v.respond_to?(:needs_heap_create) && v.needs_heap_create
           zig_t = v.type_info ? transpile_type(v.type_info.resolved.to_s) : "UNKNOWN"
           rt_name = @do_rt_name || "rt"
-          val_code = "blk_#{k}: { const __p = try #{rt_name}.heapAlloc().create(#{zig_t}); __p.* = #{val_code}; break :blk_#{k} __p; }"
+          val_code = "blk_#{k}: { const __p = try #{rt_name}.heapAlloc().create(#{zig_t}); errdefer #{rt_name}.heapAlloc().destroy(__p); __p.* = #{val_code}; break :blk_#{k} __p; }"
         end
         ".#{k} = #{val_code}"
       end.join(", ")
@@ -1060,6 +1060,7 @@ private
        <<~ZIG
           blk: {
              const ptr = try #{alloc}.create(#{struct_name});
+             errdefer #{alloc}.destroy(ptr);
              ptr.* = #{struct_init};
              break :blk ptr;
           }
@@ -1724,8 +1725,9 @@ private
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
             const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
-            #{promoted_names.map { |name, promoted| "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});" }.join("\n            ")}
+            #{promoted_names.map { |name, promoted| "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});" }.join("\n            ")}
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
+            errdefer #{alloc_var}.destroy(#{ctx_var});
             #{ctx_var}.* = .{ #{capture_inits} };
             #{bg_spawn_call(node, rt_name, ctx_type, ctx_var)}
             break :#{blk_label} #{promise_var};
@@ -1815,8 +1817,9 @@ private
             };
             const #{alloc_var} = #{rt_name}.getSched().allocator;
             const #{stream_var} = try #{stream_zig}.spawnNew(#{alloc_var}, #{rt_name}.getSched());
-            #{promoted_names.map { |name, promoted| "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});" }.join("\n            ")}
+            #{promoted_names.map { |name, promoted| "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});" }.join("\n            ")}
             const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
+            errdefer #{alloc_var}.destroy(#{ctx_var});
             #{ctx_var}.* = .{ #{capture_inits} };
             try #{rt_name}.getSched().submitSpawn(
                 @intFromPtr(&Runtime.entryWrapper),
@@ -2311,7 +2314,7 @@ private
         # Annotator sets deep_copy when elements are non-Copy unions with heap variants.
         needs_deep = node.respond_to?(:deep_copy) && node.deep_copy
         if needs_deep
-          "blk_copy: {\n    const __src = #{src_expr};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeUnionValue(#{elem_zig}, __src[__i], #{rt_name}.heapAlloc()); }\n        break :blk_copy __buf;\n    } else break :blk_copy #{empty_expr};\n}"
+          "blk_copy: {\n    const __src = #{src_expr};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        errdefer #{rt_name}.heapAlloc().free(__buf);\n        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeUnionValue(#{elem_zig}, __src[__i], #{rt_name}.heapAlloc()); }\n        break :blk_copy __buf;\n    } else break :blk_copy #{empty_expr};\n}"
         else
           "blk_copy: {\n    const __src = #{src_expr};\n    if (__src.len > 0) {\n        const __buf = try #{rt_name}.heapAlloc().alloc(#{elem_zig}, __src.len);\n        @memcpy(__buf, __src);\n        break :blk_copy __buf;\n    } else break :blk_copy #{empty_expr};\n}"
         end
