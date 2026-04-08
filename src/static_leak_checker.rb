@@ -53,6 +53,7 @@ class StaticLeakChecker
 
       check_completeness!(allocs, drops, takes)
       check_alloc_consistency!(allocs, drops)
+      check_promote_alloc_consistency!(promotes, drops)
       check_guards!(drops, df_summary)
       check_escapes!(escapes, drops)
       check_frame_escapes!(escapes, promotes)
@@ -64,6 +65,9 @@ class StaticLeakChecker
 
     # Frame overflow checks always run (catch missing loop marks).
     check_frame_overflow!(@fn.body)
+
+    # BG capture promotion checks always run (catch missing escape promotions).
+    check_bg_capture_promotes!(@fn.body, promotes)
 
     @errors
   end
@@ -95,6 +99,23 @@ class StaticLeakChecker
       if alloc_node.alloc != drop_node.alloc
         @errors << error(:ALLOC_MISMATCH, name,
           "Alloc uses :#{alloc_node.alloc} but Drop uses :#{drop_node.alloc}")
+      end
+    end
+  end
+
+  # MIR::Promote that converts frame->heap requires the matching Drop to be
+  # guarded. Without a guard, the defer fires unconditionally after promotion,
+  # freeing from the original (frame) allocator while data is now on heap.
+  def check_promote_alloc_consistency!(promotes, drops)
+    promotes.each do |name, promote|
+      next unless name.is_a?(String) # skip synthetic names (:__ret, :__catch_ret, etc.)
+      next unless [:list, :string_map, :generic].include?(promote.strategy)
+      drop = drops[name]
+      next unless drop
+      # Promote converts to heap; if Drop would still fire (no guard), allocator is wrong.
+      if !drop.has_moved_guard && drop.alloc == :frame
+        @errors << error(:ALLOC_MISMATCH, name,
+          "MIR::Promote converts to heap but unguarded Drop uses :frame (UAF after promotion)")
       end
     end
   end
@@ -230,6 +251,10 @@ class StaticLeakChecker
           body_has_frame_alloc?(stmt.default_case)
       when AST::WhileLoop then body_has_frame_alloc?(stmt.do_branch)
       when AST::ForRange, AST::ForEach then body_has_frame_alloc?(stmt.body)
+      when AST::WithBlock then body_has_frame_alloc?(stmt.body)
+      when AST::DoBlock
+        (stmt.branches || []).any? { |b| body_has_frame_alloc?(b[:body]) }
+      when AST::BgBlock, AST::BgStreamBlock then body_has_frame_alloc?(stmt.body)
       else false
       end
     end
@@ -303,6 +328,47 @@ class StaticLeakChecker
   def error(kind, name, msg)
     line = @fn.token&.line || "?"
     "[#{kind}] #{@fn.name}::#{name} (line #{line}) -- #{msg}"
+  end
+
+  # BG blocks that capture frame-allocated variables needing escape promotion
+  # must have a corresponding MIR::Promote. Without promotion the fiber
+  # outlives the parent frame -- use-after-free.
+  def check_bg_capture_promotes!(stmts, promotes)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      bg = case stmt
+           when AST::BgBlock, AST::BgStreamBlock then stmt
+           when AST::VarDecl, AST::BindExpr, AST::Assignment
+             v = stmt.respond_to?(:value) ? stmt.value : nil
+             (v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)) ? v : nil
+           else nil
+           end
+      if bg
+        captures = bg.capture_analysis&.captures
+        captures&.each do |name, type_obj|
+          t = type_obj ? Type.new(type_obj) : nil
+          next unless t && t.needs_escape_promotion? && !t.needs_pointer_passing?
+          unless promotes.key?(name) || promotes.key?(name.to_s) || promotes.key?(name.to_sym)
+            @errors << error(:FRAME_ESCAPE, name,
+              "BG capture needs escape promotion but no MIR::Promote found (use-after-free)")
+          end
+        end
+      end
+      # Recurse into nested control flow.
+      case stmt
+      when AST::IfStatement
+        check_bg_capture_promotes!(stmt.then_branch, promotes)
+        check_bg_capture_promotes!(stmt.else_branch, promotes)
+      when AST::WhileLoop then check_bg_capture_promotes!(stmt.do_branch, promotes)
+      when AST::ForRange, AST::ForEach then check_bg_capture_promotes!(stmt.body, promotes)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| check_bg_capture_promotes!(c[:body], promotes) }
+        check_bg_capture_promotes!(stmt.default_case, promotes)
+      when AST::WithBlock then check_bg_capture_promotes!(stmt.body, promotes)
+      when AST::DoBlock
+        stmt.branches&.each { |b| check_bg_capture_promotes!(b[:body], promotes) }
+      end
+    end
   end
 
   def loop_error(kind, loop_node, msg)

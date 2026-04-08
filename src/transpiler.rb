@@ -2642,6 +2642,11 @@ private
         # consistent caller cleanup across success/error paths.
         @pending_catch_string_dupe = true
         nil
+      when :or_fallback_dupe
+        # Signals that the NEXT OrRescue with struct fallback needs its
+        # string fields heap-duped for consistent caller cleanup.
+        @pending_or_fallback_dupe = true
+        nil
       when :generic
         vname = zig_safe_name(node.name)
         "try CheatLib.promote(#{node.zig_type}, #{rt_name}, &#{vname});"
@@ -2809,18 +2814,6 @@ private
   end
 
   # --- ERROR HANDLING (OR RESCUE) ---
-  # Check if an expression carries heap_promoted_call, looking through OR wrappers.
-  def has_heap_promoted_call?(expr)
-    return false unless expr
-    ti = expr.type_info rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return true if ti&.heap_provenance?
-    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
-      return has_heap_promoted_call?(expr.left)
-    end
-    false
-  end
-
   def transpile_OrRescue(node)
     t_left = Type.new(node.left.full_type)
 
@@ -2888,10 +2881,10 @@ private
     if t_left.error_union?
       right_code = visit(node.right)
 
-      # When the success path returns heap-promoted data (e.g., struct with duped
-      # string fields), the fallback must ALSO have its string fields duped to heap
-      # so the caller's cleanup is always valid regardless of which path was taken.
-      if has_heap_promoted_call?(node.left) && node.right.is_a?(AST::StructLit)
+      # MIR::Promote(:or_fallback_dupe) signals that the fallback struct literal
+      # needs its string fields heap-duped for consistent caller cleanup.
+      if @pending_or_fallback_dupe && node.right.is_a?(AST::StructLit)
+        @pending_or_fallback_dupe = false
         ret_type = node.right.full_type
         ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
         resolved = ret_type&.resolved

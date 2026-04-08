@@ -756,6 +756,10 @@ class MIRPass
       # BG escape promotions: frame-allocated captures must be promoted to heap.
       insert_bg_escape_promote!(result, stmt)
 
+      # OrRescue fallback dupe: when success path is heap-promoted and fallback
+      # is a struct literal, string fields need heap-duping for consistent cleanup.
+      insert_or_fallback_dupe!(result, stmt)
+
       # Emit the original statement.
       result << stmt
 
@@ -1007,6 +1011,65 @@ class MIRPass
     t = Type.new(ft)
     return unless t.string?
     result << MIR::Promote.new(ret_node.token, :__catch_ret, "[]const u8", :catch_string_dupe, nil)
+  end
+
+  # Insert MIR::Promote(:or_fallback_dupe) before a statement that contains
+  # an OrRescue where the success path is heap-promoted and the fallback is
+  # a struct literal. Signals the transpiler to heap-dupe string fields in the
+  # fallback so cleanup semantics match the success path.
+  def insert_or_fallback_dupe!(result, stmt)
+    or_node = find_or_rescue_in_value(stmt)
+    return unless or_node
+    return unless or_node.right.is_a?(AST::StructLit)
+    return unless or_rescue_needs_fallback_dupe?(or_node)
+    result << MIR::Promote.new(or_node.token, :__or_fallback, nil, :or_fallback_dupe, nil)
+  end
+
+  # Walk into a statement's value expression to find an OrRescue node.
+  def find_or_rescue_in_value(stmt)
+    expr = case stmt
+           when AST::VarDecl, AST::BindExpr then stmt.value
+           when AST::Assignment then stmt.value
+           when AST::ReturnNode then stmt.value
+           else nil
+           end
+    find_or_rescue_expr(expr)
+  end
+
+  def find_or_rescue_expr(expr)
+    return nil unless expr
+    if expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
+      return expr
+    end
+    if expr.is_a?(AST::BinaryOp) && expr.op == :OR
+      return find_or_rescue_expr(expr.left)
+    end
+    nil
+  end
+
+  # Check if an OrRescue's success path is heap-promoted (same logic as
+  # the transpiler's has_heap_promoted_call? but at MIR insertion time).
+  def or_rescue_needs_fallback_dupe?(or_node)
+    return false unless or_node.is_a?(AST::BinaryOp) && or_node.op == :OR_RESCUE
+    left = or_node.left
+    ti = left.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    return true if ti&.heap_provenance?
+    if left.is_a?(AST::BinaryOp) && (left.op == :OR || left.op == :OR_RESCUE)
+      return or_rescue_needs_fallback_dupe_left?(left)
+    end
+    false
+  end
+
+  def or_rescue_needs_fallback_dupe_left?(expr)
+    return false unless expr
+    ti = expr.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    return true if ti&.heap_provenance?
+    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
+      return or_rescue_needs_fallback_dupe_left?(expr.left)
+    end
+    false
   end
 
   # Collect names of bindings consumed by a statement.

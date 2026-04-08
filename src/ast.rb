@@ -26,6 +26,10 @@ module AST
         walk_body(node.body, &visitor)
       when BgBlock, BgStreamBlock
         walk_body(node.body, &visitor)
+      when WithBlock
+        walk_body(node.body, &visitor)
+      when DoBlock
+        (node.branches || []).each { |b| walk_body(b[:body], &visitor) }
       when FunctionDef
         walk_body(node.body, &visitor)
       when TestBlock
