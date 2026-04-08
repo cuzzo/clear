@@ -1242,6 +1242,30 @@ private
         t.generic_instance? ? t.generic_base : t.resolved
       end
       is_union = @union_schemas&.key?(union_lookup)
+
+      # Optimization: integer MATCH with all-literal cases -> Zig switch (jump table).
+      # Detects MATCH x START 1 -> ..., 2 -> ..., DEFAULT -> ... END patterns.
+      expr_type = node.expr.resolved_type
+      is_int_match = !is_union && !node.string_match &&
+        (expr_type == :Int64 || expr_type == :Int32 || expr_type == :Int16 || expr_type == :Int8 ||
+         (expr_type.is_a?(Type) && expr_type.integer?)) &&
+        node.cases.all? { |c| c[:kind] != :when && c[:kind] != :struct_pattern &&
+                              c[:value].is_a?(AST::Literal) && (c[:value].type == :INT64 || c[:value].type == :NUMBER) }
+
+      if is_int_match
+        arms = node.cases.map do |c|
+          val = visit(c[:value])
+          body = transpile_block(c[:body])
+          "#{val} => {\n    #{body}\n    }"
+        end
+        default_body = if node.default_case && !node.default_case.empty?
+          transpile_block(node.default_case)
+        else
+          "{}"
+        end
+        arms << "else => {\n    #{default_body}\n    }"
+        "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n    }"
+      else
       parts = node.cases.map do |c|
         body = transpile_block(c[:body])
         if is_union
@@ -1300,6 +1324,7 @@ private
       end
 
       result
+      end
 
     when AST::BlockExpr
       # labeled block: :blk { body... break :blk result; }
