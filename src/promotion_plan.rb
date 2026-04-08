@@ -235,6 +235,14 @@ module CleanupClassifier
 
       field_ti = stmt.name.type_info rescue nil
       field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+
+      # Auto-lock string fields: locked/always_mutable structs heap-dupe
+      # string fields, so overwriting needs explicit free of the old value.
+      if !field_ti&.needs_cleanup?(schema_lookup) && stmt.auto_lock && field_ti&.string?
+        stmt.field_pre_cleanup = { zig_type: "[]const u8", alloc: :heap }
+        next
+      end
+
       next unless field_ti&.needs_cleanup?(schema_lookup)
 
       alloc = if target_node.is_a?(AST::Identifier)

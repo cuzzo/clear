@@ -926,6 +926,9 @@ private
             alias_var = "__#{var_name}_inner"
             zig_var   = @do_capture_map&.dig(var_name) || var_name
             lock_expr = zig_var
+            # Field pre-cleanup driven by stamp (MIR::FieldCleanup verifies).
+            fpc = node.field_pre_cleanup
+            rt_name = @do_rt_name || "rt"
 
             if sync == :always_mutable
               # RefCell: direct access through .data, no mutex guard
@@ -934,13 +937,9 @@ private
               @locked_unwrap_map = prev_locked_map.merge({ alias_var => true })
               value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.data\./, "#{alias_var}.")
               @locked_unwrap_map = prev_locked_map
-              # Free old string field before overwriting to prevent leak.
-              # The struct is heap-owned (@alwaysMutable), so string fields are heap-duped.
-              field_ti = node.name.type_info
-              field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-              rt_name = @do_rt_name || "rt"
-              if field_ti&.string?
-                return "{ const __old = #{zig_var}.get().#{field}; #{zig_var}.get().#{field} = #{value}; if (__old.len > 0) #{rt_name}.heapAlloc().free(__old); }"
+              if fpc
+                alloc_call = alloc_expr(fpc[:alloc] || :heap, rt_name)
+                return "{ const __old = #{zig_var}.get().#{field}; #{zig_var}.get().#{field} = #{value}; if (__old.len > 0) #{alloc_call}.free(__old); }"
               end
               return "#{zig_var}.get().#{field} = #{value};"
             end
@@ -954,11 +953,9 @@ private
             value = visit(node.value).gsub(/\b#{Regexp.escape(zig_var)}\.ctrl\.data\./, "#{alias_var}.")
             @locked_unwrap_map = prev_locked_map
 
-            field_ti = node.name.type_info
-            field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-            rt_name = @do_rt_name || "rt"
-            if field_ti&.string?
-              return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\nconst __old = #{alias_var}.#{field};\n#{alias_var}.#{field} = #{value};\nif (__old.len > 0) #{rt_name}.heapAlloc().free(__old);\n}"
+            if fpc
+              alloc_call = alloc_expr(fpc[:alloc] || :heap, rt_name)
+              return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\nconst __old = #{alias_var}.#{field};\n#{alias_var}.#{field} = #{value};\nif (__old.len > 0) #{alloc_call}.free(__old);\n}"
             end
             return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value};\n}"
           end
