@@ -670,6 +670,15 @@ private
     all_drops
   end
 
+  def visit_BlockExpr(node)
+    with_new_scope(current_scope) do
+      node.body.each { |stmt| visit(stmt) }
+      visit(node.result)
+      node.full_type = node.result.full_type
+      node.storage   = node.result.storage
+    end
+  end
+
   def visit_IfStatement(node)
     visit(node.condition)
 
@@ -1073,7 +1082,7 @@ private
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
     analyze_control_flow_branches([
       proc {
-        current_scope.declare(node.var_name, nil, elem_sym, false, false, nil, :stack)
+        current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
         node.symbol = current_scope.locals[node.var_name]
         classify_ownership!(node.symbol)
         visit_stmts(node.body)
@@ -2000,6 +2009,7 @@ private
 
   def validate_assignment_type(node, target_type, value_type)
     return if target_type.nil? || value_type.nil? || target_type == :Any || value_type == :Any
+    return if target_type == :NIL # Allow narrowing from initial NIL
     return if target_type == value_type
 
     if !is_safe_autocast?(value_type, target_type)

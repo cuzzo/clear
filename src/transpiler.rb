@@ -50,14 +50,14 @@ class ZigTranspiler
     tokens    = Lexer.new(cheat_code).tokenize
     ast       = Parser.new(tokens, cheat_code).parse
 
-    # Pass 1b: Rewrite pipeline operators into plain AST nodes.
-    # Runs BEFORE annotation so the annotator sees normal ForEach/If/MethodCall nodes.
-    PipelineRewriter.new.rewrite!(ast)
-
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
     annotator.annotate!(ast)
 
-    # Pass 2b: Flatten chained string + into StringConcat nodes.
+    # Pass 2b: Rewrite pipeline operators into plain AST nodes.
+    # Runs AFTER annotation so we have type information for folds (MIN/MAX/AVG).
+    PipelineRewriter.new(annotator).rewrite!(ast)
+
+    # Pass 2c: Flatten chained string + into StringConcat nodes.
     # Runs AFTER annotation (needs type_info to identify string + vs numeric +).
     StringConcatRewriter.new.rewrite!(ast)
 
@@ -1074,6 +1074,10 @@ private
     when AST::ListLit
       # 1. Determine the Zig Type (T)
       ti = node.coerced_type_info || node.type_info
+      unless ti
+        # Fallback for unannotated literals (e.g. from rewriter)
+        return "{}"
+      end
 
       # Bounded stream: ~T[N] — emit a BoundedStream struct literal.
       # Each element is a BG block expression (labeled Zig block → Promise(T)).
@@ -1295,6 +1299,14 @@ private
 
       result
 
+    when AST::BlockExpr
+      # labeled block: :blk { body... break :blk result; }
+      @block_expr_counter = (@block_expr_counter || 0) + 1
+      label = "__blk_#{@block_expr_counter}"
+      body_code = transpile_block(node.body)
+      result_code = visit(node.result)
+      "#{label}: {\n#{body_code}\nbreak :#{label} #{result_code};\n}"
+
     when AST::ForEach
       coll_code = visit(node.collection)
       var       = zig_safe_name(node.var_name)
@@ -1303,6 +1315,7 @@ private
       coll_type = node.collection.full_type
       ct        = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
       yield_line = current_tp_ctx&.has_rt ? "\n#{rt_ref}.checkYield();" : ""
+      is_mutable = node.is_mutable == true
 
       if ct.map?
         # HashMap iteration: while-loop over keyIterator
@@ -1310,8 +1323,11 @@ private
         iter_var = "__kit_#{@for_counter}"
         "{\nvar #{iter_var} = #{coll_code}.keyIterator();\nwhile (#{iter_var}.next()) |#{var}| {\n #{body} #{yield_line}\n}\n}"
       else
-        iterable = ct.list_collection? ? "#{coll_code}.items" : "&#{coll_code}"
-        "for (#{iterable}) |#{var}| {\n #{body} #{yield_line}\n}"
+        # Dynamic arrays (std.ArrayListUnmanaged) and @list collections
+        is_list = ct.list_collection? || (ct.array? && ct.dynamic? && !ct.string?)
+        iterable = is_list ? "(#{coll_code}).items" : "&#{coll_code}"
+        ptr = is_mutable ? "*" : ""
+        "for (#{iterable}) |#{ptr}#{var}| {\n #{body} #{yield_line}\n}"
       end
 
     when AST::ForRange

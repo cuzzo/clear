@@ -46,6 +46,7 @@ class Scope
 
     # 2. Copy State Maps (var state lives on entries, already duped above)
     @dependencies = original.dependencies.dup
+    @types = original.types.dup
     # Child scopes inherit variables but don't own them — start with empty owned_names.
     # Only variables declared in this scope (via `declare`) are in @owned_names.
     @owned_names = Set.new

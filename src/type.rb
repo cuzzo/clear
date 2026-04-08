@@ -834,6 +834,7 @@ class Type
     if struct?
       raise "Need lookup context for struct size" unless resolver
       schema = resolver.call(resolved)
+      return 1 unless schema # Treat unknown/nil schemas as 1 slot (default for pointers/unknown structs)
       # Enum/Union/Resource types — treat as slot size 1.
       return 1 if schema.is_a?(Hash) && (schema[:kind] == :enum || schema[:kind] == :union || schema[:kind] == :resource)
       # Generic structs: treat as 1 slot (size depends on type args, unknown at this point)

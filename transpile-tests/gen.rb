@@ -16,11 +16,12 @@ class TestGenerator < ZigTranspiler
     tokens = Lexer.new(cheat_code).tokenize
     ast = Parser.new(tokens, cheat_code).parse
 
-    # 1b. Rewrite pipeline operators into plain AST nodes.
-    PipelineRewriter.new.rewrite!(ast)
-
     annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
     annotator.annotate!(ast)
+
+    # 1b. Rewrite pipeline operators into plain AST nodes.
+    # Passes annotator for metadata access.
+    PipelineRewriter.new(annotator).rewrite!(ast)
 
     # 2b. Flatten chained string + into StringConcat nodes.
     StringConcatRewriter.new.rewrite!(ast)

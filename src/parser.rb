@@ -1278,7 +1278,7 @@ class Parser
     if expr.is_a?(AST::RangeLit)
       AST::ForRange.new(tok, var_name, expr.start, expr.finish, expr.inclusive, body, nil)
     else
-      AST::ForEach.new(tok, var_name, expr, body, nil)
+      AST::ForEach.new(tok, var_name, expr, body, nil, false)
     end
   end
 

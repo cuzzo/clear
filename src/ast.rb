@@ -597,7 +597,7 @@ module AST
   end
 
   # ForEach: FOR var IN collection DO body END
-  ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops) { include Locatable }
+  ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops, :is_mutable) { include Locatable }
 
   # ── Test Framework ───────────────────────────────────────────────
 

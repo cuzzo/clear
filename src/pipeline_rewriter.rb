@@ -1,22 +1,476 @@
 require_relative "ast"
+require_relative "std_lib"
 
-# Pipeline Rewriter — placeholder for future AST-level pipeline optimization.
+# Pipeline Rewriter — transforms high-level pipeline operators (s>) into 
+# regular AST nodes (ForEach, IfStatement, BlockExpr) AFTER annotation.
 #
-# Pipeline `s>` carries error-unwrapping semantics: `x s> f` where f returns
-# `!T` auto-unwraps to `T` and propagates the error. This semantic is handled
-# by the annotator when it visits BinaryOp(:SMOOTH). Rewriting `s>` to a bare
-# FuncCall before annotation loses this behavior.
+# Running after annotation allows us to use type information for things like
+# correctly typed accumulators and preserving error-unwrapping semantics.
 #
-# Current status: the rewriter is a no-op. All pipeline handling stays in:
-# - Annotator: type-checks pipeline, handles error unwrapping
-# - pipeline_generator.rb: emits Zig loops for WHERE/SELECT/etc.
-# - transpiler.rb transpile_Smooth: dispatches to pipeline_generator
-#
-# Future: when pipeline fusion is implemented, it will operate on the
-# annotated AST (after type info is available) as a separate optimization pass.
-
+# Since we run after annotation, we manually stamp newly created nodes with
+# type and storage information so the transpiler can process them correctly.
 class PipelineRewriter
-  def rewrite!(ast)
-    # No-op: pipeline semantics require annotation context.
+  FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp].freeze
+  TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+                   AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
+
+  def initialize(annotator)
+    @annotator = annotator
+    @var_counter = 0
+  end
+
+  def rewrite!(node)
+    return node unless node
+
+    # Recursive walk first so nested pipelines are handled before outer ones.
+    rewrite_children!(node)
+
+    if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+      return rewrite_pipeline(node)
+    end
+
+    node
+  end
+
+  private
+
+  def next_var(prefix = "__v")
+    @var_counter += 1
+    "#{prefix}#{@var_counter}"
+  end
+
+  def rewrite_children!(node)
+    case node
+    when AST::Program
+      node.statements&.map! { |s| rewrite!(s) }
+    when AST::FunctionDef
+      node.body&.map! { |s| rewrite!(s) }
+    when AST::VarDecl, AST::BindExpr
+      node.value = rewrite!(node.value) if node.value
+    when AST::Assignment
+      node.value = rewrite!(node.value) if node.respond_to?(:value) && node.value
+    when AST::ReturnNode
+      node.value = rewrite!(node.value) if node.value
+    when AST::IfStatement
+      node.condition = rewrite!(node.condition)
+      node.then_branch&.map! { |s| rewrite!(s) }
+      node.else_branch&.map! { |s| rewrite!(s) }
+    when AST::MatchStatement
+      node.expr = rewrite!(node.expr)
+      (node.cases || []).each { |c| c[:body]&.map! { |s| rewrite!(s) } }
+      node.default_case&.map! { |s| rewrite!(s) } if node.default_case
+    when AST::WhileLoop
+      node.condition = rewrite!(node.condition)
+      node.do_branch&.map! { |s| rewrite!(s) } if node.do_branch.is_a?(Array)
+    when AST::ForRange
+      node.start_expr = rewrite!(node.start_expr)
+      node.end_expr = rewrite!(node.end_expr)
+      node.body&.map! { |s| rewrite!(s) }
+    when AST::ForEach
+      node.collection = rewrite!(node.collection)
+      node.body&.map! { |s| rewrite!(s) }
+    when AST::BinaryOp
+      node.left = rewrite!(node.left)
+      node.right = rewrite!(node.right)
+    when AST::UnaryOp
+      node.right = rewrite!(node.right)
+    when AST::FuncCall, AST::MethodCall
+      node.args&.map! { |a| rewrite!(a) }
+    when AST::StructLit
+      node.fields.each { |k, v| node.fields[k] = rewrite!(v) }
+    when AST::ListLit
+      node.items&.map! { |i| rewrite!(i) }
+    when AST::BlockExpr
+      node.body&.map! { |s| rewrite!(s) }
+      node.result = rewrite!(node.result)
+    end
+  end
+
+  def rewrite_pipeline(node)
+    source = node.left
+    rhs = node.right
+
+    # Collect the chain FIRST
+    chain = collect_chain(node)
+    stages = chain[:stages]
+    terminal = chain[:terminal]
+    real_source = chain[:source]
+
+    # CASE 1: Fusion candidate (chained fusible stages or ending in a fold/EachOp)
+    is_fold = terminal.nil? || terminal.is_a?(AST::EachOp) || TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
+    
+    if stages.any? || (is_fold && terminal)
+      if is_fold
+        return fuse_pipeline(node, real_source, stages, terminal)
+      else
+        # Fusion chain ending in a standard function call.
+        # Fuse the stages first into a loop that produces a list, 
+        # then pipe that list to the terminal function.
+        fused_loop = fuse_pipeline(node, real_source, stages, nil)
+        
+        # Create a new SMOOTH node for the terminal call
+        outer_smooth = AST::BinaryOp.new(node.token, fused_loop, :SMOOTH, terminal.dup)
+        outer_smooth.full_type = node.full_type
+        outer_smooth.storage   = node.storage
+        
+        return rewrite_pipeline(outer_smooth)
+      end
+    end
+
+    # CASE 2: x s> f(y) -> f(x, y) or f(try x, y)
+    needs_try = source.respond_to?(:full_type) && source.full_type && Type.new(source.full_type).error_union?
+
+    if rhs.is_a?(AST::FuncCall)
+      lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
+      if needs_try
+        lhs_node.full_type = Type.new(source.full_type).payload_type
+      end
+      
+      rhs.args.unshift(lhs_node)
+      return rhs
+    end
+
+    # CASE 3: x s> f -> f(x) or f(try x)
+    if rhs.is_a?(AST::Identifier)
+      lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
+      if needs_try
+        lhs_node.full_type = Type.new(source.full_type).payload_type
+      end
+      
+      call = AST::FuncCall.new(rhs.token, rhs.name, [lhs_node])
+      call.full_type = node.full_type
+      call.storage   = node.storage
+      config = STD_LIB[rhs.name]
+      if config
+        call.zig_pattern = config.is_a?(Array) ? config.first[:zig] : config[:zig]
+      end
+      return call
+    end
+
+    # CASE 4: x s> RECOVER(default) -> x OR default
+    if rhs.is_a?(AST::RecoverOp)
+      op = AST::BinaryOp.new(rhs.token, source.dup, :OR_RESCUE, rhs.default_expr.dup)
+      op.full_type = node.full_type
+      op.storage   = node.storage
+      return op
+    end
+
+    node
+  end
+
+  def is_fusible?(node)
+    FUSIBLE_STAGES.any? { |t| node.is_a?(t) }
+  end
+
+  def collect_chain(node)
+    stages = []
+    cursor = node
+    terminal = nil
+
+    # Identify the terminal operation.
+    right = node.right
+    if TERMINAL_FOLDS.any? { |t| right.is_a?(t) } || right.is_a?(AST::EachOp)
+      terminal = right
+      cursor = node.left
+    elsif is_fusible?(right)
+      terminal = nil # implicit list terminal
+      cursor = node
+    else
+      # Standard function terminal
+      terminal = right
+      cursor = node.left
+    end
+
+    # Now walk back through fusible stages
+    while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
+      r = cursor.right
+      if is_fusible?(r)
+        stages.unshift(r)
+        cursor = cursor.left
+      else
+        break
+      end
+    end
+
+    { source: cursor, stages: stages, terminal: terminal }
+  end
+
+  def fuse_pipeline(smooth_node, source, stages, terminal)
+    # Generate unique variable names for this pipeline
+    res_var = next_var("__res")
+    it_var = next_var("__it")
+    token = smooth_node.token
+
+    body = []
+    
+    # 1. Initialize result container or accumulator(s)
+    init_nodes = build_init(terminal, res_var, token, smooth_node)
+    body.concat(init_nodes)
+
+    # 2. Build loop body
+    current_it = AST::Identifier.new(token, it_var)
+    if source.respond_to?(:full_type) && source.full_type
+      src_t = Type.new(source.full_type)
+      current_it.full_type = src_t.element_type if src_t.element_type
+    end
+
+    loop_body = build_recursive_body(stages, terminal, current_it, res_var, token)
+
+    # 3. Create ForEach loop
+    is_each = terminal.is_a?(AST::EachOp)
+    foreach = AST::ForEach.new(token, it_var, source.dup, loop_body, nil, is_each)
+    foreach.full_type = :Void
+    foreach.instance_variable_set(:@var_used, true)
+    body << foreach
+
+    # 4. Result
+    result = build_final_result(terminal, res_var, token, smooth_node)
+
+    block = AST::BlockExpr.new(token, body, result)
+    block.full_type = smooth_node.full_type
+    block.storage   = smooth_node.storage
+    block
+  end
+
+  def build_init(terminal, res_var, token, smooth_node)
+    case terminal
+    when AST::SumOp, AST::CountOp
+      val = AST::Literal.new(token, :NUMBER, 0.0)
+      val.full_type = smooth_node.full_type
+      decl = AST::VarDecl.new(token, res_var, nil, val, true)
+      decl.full_type = smooth_node.full_type
+      decl.storage   = :stack
+      decl.slot_size = 1
+      decl.instance_variable_set(:@var_used, true)
+      [decl]
+    when AST::AverageOp
+      # Two accumulators: sum and count
+      sum_decl = AST::VarDecl.new(token, "#{res_var}_sum", nil, AST::Literal.new(token, :NUMBER, 0.0), true)
+      sum_decl.full_type = :Float64
+      sum_decl.storage   = :stack
+      sum_decl.slot_size = 1
+      sum_decl.instance_variable_set(:@var_used, true)
+      
+      cnt_decl = AST::VarDecl.new(token, "#{res_var}_cnt", nil, AST::Literal.new(token, :NUMBER, 0.0), true)
+      cnt_decl.full_type = :Float64
+      cnt_decl.storage   = :stack
+      cnt_decl.slot_size = 1
+      cnt_decl.instance_variable_set(:@var_used, true)
+      
+      [sum_decl, cnt_decl]
+    when AST::AnyOp, AST::AllOp
+      init_val = terminal.is_a?(AST::AllOp)
+      val = AST::Literal.new(token, :BOOLEAN, init_val)
+      val.full_type = :Bool
+      decl = AST::VarDecl.new(token, res_var, nil, val, true)
+      decl.full_type = :Bool
+      decl.storage   = :stack
+      decl.slot_size = 1
+      decl.instance_variable_set(:@var_used, true)
+      [decl]
+    when AST::ReduceOp
+      decl = AST::VarDecl.new(token, res_var, nil, terminal.initial_value.dup, true)
+      decl.full_type = terminal.full_type
+      decl.storage   = :stack
+      decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
+      decl.instance_variable_set(:@var_used, true)
+      [decl]
+    when AST::FindOp, AST::MinOp, AST::MaxOp
+      val = AST::Literal.new(token, :NIL, nil)
+      val.full_type = :NIL
+      decl = AST::VarDecl.new(token, res_var, nil, val, true)
+      decl.full_type = smooth_node.full_type
+      decl.storage   = :stack
+      decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
+      decl.instance_variable_set(:@var_used, true)
+      [decl]
+    when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
+      lit = AST::ListLit.new(token, [], :stack)
+      lit.full_type = smooth_node.full_type
+      decl = AST::VarDecl.new(token, res_var, nil, lit, true)
+      decl.full_type = smooth_node.full_type
+      decl.storage   = smooth_node.storage
+      decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
+      decl.instance_variable_set(:@var_used, true)
+      [decl]
+    else
+      []
+    end
+  end
+
+  def build_recursive_body(stages, terminal, current_val, res_var, token)
+    if stages.empty?
+      return build_terminal_action(terminal, current_val, res_var, token)
+    end
+
+    stage = stages.first
+    remaining = stages[1..-1]
+
+    case stage
+    when AST::WhereOp
+      pred = replace_placeholder(stage.expression, current_val)
+      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token)
+      if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, nil)
+      if_stmt.full_type = :Void
+      [if_stmt]
+    when AST::SelectOp
+      new_val = next_var("__fused")
+      expr = replace_placeholder(stage.expression, current_val)
+      new_ident = AST::Identifier.new(stage.token, new_val)
+      if stage.respond_to?(:full_type) && stage.full_type
+        new_ident.full_type = stage.full_type
+      end
+      
+      bind = AST::BindExpr.new(stage.token, new_val, nil, expr)
+      bind.full_type = new_ident.full_type
+      bind.storage   = :stack
+      bind.instance_variable_set(:@mode, :decl)
+      bind.instance_variable_set(:@var_used, true)
+      
+      [bind] + build_recursive_body(remaining, terminal, new_ident, res_var, token)
+    when AST::TapOp
+      tap_body = stage.body.map { |s| replace_placeholder(s, current_val) }
+      tap_body + build_recursive_body(remaining, terminal, current_val, res_var, token)
+    when AST::TakeWhileOp
+      pred = replace_placeholder(stage.expression, current_val)
+      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token)
+      if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, [AST::BreakNode.new(stage.token)])
+      if_stmt.full_type = :Void
+      [if_stmt]
+    else
+      build_recursive_body(remaining, terminal, current_val, res_var, token)
+    end
+  end
+
+  def build_terminal_action(terminal, current_val, res_var, token)
+    res_ident = AST::Identifier.new(token, res_var)
+    case terminal
+    when AST::SumOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      assign = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, expr))
+      assign.full_type = :Void
+      [assign]
+    when AST::CountOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      increment = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, AST::Literal.new(token, :NUMBER, 1.0)))
+      increment.full_type = :Void
+      if_stmt = AST::IfStatement.new(token, expr, [increment], nil)
+      if_stmt.full_type = :Void
+      [if_stmt]
+    when AST::AverageOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      sum_ident = AST::Identifier.new(token, "#{res_var}_sum")
+      cnt_ident = AST::Identifier.new(token, "#{res_var}_cnt")
+      [AST::Assignment.new(token, sum_ident, AST::BinaryOp.new(token, sum_ident, :ADD, expr)),
+       AST::Assignment.new(token, cnt_ident, AST::BinaryOp.new(token, cnt_ident, :ADD, AST::Literal.new(token, :NUMBER, 1.0)))]
+    when AST::AnyOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      set_true = AST::Assignment.new(token, res_ident, AST::Literal.new(token, :BOOLEAN, true))
+      set_true.full_type = :Void
+      if_stmt = AST::IfStatement.new(token, expr, [set_true, AST::BreakNode.new(token)], nil)
+      if_stmt.full_type = :Void
+      [if_stmt]
+    when AST::AllOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      set_false = AST::Assignment.new(token, res_ident, AST::Literal.new(token, :BOOLEAN, false))
+      set_false.full_type = :Void
+      if_stmt = AST::IfStatement.new(token, AST::UnaryOp.new(token, :NOT, expr), [set_false, AST::BreakNode.new(token)], nil)
+      if_stmt.full_type = :Void
+      [if_stmt]
+    when AST::ReduceOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      expr = replace_named_placeholder(expr, "acc", res_ident)
+      assign = AST::Assignment.new(token, res_ident, expr)
+      assign.full_type = :Void
+      [assign]
+    when AST::FindOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      assign = AST::Assignment.new(token, res_ident, current_val.dup)
+      assign.full_type = :Void
+      if_stmt = AST::IfStatement.new(token, expr, [assign, AST::BreakNode.new(token)], nil)
+      if_stmt.full_type = :Void
+      [if_stmt]
+    when AST::MinOp, AST::MaxOp
+      expr = replace_placeholder(terminal.expression, current_val)
+      op = terminal.is_a?(AST::MinOp) ? :LT : :GT
+      # IF res == NIL OR expr < res DO res = expr END
+      cond = AST::BinaryOp.new(token, 
+        AST::BinaryOp.new(token, res_ident, :EQ, AST::Literal.new(token, :NIL, nil)),
+        :OR,
+        AST::BinaryOp.new(token, expr, op, res_ident)
+      )
+      assign = AST::Assignment.new(token, res_ident, expr.dup)
+      assign.full_type = :Void
+      if_stmt = AST::IfStatement.new(token, cond, [assign], nil)
+      if_stmt.full_type = :Void
+      [if_stmt]
+    when AST::EachOp
+      terminal.body.map { |s| replace_placeholder(s, current_val) }
+    when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
+      # Produces a list
+      call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
+      call.full_type = :Void
+      call.zig_pattern = STD_LIB["append"][:zig]
+      [call]
+    else
+      call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
+      call.zig_pattern = STD_LIB["append"][:zig]
+      [call]
+    end
+  end
+
+  def build_final_result(terminal, res_var, token, smooth_node)
+    if terminal.is_a?(AST::AverageOp)
+      sum_ident = AST::Identifier.new(token, "#{res_var}_sum")
+      cnt_ident = AST::Identifier.new(token, "#{res_var}_cnt")
+      sum_ident.full_type = :Float64
+      cnt_ident.full_type = :Float64
+      div = AST::BinaryOp.new(token, sum_ident, :DIV, cnt_ident)
+      div.full_type = :Float64
+      div
+    else
+      res = AST::Identifier.new(token, res_var)
+      res.full_type = smooth_node.full_type
+      res.storage   = smooth_node.storage
+      res
+    end
+  end
+
+  def schema_lookup
+    @schema_lookup ||= ->(name) { @annotator&.lookup_type_schema(name) }
+  end
+
+  def replace_named_placeholder(node, name, replacement)
+    return node unless node
+    if node.is_a?(AST::Identifier) && node.name == name
+      return replacement.dup
+    end
+    new_node = node.dup
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array)
+        new_node[member] = val.map { |i| replace_named_placeholder(i, name, replacement) }
+      elsif val.is_a?(AST::Locatable)
+        new_node[member] = replace_named_placeholder(val, name, replacement)
+      end
+    end
+    new_node
+  end
+
+  def replace_placeholder(node, replacement)
+    return node unless node
+    if node.is_a?(AST::Placeholder) || (node.is_a?(AST::Identifier) && node.name == "_")
+      return replacement.dup
+    end
+    new_node = node.dup
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array)
+        new_node[member] = val.map { |i| replace_placeholder(i, replacement) }
+      elsif val.is_a?(AST::Locatable)
+        new_node[member] = replace_placeholder(val, replacement)
+      end
+    end
+    new_node
   end
 end
