@@ -269,38 +269,47 @@ END
 -- Position and count stored as Value.Number at "__rp" and "__tc".
 -- This avoids toString() inside WHILE loops for position updates.
 
+FN isWhitespace?(c: String) RETURNS Bool ->
+    RETURN c == " " || c == "," || c == "\n" || c == "\t";
+END
+
+FN isDelimiter?(c: String) RETURNS Bool ->
+    RETURN c == " " || c == "," || c == "\n" || c == "\t" || c == "(" || c == ")" || c == "[" || c == "]" || c == "\"" || c == ";";
+END
+
 FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
-    WHILE i < str.length() DO
+    len = str.length();
+    WHILE i < len DO
         c = charAt(str, i);
-        IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
+        IF isWhitespace?(c) THEN i += 1;
         ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
             penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
-            WHILE i < str.length() && charAt(str, i) != "\n" DO i += 1; END
+            WHILE i < len && charAt(str, i) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
-            MUTABLE s = "\""; i += 1;
-            WHILE i < str.length() && charAt(str, i) != "\"" DO
-                IF charAt(str, i) == "\\" THEN
-                    s = s + charAt(str, i); i += 1;
-                    IF i < str.length() THEN s = s + charAt(str, i); i += 1; END
-                ELSE s = s + charAt(str, i); i += 1;
+            -- String literal: scan for closing quote, extract with substr
+            start = i;
+            i += 1;
+            WHILE i < len && charAt(str, i) != "\"" DO
+                IF charAt(str, i) == "\\" THEN i += 2;
+                ELSE i += 1;
                 END
             END
-            s = s + "\"";
-            penv["__t" + count.toString()] = Value{ Str: COPY s };
+            IF i < len THEN i += 1; END
+            penv["__t" + count.toString()] = Value{ Str: substr(str, start, i - start) };
             count += 1;
-            i += 1;
         ELSE
-            MUTABLE s = "";
-            WHILE i < str.length() && charAt(str, i) != " " && charAt(str, i) != "," && charAt(str, i) != "\n" && charAt(str, i) != "\t" && charAt(str, i) != "(" && charAt(str, i) != ")" && charAt(str, i) != "[" && charAt(str, i) != "]" && charAt(str, i) != "\"" && charAt(str, i) != ";" DO
-                s = s + charAt(str, i); i += 1;
+            -- Symbol/number: scan to next delimiter, extract with substr
+            start = i;
+            WHILE i < len && isDelimiter?(charAt(str, i)) == FALSE DO
+                i += 1;
             END
-            IF s.length() > 0 THEN
-                penv["__t" + count.toString()] = Value{ Str: COPY s };
+            IF i > start THEN
+                penv["__t" + count.toString()] = Value{ Str: substr(str, start, i - start) };
                 count += 1;
             END
         END
