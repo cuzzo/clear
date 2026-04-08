@@ -1418,7 +1418,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect(out).to include("null")
-        expect(out).to include("find_result")
+        expect(out).to include("__res")
         expect(out).to include("break")
       end
 
@@ -1430,7 +1430,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("__pblk")
+        expect(out).to include("__res")
         expect(out).to include("break")
       end
     end
@@ -1901,7 +1901,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /MIN requires a numeric expression/)
       end
 
-      it "emits min_result with floatMax init and less-than guard in Zig" do
+      it "emits found-flag pattern with less-than guard for MIN in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1909,12 +1909,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("min_result: f64")
-        expect(out).to include("floatMax")
-        expect(out).to include("min_val < min_result")
+        expect(out).to include("__res")
+        expect(out).to include("_found")
+        expect(out).to include("<")
       end
 
-      it "emits min_val < min_result for updating min in Zig" do
+      it "emits assert guard for MIN on empty list in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1922,7 +1922,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("min_val < min_result")
+        expect(out).to include("_found")
+        expect(out).to include("assert")
       end
     end
 
@@ -1967,7 +1968,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /MAX requires a numeric expression/)
       end
 
-      it "emits max_result with -floatMax init and greater-than guard in Zig" do
+      it "emits found-flag pattern with greater-than guard for MAX in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1975,12 +1976,12 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("max_result: f64")
-        expect(out).to include("-std.math.floatMax")
-        expect(out).to include("max_val > max_result")
+        expect(out).to include("__res")
+        expect(out).to include("_found")
+        expect(out).to include(">")
       end
 
-      it "emits max_val > max_result for updating max in Zig" do
+      it "emits assert guard for MAX on empty list in Zig" do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS Void ->
             nums: Float64[] = [1.0];
@@ -1988,7 +1989,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("max_val > max_result")
+        expect(out).to include("_found")
+        expect(out).to include("assert")
       end
     end
 

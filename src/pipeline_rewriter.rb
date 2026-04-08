@@ -10,13 +10,14 @@ require_relative "std_lib"
 # Since we run after annotation, we manually stamp newly created nodes with
 # type and storage information so the transpiler can process them correctly.
 class PipelineRewriter
-  FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp].freeze
-  TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp,
-                   AST::CountOp, AST::ReduceOp, AST::AnyOp, AST::AllOp].freeze
-  # MinOp, MaxOp, FindOp: null-init + optional unwrap not yet implemented.
-  # UnnestOp, DistinctOp: slice vs ArrayList iteration not yet implemented.
-  # These fall through to the old pipeline_generator path.
-  LIST_TERMINALS = [].freeze
+  FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp,
+                    AST::SkipOp, AST::LimitOp].freeze
+  TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::CountOp, AST::ReduceOp,
+                    AST::AnyOp, AST::AllOp, AST::FindOp, AST::MinOp, AST::MaxOp].freeze
+  # OrderByOp, IndexOp, WindowOp, JoinOp: require Zig-specific constructs
+  # (comparator structs, HashMap ops, dual-source joins). These fall through
+  # to the pipeline_generator path.
+  LIST_TERMINALS = [AST::UnnestOp, AST::DistinctOp].freeze
 
   def initialize(annotator = nil)
     @annotator = annotator
@@ -249,7 +250,10 @@ class PipelineRewriter
       current_it.full_type = src_t.element_type if src_t.element_type
     end
 
-    loop_body = build_recursive_body(stages, terminal, current_it, res_var, token)
+    stage_inits = []
+    res_type = smooth_node.full_type
+    loop_body = build_recursive_body(stages, terminal, current_it, res_var, token, stage_inits, res_type)
+    body.concat(stage_inits)
 
     # 3. Create ForEach loop
     is_each = terminal.is_a?(AST::EachOp)
@@ -258,7 +262,16 @@ class PipelineRewriter
     foreach.instance_variable_set(:@var_used, true)
     body << foreach
 
-    # 4. Result
+    # 4. Post-loop guards
+    if terminal.is_a?(AST::MinOp) || terminal.is_a?(AST::MaxOp)
+      found_ident = AST::Identifier.new(token, "#{res_var}_found")
+      found_ident.full_type = :Bool
+      guard = AST::Assert.new(token, found_ident, "MIN/MAX applied to empty list")
+      guard.full_type = :Void
+      body << guard
+    end
+
+    # 5. Result
     if terminal.is_a?(AST::EachOp)
       # EACH is void — no result, no BlockExpr wrapper needed.
       # Return the ForEach directly (or wrap in a sequence if there are init nodes).
@@ -357,7 +370,7 @@ class PipelineRewriter
       decl.instance_variable_set(:@var_used, true)
       decl.var_mutated = true
       [decl]
-    when AST::FindOp, AST::MinOp, AST::MaxOp
+    when AST::FindOp
       val = AST::Literal.new(token, :NIL, nil)
       val.full_type = :NIL
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
@@ -367,6 +380,27 @@ class PipelineRewriter
       decl.instance_variable_set(:@var_used, true)
       decl.var_mutated = true
       [decl]
+    when AST::MinOp, AST::MaxOp
+      # Found-flag pattern: first element always sets result, subsequent compare
+      zero = AST::Literal.new(token, :NUMBER, 0.0)
+      zero.full_type = :Float64
+      val_decl = AST::VarDecl.new(token, res_var, nil, zero, true)
+      val_decl.full_type = :Float64
+      val_decl.storage   = :stack
+      val_decl.slot_size = 1
+      val_decl.instance_variable_set(:@var_used, true)
+      val_decl.var_mutated = true
+
+      found_init = AST::Literal.new(token, :BOOLEAN, false)
+      found_init.full_type = :Bool
+      found_decl = AST::VarDecl.new(token, "#{res_var}_found", nil, found_init, true)
+      found_decl.full_type = :Bool
+      found_decl.storage   = :stack
+      found_decl.slot_size = 1
+      found_decl.instance_variable_set(:@var_used, true)
+      found_decl.var_mutated = true
+
+      [val_decl, found_decl]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp,
          AST::UnnestOp, AST::DistinctOp
       lit = AST::ListLit.new(token, [], :stack)
@@ -382,9 +416,9 @@ class PipelineRewriter
     end
   end
 
-  def build_recursive_body(stages, terminal, current_val, res_var, token)
+  def build_recursive_body(stages, terminal, current_val, res_var, token, stage_inits = [], res_type = nil)
     if stages.empty?
-      return build_terminal_action(terminal, current_val, res_var, token)
+      return build_terminal_action(terminal, current_val, res_var, token, res_type)
     end
 
     stage = stages.first
@@ -393,7 +427,7 @@ class PipelineRewriter
     case stage
     when AST::WhereOp
       pred = replace_placeholder(stage.expression, current_val)
-      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token)
+      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
       if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, nil)
       if_stmt.full_type = :Void
       [if_stmt]
@@ -404,30 +438,85 @@ class PipelineRewriter
       if stage.respond_to?(:full_type) && stage.full_type
         new_ident.full_type = stage.full_type
       end
-      
+
       bind = AST::BindExpr.new(stage.token, new_val, nil, expr)
       bind.full_type = new_ident.full_type
       bind.storage   = :stack
       bind.instance_variable_set(:@mode, :decl)
       bind.instance_variable_set(:@var_used, true)
-      
-      [bind] + build_recursive_body(remaining, terminal, new_ident, res_var, token)
+
+      [bind] + build_recursive_body(remaining, terminal, new_ident, res_var, token, stage_inits, res_type)
     when AST::TapOp
       tap_body = stage.body.map { |s| replace_placeholder(s, current_val) }
-      tap_body + build_recursive_body(remaining, terminal, current_val, res_var, token)
+      tap_body + build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
     when AST::TakeWhileOp
       pred = replace_placeholder(stage.expression, current_val)
-      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token)
+      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
       if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, [AST::BreakNode.new(stage.token)])
       if_stmt.full_type = :Void
       [if_stmt]
+    when AST::SkipOp
+      cnt_var = next_var("__skip_cnt")
+      zero = AST::Literal.new(token, :INT64, 0)
+      zero.full_type = :Int64
+      cnt_decl = AST::VarDecl.new(token, cnt_var, nil, zero, true)
+      cnt_decl.full_type = :Int64
+      cnt_decl.storage = :stack
+      cnt_decl.slot_size = 1
+      cnt_decl.instance_variable_set(:@var_used, true)
+      cnt_decl.var_mutated = true
+      stage_inits << cnt_decl
+
+      cnt_ident = AST::Identifier.new(token, cnt_var)
+      cnt_ident.full_type = :Int64
+      one = AST::Literal.new(token, :INT64, 1)
+      one.full_type = :Int64
+      increment = AST::Assignment.new(token, cnt_ident, AST::BinaryOp.new(token, cnt_ident.dup, :ADD, one))
+      increment.full_type = :Void
+
+      skip_n = stage.count.dup
+      cond = AST::BinaryOp.new(token, cnt_ident.dup, :LTE, skip_n)
+      cond.full_type = :Bool
+      skip_if = AST::IfStatement.new(token, cond, [AST::ContinueNode.new(token)], nil)
+      skip_if.full_type = :Void
+
+      rest = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      [increment, skip_if] + rest
+    when AST::LimitOp
+      cnt_var = next_var("__lim_cnt")
+      zero = AST::Literal.new(token, :INT64, 0)
+      zero.full_type = :Int64
+      cnt_decl = AST::VarDecl.new(token, cnt_var, nil, zero, true)
+      cnt_decl.full_type = :Int64
+      cnt_decl.storage = :stack
+      cnt_decl.slot_size = 1
+      cnt_decl.instance_variable_set(:@var_used, true)
+      cnt_decl.var_mutated = true
+      stage_inits << cnt_decl
+
+      cnt_ident = AST::Identifier.new(token, cnt_var)
+      cnt_ident.full_type = :Int64
+      one = AST::Literal.new(token, :INT64, 1)
+      one.full_type = :Int64
+      increment = AST::Assignment.new(token, cnt_ident, AST::BinaryOp.new(token, cnt_ident.dup, :ADD, one))
+      increment.full_type = :Void
+
+      limit_n = stage.count.dup
+      cond = AST::BinaryOp.new(token, cnt_ident.dup, :GT, limit_n)
+      cond.full_type = :Bool
+      limit_if = AST::IfStatement.new(token, cond, [AST::BreakNode.new(token)], nil)
+      limit_if.full_type = :Void
+
+      rest = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      [increment, limit_if] + rest
     else
-      build_recursive_body(remaining, terminal, current_val, res_var, token)
+      build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
     end
   end
 
-  def build_terminal_action(terminal, current_val, res_var, token)
+  def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
+    res_ident.full_type = res_type if res_type
     case terminal
     when AST::SumOp
       expr = replace_placeholder(terminal.expression, current_val)
@@ -478,15 +567,23 @@ class PipelineRewriter
     when AST::MinOp, AST::MaxOp
       expr = replace_placeholder(terminal.expression, current_val)
       op = terminal.is_a?(AST::MinOp) ? :LT : :GT
-      # IF res == NIL OR expr < res DO res = expr END
-      cond = AST::BinaryOp.new(token, 
-        AST::BinaryOp.new(token, res_ident, :EQ, AST::Literal.new(token, :NIL, nil)),
-        :OR,
-        AST::BinaryOp.new(token, expr, op, res_ident)
-      )
-      assign = AST::Assignment.new(token, res_ident, expr.dup)
-      assign.full_type = :Void
-      if_stmt = AST::IfStatement.new(token, cond, [assign], nil)
+      found_ident = AST::Identifier.new(token, "#{res_var}_found")
+      found_ident.full_type = :Bool
+
+      # if !found || expr < res { res = expr; found = true }
+      not_found = AST::UnaryOp.new(token, :NOT, found_ident.dup)
+      not_found.full_type = :Bool
+      cmp = AST::BinaryOp.new(token, expr, op, res_ident.dup)
+      cmp.full_type = :Bool
+      cond = AST::BinaryOp.new(token, not_found, :OR, cmp)
+      cond.full_type = :Bool
+
+      assign_val = AST::Assignment.new(token, res_ident, expr.dup)
+      assign_val.full_type = :Void
+      set_found = AST::Assignment.new(token, found_ident, AST::Literal.new(token, :BOOLEAN, true))
+      set_found.full_type = :Void
+
+      if_stmt = AST::IfStatement.new(token, cond, [assign_val, set_found], nil)
       if_stmt.full_type = :Void
       [if_stmt]
     when AST::EachOp
@@ -494,28 +591,21 @@ class PipelineRewriter
     when AST::UnnestOp
       # Nested loop: for each item, iterate over the inner list and append each element
       inner_expr = replace_placeholder(terminal.expression, current_val)
-      inner_var = next_var("__inner")
       inner_it_var = next_var("__it")
 
-      inner_bind = AST::BindExpr.new(token, inner_var, nil, inner_expr)
-      inner_bind.full_type = inner_expr.full_type || terminal.expression.full_type
-      inner_bind.storage = :stack
-      inner_bind.instance_variable_set(:@mode, :decl)
-      inner_bind.instance_variable_set(:@var_used, true)
-
       inner_it = AST::Identifier.new(token, inner_it_var)
-      inner_coll = AST::Identifier.new(token, inner_var)
-      inner_coll.full_type = inner_bind.full_type
 
       append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
       append.full_type = :Void
       append.zig_pattern = STD_LIB["append"][:zig]
 
-      inner_foreach = AST::ForEach.new(token, inner_it_var, inner_coll, [append], nil, false)
+      # Iterate directly over the expression (avoids ArrayList/slice confusion).
+      # Mark collection as a slice so the transpiler uses &expr, not .items.
+      inner_foreach = AST::ForEach.new(token, inner_it_var, inner_expr, [append], nil, false)
       inner_foreach.full_type = :Void
       inner_foreach.instance_variable_set(:@var_used, true)
 
-      [inner_bind, inner_foreach]
+      [inner_foreach]
     when AST::DistinctOp
       # Linear scan: check if key already exists in result, append if not
       key_expr = replace_placeholder(terminal.expression, current_val)
@@ -530,6 +620,7 @@ class PipelineRewriter
       found_decl.storage = :stack
       found_decl.slot_size = 1
       found_decl.instance_variable_set(:@var_used, true)
+      found_decl.var_mutated = true
 
       # Inner loop over result: for existing in res { if key == existing_key { found = true; break } }
       ex_ident = AST::Identifier.new(token, ex_var)

@@ -785,7 +785,9 @@ private
       end
       zig_type = transpile_type(node.full_type)
       # Always emit explicit type annotation for fn_type (Zig can't always infer *const fn(...)).
-      annotation = (ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type?) ? ": #{zig_type}" : ""
+      needs_annotation = ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
+                         (node.value.is_a?(AST::Literal) && node.value.type == :NIL)
+      annotation = needs_annotation ? ": #{zig_type}" : ""
 
       # 1. Resolve MOVE vs RETAIN logic
       @current_rhs_is_move = node.value.is_a?(AST::MoveNode)
@@ -1323,9 +1325,18 @@ private
         iter_var = "__kit_#{@for_counter}"
         "{\nvar #{iter_var} = #{coll_code}.keyIterator();\nwhile (#{iter_var}.next()) |#{var}| {\n #{body} #{yield_line}\n}\n}"
       else
-        # Dynamic arrays (std.ArrayListUnmanaged) and @list collections
-        is_list = ct.list_collection? || (ct.array? && ct.dynamic? && !ct.string?)
-        iterable = is_list ? "(#{coll_code}).items" : "&#{coll_code}"
+        # Dynamic arrays (std.ArrayListUnmanaged) and @list collections.
+        # Struct fields are slices in Zig even when the CLEAR type is dynamic T[],
+        # so skip .items for field access (slices are directly iterable).
+        is_field_access = node.collection.is_a?(AST::GetField)
+        is_list = ct.list_collection? || (ct.array? && ct.dynamic? && !ct.string? && !is_field_access)
+        iterable = if is_list
+          "(#{coll_code}).items"
+        elsif is_field_access && ct.array? && ct.dynamic?
+          coll_code  # Struct field slices are directly iterable
+        else
+          "&#{coll_code}"
+        end
         ptr = is_mutable ? "*" : ""
         "for (#{iterable}) |#{ptr}#{var}| {\n #{body} #{yield_line}\n}"
       end
