@@ -2161,9 +2161,10 @@ private
       # 3. Escape promotion — driven by MIR nodes (Promote/SuppressCleanup
       #    inserted before this ReturnNode) + annotations on the ReturnNode.
       needs_string_dupe = @catch_dupe_string_returns || @current_fn_has_catch
-      if node.promote_ret_wrap == :var && node.promote_fields_info
-        # Struct/union-level promotion: wrap return value in __ret, promote fields.
-        info = node.promote_fields_info
+      if node.promote_ret_wrap == :var && @pending_ret_field_promote
+        # Struct/union-level promotion: driven by MIR::Promote(:ret_fields).
+        info = @pending_ret_field_promote
+        @pending_ret_field_promote = nil
         zig_type = info[:zig_type]
         parts = []
         parts << "var __ret = #{val_code};"
@@ -2620,6 +2621,11 @@ private
         # Signals that the NEXT statement's value needs a temp + promote.
         # Consumed by the Assignment handler in the map put path.
         @pending_container_promote = { zig_type: node.zig_type }
+        nil
+      when :ret_fields
+        # Signals that the NEXT ReturnNode needs struct-level field promotion.
+        # Consumed by the ReturnNode handler.
+        @pending_ret_field_promote = { zig_type: node.zig_type, fields: node.fields }
         nil
       when :list
         vname = zig_safe_name(node.name)

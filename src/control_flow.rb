@@ -1136,13 +1136,16 @@ class MIRPass
       result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil)
     end
 
-    # Struct-level promotion: annotate ReturnNode so transpiler wraps with __ret.
+    # Struct-level field promotion: insert MIR::Promote with :ret_fields strategy
+    # so the StaticLeakChecker can verify it. The transpiler consumes this as a
+    # pending flag and wraps the return value in `var __ret` + per-field promote calls.
     if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
       ret_node.promote_ret_wrap = :var
-      ret_node.promote_fields_info = {
-        zig_type: filtered[:struct_promote],
-        fields: filtered[:unhandled_promote_fields]
-      }
+      result << MIR::Promote.new(
+        ret_node.token, :__ret,
+        filtered[:struct_promote], :ret_fields,
+        filtered[:unhandled_promote_fields]
+      )
     elsif filtered[:var_promotes]&.any?
       ret_node.promote_ret_wrap = :const
     end

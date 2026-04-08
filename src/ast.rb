@@ -377,7 +377,6 @@ module AST
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
     attr_accessor :promote_ret_wrap    # :const or :var — set by MIRPass for return wrapping
-    attr_accessor :promote_fields_info # { zig_type:, fields: } — struct/union field promotion on __ret
     attr_accessor :hpt_return_promote  # MIR::Promote node — :hpt_string_dupe or :hpt_promote strategy
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
