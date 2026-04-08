@@ -1046,7 +1046,7 @@ private
     # allocates from the frame arena. If any frame data escapes to outer-scope
     # containers, promote those containers to heap so the rewind is safe.
     # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
-    allocates = !node.tight && loop_allocates_frame?(node.body)
+    allocates = !node.tight && loop_allocates_frame?(node.body, outer_vars)
     if allocates
       preserve_vars = Set.new
       escape_actions = collect_loop_escapes(node.body, outer_vars, preserve_vars: preserve_vars)
@@ -1166,7 +1166,7 @@ private
     # allocates from the frame arena. If any frame data escapes to outer-scope
     # containers, promote those containers to heap so the rewind is safe.
     # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
-    allocates = !node.tight && loop_allocates_frame?(node.do_branch)
+    allocates = !node.tight && loop_allocates_frame?(node.do_branch, outer_vars)
     if allocates
       preserve_vars = Set.new
       escape_actions = collect_loop_escapes(node.do_branch, outer_vars, preserve_vars: preserve_vars)

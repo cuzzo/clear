@@ -74,31 +74,43 @@ module AllocHelper
   end
 
   # Returns true if any statement in stmts allocates from the frame arena.
-  def loop_allocates_frame?(stmts)
+  def loop_allocates_frame?(stmts, outer_vars = nil)
     return false if stmts.nil?
     stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.any? { |s| node_allocates_frame?(s) }
+    stmts.any? { |s| node_allocates_frame?(s, outer_vars) }
   end
 
-  def node_allocates_frame?(node)
+  def node_allocates_frame?(node, outer_vars = nil)
     return false if node.nil?
     case node
     when AST::VarDecl, AST::BindExpr
       return true if node.storage == :frame
-      node_allocates_frame?(node.value)
+      node_allocates_frame?(node.value, outer_vars)
     when AST::FuncCall
+      # mutates_receiver (e.g. append(outer_list, val)): allocation goes into the
+      # receiver's backing, not the iteration's frame scope. When the receiver is
+      # an outer variable, no per-iteration frame waste is produced.
+      if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars
+        receiver = node.args&.first
+        return false if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
+      end
       return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
       return false if node.respond_to?(:extern_call) && node.extern_call
       fn = @fn_nodes&.[](node.name)
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
-      node.args&.any? { |a| node_allocates_frame?(a) } || false
+      node.args&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
     when AST::MethodCall
       return false if node.respond_to?(:pool_method) && node.pool_method
       return false if node.respond_to?(:set_method) && node.set_method
+      # Same as FuncCall: mutates_receiver on an outer container is not per-iteration waste.
+      if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars
+        receiver = node.object
+        return false if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
+      end
       return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
       fn = @fn_nodes&.[](node.name)
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
-      ([node.object] + (node.args || [])).any? { |a| node_allocates_frame?(a) }
+      ([node.object] + (node.args || [])).any? { |a| node_allocates_frame?(a, outer_vars) }
     when AST::BinaryOp
       # String concat (+) allocates from the frame arena (transpiles to CheatLib.concat).
       if node.op == :ADD
@@ -106,24 +118,24 @@ module AllocHelper
         rt = node.right.type_info rescue nil
         return true if (lt.is_a?(Type) ? lt.string? : lt == :String) || (rt.is_a?(Type) ? rt.string? : rt == :String)
       end
-      node_allocates_frame?(node.left) || node_allocates_frame?(node.right)
+      node_allocates_frame?(node.left, outer_vars) || node_allocates_frame?(node.right, outer_vars)
     when AST::UnaryOp
-      node_allocates_frame?(node.right)
+      node_allocates_frame?(node.right, outer_vars)
     when AST::IfStatement
-      loop_allocates_frame?(node.then_branch) || loop_allocates_frame?(node.else_branch)
+      loop_allocates_frame?(node.then_branch, outer_vars) || loop_allocates_frame?(node.else_branch, outer_vars)
     when AST::WhileLoop
-      loop_allocates_frame?(node.do_branch)
+      loop_allocates_frame?(node.do_branch, outer_vars)
     when AST::ForRange, AST::ForEach
-      loop_allocates_frame?(node.body)
+      loop_allocates_frame?(node.body, outer_vars)
     when AST::MatchStatement
-      node.cases.any? { |c| loop_allocates_frame?(c[:body]) } ||
-        loop_allocates_frame?(node.default_case)
+      node.cases.any? { |c| loop_allocates_frame?(c[:body], outer_vars) } ||
+        loop_allocates_frame?(node.default_case, outer_vars)
     when AST::GetIndex
-      node_allocates_frame?(node.index)
+      node_allocates_frame?(node.index, outer_vars)
     when AST::ReturnNode
-      node_allocates_frame?(node.value)
+      node_allocates_frame?(node.value, outer_vars)
     when AST::Assignment
-      node_allocates_frame?(node.value)
+      node_allocates_frame?(node.value, outer_vars)
     else
       false
     end

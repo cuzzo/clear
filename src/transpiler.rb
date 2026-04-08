@@ -2976,7 +2976,22 @@ private
     if pattern.include?("{alloc}")
       rt_ref = @do_rt_name || "rt"
       alloc_sym = node.matched_stdlib_def&.dig(:alloc) || :node_storage
-      pattern = pattern.gsub("{alloc}", resolve_alloc_for_intrinsic(alloc_sym, node, rt_ref))
+      resolved_alloc = resolve_alloc_for_intrinsic(alloc_sym, node, rt_ref)
+      pattern = pattern.gsub("{alloc}", resolved_alloc)
+
+      # Dupe non-heap strings at TAKES positions for heap containers.
+      # Heap containers free elements with heapAlloc at deinit - rodata and
+      # frame-allocated strings can't be freed that way.
+      stdlib_args = node.matched_stdlib_def&.dig(:args)
+      if stdlib_args.is_a?(Array)
+        raw_args = node.is_a?(AST::MethodCall) ? node.args : node.args[1..]
+        raw_args&.each_with_index do |arg_node, ai|
+          param_def = stdlib_args[ai + 1]  # +1: first stdlib arg is receiver type
+          next unless param_def.is_a?(Hash) && param_def[:takes]
+          zig_idx = node.is_a?(AST::MethodCall) ? ai + 1 : ai
+          args_zig[zig_idx] = heap_dupe_takes_string(args_zig[zig_idx], arg_node, resolved_alloc)
+        end
+      end
     end
 
     args_zig.each_with_index do |val, i|
@@ -3657,13 +3672,30 @@ private
   end
 
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
-  # Wrap string literals in heapAlloc.dupe for HashMap value storage.
-  # String literals are rodata - can't be freed by HashMap.deinit.
+
+  # Dupe non-heap strings for TAKES container storage.
+  # Heap containers free elements with heapAlloc - rodata and frame strings
+  # can't be freed that way. Dupe them to the container's allocator.
+  def heap_dupe_takes_string(val_ref, val_node, alloc_ref)
+    val_ti = val_node.type_info rescue nil
+    return val_ref unless val_ti&.string?
+    # Frame-backed containers: cleanup is via arena rewind, not per-element free.
+    # Rodata and frame strings are safe as-is — no dupe needed.
+    return val_ref unless alloc_ref.include?("heapAlloc")
+    # Literals are always rodata at runtime regardless of storage annotation.
+    return "try #{alloc_ref}.dupe(u8, #{val_ref})" if val_node.is_a?(AST::Literal)
+    # Already heap-allocated - container can take ownership directly.
+    return val_ref if val_node.respond_to?(:storage) && val_node.storage == :heap
+    return val_ref if val_ti.heap_provenance?
+    "try #{alloc_ref}.dupe(u8, #{val_ref})"
+  end
+
+  # Dupe strings for HashMap/container value storage (INDEX_OPS path).
   def heap_dupe_string_literals(val_ref, val_node, rt_name)
-    # Direct string literal: "hello" -> try heapAlloc.dupe(u8, "hello")
-    if val_node.is_a?(AST::Literal) && val_node.type_info&.string?
-      return "try #{rt_name}.heapAlloc().dupe(u8, #{val_ref})"
-    end
+    alloc_ref = "#{rt_name}.heapAlloc()"
+    # General: dupe any non-heap string.
+    result = heap_dupe_takes_string(val_ref, val_node, alloc_ref)
+    return result if result != val_ref
     # Union construction with string literal field: Value{ Str: "hello" }
     if val_node.is_a?(AST::StructLit)
       schema = @union_schemas&.dig(val_node.name.to_sym)
@@ -3672,7 +3704,7 @@ private
           if fnode.type_info&.string? && fnode.is_a?(AST::Literal)
             if fnode.respond_to?(:value) && fnode.value.is_a?(String)
               old_str = "\"#{fnode.value}\""
-              new_str = "try #{rt_name}.heapAlloc().dupe(u8, #{old_str})"
+              new_str = "try #{alloc_ref}.dupe(u8, #{old_str})"
               return val_ref.sub(old_str, new_str)
             end
           end

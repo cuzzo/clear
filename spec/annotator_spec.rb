@@ -1363,7 +1363,7 @@ RSpec.describe SemanticAnnotator do
         expect(loop_node.mark_per_iter).to be true
       end
 
-      it "marks loop as safe when outer-scope list is appended (container promoted to heap)" do
+      it "skips loop marks when only mutates_receiver on outer container (no per-iteration waste)" do
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE all: Float64[]@list = [];
@@ -1378,7 +1378,9 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.first
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
-        expect(loop_node.mark_per_iter).to be true
+        # append to outer list allocates into the receiver's backing, not the
+        # iteration's frame scope - no per-iteration frame waste, no loop marks.
+        expect(loop_node.mark_per_iter).to be false
       end
 
       it "does NOT mark loop as safe when outer var is assigned a frame-allocating call" do
