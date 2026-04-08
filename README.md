@@ -54,7 +54,7 @@ CLEAR attempts to merge the best of Rust, Go, and SQL to build the language of t
 
 Concurrency is not hard.  SQL is the most commonly used programming language in the world, and it executes parallel queries as effiently as possible.
 
-Concurrency is only hard when you have to tell the computer exactly how to achieve it efficiently.  CLEAR does tha hard part for you like a SQL engine.
+Concurrency is only hard when you have to tell the computer exactly how to achieve it efficiently.  CLEAR does the hard part for you like a SQL engine.
 
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
 
