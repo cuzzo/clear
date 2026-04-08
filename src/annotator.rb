@@ -57,6 +57,8 @@ class SemanticAnnotator
     @pipeline_accessed_fields = nil
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = false
+    # Tracks remaining statements in current body for forward reference analysis
+    @stmts_after = nil
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
     @og = OwnershipGraph.new
     @og_scope_depth = 0
@@ -496,7 +498,7 @@ private
           if snap_types.size == 1
             current_scope.declare("snapshot", nil, snap_types.first.to_sym, false, false, nil, :stack)
           end
-          clause_body.each { |stmt| visit(stmt) }
+          visit_stmts(clause_body)
         end
       end
 
@@ -535,6 +537,19 @@ private
       when AST::Locatable then walk_ast(val, &block)
       end
     end
+  end
+
+  # Visit a statement body while tracking remaining siblings in @stmts_after.
+  # This lets visit_MatchStatement check whether the match subject is used
+  # after the match (to avoid incorrect auto-TAKES consumption).
+  def visit_stmts(stmts)
+    return unless stmts.is_a?(Array)
+    saved = @stmts_after
+    stmts.each_with_index do |stmt, i|
+      @stmts_after = stmts[(i + 1)..]
+      visit(stmt)
+    end
+    @stmts_after = saved
   end
 
   def visit_StructDef(node)
@@ -660,12 +675,12 @@ private
 
     branch_logic = [
       proc {
-        node.then_branch.each { |stmt| visit(stmt) }
+        visit_stmts(node.then_branch)
         finalize_scope(node, branch: :then)
         node.then_drops
       },
       proc {
-        node.else_branch.each { |stmt| visit(stmt) }
+        visit_stmts(node.else_branch)
         finalize_scope(node, branch: :else)
         node.else_drops
       }
@@ -802,6 +817,18 @@ private
         end
         auto_takes = all_cases_bind && !default_refs_source
         auto_takes = false if @og[source_name]&.kind == :borrowed
+        # Don't auto-consume if the source is referenced after the MATCH.
+        if auto_takes && @stmts_after&.any?
+          @stmts_after.each do |s|
+            walk_ast(s) do |n|
+              if n.is_a?(AST::Identifier) && n.name == source_name
+                auto_takes = false
+                break
+              end
+            end
+            break unless auto_takes
+          end
+        end
       end
     end
     if (node.takes || auto_takes) && is_union && node.expr.is_a?(AST::Identifier)
@@ -917,14 +944,14 @@ private
             end
           end
         end
-        c[:body].each { |s| visit(s) }
+        visit_stmts(c[:body])
         collect_scope_drops(node: node)
       }
     end
 
     if node.default_case
       branch_logic << proc {
-        node.default_case.each { |s| visit(s) }
+        visit_stmts(node.default_case)
         collect_scope_drops(node: node)
       }
     end
@@ -994,7 +1021,7 @@ private
         current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
         node.symbol = current_scope.locals[node.var_name]
         classify_ownership!(node.symbol)
-        node.body.each { |stmt| visit(stmt) }
+        visit_stmts(node.body)
         finalize_scope(node)
         node.deferred_drops
       }
@@ -1049,7 +1076,7 @@ private
         current_scope.declare(node.var_name, nil, elem_sym, false, false, nil, :stack)
         node.symbol = current_scope.locals[node.var_name]
         classify_ownership!(node.symbol)
-        node.body.each { |stmt| visit(stmt) }
+        visit_stmts(node.body)
         finalize_scope(node)
         node.deferred_drops
       }
@@ -1088,7 +1115,7 @@ private
     analyze_control_flow_branches([
       proc {
         if node.do_branch.is_a?(Array)
-          node.do_branch.each { |stmt| visit(stmt) }
+          visit_stmts(node.do_branch)
         else
           visit(node.do_branch)
         end
@@ -1201,7 +1228,7 @@ private
   end
 
   def visit_TestThat(node)
-    node.body.each { |s| visit(s) }
+    visit_stmts(node.body)
     node.full_type = :Void
   end
 
@@ -2886,7 +2913,7 @@ private
     # checks this flag automatically.
     with_new_scope(current_scope) do
       expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
-      node.body.each { |stmt| visit(stmt) }
+      visit_stmts(node.body)
       finalize_scope(node)
     end
 
@@ -2908,7 +2935,7 @@ private
   # to an outer-scope variable.
   def visit_DoBlock(node)
     node.branches.each do |branch|
-      branch[:body].each { |expr| visit(expr) }
+      visit_stmts(branch[:body])
 
       full_analysis = analyze_fiber_captures(branch[:body], is_parallel: branch[:parallel])
       branch[:capture_analysis] = full_analysis
@@ -2938,7 +2965,7 @@ private
     @current_stream_context = node
     @stream_yield_types = []
 
-    node.body.each { |expr| visit(expr) }
+    visit_stmts(node.body)
 
     yield_types = @stream_yield_types
     @current_stream_context = prev_stream_ctx

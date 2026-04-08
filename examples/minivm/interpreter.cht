@@ -2201,7 +2201,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
 
         IF op == 1 THEN
             idx = ops[ip]; ip += 1;
-            pv = consts[idx];
+            pv = COPY consts[idx];
             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
             sp += 1;
         ELSE_IF op == 2 THEN

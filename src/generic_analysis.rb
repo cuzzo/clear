@@ -329,6 +329,8 @@ module GenericAnalysis
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   def find_container_source(expr)
     return nil unless expr
+    # COPY produces an owned deep-copy; no borrow relationship.
+    return nil if expr.is_a?(AST::CopyNode)
     if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:type_info)
       ti = expr.target.type_info
       if ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?)
@@ -338,7 +340,13 @@ module GenericAnalysis
     # Non-Copy field extraction from a struct is a borrow of the parent.
     # Without this, the extracted variable gets its own cleanup defer while
     # the parent's cleanup also frees the field -- double-free.
+    # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
+    # values, not borrows from an existing variable.
     if expr.is_a?(AST::GetField) && expr.respond_to?(:type_info)
+      if expr.target.is_a?(AST::Identifier)
+        target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
+        return nil if target_schema.is_a?(Hash) && (target_schema[:kind] == :enum || target_schema[:kind] == :union)
+      end
       field_ti = expr.type_info rescue nil
       field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
       if field_ti && !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }

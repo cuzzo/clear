@@ -824,6 +824,9 @@ class MIRPass
 
     entry = bindings[name]
     return unless entry && entry[:needs_cleanup]
+    # MATCH AS bindings are handled by stamp_match_as_cleanup!, not here.
+    # Skip to avoid name collisions (e.g., MATCH AS si vs MUTABLE si in different branches).
+    return if entry[:match_as]
 
     # Stamp declaration with cleanup info for transpiler.
     if stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)

@@ -52,7 +52,7 @@ module FunctionAnalysis
       declare_captures(node)
 
       if body.is_a?(Array)
-        body.each { |stmt| visit(stmt) }
+        visit_stmts(body)
       else
         visit(body)
       end
