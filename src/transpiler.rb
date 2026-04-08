@@ -827,8 +827,7 @@ private
           visit(node.value)
         elsif node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
           # T[N]@list: pre-allocate N slots. Allocator from MIRPass stamp.
-          alloc_kind = node.cleanup_alloc || :frame
-          alloc = alloc_kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+          alloc = alloc_expr(node.cleanup_alloc || :frame, rt_name)
           "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{node.full_type.capacity})"
         else
           "#{node.full_type.zig_type}{}"
@@ -982,7 +981,7 @@ private
           rt_name = @do_rt_name || "rt"
           fpc = node.field_pre_cleanup
           pre_cleanup = if fpc
-            alloc_call = fpc[:alloc] == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+            alloc_call = alloc_expr(fpc[:alloc] || :heap, rt_name)
             "CheatLib.cleanup(#{fpc[:zig_type]}, #{alloc_call}, &#{target}.#{field});\n"
           else
             ""
@@ -1066,21 +1065,12 @@ private
       else
         "#{struct_name}{ #{field_inits} }"
       end
-      if node.storage == :heap # You set this in the Annotator!
+      if node.storage == :heap || node.storage == :frame
+        rt_name = @do_rt_name || "rt"
+        alloc = resolve_alloc_for_intrinsic(:node_storage, node, rt_name)
        <<~ZIG
           blk: {
-             const ptr = try rt.heapAlloc().create(#{struct_name});
-             ptr.* = #{struct_init};
-             break :blk ptr;
-          }
-        ZIG
-      elsif node.storage == :frame
-        # Large struct (> 128 slots): allocate in the frame arena so it doesn't bloat the
-        # fiber stack.  The frame mark is saved/restored by the enclosing function, so no
-        # explicit destroy is needed -- O(1) bulk reclaim on function exit.
-        <<~ZIG
-          blk: {
-             const ptr = try rt.frameAlloc().create(#{struct_name});
+             const ptr = try #{alloc}.create(#{struct_name});
              ptr.* = #{struct_init};
              break :blk ptr;
           }
@@ -1135,8 +1125,9 @@ private
         return "[#{ti.capacity}]#{zig_type}{ #{items_code} }"
       end
 
-      # 2. Determine Allocator
-      allocator = node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+      # 2. Determine Allocator — driven by annotator's storage decision.
+      rt_name = @do_rt_name || "rt"
+      allocator = resolve_alloc_for_intrinsic(:node_storage, node, rt_name)
 
       # 3. Generate Items Slice
       if node.items.empty?
@@ -2461,7 +2452,7 @@ private
         # Check if we are operating on Strings
         # Annotator ensures full_type is set (e.g. "String" or "%String")
         rt_ref = @do_rt_name || "rt"
-        alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+        alloc = resolve_alloc_for_intrinsic(:node_storage, node, rt_ref)
 
         if node.left.type_info&.string? || node.right.type_info&.string?
           return "try std.mem.concat(#{alloc}, u8, &.{ #{left}, #{right} })"
@@ -2554,7 +2545,7 @@ private
 
     when AST::StringConcat
       rt_ref = @do_rt_name || "rt"
-      alloc = node.storage == :heap ? "#{rt_ref}.heapAlloc()" : "#{rt_ref}.frameAlloc()"
+      alloc = resolve_alloc_for_intrinsic(:node_storage, node, rt_ref)
       parts_zig = node.parts.map { |p| visit(p) }
       "try std.mem.concat(#{alloc}, u8, &.{ #{parts_zig.join(', ')} })"
 
