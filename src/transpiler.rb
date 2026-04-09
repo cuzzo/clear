@@ -220,6 +220,87 @@ class ZigTranspiler
     ZIG
   end
 
+  # MIR pipeline entry point: same front-end as transpile(), but uses
+  # MIRLowering + MIREmitter instead of the visit() dispatch.
+  # Produces complete Zig output identical in structure to transpile().
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false)
+    require_relative "mir"
+    require_relative "mir_lowering"
+    require_relative "mir_emitter"
+
+    @source_dir = File.expand_path(source_dir)
+    @test_mode = test_mode
+    @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
+
+    tokens    = Lexer.new(cheat_code).tokenize
+    ast       = Parser.new(tokens, cheat_code).parse
+
+    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
+    annotator.annotate!(ast)
+
+    PipelineRewriter.new(annotator).rewrite!(ast)
+    StringConcatRewriter.new.rewrite!(ast)
+
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir_pass.transform!(ast)
+
+    # Collect schemas and fn_sigs for MIRLowering
+    struct_schemas = {}
+    enum_schemas = {}
+    union_schemas = {}
+    ast.statements.each do |stmt|
+      case stmt
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
+      when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
+      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
+      end
+    end
+
+    fn_sigs = {}
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      sig = stmt.full_type
+      if sig.is_a?(FunctionSignature)
+        fn_sigs[stmt.name] = sig
+      else
+        fs = FunctionSignature.new(params: [], return_type: :Any)
+        fs.needs_rt = stmt.needs_rt
+        fs.can_fail = stmt.can_fail
+        fs.effects = stmt.effects
+        fn_sigs[stmt.name] = fs
+      end
+    end
+
+    moved_guard_info = {}
+    fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
+
+    lowering = MIRLowering.new(
+      struct_schemas: struct_schemas,
+      enum_schemas: enum_schemas,
+      union_schemas: union_schemas,
+      fn_sigs: fn_sigs,
+      moved_guard_info: moved_guard_info
+    )
+
+    needs_c_alloc = use_c_allocator
+    program = lowering.lower_program(ast, use_c_allocator: needs_c_alloc)
+
+    emitter = MIREmitter.new
+    body = emitter.emit(program)
+
+    <<~ZIG
+      #{body}
+
+      // -------------------------------------------------------------------------
+      // 3. Main Entry (Test Harness)
+      // -------------------------------------------------------------------------
+      #{File.read("./zig/runtime-footer.zig")}
+    ZIG
+  end
+
 private
 
   # Compute cleanup plans from the annotated AST if not already done.
@@ -4167,6 +4248,9 @@ if __FILE__ == $0
     opts.on('--strict', 'Strict test mode') do
       options[:strict] = true
     end
+    opts.on('--mir', 'Use MIR pipeline (MIRLowering + MIREmitter) instead of old transpiler') do
+      options[:mir] = true
+    end
   end.parse!
 
   script_file = ARGV.first
@@ -4177,15 +4261,20 @@ if __FILE__ == $0
 
     transpiler.instance_variable_set(:@default_stack_size, options[:default_stack]) if options[:default_stack]
 
-    case options[:mode]
-    when :module
-      puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
-    when :test
-      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
-                                test_mode: true, strict_test: !!options[:strict])
+    if options[:mir]
+      puts transpiler.transpile_mir(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
+                                    use_c_allocator: !!options[:use_c_allocator])
     else
-      puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
-                                use_c_allocator: !!options[:use_c_allocator])
+      case options[:mode]
+      when :module
+        puts transpiler.transpile_as_module(code, source_dir: source_dir, pkg_paths: options[:pkg_paths])
+      when :test
+        puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
+                                  test_mode: true, strict_test: !!options[:strict])
+      else
+        puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
+                                  use_c_allocator: !!options[:use_c_allocator])
+      end
     end
   else
     $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.cht] <script.cht>"

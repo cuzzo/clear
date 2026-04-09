@@ -151,9 +151,9 @@ class MIRLowering
     # Standard imports
     items << MIR::Import.new("std", "std", nil)
     items << MIR::Import.new("CheatHeader", "runtime-header.zig", nil)
-    items << MIR::Import.new("CheatLib", "runtime-header.zig", "CheatLib")
-    items << MIR::Import.new("Runtime", "runtime-header.zig", "Runtime")
-    items << MIR::Import.new("EbrContext", "runtime-header.zig", "EbrContext")
+    items << MIR::TypeAlias.new("CheatLib", "CheatHeader.CheatLib")
+    items << MIR::TypeAlias.new("Runtime", "CheatHeader.Runtime")
+    items << MIR::TypeAlias.new("EbrContext", "CheatHeader.EbrContext")
     items << MIR::Import.new("safety", "safety.zig", nil) if needs_safety
 
     if use_c_allocator || @used_sharded_map
@@ -444,7 +444,8 @@ class MIRLowering
     # Comptime params
     comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
 
-    # Build return type string
+    # Build return type string. The error prefix is baked into the string,
+    # so can_fail on MIR::FnDef is always false (emitter would double it).
     return_type_str = if fn_can_fail
       if final_type.start_with?("!")
         final_type
@@ -523,7 +524,7 @@ class MIRLowering
       inner_ret = fn_can_fail ? "anyerror!#{final_type}" : "!#{final_type}"
 
       inner_fn = MIR::FnDef.new(inner_name, params_mir, inner_ret,
-                                 prologue + body_mir, :private, true, comptime_params)
+                                 prologue + body_mir, :private, false, comptime_params)
 
       # Outer function: calls inner, catches errors
       call_args = fn_needs_rt ? ["rt"] + (node.params || []).map { |p| p[:name] } : (node.params || []).map { |p| p[:name] }
@@ -535,7 +536,7 @@ class MIRLowering
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                                  outer_body, vis, fn_can_fail, comptime_params)
+                                  outer_body, vis, false, comptime_params)
 
       # Return both as RawZig combining them
       inner_zig = emit_expr(inner_fn)
@@ -550,10 +551,10 @@ class MIRLowering
         MIR::RawZig.new("return try #{@rt_name}.preserveAndRewind(frame_mark, __pr_val);", "preserve_rewind_return")
       ]
       MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                      pr_body, vis, fn_can_fail, comptime_params)
+                      pr_body, vis, false, comptime_params)
     else
       MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                      prologue + body_mir, vis, fn_can_fail, comptime_params)
+                      prologue + body_mir, vis, false, comptime_params)
     end
   end
 

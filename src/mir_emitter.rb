@@ -640,7 +640,18 @@ class MIREmitter
 
   def emit_body(stmts)
     return "" unless stmts
-    stmts.filter_map { |s| emit(s) }.join("\n")
+    stmts.filter_map { |s|
+      code = emit(s)
+      next nil unless code
+      # Expression nodes used as statements need trailing semicolons.
+      # Statement nodes (Let, Set, If, While, etc.) already include them
+      # or end with }. Raw/Inline Zig handles its own formatting.
+      if s.expr? && !code.strip.end_with?(";") && !code.strip.end_with?("}")
+        "#{code};"
+      else
+        code
+      end
+    }.join("\n")
   end
 
   def alloc_from_entry(entry)

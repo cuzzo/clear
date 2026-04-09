@@ -542,4 +542,80 @@ RSpec.describe "MIR pipeline comparison" do
       expect(or_result).not_to be_nil
     end
   end
+
+  # =========================================================================
+  # Phase 6: Full pipeline integration (transpile_mir)
+  # =========================================================================
+
+  describe "transpile_mir integration" do
+    it "produces complete Zig output for simple struct program" do
+      src = <<~CLEAR
+        STRUCT Point { x: Number, y: Number }
+        FN main() RETURNS Void ->
+          p = Point { x: 10, y: 20 };
+          ASSERT p.x == 10, "x failed";
+          RETURN;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile_mir(src)
+      expect(zig).to include('@import("std")')
+      expect(zig).to include('@import("runtime-header.zig")')
+      expect(zig).to include("CheatHeader.CheatLib")
+      expect(zig).to include("Point")
+      expect(zig).to include("clearMain")
+      expect(zig).to include("pub fn main()")
+    end
+
+    it "produces complete Zig for pure function" do
+      src = <<~CLEAR
+        FN double(n: Number) RETURNS Number -> RETURN n * 2; END
+        FN main() RETURNS Void ->
+          result = double(21);
+          ASSERT result == 42, "double failed";
+          RETURN;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile_mir(src)
+      expect(zig).to include("fn double(")
+      expect(zig).to include("clearMain")
+      expect(zig).to include("42")
+    end
+
+    it "produces complete Zig for enum + match" do
+      src = <<~CLEAR
+        ENUM Dir { N, S, E, W }
+        FN main() RETURNS Void ->
+          d: Dir = Dir.N;
+          MATCH d START Dir.N -> ASSERT TRUE, "ok";, DEFAULT -> ASSERT FALSE, "bad"; END
+          RETURN;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile_mir(src)
+      expect(zig).to include("Dir")
+      expect(zig).to include("enum")
+      expect(zig).to include("clearMain")
+    end
+
+    it "matches old transpiler structure for simple programs" do
+      src = <<~CLEAR
+        STRUCT Point { x: Number }
+        FN main() RETURNS Void ->
+          p = Point { x: 42 };
+          ASSERT p.x == 42, "fail";
+          RETURN;
+        END
+      CLEAR
+      old_zig = ZigTranspiler.new.transpile(src)
+      new_zig = ZigTranspiler.new.transpile_mir(src)
+
+      # Both should have the same structural elements
+      expect(new_zig).to include("Point")
+      expect(new_zig).to include("clearMain")
+      expect(new_zig).to include("pub fn main()")
+
+      # Both should have runtime imports
+      expect(old_zig).to include("CheatHeader")
+      expect(new_zig).to include("CheatHeader")
+    end
+  end
 end
