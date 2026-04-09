@@ -701,11 +701,13 @@ class MIRLowering
       MIR::RawZig.new("#{inner_zig}\n\n#{outer_zig}", "catch_function_pair")
     elsif @current_fn_preserve_rewind
       # Wrap body in a labeled block for preserveAndRewind
+      rt = MIR::Ident.new(@rt_name)
+      block_expr = MIR::BlockExpr.new("__pr_body", body_mir)
       pr_body = prologue + [
-        MIR::RawZig.new("const __pr_val = __pr_body: {", "preserve_rewind_start")
-      ] + body_mir + [
-        MIR::RawZig.new("};", "preserve_rewind_end"),
-        MIR::RawZig.new("return try #{@rt_name}.preserveAndRewind(frame_mark, __pr_val);", "preserve_rewind_return")
+        MIR::Let.new("__pr_val", block_expr, false, nil, nil),
+        MIR::ReturnStmt.new(
+          MIR::MethodCall.new(rt, "preserveAndRewind", [MIR::Ident.new("frame_mark"), MIR::Ident.new("__pr_val")], true)
+        )
       ]
       MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
                       pr_body, vis, false, comptime_params)
@@ -2783,93 +2785,132 @@ class MIRLowering
   end
 
   def lower_while(node)
-    rt_ref = @rt_name
-    cond_zig = emit_expr(lower(node.condition))
+    rt = MIR::Ident.new(@rt_name)
+    cond = lower(node.condition)
     b = node.do_branch
-    body_zig = emit_stmts_zig(b.is_a?(Array) ? lower_body(b) : [], indent: "")
-    yield_line = @current_fn_has_rt ? "\n#{rt_ref}.checkYield();" : ""
+    body = b.is_a?(Array) ? lower_body(b) : []
 
-    if node.tight
-      code = "while (#{cond_zig}) {\n#{body_zig}\n}"
-    elsif node.mark_per_iter && @current_fn_has_rt
+    if !node.tight && node.mark_per_iter && @current_fn_has_rt
       @loop_mark_counter = (@loop_mark_counter || 0) + 1
       mark_var = "__loop_mark_#{@loop_mark_counter}"
+      # Prologue: save loop mark
+      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
       if node.loop_preserve_vars&.any?
-        preserve_stmts = node.loop_preserve_vars.map { |v|
-          "#{zig_safe_name(v)} = try #{rt_ref}.loopPreserveAndRewind(#{mark_var}, #{zig_safe_name(v)});"
-        }.join("\n")
-        code = "while (#{cond_zig}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark();\n#{body_zig}\n#{preserve_stmts}#{yield_line}\n}"
+        # Preserve vars + explicit rewind (no defer)
+        body = [save] + body
+        node.loop_preserve_vars.each do |v|
+          body << MIR::Set.new(
+            MIR::Ident.new(zig_safe_name(v)),
+            MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
+          )
+        end
       else
-        code = "while (#{cond_zig}) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\n#{body_zig}#{yield_line}\n}"
+        # defer restore
+        restore = MIR::DeferStmt.new(
+          MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+        )
+        body = [save, restore] + body
       end
-    elsif @current_fn_has_rt
-      code = "while (#{cond_zig}) {\n#{body_zig}#{yield_line}\n}"
-    else
-      code = "while (#{cond_zig}) {\n#{body_zig}\n}"
     end
-    MIR::RawZig.new(code, "while_loop")
+
+    # Yield check at end of loop body
+    if !node.tight && @current_fn_has_rt
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+    end
+
+    MIR::WhileStmt.new(cond, body, nil, nil)
   end
 
   def lower_for_each(node)
     var = zig_safe_name(node.var_name)
-    body_mir = lower_body(node.body)
-    rt_ref = @rt_name
-    coll_code = emit_expr(lower(node.collection))
+    body = lower_body(node.body)
+    rt = MIR::Ident.new(@rt_name)
+    coll = lower(node.collection)
     coll_type = node.collection.full_type
     ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
     is_mutable = node.is_mutable == true
-    yield_line = @current_fn_has_rt ? "\n#{rt_ref}.checkYield();" : ""
-    body_zig = emit_stmts_zig(body_mir, indent: "")
+
+    # Yield check at end of body
+    if @current_fn_has_rt
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+    end
 
     if ct.map?
       @for_counter = (@for_counter || 0) + 1
       iter_var = "__kit_#{@for_counter}"
-      code = "{\nvar #{iter_var} = #{coll_code}.keyIterator();\nwhile (#{iter_var}.next()) |#{var}| {\n#{body_zig}#{yield_line}\n}\n}"
+      # { var iter = coll.keyIterator(); while (iter.next()) |var| { body } }
+      iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
+      while_stmt = MIR::WhileStmt.new(
+        MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
+        body, var, nil
+      )
+      MIR::ScopeBlock.new([iter_init, while_stmt])
     else
       is_field_access = node.collection.is_a?(AST::GetField)
       is_list = ct.list_collection? || (ct.array? && ct.dynamic? && !ct.string? && !is_field_access)
-      iterable = if is_list
-        "(#{coll_code}).items"
+      iter = if is_list
+        MIR::FieldGet.new(coll, "items")
       elsif is_field_access && ct.array? && ct.dynamic?
-        coll_code
+        coll
       else
-        "&#{coll_code}"
+        MIR::AddressOf.new(coll)
       end
-      ptr = is_mutable ? "*" : ""
-      code = "for (#{iterable}) |#{ptr}#{var}| {\n#{body_zig}#{yield_line}\n}"
+      capture = is_mutable ? "*#{var}" : var
+      MIR::ForStmt.new(iter, capture, body, nil)
     end
-    MIR::RawZig.new(code, "for_each")
   end
 
   def lower_for_range(node)
-    start_zig = emit_expr(lower(node.start_expr))
-    end_zig = emit_expr(lower(node.end_expr))
+    start_val = lower(node.start_expr)
+    end_val = lower(node.end_expr)
     var = zig_safe_name(node.var_name)
-    body_zig = emit_stmts_zig(lower_body(node.body), indent: "")
-    rt_ref = @rt_name
+    body = lower_body(node.body)
+    rt = MIR::Ident.new(@rt_name)
     cmp = node.inclusive ? "<=" : "<"
     @for_counter = (@for_counter || 0) + 1
     iter_var = "__for_#{@for_counter}"
 
-    if node.tight
-      code = "{\nvar #{iter_var}: i64 = #{start_zig};\nwhile (#{iter_var} #{cmp} #{end_zig}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n#{body_zig}\n}\n}"
-    elsif node.mark_per_iter && @current_fn_has_rt
+    # Prologue: const var: i64 = iter; _ = &var;
+    var_decl = MIR::Let.new(var, MIR::Ident.new(iter_var), false, "i64", "_ = &#{var};")
+
+    # Frame mark if needed
+    if !node.tight && node.mark_per_iter && @current_fn_has_rt
       @loop_mark_counter = (@loop_mark_counter || 0) + 1
       mark_var = "__loop_mark_#{@loop_mark_counter}"
+      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
       if node.loop_preserve_vars&.any?
-        preserve_stmts = node.loop_preserve_vars.map { |v|
-          "#{zig_safe_name(v)} = try #{rt_ref}.loopPreserveAndRewind(#{mark_var}, #{zig_safe_name(v)});"
-        }.join("\n")
-        code = "{\nvar #{iter_var}: i64 = #{start_zig};\nwhile (#{iter_var} #{cmp} #{end_zig}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark();\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n#{body_zig}\n#{preserve_stmts}\n#{rt_ref}.checkYield();\n}\n}"
+        body = [save, var_decl] + body
+        node.loop_preserve_vars.each do |v|
+          body << MIR::Set.new(
+            MIR::Ident.new(zig_safe_name(v)),
+            MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
+          )
+        end
       else
-        code = "{\nvar #{iter_var}: i64 = #{start_zig};\nwhile (#{iter_var} #{cmp} #{end_zig}) : (#{iter_var} += 1) {\nconst #{mark_var} = #{rt_ref}.saveLoopMark(); defer #{rt_ref}.restoreLoopMark(#{mark_var});\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n#{body_zig}\n#{rt_ref}.checkYield();\n}\n}"
+        restore = MIR::DeferStmt.new(
+          MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+        )
+        body = [save, restore, var_decl] + body
       end
-    elsif @current_fn_has_rt
-      code = "{\nvar #{iter_var}: i64 = #{start_zig};\nwhile (#{iter_var} #{cmp} #{end_zig}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n#{body_zig}\n#{rt_ref}.checkYield();\n}\n}"
     else
-      code = "{\nvar #{iter_var}: i64 = #{start_zig};\nwhile (#{iter_var} #{cmp} #{end_zig}) : (#{iter_var} += 1) {\nconst #{var}: i64 = #{iter_var}; _ = &#{var};\n#{body_zig}\n}\n}"
+      body = [var_decl] + body
     end
-    MIR::RawZig.new(code, "for_range")
+
+    # Yield check
+    if !node.tight && @current_fn_has_rt
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+    end
+
+    # Update: iter += 1
+    update = MIR::Set.new(MIR::Ident.new(iter_var), MIR::BinOp.new("+", MIR::Ident.new(iter_var), MIR::Lit.new("1")))
+
+    # Condition: iter cmp end
+    cond = MIR::BinOp.new(cmp, MIR::Ident.new(iter_var), end_val)
+
+    # Wrapping block: { var __for: i64 = start; while (...) : (...) { body } }
+    iter_init = MIR::Let.new(iter_var, start_val, true, "i64", nil)
+    while_stmt = MIR::WhileStmt.new(cond, body, nil, update)
+    MIR::ScopeBlock.new([iter_init, while_stmt])
   end
 
   def lower_match(node)
@@ -2992,48 +3033,63 @@ class MIRLowering
     if @current_fn_preserve_rewind && value
       MIR::BreakStmt.new("__pr_body", value)
     elsif node.promote_ret_wrap == :var && ret_field_promote && value
-      val_code = emit_expr(value)
-      zig_type = ret_field_promote[:zig_type]
-      parts = ["var __ret = #{val_code};"]
+      rt = MIR::Ident.new(rt_name)
+      stmts = [MIR::Let.new("__ret", value, true, nil, nil)]
       if ret_field_promote[:fields]
         ret_field_promote[:fields].each do |fname|
-          parts << "try CheatLib.promote(@TypeOf(__ret.#{fname}), #{rt_name}, &__ret.#{fname});"
+          stmts << MIR::ExprStmt.new(
+            MIR::Call.new("CheatLib.promote", [
+              MIR::Call.new("@TypeOf", [MIR::FieldGet.new(MIR::Ident.new("__ret"), fname)], false),
+              rt,
+              MIR::AddressOf.new(MIR::FieldGet.new(MIR::Ident.new("__ret"), fname))
+            ], true), false)
         end
       else
-        parts << "try CheatLib.promoteFields(#{zig_type}, #{rt_name}, &__ret);"
+        zig_type = ret_field_promote[:zig_type]
+        stmts << MIR::ExprStmt.new(
+          MIR::Call.new("CheatLib.promoteFields", [
+            MIR::Ident.new(zig_type), rt, MIR::AddressOf.new(MIR::Ident.new("__ret"))
+          ], true), false)
       end
-      parts << "return __ret;"
-      MIR::RawZig.new(parts.join("\n"), "ret_field_promote")
+      stmts << MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
+      MIR::ScopeBlock.new(stmts)
     elsif node.promote_ret_wrap == :const && value
-      val_code = emit_expr(value)
-      MIR::RawZig.new("const __ret = #{val_code};\nreturn __ret;", "ret_const_wrap")
+      stmts = [
+        MIR::Let.new("__ret", value, false, nil, nil),
+        MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
+      ]
+      MIR::ScopeBlock.new(stmts)
     elsif hpt_promote && value
-      val_code = emit_expr(value)
+      rt = MIR::Ident.new(rt_name)
       case hpt_promote.strategy
       when :hpt_string_dupe
         alloc_fn = hpt_promote.fields == :heap ? "heapAlloc" : "frameAlloc"
-        MIR::RawZig.new(
-          "var __hpt_ret: []const u8 = #{val_code};\n" \
-          "__hpt_ret = try #{rt_name}.#{alloc_fn}().dupe(u8, __hpt_ret);\n" \
-          "return __hpt_ret;",
-          "hpt_string_dupe_return"
-        )
+        alloc_call = MIR::MethodCall.new(rt, alloc_fn, [], false)
+        stmts = [
+          MIR::Let.new("__hpt_ret", value, true, "[]const u8", nil),
+          MIR::Set.new(MIR::Ident.new("__hpt_ret"),
+            MIR::MethodCall.new(alloc_call, "dupe", [MIR::Ident.new("u8"), MIR::Ident.new("__hpt_ret")], true)),
+          MIR::ReturnStmt.new(MIR::Ident.new("__hpt_ret"))
+        ]
+        MIR::ScopeBlock.new(stmts)
       when :hpt_promote
         zig_t = hpt_promote.zig_type
-        MIR::RawZig.new(
-          "var __hpt_ret: #{zig_t} = #{val_code};\n" \
-          "try CheatLib.promote(#{zig_t}, #{rt_name}, &__hpt_ret);\n" \
-          "return __hpt_ret;",
-          "hpt_promote_return"
-        )
+        stmts = [
+          MIR::Let.new("__hpt_ret", value, true, zig_t, nil),
+          MIR::ExprStmt.new(
+            MIR::Call.new("CheatLib.promote", [MIR::Ident.new(zig_t), rt, MIR::AddressOf.new(MIR::Ident.new("__hpt_ret"))], true), false),
+          MIR::ReturnStmt.new(MIR::Ident.new("__hpt_ret"))
+        ]
+        MIR::ScopeBlock.new(stmts)
       else
         MIR::ReturnStmt.new(value)
       end
     elsif needs_string_dupe && value
       ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
-        val_code = emit_expr(value)
-        MIR::RawZig.new("return try #{rt_name}.heapAlloc().dupe(u8, #{val_code});", "catch_string_dupe_return")
+        rt = MIR::Ident.new(rt_name)
+        dupe = MIR::MethodCall.new(MIR::MethodCall.new(rt, "heapAlloc", [], false), "dupe", [MIR::Ident.new("u8"), value], true)
+        MIR::ReturnStmt.new(dupe)
       else
         MIR::ReturnStmt.new(value)
       end

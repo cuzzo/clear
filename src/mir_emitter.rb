@@ -50,6 +50,7 @@ class MIREmitter
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
+    when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::RawZig           then node.code
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
@@ -209,8 +210,15 @@ class MIREmitter
   def emit_while(node)
     cond = emit(node.cond)
     cap = node.capture ? " |#{node.capture}|" : ""
+    upd = if node.update
+      # Strip trailing semicolon for update expression in while header
+      update_code = emit(node.update).chomp(";")
+      " : (#{update_code})"
+    else
+      ""
+    end
     body = emit_body(node.body)
-    "while (#{cond})#{cap} {\n#{body}\n}"
+    "while (#{cond})#{upd}#{cap} {\n#{body}\n}"
   end
 
   def emit_for(node)
@@ -256,6 +264,11 @@ class MIREmitter
     parts << ":#{node.label}" if node.label
     parts << emit(node.value) if node.value
     "#{parts.join(' ')};"
+  end
+
+  def emit_scope_block(node)
+    body = emit_body(node.body)
+    "{\n#{body}\n}"
   end
 
   def emit_defer(node)
@@ -538,7 +551,10 @@ class MIREmitter
   end
 
   def emit_field_get(node)
-    "#{emit(node.object)}.#{node.field}"
+    obj = emit(node.object)
+    # Parenthesize try-expressions to prevent Zig precedence issues
+    obj = "(#{obj})" if obj.start_with?("try ")
+    "#{obj}.#{node.field}"
   end
 
   def emit_index_get(node)

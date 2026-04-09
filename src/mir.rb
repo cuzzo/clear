@@ -142,14 +142,20 @@ module MIR
   end
 
   # While loop.
-  # Zig: while (cond) { body }
-  WhileStmt = Struct.new(:cond, :body, :capture) do
+  # Zig: while (cond) [: (update)] [|capture|] { body }
+  WhileStmt = Struct.new(:cond, :body, :capture, :update) do
     include Stmt
   end
 
   # For loop over slice/range.
   # Zig: for (iter) |item[, idx]| { body }
   ForStmt = Struct.new(:iter, :capture, :body, :index_capture) do
+    include Stmt
+  end
+
+  # Scoped block.
+  # Zig: { stmts }
+  ScopeBlock = Struct.new(:body) do
     include Stmt
   end
 

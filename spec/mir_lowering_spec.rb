@@ -532,7 +532,7 @@ RSpec.describe MIRLowering do
       node = AST::WhileLoop.new(tok, cond, [body_stmt], nil)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::WhileStmt)
       zig = emit(result)
       expect(zig).to include("while (true)")
     end
@@ -574,7 +574,7 @@ RSpec.describe MIRLowering do
       node = AST::ForEach.new(tok, "item", coll, [body_stmt], nil, false)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::ForStmt)
       zig = emit(result)
       expect(zig).to include("for")
       expect(zig).to include("|item|")
