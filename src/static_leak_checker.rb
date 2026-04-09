@@ -313,6 +313,21 @@ class StaticLeakChecker
         stmt.branches&.each { |b| check_frame_overflow!(b[:body]) }
       when AST::BgBlock, AST::BgStreamBlock
         check_frame_overflow!(stmt.body)
+      # MIR control-flow nodes (from migrated pipeline operators)
+      when MIR::IfStmt
+        check_frame_overflow!(stmt.then_body)
+        check_frame_overflow!(stmt.else_body)
+      when MIR::ForStmt
+        check_frame_overflow!(stmt.body)
+      when MIR::WhileStmt
+        check_frame_overflow!(stmt.body)
+      when MIR::BlockExpr
+        check_frame_overflow!(stmt.body)
+      when MIR::ScopeBlock
+        check_frame_overflow!(stmt.body)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| check_frame_overflow!(a[:body]) }
+        check_frame_overflow!(stmt.default_body)
       end
     end
   end
@@ -374,6 +389,14 @@ class StaticLeakChecker
       when AST::DoBlock
         (stmt.branches || []).any? { |b| body_has_frame_alloc?(b[:body]) }
       when AST::BgBlock, AST::BgStreamBlock then body_has_frame_alloc?(stmt.body)
+      # MIR control-flow nodes
+      when MIR::IfStmt
+        body_has_frame_alloc?(stmt.then_body) || body_has_frame_alloc?(stmt.else_body)
+      when MIR::ForStmt, MIR::WhileStmt then body_has_frame_alloc?(stmt.body)
+      when MIR::BlockExpr, MIR::ScopeBlock then body_has_frame_alloc?(stmt.body)
+      when MIR::SwitchStmt
+        (stmt.arms || []).any? { |a| body_has_frame_alloc?(a[:body]) } ||
+          body_has_frame_alloc?(stmt.default_body)
       else false
       end
     end
@@ -441,6 +464,23 @@ class StaticLeakChecker
         stmt.branches&.each { |b| collect_mir_nodes(b[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
       when AST::BgBlock, AST::BgStreamBlock
         collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      # MIR control-flow nodes (from migrated pipeline operators)
+      when MIR::IfStmt
+        collect_mir_nodes(stmt.then_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.else_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      when MIR::WhileStmt
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      when MIR::ForStmt
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      when MIR::BlockExpr
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      when MIR::ScopeBlock
+        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      when MIR::DeferStmt, MIR::ErrDeferStmt
+        collect_mir_nodes(Array(stmt.body), allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| collect_mir_nodes(a[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
+        collect_mir_nodes(stmt.default_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
       end
     end
   end
@@ -468,6 +508,16 @@ class StaticLeakChecker
         stmt.branches&.each { |b| collect_reassign_sites(b[:body], sites) }
       when AST::BgBlock, AST::BgStreamBlock
         collect_reassign_sites(stmt.body, sites)
+      # MIR control-flow nodes
+      when MIR::IfStmt
+        collect_reassign_sites(stmt.then_body, sites)
+        collect_reassign_sites(stmt.else_body, sites)
+      when MIR::WhileStmt then collect_reassign_sites(stmt.body, sites)
+      when MIR::ForStmt then collect_reassign_sites(stmt.body, sites)
+      when MIR::BlockExpr, MIR::ScopeBlock then collect_reassign_sites(stmt.body, sites)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| collect_reassign_sites(a[:body], sites) }
+        collect_reassign_sites(stmt.default_body, sites)
       end
     end
   end
@@ -514,6 +564,15 @@ class StaticLeakChecker
       when AST::WithBlock then check_bg_capture_promotes!(stmt.body, promotes)
       when AST::DoBlock
         stmt.branches&.each { |b| check_bg_capture_promotes!(b[:body], promotes) }
+      # MIR control-flow nodes
+      when MIR::IfStmt
+        check_bg_capture_promotes!(stmt.then_body, promotes)
+        check_bg_capture_promotes!(stmt.else_body, promotes)
+      when MIR::ForStmt, MIR::WhileStmt then check_bg_capture_promotes!(stmt.body, promotes)
+      when MIR::BlockExpr, MIR::ScopeBlock then check_bg_capture_promotes!(stmt.body, promotes)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| check_bg_capture_promotes!(a[:body], promotes) }
+        check_bg_capture_promotes!(stmt.default_body, promotes)
       end
     end
   end
