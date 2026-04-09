@@ -2922,6 +2922,9 @@ private
   # --- ERROR HANDLING (OR RESCUE) ---
   def transpile_OrRescue(node)
     t_left = Type.new(node.left.full_type)
+    # Intrinsic failable calls (can_fail: true) produce Zig error unions even
+    # when the annotator's full_type is the unwrapped return type.
+    is_error = t_left.error_union? || (node.left.respond_to?(:can_fail) && node.left.can_fail)
 
     # For error union handling, we need the raw call without 'try'
     # Visit the left normally first (which may add 'try' for error unions)
@@ -2933,7 +2936,7 @@ private
 
     # Handle OR RAISE: bubble up error (Zig's `try`)
     if node.right.is_a?(AST::OrRaise)
-      if t_left.error_union?
+      if is_error
         # EXTERN FN trampoline already handles errors (catch + return e).
         # The block produces the payload type, not an error union.
         if node.left.respond_to?(:extern_call) && node.left.extern_call
@@ -2951,7 +2954,7 @@ private
     if node.right.is_a?(AST::OrExit)
       rt_name = @do_rt_name || "rt"
       msg_code = visit(node.right.message)
-      if t_left.error_union?
+      if is_error
         return "(#{left_raw} catch |__exit_err| {\n#{rt_name}.__error.message = #{msg_code};\n#{rt_name}.__error.clear_line = #{node.token.line};\nreturn __exit_err;\n})"
       else
         return left
@@ -2960,7 +2963,7 @@ private
 
     # Handle OR PASS: ignore error, use undefined (Zig's `catch |_| undefined`)
     if node.right.is_a?(AST::OrPass)
-      if t_left.error_union?
+      if is_error
         return left if node.left.respond_to?(:extern_call) && node.left.extern_call
         return "(#{left_raw} catch undefined)"
       else
@@ -2970,7 +2973,7 @@ private
 
     # Handle OR BREAK: error-to-break coercion (Zig's `catch break`)
     if node.right.is_a?(AST::OrBreak)
-      if t_left.error_union?
+      if is_error
         return left if node.left.respond_to?(:extern_call) && node.left.extern_call
         return "(#{left_raw} catch break)"
       else
@@ -2980,11 +2983,11 @@ private
 
     # Handle error union with default value: !T OR default -> T
     # EXTERN FN trampoline already handles errors; passthrough.
-    if t_left.error_union? && node.left.respond_to?(:extern_call) && node.left.extern_call
+    if is_error && node.left.respond_to?(:extern_call) && node.left.extern_call
       return left
     end
 
-    if t_left.error_union?
+    if is_error
       right_code = visit(node.right)
 
       # MIR::Promote(:or_fallback_dupe) signals that the fallback struct literal
