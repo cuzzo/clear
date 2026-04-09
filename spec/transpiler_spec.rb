@@ -514,7 +514,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("var x")
     end
 
-    it "warns about MUTABLE that is used but never reassigned", :pending => "MIR pipeline: MUTABLE-never-reassigned warning not yet implemented" do
+    it "warns about MUTABLE that is used but never reassigned" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE x = 5_i64;
@@ -559,7 +559,7 @@ RSpec.describe ZigTranspiler do
   end
 
   describe "HashMap param double-& fix" do
-    it "does not double-wrap HashMap params with & in recursive calls", :pending => "MIR pipeline: HashMap mutable param double-& prevention not yet implemented" do
+    it "does not double-wrap HashMap params with & in recursive calls" do
       src = <<~CLEAR
         FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS Int64 @reentrant ->
             env[key] = depth;
@@ -1256,7 +1256,7 @@ RSpec.describe ZigTranspiler do
   # BG spawn: @local uses same-scheduler, not round-robin
   # ===========================================================================
   describe "BG spawn dispatch" do
-    it "uses spawnPinned (round-robin) for @locked captures", :pending => "MIR pipeline: BG spawnPinned dispatch not yet implemented" do
+    it "uses spawnPinned (round-robin) for @locked captures" do
       src = <<~CLEAR
         STRUCT Counter { value: Int64 }
         FN inc(c: Counter) RETURNS Void -> RETURN; END

@@ -241,6 +241,7 @@ module CapabilityHelper
     :has_rc,           # captures @multiowned (Rc) var
     :has_shared,       # captures any shared/locked/write_locked/local/multiowned/sharded var
     :has_sharded,      # specifically captures @sharded (for auto-pin reason)
+    :has_affine_locked, # captures affine @locked (not @shared) -- needs spawnPinned
     :has_outer_ref,    # references any outer-scope variable
     :captures,         # Hash<name => type_obj> for code generation
     :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
@@ -258,7 +259,7 @@ module CapabilityHelper
   def analyze_fiber_captures(body_exprs, is_parallel: false)
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
-      has_sharded: false, has_outer_ref: false,
+      has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       captures: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
@@ -295,7 +296,7 @@ module CapabilityHelper
   def captures_outer_variables?(body, locally_bound)
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
-      has_sharded: false, has_outer_ref: false,
+      has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       captures: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
@@ -354,6 +355,10 @@ module CapabilityHelper
           unless is_dashmap
             result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
             result.has_shared  = true if info.storage == :shared || info.storage == :multiowned
+            # Affine @locked: not backed by Arc, needs spawnPinned for scheduler affinity
+            if (info.sync == :locked || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
+              result.has_affine_locked = true
+            end
             if ti.is_a?(Type) && ti.sharded?
               result.has_sharded = true
               result.has_shared  = true
@@ -391,6 +396,9 @@ module CapabilityHelper
           result.has_local  = true if info.sync == :local
           result.has_shared = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
           result.has_shared = true if info.storage == :shared
+          if (info.sync == :locked || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
+            result.has_affine_locked = true
+          end
 
           if current_fn_ctx&.name
             key = "#{current_fn_ctx.name}:#{name}"

@@ -587,6 +587,12 @@ class MIRLowering
       p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
     }.map { |p| p[:name] }.to_set
 
+    # Collection params: already passed by pointer, skip & at recursive call sites
+    @current_fn_collection_params = (node.params || []).select { |p|
+      p_type_obj = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+      p_type_obj.needs_pointer_passing?
+    }.map { |p| p[:name] }.to_set
+
     # Build param list
     params_mir = (node.params || []).map { |param|
       p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
@@ -808,7 +814,12 @@ class MIRLowering
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
-        MIR::AddressOf.new(arg)
+        # Skip & for params already received as pointers (prevents double-& in recursive calls)
+        if a.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(a.name)
+          arg
+        else
+          MIR::AddressOf.new(arg)
+        end
       else
         arg
       end
@@ -868,7 +879,11 @@ class MIRLowering
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
-        MIR::AddressOf.new(arg)
+        if a.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(a.name)
+          arg
+        else
+          MIR::AddressOf.new(arg)
+        end
       else
         arg
       end
@@ -1952,21 +1967,18 @@ class MIRLowering
   end
 
   def bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
-    pinned = node.respond_to?(:pinned) && node.pinned
-    if pinned
-      "try #{rt_name}.getSched().submitSpawn(\n" \
-      "    @intFromPtr(&Runtime.entryWrapper),\n" \
+    pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
+    spawn_args = "@intFromPtr(&Runtime.entryWrapper),\n" \
       "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
       "    #{ctx_var},\n" \
-      "    #{task_cfg}\n" \
-      ");"
+      "    #{task_cfg}"
+    case pin_mode
+    when :local, true
+      "try #{rt_name}.getSched().submitSpawn(\n    #{spawn_args}\n);"
+    when :shared
+      "try #{rt_name}.getSched().spawnPinned(\n    #{spawn_args}\n);"
     else
-      "try CheatHeader.spawnBest(\n" \
-      "    @intFromPtr(&Runtime.entryWrapper),\n" \
-      "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
-      "    #{ctx_var},\n" \
-      "    #{task_cfg}\n" \
-      ");"
+      "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
     end
   end
 

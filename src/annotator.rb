@@ -3075,13 +3075,19 @@ private
 
     # Auto-pin when shared state is captured (uses result from validate_fiber_captures!).
     if analysis && !node.pinned
-      node.pinned = true
-      if analysis.has_sharded
-        note!(node, "BG block auto-pinned — captures @sharded map (scheduler affinity for shard locality).")
-      elsif analysis.has_local
+      if analysis.has_local
+        node.pinned = :local
         note!(node, "BG block auto-pinned — captures @local resource (same-scheduler affinity).")
+      elsif analysis.has_affine_locked
+        node.pinned = :shared
+        note!(node, "BG block auto-pinned — captures @locked resource (round-robin scheduler affinity).")
       else
-        note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to override.")
+        node.pinned = :local
+        if analysis.has_sharded
+          note!(node, "BG block auto-pinned — captures @sharded map (scheduler affinity for shard locality).")
+        else
+          note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to override.")
+        end
       end
     end
 
@@ -3399,6 +3405,17 @@ private
         next unless info.reg
         loc = info.reg.respond_to?(:line) ? " (line #{info.reg.line})" : ""
         $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{name}'#{loc}"
+      end
+
+      # MUTABLE-never-reassigned warnings
+      current_scope.locals.each do |name, info|
+        next unless current_scope.owned_names.include?(name)
+        next if name.start_with?('_')
+        next unless info.mutable
+        next unless info.read || (info.reg&.respond_to?(:var_used) && info.reg.var_used)
+        next if info.reg&.respond_to?(:var_mutated) && info.reg.var_mutated
+        loc = info.reg.respond_to?(:line) ? " (line #{info.reg.line})" : ""
+        $stderr.puts "\e[33m[Warning]\e[0m MUTABLE '#{name}' is never reassigned#{loc} — consider removing MUTABLE"
       end
     end
   end
