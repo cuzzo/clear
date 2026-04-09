@@ -22,6 +22,7 @@ class BytecodeCompiler
   LT_F64      = 49; GT_F64      = 50; LTE_F64     = 51; GTE_F64     = 52
   EQ_F64      = 53; NEQ_F64     = 54
   I_TO_VAL    = 55; F_TO_VAL    = 56; BOOL_TO_VAL = 57
+  DEBUG_BREAK = 58
 
   # Native function IDs (must match interpreter's setupEnv!)
   NATIVES = {
@@ -617,6 +618,9 @@ class BytecodeCompiler
     when "toFloat"
       compile(node.args[0])
       emit(INT_TO_F64)
+      return
+    when "debug"
+      emit(DEBUG_BREAK)
       return
     end
 

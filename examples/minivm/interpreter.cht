@@ -2234,6 +2234,9 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
                     IF di < items.length() - 1 THEN ops.append(Value{ Number: 3.0 }); END
                 END
 
+            ELSE_IF formName == "debug" THEN
+                ops.append(Value{ Number: 58.0 });
+
             ELSE
                 FOR ai IN (0_i64 ..< items.length()) DO
                     eva = eval!(COPY items[ai], envId, pool);
@@ -2574,6 +2577,76 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = boolVal(istack[isp] != 0);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            58 -> -- DEBUG_BREAK
+                print("--- debug break at ip=" + toString(ip) + " ---");
+                MUTABLE dbgRunning = TRUE;
+                WHILE dbgRunning DO
+                    MUTABLE dbgPrompt = "dbg> ";
+                    writeFile("/dev/stderr", dbgPrompt);
+                    MUTABLE dbgCmd = readLine!();
+                    IF eql?(dbgCmd, ":c") || eql?(dbgCmd, ":continue") THEN
+                        dbgRunning = FALSE;
+                    ELSE_IF eql?(dbgCmd, ":stack") || eql?(dbgCmd, ":s") THEN
+                        print("  value stack (sp=" + toString(sp) + "):");
+                        FOR di IN (0_i64 ..< sp) DO
+                            print("    [" + toString(di) + "] " + prStr(stack[di], TRUE));
+                        END
+                    ELSE_IF eql?(dbgCmd, ":istack") THEN
+                        print("  istack (isp=" + toString(isp) + "):");
+                        FOR di IN (0_i64 ..< isp) DO
+                            print("    [" + toString(di) + "] " + toString(istack[di]));
+                        END
+                    ELSE_IF eql?(dbgCmd, ":fstack") THEN
+                        print("  fstack (fsp=" + toString(fsp) + "):");
+                        FOR di IN (0_i64 ..< fsp) DO
+                            print("    [" + toString(di) + "] " + toString(fstack[di]));
+                        END
+                    ELSE_IF eql?(dbgCmd, ":locals") || eql?(dbgCmd, ":l") THEN
+                        print("  slots:");
+                        FOR di IN (0_i64 ..< 64) DO
+                            MATCH slots[di] START
+                                Value.Nil ->,
+                                DEFAULT ->
+                                    print("    [" + toString(di) + "] " + prStr(slots[di], TRUE));
+                            END
+                        END
+                    ELSE_IF eql?(dbgCmd, ":ip") THEN
+                        print("  ip=" + toString(ip) + " op=" + toString(ops[ip]));
+                        -- Show next 5 opcodes
+                        FOR di IN (0_i64 ..< 5) DO
+                            IF ip + di < ops.length() THEN
+                                print("    ip+" + toString(di) + ": " + toString(ops[ip + di]));
+                            END
+                        END
+                    ELSE_IF eql?(dbgCmd, ":consts") THEN
+                        print("  constants:");
+                        FOR di IN (0_i64 ..< consts.length()) DO
+                            print("    [" + toString(di) + "] " + prStr(consts[di], TRUE));
+                        END
+                    ELSE_IF eql?(dbgCmd, ":env") THEN
+                        print("  (use :eval <expr> to inspect env bindings)");
+                    ELSE_IF startsWith?(dbgCmd, ":eval ") THEN
+                        MUTABLE dbgExpr = substr(dbgCmd, 6, dbgCmd.length() - 6);
+                        MUTABLE dbgPenv: HashMap<Value> = {};
+                        tokenizeToEnv!(dbgPenv, dbgExpr);
+                        dbgPenv["__rp"] = Value{ Number: 0.0 };
+                        dbgAst = readFormEnv!(dbgPenv);
+                        dbgResult = eval!(COPY dbgAst, curEnv, pool);
+                        print("  => " + prStr(dbgResult, TRUE));
+                    ELSE_IF eql?(dbgCmd, ":help") || eql?(dbgCmd, ":h") || eql?(dbgCmd, "?") THEN
+                        print("  :c          continue execution");
+                        print("  :stack      show value stack");
+                        print("  :istack     show i64 stack");
+                        print("  :fstack     show f64 stack");
+                        print("  :locals     show non-nil slots");
+                        print("  :ip         show instruction pointer + next ops");
+                        print("  :consts     show constant pool");
+                        print("  :env        show environment info");
+                        print("  :eval <ex>  evaluate expression in current env");
+                    ELSE
+                        print("  unknown command. type :help for commands");
+                    END
+                END,
             DEFAULT ->
         END
     END
