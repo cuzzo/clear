@@ -134,7 +134,7 @@ pub fn main() !void {
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
         &main_runner,
-        .{ .stack_size = .Large },
+        .{ .stack_size = .Large, .pinned = true },
     );
     sched.run();
 
