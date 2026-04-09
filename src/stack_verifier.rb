@@ -23,11 +23,17 @@ class StackVerifier
   def initialize(binary_path, module_prefix = nil)
     @binary_path = binary_path
     @module_prefix = module_prefix || detect_prefix(binary_path)
+    @objdump_output = nil
+  end
+
+  # Run objdump once and cache the output.
+  def objdump_output
+    @objdump_output ||= `objdump -d #{@binary_path} 2>/dev/null`
   end
 
   # Parse objdump output and return per-function stack frame sizes.
   def extract_frame_sizes
-    output = `objdump -d #{@binary_path} 2>/dev/null`
+    output = objdump_output
     return [] if output.empty?
 
     results = []
@@ -139,7 +145,7 @@ class StackVerifier
   # A TCO'd function should NOT contain a `call <self>` instruction - only `jmp`.
   # Returns array of { name:, tco_verified: bool, has_self_call: bool }
   def verify_tail_calls(fn_nodes)
-    output = `objdump -d #{@binary_path} 2>/dev/null`
+    output = objdump_output
     return [] if output.empty?
 
     tail_call_fns = fn_nodes.select { |_, fn| fn.tail_call }.map { |name, _| name }

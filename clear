@@ -229,7 +229,7 @@ when 'build'
 
   # Parse build flags
   remaining = []
-  stack_check = true  # on by default
+  stack_check = nil  # auto: on for release/safe, off for debug
   i = 0
   while i < args.length
     case args[i]
@@ -250,10 +250,10 @@ when 'build'
       extra_flags = []
       i += 1
     when '--stack-check'
-      stack_check = true
+      stack_check = true  # explicit override
       i += 1
     when '--no-stack-check'
-      stack_check = false
+      stack_check = false  # explicit override
       i += 1
     when '--force'
       @force_build = true
@@ -266,6 +266,9 @@ when 'build'
 
   source = remaining.first
   error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
+
+  # Auto-detect stack check: off for debug (20MB binaries make objdump slow), on for release/safe.
+  stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build)
