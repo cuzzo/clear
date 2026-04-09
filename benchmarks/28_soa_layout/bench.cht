@@ -1,13 +1,13 @@
--- SOA vs AOS Layout Benchmark -- CLEAR (@list:soa)
+-- SOA vs AOS Layout Benchmark -- CLEAR (T[N]@soa)
 --
 -- Particle simulation: 10K particles, 100 iterations of position update.
--- Heap-allocated dynamic SOA list (like C/Rust Vec with SOA layout).
+-- Fixed-size SOA array (like C/Rust static SOA arrays).
 --
 -- The position update loop (x += vx, y += vy) only touches 4 of 64 fields
 -- per pass (6% utilization). SOA keeps each field contiguous in memory,
 -- so the CPU prefetcher loads full cache lines of useful data.
 --
--- CLEAR's @list:soa gives SOA layout with AOS syntax -- the compiler
+-- CLEAR's T[N]@soa gives SOA layout with AOS syntax -- the compiler
 -- transposes the data automatically. No manual struct-splitting needed.
 
 STRUCT Particle {
@@ -34,8 +34,8 @@ FN main() RETURNS Void ->
     n = 10000_i64;
     iterations = 100_i64;
 
-    -- SOA layout via @list:soa (heap-allocated, dynamic)
-    MUTABLE soa: Particle[]@list:soa = [];
+    -- SOA layout via T[N]@soa (fixed-size SOA array)
+    MUTABLE soa: Particle[10000]@soa = [];
     FOR i IN (0_i64 ..< n) DO
         soa.append(Particle{
             x: toFloat(i), y: toFloat(i) * 2.0, z: 0.0,
