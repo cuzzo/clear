@@ -93,6 +93,19 @@ module EffectTracker
       needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || name == "main"
     end
 
+    # Seed imported (cross-module) functions: if a callee is not a local function
+    # but is imported with needs_rt=true, include it so propagation works.
+    @call_graph.each do |_, callees|
+      callees.each do |c|
+        next if needs_rt.key?(c)
+        scope = lookup_scope_for(c)
+        next unless scope
+        sig = scope.locals[c]&.type
+        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        needs_rt[c] = true if sig&.needs_rt
+      end
+    end
+
     changed = true
     while changed
       changed = false
@@ -121,12 +134,24 @@ module EffectTracker
       can_fail[name] = @fn_raises_directly[name] == true || name == "main"
     end
 
+    # Seed imported (cross-module) functions that can fail.
+    @call_graph.each do |_, callees|
+      callees.each do |c|
+        next if can_fail.key?(c)
+        scope = lookup_scope_for(c)
+        next unless scope
+        sig = scope.locals[c]&.type
+        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        can_fail[c] = true if sig&.can_fail
+      end
+    end
+
     changed = true
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
         next if can_fail[fn_name]
-        if callees.any? { |c| @fn_nodes.key?(c) && can_fail[c] }
+        if callees.any? { |c| can_fail[c] }
           can_fail[fn_name] = true
           changed = true
         end
