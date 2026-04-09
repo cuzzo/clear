@@ -95,6 +95,7 @@ class MIREmitter
     when MIR::Cast             then emit_cast(node)
     when MIR::TryExpr          then "try #{emit(node.expr)}"
     when MIR::TryCatch         then emit_try_catch(node)
+    when MIR::Orelse           then "(#{emit(node.expr)} orelse #{emit(node.fallback)})"
     when MIR::Conditional      then emit_conditional(node)
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"

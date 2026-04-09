@@ -538,6 +538,12 @@ module MIR
     # capture: error variable name or nil
   end
 
+  # Optional orelse expression.
+  # Zig: (expr orelse fallback)
+  Orelse = Struct.new(:expr, :fallback) do
+    include Expr
+  end
+
   # Conditional expression (Zig if-expression).
   # Zig: if (cond) then_val else else_val
   Conditional = Struct.new(:cond, :then_val, :else_val) do

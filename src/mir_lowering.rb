@@ -126,7 +126,7 @@ class MIRLowering
     when AST::YieldExpr        then lower_yield(node)
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
-    when AST::OrRaise          then MIR::InlineZig.new("error.OrRaise", "or_raise")
+    when AST::OrRaise          then MIR::Ident.new("error.OrRaise")
     when AST::OrBreak          then MIR::RawZig.new("break;", "or_break")
     when AST::OrPass           then MIR::InlineZig.new("undefined", "or_pass")
     when AST::OrPrune          then MIR::InlineZig.new("undefined", "or_prune")
@@ -149,9 +149,8 @@ class MIRLowering
         skip = node.is_a?(AST::ListLit) && node.storage == :stack &&
                (node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.type_info)&.fixed?
         unless skip
-          code = emit_expr(mir)
-          cast = transpile_cast(code, node.full_type, node.coerced_type)
-          return MIR::InlineZig.new(cast, "type_coerce") if cast != code
+          cast_node = mir_cast(mir, node.full_type, node.coerced_type)
+          return cast_node if cast_node
         end
       end
     }
@@ -168,11 +167,7 @@ class MIRLowering
                       (s.is_a?(AST::BinaryOp) && (s.op == :OR_RESCUE || s.op == :PIPE_ERR))
       if needs_discard &&
          s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void
-        code = emit_expr(mir)
-        next nil unless code
-        unless code.strip.start_with?("_ = ") || code.strip.start_with?("const __hpt")
-          mir = MIR::InlineZig.new("_ = #{code}", "stmt_discard")
-        end
+        mir = MIR::ExprStmt.new(mir, true)
       end
       mir
     }
@@ -290,6 +285,58 @@ class MIRLowering
     when :frame then "#{@rt_name}.frameAlloc()"
     else "#{@rt_name}.heapAlloc()"
     end
+  end
+
+  # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
+  # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
+  def mir_cast(mir_node, from_type, to_type)
+    from = from_type.respond_to?(:resolved) ? from_type.resolved : from_type
+    to   = to_type.respond_to?(:resolved) ? to_type.resolved : to_type
+    return nil if from == to
+
+    from_t = from_type.is_a?(Type) ? from_type : Type.new(from)
+    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to)
+
+    zig_to = transpile_type(to)
+
+    # fn_type: generic @as cast
+    return MIR::Cast.new(mir_node, zig_to, :as) if from_t.fn_type? || to_t.fn_type?
+
+    # Int -> Float
+    if from_t.integer? && to_t.float?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :floatFromInt), zig_to, :as)
+    end
+
+    # Float -> Int
+    if from_t.float? && to_t.integer?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :intFromFloat), zig_to, :as)
+    end
+
+    # Int -> Int
+    if from_t.integer? && to_t.integer?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :intCast), zig_to, :as)
+    end
+
+    # Float -> Float
+    if from_t.float? && to_t.float?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :floatCast), zig_to, :as)
+    end
+
+    # Array coercions, HashMap coercions, error union coercions -- no cast needed
+    from_str = from.to_s
+    to_str = to.to_s
+    return nil if from_str.end_with?("[]") && to_str.end_with?("[]")
+    return nil if from_str =~ /\[\d+\]$/ && to_str == "Any[]"
+    return nil if from_str.start_with?("HashMap<") && to_str.start_with?("HashMap<")
+    if to_str.start_with?("!")
+      payload_type = to_str[1..]
+      from_matches = from_str == payload_type || from == to.to_s[1..].to_sym
+      from_matches ||= from_str.start_with?("Byte[") && payload_type == "String"
+      return nil if from_matches
+    end
+
+    # Fallback: @as cast
+    MIR::Cast.new(mir_node, zig_to, :as)
   end
 
   # ================================================================
@@ -929,81 +976,101 @@ class MIRLowering
   end
 
   def lower_pool_method(node)
-    obj_zig = emit_expr(lower(node.object))
-    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    obj = lower(node.object)
+    args = node.args.map { |a| lower(a) }
+    rt = MIR::Ident.new(@rt_name)
     case node.pool_method
-    when :get    then MIR::InlineZig.new("#{obj_zig}.get(#{args_zig[0]})", "pool_get")
-    when :remove then MIR::InlineZig.new("#{obj_zig}.remove(#{args_zig[0]})", "pool_remove")
-    when :count  then MIR::InlineZig.new("#{obj_zig}.count()", "pool_count")
-    when :insert then MIR::InlineZig.new("try #{obj_zig}.insert(#{@rt_name}.heapAlloc(), #{args_zig[0]})", "pool_insert")
-    else MIR::InlineZig.new("#{obj_zig}.#{node.pool_method}(#{args_zig.join(', ')})", "pool_method")
+    when :get    then MIR::MethodCall.new(obj, "get", [args[0]], false)
+    when :remove then MIR::MethodCall.new(obj, "remove", [args[0]], false)
+    when :count  then MIR::MethodCall.new(obj, "count", [], false)
+    when :insert
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      MIR::MethodCall.new(obj, "insert", [heap_alloc, args[0]], true)
+    else
+      MIR::MethodCall.new(obj, node.pool_method.to_s, args, false)
     end
   end
 
   def lower_set_method(node)
-    obj_zig = emit_expr(lower(node.object))
-    args_zig = node.args.map { |a| emit_expr(lower(a)) }
-    method_name = zig_safe_name(node.set_method.to_s)
-    rt_name = @rt_name
+    obj = lower(node.object)
+    args = node.args.map { |a| lower(a) }
+    rt = MIR::Ident.new(@rt_name)
     case node.set_method
     when :insert
-      MIR::InlineZig.new("try #{obj_zig}.insert(#{rt_name}.heapAlloc(), #{args_zig[0]})", "set_insert")
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      MIR::MethodCall.new(obj, "insert", [heap_alloc, args[0]], true)
     when :remove
-      MIR::InlineZig.new("#{obj_zig}.remove(#{rt_name}.heapAlloc(), #{args_zig[0]})", "set_remove")
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      MIR::MethodCall.new(obj, "remove", [heap_alloc, args[0]], false)
     else
-      MIR::InlineZig.new("#{obj_zig}.#{method_name}(#{args_zig.join(', ')})", "set_method")
+      method_name = zig_safe_name(node.set_method.to_s)
+      MIR::MethodCall.new(obj, method_name, args, false)
     end
   end
 
   def lower_map_method(node)
-    obj_zig = emit_expr(lower(node.object))
-    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    obj = lower(node.object)
+    args = node.args.map { |a| lower(a) }
     map_ft = Type.new(node.object.full_type)
     rt_name = @rt_name
+    rt = MIR::Ident.new(rt_name)
 
-    # Auto-deref Arc-wrapped maps
+    # Auto-deref Arc-wrapped maps: obj.ctrl.data.*
     obj_ti = node.object.type_info
-    obj_zig = "#{obj_zig}.ctrl.data.*" if obj_ti&.shared? || obj_ti&.multiowned?
+    if obj_ti&.shared? || obj_ti&.multiowned?
+      obj = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj, "ctrl"), "data"))
+    end
 
     case node.map_method
     when :put
       # StringMap.put takes (key_alloc, bucket_alloc, key, value)
-      alloc = "#{rt_name}.heapAlloc()"
-      val = args_zig[1]
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      val = args[1]
       val_ti = node.args[1]&.type_info rescue nil
-      val = "try #{rt_name}.heapAlloc().dupe(u8, #{val})" if val_ti&.string?
-      MIR::InlineZig.new("try #{obj_zig}.put(#{alloc}, #{alloc}, #{args_zig[0]}, #{val})", "map_put")
+      if val_ti&.string?
+        # try rt.heapAlloc().dupe(u8, val)
+        val = MIR::MethodCall.new(
+          MIR::MethodCall.new(rt, "heapAlloc", [], false),
+          "dupe", [MIR::Ident.new("u8"), val], true
+        )
+      end
+      MIR::MethodCall.new(obj, "put", [heap_alloc, heap_alloc, args[0], val], true)
     when :delete
-      alloc = "#{rt_name}.heapAlloc()"
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
       if map_ft.numeric_map?
         key_zig = map_ft.key_type.zig_type
         val_zig = map_ft.value_type.zig_type
-        MIR::InlineZig.new("CheatLib.numericMapDelete(#{key_zig}, #{val_zig}, #{alloc}, &#{obj_zig}, #{args_zig[0]})", "map_delete")
+        MIR::Call.new("CheatLib.numericMapDelete",
+          [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), heap_alloc, MIR::AddressOf.new(obj), args[0]], false)
       else
-        MIR::InlineZig.new("#{obj_zig}.remove(#{alloc}, #{args_zig[0]})", "map_delete")
+        MIR::MethodCall.new(obj, "remove", [heap_alloc, args[0]], false)
       end
     when :"contains?"
       method_name = zig_safe_name(node.map_method.to_s)
-      MIR::InlineZig.new("#{obj_zig}.#{method_name}(#{args_zig.join(', ')})", "map_contains")
+      MIR::MethodCall.new(obj, method_name, args, false)
     when :keys
-      alloc = "#{rt_name}.frameAlloc()"
       if map_ft.sharded? || map_ft.striped?
-        MIR::InlineZig.new("try #{obj_zig}.keys(#{rt_name}.heapAlloc())", "map_keys_sharded")
+        heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+        MIR::MethodCall.new(obj, "keys", [heap_alloc], true)
       else
+        frame_alloc = MIR::MethodCall.new(rt, "frameAlloc", [], false)
         val_zig = map_ft.value_type.zig_type
-        MIR::InlineZig.new("try CheatLib.mapKeys(#{val_zig}, #{alloc}, #{obj_zig}.inner)", "map_keys")
+        MIR::Call.new("CheatLib.mapKeys",
+          [MIR::Ident.new(val_zig), frame_alloc, MIR::FieldGet.new(obj, "inner")], true)
       end
     when :values
-      alloc = "#{rt_name}.frameAlloc()"
       if map_ft.sharded? || map_ft.striped?
-        MIR::InlineZig.new("try #{obj_zig}.values(#{rt_name}.heapAlloc())", "map_values_sharded")
+        heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+        MIR::MethodCall.new(obj, "values", [heap_alloc], true)
       else
+        frame_alloc = MIR::MethodCall.new(rt, "frameAlloc", [], false)
         val_zig = map_ft.value_type.zig_type
-        MIR::InlineZig.new("try CheatLib.mapValues(#{val_zig}, #{alloc}, #{obj_zig}.inner)", "map_values")
+        MIR::Call.new("CheatLib.mapValues",
+          [MIR::Ident.new(val_zig), frame_alloc, MIR::FieldGet.new(obj, "inner")], true)
       end
     else
       method_name = zig_safe_name(node.map_method.to_s)
-      MIR::InlineZig.new("#{obj_zig}.#{method_name}(#{args_zig.join(', ')})", "map_method")
+      MIR::MethodCall.new(obj, method_name, args, false)
     end
   end
 
@@ -1977,8 +2044,8 @@ class MIRLowering
     if node.op == :POW
       left_type = node.left.full_type
       resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
-      fn = resolved == :Int64 ? "std.math.pow(i64, " : "std.math.pow(f64, "
-      return MIR::InlineZig.new("#{fn}#{emit_expr(left)}, #{emit_expr(right)})", "pow")
+      type_arg = resolved == :Int64 ? "i64" : "f64"
+      return MIR::Call.new("std.math.pow", [MIR::Ident.new(type_arg), left, right], false)
     end
 
     # Modulo on signed int
@@ -1986,23 +2053,21 @@ class MIRLowering
       left_type = node.left.full_type
       resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
       if resolved == :Int64
-        return MIR::InlineZig.new("@mod(#{emit_expr(left)}, #{emit_expr(right)})", "signed_mod")
+        return MIR::Call.new("@mod", [left, right], false)
       end
     end
 
     # String comparison
     if Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?
-      l = emit_expr(left)
-      r = emit_expr(right)
-      zig = case node.op
-            when :EQ  then "CheatLib.eql(#{l}, #{r})"
-            when :NEQ then "!CheatLib.eql(#{l}, #{r})"
-            when :LT  then "(CheatLib.strcmp(#{l}, #{r}) < 0)"
-            when :LTE then "(CheatLib.strcmp(#{l}, #{r}) <= 0)"
-            when :GT  then "(CheatLib.strcmp(#{l}, #{r}) > 0)"
-            when :GTE then "(CheatLib.strcmp(#{l}, #{r}) >= 0)"
+      cmp_node = case node.op
+            when :EQ  then MIR::Call.new("CheatLib.eql", [left, right], false)
+            when :NEQ then MIR::UnaryOp.new("!", MIR::Call.new("CheatLib.eql", [left, right], false))
+            when :LT  then MIR::BinOp.new("<",  MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
+            when :LTE then MIR::BinOp.new("<=", MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
+            when :GT  then MIR::BinOp.new(">",  MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
+            when :GTE then MIR::BinOp.new(">=", MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
             end
-      return MIR::InlineZig.new(zig, "string_cmp") if zig
+      return cmp_node if cmp_node
     end
 
     # Integer division
@@ -2010,7 +2075,7 @@ class MIRLowering
       left_ti = node.left.type_info
       right_ti = node.right.type_info
       if left_ti&.integer? && right_ti&.integer?
-        return MIR::InlineZig.new("@divTrunc(#{emit_expr(left)}, #{emit_expr(right)})", "int_div")
+        return MIR::Call.new("@divTrunc", [left, right], false)
       end
     end
 
@@ -2082,10 +2147,9 @@ class MIRLowering
 
     # RecoverOp: x s> RECOVER(default) -> (x catch default)
     if rhs.is_a?(AST::RecoverOp)
-      left_zig = emit_expr(lower(node.left))
-      left_raw = left_zig.sub(/\Atry /, '')
-      default_zig = emit_expr(lower(rhs.default_expr))
-      return MIR::InlineZig.new("(#{left_raw} catch #{default_zig})", "recover")
+      left = lower(node.left)
+      default_val = lower(rhs.default_expr)
+      return MIR::TryCatch.new(strip_try(left), default_val, nil)
     end
 
     # Simple pipe: x s> f -> f(x) or x s> f(y) -> f(x, y)
@@ -2123,12 +2187,10 @@ class MIRLowering
     is_error = (t_left&.error_union?) || (node.left.respond_to?(:can_fail) && node.left.can_fail)
 
     left = lower(node.left)
-    left_zig = emit_expr(left)
-    left_raw = left_zig.sub(/\Atry /, '')
 
     # OR RAISE: bubble up error (Zig's try)
     if node.right.is_a?(AST::OrRaise)
-      return MIR::InlineZig.new("try #{left_raw}", "or_raise") if is_error
+      return MIR::TryExpr.new(strip_try(left)) if is_error
       return left
     end
 
@@ -2136,6 +2198,7 @@ class MIRLowering
     if node.right.is_a?(AST::OrExit)
       if is_error
         rt_name = @rt_name
+        left_raw = emit_expr(strip_try(left))
         msg_zig = node.right.message ? emit_expr(lower(node.right.message)) : '""'
         line = node.respond_to?(:token) && node.token ? node.token.line : 0
         return MIR::RawZig.new(
@@ -2148,25 +2211,24 @@ class MIRLowering
 
     # OR PASS: ignore error (Zig's catch undefined)
     if node.right.is_a?(AST::OrPass)
-      return MIR::InlineZig.new("(#{left_raw} catch undefined)", "or_pass") if is_error
+      return MIR::TryCatch.new(strip_try(left), MIR::Ident.new("undefined"), nil) if is_error
       return left
     end
 
     # OR BREAK: error-to-break (Zig's catch break)
     if node.right.is_a?(AST::OrBreak)
-      return MIR::InlineZig.new("(#{left_raw} catch break)", "or_break") if is_error
+      return MIR::TryCatch.new(strip_try(left), MIR::Ident.new("break"), nil) if is_error
       return left
     end
 
     # OR PRUNE: same as OR PASS for now
     if node.right.is_a?(AST::OrPrune)
-      return MIR::InlineZig.new("(#{left_raw} catch undefined)", "or_prune") if is_error
+      return MIR::TryCatch.new(strip_try(left), MIR::Ident.new("undefined"), nil) if is_error
       return left
     end
 
     # Default: expr OR fallback -> error union catch or optional orelse
     right = lower(node.right)
-    right_zig = emit_expr(right)
 
     if is_error
       # MIR::Promote(:or_fallback_dupe) for struct fallbacks with string fields
@@ -2184,6 +2246,8 @@ class MIRLowering
         end || []
         if string_fields.any?
           rt_name = @rt_name
+          left_raw = emit_expr(strip_try(left))
+          right_zig = emit_expr(right)
           promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch @panic(\"out of memory\");" }.join(" ")
           return MIR::RawZig.new(
             "(#{left_raw} catch __fb: { var __fb = #{right_zig}; #{promos} break :__fb __fb; })",
@@ -2192,11 +2256,11 @@ class MIRLowering
         end
       end
 
-      return MIR::InlineZig.new("(#{left_raw} catch #{right_zig})", "or_rescue_catch")
+      return MIR::TryCatch.new(strip_try(left), right, nil)
     end
 
     # Optional orelse
-    MIR::InlineZig.new("((#{left_zig}) orelse #{right_zig})", "or_rescue_orelse")
+    MIR::Orelse.new(left, right)
   end
 
   def lower_get_field(node)
@@ -2221,14 +2285,19 @@ class MIRLowering
     is_locked_unwrapped = node.target.is_a?(AST::Identifier) && locked_map.key?(node.target.name)
 
     if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
-      target_zig = emit_expr(target)
-      return MIR::InlineZig.new("#{target_zig}.ctrl.data.#{node.field}", "rc_field_get")
+      # target.ctrl.data.field
+      ctrl = MIR::FieldGet.new(target, "ctrl")
+      data = MIR::FieldGet.new(ctrl, "data")
+      return MIR::FieldGet.new(data, node.field.to_s)
     elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
-      target_zig = emit_expr(target)
-      return MIR::InlineZig.new("#{target_zig}.ctrl.data.#{node.field}", "locked_field_get")
+      # target.ctrl.data.field
+      ctrl = MIR::FieldGet.new(target, "ctrl")
+      data = MIR::FieldGet.new(ctrl, "data")
+      return MIR::FieldGet.new(data, node.field.to_s)
     elsif ti&.always_mutable? && !is_locked_unwrapped
-      target_zig = emit_expr(target)
-      return MIR::InlineZig.new("#{target_zig}.data.#{node.field}", "refcell_field_get")
+      # target.data.field
+      data = MIR::FieldGet.new(target, "data")
+      return MIR::FieldGet.new(data, node.field.to_s)
     end
 
     result = MIR::FieldGet.new(target, node.field.to_s)
@@ -2236,20 +2305,20 @@ class MIRLowering
     # Auto-dereference @indirect fields
     target_type = ti&.resolved.to_s
     if @indirect_fields&.dig("#{target_type}.#{node.field}")
-      return MIR::InlineZig.new("#{emit_expr(result)}.*", "indirect_deref")
+      return MIR::Deref.new(result)
     end
 
     result
   end
 
   def lower_get_index(node)
-    target_zig = emit_expr(lower(node.target))
-    index_zig = emit_expr(lower(node.index))
+    target = lower(node.target)
+    index = lower(node.index)
     ti = node.target.type_info
 
-    # Auto-deref Arc/Rc-wrapped maps
+    # Auto-deref Arc/Rc-wrapped maps: target.ctrl.data.*
     if ti&.map? && (ti&.shared? || ti&.multiowned?)
-      target_zig = "#{target_zig}.ctrl.data.*"
+      target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
     if node.target.metatype == :hashmap
@@ -2257,18 +2326,21 @@ class MIRLowering
       if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
         key_zig = map_ft.key_type.zig_type
         val_zig = map_ft.value_type.zig_type
-        MIR::InlineZig.new("CheatLib.numericMapGet(#{key_zig}, #{val_zig}, #{target_zig}, #{index_zig})", "get_index_nummap")
+        MIR::Call.new("CheatLib.numericMapGet", [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), target, index], false)
       else
-        MIR::InlineZig.new("#{target_zig}.get(#{index_zig})", "get_index_map")
+        MIR::MethodCall.new(target, "get", [index], false)
       end
     elsif ti&.pool?
-      MIR::InlineZig.new("#{target_zig}.get(#{index_zig})", "get_index_pool")
+      MIR::MethodCall.new(target, "get", [index], false)
     elsif ti&.string?
-      MIR::InlineZig.new("CheatLib.charAt(#{target_zig}, #{index_zig})", "get_index_string")
+      MIR::Call.new("CheatLib.charAt", [target, index], false)
     elsif node.needs_mut_ref
-      MIR::InlineZig.new("#{target_zig}.items[@as(usize, @intCast(#{index_zig}))]", "get_index_mut")
+      # target.items[@as(usize, @intCast(index))]
+      items = MIR::FieldGet.new(target, "items")
+      cast_idx = MIR::Cast.new(index, "usize", :intCast)
+      MIR::IndexGet.new(items, cast_idx)
     else
-      MIR::InlineZig.new("CheatLib.getAt(#{target_zig}, #{index_zig})", "get_index_list")
+      MIR::Call.new("CheatLib.getAt", [target, index], false)
     end
   end
 
@@ -2390,11 +2462,12 @@ class MIRLowering
 
   def lower_assert(node)
     cond = lower(node.condition)
-    MIR::InlineZig.new("CheatLib.assert(#{emit_expr(cond)}, \"#{node.message}\")", "assert")
+    msg = node.message.to_s.gsub('"', '\\"')
+    MIR::Call.new("CheatLib.assert", [cond, MIR::Lit.new("\"#{msg}\"")], false)
   end
 
   def lower_raise(node)
-    MIR::RawZig.new("return error.CheatError", "raise")
+    MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
   end
 
   # ================================================================
@@ -2516,18 +2589,18 @@ class MIRLowering
     # Resolve init value - special handling for collection types
     init = if ft.pool?
       cap = ft.capacity
-      MIR::InlineZig.new("try #{transpile_type(ft)}.initCapacity(#{@rt_name}.heapAlloc(), #{cap})", "pool_init")
+      MIR::ContainerInit.new(transpile_type(ft), :pool, "#{@rt_name}.heapAlloc()", cap)
     elsif ft.set_collection?
-      MIR::InlineZig.new("#{transpile_type(ft)}{}", "set_init")
+      MIR::ContainerInit.new(transpile_type(ft), :set_empty, nil, nil)
     elsif ft.list_collection?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
       if rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
         lower(node.value)
       elsif ft.capacity.is_a?(Integer) && ft.capacity > 0
-        MIR::InlineZig.new("try #{transpile_type(ft)}.initCapacity(#{@rt_name}.heapAlloc(), #{ft.capacity})", "list_init_cap")
+        MIR::ContainerInit.new(transpile_type(ft), :list_capacity, "#{@rt_name}.heapAlloc()", ft.capacity)
       else
-        MIR::InlineZig.new("#{transpile_type(ft)}{}", "list_init")
+        MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
       end
     else
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
@@ -3051,6 +3124,27 @@ class MIRLowering
       MIREmitter.new
     end
     @_emitter.emit(node)
+  end
+
+  # Strip try-wrapping from a MIR node so it can be used inside catch/orelse.
+  # Returns a new node without try, or the original node if not try-wrapped.
+  def strip_try(mir_node)
+    case mir_node
+    when MIR::Call
+      MIR::Call.new(mir_node.callee, mir_node.args, false)
+    when MIR::MethodCall
+      MIR::MethodCall.new(mir_node.receiver, mir_node.method, mir_node.args, false)
+    when MIR::TryExpr
+      mir_node.expr
+    when MIR::InlineZig
+      code = mir_node.code.sub(/\Atry /, '')
+      MIR::InlineZig.new(code, mir_node.reason)
+    when MIR::RawZig
+      code = mir_node.code.sub(/\Atry /, '')
+      MIR::RawZig.new(code, mir_node.reason)
+    else
+      mir_node
+    end
   end
 
   # Emit a list of MIR statements as Zig body text, adding semicolons

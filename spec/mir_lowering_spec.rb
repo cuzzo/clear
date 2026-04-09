@@ -278,7 +278,7 @@ RSpec.describe MIRLowering do
       right = make_lit(:STRING, "alice")
       node = make_binop(left, :EQ, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Call)
       expect(emit(result)).to include("CheatLib.eql(name,")
     end
 
@@ -312,7 +312,7 @@ RSpec.describe MIRLowering do
       right = make_id("b", full_type: :Int64)
       node = make_binop(left, :DIV, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Call)
       expect(emit(result)).to include("@divTrunc(a, b)")
     end
 
@@ -355,7 +355,7 @@ RSpec.describe MIRLowering do
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Call)
       expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
     end
   end
@@ -809,7 +809,7 @@ RSpec.describe MIRLowering do
       node = AST::Assert.new(tok, cond, "should be true")
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Call)
       expect(emit(result)).to include("CheatLib.assert(true,")
     end
 
@@ -817,7 +817,7 @@ RSpec.describe MIRLowering do
       node = AST::Raise.new(tok, :ERROR, nil, nil)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::ReturnStmt)
       expect(emit(result)).to include("return error.CheatError")
     end
   end
@@ -1575,10 +1575,10 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "Or* error chain lowering" do
-    it "lowers OrRaise to InlineZig" do
+    it "lowers OrRaise to Ident" do
       node = AST::OrRaise.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Ident)
       expect(emit(result)).to eq("error.OrRaise")
     end
 
