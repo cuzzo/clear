@@ -69,8 +69,7 @@ class StringConcatRewriter
   def string_concat?(node)
     return true if node.is_a?(AST::StringConcat)
     return false unless node.is_a?(AST::BinaryOp)
-    return false unless node.op == :ADD || node.op == "+"
-    node.left.type_info&.string? || node.right.type_info&.string?
+    node.string_concat
   end
 
   # Flatten chained string + into a flat list of parts.

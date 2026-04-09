@@ -682,6 +682,25 @@ class MIRPass
       promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
     end
 
+    # Phase 1.5: upgrade always-escaped collections to heap at declaration.
+    # If a collection variable is returned on ALL return paths, allocate it on the
+    # heap from the start instead of frame-then-promote. This eliminates the
+    # MIR::Promote + runtime promoteList for these variables.
+    promotion_plans.each do |name, plan|
+      next unless plan[:var_promotes]&.any?
+      fn = @fn_nodes[name]
+      upgrade_always_escaped_to_heap!(fn, plan) if fn&.body
+    end
+
+    # Phase 1.5b: upgrade BG-captured variables to heap at declaration.
+    # BG blocks capture outer variables into a separate fiber. Frame-allocated
+    # data would be invalidated by frame rewind, so captured collections and
+    # strings are promoted at runtime. Upgrading to heap at declaration
+    # eliminates the runtime promote.
+    @fn_nodes.each do |name, fn|
+      upgrade_bg_captures_to_heap!(fn) if fn&.body
+    end
+
     # Phase 2: classify cleanup bindings (uses cleared provenance from Phase 1).
     @fn_nodes.each do |name, fn|
       @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
@@ -711,6 +730,130 @@ class MIRPass
   end
 
   private
+
+  # Upgrade always-escaped collection variables to heap at declaration.
+  # A variable is always-escaped if it's in var_promotes AND referenced in
+  # every return node. For those, heap allocation at declaration is correct
+  # and cheaper than frame-then-promote.
+  def upgrade_always_escaped_to_heap!(fn, plan)
+    return_nodes = []
+    AST.walk_body(fn.body) { |n| return_nodes << n if n.is_a?(AST::ReturnNode) }
+    return if return_nodes.empty?
+
+    always_escaped = plan[:var_promotes].select do |vp|
+      return_nodes.all? { |ret| ret.value && return_references_var?(ret.value, vp[:var]) }
+    end
+    return if always_escaped.empty?
+
+    always_names = Set.new
+    always_escaped.each do |vp|
+      ident = find_return_identifier(return_nodes, vp[:var])
+      next unless ident
+
+      # Upgrade declaration node
+      decl = ident.symbol&.reg
+      if decl&.respond_to?(:storage=)
+        decl.storage = :heap
+      end
+      decl_ti = decl&.type_info rescue nil
+      if decl_ti.is_a?(Type)
+        decl_ti.provenance = :heap
+        decl_ti.cleanup_alloc = :heap
+        # Clear escaped_return so CleanupClassifier's escape hatch (line 420)
+        # doesn't suppress cleanup. The variable is heap from the start now --
+        # it doesn't need runtime promotion, so "escaped" is no longer true.
+        decl_ti.escaped_return = false
+      end
+
+      # Upgrade scope entry
+      if ident.symbol
+        ident.symbol.storage = :heap
+        sym_type = ident.symbol.type
+        if sym_type.is_a?(Type)
+          sym_type.provenance = :heap
+          sym_type.escaped_return = false
+        end
+      end
+
+      always_names << vp[:var]
+    end
+
+    # Remove always-escaped vars from promotion plan (no MIR::Promote needed)
+    plan[:var_promotes] = plan[:var_promotes].reject { |vp| always_names.include?(vp[:var]) }
+  end
+
+  # Check if a return value expression references a variable by name.
+  def return_references_var?(node, var_name)
+    case node
+    when AST::Identifier then node.name == var_name
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.any? { |_, fval| return_references_var?(fval, var_name) }
+    else false
+    end
+  end
+
+  # Find an Identifier node for a variable name across all return nodes.
+  def find_return_identifier(return_nodes, var_name)
+    return_nodes.each do |ret|
+      next unless ret.value
+      ident = extract_identifier(ret.value, var_name)
+      return ident if ident
+    end
+    nil
+  end
+
+  # Extract an Identifier node matching var_name from a return value expression.
+  def extract_identifier(node, var_name)
+    case node
+    when AST::Identifier
+      node.name == var_name ? node : nil
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.each_value { |fval| r = extract_identifier(fval, var_name); return r if r }
+      nil
+    else nil
+    end
+  end
+
+  # Upgrade BG-captured collection variables to heap at declaration.
+  # BG captures are always escapes -- the captured data must survive frame rewind.
+  # Only collections (list/map) benefit: their allocator controls backing storage.
+  # Strings still need MIR::Promote(:bg_string) because the data comes from
+  # external sources and must be physically duped to heap at capture time.
+  def upgrade_bg_captures_to_heap!(fn)
+    # Collect captured collection variable names needing escape promotion.
+    bg_capture_names = Set.new
+    AST.walk_body(fn.body) do |stmt|
+      each_bg_in_stmt(stmt) do |bg|
+        captured = bg.capture_analysis&.captures
+        next unless captured&.any?
+        captured.each do |name, type_obj|
+          t = type_obj ? Type.new(type_obj) : nil
+          next unless t && !t.needs_pointer_passing?
+          next unless t.list_collection? || (t.map? && !t.numeric_map?)
+          bg_capture_names << name
+        end
+      end
+    end
+    return if bg_capture_names.empty?
+
+    # Track upgraded names so insert_bg_escape_promote! skips them.
+    @bg_heap_upgraded ||= Set.new
+    @bg_heap_upgraded.merge(bg_capture_names)
+
+    # Find declarations and upgrade to heap.
+    AST.walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+      var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+      next unless bg_capture_names.include?(var_name)
+
+      node.storage = :heap if node.respond_to?(:storage=)
+      ti = node.type_info rescue nil
+      if ti.is_a?(Type)
+        ti.provenance = :heap
+        ti.cleanup_alloc = :heap
+      end
+    end
+  end
 
   def transform_function!(fn, promo)
     bindings = @cleanup_bindings[fn.name]
@@ -1124,9 +1267,9 @@ class MIRPass
       each_bg_in_stmt(stmt) do |bg|
         captured = bg.capture_analysis&.captures
         next unless captured&.any?
-        found = true if captured.any? do |_, type_obj|
+        found = true if captured.any? do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
-          t && t.needs_escape_promotion? && !t.needs_pointer_passing?
+          t && t.needs_escape_promotion? && !t.needs_pointer_passing? && !@bg_heap_upgraded&.include?(name)
         end
       end
       found
@@ -1144,6 +1287,7 @@ class MIRPass
         t = type_obj ? Type.new(type_obj) : nil
         next unless t && t.needs_escape_promotion?
         next if t.needs_pointer_passing?
+        next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
         strategy = t.list_collection? ? :list : :bg_string
         result << MIR::Promote.new(bg.token, name, t.zig_type, strategy, nil)
       end
@@ -1505,6 +1649,7 @@ class MIRPass
 
   def hoist_heap_temps!(fn)
     @hpt_counter = 0
+    @current_hpt_fn = fn
     fn.body = hoist_in_body(fn.body)
   end
 
@@ -1741,7 +1886,11 @@ class MIRPass
       ret_ti = stmt_node.value&.type_info rescue nil
       ret_ti = ret_ti.is_a?(Type) ? ret_ti : nil
       if ret_ti&.string?
-        stmt_node.hpt_return_promote = MIR::Promote.new(stmt_node.token, nil, "[]const u8", :hpt_string_dupe, nil)
+        # Use heap allocator for the dupe when the function returns heap-provenance
+        # data. This ensures the returned string's allocator matches what the caller
+        # expects (INV-1: single allocator per binding).
+        dupe_alloc = @current_hpt_fn&.return_provenance == :heap ? :heap : :frame
+        stmt_node.hpt_return_promote = MIR::Promote.new(stmt_node.token, nil, "[]const u8", :hpt_string_dupe, dupe_alloc)
       elsif ret_ti
         resolved = ret_ti.resolved
         ret_schema = @schema_lookup.call(resolved) rescue nil

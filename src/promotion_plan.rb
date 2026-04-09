@@ -417,7 +417,6 @@ module CleanupClassifier
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
-    return nil if ti.escaped_return && (ti.collection? || ti.string?)
 
     classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||

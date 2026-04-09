@@ -599,6 +599,22 @@ class Type
     map? || pool?
   end
 
+  # True when backing storage operations require the heap allocator.
+  # Used by the transpiler to resolve :receiver_storage allocator symbols.
+  def needs_heap_backing?
+    pool? || sharded? || heap_provenance?
+  end
+
+  # True when this map type stores an allocator in its Zig struct initializer.
+  # StringMaps/StripedMaps need .alloc = heapAlloc(); NumericMaps and
+  # PartitionedMaps (shared-nothing sharded) don't have an alloc field.
+  def map_init_needs_alloc?
+    return false unless map?
+    return false if numeric_map?
+    return false if sharded? && !striped?
+    true
+  end
+
   # True when backing data is frame-allocated and must be promoted to heap
   # before escaping its scope (return, BG capture, etc.).
   # Covers: @list (frame-backed buffer), string HashMap (frame-backed keys/buckets),
@@ -676,6 +692,38 @@ class Type
   # and falls back to checking known resource type names.
   def resource?
     @is_resource || RESOURCE_TYPES.include?(resolved)
+  end
+
+  # Resolve the Zig close/deinit statement for resource types.
+  # Returns [is_resource, close_zig_template] where close_zig_template uses
+  # {0} as placeholder for the variable name. Returns [false, nil] for non-resources.
+  def resolve_resource_close(schema_lookup = nil)
+    return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
+    return [true, "{0}.deinit(rt.heapAlloc())"] if set_collection?
+    return [true, "{0}.deinit()"] if open_stream? || inf_stream?
+
+    return [false, nil] unless schema_lookup
+    schema = schema_lookup.call(resolved) rescue nil
+
+    if schema&.dig(:kind) == :resource
+      return [true, schema[:close_zig]]
+    end
+
+    # Struct with resource fields: compose close statements from fields.
+    if schema.is_a?(Hash) && schema[:kind].nil?
+      closes = []
+      schema.each do |fname, ftype|
+        next if fname == :type_params || fname == :methods
+        f_resolved = Type.new(ftype).resolved
+        f_schema = schema_lookup.call(f_resolved) rescue nil
+        if f_schema&.dig(:kind) == :resource
+          closes << f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
+        end
+      end
+      return [true, closes.join("; ")] if closes.any?
+    end
+
+    [false, nil]
   end
 
   # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.
@@ -993,6 +1041,28 @@ class Type
       end
     end
     false
+  end
+
+  # Determine the allocator needed for cleanup of this type.
+  # Returns :heap or :frame. Centralizes the type-specific logic that
+  # was previously inline in annotator.rb's set_cleanup_alloc!.
+  def cleanup_allocator(schema_lookup = nil)
+    return :heap if heap_provenance? || map? || any_rc? || any_sync? ||
+                     resource? || sharded? || striped? || link?
+    if schema_lookup
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash) && !schema[:kind]
+        return :heap if schema.any? { |k, v|
+          next false if k.is_a?(Symbol)
+          ft = v.is_a?(Hash) ? v[:type] : v
+          t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+          t.link? || t.any_rc? || t.string?
+        }
+      elsif schema.is_a?(Hash) && schema[:kind] == :union
+        return :heap if (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      end
+    end
+    :frame
   end
 
   # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).

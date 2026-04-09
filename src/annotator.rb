@@ -2517,6 +2517,7 @@ private
     # String concat (+) transpiles to std.mem.concat(rt.frameAlloc(), ...) —
     # mark as frame allocation so needs_rt and loop mark elision are correct.
     if node.op == :ADD && (node.left.type_info&.string? || node.right.type_info&.string?)
+      node.string_concat = true
       current_fn_ctx.frame_count += 1 if current_fn_ctx
       # String concat result is frame-allocated.
       ti = node.type_info
@@ -3836,29 +3837,8 @@ private
       end
     end
 
-    # Heap allocator needed for: heap-promoted data, maps, RC/Arc, sync,
-    # resources, sharded collections, structs with RC/link/string fields.
-    needs_heap = ti.heap_provenance? || ti.map? || ti.any_rc? || ti.any_sync? ||
-                 ti.resource? || ti.sharded? || ti.striped? || ti.link?
-    unless needs_heap
-      schema = lookup_type_schema(ti.resolved) rescue nil
-      if schema.is_a?(Hash) && !schema[:kind]
-        # Struct: check fields for RC/link/string
-        needs_heap = schema.any? do |k, v|
-          next false if k.is_a?(Symbol)
-          ft = v.is_a?(Hash) ? v[:type] : v
-          t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-          t.link? || t.any_rc? || t.string?
-        end
-      elsif schema.is_a?(Hash) && schema[:kind] == :union
-        # Union: needs heap if any variant has heap data (strings, slices,
-        # @indirect pointers, collections). COPY always allocates on the heap,
-        # so any non-Copy union holding COPY'd data needs heapAlloc cleanup.
-        needs_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      end
-    end
-    alloc = needs_heap ? :heap : :frame
-    ti.cleanup_alloc = alloc  # backward compat (will be removed)
+    alloc = ti.cleanup_allocator(->(name) { lookup_type_schema(name) })
+    ti.cleanup_alloc = alloc
 
     # Propagate provenance: prefer value's provenance, then computed alloc.
     val = node.respond_to?(:value) ? node.value : nil

@@ -86,22 +86,20 @@ RSpec.describe ZigTranspiler do
       END
     CLEAR
 
-    it "emits promoteList before return" do
+    it "allocates always-escaped list on heap (no promoteList)" do
       zig = transpile(frame_list_src)
-      expect(zig).to include("CheatLib.promoteList(f64, rt, &vals)")
+      # Always-escaped: single return referencing vals → heap from the start.
+      # No runtime promoteList needed.
+      expect(zig).not_to include("CheatLib.promoteList(")
     end
 
-    it "emits promoteList before the return statement" do
+    it "uses heapAlloc for always-escaped list operations" do
       zig = transpile(frame_list_src)
-      promote_pos = zig.index("CheatLib.promoteList(")
-      return_pos  = zig.index("return __ret")
-      expect(promote_pos).to be < return_pos
+      expect(zig).to include("rt.heapAlloc()")
     end
 
-    it "callee omits the defer deinit for the returned list (escaped_return suppresses cleanup)" do
+    it "caller cleans up heap-allocated list (no frame deinit)" do
       zig = transpile(frame_list_src)
-      # The returned list must NOT have a defer deinit — ownership transfers to the
-      # caller and a defer would corrupt the value through Zig NRVO aliasing.
       expect(zig).not_to include("vals.deinit(rt.frameAlloc())")
     end
   end
@@ -131,16 +129,17 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include(".alloc = rt.heapAlloc()")
     end
 
-    it "sets alloc before the return statement" do
+    it "always-escaped map is heap from start (no separate alloc set before return)" do
       zig = transpile(map_return_src)
-      alloc_pos  = zig.index(".alloc = rt.heapAlloc()")
-      return_pos = zig.index("return __ret")
-      expect(alloc_pos).to be < return_pos
+      # StringMap init already sets .alloc = rt.heapAlloc(). Always-escaped
+      # detection eliminates the redundant MIR::Promote alloc assignment.
+      expect(zig).to include(".alloc = rt.heapAlloc()")
+      expect(zig).not_to include("m.alloc = rt.heapAlloc()")
     end
 
-    it "uses heapAlloc for mapPut keys (keys must outlive frame rewind)" do
+    it "uses heapAlloc for mapPut keys and values (heap-provenance map)" do
       zig = transpile(map_return_src)
-      expect(zig).to include(".put(rt.heapAlloc(), rt.frameAlloc()")
+      expect(zig).to include(".put(rt.heapAlloc(), rt.heapAlloc()")
     end
 
     it "caller uses cleanup with heapAlloc for promoted map" do
@@ -871,6 +870,20 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "HPT string dupe uses correct allocator for return provenance" do
+    it "uses heapAlloc for dupe when function has heap return_provenance" do
+      src = <<~CLEAR
+        FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
+        FN transform!(s: String) RETURNS String -> RETURN COPY s; END
+        FN caller!() RETURNS String -> RETURN transform!(makeStr!()); END
+        FN main() RETURNS Void -> result = caller!(); RETURN; END
+      CLEAR
+      zig = transpile(src)
+      # HPT dupe in caller! should use heapAlloc (return_provenance == :heap)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, __hpt_ret\)/)
+    end
+  end
+
   describe "Borrow rejection in struct construction" do
     it "rejects container index borrow stored in struct field" do
       src = <<~CLEAR
@@ -1277,6 +1290,81 @@ RSpec.describe ZigTranspiler do
       expect(user_code).to include("submitSpawn")
       expect(user_code).not_to include("spawnPinned")
       expect(user_code).not_to include("spawnBest")
+    end
+  end
+
+  # ===========================================================================
+  # INV regression: memory safety invariant checks
+  # ===========================================================================
+
+  describe "INV-1/INV-5: always-escaped collections are heap from start" do
+    it "allocates always-escaped list on heap (no promoteList)" do
+      src = <<~CLEAR
+        FN build!() RETURNS Float64[] ->
+            MUTABLE vals: Float64[]@list = List[];
+            append(vals, 1.0);
+            RETURN vals;
+        END
+        FN main() RETURNS Void -> x = build!(); RETURN; END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to include("promoteList")
+      expect(zig).to include("heapAlloc")
+    end
+
+    it "uses heap allocator for always-escaped map" do
+      src = <<~CLEAR
+        FN buildMap!() RETURNS HashMap<Int64> ->
+            MUTABLE m: HashMap<Int64> = {};
+            m["x"] = 1_i64;
+            RETURN m;
+        END
+        FN main() RETURNS Void -> x = buildMap!(); RETURN; END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to include("promoteList")
+    end
+  end
+
+  describe "INV-1: HPT string dupe matches return_provenance" do
+    it "uses heapAlloc for dupe when function has heap return_provenance" do
+      src = <<~CLEAR
+        FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
+        FN transform!(s: String) RETURNS String -> RETURN COPY s; END
+        FN caller!() RETURNS String -> RETURN transform!(makeStr!()); END
+        FN main() RETURNS Void -> result = caller!(); RETURN; END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, __hpt_ret\)/)
+    end
+  end
+
+  describe "INV-7: string concat flag is annotation-driven" do
+    it "emits std.mem.concat for string addition" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            a = "hello";
+            b = " world";
+            c = a + b;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("std.mem.concat")
+    end
+  end
+
+  describe "INV-8: cleanup allocator is type-driven" do
+    it "uses heapAlloc cleanup for map types" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            m["x"] = 1_i64;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("heapAlloc")
     end
   end
 end

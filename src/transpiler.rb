@@ -2278,8 +2278,9 @@ private
         mir = node.hpt_return_promote
         case mir.strategy
         when :hpt_string_dupe
+          alloc_fn = mir.fields == :heap ? "heapAlloc" : "frameAlloc"
           ["var __hpt_ret: []const u8 = #{val_code};",
-           "__hpt_ret = try #{rt_name}.frameAlloc().dupe(u8, __hpt_ret);",
+           "__hpt_ret = try #{rt_name}.#{alloc_fn}().dupe(u8, __hpt_ret);",
            "return __hpt_ret;"].join("\n")
         when :hpt_promote
           zig_t = mir.zig_type
@@ -2290,7 +2291,7 @@ private
       elsif needs_string_dupe && node.value
         ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
         if ret_type&.string?
-          "return #{rt_name}.heapAlloc().dupe(u8, #{val_code}) catch #{val_code};"
+          "return try #{rt_name}.heapAlloc().dupe(u8, #{val_code});"
         else
           "return #{val_code};"
         end
@@ -2551,15 +2552,10 @@ private
       left = visit(node.left)
       right = visit(node.right)
 
-      if node.op == :ADD || node.op == "+"
-        # Check if we are operating on Strings
-        # Annotator ensures full_type is set (e.g. "String" or "%String")
+      if node.string_concat
         rt_ref = @do_rt_name || "rt"
         alloc = resolve_alloc_for_intrinsic(:node_storage, node, rt_ref)
-
-        if node.left.type_info&.string? || node.right.type_info&.string?
-          return "try std.mem.concat(#{alloc}, u8, &.{ #{left}, #{right} })"
-        end
+        return "try std.mem.concat(#{alloc}, u8, &.{ #{left}, #{right} })"
       end
 
       if node.op == :POW
@@ -3013,7 +3009,7 @@ private
         end || []
         if string_fields.any?
           rt_name = @do_rt_name || "rt"
-          promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch __fb.#{f};" }.join(" ")
+          promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch @panic(\"out of memory\");" }.join(" ")
           return "(#{left_raw} catch __fb: { var __fb = #{right_code}; #{promos} break :__fb __fb; })"
         end
       end
@@ -3157,15 +3153,10 @@ private
     bare_ft.shard_count = map_ft.shard_count if map_ft.shard_count
     bare_ft.sync = map_ft.sync if map_ft.shard_count && map_ft.sync
 
-    # StringMap, ShardedStringMap, MutexShardedStringMap store their allocator.
-    # Numeric maps and PartitionedStringMap (shared-nothing) don't have alloc.
-    if bare_ft.numeric_map? || (bare_ft.sharded? && !bare_ft.striped?)
-      bare_init = "#{bare_ft.zig_type}{}"
-    else
-      # Always use heapAlloc for StringMaps. Frame-allocated keys become
-      # dangling after restoreFrameMark in called functions, causing
-      # use-after-free when the map is accessed later.
+    if bare_ft.map_init_needs_alloc?
       bare_init = "#{bare_ft.zig_type}{ .alloc = #{rt_name}.heapAlloc() }"
+    else
+      bare_init = "#{bare_ft.zig_type}{}"
     end
 
     # Wrap with RwLocked/Locked and Arc/Rc if capabilities require it.
@@ -3348,7 +3339,8 @@ private
       else
         node.args&.first&.type_info rescue nil
       end
-      needs_heap = ti&.pool? || ti&.sharded? || ti&.heap_provenance?
+      ti = ti.is_a?(Type) ? ti : (Type.new(ti) rescue nil) if ti
+      needs_heap = ti&.needs_heap_backing?
       needs_heap ||= (node.respond_to?(:storage) && node.storage == :heap)
       # Check receiver/first-arg node storage (annotator sets :heap on escape-promoted nodes).
       needs_heap ||= if node.is_a?(AST::MethodCall)

@@ -305,7 +305,10 @@ module AST
     attr_accessor :cleanup_alloc     # stamped by MIRPass: :heap or :frame (for decl mode proxy)
     attr_accessor :has_cleanup       # stamped by MIRPass: true when MIR::Drop follows (for decl mode proxy)
   end
-  BinaryOp     = Struct.new(:token, :left, :op, :right) { include Locatable }
+  BinaryOp     = Struct.new(:token, :left, :op, :right) do
+    include Locatable
+    attr_accessor :string_concat  # true when this is string + (stamped by annotator)
+  end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
     include Locatable
