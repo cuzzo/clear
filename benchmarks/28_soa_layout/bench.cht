@@ -1,15 +1,13 @@
--- SOA vs AOS Layout Benchmark -- CLEAR (@pool:soa)
+-- SOA vs AOS Layout Benchmark -- CLEAR (@list:soa)
 --
 -- Particle simulation: 10K particles, 100 iterations of position update.
--- Two layouts:
---   1. AOS: regular Entity[] array (array of structs)
---   2. SOA: Entity@pool:soa (struct of arrays, compiler-managed)
+-- Heap-allocated dynamic SOA list (like C/Rust Vec with SOA layout).
 --
 -- The position update loop (x += vx, y += vy) only touches 4 of 64 fields
 -- per pass (6% utilization). SOA keeps each field contiguous in memory,
 -- so the CPU prefetcher loads full cache lines of useful data.
 --
--- CLEAR's @pool:soa gives SOA layout with AOS syntax -- the compiler
+-- CLEAR's @list:soa gives SOA layout with AOS syntax -- the compiler
 -- transposes the data automatically. No manual struct-splitting needed.
 
 STRUCT Particle {
@@ -36,10 +34,10 @@ FN main() RETURNS Void ->
     n = 10000_i64;
     iterations = 100_i64;
 
-    -- SOA layout via @pool:soa
-    MUTABLE soa: Particle[10000]@pool:soa = [];
+    -- SOA layout via @list:soa (heap-allocated, dynamic)
+    MUTABLE soa: Particle[]@list:soa = [];
     FOR i IN (0_i64 ..< n) DO
-        soa.insert(Particle{
+        soa.append(Particle{
             x: toFloat(i), y: toFloat(i) * 2.0, z: 0.0,
             vx: 1.0, vy: 0.5, vz: 0.0,
             mass: 1.0, radius: 0.1, charge: 0.0,
