@@ -123,6 +123,21 @@ class ZigTranspiler
   def transpile_module(ast)
     @emitted_extern_modules = Set.new
     @fn_sigs ||= {}
+    # Pre-populate fn_sigs so callee_needs_rt?/callee_can_fail? resolve
+    # correctly for intra-module calls (recursive, cross-function, etc.).
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      sig = stmt.full_type
+      if sig.is_a?(FunctionSignature)
+        @fn_sigs[stmt.name] = sig
+      else
+        fs = FunctionSignature.new(params: [], return_type: :Any)
+        fs.needs_rt = stmt.needs_rt
+        fs.can_fail = stmt.can_fail
+        fs.effects = stmt.effects
+        @fn_sigs[stmt.name] = fs
+      end
+    end
     type_parts = []
     fn_parts = []
     ast.statements.each do |stmt|
@@ -354,13 +369,16 @@ private
         # requiring file can reference them directly. Only functions go inside
         # the namespace struct wrapper to avoid Zig name-ambiguity errors.
         same_dir = mod.source_dir == @source_dir
+        @emitted_types ||= Set.new
 
-        # Filter type defs by visibility for file-scope emission.
-        file_scope_types = visible_type_defs(mod, same_dir: same_dir)
+        # Filter type defs by visibility for file-scope emission,
+        # skipping types already emitted by a previous REQUIRE.
+        file_scope_types = visible_type_defs(mod, same_dir: same_dir, emitted: @emitted_types)
 
-        # Strip type definitions from the body — they'll be emitted at file scope.
+        # Strip ALL type definitions from the body (own + transitive) since
+        # they're emitted at file scope by whoever first REQUIRE'd them.
         body = mod.transpiled_body.strip
-        fn_body = strip_type_defs(body, mod)
+        fn_body = strip_all_type_defs(body)
         indented = fn_body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
 
         lines = []
@@ -3946,6 +3964,16 @@ private
     if mod.union_schemas
       @union_schemas ||= {}
       @union_schemas.merge!(mod.union_schemas)
+      # Rebuild @indirect_fields for imported unions so auto-deref works.
+      @indirect_fields ||= {}
+      mod.union_schemas.each do |uname, variants|
+        variants.each do |var_name, var_data|
+          next unless var_data.is_a?(Hash) && var_data[:indirect_fields]
+          var_data[:indirect_fields].each do |fname|
+            @indirect_fields["#{uname}_#{var_name}.#{fname}"] = true
+          end
+        end
+      end
     end
     if mod.enum_schemas
       @enum_schemas ||= {}
@@ -3981,7 +4009,9 @@ private
 
   # Return the Zig type definitions from a module, filtered by visibility,
   # for emission at file scope (outside the struct wrapper).
-  def visible_type_defs(mod, same_dir: false)
+  # Skips types already in the `emitted` set to avoid duplicate definitions
+  # from transitive REQUIREs.
+  def visible_type_defs(mod, same_dir: false, emitted: nil)
     return nil unless mod&.type_defs && !mod.type_defs.strip.empty?
     return nil unless mod&.ast
 
@@ -3993,12 +4023,16 @@ private
         vis = stmt.visibility || :package
         next if vis == :private
         next unless (vis == :pub) || same_dir
-        visible_names.add(stmt.name.to_s)
-        # Include synthetic inline-struct variants for unions
+        name = stmt.name.to_s
+        next if emitted&.include?(name)
+        visible_names.add(name)
+        emitted&.add(name)
         if stmt.is_a?(AST::UnionDef)
           stmt.variants.each do |var_name, var_data|
             next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
-            visible_names.add("#{stmt.name}_#{var_name}")
+            syn = "#{stmt.name}_#{var_name}"
+            visible_names.add(syn)
+            emitted&.add(syn)
           end
         end
       end
@@ -4010,26 +4044,33 @@ private
     filter_zig_blocks(mod.type_defs, visible_names)
   end
 
-  # Strip type definitions from a transpiled body, leaving only functions
-  # and other non-type code for the struct wrapper.
-  def strip_type_defs(body, mod)
-    return body unless mod&.ast
-    type_names = Set.new
-    mod.ast.statements.each do |stmt|
-      case stmt
-      when AST::StructDef, AST::EnumDef, AST::UnionDef
-        next if stmt.visibility == :private
-        type_names.add(stmt.name.to_s)
-        if stmt.is_a?(AST::UnionDef)
-          stmt.variants.each do |var_name, var_data|
-            next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
-            type_names.add("#{stmt.name}_#{var_name}")
-          end
+  # Strip ALL const type/struct/union/enum blocks from a transpiled body,
+  # leaving only functions. Used when inlining a module into a struct wrapper
+  # since types are emitted at file scope.
+  def strip_all_type_defs(body)
+    lines = body.lines
+    result = []
+    i = 0
+    while i < lines.length
+      line = lines[i]
+      if line =~ /\Aconst (\w+)\s*=\s*(struct|union\(enum\)|enum)\s*[\{(]/
+        # Skip this entire const block (type definition)
+        depth = line.count('{') - line.count('}')
+        i += 1
+        while i < lines.length && depth > 0
+          depth += lines[i].count('{') - lines[i].count('}')
+          i += 1
         end
+        # Skip trailing }; on its own line
+        if i < lines.length && lines[i].strip == '};'
+          i += 1
+        end
+      else
+        result << line
+        i += 1
       end
     end
-    return body if type_names.empty?
-    filter_zig_blocks(body, type_names, keep: false)
+    result.join
   end
 
   # Filter Zig top-level const blocks by name.

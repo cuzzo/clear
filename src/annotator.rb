@@ -258,8 +258,12 @@ private
       # For package imports: skip functions that were themselves imported from
       # another module (they have a pre-existing module_alias). Those functions
       # live in their own package's Zig module and must be accessed through it.
-      # For local file imports (inline struct): re-exporting is fine.
       next if node.kind == :package && sig.module_alias
+
+      # For local imports: skip re-exporting functions that were imported from
+      # a deeper module. They live in their original namespace's struct wrapper
+      # and the requiring file already has them with the correct module_alias.
+      next if node.kind != :package && sig.module_alias
 
       vis = sig.visibility || :package
       importable = (vis == :pub) || (vis == :package && same_dir)
