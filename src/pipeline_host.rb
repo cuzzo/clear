@@ -208,8 +208,247 @@ class PipelineHost
   # MIR entry point: returns MIR node tree for migrated pipeline operators.
   # Returns nil for non-migrated operators (caller falls back to string path).
   def lower_pipeline(node)
-    # Phase 1+ will add operator dispatch here.
-    nil
+    rhs = node.right
+    lhs = node.left
+    lhs_type = lhs.type_info
+
+    # SOA sources stay on string path for now
+    is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
+    return nil if is_soa
+
+    case rhs
+    when AST::CountOp   then lower_count(lhs, rhs, node)
+    when AST::SumOp     then lower_sum(lhs, rhs, node)
+    when AST::AverageOp then lower_average(lhs, rhs, node)
+    when AST::MinOp     then lower_min(lhs, rhs, node)
+    when AST::MaxOp     then lower_max(lhs, rhs, node)
+    when AST::AnyOp     then lower_any(lhs, rhs, node)
+    when AST::AllOp     then lower_all(lhs, rhs, node)
+    when AST::FindOp    then lower_find(lhs, rhs, node)
+    else nil
+    end
+  end
+
+  # Infrastructure: builds labeled block with source eval + materialization,
+  # yields to operator body, returns MIR::BlockExpr.
+  def lower_pipeline_block(list_node)
+    label = next_pipe_label
+    source_mir = visit_mir(list_node)
+    @current_pipe_label = label
+
+    lhs_type = list_node.type_info
+    mat_stmts, items_ident = build_pipe_items_mir(lhs_type)
+
+    body_stmts = yield(items_ident, label)
+
+    MIR::BlockExpr.new(label, [
+      MIR::Let.new("pipe_src_list", source_mir, false, nil, nil),
+      *mat_stmts,
+      *body_stmts
+    ])
+  end
+
+  # Build materialization MIR nodes. Returns [stmts_array, items_ident_string].
+  # Pool/sharded sources materialize live items into a temp buffer.
+  def build_pipe_items_mir(lhs_type)
+    if lhs_type&.pool? && lhs_type&.sharded?
+      elem_zig = lhs_type.element_type.zig_type
+      n = lhs_type.shard_count
+      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
+             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
+             "for (0..#{n}) |__psi| {\n" \
+             "    for (pipe_src_list.shards[__psi].slots) |*__pslot| {\n" \
+             "        if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);\n" \
+             "    }\n" \
+             "}\n" \
+             "const pipe_items = pipe_mat.items;"
+      [[MIR::RawZig.new(code, "mat_sharded_pool")], "pipe_items"]
+    elsif lhs_type&.pool?
+      elem_zig = lhs_type.element_type.zig_type
+      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
+             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
+             "for (pipe_src_list.slots) |*__pslot| {\n" \
+             "    if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);\n" \
+             "}\n" \
+             "const pipe_items = pipe_mat.items;"
+      [[MIR::RawZig.new(code, "mat_pool")], "pipe_items"]
+    elsif lhs_type&.list_collection? && lhs_type&.sharded?
+      elem_zig = lhs_type.element_type.zig_type
+      n = lhs_type.shard_count
+      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
+             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
+             "for (0..#{n}) |__psi| {\n" \
+             "    try pipe_mat.appendSlice(rt.heapAlloc(), pipe_src_list.shards[__psi].items);\n" \
+             "}\n" \
+             "const pipe_items = pipe_mat.items;"
+      [[MIR::RawZig.new(code, "mat_sharded_list")], "pipe_items"]
+    else
+      # Plain array/list: hasField check for .items vs raw slice
+      init = MIR::InlineZig.new(
+        'if (@hasField(@TypeOf(pipe_src_list), "items")) pipe_src_list.items else pipe_src_list[0..]',
+        "pipe_items_access")
+      [[MIR::Let.new("pipe_items", init, false, nil, nil)], "pipe_items"]
+    end
+  end
+
+  # Visit pipeline expression in MIR mode with placeholder substitution.
+  def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
+    with_pipeline_context(placeholder: placeholder) do
+      visit_mir(expr_node)
+    end
+  end
+
+  # --- Scalar accumulator lowerings (Phase 1) ---
+
+  def lower_count(list_node, count_node, _smooth_node)
+    pred_mir = visit_pipeline_expr_mir(list_node, count_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("count_result", MIR::Lit.new("0"), true, "i64", nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::IfStmt.new(pred_mir, [
+            MIR::Set.new(MIR::Ident.new("count_result"),
+              MIR::BinOp.new("+", MIR::Ident.new("count_result"), MIR::Lit.new("1")))
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("count_result"))
+      ]
+    end
+  end
+
+  def lower_sum(list_node, sum_node, _smooth_node)
+    expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("sum_result", MIR::Lit.new("0"), true, "f64", nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Set.new(MIR::Ident.new("sum_result"),
+            MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir))
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("sum_result"))
+      ]
+    end
+  end
+
+  def lower_average(list_node, avg_node, _smooth_node)
+    expr_mir = visit_pipeline_expr_mir(list_node, avg_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, "f64", nil),
+        MIR::Let.new("avg_count", MIR::FieldGet.new(MIR::Ident.new(items), "len"), false, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Set.new(MIR::Ident.new("avg_sum"),
+            MIR::BinOp.new("+", MIR::Ident.new("avg_sum"), expr_mir))
+        ], nil),
+        MIR::BreakStmt.new(label,
+          MIR::Conditional.new(
+            MIR::BinOp.new("==", MIR::Ident.new("avg_count"), MIR::Lit.new("0")),
+            MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
+            MIR::BinOp.new("/", MIR::Ident.new("avg_sum"),
+              MIR::Cast.new(MIR::Ident.new("avg_count"), "f64", :floatFromInt))))
+      ]
+    end
+  end
+
+  def lower_min(list_node, min_node, _smooth_node)
+    expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::ExprStmt.new(
+          MIR::InlineZig.new(
+            "if (#{items}.len == 0) @panic(\"MIN applied to empty list\")",
+            "min_empty_check"), nil),
+        MIR::Let.new("min_result", MIR::InlineZig.new("std.math.floatMax(f64)", "float_max"),
+          true, "f64", nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("min_val", expr_mir, false, nil, nil),
+          MIR::IfStmt.new(
+            MIR::BinOp.new("<", MIR::Ident.new("min_val"), MIR::Ident.new("min_result")),
+            [MIR::Set.new(MIR::Ident.new("min_result"), MIR::Ident.new("min_val"))],
+            nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("min_result"))
+      ]
+    end
+  end
+
+  def lower_max(list_node, max_node, _smooth_node)
+    expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::ExprStmt.new(
+          MIR::InlineZig.new(
+            "if (#{items}.len == 0) @panic(\"MAX applied to empty list\")",
+            "max_empty_check"), nil),
+        MIR::Let.new("max_result", MIR::InlineZig.new("-std.math.floatMax(f64)", "float_min"),
+          true, "f64", nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("max_val", expr_mir, false, nil, nil),
+          MIR::IfStmt.new(
+            MIR::BinOp.new(">", MIR::Ident.new("max_val"), MIR::Ident.new("max_result")),
+            [MIR::Set.new(MIR::Ident.new("max_result"), MIR::Ident.new("max_val"))],
+            nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("max_result"))
+      ]
+    end
+  end
+
+  def lower_any(list_node, any_node, _smooth_node)
+    pred_mir = visit_pipeline_expr_mir(list_node, any_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::IfStmt.new(pred_mir, [
+            MIR::Set.new(MIR::Ident.new("any_result"), MIR::Lit.new("true")),
+            MIR::BreakStmt.new(nil, nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("any_result"))
+      ]
+    end
+  end
+
+  def lower_all(list_node, all_node, _smooth_node)
+    pred_mir = visit_pipeline_expr_mir(list_node, all_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), [
+            MIR::Set.new(MIR::Ident.new("all_result"), MIR::Lit.new("false")),
+            MIR::BreakStmt.new(nil, nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("all_result"))
+      ]
+    end
+  end
+
+  def lower_find(list_node, find_node, _smooth_node)
+    elem_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
+    pred_mir = visit_pipeline_expr_mir(list_node, find_node.expression)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("find_result",
+          MIR::InlineZig.new("undefined", "undef"), true, elem_zig_type, nil),
+        MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("find_matches", pred_mir, false, nil, nil),
+          MIR::IfStmt.new(MIR::Ident.new("find_matches"), [
+            MIR::Set.new(MIR::Ident.new("find_result"), MIR::Ident.new("it")),
+            MIR::Set.new(MIR::Ident.new("find_found"), MIR::Lit.new("true")),
+            MIR::BreakStmt.new(nil, nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label,
+          MIR::Conditional.new(
+            MIR::Ident.new("find_found"),
+            MIR::Cast.new(MIR::Ident.new("find_result"), "?#{elem_zig_type}", :as),
+            MIR::Lit.new("null")))
+      ]
+    end
   end
 
   # String entry point for SMOOTH pipeline nodes from MIRLowering.

@@ -2167,6 +2167,12 @@ class MIRLowering
       AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
     ]
     if complex_ops.any? { |t| rhs.is_a?(t) }
+      # Test fallback bypasses pipeline host entirely
+      if @pipeline_fallback
+        zig_code = @pipeline_fallback.call(node)
+        return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
+      end
+
       host = pipeline_host
 
       # Try MIR path first (migrated operators return MIR node tree)
@@ -2174,11 +2180,7 @@ class MIRLowering
       return mir_result if mir_result
 
       # Fall back to string path (non-migrated operators)
-      if @pipeline_fallback
-        zig_code = @pipeline_fallback.call(node)
-      else
-        zig_code = host.transpile_pipeline(node)
-      end
+      zig_code = host.transpile_pipeline(node)
       return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
     end
 
