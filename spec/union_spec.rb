@@ -285,8 +285,8 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect(out).to include("const Shape = union(enum) {")
-        expect(out).to include("    Circle: f64,")
-        expect(out).to include("    Point: void,")
+        expect(out).to include("Circle: f64,")
+        expect(out).to include("Point: void")
       end
 
       it "emits payload variant constructor as UnionType{ .Variant = payload }" do
@@ -601,8 +601,8 @@ RSpec.describe SemanticAnnotator do
             END
           CLEAR
           expect(out).to include("const Shape = union(enum) {")
-          expect(out).to include("    Circle: Shape_Circle,")
-          expect(out).to include("    Point: void,")
+          expect(out).to include("Circle: Shape_Circle,")
+          expect(out).to include("Point: void")
         end
 
         it "emits helper structs for multiple inline struct variants" do
@@ -613,8 +613,8 @@ RSpec.describe SemanticAnnotator do
           CLEAR
           expect(out).to include("const Shape_Circle = struct {")
           expect(out).to include("const Shape_Rectangle = struct {")
-          expect(out).to include("    Circle: Shape_Circle,")
-          expect(out).to include("    Rectangle: Shape_Rectangle,")
+          expect(out).to include("Circle: Shape_Circle,")
+          expect(out).to include("Rectangle: Shape_Rectangle,")
         end
 
         it "emits UnionVariantLit as Shape{ .Circle = Shape_Circle{ .radius = val } }" do

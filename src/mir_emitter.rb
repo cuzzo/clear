@@ -83,6 +83,7 @@ class MIREmitter
 
     # --- Expressions ---
     when MIR::Call             then emit_call(node)
+    when MIR::TailCall         then emit_tail_call(node)
     when MIR::MethodCall       then emit_method_call(node)
     when MIR::FieldGet         then emit_field_get(node)
     when MIR::IndexGet         then emit_index_get(node)
@@ -550,6 +551,11 @@ class MIREmitter
     args = node.args.map { |a| emit(a) }.join(", ")
     call = "#{node.callee}(#{args})"
     node.try_wrap ? "try #{call}" : call
+  end
+
+  def emit_tail_call(node)
+    args = node.args.map { |a| emit(a) }.join(", ")
+    "@call(.always_tail, #{node.callee}, .{#{args}})"
   end
 
   def emit_method_call(node)

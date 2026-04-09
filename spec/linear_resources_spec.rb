@@ -27,12 +27,7 @@ RSpec.describe SemanticAnnotator do
   # ===================================================================
   describe "Resource Types — Phase 1" do
     def transpile_fn(clear_src)
-      tokens    = Lexer.new(clear_src).tokenize
-      ast       = Parser.new(tokens, clear_src).parse
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      t = ZigTranspiler.new
-      t.send(:visit, ast)
+      ZigTranspiler.new.transpile(clear_src)
     end
 
     # ------------------------------------------------------------------
@@ -179,12 +174,7 @@ RSpec.describe SemanticAnnotator do
   # ===================================================================
   describe "Resource Types — Phase 3 (TCP)" do
     def transpile_fn(clear_src)
-      tokens    = Lexer.new(clear_src).tokenize
-      ast       = Parser.new(tokens, clear_src).parse
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      t = ZigTranspiler.new
-      t.send(:visit, ast)
+      ZigTranspiler.new.transpile(clear_src)
     end
 
     # ------------------------------------------------------------------

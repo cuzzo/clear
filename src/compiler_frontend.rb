@@ -72,6 +72,15 @@ class CompilerFrontend
       end
     end
 
+    # Include module-imported function signatures so MIRLowering can
+    # determine needs_rt/can_fail for cross-module calls.
+    annotator.scope_stack.first.locals.each do |name, entry|
+      next if fn_sigs.key?(name)
+      sig = entry.type
+      next unless sig.is_a?(FunctionSignature) && sig.module_alias
+      fn_sigs[name] = sig
+    end
+
     moved_guard_info = {}
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 

@@ -217,7 +217,8 @@ private
     # This allows callers to read needs_rt, can_fail, return_provenance from
     # the signature without needing @fn_nodes.
     @fn_nodes.each do |name, fn|
-      sig = fn.full_type
+      ft = fn.full_type
+      sig = ft.is_a?(Type) ? ft.raw : ft
       next unless sig.is_a?(FunctionSignature)
       sig.needs_rt = fn.needs_rt
       sig.can_fail = fn.can_fail

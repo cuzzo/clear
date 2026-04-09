@@ -19,9 +19,12 @@ class MIRLowering
 
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
 
+  attr_reader :fn_sigs
+
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
-                 pipeline_fallback: nil, importer: nil, source_dir: nil)
+                 pipeline_fallback: nil, importer: nil, source_dir: nil,
+                 debug_mode: false)
     @struct_schemas = struct_schemas || {}
     @enum_schemas = enum_schemas || {}
     @union_schemas = union_schemas || {}
@@ -32,9 +35,11 @@ class MIRLowering
     @block_expr_counter = 0
     @indirect_fields = {}
     @pipeline_fallback = pipeline_fallback
+    @pipeline_host = nil
     @importer = importer
     @source_dir = source_dir
     @emitted_types = Set.new
+    @debug_mode = debug_mode
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -200,6 +205,9 @@ class MIRLowering
   # Lower a full program into MIR::Program with standard imports + footer.
   def lower_program(node, use_c_allocator: false, needs_safety: false)
     items = []
+
+    # Auto-detect needs_safety from @nonReentrant functions
+    needs_safety ||= node.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.reentrant == :non_reentrant }
 
     # Standard imports
     items << MIR::Import.new("std", "std", nil)
@@ -571,6 +579,8 @@ class MIRLowering
     fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
+    @current_fn_tail_call = node.tail_call
+    @current_fn_zig_name = zig_safe_name(node.name)
 
     # Mutable scalar params: Zig params are const, need shadow vars
     mutable_scalar_params = (node.params || []).select { |p|
@@ -2145,13 +2155,15 @@ class MIRLowering
       AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
     ]
     if complex_ops.any? { |t| rhs.is_a?(t) }
-      # Delegate to old transpiler's pipeline_generator via callback.
-      # Phase 8 will migrate these individually to proper MIR nodes.
+      # Delegate to PipelineHost (which includes PipelineGenerator).
+      # PipelineHost.visit() routes sub-expressions back through lower()+emit().
       if @pipeline_fallback
         zig_code = @pipeline_fallback.call(node)
-        return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
+      else
+        host = pipeline_host
+        zig_code = host.transpile_pipeline(node)
       end
-      return MIR::Comment.new("PIPELINE: #{rhs.class.name.split('::').last} (no fallback)")
+      return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
     end
 
     # RecoverOp: x s> RECOVER(default) -> (x catch default)
@@ -3022,6 +3034,12 @@ class MIRLowering
     value = node.value ? lower(node.value) : nil
     rt_name = @rt_name
 
+    # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
+    # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
+    if @current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name
+      return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args))
+    end
+
     # Consume pending promote flags
     needs_string_dupe = @pending_catch_string_dupe
     @pending_catch_string_dupe = false
@@ -3224,8 +3242,10 @@ class MIRLowering
     }.join("\n")
   end
 
+  public
+
   # Temporarily installs a fiber capture map and rt alias, runs the block, then restores.
-  # Used by DoBlock (per-branch) and BgBlock to rewrite identifier access inside fiber bodies.
+  # Used by DoBlock, BgBlock, and PipelineHost (for concurrent pipeline operators).
   def with_fiber_capture_map(new_entries, rt_override: "__rt", &blk)
     prev_map = @do_capture_map || {}
     prev_rt  = @rt_name
@@ -3236,6 +3256,8 @@ class MIRLowering
     @rt_name = prev_rt
     result
   end
+
+  private
 
   # Dupe a borrowed non-Copy union value before storing into a TAKES container.
   def dupe_borrowed_union_zig(val_ref, val_node, rt_name)
@@ -3274,5 +3296,15 @@ class MIRLowering
     func = ti.shared? ? "arcRetain" : "rcRetain"
     zig_base = transpile_type(ti.resolved.to_s)
     MIR::RcRetain.new(lower(value_node), zig_base, func)
+  end
+
+  # Lazy-create PipelineHost for complex pipeline operator dispatch.
+  def pipeline_host
+    @pipeline_host ||= begin
+      require_relative "pipeline_host"
+      require_relative "mir_emitter"
+      emitter = @_emitter || MIREmitter.new
+      PipelineHost.new(lowering: self, emitter: emitter)
+    end
   end
 end

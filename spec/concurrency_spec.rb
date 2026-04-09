@@ -240,12 +240,11 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "auto-pins (emits spawnPinned, not spawnBest)" do
+      it "auto-pins (emits submitSpawn, not spawnBest)" do
         zig = ZigTranspiler.new.transpile(code)
-        # The BG block should be auto-pinned: emits spawnPinned, not spawnBest
-        user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("spawnPinned")
-        expect(user_code).not_to include("spawnBest")
+        # The BG block should be auto-pinned: emits submitSpawn (local scheduler), not spawnBest
+        expect(zig).to include("submitSpawn")
+        expect(zig).not_to include("spawnBest")
       end
     end
 
@@ -261,11 +260,11 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "auto-pins to scheduler (distributed)" do
+      it "auto-pins to scheduler (local)" do
         zig = ZigTranspiler.new.transpile(code)
-        user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("spawnPinned")
-        expect(user_code).not_to include("spawnBest")
+        # Auto-pinned: emits submitSpawn (local scheduler), not spawnBest
+        expect(zig).to include("submitSpawn")
+        expect(zig).not_to include("spawnBest")
       end
     end
 
@@ -1585,12 +1584,7 @@ RSpec.describe SemanticAnnotator do
   # ===================================================================
   describe "BG/NEXT — Phase 5: integration (collect_do_identifiers fix)" do
     def transpile_fn(clear_src)
-      tokens    = Lexer.new(clear_src).tokenize
-      ast       = Parser.new(tokens, clear_src).parse
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      t = ZigTranspiler.new
-      t.send(:visit, ast)
+      ZigTranspiler.new.transpile(clear_src)
     end
 
     it "collect_do_identifiers does not capture locally-bound names from BindExpr" do
@@ -1657,12 +1651,7 @@ RSpec.describe SemanticAnnotator do
   # ===================================================================
   describe "BG/NEXT — Phase 4: parser and transpiler" do
     def transpile_fn(clear_src)
-      tokens    = Lexer.new(clear_src).tokenize
-      ast       = Parser.new(tokens, clear_src).parse
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      t = ZigTranspiler.new
-      t.send(:visit, ast)
+      ZigTranspiler.new.transpile(clear_src)
     end
 
     describe "Parser" do
@@ -1746,18 +1735,7 @@ RSpec.describe SemanticAnnotator do
   # ===================================================================
   describe "BG resource capture close" do
     def transpile_fn(clear_src)
-      tokens    = Lexer.new(clear_src).tokenize
-      ast       = Parser.new(tokens, clear_src).parse
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-      mir.transform!(ast)
-      t = ZigTranspiler.new
-      t.send(:visit, ast)
+      ZigTranspiler.new.transpile(clear_src)
     end
 
     it "emits defer socketClose for TCPClient captured by BG" do

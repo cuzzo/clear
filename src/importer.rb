@@ -22,7 +22,6 @@ class ModuleImporter
     @compiling    = Set.new  # abs_paths currently being compiled (cycle detection)
     # pkg_paths: { "name" => "/abs/path/to/lib.cht" } -- registered package sources.
     @pkg_paths    = pkg_paths.transform_keys(&:to_s)
-    @use_mir      = use_mir
   end
 
   # Compile a .cht package by name and return a CompiledModule.
@@ -63,11 +62,7 @@ class ModuleImporter
     annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir)
     annotator.annotate!(ast)
 
-    mod = if @use_mir
-      compile_module_mir(ast, annotator, source_dir)
-    else
-      compile_module_legacy(ast, annotator, source_dir)
-    end
+    mod = compile_module_mir(ast, annotator, source_dir)
 
     @module_cache[abs_path] = mod
     @compiling.delete(abs_path)
@@ -75,22 +70,6 @@ class ModuleImporter
   end
 
   private
-
-  def compile_module_legacy(ast, annotator, source_dir)
-    transpiler = ZigTranspiler.new(importer: self, source_dir: source_dir)
-    zig_body   = transpiler.transpile_module(ast)
-
-    CompiledModule.new(
-      ast,
-      annotator.scope_stack.first,
-      zig_body,
-      source_dir,
-      transpiler.struct_schemas,
-      transpiler.union_schemas,
-      transpiler.enum_schemas,
-      transpiler.module_type_defs
-    )
-  end
 
   def compile_module_mir(ast, annotator, source_dir)
     require_relative "mir"

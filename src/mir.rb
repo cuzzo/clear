@@ -457,6 +457,11 @@ module MIR
     # try_wrap: bool
   end
 
+  # Tail call (emits @call(.always_tail, callee, .{args})).
+  TailCall = Struct.new(:callee, :args) do
+    include Expr
+  end
+
   # Method call.
   # Zig: receiver.method(args)
   MethodCall = Struct.new(:receiver, :method, :args, :try_wrap) do

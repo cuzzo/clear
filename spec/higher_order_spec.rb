@@ -685,7 +685,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("for ((items).items)")
+        expect(out).to include("for (items.items)")
         expect(out).to include("|*__it")
       end
 

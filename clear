@@ -104,7 +104,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     "--pkg #{pkg_name}=#{pkg_path}"
   end.join(" ")
   transpile_flag += " #{pkg_flags}" if pkg_flags.length > 0
-  transpile_flag += " --mir" if @use_mir
+  # MIR is the only pipeline (--mir flag no longer needed)
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(ZIG_DIR, tmp_name)
@@ -277,7 +277,7 @@ when 'build'
       @force_build = true
       i += 1
     when '--mir'
-      @use_mir = true
+      # No-op: MIR is the only pipeline. Flag kept for backward compat.
       i += 1
     else
       remaining << args[i]
@@ -286,7 +286,7 @@ when 'build'
   end
 
   source = remaining.first
-  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check] [--force] [--mir]" unless source
+  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
 
   # Auto-detect stack check: off for debug (20MB binaries make objdump slow), on for release/safe.
   stack_check = (opt_level != 'Debug') if stack_check.nil?
@@ -420,14 +420,14 @@ when 'run'
       opt_level = 'Debug'
       extra_flags = ['-fno-llvm', '-fno-lld']
     when '--mir'
-      @use_mir = true
+      # No-op: MIR is the only pipeline. Flag kept for backward compat.
     else
       run_remaining << arg
     end
   end
 
   source = run_remaining.first
-  error "Usage: clear run <file.cht> [--optimized|--safe] [--mir] [-- args...]" unless source
+  error "Usage: clear run <file.cht> [--optimized|--safe] [-- args...]" unless source
 
   source = File.expand_path(source)
   output = File.join(File.dirname(source), File.basename(source, '.cht'))
@@ -452,15 +452,14 @@ when 'test'
   test_args = ARGV[1..] || []
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
-  @use_mir = true if test_args.delete('--mir')
+  test_args.delete('--mir')  # No-op: MIR is the only pipeline
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--mir]" unless source
+  error "Usage: clear test <file.cht|directory> [--profile] [--strict]" unless source
 
   if File.directory?(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
-    gen_flags = @use_mir ? " --mir" : ""
     puts "Generating tests..."
-    system("ruby #{gen_script}#{gen_flags}")
+    system("ruby #{gen_script}")
     puts "Running tests..."
     passed = 0
     failed = 0

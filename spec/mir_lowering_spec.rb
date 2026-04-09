@@ -1846,7 +1846,7 @@ RSpec.describe MIRLowering do
       expect(zig).to include("20")
     end
 
-    it "lowers complex pipeline ops to Comment placeholder" do
+    it "lowers complex pipeline ops via pipeline_fallback when given" do
       lhs = make_id("items", full_type: :List)
       rhs = AST::CountOp.new(tok)
       rhs.full_type = :Number
@@ -1854,9 +1854,10 @@ RSpec.describe MIRLowering do
       node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
       node.full_type = :Number
 
-      result = lowering.lower(node)
-      expect(result).to be_a(MIR::Comment)
-      expect(result.text).to include("PIPELINE")
+      fallback_lowering = MIRLowering.new(pipeline_fallback: ->(n) { "fallback_zig_code" })
+      result = fallback_lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.code).to eq("fallback_zig_code")
     end
 
     it "raises on unhandled SMOOTH RHS" do
