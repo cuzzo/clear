@@ -83,17 +83,106 @@ test "InfStream.Inner consumer_task defaults to null" {
 }
 
 // ---------------------------------------------------------------------------
-// close() is a no-op (compiles and does not panic)
+// close() sets closed flag and signals EOF
 // ---------------------------------------------------------------------------
 
-test "InfStream.close() is a no-op" {
+test "InfStream.close() sets inner.closed to true" {
     const S = CheatLib.InfStream(f64);
     const alloc = std.testing.allocator;
     const inner = try alloc.create(S.Inner);
     inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
     defer alloc.destroy(inner);
     var s = S{ .inner = inner, .alloc = alloc };
-    s.close(); // must not panic
+    try std.testing.expect(!inner.closed);
+    s.close();
+    try std.testing.expect(inner.closed);
+}
+
+test "InfStream.push() returns StreamClosed after close()" {
+    const S = CheatLib.InfStream(f64);
+    const alloc = std.testing.allocator;
+    const inner = try alloc.create(S.Inner);
+    inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
+    defer alloc.destroy(inner);
+    var s = S{ .inner = inner, .alloc = alloc };
+    s.close();
+    try std.testing.expectError(error.StreamClosed, s.push(1.0));
+}
+
+// ---------------------------------------------------------------------------
+// nextOrNull: reads buffered items, returns null on EOF
+// ---------------------------------------------------------------------------
+
+test "InfStream.nextOrNull() returns items then null after close" {
+    const S = CheatLib.InfStream(i64);
+    const alloc = std.testing.allocator;
+    const inner = try alloc.create(S.Inner);
+    inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
+    defer alloc.destroy(inner);
+    var s = S{ .inner = inner, .alloc = alloc };
+
+    // Push 3 items (fast path, no blocking)
+    try s.push(10);
+    try s.push(20);
+    try s.push(30);
+
+    // Close the stream (no more pushes)
+    s.close();
+
+    // nextOrNull returns all buffered items
+    const v1 = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?i64, 10), v1);
+    const v2 = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?i64, 20), v2);
+    const v3 = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?i64, 30), v3);
+
+    // Buffer empty + closed = null (EOF)
+    const v4 = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?i64, null), v4);
+
+    // Subsequent calls also return null
+    const v5 = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?i64, null), v5);
+}
+
+test "InfStream.nextOrNull() returns null immediately when closed with empty buffer" {
+    const S = CheatLib.InfStream(i64);
+    const alloc = std.testing.allocator;
+    const inner = try alloc.create(S.Inner);
+    inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
+    defer alloc.destroy(inner);
+    var s = S{ .inner = inner, .alloc = alloc };
+
+    // Close immediately (no items pushed)
+    s.close();
+
+    // nextOrNull returns null (EOF)
+    const v = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?i64, null), v);
+}
+
+test "InfStream.nextOrNull() with struct element type" {
+    const Item = struct { key: []const u8, hash: u64 };
+    const S = CheatLib.InfStream(Item);
+    const alloc = std.testing.allocator;
+    const inner = try alloc.create(S.Inner);
+    inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
+    defer alloc.destroy(inner);
+    var s = S{ .inner = inner, .alloc = alloc };
+
+    // Push a struct item (simulates SHARD pipeline element)
+    try s.push(.{ .key = "hello", .hash = 42 });
+    s.close();
+
+    const item = try s.nextOrNull();
+    try std.testing.expect(item != null);
+    try std.testing.expectEqualStrings("hello", item.?.key);
+    try std.testing.expectEqual(@as(u64, 42), item.?.hash);
+
+    // EOF
+    const eof = try s.nextOrNull();
+    try std.testing.expectEqual(@as(?Item, null), eof);
 }
 
 // ---------------------------------------------------------------------------

@@ -2729,8 +2729,75 @@ pub const CheatLib = struct {
                 }
             }
 
-            /// No-op — infinite streams have no natural close point.
-            pub fn close(_: *Self) void {}
+            /// Signal EOF to the consumer: no more values will be pushed.
+            /// Wakes the consumer if it was blocked waiting for data.
+            pub fn close(self: *Self) void {
+                const inner = self.inner;
+                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                inner.closed = true;
+                if (inner.consumer_task) |consumer| {
+                    inner.consumer_task = null;
+                    inner.lock.store(0, .release);
+                    inner.sched.schedule(consumer);
+                } else {
+                    inner.lock.store(0, .release);
+                }
+            }
+
+            /// Consumer reads next value, returning null on EOF (closed + empty).
+            /// Lock-free fast path when buffer has data.
+            /// Blocks (yields fiber) when buffer is empty and stream is open.
+            pub fn nextOrNull(self: *Self) anyerror!?T {
+                const inner = self.inner;
+
+                while (true) {
+                    const t = inner.tail.load(.monotonic);
+                    const h = inner.head.load(.acquire);
+
+                    if (h != t) {
+                        // Buffer has data — read without locking.
+                        const val = inner.buf[t & MASK];
+                        inner.tail.store(t +% 1, .release);
+
+                        // Wake producer if it was blocked (buffer was full).
+                        if (h -% t == BUF_SIZE) {
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.producer_task) |producer| {
+                                inner.producer_task = null;
+                                inner.lock.store(0, .release);
+                                inner.sched.schedule(producer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
+                        }
+                        return val;
+                    }
+
+                    // Buffer empty — check for close, then block.
+                    if (inner.closed) {
+                        if (inner.err) |err| return err;
+                        return null; // EOF
+                    }
+
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    // Re-check under lock (producer may have pushed or closed).
+                    const h2 = inner.head.load(.acquire);
+                    if (h2 != t) {
+                        inner.lock.store(0, .release);
+                        continue; // Data available now.
+                    }
+                    if (inner.closed) {
+                        inner.lock.store(0, .release);
+                        if (inner.err) |err| return err;
+                        return null; // EOF
+                    }
+                    const task = inner.sched.getCurrent();
+                    task.status.store(.Blocked, .release);
+                    inner.consumer_task = task;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
+            }
 
             /// Signal the generator fiber to stop.
             /// Sets closed flag and wakes the producer if blocked.
