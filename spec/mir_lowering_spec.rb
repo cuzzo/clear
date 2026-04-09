@@ -904,4 +904,252 @@ RSpec.describe MIRLowering do
       expect(zig).to include("if ((x > 0.0))")
     end
   end
+
+  # =========================================================================
+  # Phase 3: FunctionDef
+  # =========================================================================
+
+  describe "function definitions" do
+    def make_fn(name, params: [], return_type: :Void, body: [], visibility: nil,
+                needs_rt: true, can_fail: true, uses_frame: false, uses_alloc: false,
+                type_params: nil, catch_clauses: nil, default_catch: nil, has_promotion: false)
+      fn = AST::FunctionDef.new(tok, name, params, nil, return_type, nil, body,
+                                 catch_clauses, default_catch, visibility, nil, uses_frame)
+      fn.full_type = return_type
+      fn.needs_rt = needs_rt
+      fn.can_fail = can_fail
+      fn.uses_alloc = uses_alloc
+      fn.type_params = type_params
+      fn.has_promotion = has_promotion
+      fn
+    end
+
+    it "lowers simple void function" do
+      ret = make_lit(:NIL, nil, full_type: :Void)
+      body = [AST::ReturnNode.new(tok, nil).tap { |n| n.full_type = :Void }]
+      fn = make_fn("greet", body: body)
+      result = lowering.lower(fn)
+      expect(result).to be_a(MIR::FnDef)
+      expect(result.name).to eq("greet")
+      expect(result.visibility).to eq(:private)
+      zig = emit(result)
+      expect(zig).to include("fn greet(rt: *Runtime)")
+      expect(zig).to include("!void")
+      expect(zig).to include("return;")
+    end
+
+    it "lowers pub function" do
+      fn = make_fn("hello", visibility: :pub, body: [])
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to start_with("pub fn")
+    end
+
+    it "lowers function with params" do
+      params = [{ name: "x", type: :Int64, mutable: false },
+                { name: "y", type: :Number, mutable: false }]
+      fn = make_fn("add", params: params, return_type: :Number)
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("x: i64")
+      expect(zig).to include("y: f64")
+    end
+
+    it "uses anytype for struct params" do
+      params = [{ name: "p", type: :Point, mutable: false }]
+      l = lowering(struct_schemas: { Point: { x: { type: :Number }, y: { type: :Number } } })
+      fn = make_fn("move", params: params)
+      result = l.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("p: anytype")
+    end
+
+    it "includes frame save/restore for value-returning frame functions" do
+      fn = make_fn("compute", return_type: :Int64, uses_frame: true)
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("saveFrameMark")
+      expect(zig).to include("restoreFrameMark")
+    end
+
+    it "skips frame restore for string-returning functions" do
+      fn = make_fn("getName", return_type: :String, uses_frame: true)
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("saveFrameMark")
+      expect(zig).to include("preserveAndRewind")
+      expect(zig).not_to include("restoreFrameMark")
+    end
+
+    it "emits _ = &rt when no frame allocation" do
+      fn = make_fn("simple", body: [])
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("_ = &rt;")
+    end
+
+    it "lowers function without rt when needs_rt=false" do
+      fn = make_fn("pure", needs_rt: false, can_fail: false)
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).not_to include("rt: *Runtime")
+    end
+
+    it "renames main to clearMain" do
+      fn = make_fn("main")
+      result = lowering.lower(fn)
+      expect(result.name).to eq("clearMain")
+    end
+
+    it "emits comptime params for generic functions" do
+      fn = make_fn("identity", type_params: ["T"])
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("comptime T: type")
+    end
+
+    it "handles mutable scalar param shadows" do
+      params = [{ name: "count", type: :Int64, mutable: true }]
+      body_stmt = make_id("count")
+      fn = make_fn("inc", params: params, body: [body_stmt])
+      result = lowering.lower(fn)
+      zig = emit(result)
+      expect(zig).to include("_m_count: i64")
+      expect(zig).to include("var count = _m_count;")
+    end
+  end
+
+  # =========================================================================
+  # Phase 3: FuncCall / MethodCall
+  # =========================================================================
+
+  describe "function calls" do
+    it "lowers simple function call with rt and try" do
+      arg = make_lit(:NUMBER, 42, full_type: :Int64)
+      arg.coerced_type = :Int64
+      node = AST::FuncCall.new(tok, "compute", [arg])
+      node.full_type = :Int64
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::Call)
+      zig = emit(result)
+      expect(zig).to include("try compute(rt, 42)")
+    end
+
+    it "lowers call without rt when fn_sig says needs_rt=false" do
+      sig = Struct.new(:needs_rt, :can_fail, :params, :return_type).new(false, false, [], :Int64)
+      l = lowering(fn_sigs: { "pure" => sig })
+      node = AST::FuncCall.new(tok, "pure", [])
+      node.full_type = :Int64
+      result = l.lower(node)
+      zig = emit(result)
+      expect(zig).to eq("pure()")
+    end
+
+    it "lowers method call as UFCS" do
+      obj = make_id("user", full_type: :User)
+      node = AST::MethodCall.new(tok, obj, "greet", [])
+      node.full_type = :String
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::Call)
+      zig = emit(result)
+      expect(zig).to include("try greet(rt, user)")
+    end
+
+    it "lowers intrinsic with zig_pattern" do
+      arg = make_id("x", full_type: :Int64)
+      node = AST::FuncCall.new(tok, "toString", [arg])
+      node.full_type = :String
+      node.zig_pattern = "try CheatLib.intToString({alloc}, {0})"
+      node.matched_stdlib_def = { alloc: :frame }
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      zig = emit(result)
+      expect(zig).to include("CheatLib.intToString")
+      expect(zig).to include("frameAlloc")
+    end
+  end
+
+  # =========================================================================
+  # Phase 3: ListLit / HashLit
+  # =========================================================================
+
+  describe "list literals" do
+    it "lowers empty list as empty slice" do
+      node = AST::ListLit.new(tok, [], nil)
+      node.full_type = Type.new(:"Int64[]")
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("i64")
+    end
+
+    it "lowers non-empty list as MakeList" do
+      items = [make_lit(:NUMBER, 1, full_type: :Int64), make_lit(:NUMBER, 2, full_type: :Int64)]
+      items.each { |i| i.coerced_type = :Int64 }
+      node = AST::ListLit.new(tok, items, nil)
+      node.full_type = Type.new(:"Int64[]")
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("makeList")
+    end
+  end
+
+  describe "hash literals" do
+    it "lowers empty hash as map_bare" do
+      node = AST::HashLit.new(tok, [], :heap)
+      node.full_type = :StringMap
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include(".alloc =")
+    end
+  end
+
+  # =========================================================================
+  # Phase 3: Lambda
+  # =========================================================================
+
+  describe "lambda literals" do
+    it "lowers lambda to anonymous struct" do
+      body = make_lit(:NUMBER, 42, full_type: :Int64)
+      body.coerced_type = :Int64
+      node = AST::LambdaLit.new(tok, [], nil, body, nil, nil)
+      sig_hash = { params: [], return: { type: :Int64 }, lambda: true }
+      node.full_type = sig_hash
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      zig = emit(result)
+      expect(zig).to include("struct")
+      expect(zig).to include("_lambda_")
+      expect(zig).to include("return 42")
+    end
+  end
+
+  # =========================================================================
+  # Phase 3: Placeholder / escape hatch nodes
+  # =========================================================================
+
+  describe "escape hatch nodes" do
+    it "lowers BgBlock to RawZig placeholder" do
+      node = AST::BgBlock.new(tok, [], nil, nil, nil, nil, nil, nil)
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+    end
+
+    it "lowers ThrowNode" do
+      node = AST::ThrowNode.new(tok, nil)
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(emit(result)).to include("return error.CheatError")
+    end
+
+    it "lowers Cast" do
+      inner = make_lit(:NUMBER, 42, full_type: :Int64)
+      inner.coerced_type = :Int64
+      node = AST::Cast.new(tok, inner, :Int32)
+      node.full_type = :Int32
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::Cast)
+      expect(emit(result)).to eq("@as(i32, 42)")
+    end
+  end
 end

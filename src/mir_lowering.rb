@@ -68,6 +68,16 @@ class MIRLowering
     when AST::ContinueNode      then MIR::ContinueStmt.new(nil)
     when AST::PassStmt          then MIR::RawZig.new("{}", "pass")
 
+    # --- Functions & calls ---
+    when AST::FunctionDef       then lower_function_def(node)
+    when AST::FuncCall          then lower_func_call(node)
+    when AST::MethodCall        then lower_method_call(node)
+    when AST::LambdaLit         then lower_lambda(node)
+
+    # --- Collections ---
+    when AST::ListLit           then lower_list_lit(node)
+    when AST::HashLit           then lower_hash_lit(node)
+
     # --- Expressions ---
     when AST::Literal           then lower_literal(node)
     when AST::Identifier        then lower_identifier(node)
@@ -83,6 +93,9 @@ class MIRLowering
     when AST::OptionalUnwrap    then MIR::OptionalUnwrap.new(lower(node.target))
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
+    when AST::Cast              then lower_cast(node)
+    when AST::ThrowNode         then MIR::RawZig.new("return error.CheatError;", "throw")
+    when AST::DieNode           then MIR::RawZig.new("std.process.exit(#{node.status || 1});", "die")
 
     # --- Memory / capability expressions ---
     when AST::CopyNode          then lower_copy(node)
@@ -94,6 +107,20 @@ class MIRLowering
 
     # --- Slice ---
     when AST::Slice             then lower_slice(node)
+
+    # --- Concurrent / capability blocks (tracked escape hatches for Phase 4+) ---
+    when AST::BgBlock, AST::BgStreamBlock
+      MIR::RawZig.new("// TODO: BG block lowering", "bg_block")
+    when AST::WithBlock
+      MIR::RawZig.new("// TODO: WITH block lowering", "with_block")
+    when AST::DoBlock
+      MIR::RawZig.new("// TODO: DO block lowering", "do_block")
+    when AST::TestBlock
+      MIR::RawZig.new("// TODO: TEST block lowering", "test_block")
+    when AST::RequireNode
+      MIR::RawZig.new("// TODO: REQUIRE lowering", "require")
+    when AST::YieldExpr
+      MIR::RawZig.new("// TODO: YIELD lowering", "yield")
 
     else
       raise "MIRLowering: unhandled node type #{node.class} at #{node.respond_to?(:token) && node.token ? "line #{node.token.line}" : 'unknown'}"
@@ -331,6 +358,487 @@ class MIRLowering
       "const #{node.alias_name} = #{base};"
     else node.to_s
     end
+  end
+
+  # ================================================================
+  # Functions
+  # ================================================================
+
+  def lower_function_def(node)
+    ret_type = node.return_type || :Void
+    if ret_type.is_a?(Type) && ret_type.frame? && ret_type.struct?
+      ret_type = Type.new(ret_type.resolved)
+    end
+    final_type = transpile_type(ret_type)
+
+    fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
+    fn_can_fail = node.can_fail.nil? ? true : node.can_fail
+
+    # Mutable scalar params: Zig params are const, need shadow vars
+    mutable_scalar_params = (node.params || []).select { |p|
+      p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
+    }.map { |p| p[:name] }.to_set
+
+    # Build param list
+    params_mir = (node.params || []).map { |param|
+      p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
+      p_type_sym = param[:type].is_a?(Type) ? param[:type].resolved : param[:type]
+      p_type_obj = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
+      is_user_struct = @struct_schemas&.key?(p_type_sym)
+      zig_t = if is_user_struct
+        "anytype"
+      elsif p_type_obj.collection?
+        "anytype"
+      else
+        transpile_type(param[:type], is_param: true)
+      end
+      MIR::Param.new(p_name, zig_t)
+    }
+
+    # Prepend rt param
+    if fn_needs_rt
+      params_mir.unshift(MIR::Param.new("rt", "*Runtime"))
+    end
+
+    # Comptime params
+    comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
+
+    # Build return type string
+    return_type_str = if fn_can_fail
+      if final_type.start_with?("!")
+        final_type
+      elsif node.reentrant == :reentrant
+        "anyerror!#{final_type}"
+      else
+        "!#{final_type}"
+      end
+    else
+      final_type
+    end
+
+    vis = (node.visibility == :pub) ? :pub : :private
+
+    # Determine used names for param suppression
+    used_names = collect_identifier_names(node.body)
+
+    # Build prologue statements
+    prologue = []
+
+    # Frame mark save/restore
+    uses_frame_or_alloc = node.uses_frame || node.uses_alloc
+    ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
+    returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
+                         @enum_schemas&.key?(ret_type_obj.resolved) ||
+                         @union_schemas&.key?(ret_type_obj.resolved)
+    returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
+    has_promotion = node.has_promotion
+
+    if fn_needs_rt
+      prologue << MIR::RawZig.new("@setEvalBranchQuota(100000);", "eval_branch_quota")
+      if uses_frame_or_alloc && returns_value_type
+        prologue << MIR::FrameSave.new(@rt_name)
+        prologue << MIR::FrameRestore.new(@rt_name)
+      elsif uses_frame_or_alloc && returns_string && !has_promotion
+        prologue << MIR::FrameSave.new(@rt_name)
+        # No FrameRestore -- preserveAndRewind at return sites
+      else
+        prologue << MIR::RawZig.new("_ = &rt;", "rt_suppress")
+      end
+    end
+
+    # NonReentrant guard
+    if node.reentrant == :non_reentrant
+      prologue.unshift(MIR::RawZig.new(
+        "var _guard = try safety.StackGuard.enter(@src());\n    _guard.push();\n    defer _guard.pop();",
+        "non_reentrant_guard"
+      ))
+    end
+
+    # Param suppressions for unused params
+    (node.params || []).each do |p|
+      next if used_names.include?(p[:name])
+      suppress_name = mutable_scalar_params.include?(p[:name]) ? "_m_#{p[:name]}" : p[:name]
+      prologue << MIR::RawZig.new("_ = &#{suppress_name};", "param_suppress")
+    end
+
+    # Mutable scalar param shadows
+    mutable_scalar_params.each do |name|
+      next unless used_names.include?(name)
+      prologue << MIR::RawZig.new("var #{name} = _m_#{name}; _ = &#{name};", "mutable_param_shadow")
+    end
+
+    # Track preserveAndRewind state for return lowering
+    @current_fn_preserve_rewind = fn_needs_rt && uses_frame_or_alloc && returns_string && !has_promotion
+
+    # Lower body
+    body_mir = lower_body(node.body)
+
+    # Handle catch clauses
+    has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+
+    if has_catch
+      # Emit inner/outer function pair
+      inner_name = "__#{node.name}_body"
+      inner_ret = fn_can_fail ? "anyerror!#{final_type}" : "!#{final_type}"
+
+      inner_fn = MIR::FnDef.new(inner_name, params_mir, inner_ret,
+                                 prologue + body_mir, :private, true, comptime_params)
+
+      # Outer function: calls inner, catches errors
+      call_args = fn_needs_rt ? ["rt"] + (node.params || []).map { |p| p[:name] } : (node.params || []).map { |p| p[:name] }
+      inner_call = "#{inner_name}(#{call_args.join(', ')})"
+
+      catch_zig = build_catch_clauses(node, fn_can_fail)
+      outer_body = [
+        MIR::RawZig.new("return #{inner_call} catch {\n    #{catch_zig}\n};", "catch_wrapper")
+      ]
+
+      outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
+                                  outer_body, vis, fn_can_fail, comptime_params)
+
+      # Return both as RawZig combining them
+      inner_zig = emit_expr(inner_fn)
+      outer_zig = emit_expr(outer_fn)
+      MIR::RawZig.new("#{inner_zig}\n\n#{outer_zig}", "catch_function_pair")
+    elsif @current_fn_preserve_rewind
+      # Wrap body in a labeled block for preserveAndRewind
+      pr_body = prologue + [
+        MIR::RawZig.new("const __pr_val = __pr_body: {", "preserve_rewind_start")
+      ] + body_mir + [
+        MIR::RawZig.new("};", "preserve_rewind_end"),
+        MIR::RawZig.new("return try #{@rt_name}.preserveAndRewind(frame_mark, __pr_val);", "preserve_rewind_return")
+      ]
+      MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
+                      pr_body, vis, fn_can_fail, comptime_params)
+    else
+      MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
+                      prologue + body_mir, vis, fn_can_fail, comptime_params)
+    end
+  end
+
+  def build_catch_clauses(node, fn_can_fail)
+    rt_name = @rt_name
+    parts = (node.catch_clauses || []).map { |clause|
+      kind = clause[:kind]
+      error_name = clause[:error_name]
+      clause_body_zig = clause[:body].map { |s| emit_expr(lower(s)) }.join("\n            ")
+
+      cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
+      cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
+      cond = cond_parts.join(" and ")
+
+      "if (#{cond}) {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_zig}\n        }"
+    }.join(" else ")
+
+    default_code = if node.default_catch.is_a?(Array) && node.default_catch.any?
+      default_body = node.default_catch.map { |s| emit_expr(lower(s)) }.join("\n            ")
+      " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
+    elsif fn_can_fail
+      " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
+    else
+      " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
+    end
+
+    "#{parts}#{default_code}"
+  end
+
+  # ================================================================
+  # Function / method calls
+  # ================================================================
+
+  def lower_func_call(node)
+    # Intrinsic pattern: already resolved by annotator
+    return lower_intrinsic(node) if node.zig_pattern
+
+    # Extern FFI call
+    if node.respond_to?(:extern_call) && node.extern_call
+      return lower_extern_call(node)
+    end
+
+    # Standard call
+    args_mir = node.args.map { |a|
+      arg = lower(a)
+      # Array/List args: convert to slice via .items
+      if a.type_info&.array? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+        MIR::ItemsAccess.new(arg, true)
+      elsif a.type_info.is_a?(Type) && Type.new(a.type_info).needs_pointer_passing?
+        MIR::AddressOf.new(arg)
+      else
+        arg
+      end
+    }
+
+    mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
+
+    if node.respond_to?(:fn_var_call) && node.fn_var_call
+      # fn-type variable call
+      all_args = [MIR::Ident.new(@rt_name)] + args_mir
+      return MIR::Call.new("try #{node.name}", all_args, false)
+    end
+
+    # Resolve rt/fail from fn_sigs
+    needs_rt = callee_needs_rt?(node.name)
+    can_fail = callee_can_fail?(node.name)
+
+    # Generic type args
+    type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
+      node.generic_type_args.map { |t| MIR::Ident.new(Type.new(t).zig_type) }
+    else
+      []
+    end
+
+    rt_args = needs_rt ? [MIR::Ident.new(@rt_name)] : []
+    all_args = type_args + rt_args + args_mir
+    fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
+
+    # Heap dupe result
+    if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
+      inner_call = MIR::Call.new(fn_zig, all_args, can_fail)
+      return MIR::DupeSlice.new(inner_call, "#{@rt_name}.heapAlloc()")
+    end
+
+    MIR::Call.new(fn_zig, all_args, can_fail)
+  end
+
+  def lower_method_call(node)
+    # Intrinsic pattern: already resolved by annotator
+    return lower_intrinsic(node) if node.zig_pattern
+
+    # Extern method dispatch
+    if node.instance_variable_get(:@extern_method)
+      return lower_extern_method(node)
+    end
+
+    # Pool/set/map methods
+    return lower_pool_method(node) if node.respond_to?(:pool_method) && node.pool_method
+    return lower_set_method(node) if node.respond_to?(:set_method) && node.set_method
+    return lower_map_method(node) if node.respond_to?(:map_method) && node.map_method
+
+    # Standard UFCS call: method(object, args...)
+    obj_mir = lower(node.object)
+    args_mir = node.args.map { |a|
+      arg = lower(a)
+      if a.type_info&.array? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+        MIR::ItemsAccess.new(arg, true)
+      elsif a.type_info.is_a?(Type) && Type.new(a.type_info).needs_pointer_passing?
+        MIR::AddressOf.new(arg)
+      else
+        arg
+      end
+    }
+
+    mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
+    needs_rt = callee_needs_rt?(node.name)
+    can_fail = callee_can_fail?(node.name)
+
+    type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
+      node.generic_type_args.map { |t| MIR::Ident.new(Type.new(t).zig_type) }
+    else
+      []
+    end
+
+    rt_args = needs_rt ? [MIR::Ident.new(@rt_name)] : []
+    all_args = type_args + rt_args + [obj_mir] + args_mir
+    fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
+
+    if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
+      inner_call = MIR::Call.new(fn_zig, all_args, can_fail)
+      return MIR::DupeSlice.new(inner_call, "#{@rt_name}.heapAlloc()")
+    end
+
+    MIR::Call.new(fn_zig, all_args, can_fail)
+  end
+
+  def lower_intrinsic(node)
+    # Symbol-based intrinsics are complex special builtins
+    if node.zig_pattern.is_a?(Symbol)
+      return MIR::InlineZig.new("/* intrinsic: #{node.zig_pattern} */", "symbol_intrinsic_#{node.zig_pattern}")
+    end
+
+    # Template-based intrinsics: resolve placeholders
+    args_zig = if node.is_a?(AST::MethodCall)
+      [emit_expr(lower(node.object))] + node.args.map { |a| emit_expr(lower(a)) }
+    else
+      node.args.map { |a| emit_expr(lower(a)) }
+    end
+
+    pattern = node.zig_pattern.dup
+
+    # Resolve {alloc}
+    if pattern.include?("{alloc}")
+      alloc_sym = node.matched_stdlib_def&.dig(:alloc) || :node_storage
+      resolved_alloc = resolve_intrinsic_alloc(alloc_sym, node)
+      pattern = pattern.gsub("{alloc}", resolved_alloc)
+
+      # Dupe non-heap strings at TAKES positions
+      stdlib_args = node.matched_stdlib_def&.dig(:args)
+      if stdlib_args.is_a?(Array)
+        raw_args = node.is_a?(AST::MethodCall) ? node.args : node.args[1..]
+        raw_args&.each_with_index do |arg_node, ai|
+          param_def = stdlib_args[ai + 1]
+          next unless param_def.is_a?(Hash) && param_def[:takes]
+          zig_idx = node.is_a?(AST::MethodCall) ? ai + 1 : ai
+          args_zig[zig_idx] = heap_dupe_takes_string_zig(args_zig[zig_idx], arg_node, resolved_alloc)
+        end
+      end
+    end
+
+    # Substitute positional args
+    args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}", val) }
+
+    MIR::InlineZig.new(pattern, "intrinsic")
+  end
+
+  def resolve_intrinsic_alloc(alloc_sym, node)
+    case alloc_sym
+    when :heap  then "#{@rt_name}.heapAlloc()"
+    when :frame then "#{@rt_name}.frameAlloc()"
+    when :node_storage
+      storage = node.respond_to?(:storage) ? node.storage : nil
+      storage == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
+    when :cleanup
+      "#{@rt_name}.cleanupAlloc()"
+    else
+      "#{@rt_name}.frameAlloc()"
+    end
+  end
+
+  def heap_dupe_takes_string_zig(arg_zig, arg_node, alloc_zig)
+    ti = arg_node.type_info
+    return arg_zig unless ti&.string?
+    storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
+    return arg_zig if storage == :heap
+    "try #{alloc_zig}.dupe(u8, #{arg_zig})"
+  end
+
+  def lower_extern_call(node)
+    # Extern FFI calls use trampolines -- complex Zig codegen.
+    # Bridge via InlineZig for now, tracked for Phase 4 migration.
+    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
+    MIR::InlineZig.new("#{mod_prefix}#{node.name}(#{args_zig.join(', ')})", "extern_call")
+  end
+
+  def lower_extern_method(node)
+    obj_zig = emit_expr(lower(node.object))
+    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    MIR::InlineZig.new("#{obj_zig}.#{node.name}(#{args_zig.join(', ')})", "extern_method")
+  end
+
+  def lower_pool_method(node)
+    obj_zig = emit_expr(lower(node.object))
+    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    case node.pool_method
+    when :get    then MIR::InlineZig.new("#{obj_zig}.get(#{args_zig[0]})", "pool_get")
+    when :remove then MIR::InlineZig.new("#{obj_zig}.remove(#{args_zig[0]})", "pool_remove")
+    when :count  then MIR::InlineZig.new("#{obj_zig}.count()", "pool_count")
+    when :insert then MIR::InlineZig.new("try #{obj_zig}.insert(#{@rt_name}.heapAlloc(), #{args_zig[0]})", "pool_insert")
+    else MIR::InlineZig.new("#{obj_zig}.#{node.pool_method}(#{args_zig.join(', ')})", "pool_method")
+    end
+  end
+
+  def lower_set_method(node)
+    obj_zig = emit_expr(lower(node.object))
+    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    MIR::InlineZig.new("#{obj_zig}.#{node.set_method}(#{args_zig.join(', ')})", "set_method")
+  end
+
+  def lower_map_method(node)
+    obj_zig = emit_expr(lower(node.object))
+    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    MIR::InlineZig.new("#{obj_zig}.#{node.map_method}(#{args_zig.join(', ')})", "map_method")
+  end
+
+  # ================================================================
+  # Lambda
+  # ================================================================
+
+  def lower_lambda(node)
+    sig = node.full_type
+    @lambda_counter = (@lambda_counter || 0) + 1
+    fn_name = "_lambda_#{@lambda_counter}"
+
+    params_zig = (sig.respond_to?(:params) ? sig.params : sig[:params] || []).map { |p|
+      p_type = p[:type]
+      type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
+      "#{p[:name]}: #{type_str}"
+    }
+
+    ret = sig.respond_to?(:return_type) ? (sig.return_type || :Void) : (sig[:return]&.fetch(:type, nil) || :Void)
+    ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
+    ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
+
+    all_params = ["_rt: *Runtime"] + params_zig
+    body_zig = emit_expr(lower(node.body))
+
+    rt_sup = "_ = &_rt;"
+    param_sups = (sig[:params] || []).map { |p| "_ = &#{p[:name]};" }.join(" ")
+    sups = [rt_sup, param_sups].reject(&:empty?).join(" ")
+
+    MIR::InlineZig.new(
+      "&(struct { fn #{fn_name}(#{all_params.join(', ')}) #{ret_str} { #{sups} return #{body_zig}; } }).#{fn_name}",
+      "lambda"
+    )
+  end
+
+  # ================================================================
+  # Collections
+  # ================================================================
+
+  def lower_list_lit(node)
+    items_mir = node.items.map { |i| lower(i) }
+    ti = node.type_info || Type.new(node.full_type || :Any)
+
+    if node.storage == :stack && (ti.respond_to?(:fixed?) && ti.fixed? || node.items.length > 0)
+      # Stack-allocated fixed array
+      elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
+      return MIR::ArrayInit.new(elem_zig, node.items.length.to_s, items_mir)
+    end
+
+    if node.items.empty?
+      # Empty list: MIR expression depends on collection type
+      if ti.respond_to?(:list_collection?) && ti.list_collection?
+        zig_t = transpile_type(ti)
+        alloc = alloc_for_node(node)
+        return MIR::ContainerInit.new(zig_t, :list_empty, alloc, nil)
+      end
+      # Empty slice
+      elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
+      return MIR::InlineZig.new("&[_]#{elem_zig}{}", "empty_array")
+    end
+
+    # Non-empty list literal -> makeList
+    elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
+    alloc = alloc_for_node(node)
+    MIR::MakeList.new(elem_zig, items_mir, alloc)
+  end
+
+  def lower_hash_lit(node)
+    # HashMaps are always heap-allocated
+    ti = node.type_info || Type.new(node.full_type || :Any)
+    zig_t = transpile_type(ti)
+    alloc = "#{@rt_name}.heapAlloc()"
+
+    if node.pairs.empty?
+      return MIR::ContainerInit.new(zig_t, :map_bare, alloc, nil)
+    end
+
+    # Non-empty hash: init + puts
+    items = []
+    items << MIR::RawZig.new("var __hm = #{zig_t}{ .alloc = #{alloc} };", "hashmap_init")
+    node.pairs.each do |pair|
+      k = emit_expr(lower(pair[:key]))
+      v = emit_expr(lower(pair[:value]))
+      items << MIR::RawZig.new("try __hm.put(#{k}, #{v});", "hashmap_put")
+    end
+    items << MIR::RawZig.new("break :__hm_blk __hm;", "hashmap_break")
+    MIR::BlockExpr.new("__hm_blk", items)
+  end
+
+  def lower_cast(node)
+    inner = lower(node.value)
+    target_type = transpile_type(node.target)
+    MIR::Cast.new(inner, target_type, :as)
   end
 
   # ================================================================
@@ -882,6 +1390,34 @@ class MIRLowering
   # ================================================================
   # Helpers
   # ================================================================
+
+  def callee_needs_rt?(name)
+    return true if name.nil? || name.to_s.empty?
+    sig = @fn_sigs&.dig(name)
+    sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true
+  end
+
+  def callee_can_fail?(name)
+    return true if name.nil? || name.to_s.empty?
+    sig = @fn_sigs&.dig(name)
+    sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
+  end
+
+  def collect_identifier_names(nodes)
+    names = Set.new
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array then n.each { |item| traverse.call(item) }
+      when Hash then n.each_value { |v| traverse.call(v) }
+      when AST::FunctionDef then nil # Don't descend into nested defs
+      when AST::Identifier then names.add(n.name)
+      else n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(nodes)
+    names
+  end
 
   # Quick emit for an MIR expression (used when embedding in InlineZig).
   # This is a temporary bridge -- ideally all expressions stay as MIR nodes.

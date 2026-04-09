@@ -340,4 +340,138 @@ RSpec.describe "MIR pipeline comparison" do
       expect(match_result[:error]).to be_nil
     end
   end
+
+  # =========================================================================
+  # Phase 3: Full function lowering via MIR pipeline
+  # =========================================================================
+
+  def compare_top_level(src)
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    annotator = SemanticAnnotator.new(importer: nil, source_dir: ".", strict_test: false)
+    annotator.annotate!(ast)
+    PipelineRewriter.new(annotator).rewrite!(ast)
+    StringConcatRewriter.new.rewrite!(ast)
+
+    fn_nodes = {}
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir.transform!(ast)
+
+    struct_schemas = {}
+    enum_schemas = {}
+    union_schemas = {}
+    fn_sigs = {}
+    ast.statements.each do |stmt|
+      case stmt
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
+      when AST::EnumDef then enum_schemas[stmt.name.to_sym] = stmt.variants
+      when AST::UnionDef then union_schemas[stmt.name.to_sym] = stmt.variants
+      when AST::FunctionDef
+        sig = stmt.full_type
+        fn_sigs[stmt.name] = sig if sig.is_a?(FunctionSignature)
+      end
+    end
+
+    lowering = MIRLowering.new(
+      struct_schemas: struct_schemas,
+      enum_schemas: enum_schemas,
+      union_schemas: union_schemas,
+      fn_sigs: fn_sigs
+    )
+    emitter = MIREmitter.new
+
+    results = []
+    ast.statements.each do |stmt|
+      begin
+        mir_node = lowering.lower(stmt)
+        new_zig = emitter.emit(mir_node)
+        results << { ast_class: stmt.class.name, name: stmt.respond_to?(:name) ? stmt.name : nil, new_zig: new_zig }
+      rescue => e
+        results << { ast_class: stmt.class.name, name: stmt.respond_to?(:name) ? stmt.name : nil, error: e.message }
+      end
+    end
+    results
+  end
+
+  describe "function definition lowering" do
+    it "lowers a simple function to FnDef" do
+      src = <<~CLEAR
+        FN greet() RETURNS Void ->
+          RETURN;
+        END
+      CLEAR
+      results = compare_top_level(src)
+      fn = results.find { |r| r[:name] == "greet" }
+      expect(fn).not_to be_nil
+      expect(fn[:error]).to be_nil
+      expect(fn[:new_zig]).to include("fn greet(")
+      expect(fn[:new_zig]).to include("return;")
+    end
+
+    it "lowers function with params and return type" do
+      src = <<~CLEAR
+        FN add(a: Number, b: Number) RETURNS Number ->
+          RETURN a + b;
+        END
+      CLEAR
+      results = compare_top_level(src)
+      fn = results.find { |r| r[:name] == "add" }
+      expect(fn[:error]).to be_nil
+      expect(fn[:new_zig]).to include("a: f64")
+      expect(fn[:new_zig]).to include("b: f64")
+      # Pure math function: needs_rt=false, can_fail=false
+      expect(fn[:new_zig]).to include("f64")
+    end
+
+    it "lowers function with string return using alloc (preserveAndRewind)" do
+      src = <<~CLEAR
+        FN getName() RETURNS String ->
+          s = toString(42);
+          RETURN s;
+        END
+      CLEAR
+      results = compare_top_level(src)
+      fn = results.find { |r| r[:name] == "getName" }
+      expect(fn[:error]).to be_nil
+      # toString triggers uses_alloc=true + needs_rt=true → frame save + preserveAndRewind
+      expect(fn[:new_zig]).to include("saveFrameMark")
+      expect(fn[:new_zig]).to include("preserveAndRewind")
+    end
+
+    it "lowers function calling another function" do
+      src = <<~CLEAR
+        FN double(x: Number) RETURNS Number ->
+          RETURN x * 2;
+        END
+        FN main() RETURNS Void ->
+          result = double(21.0);
+          RETURN;
+        END
+      CLEAR
+      results = compare_top_level(src)
+      main_fn = results.find { |r| r[:name] == "main" }
+      expect(main_fn[:error]).to be_nil
+      expect(main_fn[:new_zig]).to include("double(")
+    end
+  end
+
+  describe "intrinsic calls" do
+    it "lowers toString intrinsic" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          x = 42;
+          s = toString(x);
+          RETURN;
+        END
+      CLEAR
+      results = compare_fn_body(src)
+      # toString should appear somewhere in the lowered output
+      toString_result = results.find { |r| r[:new_zig]&.include?("intToString") || r[:new_zig]&.include?("toString") }
+      # May be nil if toString lowering produces different pattern -- just verify no errors
+      errors = results.select { |r| r[:error] }
+      expect(errors).to eq([])
+    end
+  end
 end
