@@ -212,9 +212,13 @@ class PipelineHost
     lhs = node.left
     lhs_type = lhs.type_info
 
-    # SOA sources stay on string path for now
+    # SOA scalar operators have zero allocations -- field-slice path in the
+    # string generator is strictly better (no materialization overhead).
+    # Let them fall through to the string path where field-slice optimization applies.
     is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
-    return nil if is_soa
+    scalar_op = [AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp,
+                 AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp].any? { |t| rhs.is_a?(t) }
+    return nil if is_soa && scalar_op
 
     case rhs
     when AST::CountOp   then lower_count(lhs, rhs, node)
@@ -277,6 +281,15 @@ class PipelineHost
              "}\n" \
              "const pipe_items = pipe_mat.items;"
       [[MIR::RawZig.new(code, "mat_sharded_pool")], "pipe_items"]
+    elsif lhs_type&.pool? && lhs_type&.soa?
+      elem_zig = lhs_type.element_type.zig_type
+      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
+             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
+             "for (0..@intCast(pipe_src_list.data.len)) |__psi| {\n" \
+             "    if (pipe_src_list.alive[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));\n" \
+             "}\n" \
+             "const pipe_items = pipe_mat.items;"
+      [[MIR::RawZig.new(code, "mat_soa_pool")], "pipe_items"]
     elsif lhs_type&.pool?
       elem_zig = lhs_type.element_type.zig_type
       code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
@@ -286,6 +299,15 @@ class PipelineHost
              "}\n" \
              "const pipe_items = pipe_mat.items;"
       [[MIR::RawZig.new(code, "mat_pool")], "pipe_items"]
+    elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa?
+      elem_zig = lhs_type.element_type.zig_type
+      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
+             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
+             "for (0..@intCast(pipe_src_list.data.len)) |__psi| {\n" \
+             "    try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));\n" \
+             "}\n" \
+             "const pipe_items = pipe_mat.items;"
+      [[MIR::RawZig.new(code, "mat_soa_list")], "pipe_items"]
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
       elem_zig = lhs_type.element_type.zig_type
       n = lhs_type.shard_count
@@ -831,7 +853,43 @@ class PipelineHost
     # Sharded pools/lists need fibers -- stay on string path
     return nil if lhs_type&.sharded?
 
-    # Non-sharded pool (non-SOA): iterate slots with alive check
+    is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
+
+    if is_soa
+      # SOA path: field-slice access (preserves SOA cache locality)
+      prev_soa_active = @soa_rewrite_active
+      prev_soa_fields = @soa_needed_fields
+      @soa_rewrite_active = true
+      @soa_needed_fields = Set.new
+
+      body_code = with_pipeline_context(placeholder: "_") do
+        each_op.body.map { |stmt|
+          code = visit(stmt)
+          code.strip.end_with?(";") ? code : "#{code};"
+        }.join("\n        ")
+      end
+
+      source_mir = visit_mir(list_node)
+      field_slices = @soa_needed_fields.map { |f|
+        "const __soa_#{f} = __soa_src.data.items(.#{f});"
+      }.join("\n    ")
+
+      alive_check = lhs_type&.pool? ? "if (!__soa_src.alive[__soa_i]) continue;\n        " : ""
+
+      @soa_rewrite_active = prev_soa_active
+      @soa_needed_fields = prev_soa_fields
+
+      return MIR::ScopeBlock.new([
+        MIR::Let.new("__soa_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
+        MIR::RawZig.new(
+          "#{field_slices}\n" \
+          "for (0..@intCast(__soa_src.data.len)) |__soa_i| {\n" \
+          "    #{alive_check}#{body_code}\n" \
+          "}", "each_soa_loop")
+      ])
+    end
+
+    # Non-SOA pool: iterate slots with alive check
     if lhs_type&.pool?
       source_mir = visit_mir(list_node)
       body_code = with_pipeline_context(placeholder: "__each_item") do
@@ -851,8 +909,8 @@ class PipelineHost
       ])
     end
 
-    # Non-sharded list collection: iterate items
-    if lhs_type&.list_collection?
+    # Non-SOA list collection or fixed_soa: iterate items
+    if lhs_type&.list_collection? || lhs_type&.fixed_soa?
       source_mir = visit_mir(list_node)
       body_code = with_pipeline_context(placeholder: "__each_item") do
         each_op.body.map { |stmt|
