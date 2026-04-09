@@ -290,7 +290,9 @@ class ZigTranspiler
       union_schemas: union_schemas,
       fn_sigs: fn_sigs,
       moved_guard_info: moved_guard_info,
-      pipeline_fallback: pipeline_cb
+      pipeline_fallback: pipeline_cb,
+      importer: @importer,
+      source_dir: @source_dir
     )
 
     needs_c_alloc = use_c_allocator

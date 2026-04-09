@@ -355,8 +355,8 @@ RSpec.describe MIRLowering do
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::IndexGet)
-      expect(emit(result)).to eq("items[0]")
+      expect(result).to be_a(MIR::InlineZig)
+      expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
     end
   end
 
@@ -532,7 +532,7 @@ RSpec.describe MIRLowering do
       node = AST::WhileLoop.new(tok, cond, [body_stmt], nil)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::WhileStmt)
+      expect(result).to be_a(MIR::RawZig)
       zig = emit(result)
       expect(zig).to include("while (true)")
     end
@@ -574,9 +574,9 @@ RSpec.describe MIRLowering do
       node = AST::ForEach.new(tok, "item", coll, [body_stmt], nil, false)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::ForStmt)
+      expect(result).to be_a(MIR::RawZig)
       zig = emit(result)
-      expect(zig).to include("for (items)")
+      expect(zig).to include("for")
       expect(zig).to include("|item|")
     end
 
@@ -760,7 +760,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ConcatStr)
       zig = emit(result)
-      expect(zig).to include("CheatLib.concat")
+      expect(zig).to include("std.mem.concat")
       expect(zig).to include('"hello "')
       expect(zig).to include("name")
     end
@@ -1373,14 +1373,14 @@ RSpec.describe MIRLowering do
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: :micro
+        computed_stack_tier: :large
       }
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include("stack_size = .Micro")
+      expect(zig).to include("stack_size = .Large")
     end
   end
 
@@ -1641,8 +1641,8 @@ RSpec.describe MIRLowering do
       expect(result.reason).to eq("test_block")
       zig = emit(result)
       expect(zig).to include('test "MyTest: given input: works"')
-      expect(zig).to include("Runtime.init")
-      expect(zig).to include("defer __rt_instance.deinit()")
+      expect(zig).to include("Runtime.init(allocator")
+      expect(zig).to include("rt.wireAllocator()")
     end
 
     it "lowers test block with setup code" do

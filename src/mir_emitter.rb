@@ -222,8 +222,8 @@ class MIREmitter
       body = emit_body(arm[:body])
       "#{arm[:pattern]} => {\n#{body}\n}"
     }
-    if node.default_body && !node.default_body.empty?
-      body = emit_body(node.default_body)
+    if node.default_body
+      body = node.default_body.empty? ? "" : emit_body(node.default_body)
       arms << "else => {\n#{body}\n}"
     end
     "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
@@ -581,7 +581,7 @@ class MIREmitter
 
   def emit_concat(node)
     parts = node.parts.map { |p| emit(p) }.join(", ")
-    "try CheatLib.concat(#{node.rt_expr}, #{node.alloc_expr}, &.{ #{parts} })"
+    "try std.mem.concat(#{node.alloc_expr}, u8, &.{ #{parts} })"
   end
 
   def emit_cast(node)
@@ -590,7 +590,7 @@ class MIREmitter
     when :as
       "@as(#{node.target_type}, #{inner})"
     when :intCast
-      "@intCast(#{inner})"
+      node.target_type ? "@as(#{node.target_type}, @intCast(#{inner}))" : "@intCast(#{inner})"
     when :floatCast
       "@floatCast(#{inner})"
     when :ptrCast
