@@ -886,9 +886,9 @@ class MIRLowering
         return lower_macro_print(node)
       when :macro_map
         # map is handled by PipelineRewriter; if we get here, emit a no-op
-        return MIR::InlineZig.new("// map intrinsic (should be rewritten)", "macro_map")
+        return MIR::Comment.new("map intrinsic (should be rewritten)")
       else
-        return MIR::InlineZig.new("/* intrinsic: #{node.zig_pattern} */", "symbol_intrinsic_#{node.zig_pattern}")
+        return MIR::Comment.new("intrinsic: #{node.zig_pattern}")
       end
     end
 
@@ -1622,8 +1622,13 @@ class MIRLowering
   end
 
   def lower_or_exit(node)
-    msg = node.message ? emit_expr(lower(node.message)) : '""'
-    MIR::RawZig.new("{ #{@rt_name}.setError(.System, \"\", #{msg}, #{node.token.line}); return error.CheatError; }", "or_exit")
+    rt = MIR::Ident.new(@rt_name)
+    msg_node = node.message ? lower(node.message) : MIR::Lit.new('""')
+    set_error = MIR::MethodCall.new(rt, "setError", [
+      MIR::Ident.new(".System"), MIR::Lit.new('""'), msg_node, MIR::Lit.new(node.token.line.to_s)
+    ], false)
+    ret = MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    MIR::ScopeBlock.new([MIR::ExprStmt.new(set_error, false), ret])
   end
 
   # ================================================================
@@ -1716,13 +1721,13 @@ class MIRLowering
 
     case node.kind
     when :returns
-      val_code = emit_expr(lower(node.value))
+      val = lower(node.value)
       @active_stubs[fn_name] = { kind: :returns, var: stub_var }
-      MIR::RawZig.new("const #{stub_var} = #{val_code};", "stub_returns")
+      MIR::Let.new(stub_var, val, false, nil, nil)
     when :captures
       cap_name = node.value
       @active_stubs[fn_name] = { kind: :captures, var: cap_name }
-      MIR::RawZig.new("var #{cap_name}: i64 = 0; _ = &#{cap_name};", "stub_captures")
+      MIR::Let.new(cap_name, MIR::Lit.new("0"), true, "i64", "_ = &#{cap_name};")
     when :sequence
       values = node.value
       items = if values.respond_to?(:items)
@@ -1737,24 +1742,24 @@ class MIRLowering
         "stub_sequence"
       )
     when :with
-      lambda_code = emit_expr(lower(node.value))
+      val = lower(node.value)
       @active_stubs[fn_name] = { kind: :with, var: stub_var }
-      MIR::RawZig.new("const #{stub_var} = #{lambda_code};", "stub_with")
+      MIR::Let.new(stub_var, val, false, nil, nil)
     else
-      MIR::RawZig.new("// stub: #{fn_name} (unhandled kind: #{node.kind})", "stub_decl")
+      MIR::Comment.new("stub: #{fn_name} (unhandled kind: #{node.kind})")
     end
   end
 
   def lower_benchmark(node)
-    MIR::RawZig.new("// benchmark lowering placeholder", "benchmark")
+    MIR::Comment.new("benchmark lowering placeholder")
   end
 
   def lower_smash(node)
-    MIR::RawZig.new("// smash test placeholder", "smash")
+    MIR::Comment.new("smash test placeholder")
   end
 
   def lower_profile(node)
-    MIR::RawZig.new("// profile placeholder", "profile")
+    MIR::Comment.new("profile placeholder")
   end
 
   def lower_require(node)
@@ -2358,14 +2363,9 @@ class MIRLowering
       # BORROWED fields: source may be ArrayList but field expects slice
       field_def = @struct_schemas&.dig(node.name.to_sym, k)
       if field_def.is_a?(Hash) && field_def[:borrowed] && vt&.array? && !needs_items
-        code = emit_expr(val)
-        val = MIR::InlineZig.new(
-          "(if (@hasField(@TypeOf(#{code}), \"items\")) #{code}.items else #{code})",
-          "borrowed_items"
-        )
+        val = MIR::ItemsAccess.new(val, true)
       elsif needs_items
-        code = emit_expr(val)
-        val = MIR::InlineZig.new("#{code}.items", "list_items")
+        val = MIR::ItemsAccess.new(val, false)
       end
       # @indirect field: wrap in HeapCreate
       if v.respond_to?(:needs_heap_create) && v.needs_heap_create

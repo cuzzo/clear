@@ -1606,7 +1606,7 @@ RSpec.describe MIRLowering do
       msg = make_lit(:STRING, "fatal", full_type: :String)
       node = AST::OrExit.new(tok, msg)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
       expect(zig).to include("setError")
       expect(zig).to include("return error.CheatError")
@@ -1720,33 +1720,33 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "test framework helpers" do
-    it "lowers StubDecl to RawZig comment" do
+    it "lowers StubDecl :returns to MIR::Let" do
       node = AST::StubDecl.new(tok, "getData", :returns, make_lit(:NUMBER, 42))
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(emit(result)).to include("stub")
+      expect(result).to be_a(MIR::Let)
+      expect(result.name).to eq("__stub_getData")
     end
 
-    it "lowers BenchmarkStmt to RawZig placeholder" do
+    it "lowers BenchmarkStmt to Comment" do
       node = AST::BenchmarkStmt.new(tok, make_lit(:NUMBER, 1), 1000)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::Comment)
     end
 
-    it "lowers SmashStmt to RawZig placeholder" do
+    it "lowers SmashStmt to Comment" do
       node = AST::SmashStmt.new(tok, make_lit(:NUMBER, 1))
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::Comment)
     end
 
-    it "lowers ProfileStmt to RawZig placeholder" do
+    it "lowers ProfileStmt to Comment" do
       node = AST::ProfileStmt.new(tok, make_lit(:NUMBER, 1))
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::Comment)
     end
   end
 
