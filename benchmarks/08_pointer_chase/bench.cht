@@ -1,3 +1,4 @@
+-- @leak: 2000000 -> 2000
 -- Pointer-Chasing Benchmark — CLEAR (@pool + Id<Node>)
 --
 -- Mirrors bench.c exactly: 2,000,000 nodes, additive prime-step permutation.

@@ -1,3 +1,4 @@
+-- @leak: 100000 -> 1000
 -- Pub-Sub Benchmark — CLEAR
 --
 -- Models 1 publisher broadcasting 100K messages to 64 subscribers.

@@ -1,3 +1,4 @@
+-- @leak_skip
 -- SIMD Benchmark — Vec4 Dot Product (10 million iterations)
 --
 -- WHY CLEAR FAILS HERE:

@@ -1,3 +1,4 @@
+-- @leak: 100000 -> 1000
 -- Stream Merge Benchmark — CLEAR
 --
 -- 8 BG STREAM producers each yield 100K values (LCG sequence).

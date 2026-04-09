@@ -1,3 +1,4 @@
+-- @leak: 10000 -> 100
 -- String Builder Benchmark — CLEAR List+join vs C StringBuilder
 --
 -- WHAT WE ARE MEASURING:

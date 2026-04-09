@@ -1,3 +1,4 @@
+-- @leak: n = 1000000 -> n = 1000
 -- KV Store Benchmark — CLEAR (HashMap@shared:sharded(128):locked, DashMap)
 --
 -- Uses @shared:sharded(128):locked — Arc-wrapped lock-striped HashMap.

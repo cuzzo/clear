@@ -1,3 +1,4 @@
+-- @leak_skip
 -- Recursive Fibonacci to test stack frames and call overhead
 -- Goal: 1M calls with zero heap allocation
 

@@ -1,3 +1,4 @@
+-- @leak: n = 10000 -> n = 100
 -- Heap Array Benchmark
 --
 -- All three languages allocate a 10000-element heap array per outer

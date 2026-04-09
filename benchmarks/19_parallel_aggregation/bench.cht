@@ -1,3 +1,4 @@
+-- @leak: n = 100000 -> n = 1000
 -- Parallel Aggregation Benchmark — Distributed Histogram + Stats
 --
 -- Deterministic LCG generates 100K events. Each event is bucketed into

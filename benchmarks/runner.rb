@@ -75,13 +75,32 @@ def run_bench(dir)
   if leak_mode
     # Leak mode: build with ./clear build (debug, GPA leak detection enabled)
     if File.exist?("#{dir}/bench.cht")
+      src = File.read("#{dir}/bench.cht")
+
+      # @leak_skip: benchmark has no heap allocations, leak check is pointless
+      if src.include?("@leak_skip")
+        puts "  SKIP (no heap allocations)"
+        return
+      end
+
+      # @leak: old -> new  (reduce iteration counts for debug mode)
+      build_src = "#{dir}/bench.cht"
+      subs = src.scan(/^--\s*@leak:\s*(.+?)\s*->\s*(.+?)\s*$/)
+      if subs.any?
+        patched = src.dup
+        subs.each { |old, new_val| patched.sub!(old.strip, new_val.strip) }
+        build_src = "/tmp/bench_leak_#{File.basename(dir)}.cht"
+        File.write(build_src, patched)
+      end
+
       puts "Compiling CLEAR (debug, leak detection)..."
-      output = `./clear build #{dir}/bench.cht -o #{dir}/bench_clear 2>&1`
+      output = `./clear build #{build_src} -o #{dir}/bench_clear 2>&1`
       if File.exist?("#{dir}/bench_clear")
         has_clear = true
       else
         puts "WARNING: debug build failed: #{output.lines.last&.strip}"
       end
+      FileUtils.rm_f(build_src) if build_src != "#{dir}/bench.cht"
     else
       puts "No CLEAR source found, skipping."
     end
@@ -481,14 +500,19 @@ if __FILE__ == $0
       mode = "smoke"
       scale = "0.1"
     when "--all"
-      dirs += Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort + Dir.glob("benchmarks/2*").sort
+      dirs += Dir.glob("benchmarks/[0-9]*").select { |d| File.directory?(d) }.sort
     else
       dirs << arg
     end
   end
 
   if dirs.empty?
-    dirs = Dir.glob("benchmarks/0*").sort
+    if mode == "leak"
+      # Leak mode: run ALL benchmarks by default
+      dirs = Dir.glob("benchmarks/[0-9]*").select { |d| File.directory?(d) }.sort
+    else
+      dirs = Dir.glob("benchmarks/0*").sort
+    end
   end
 
   ENV['BENCH_MODE'] = mode

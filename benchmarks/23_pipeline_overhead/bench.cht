@@ -1,3 +1,4 @@
+-- @leak: n = 10000000 -> n = 10000
 -- Benchmark 23: Pipeline Overhead — s> operators vs Handwritten Loops
 --
 -- Measures the transpiler abstraction tax of pipeline operators.

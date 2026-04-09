@@ -1,3 +1,4 @@
+-- @leak: 10000 -> 100
 -- Fan-Out / Fan-In Benchmark — CLEAR
 --
 -- 10,000 items, each processed with CPU-bound work (100K LCG iterations),

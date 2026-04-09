@@ -1,3 +1,4 @@
+-- @leak: n = 1000000 -> n = 1000
 -- Benchmark 21: Frame vs Heap Escape — The Memory Boundary Tax
 --
 -- Measures the cost of frame allocation (CLEAR's fast path) vs heap

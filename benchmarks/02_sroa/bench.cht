@@ -1,3 +1,4 @@
+-- @leak_skip
 -- SROA (Scalar Replacement of Aggregates) Benchmark
 --
 -- WHAT THIS MEASURES:

@@ -1,3 +1,4 @@
+-- @leak: 1000000 -> 1000
 -- HashMap Benchmark — CLEAR @map vs C baseline
 --
 -- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3)

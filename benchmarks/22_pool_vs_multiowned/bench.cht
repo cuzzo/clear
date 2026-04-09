@@ -1,3 +1,4 @@
+-- @leak: n = 5000000 -> n = 5000
 -- Benchmark 22: Pool vs List — Insert + Iteration Cost
 --
 -- Both variants insert N structs, then iterate to sum a field.
