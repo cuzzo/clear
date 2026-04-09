@@ -1173,4 +1173,45 @@ RSpec.describe ZigTranspiler do
         "free without dupe is a crash: msg is freed but was never duped to heap"
     end
   end
+
+  # ===========================================================================
+  # BG spawn: @local uses same-scheduler, not round-robin
+  # ===========================================================================
+  describe "BG spawn dispatch" do
+    it "uses spawnPinned (round-robin) for @locked captures" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+        FN inc(c: Counter) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @locked;
+            p: ~Void = BG { inc(c); };
+            NEXT p;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Affine @locked: Mutex-protected but lifetime tied to frame — must pin
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).to include("spawnPinned")
+    end
+
+    it "uses submitSpawn (same-scheduler) for @local captures" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+        FN inc(c: Counter) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @local;
+            p: ~Void = BG { inc(c); };
+            NEXT p;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # @local is shared-nothing — all fibers on same scheduler
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).to include("submitSpawn")
+      expect(user_code).not_to include("spawnPinned")
+      expect(user_code).not_to include("spawnBest")
+    end
+  end
 end

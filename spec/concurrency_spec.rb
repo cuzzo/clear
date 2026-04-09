@@ -380,7 +380,7 @@ RSpec.describe SemanticAnnotator do
         expect(zig).not_to include("var c =")
       end
 
-      it "BG capturing @local emits spawnPinned (auto-pinned)" do
+      it "BG capturing @local emits submitSpawn (same-scheduler, not round-robin)" do
         code = counter_struct + <<~FLUX
           FN f() RETURNS Void ->
               MUTABLE c = Counter{ value: 0 } @local;
@@ -391,7 +391,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("spawnPinned")
+        # @local fibers must stay on the caller's scheduler - no synchronization
+        expect(user_code).to include("submitSpawn")
+        expect(user_code).not_to include("spawnPinned")
         expect(user_code).not_to include("spawnBest")
       end
     end

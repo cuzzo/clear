@@ -3066,6 +3066,8 @@ private
       node.pinned = true
       if analysis.has_sharded
         note!(node, "BG block auto-pinned — captures @sharded map (scheduler affinity for shard locality).")
+      elsif analysis.has_local
+        note!(node, "BG block auto-pinned — captures @local resource (same-scheduler affinity).")
       else
         note!(node, "BG block auto-pinned — captures shared/locked resource. Use @parallel to override.")
       end

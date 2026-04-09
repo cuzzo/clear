@@ -3361,15 +3361,27 @@ private
     :service  => "Huge",
   }.freeze
 
-  # BG spawn call: spawnBest by default, spawnPinned when @pinned.
-  # spawnPinned distributes fibers round-robin across schedulers — each
-  # scheduler gets its own set of pinned fibers (shared-nothing model).
-  # Exception: when the BG block captures a resource (TCP fd), spawn on
-  # the accepting scheduler to keep epoll fd registration consistent.
+  # BG spawn call dispatch:
+  # @local  (pinned + has_local)  -> submitSpawn: same-scheduler, no sync needed
+  # @sharded (pinned + has_sharded) -> spawnPinned: round-robin distribution across cores
+  # @shared / default              -> spawnBest: work-stealing, synchronized via Arc+Mutex
   def bg_spawn_call(node, rt_name, ctx_type, ctx_var)
     effective_tier = node.computed_stack_tier
     task_cfg = task_config_zig(node.stack_size, pinned: !!node.pinned, use_arena: !!node.arena_mode, computed_tier: effective_tier)
-    if node.pinned
+    has_local = node.capture_analysis&.has_local
+    if node.pinned && has_local
+      # @local: same-scheduler affinity. The data has no synchronization,
+      # so all fibers accessing it must run cooperatively on one scheduler.
+      <<~ZIG.chomp
+        try #{rt_name}.getSched().submitSpawn(
+                    @intFromPtr(&Runtime.entryWrapper),
+                    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+                    #{ctx_var},
+                    #{task_cfg},
+                );
+      ZIG
+    elsif node.pinned
+      # @sharded / explicit @pinned: distribute round-robin, each pinned to its core.
       <<~ZIG.chomp
         try CheatHeader.spawnPinned(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -3379,6 +3391,7 @@ private
                 );
       ZIG
     else
+      # @shared or unpinned: work-stealing, synchronized via Arc+Mutex.
       <<~ZIG.chomp
         try CheatHeader.spawnBest(
                     @intFromPtr(&Runtime.entryWrapper),
