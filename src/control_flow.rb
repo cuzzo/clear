@@ -965,19 +965,24 @@ class MIRPass
   # When a BG fiber captures a resource (TCP fd, etc.), ownership transfers
   # to the fiber — the outer scope's defer must not close it.
   #
-  # If dataflow determines the resource is ALWAYS moved (unconditional BG),
-  # cleanup is eliminated entirely (no defer emitted) and no SuppressCleanup
-  # is needed. SuppressCleanup is only needed when the BG is conditional
-  # (MAYBE_MOVED) and the binding retains a moved guard.
+  # Resource variables always emit a guarded_defer (moved guard pattern)
+  # regardless of scope depth. We must insert SuppressCleanup whenever a
+  # BG block captures a resource — even for inner-scope variables that
+  # don't appear in the function-level bindings hash.
   def insert_bg_resource_suppress!(result, stmt, bindings)
-    return unless bindings
     each_bg_in_stmt(stmt) do |bg|
       next unless bg.is_a?(AST::BgBlock) # resource suppress only for BgBlock
       resource_captures = bg.capture_analysis&.resource_captures
       next unless resource_captures&.any?
       resource_captures.each do |name|
-        entry = bindings[name]
-        next unless entry && entry[:has_moved_guard]
+        entry = bindings&.dig(name)
+        # When dataflow says always-moved (needs_cleanup=false), no Drop was
+        # inserted — the fiber is the sole owner. No suppress needed.
+        next if entry && !entry[:needs_cleanup]
+        # Resource cleanup always uses guarded_defer (emits X_moved variable)
+        # regardless of has_moved_guard. Mark it true so the static leak
+        # checker accepts the SuppressCleanup node.
+        entry[:has_moved_guard] = true if entry && entry[:kind] == :resource
         result << MIR::SuppressCleanup.new(stmt.token, name)
       end
     end
