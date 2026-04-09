@@ -225,6 +225,12 @@ class PipelineHost
     when AST::AnyOp     then lower_any(lhs, rhs, node)
     when AST::AllOp     then lower_all(lhs, rhs, node)
     when AST::FindOp    then lower_find(lhs, rhs, node)
+    when AST::WhereOp   then lower_where(lhs, rhs.expression, node)
+    when AST::SelectOp  then lower_select(lhs, rhs.expression, node)
+    when AST::LimitOp   then lower_limit(lhs, rhs, node)
+    when AST::TakeWhileOp then lower_take_while(lhs, rhs.expression, node)
+    when AST::SkipOp    then lower_skip(lhs, rhs, node)
+    when AST::DistinctOp then lower_distinct(lhs, rhs, node)
     else nil
     end
   end
@@ -447,6 +453,157 @@ class PipelineHost
             MIR::Ident.new("find_found"),
             MIR::Cast.new(MIR::Ident.new("find_result"), "?#{elem_zig_type}", :as),
             MIR::Lit.new("null")))
+      ]
+    end
+  end
+
+  # --- Filter/transform operator lowerings (Phase 2) ---
+
+  def pipeline_alloc(smooth_node)
+    smooth_node.respond_to?(:storage) && smooth_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
+  end
+
+  def lower_where(list_node, expr_node, smooth_node)
+    elem_type = list_node.full_type.element_type.resolved.to_s
+    elem_zig = transpile_type(elem_type)
+    alloc = pipeline_alloc(smooth_node)
+    pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("matches", pred_mir, false, nil, nil),
+          MIR::IfStmt.new(MIR::Ident.new("matches"), [
+            MIR::ExprStmt.new(MIR::MethodCall.new(
+              MIR::Ident.new("res_list"), "append",
+              [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("it")], true), nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
+  end
+
+  def lower_select(list_node, expr_node, smooth_node)
+    res_type = expr_node.full_type
+    res_zig = transpile_type(res_type)
+    alloc = pipeline_alloc(smooth_node)
+    expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("val", expr_mir, false, nil, nil),
+          MIR::ExprStmt.new(MIR::MethodCall.new(
+            MIR::Ident.new("res_list"), "append",
+            [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("val")], true), nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
+  end
+
+  def lower_limit(list_node, limit_node, smooth_node)
+    elem_type = list_node.full_type.element_type.resolved.to_s
+    elem_zig = transpile_type(elem_type)
+    alloc = pipeline_alloc(smooth_node)
+    count_mir = visit_mir(limit_node.count)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("lim_requested",
+          MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
+        MIR::Let.new("lim_actual",
+          MIR::InlineZig.new("@min(lim_requested, #{items}.len)", "min_len"),
+          false, nil, nil),
+        MIR::BreakStmt.new(label,
+          MIR::InlineZig.new(
+            "try CheatLib.makeList(#{elem_zig}, #{alloc}, #{items}[0..lim_actual])",
+            "make_limited_list"))
+      ]
+    end
+  end
+
+  def lower_take_while(list_node, expr_node, smooth_node)
+    elem_type = list_node.full_type.element_type.resolved.to_s
+    elem_zig = transpile_type(elem_type)
+    alloc = pipeline_alloc(smooth_node)
+    pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("matches", pred_mir, false, nil, nil),
+          MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("matches")),
+            [MIR::BreakStmt.new(nil, nil)], nil),
+          MIR::ExprStmt.new(MIR::MethodCall.new(
+            MIR::Ident.new("res_list"), "append",
+            [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("it")], true), nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
+  end
+
+  def lower_skip(list_node, skip_node, _smooth_node)
+    label = next_pipe_label
+    source_mir = visit_mir(list_node)
+    @current_pipe_label = label
+    count_mir = visit_mir(skip_node.count)
+
+    MIR::BlockExpr.new(label, [
+      MIR::Let.new("__skip_src", source_mir, false, nil, nil),
+      MIR::Let.new("__skip_items",
+        MIR::InlineZig.new(
+          'if (@hasField(@TypeOf(__skip_src), "items")) __skip_src.items else __skip_src[0..]',
+          "skip_items"), false, nil, nil),
+      MIR::Let.new("skip_requested",
+        MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
+      MIR::Let.new("skip_actual",
+        MIR::InlineZig.new("@min(skip_requested, __skip_items.len)", "skip_min"),
+        false, nil, nil),
+      MIR::BreakStmt.new(label,
+        MIR::InlineZig.new("__skip_items[skip_actual..]", "skip_slice"))
+    ])
+  end
+
+  def lower_distinct(list_node, distinct_node, smooth_node)
+    elem_type = list_node.full_type.element_type.resolved.to_s
+    elem_zig = transpile_type(elem_type)
+    alloc = pipeline_alloc(smooth_node)
+
+    expr_mir = visit_pipeline_expr_mir(list_node, distinct_node.expression)
+    expr_mir_inner = with_pipeline_context(placeholder: "it2") {
+      visit_mir(distinct_node.expression)
+    }
+
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("dist_key", expr_mir, false, nil, nil),
+          MIR::Let.new("dist_found", MIR::Lit.new("false"), true, nil, nil),
+          MIR::ForStmt.new(
+            MIR::FieldGet.new(MIR::Ident.new("res_list"), "items"), "it2", [
+              MIR::Let.new("dist_existing_key", expr_mir_inner, false, nil, nil),
+              MIR::IfStmt.new(
+                MIR::Call.new("CheatLib.eql",
+                  [MIR::Ident.new("dist_key"), MIR::Ident.new("dist_existing_key")], false),
+                [
+                  MIR::Set.new(MIR::Ident.new("dist_found"), MIR::Lit.new("true")),
+                  MIR::BreakStmt.new(nil, nil)
+                ], nil)
+            ], nil),
+          MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("dist_found")), [
+            MIR::ExprStmt.new(MIR::MethodCall.new(
+              MIR::Ident.new("res_list"), "append",
+              [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("it")], true), nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
     end
   end
