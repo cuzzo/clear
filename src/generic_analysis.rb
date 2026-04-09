@@ -58,11 +58,48 @@ module GenericAnalysis
   #
   # Respects current_fn_ctx&.type_params so that Cache<T> in a generic function
   # does not raise "unknown type argument T".
-  def validate_type_annotation!(node, type_obj)
+  # Structural capabilities that are allowed on function parameters.
+  STRUCTURAL_CAPABILITIES = %i[link].freeze
+
+  def validate_type_annotation!(node, type_obj, is_param: false)
     return unless type_obj.is_a?(Type)
     # FN types are structurally typed; their nested param/return types are validated
     # when they are parsed. No named-type schema lookup is needed here.
     return if type_obj.fn_type?
+
+    # --- Capability validation (moved from parser for separation of concerns) ---
+
+    # Ownership/sync capabilities are not allowed on function parameters.
+    # :affine is the default (not a user-set capability). :link is structural (allowed on params).
+    # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
+    if is_param
+      has_ownership_cap = %i[multiowned shared].include?(type_obj.ownership)
+      has_sync_cap = type_obj.sync && !%i[raw].include?(type_obj.sync)
+      if has_ownership_cap || has_sync_cap
+        error!(node, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
+      end
+    end
+
+    # @list/@pool/@set require an array type.
+    if type_obj.list_collection? && !type_obj.array?
+      error!(node, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
+    end
+    if type_obj.pool? && !type_obj.array?
+      error!(node, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
+    end
+    if type_obj.set_collection? && !type_obj.array?
+      error!(node, "Collection capability @set requires an array type (e.g. String[]@set)")
+    end
+
+    # @soa requires a fixed-size array (or collection, which handles its own SOA).
+    if type_obj.soa? && !type_obj.collection? && (!type_obj.array? || !type_obj.fixed?)
+      error!(node, "@soa requires a fixed-size array type (e.g. Particle[10000]@soa)")
+    end
+
+    # @sharded requires N >= 2.
+    if type_obj.shard_count && type_obj.shard_count < 2
+      error!(node, "@sharded requires N >= 2, got #{type_obj.shard_count}")
+    end
 
     # Pools require a fixed capacity: Entity[1000]@pool, not Entity[]@pool.
     if type_obj.pool? && !type_obj.fixed?

@@ -62,7 +62,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when @list is applied to a non-array type" do
         expect {
           run('FN f() RETURNS Void -> x: Float64@list = 1; RETURN; END')
-        }.to raise_error(ParserError, /@list requires an array type/)
+        }.to raise_error(SourceError, /@list requires an array type/)
       end
 
       it "emits ArrayListUnmanaged Zig code for @list (same as plain dynamic array)" do
@@ -109,7 +109,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when @pool is applied to a non-array type" do
         expect {
           run('FN f() RETURNS Void -> x: Float64@pool = 1; RETURN; END')
-        }.to raise_error(ParserError, /@pool requires an array type/)
+        }.to raise_error(SourceError, /@pool requires an array type/)
       end
 
       it "emits CheatLib.Pool Zig type for @pool declarations" do

@@ -604,7 +604,7 @@ class Parser
         p_type = consume(:TYPE_ID).value.to_sym  # The type param name (T)
         p_name = "comptime"
       elsif match!(:CHAR, ":")
-        p_type = parse_type_annotation(allow_capabilities: false)
+        p_type = parse_type_annotation
       end
 
       default_val = nil
@@ -1658,12 +1658,12 @@ class Parser
         consume(:VAR_ID)   # name is for documentation only
         consume(:CHAR, ':')
       end
-      param_types << parse_type_annotation(allow_capabilities: false)
+      param_types << parse_type_annotation
       break unless match!(:CHAR, ',')
     end
     consume(:CHAR, ')')
     consume(:ARROW, '->')
-    return_type = parse_type_annotation(allow_capabilities: false)
+    return_type = parse_type_annotation
     # Parse optional @reentrant capability on fn-type annotations.
     # FN(Int64) -> Bool @reentrant means the parameter accepts @reentrant functions.
     allows_reentrant = false
@@ -1681,7 +1681,7 @@ class Parser
     })
   end
 
-  def parse_type_annotation(allow_capabilities: true)
+  def parse_type_annotation
     # Function type: FN(Type, ...) -> ReturnType
     return parse_fn_type_annotation if match?(:KEYWORD, 'FN')
 
@@ -1811,130 +1811,22 @@ class Parser
       end
     end
 
-    # Check for capability suffix: Type @multiowned, Type @shared, Type @locked, @list, @pool.
-    # Not permitted on function parameters (functions take plain Types, not Capabilities).
-    ownership  = nil
-    sync       = nil
-    collection = nil
-    is_soa     = false
-    is_indirect = false
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @raw @list @pool @set @soa].include?(current.value)
-      # Collection types (@list, @pool, @set), @link (weak reference), and @raw (byte buffer)
-      # are structural types — they must be allowed on function parameters.
-      is_structural = %w[@list @pool @set @link @raw @soa @indirect].include?(current.value)
-      unless allow_capabilities || is_structural
-        error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
-      end
-      cap_tok = consume(:VAR_ID)
-      case cap_tok.value
-      when "@multiowned" then ownership = :multiowned
-      when "@shared"     then ownership = :shared
-      when "@link"       then ownership = :link
-      when "@locked"      then sync      = :locked
-      when "@writeLocked" then sync     = :write_locked
-      when "@local"       then sync     = :local
-      when "@raw"         then sync     = :raw
-      when "@indirect"
-        @last_indirect_consumed = true  # Signal to union field parser
-        is_indirect = true if inner.start_with?("[")
-      when "@soa"
-        unless inner.start_with?("[") && inner.match?(/\[\d+\]/)
-          error!(cap_tok, "@soa requires a fixed-size array type (e.g. Particle[10000]@soa)")
-        end
-        is_soa = true
-      when "@list"
-        unless inner.start_with?("[")
-          error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
-        end
-        collection = :list
-        mods = parse_collection_modifiers!(cap_tok)
-        shard_count = mods[:shard_count]
-        is_soa = mods[:soa]
-      when "@pool"
-        unless inner.start_with?("[")
-          error!(cap_tok, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
-        end
-        collection = :pool
-        mods = parse_collection_modifiers!(cap_tok)
-        shard_count = mods[:shard_count]
-        is_soa = mods[:soa]
-      when "@set"
-        unless inner.start_with?("[")
-          error!(cap_tok, "Collection capability @set requires an array type (e.g. String[]@set)")
-        end
-        collection = :set
-      end
+    # Capability suffix: T @shared, T[]@list:soa, T[N]@soa:shared:locked, HashMap<V>@sharded(N), etc.
+    # Parser only does token consumption and duplicate detection. Semantic validation
+    # (e.g., "@list requires array", "@soa requires fixed array") is in the annotator.
+    caps = parse_capabilities
+    ownership   = caps&.dig(:ownership)
+    sync        = caps&.dig(:sync)
+    collection  = caps&.dig(:collection)
+    is_soa      = caps&.dig(:is_soa) || false
+    is_indirect = caps&.dig(:is_indirect) || false
+    shard_count = caps&.dig(:shard_count)
 
-      # `:` join: allow combining ownership + sync in a single annotation (order-independent).
-      # Only for @multiowned/@shared/@locked/@writeLocked — not @list/@pool.
-      # Accepts both 'locked' and '@locked' after ':' (same convention as branch prefixes).
-      # Allow chaining multiple modifiers with ':' (e.g., @shared:sharded(32):locked)
-      while (ownership || sync || shard_count || is_soa || is_indirect) && !collection && match?(:CHAR, ':')
-        consume(:CHAR, ':')
-        unless current.type == :VAR_ID || current.type == :INT64
-          error!(current, "Expected a capability modifier after ':'")
-        end
-        normalized = current.value.to_s
-        normalized = normalized.start_with?('@') ? normalized : "@#{normalized}"
-
-        case normalized
-        when "@multiowned"
-          error!(current, "Duplicate ownership") if ownership
-          consume(:VAR_ID); ownership = :multiowned
-        when "@shared"
-          error!(current, "Duplicate ownership") if ownership
-          consume(:VAR_ID); ownership = :shared
-        when "@locked"
-          error!(current, "Duplicate sync") if sync
-          consume(:VAR_ID); sync = :locked
-        when "@writeLocked"
-          error!(current, "Duplicate sync") if sync
-          consume(:VAR_ID); sync = :write_locked
-        when "@sharded"
-          error!(current, "Duplicate shard count") if shard_count
-          consume(:VAR_ID)
-          consume(:CHAR, '(')
-          n = consume_number.value.to_i
-          error!(cap_tok, "@sharded requires N >= 2, got #{n}") if n < 2
-          consume(:CHAR, ')')
-          shard_count = n
-        when "@soa"
-          error!(current, "Duplicate soa") if is_soa
-          consume(:VAR_ID); is_soa = true
-        when "@indirect"
-          error!(current, "Duplicate indirect") if is_indirect
-          consume(:VAR_ID); is_indirect = true
-        else
-          error!(current, "Expected a capability modifier (locked, writeLocked, shared, sharded, soa, indirect) after ':'")
-        end
-      end
-
-    end
+    # @indirect on non-array types (union fields) only sets @last_indirect_consumed
+    # (signals union field parser). The Type itself is not heap-boxed.
+    is_indirect = false if is_indirect && !inner.start_with?("[")
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
-
-    # HashMap@sharded(N) — sharding capability for HashMap types.
-    # Syntax: HashMap<V>@sharded(N) or HashMap<V>@sharded(N):locked
-    if base.start_with?("HashMap") && !shard_count && match?(:VAR_ID) && current.value == "@sharded"
-      cap_tok = consume(:VAR_ID)
-      consume(:CHAR, '(')
-      n = consume_number.value.to_i
-      error!(cap_tok, "@sharded requires N >= 2, got #{n}") if n < 2
-      consume(:CHAR, ')')
-      shard_count = n
-
-      # Optional :locked or :writeLocked modifier joined to @sharded
-      if match?(:CHAR, ':')
-        consume(:CHAR, ':')
-        if match?(:VAR_ID) && %w[locked writeLocked].include?(current.value)
-          mod_tok = consume(:VAR_ID)
-          sync = mod_tok.value == "locked" ? :locked : :write_locked
-        else
-          error!(current, "Expected 'locked' or 'writeLocked' after @sharded(N):")
-        end
-      end
-    end
-
 
     loc = is_heap ? :heap : (is_indirect ? :heap : nil)
     t = Type.new(base_sym, ownership: ownership, sync: sync, location: loc, collection: collection, shard_count: shard_count)
@@ -2057,6 +1949,88 @@ class Parser
   def parse_sharded_modifier_if_present!(cap_tok)
     parse_collection_modifiers!(cap_tok)[:shard_count]
   end
+
+  # All recognized capability tokens.
+  CAPABILITY_TOKENS = %w[@multiowned @shared @locked @writeLocked @local @indirect @link @raw @list @pool @set @soa @sharded].freeze
+
+  # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
+  # Returns nil if no capability token is present, or a Hash:
+  #   { ownership:, sync:, collection:, is_soa:, is_indirect:, shard_count: }
+  # No semantic validation — just token consumption and duplicate detection.
+  def parse_capabilities
+    return nil unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
+
+    result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil }
+    apply_capability!(result, consume(:VAR_ID))
+
+    # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
+    while match?(:CHAR, ':')
+      consume(:CHAR, ':')
+      unless current.type == :VAR_ID || current.type == :INT64
+        error!(current, "Expected a capability modifier after ':'")
+      end
+      # After ':', accept both 'locked' and '@locked' forms.
+      tok = consume(:VAR_ID)
+      normalized_value = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
+      apply_capability!(result, tok, normalized_value)
+    end
+
+    result
+  end
+
+  private
+
+  # Apply a single capability token to the result hash. Detects duplicates.
+  def apply_capability!(result, token, value = token.value)
+    case value
+    when "@multiowned"
+      error!(token, "Duplicate ownership") if result[:ownership]
+      result[:ownership] = :multiowned
+    when "@shared"
+      error!(token, "Duplicate ownership") if result[:ownership]
+      result[:ownership] = :shared
+    when "@link"
+      error!(token, "Duplicate ownership") if result[:ownership]
+      result[:ownership] = :link
+    when "@locked"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :locked
+    when "@writeLocked"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :write_locked
+    when "@local"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :local
+    when "@raw"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :raw
+    when "@indirect"
+      error!(token, "Duplicate indirect") if result[:is_indirect]
+      @last_indirect_consumed = true
+      result[:is_indirect] = true
+    when "@soa"
+      error!(token, "Duplicate soa") if result[:is_soa]
+      result[:is_soa] = true
+    when "@list"
+      error!(token, "Duplicate collection") if result[:collection]
+      result[:collection] = :list
+    when "@pool"
+      error!(token, "Duplicate collection") if result[:collection]
+      result[:collection] = :pool
+    when "@set"
+      error!(token, "Duplicate collection") if result[:collection]
+      result[:collection] = :set
+    when "@sharded"
+      error!(token, "Duplicate shard count") if result[:shard_count]
+      consume(:CHAR, '(')
+      result[:shard_count] = consume_number.value.to_i
+      consume(:CHAR, ')')
+    else
+      error!(token, "Unknown capability modifier: #{value}")
+    end
+  end
+
+  public
 
   # parse_striped_modifier! removed — striped is now :sharded(N) @locked composition
 

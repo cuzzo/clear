@@ -413,7 +413,7 @@ private
     validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
 
     # Make type params visible during type annotation validation
-    node.params.each { |p| validate_type_annotation!(node, p[:type]) if p[:type].is_a?(Type) }
+    node.params.each { |p| validate_type_annotation!(node, p[:type], is_param: true) if p[:type].is_a?(Type) }
     validate_type_annotation!(node, node.return_type) if node.return_type.is_a?(Type)
 
     # 3. Pre-declaration (so the function can be recursive)

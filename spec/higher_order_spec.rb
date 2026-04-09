@@ -510,13 +510,13 @@ RSpec.describe SemanticAnnotator do
       it "raises for @pool:sharded(1) — shard count must be >= 2" do
         expect {
           run('FN f() RETURNS Void -> MUTABLE sp: Float64[100]@pool:sharded(1) = []; RETURN; END')
-        }.to raise_error(ParserError, /requires N >= 2/)
+        }.to raise_error(SourceError, /requires N >= 2/)
       end
 
       it "raises for @pool:sharded on a non-array type" do
         expect {
           run('FN f() RETURNS Void -> x: Float64@pool:sharded(2) = 1; RETURN; END')
-        }.to raise_error(ParserError, /@pool requires an array type/)
+        }.to raise_error(SourceError, /@pool requires an array type/)
       end
 
       it "allows insert/get/remove/count on a sharded pool" do
@@ -598,13 +598,13 @@ RSpec.describe SemanticAnnotator do
       it "raises for @list:sharded(1) — shard count must be >= 2" do
         expect {
           run('FN f() RETURNS Void -> MUTABLE sl: Float64[]@list:sharded(1) = []; RETURN; END')
-        }.to raise_error(ParserError, /requires N >= 2/)
+        }.to raise_error(SourceError, /requires N >= 2/)
       end
 
       it "raises for @list:sharded on a non-array type" do
         expect {
           run('FN f() RETURNS Void -> x: Float64@list:sharded(2) = 1; RETURN; END')
-        }.to raise_error(ParserError, /@list requires an array type/)
+        }.to raise_error(SourceError, /@list requires an array type/)
       end
     end
 
