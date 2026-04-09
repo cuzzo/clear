@@ -72,7 +72,8 @@ pub fn SpscRing(comptime capacity: usize) type {
             const t = self.tail.load(.monotonic);
             const h = self.head.load(.acquire);
             if (t == h) return null; // empty
-            const msg = self.buffer[t & mask];
+            // Access via pointer to avoid debug-mode copy of entire buffer array.
+            const msg = (&self.buffer)[t & mask];
             self.tail.store(t +% 1, .release);
             return msg;
         }
@@ -82,7 +83,7 @@ pub fn SpscRing(comptime capacity: usize) type {
             const t = self.tail.load(.monotonic);
             const h = self.head.load(.acquire);
             if (t == h) return null;
-            return self.buffer[t & mask];
+            return (&self.buffer)[t & mask];
         }
 
         /// Consumer: number of pending messages.
