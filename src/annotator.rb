@@ -3460,7 +3460,7 @@ private
   # stubbed in test bodies. Walks the call chain transitively.
 
   # Known IO builtins that don't appear in @fn_nodes (runtime-level).
-  IO_BUILTINS = %w[tcpRead tcpWrite accept connect readFile writeFile
+  IO_BUILTINS = %w[tcpRead tcpWrite accept connect readFile writeFile readLine
                    listDir listAll fileSize socketRead socketWrite socketClose].to_set.freeze
 
   def validate_strict_io!(test_that, stubbed_fns)

@@ -635,6 +635,46 @@ pub const CheatLib = struct {
         if (ctx.err) |e| return e;
     }
 
+    // Read Line from stdin
+    const ReadLineCtx = struct {
+        allocator: std.mem.Allocator,
+        result: []const u8 = &.{},
+        err: ?anyerror = null,
+        fn run(ptr: ?*anyopaque) callconv(.c) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            var buf: [4096]u8 = undefined;
+            var pos: usize = 0;
+            while (pos < buf.len) {
+                const n = std.posix.read(std.posix.STDIN_FILENO, buf[pos..][0..1]) catch |e| {
+                    self.err = e;
+                    return;
+                };
+                if (n == 0) break; // EOF
+                if (buf[pos] == '\n') break;
+                pos += 1;
+            }
+            if (pos > 0 and buf[pos - 1] == '\r') {
+                pos -= 1;
+            }
+            self.result = self.allocator.dupe(u8, buf[0..pos]) catch |e| {
+                self.err = e;
+                return;
+            };
+        }
+    };
+
+    pub noinline fn readLine(allocator: std.mem.Allocator) ![]const u8 {
+        var ctx = ReadLineCtx{ .allocator = allocator };
+        if (fp.scheduler_running) {
+            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
+            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &ReadLineCtx.run), @ptrCast(&ctx));
+        } else {
+            ReadLineCtx.run(@ptrCast(&ctx));
+        }
+        if (ctx.err) |e| return e;
+        return ctx.result;
+    }
+
     // String Lib
 
     // Used to make HEAP strings

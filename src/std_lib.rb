@@ -131,7 +131,18 @@ STD_LIB = {
     can_fail: true,
   },
 
-  # 6. Split (String -> String[])
+  # 6. Read Line from stdin
+  "readLine!" => {
+    args: [],
+    return: STRING_TYPE,
+    return_alloc: :heap,
+    zig: "try CheatLib.readLine({alloc})",
+    allocates: true,
+    alloc: :node_storage,
+    can_fail: true,
+  },
+
+  # 7. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :"String[]",
