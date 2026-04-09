@@ -224,12 +224,7 @@ test "PROVE slab reuse (Swiss Cheese scenario)" {
     }
 }
 
-// TODO(v0.2): Fix slab allocator depot-level free list corruption under
-// cross-thread producer-consumer pattern. The magazine ownership fix handles
-// magazine-level issues, but depot free_head gets corrupted when multiple
-// SlabAllocator instances share threadlocal magazines across OS threads.
 test "Producer-Consumer contention" {
-    if (true) return error.SkipZigTest; // Known issue — skip until v0.2
     // Setup
     var slab = SlabAllocator(TestObj).init(
         std.heap.page_allocator,
@@ -247,6 +242,7 @@ test "Producer-Consumer contention" {
     // Fix: use 'const' because the pointer itself doesn't change
     const queue = try std.testing.allocator.create(Queue);
     defer std.testing.allocator.destroy(queue);
+    queue.* = .{};
 
     // Producer Thread
     const producer = try std.Thread.spawn(.{}, struct {
@@ -390,5 +386,196 @@ test "sequential create-destroy of slab instances does not leak state" {
         for (objs) |obj| slab.destroy(obj);
         slab.deinit();
     }
+}
+
+// ========================================================================
+// LARGE OBJECT TESTS — Reproduce bench 14 crash
+//
+// bench 14 uses Large stacks: 65536-byte objects in 2MB slab blocks.
+// 31 objects per slab, magazine size 64. This exercises the exact
+// configuration that crashes in the scheduler.
+// ========================================================================
+
+const LargeStack = [65536]u8;
+const LargeSlab = SlabAllocator(LargeStack);
+const LARGE_SLAB_BLOCK: usize = 2 * 1024 * 1024;
+
+/// Validate that a pointer is at a valid object offset within its slab.
+/// Mirrors the layout math from SlabAllocator.grow().
+fn validateLargePtr(slab_size: usize, obj: *LargeStack) !void {
+    const obj_size = @sizeOf(LargeStack);
+    // SlabHeader: 3 optional pointers (8 each) + usize + bool = ~33 bytes.
+    // We conservatively use 48 as the aligned header size (matches object_align=16).
+    const obj_align = 16; // @max(16, @max(@alignOf(LargeStack), @alignOf(?*anyopaque)))
+    const header_estimate = 48; // alignForward(~33, 16) — matches grow()
+    const first_obj = std.mem.alignForward(usize, header_estimate, obj_align);
+    const stride = std.mem.alignForward(usize, obj_size, obj_align);
+
+    const ptr_addr = @intFromPtr(obj);
+    const mask = ~(slab_size - 1);
+    const slab_base = ptr_addr & mask;
+    const offset = ptr_addr - slab_base;
+
+    if (offset < first_obj) {
+        std.debug.print("VALIDATION FAIL: offset 0x{x} < first_obj 0x{x}\n", .{ offset, first_obj });
+        return error.PtrBeforeFirstObj;
+    }
+    if ((offset - first_obj) % stride != 0) {
+        std.debug.print("VALIDATION FAIL: offset 0x{x}, (offset - 0x{x}) % 0x{x} = 0x{x}\n", .{
+            offset, first_obj, stride, (offset - first_obj) % stride,
+        });
+        return error.PtrNotAlignedToStride;
+    }
+    if (offset + obj_size > slab_size) {
+        std.debug.print("VALIDATION FAIL: offset 0x{x} + 0x{x} > slab_size 0x{x}\n", .{ offset, obj_size, slab_size });
+        return error.PtrPastSlabEnd;
+    }
+}
+
+test "Large slab: alloc-all-then-free-all (bench 14 pattern)" {
+    var slab = LargeSlab.init(std.heap.page_allocator, LARGE_SLAB_BLOCK);
+    defer slab.deinit();
+
+    // 200 objects = ~6-7 slabs (31 per slab). Enough to exercise multiple
+    // magazine fills/flushes (magazine=64).
+    const COUNT = 200;
+    var list: [COUNT]*LargeStack = undefined;
+
+    // Phase 1: Allocate all (simulates drainChannels batch)
+    for (&list) |*slot| {
+        const obj = try slab.create();
+        try validateLargePtr(LARGE_SLAB_BLOCK, obj);
+        @memset(obj, 0xCC); // Simulate Fiber.init debug fill
+        slot.* = obj;
+    }
+
+    // Phase 2: Free all (simulates finished handler freeStack)
+    for (list) |obj| {
+        slab.destroy(obj);
+    }
+
+    slab.flushThreadCache();
+}
+
+test "Large slab: alloc-free-alloc-free churn" {
+    var slab = LargeSlab.init(std.heap.page_allocator, LARGE_SLAB_BLOCK);
+    defer slab.deinit();
+
+    // Churn: alloc one, use it, free it, repeat. Tests magazine reuse path.
+    for (0..500) |_| {
+        const obj = try slab.create();
+        try validateLargePtr(LARGE_SLAB_BLOCK, obj);
+        @memset(obj, 0xCC);
+        slab.destroy(obj);
+    }
+
+    slab.flushThreadCache();
+}
+
+test "Large slab: batch alloc/free cycles with memset (magazine flush)" {
+    var slab = LargeSlab.init(std.heap.page_allocator, LARGE_SLAB_BLOCK);
+    defer slab.deinit();
+
+    // Allocate in batches of 80 (> magazine size 64) to force flush paths
+    const BATCH = 80;
+    var batch: [BATCH]*LargeStack = undefined;
+
+    for (0..10) |_| {
+        for (&batch) |*slot| {
+            const obj = try slab.create();
+            try validateLargePtr(LARGE_SLAB_BLOCK, obj);
+            @memset(obj, 0xCC); // Overwrites Node.next at obj[0..8]
+            slot.* = obj;
+        }
+        for (batch) |obj| {
+            slab.destroy(obj);
+        }
+    }
+
+    slab.flushThreadCache();
+}
+
+test "Large slab: cross-thread alloc on A, free on B" {
+    var slab = LargeSlab.init(std.heap.page_allocator, LARGE_SLAB_BLOCK);
+    defer slab.deinit();
+
+    const COUNT = 200;
+    var objs: [COUNT]*LargeStack = undefined;
+
+    // Thread A (main): allocate all
+    for (&objs) |*slot| {
+        const obj = try slab.create();
+        try validateLargePtr(LARGE_SLAB_BLOCK, obj);
+        @memset(obj, 0xCC);
+        slot.* = obj;
+    }
+
+    // Thread B: free all
+    const t = try std.Thread.spawn(.{}, struct {
+        fn run(s: *LargeSlab, os: []const *LargeStack) void {
+            for (os) |o| s.destroy(o);
+            s.flushThreadCache();
+        }
+    }.run, .{ &slab, &objs });
+    t.join();
+}
+
+test "Large slab: cross-thread producer-consumer" {
+    var slab = LargeSlab.init(std.heap.page_allocator, LARGE_SLAB_BLOCK);
+    defer slab.deinit();
+
+    const ItemCount = 500;
+
+    const Queue = struct {
+        items: [ItemCount]?*LargeStack = undefined,
+        ready_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    };
+    const queue = try std.testing.allocator.create(Queue);
+    defer std.testing.allocator.destroy(queue);
+    queue.* = .{};
+
+    // Producer: allocate + memset (simulates drainChannels + Fiber.init)
+    const producer = try std.Thread.spawn(.{}, struct {
+        fn run(s: *LargeSlab, q: *Queue) void {
+            for (0..ItemCount) |i| {
+                const obj = s.create() catch @panic("Alloc failed");
+                // Validate pointer is at a valid slab offset
+                validateLargePtr(LARGE_SLAB_BLOCK, obj) catch |e| {
+                    std.debug.print("PRODUCER: bad ptr at alloc #{d}: {}\n", .{ i, e });
+                    @panic("Producer got bad pointer from create()");
+                };
+                @memset(obj, 0xCC);
+                q.items[i] = obj;
+                _ = q.ready_count.fetchAdd(1, .release);
+            }
+        }
+    }.run, .{ &slab, queue });
+
+    // Consumer: free (simulates finished handler)
+    const consumer = try std.Thread.spawn(.{}, struct {
+        fn run(s: *LargeSlab, q: *Queue) void {
+            var consumed: usize = 0;
+            while (consumed < ItemCount) {
+                while (q.ready_count.load(.acquire) <= consumed) {
+                    std.atomic.spinLoopHint();
+                }
+                const obj = q.items[consumed].?;
+                // Validate pointer before passing to destroy
+                validateLargePtr(LARGE_SLAB_BLOCK, obj) catch |e| {
+                    std.debug.print("CONSUMER: bad ptr at free #{d}: 0x{x}, err={}\n", .{
+                        consumed, @intFromPtr(obj), e,
+                    });
+                    @panic("Consumer got bad pointer from queue");
+                };
+                s.destroy(obj);
+                consumed += 1;
+            }
+        }
+    }.run, .{ &slab, queue });
+
+    producer.join();
+    consumer.join();
+
+    slab.flushThreadCache();
 }
 
