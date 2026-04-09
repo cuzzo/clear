@@ -970,6 +970,85 @@ RSpec.describe StaticLeakChecker do
   end
 
   # ===========================================================================
+  # FRAME_OVERFLOW: safety net catches missing loop marks
+  # ===========================================================================
+  describe "FRAME_OVERFLOW detection" do
+    # Helper: run full pipeline, then sabotage mark_per_iter and re-check
+    def run_checker_without_marks(src, fn_name)
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir.transform!(ast)
+
+      fn = fn_nodes[fn_name]
+      raise "Function '#{fn_name}' not found" unless fn
+
+      # Sabotage: remove mark_per_iter from all loops to simulate annotator bug
+      fn.body.each do |stmt|
+        stmt.mark_per_iter = false if stmt.respond_to?(:mark_per_iter=)
+      end
+
+      bindings = mir.cleanup_bindings[fn_name] || {}
+      can_fail_fns = Set.new
+      fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
+      checker = StaticLeakChecker.new(fn, bindings: bindings, can_fail_fns: can_fail_fns)
+      checker.check!
+    end
+
+    it "catches loop with stdlib_allocates call (toString) when mark_per_iter sabotaged" do
+      errors = run_checker_without_marks(<<~CLEAR, "test")
+        FN test() RETURNS Void ->
+            MUTABLE keys: String[]@list = List[];
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+                keys.append(toString(i));
+                i = i + 1_i64;
+            END
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to include(a_string_matching(/FRAME_OVERFLOW/))
+    end
+
+    it "catches loop with string concat BinaryOp when mark_per_iter sabotaged" do
+      errors = run_checker_without_marks(<<~CLEAR, "test")
+        FN test() RETURNS Void ->
+            MUTABLE keys: String[]@list = List[];
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+                keys.append("b:" + toString(i));
+                i = i + 1_i64;
+            END
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to include(a_string_matching(/FRAME_OVERFLOW/))
+    end
+
+    it "passes when mark_per_iter is set correctly" do
+      errors = run_checker(<<~CLEAR, "test")
+        FN test() RETURNS Void ->
+            MUTABLE keys: String[]@list = List[];
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+                keys.append(toString(i));
+                i = i + 1_i64;
+            END
+            RETURN;
+        END
+      CLEAR
+      expect(errors).to be_empty
+    end
+  end
+
+  # ===========================================================================
   # BG escape promotion: MIR::Promote(:bg_string) for string captures
   # ===========================================================================
   describe "BG escape promotion for string captures" do

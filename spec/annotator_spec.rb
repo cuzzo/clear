@@ -1383,6 +1383,47 @@ RSpec.describe SemanticAnnotator do
         expect(loop_node.mark_per_iter).to be false
       end
 
+      it "sets loop marks when mutates_receiver on outer var but args allocate from frame" do
+        # append(outer_list, value) — the append itself targets the container's backing,
+        # but the VALUE arg (toString) allocates a frame string every iteration.
+        # The outer_vars short-circuit must not skip checking args.
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE keys: String[]@list = List[];
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+              keys.append(toString(i));
+              i = i + 1_i64;
+            END
+            RETURN;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+        expect(loop_node.mark_per_iter).to be true
+      end
+
+      it "sets loop marks when mutates_receiver on outer var with nested frame-allocating calls" do
+        # keys.append("b:" + toString(n)) — string concat AND toString both allocate
+        # from frame. Even though append's receiver is outer, the nested args must be checked.
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE keys: String[]@list = List[];
+            MUTABLE i = 0_i64;
+            WHILE i < 10 DO
+              keys.append("b:" + toString(i));
+              i = i + 1_i64;
+            END
+            RETURN;
+          END
+        CLEAR
+        annotated = run(src)
+        fn = annotated.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+        expect(loop_node.mark_per_iter).to be true
+      end
+
       it "does NOT mark loop as safe when outer var is assigned a frame-allocating call" do
         # BigS has 130 fields (>128 threshold) → frame allocation.
         # Assigning frame-allocated return value to an outer var escapes the iteration.

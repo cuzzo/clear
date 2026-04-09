@@ -47,7 +47,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -55,6 +55,21 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
+
+  # Skip rebuild if output is newer than source AND compiler files.
+  unless force || module_mode || profile
+    if File.exist?(output)
+      out_mtime = File.mtime(output)
+      src_mtime = File.mtime(source)
+      compiler_mtime = Dir.glob(File.join(SRC_DIR, '*.rb')).map { |f| File.mtime(f) }.max
+      runtime_mtime = File.mtime(File.join(ZIG_DIR, 'runtime-header.zig')) rescue Time.at(0)
+      newest_dep = [src_mtime, compiler_mtime, runtime_mtime].compact.max
+      if out_mtime > newest_dep
+        $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
+        return :up_to_date
+      end
+    end
+  end
 
   # Transpile
   transpile_flag = module_mode ? '--test' : ''
@@ -240,6 +255,9 @@ when 'build'
     when '--no-stack-check'
       stack_check = false
       i += 1
+    when '--force'
+      @force_build = true
+      i += 1
     else
       remaining << args[i]
       i += 1
@@ -247,11 +265,12 @@ when 'build'
   end
 
   source = remaining.first
-  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check]" unless source
+  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
+  exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
   # Post-build stack verification

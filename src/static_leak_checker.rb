@@ -241,12 +241,21 @@ class StaticLeakChecker
     end
   end
 
-  # Check if a loop body contains any MIR::Alloc with frame allocation.
+  # Check if a loop body contains any frame allocation.
+  # Checks both MIR::Alloc nodes AND AST-level indicators (stdlib_allocates,
+  # string concat BinaryOp) to catch cases where the transpiler emits
+  # rt.frameAlloc() without a corresponding MIR::Alloc node.
   def body_has_frame_alloc?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |stmt|
       case stmt
       when MIR::Alloc then stmt.alloc == :frame
+      when AST::VarDecl, AST::BindExpr
+        stmt.storage == :frame || expr_has_frame_alloc?(stmt.value)
+      when AST::FuncCall, AST::MethodCall
+        expr_has_frame_alloc?(stmt)
+      when AST::Assignment
+        expr_has_frame_alloc?(stmt.value)
       when AST::IfStatement
         body_has_frame_alloc?(stmt.then_branch) || body_has_frame_alloc?(stmt.else_branch)
       when AST::MatchStatement
@@ -260,6 +269,40 @@ class StaticLeakChecker
       when AST::BgBlock, AST::BgStreamBlock then body_has_frame_alloc?(stmt.body)
       else false
       end
+    end
+  end
+
+  # Check if an expression tree contains implicit frame allocations
+  # (stdlib_allocates calls, string concat BinaryOps).
+  # mutates_receiver calls (append, etc.) allocate into the container's
+  # backing, not per-iteration frame scope -- skip their own stdlib_allocates
+  # but still check value args.
+  def expr_has_frame_alloc?(node)
+    return false unless node
+    case node
+    when AST::FuncCall
+      if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+        return node.args&.drop(1)&.any? { |a| expr_has_frame_alloc?(a) } || false
+      end
+      return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
+      node.args&.any? { |a| expr_has_frame_alloc?(a) } || false
+    when AST::MethodCall
+      if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+        return node.args&.any? { |a| expr_has_frame_alloc?(a) } || false
+      end
+      return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
+      expr_has_frame_alloc?(node.object) ||
+        (node.args&.any? { |a| expr_has_frame_alloc?(a) } || false)
+    when AST::BinaryOp
+      if node.op == :ADD
+        lt = node.left.type_info rescue nil
+        rt = node.right.type_info rescue nil
+        return true if (lt.is_a?(Type) ? lt.string? : lt == :String) ||
+                       (rt.is_a?(Type) ? rt.string? : rt == :String)
+      end
+      expr_has_frame_alloc?(node.left) || expr_has_frame_alloc?(node.right)
+    else
+      false
     end
   end
 

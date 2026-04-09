@@ -87,12 +87,14 @@ module AllocHelper
       return true if node.storage == :frame
       node_allocates_frame?(node.value, outer_vars)
     when AST::FuncCall
-      # mutates_receiver (e.g. append(outer_list, val)): allocation goes into the
-      # receiver's backing, not the iteration's frame scope. When the receiver is
-      # an outer variable, no per-iteration frame waste is produced.
+      # mutates_receiver (e.g. append(outer_list, val)): the mutation itself targets
+      # the receiver's backing, not the iteration's frame scope. But the VALUE args
+      # may still contain frame-allocating subexpressions (toString, concat, etc.).
       if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars
         receiver = node.args&.first
-        return false if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
+        if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
+          return node.args&.drop(1)&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
+        end
       end
       return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
       return false if node.respond_to?(:extern_call) && node.extern_call
@@ -102,10 +104,13 @@ module AllocHelper
     when AST::MethodCall
       return false if node.respond_to?(:pool_method) && node.pool_method
       return false if node.respond_to?(:set_method) && node.set_method
-      # Same as FuncCall: mutates_receiver on an outer container is not per-iteration waste.
+      # Same as FuncCall: the mutation targets the container's backing, but VALUE
+      # args may still contain frame-allocating subexpressions.
       if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars
         receiver = node.object
-        return false if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
+        if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
+          return node.args&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
+        end
       end
       return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
       fn = @fn_nodes&.[](node.name)
