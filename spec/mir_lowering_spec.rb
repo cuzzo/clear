@@ -1705,13 +1705,13 @@ RSpec.describe MIRLowering do
       expect(zig).to include('@import("math")')
     end
 
-    it "lowers local require to RawZig placeholder" do
+    it "lowers local require to Comment placeholder when no importer" do
       node = AST::RequireNode.new(tok, "utils.cht", nil, :local)
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.reason).to eq("require_local")
+      expect(result).to be_a(MIR::Comment)
+      expect(result.text).to include("utils.cht")
     end
   end
 

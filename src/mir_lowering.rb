@@ -647,10 +647,14 @@ class MIRLowering
 
     # NonReentrant guard
     if node.reentrant == :non_reentrant
-      prologue.unshift(MIR::RawZig.new(
-        "var _guard = try safety.StackGuard.enter(@src());\n    _guard.push();\n    defer _guard.pop();",
-        "non_reentrant_guard"
-      ))
+      guard_init = MIR::Let.new("_guard",
+        MIR::TryExpr.new(MIR::Call.new("safety.StackGuard.enter", [MIR::Call.new("@src", [], false)], false)),
+        true, nil, nil)
+      guard_push = MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "push", [], false), false)
+      guard_defer = MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "pop", [], false))
+      prologue.unshift(guard_defer)
+      prologue.unshift(guard_push)
+      prologue.unshift(guard_init)
     end
 
     # Param suppressions for unused params
@@ -1767,7 +1771,7 @@ class MIRLowering
       MIR::Import.new(node.namespace || node.path, node.namespace || node.path, nil)
     else
       # Local require: compile the module and inline the Zig body
-      return MIR::RawZig.new("// REQUIRE \"#{node.path}\" — no importer available", "require_local") unless @importer
+      return MIR::Comment.new("REQUIRE \"#{node.path}\" -- no importer available") unless @importer
 
       mod = @importer.compile_file(node.path, caller_dir: @source_dir)
 
@@ -2037,10 +2041,7 @@ class MIRLowering
       left = lower(node.left)
       right = lower(node.right)
       alloc = alloc_for_node(node)
-      return MIR::InlineZig.new(
-        "try std.mem.concat(#{alloc}, u8, &.{ #{emit_expr(left)}, #{emit_expr(right)} })",
-        "string_concat_2part"
-      )
+      return MIR::ConcatStr.new([left, right], alloc, nil)
     end
 
     left = lower(node.left)
@@ -2203,14 +2204,15 @@ class MIRLowering
     # OR EXIT "message": set error context + propagate
     if node.right.is_a?(AST::OrExit)
       if is_error
-        rt_name = @rt_name
-        left_raw = emit_expr(strip_try(left))
-        msg_zig = node.right.message ? emit_expr(lower(node.right.message)) : '""'
+        rt = MIR::Ident.new(@rt_name)
+        msg_node = node.right.message ? lower(node.right.message) : MIR::Lit.new('""')
         line = node.respond_to?(:token) && node.token ? node.token.line : 0
-        return MIR::RawZig.new(
-          "(#{left_raw} catch |__exit_err| {\n#{rt_name}.__error.message = #{msg_zig};\n#{rt_name}.__error.clear_line = #{line};\nreturn __exit_err;\n})",
-          "or_exit"
-        )
+        error_obj = MIR::FieldGet.new(rt, "__error")
+        set_msg = MIR::Set.new(MIR::FieldGet.new(error_obj, "message"), msg_node)
+        set_line = MIR::Set.new(MIR::FieldGet.new(error_obj, "clear_line"), MIR::Lit.new(line.to_s))
+        ret_err = MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
+        catch_block = MIR::ScopeBlock.new([set_msg, set_line, ret_err])
+        return MIR::TryCatch.new(strip_try(left), catch_block, "__exit_err")
       end
       return left
     end
@@ -2727,14 +2729,17 @@ class MIRLowering
   end
 
   def lower_field_assignment_with_cleanup(node)
-    rt_name = @rt_name
-    target_zig = emit_expr(lower(node.name.target))
-    field = node.name.field
-    value_zig = emit_expr(lower(node.value))
+    target = lower(node.name.target)
+    field = node.name.field.to_s
+    value = lower(node.value)
     fpc = node.field_pre_cleanup
-    alloc = alloc_from_sym(fpc[:alloc] || :heap)
-    code = "CheatLib.cleanup(#{fpc[:zig_type]}, #{alloc}, &#{target_zig}.#{field});\n#{target_zig}.#{field} = #{value_zig};"
-    MIR::RawZig.new(code, "field_assign_cleanup")
+    alloc = MIR::Ident.new(alloc_from_sym(fpc[:alloc] || :heap))
+    cleanup_call = MIR::Call.new("CheatLib.cleanup", [
+      MIR::Ident.new(fpc[:zig_type]), alloc,
+      MIR::AddressOf.new(MIR::FieldGet.new(target, field))
+    ], false)
+    assign = MIR::Set.new(MIR::FieldGet.new(target, field), value)
+    MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), assign])
   end
 
   def lower_auto_lock_assignment(node)
@@ -3130,8 +3135,11 @@ class MIRLowering
 
   def lower_macro_print(node)
     formats = node.args.map { |arg| zig_format_for_type(arg.full_type) }.join(" ")
-    values = node.args.map { |a| emit_expr(lower(a)) }.join(", ")
-    MIR::InlineZig.new("std.debug.print(\"#{formats}\\n\", .{#{values}})", "macro_print")
+    args_mir = node.args.map { |a| lower(a) }
+    format_lit = MIR::Lit.new("\"#{formats}\\n\"")
+    tuple_inner = args_mir.map { |a| emit_expr(a) }.join(", ")
+    tuple = MIR::Ident.new(".{#{tuple_inner}}")
+    MIR::Call.new("std.debug.print", [format_lit, tuple], false)
   end
 
   def zig_format_for_type(flux_type)
