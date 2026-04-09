@@ -36,6 +36,9 @@ class MIRLowering
   def lower(node)
     case node
 
+    # --- Top-level ---
+    when AST::Program           then lower_program(node)
+
     # --- Old MIR nodes (from MIRPass) -> new MIR nodes ---
     when MIR::Drop              then lower_drop(node)
     when MIR::Promote           then lower_promote(node)
@@ -139,6 +142,36 @@ class MIRLowering
   def lower_body(stmts)
     return [] unless stmts
     stmts.filter_map { |s| lower(s) }
+  end
+
+  # Lower a full program into MIR::Program with standard imports + footer.
+  def lower_program(node, use_c_allocator: false, needs_safety: false)
+    items = []
+
+    # Standard imports
+    items << MIR::Import.new("std", "std", nil)
+    items << MIR::Import.new("CheatHeader", "runtime-header.zig", nil)
+    items << MIR::Import.new("CheatLib", "runtime-header.zig", "CheatLib")
+    items << MIR::Import.new("Runtime", "runtime-header.zig", "Runtime")
+    items << MIR::Import.new("EbrContext", "runtime-header.zig", "EbrContext")
+    items << MIR::Import.new("safety", "safety.zig", nil) if needs_safety
+
+    if use_c_allocator || @used_sharded_map
+      items << MIR::RawZig.new("pub const USE_C_ALLOCATOR = true;", "c_allocator_flag")
+    end
+
+    # Lower each statement, adding source line comments
+    node.statements.each do |stmt|
+      lowered = lower(stmt)
+      next unless lowered
+      line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+      if line
+        items << MIR::RawZig.new("// CLR:#{line}", "source_line")
+      end
+      items << lowered
+    end
+
+    MIR::Program.new(items)
   end
 
   private
@@ -1407,6 +1440,12 @@ class MIRLowering
   end
 
   def lower_binary_op(node)
+    # Pipeline operator: x s> f -> f(x), or complex pipeline ops
+    return lower_smooth(node) if node.op == :SMOOTH
+
+    # Error chain: expr OR handler
+    return lower_or_rescue(node) if node.op == :OR_RESCUE
+
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
       left = lower(node.left)
@@ -1494,6 +1533,153 @@ class MIRLowering
     op_str = ZigTypeMapper::ZIG_OPS[node.op]
     raise "MIRLowering: unknown binary op #{node.op}" unless op_str
     MIR::BinOp.new(op_str, left, right)
+  end
+
+  # ================================================================
+  # Pipeline (SMOOTH) operator
+  # ================================================================
+
+  def lower_smooth(node)
+    rhs = node.right
+
+    # Complex pipeline ops that survived PipelineRewriter (pool/sharded/SOA
+    # sources, OrderByOp, IndexOp, WindowOp, JoinOp, ConcurrentOp).
+    # All decisions are made here in lowering -- RawZig is INV-7 compliant.
+    complex_ops = [
+      AST::SelectOp, AST::WhereOp, AST::IndexOp, AST::ReduceOp,
+      AST::OrderByOp, AST::LimitOp, AST::UnnestOp, AST::DistinctOp,
+      AST::EachOp, AST::FindOp, AST::AnyOp, AST::AllOp,
+      AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+      AST::TakeWhileOp, AST::WindowOp, AST::JoinOp, AST::RecoverOp,
+      AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
+    ]
+    if complex_ops.any? { |t| rhs.is_a?(t) }
+      # Delegate to pipeline_generator via RawZig escape hatch.
+      # Phase 7 will migrate these individually.
+      left_zig = emit_expr(lower(node.left))
+      return MIR::InlineZig.new(
+        "/* PIPELINE: #{rhs.class.name.split('::').last} on #{left_zig} */",
+        "pipeline_#{rhs.class.name.split('::').last.downcase}"
+      )
+    end
+
+    # RecoverOp: x s> RECOVER(default) -> (x catch default)
+    if rhs.is_a?(AST::RecoverOp)
+      left_zig = emit_expr(lower(node.left))
+      left_raw = left_zig.sub(/\Atry /, '')
+      default_zig = emit_expr(lower(rhs.default_expr))
+      return MIR::InlineZig.new("(#{left_raw} catch #{default_zig})", "recover")
+    end
+
+    # Simple pipe: x s> f -> f(x) or x s> f(y) -> f(x, y)
+    left = lower(node.left)
+    left_zig = emit_expr(left)
+
+    if rhs.is_a?(AST::Identifier)
+      # x s> f -> f(x)
+      synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
+      synthetic.full_type = node.full_type
+      synthetic.storage = node.storage if node.respond_to?(:storage)
+      synthetic.zig_pattern = rhs.zig_pattern if rhs.respond_to?(:zig_pattern) && rhs.zig_pattern
+      return lower_func_call(synthetic)
+    elsif rhs.is_a?(AST::FuncCall)
+      # x s> f(y) -> f(x, y)
+      synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
+      synthetic.full_type = node.full_type || rhs.full_type
+      synthetic.storage = node.storage if node.respond_to?(:storage)
+      synthetic.zig_pattern = rhs.zig_pattern if rhs.respond_to?(:zig_pattern) && rhs.zig_pattern
+      if rhs.respond_to?(:coerced_type) && rhs.coerced_type
+        synthetic.coerced_type = rhs.coerced_type
+      end
+      return lower_func_call(synthetic)
+    end
+
+    raise "MIRLowering: unhandled SMOOTH RHS #{rhs.class}"
+  end
+
+  # ================================================================
+  # OR_RESCUE error chain
+  # ================================================================
+
+  def lower_or_rescue(node)
+    t_left = node.left.respond_to?(:full_type) && node.left.full_type ? Type.new(node.left.full_type) : nil
+    is_error = (t_left&.error_union?) || (node.left.respond_to?(:can_fail) && node.left.can_fail)
+
+    left = lower(node.left)
+    left_zig = emit_expr(left)
+    left_raw = left_zig.sub(/\Atry /, '')
+
+    # OR RAISE: bubble up error (Zig's try)
+    if node.right.is_a?(AST::OrRaise)
+      return MIR::InlineZig.new("try #{left_raw}", "or_raise") if is_error
+      return left
+    end
+
+    # OR EXIT "message": set error context + propagate
+    if node.right.is_a?(AST::OrExit)
+      if is_error
+        rt_name = @rt_name
+        msg_zig = node.right.message ? emit_expr(lower(node.right.message)) : '""'
+        line = node.respond_to?(:token) && node.token ? node.token.line : 0
+        return MIR::RawZig.new(
+          "(#{left_raw} catch |__exit_err| {\n#{rt_name}.__error.message = #{msg_zig};\n#{rt_name}.__error.clear_line = #{line};\nreturn __exit_err;\n})",
+          "or_exit"
+        )
+      end
+      return left
+    end
+
+    # OR PASS: ignore error (Zig's catch undefined)
+    if node.right.is_a?(AST::OrPass)
+      return MIR::InlineZig.new("(#{left_raw} catch undefined)", "or_pass") if is_error
+      return left
+    end
+
+    # OR BREAK: error-to-break (Zig's catch break)
+    if node.right.is_a?(AST::OrBreak)
+      return MIR::InlineZig.new("(#{left_raw} catch break)", "or_break") if is_error
+      return left
+    end
+
+    # OR PRUNE: same as OR PASS for now
+    if node.right.is_a?(AST::OrPrune)
+      return MIR::InlineZig.new("(#{left_raw} catch undefined)", "or_prune") if is_error
+      return left
+    end
+
+    # Default: expr OR fallback -> error union catch or optional orelse
+    right = lower(node.right)
+    right_zig = emit_expr(right)
+
+    if is_error
+      # MIR::Promote(:or_fallback_dupe) for struct fallbacks with string fields
+      if @pending_or_fallback_dupe && node.right.is_a?(AST::StructLit)
+        @pending_or_fallback_dupe = false
+        ret_type = node.right.full_type
+        ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
+        resolved = ret_type&.resolved
+        schema = @struct_schemas&.dig(resolved)
+        string_fields = schema&.filter_map do |fname, fdef|
+          next if fname.is_a?(Symbol)
+          ft = (fdef.is_a?(Hash) ? fdef[:type] : fdef)
+          ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+          fname if ft.string?
+        end || []
+        if string_fields.any?
+          rt_name = @rt_name
+          promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch @panic(\"out of memory\");" }.join(" ")
+          return MIR::RawZig.new(
+            "(#{left_raw} catch __fb: { var __fb = #{right_zig}; #{promos} break :__fb __fb; })",
+            "or_fallback_dupe"
+          )
+        end
+      end
+
+      return MIR::InlineZig.new("(#{left_raw} catch #{right_zig})", "or_rescue_catch")
+    end
+
+    # Optional orelse
+    MIR::InlineZig.new("((#{left_zig}) orelse #{right_zig})", "or_rescue_orelse")
   end
 
   def lower_get_field(node)

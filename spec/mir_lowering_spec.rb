@@ -1762,4 +1762,218 @@ RSpec.describe MIRLowering do
       expect { lowering.lower(node) }.to raise_error(/ThenChain should be flattened/)
     end
   end
+
+  # =========================================================================
+  # Phase 5: Program node
+  # =========================================================================
+
+  describe "Program lowering" do
+    it "lowers empty program with standard imports" do
+      prog = AST::Program.new(tok, [])
+      result = lowering.lower(prog)
+      expect(result).to be_a(MIR::Program)
+      zig = emit(result)
+      expect(zig).to include('@import("std")')
+      expect(zig).to include('@import("runtime-header.zig")')
+      expect(zig).to include("CheatLib")
+      expect(zig).to include("Runtime")
+      expect(zig).to include("EbrContext")
+    end
+
+    it "lowers program with statements and source line comments" do
+      enum_node = AST::EnumDef.new(tok, "Color", ["Red", "Blue"], nil)
+      enum_node.full_type = :Void
+      prog = AST::Program.new(tok, [enum_node])
+      result = lowering.lower(prog)
+      zig = emit(result)
+      expect(zig).to include("// CLR:1")
+      expect(zig).to include("Color")
+    end
+
+    it "includes safety import when requested" do
+      prog = AST::Program.new(tok, [])
+      result = lowering.lower_program(prog, needs_safety: true)
+      zig = emit(result)
+      expect(zig).to include('@import("safety.zig")')
+    end
+
+    it "includes USE_C_ALLOCATOR when requested" do
+      prog = AST::Program.new(tok, [])
+      result = lowering.lower_program(prog, use_c_allocator: true)
+      zig = emit(result)
+      expect(zig).to include("USE_C_ALLOCATOR")
+    end
+  end
+
+  # =========================================================================
+  # Phase 5: SMOOTH (pipeline) operator
+  # =========================================================================
+
+  describe "SMOOTH pipeline lowering" do
+    it "lowers simple pipe x s> f to function call via intrinsic pattern" do
+      lhs = make_lit(:NUMBER, 42, full_type: :Number)
+      lhs.coerced_type = nil
+      rhs = AST::Identifier.new(tok, "double")
+      rhs.full_type = :Number
+      rhs.zig_pattern = "double({0})"
+
+      node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("double")
+      expect(zig).to include("42")
+    end
+
+    it "lowers pipe with args x s> f(y) to f(x, y) via intrinsic pattern" do
+      lhs = make_lit(:NUMBER, 10, full_type: :Number)
+      lhs.coerced_type = nil
+      arg = make_lit(:NUMBER, 20, full_type: :Number)
+      arg.coerced_type = nil
+      rhs = AST::FuncCall.new(tok, "add", [arg])
+      rhs.full_type = :Number
+      rhs.zig_pattern = "add({0}, {1})"
+
+      node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("add")
+      expect(zig).to include("10")
+      expect(zig).to include("20")
+    end
+
+    it "lowers complex pipeline ops to InlineZig placeholder" do
+      lhs = make_id("items", full_type: :List)
+      rhs = AST::CountOp.new(tok)
+      rhs.full_type = :Number
+
+      node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(result.reason).to include("pipeline")
+    end
+
+    it "raises on unhandled SMOOTH RHS" do
+      lhs = make_lit(:NUMBER, 1, full_type: :Number)
+      rhs = make_lit(:NUMBER, 2, full_type: :Number) # Literal is not a valid pipe target
+
+      node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
+      node.full_type = :Number
+
+      expect { lowering.lower(node) }.to raise_error(/unhandled SMOOTH/)
+    end
+  end
+
+  # =========================================================================
+  # Phase 5: OR_RESCUE error chain
+  # =========================================================================
+
+  describe "OR_RESCUE error chain lowering" do
+    def make_error_expr(name)
+      id = make_id(name, full_type: :"!Number")
+      # Simulate error union type
+      allow(id).to receive(:can_fail).and_return(true)
+      id
+    end
+
+    it "lowers OR RAISE with error to try" do
+      left = make_error_expr("getData")
+      right = AST::OrRaise.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("try")
+      expect(zig).to include("getData")
+    end
+
+    it "lowers OR RAISE with non-error to passthrough" do
+      left = make_id("x", full_type: :Number)
+      right = AST::OrRaise.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to eq("x")
+    end
+
+    it "lowers OR PASS with error to catch undefined" do
+      left = make_error_expr("getData")
+      right = AST::OrPass.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("catch undefined")
+    end
+
+    it "lowers OR BREAK with error to catch break" do
+      left = make_error_expr("getData")
+      right = AST::OrBreak.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("catch break")
+    end
+
+    it "lowers OR EXIT with error to catch + setError" do
+      left = make_error_expr("getData")
+      msg = make_lit(:STRING, "failed", full_type: :String)
+      right = AST::OrExit.new(tok, msg)
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("__exit_err")
+      expect(zig).to include("return __exit_err")
+    end
+
+    it "lowers error union with default fallback to catch" do
+      left = make_error_expr("getData")
+      right = make_lit(:NUMBER, 0, full_type: :Number)
+      right.coerced_type = nil
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("catch")
+      expect(zig).to include("0")
+    end
+
+    it "lowers optional with fallback to orelse" do
+      left = make_id("maybe", full_type: :"?Number")
+      right = make_lit(:NUMBER, 99, full_type: :Number)
+      right.coerced_type = nil
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("orelse")
+      expect(zig).to include("99")
+    end
+
+    it "lowers OR PRUNE with error to catch undefined" do
+      left = make_error_expr("getData")
+      right = AST::OrPrune.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node.full_type = :Number
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("catch undefined")
+    end
+  end
 end

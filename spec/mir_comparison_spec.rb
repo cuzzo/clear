@@ -474,4 +474,72 @@ RSpec.describe "MIR pipeline comparison" do
       expect(errors).to eq([])
     end
   end
+
+  # =========================================================================
+  # Phase 5: Full program lowering
+  # =========================================================================
+
+  describe "Program node lowering" do
+    it "produces MIR::Program with standard imports" do
+      src = <<~CLEAR
+        ENUM Color { Red, Blue }
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new(importer: nil, source_dir: ".", strict_test: false)
+      annotator.annotate!(ast)
+      PipelineRewriter.new(annotator).rewrite!(ast)
+      StringConcatRewriter.new.rewrite!(ast)
+
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir.transform!(ast)
+
+      fn_sigs = {}
+      ast.statements.each do |stmt|
+        next unless stmt.is_a?(AST::FunctionDef)
+        sig = stmt.full_type
+        fn_sigs[stmt.name] = sig if sig.is_a?(FunctionSignature)
+      end
+
+      lowering = MIRLowering.new(fn_sigs: fn_sigs)
+      emitter = MIREmitter.new
+
+      program = lowering.lower(ast)
+      expect(program).to be_a(MIR::Program)
+
+      zig = emitter.emit(program)
+      expect(zig).to include('@import("std")')
+      expect(zig).to include('@import("runtime-header.zig")')
+      expect(zig).to include("Color")
+      expect(zig).to include("enum")
+      expect(zig).to include("clearMain")
+    end
+  end
+
+  # =========================================================================
+  # Phase 5: OR_RESCUE comparison
+  # =========================================================================
+
+  describe "OR_RESCUE error chain comparison" do
+    it "lowers optional orelse correctly" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          items = [1, 2, 3];
+          first = items[0] OR 0;
+          RETURN;
+        END
+      CLEAR
+      results = compare_fn_body(src)
+      errors = results.select { |r| r[:error] }
+      expect(errors).to eq([])
+      # Should have an orelse somewhere
+      or_result = results.find { |r| r[:new_zig]&.include?("orelse") }
+      expect(or_result).not_to be_nil
+    end
+  end
 end
