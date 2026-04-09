@@ -383,11 +383,13 @@ RSpec.describe MIRLowering do
       expect(zig).to include("age: i64")
     end
 
-    it "lowers generic struct to RawZig" do
+    it "lowers generic struct to FnDef returning anonymous StructDef" do
       fields = { value: { type: :T } }
       node = AST::StructDef.new(tok, "Box", fields, nil, ["T"])
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::FnDef)
+      expect(result.comptime_params).to eq(["comptime T: type"])
+      expect(result.ret_type).to eq("type")
       zig = emit(result)
       expect(zig).to include("fn Box(comptime T: type)")
       expect(zig).to include("return struct {")

@@ -147,8 +147,8 @@ class ModuleImporter
 
     result = lowering.lower_module(ast)
     emitter = MIREmitter.new
-    zig_body = result[:items].filter_map { |item| emitter.emit(item) }.join("\n\n")
-    type_defs = result[:type_items].filter_map { |item| emitter.emit(item) }.join("\n\n")
+    zig_body = result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    type_defs = result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     CompiledModule.new(
       ast,

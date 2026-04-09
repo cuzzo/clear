@@ -218,10 +218,12 @@ class MIRLowering
       lowered = lower(stmt)
       next unless lowered
       line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
-      if line
-        items << MIR::Comment.new("CLR:#{line}")
+      # Some lowerings (e.g. union with helpers) return arrays of nodes
+      nodes = lowered.is_a?(::Array) ? lowered : [lowered]
+      nodes.each_with_index do |n, i|
+        items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+        items << n
       end
-      items << lowered
     end
 
     MIR::Program.new(items)
@@ -241,17 +243,21 @@ class MIRLowering
       when AST::FunctionDef
         next if stmt.visibility == :private
         lowered = lower(stmt)
-        fn_items << lowered if lowered
+        next unless lowered
+        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| fn_items << n }
       when AST::StructDef, AST::EnumDef, AST::UnionDef
         next if stmt.visibility == :private
         lowered = lower(stmt)
-        type_items << lowered if lowered
+        next unless lowered
+        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| type_items << n }
       when AST::RequireNode
         lowered = lower(stmt)
-        fn_items << lowered if lowered
+        next unless lowered
+        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| fn_items << n }
       when AST::ExternFnDecl, AST::ExternStructDecl
         lowered = lower(stmt)
-        fn_items << lowered if lowered
+        next unless lowered
+        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| fn_items << n }
       end
     end
 
@@ -391,15 +397,14 @@ class MIRLowering
 
     if node.type_params&.any?
       # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
-      params = node.type_params.map { |p| "comptime #{p}: type" }.join(", ")
-      fields = node.fields.map { |name, fd|
+      comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
+      fields_mir = node.fields.map { |name, fd|
         zig_t = transpile_type(fd[:type], is_field: true)
-        "        #{name}: #{zig_t},"
-      }.join("\n")
-      MIR::RawZig.new(
-        "fn #{node.name}(#{params}) type {\n    return struct {\n#{fields}\n    };\n}",
-        "generic_struct"
-      )
+        MIR::FieldDef.new(name.to_s, zig_t, nil)
+      }
+      inner_struct = MIR::StructDef.new(nil, fields_mir, nil, nil)
+      body = [MIR::ReturnStmt.new(inner_struct)]
+      MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
     else
       fields = node.fields.map { |name, fd|
         zig_t = transpile_type(fd[:type], is_field: true)
@@ -469,25 +474,20 @@ class MIRLowering
     }
 
     if node.type_params&.any?
-      # Generic union
-      params = node.type_params.map { |p| "comptime #{p}: type" }.join(", ")
-      variant_lines = variants.map { |v| "    #{v[:name]}: #{v[:zig_type]}," }.join("\n")
-      raw = "fn #{node.name}(#{params}) type {\n    return union(enum) {\n#{variant_lines}\n    };\n}"
+      # Generic union: fn Name(comptime T: type) type { return union(enum) { ... }; }
+      comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
+      inner_union = MIR::UnionTypeDef.new(nil, variants, nil)
+      body = [MIR::ReturnStmt.new(inner_union)]
+      generic_fn = MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
       if helper_structs.any?
-        # Combine helper structs + generic union into a multi-item RawZig
-        helper_code = helper_structs.map { |s| emit_struct_def_inline(s) }.join("\n\n")
-        MIR::RawZig.new("#{helper_code}\n\n#{raw}", "generic_union_with_helpers")
+        helper_structs + [generic_fn]
       else
-        MIR::RawZig.new(raw, "generic_union")
+        generic_fn
       end
     else
       union_node = MIR::UnionTypeDef.new(node.name, variants, nil)
       if helper_structs.any?
-        # Return array of nodes: helpers first, then union
-        # Wrap in a program-like container... actually we need a way to return multiple nodes
-        # For now, emit helper structs as RawZig and combine
-        helper_code = helper_structs.map { |s| emit_struct_def_inline(s) }.join("\n\n")
-        MIR::RawZig.new("#{helper_code}\n\n#{emit_union_inline(union_node)}", "union_with_helpers")
+        helper_structs + [union_node]
       else
         union_node
       end
@@ -532,7 +532,7 @@ class MIRLowering
         items << MIR::Import.new(mod_alias, mod_parts.first, member_chain)
       end
       items << MIR::TypeAlias.new(node.name, "#{mod_alias}.#{node.name}")
-      items.length == 1 ? items.first : MIR::RawZig.new(items.map { |i| emit_item(i) }.join("\n"), "extern_struct")
+      items.length == 1 ? items.first : items
     elsif node.fields.empty?
       MIR::Noop.new("empty_local_extern_struct")
     else

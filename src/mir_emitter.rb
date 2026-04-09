@@ -144,7 +144,11 @@ class MIREmitter
     methods = (node.methods || []).map { |m| emit(m) }.join("\n\n    ")
 
     parts = [fields, methods].reject(&:empty?).join("\n\n    ")
-    "#{vis}const #{node.name} = struct {\n    #{parts}\n};"
+    if node.name
+      "#{vis}const #{node.name} = struct {\n    #{parts}\n};"
+    else
+      "struct {\n    #{parts}\n    }"
+    end
   end
 
   def emit_enum_def(node)
@@ -158,7 +162,11 @@ class MIREmitter
     fields = node.variants.map { |v|
       "#{v[:name]}: #{v[:zig_type]}"
     }.join(", ")
-    "#{vis}const #{node.name} = union(enum) { #{fields} };"
+    if node.name
+      "#{vis}const #{node.name} = union(enum) { #{fields} };"
+    else
+      "union(enum) { #{fields} }"
+    end
   end
 
   def emit_import(node)
