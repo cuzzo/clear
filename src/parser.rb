@@ -1728,16 +1728,39 @@ class Parser
 
     # Element-level capability: T@shared[] means Array<Arc<T>>.
     # Parsed BEFORE the [] suffix so it attaches to the element type, not the collection.
+    # Also handles T@shared:locked[] (Arc<Mutex<T>>[]).
     elem_ownership = nil
     elem_sync = nil
-    if match?(:VAR_ID) && %w[@shared @multiowned @locked @writeLocked @link].include?(current.value) && peek_at(1)&.type == :CHAR && peek_at(1)&.value == '['
-      cap_tok = consume(:VAR_ID)
-      case cap_tok.value
-      when "@shared"     then elem_ownership = :shared
-      when "@multiowned" then elem_ownership = :multiowned
-      when "@locked"     then elem_sync = :locked
-      when "@writeLocked" then elem_sync = :write_locked
-      when "@link"       then elem_ownership = :link
+    if match?(:VAR_ID) && %w[@shared @multiowned @locked @writeLocked @link].include?(current.value)
+      # Lookahead: next token must be '[' (simple) or ':' followed by sync then '['
+      next_tok = peek_at(1)
+      is_elem_cap = (next_tok&.type == :CHAR && next_tok&.value == '[')
+      if !is_elem_cap && next_tok&.type == :CHAR && next_tok&.value == ':'
+        # Check for :locked[] or :writeLocked[] pattern
+        sync_tok = peek_at(2)
+        bracket_tok = peek_at(3)
+        is_elem_cap = sync_tok&.type == :VAR_ID &&
+                      %w[@locked @writeLocked locked writeLocked].include?(sync_tok&.value) &&
+                      bracket_tok&.type == :CHAR && bracket_tok&.value == '['
+      end
+      if is_elem_cap
+        cap_tok = consume(:VAR_ID)
+        case cap_tok.value
+        when "@shared"     then elem_ownership = :shared
+        when "@multiowned" then elem_ownership = :multiowned
+        when "@locked"     then elem_sync = :locked
+        when "@writeLocked" then elem_sync = :write_locked
+        when "@link"       then elem_ownership = :link
+        end
+        # Parse optional :sync suffix (e.g., @shared:locked)
+        if match?(:CHAR, ':')
+          consume(:CHAR, ':')
+          sync_tok = consume(:VAR_ID)
+          case sync_tok.value
+          when "@locked", "locked"       then elem_sync = :locked
+          when "@writeLocked", "writeLocked" then elem_sync = :write_locked
+          end
+        end
       end
     end
 

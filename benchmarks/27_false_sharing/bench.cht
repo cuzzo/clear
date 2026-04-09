@@ -1,0 +1,61 @@
+-- False Sharing Benchmark -- CLEAR (@shared:locked)
+--
+-- threadCount() fibers each increment their own @shared:locked counter.
+-- Each counter is an independent Arc<Mutex<Counter>> heap allocation, so
+-- counters naturally land on separate cache lines. No false sharing.
+--
+-- Compare to C/Go packed arrays where adjacent counters share a cache line,
+-- causing 5-20x slowdown from cache line bouncing across cores.
+--
+-- CLEAR's @shared eliminates false sharing by construction: every @shared
+-- value is its own heap allocation with a control block, guaranteeing
+-- cache line isolation without manual padding.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    workers = threadCount();
+    totalWork = 40000000_i64;
+    increments = totalWork / workers;
+
+    -- Each worker gets its own @shared:locked counter (separate heap alloc)
+    MUTABLE counters: Counter@shared:locked[]@list = [];
+    FOR i IN (0_i64 ..< workers) DO
+        counters.append(Counter{ value: 0 } @shared:locked);
+    END
+
+    t0 = timestampMs();
+
+    MUTABLE futures: ~Void[]@list = [];
+    MUTABLE wi = 0_i64;
+    WHILE wi < workers DO
+        ref = counters[wi];
+        futures.append(BG { @parallel ->
+            FOR j IN (0_i64 ..< increments) DO
+                WITH EXCLUSIVE ref AS inner {
+                    inner.value = inner.value + 1;
+                }
+            END
+        });
+        wi += 1;
+    END
+
+    FOR i IN (0_i64 ..< workers) -> NEXT futures[i];
+    elapsed = timestampMs() - t0;
+
+    -- Verify
+    MUTABLE total = 0_i64;
+    FOR i IN (0_i64 ..< workers) DO
+        ref = counters[i];
+        WITH ref AS inner {
+            total = total + inner.value;
+        }
+    END
+    expected = workers * increments;
+    ASSERT total == expected, "total mismatch";
+
+    print("Threads:     ${workers.toString()}");
+    print("Increments:  ${increments.toString()} per thread");
+    print("Time:        ${elapsed.toString()} ms  (no false sharing -- @shared:locked)");
+    print("Total:       ${total.toString()}");
+END
