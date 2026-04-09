@@ -232,6 +232,37 @@ class MIRLowering
     MIR::Program.new(items)
   end
 
+  # Lower a module AST into MIR items for inlining via REQUIRE.
+  # Emits only public declarations (types + functions + re-exports).
+  # No standard imports or runtime footer -- the importing file provides those.
+  #
+  # Returns { items: [MIR nodes], type_items: [MIR type nodes] }
+  def lower_module(node)
+    type_items = []
+    fn_items = []
+
+    node.statements.each do |stmt|
+      case stmt
+      when AST::FunctionDef
+        next if stmt.visibility == :private
+        lowered = lower(stmt)
+        fn_items << lowered if lowered
+      when AST::StructDef, AST::EnumDef, AST::UnionDef
+        next if stmt.visibility == :private
+        lowered = lower(stmt)
+        type_items << lowered if lowered
+      when AST::RequireNode
+        lowered = lower(stmt)
+        fn_items << lowered if lowered
+      when AST::ExternFnDecl, AST::ExternStructDecl
+        lowered = lower(stmt)
+        fn_items << lowered if lowered
+      end
+    end
+
+    { items: type_items + fn_items, type_items: type_items }
+  end
+
   private
 
   # ================================================================

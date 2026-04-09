@@ -14,48 +14,14 @@ class TestGenerator < ZigTranspiler
     @source_dir = File.expand_path(source_dir)
     @importer   = ModuleImporter.new(base_dir: @source_dir)
 
-    # 1. Parse AST
-    tokens = Lexer.new(cheat_code).tokenize
-    ast = Parser.new(tokens, cheat_code).parse
+    result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
 
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
-    annotator.annotate!(ast)
-
-    # 1b. Rewrite pipeline operators into plain AST nodes.
-    # Passes annotator for metadata access.
-    PipelineRewriter.new(annotator).rewrite!(ast)
-
-    # 2b. Flatten chained string + into StringConcat nodes.
-    StringConcatRewriter.new.rewrite!(ast)
-
-    # 2. Pre-populate signature table.
-    @fn_sigs = {}
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    fn_nodes.each do |name, fn|
-      sig = fn.full_type
-      if sig.is_a?(FunctionSignature)
-        @fn_sigs[name] = sig
-      else
-        fs = FunctionSignature.new(params: [], return_type: :Any)
-        fs.needs_rt = fn.needs_rt
-        fs.can_fail = fn.can_fail
-        fs.effects = fn.effects
-        @fn_sigs[name] = fs
-      end
-    end
-
-    # Compute plans + insert MIR nodes (Drop, Promote, SuppressCleanup).
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
+    @fn_sigs = result.fn_sigs
     @mir_pass_done = true
-    @moved_guard_info = {}
-    fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
-
-    # 3. Get Raw Zig Body
+    @moved_guard_info = result.moved_guard_info
     @needs_safety_import = false
-    transpiled_body = visit(ast)
+
+    transpiled_body = visit(result.ast)
     @_needs_safety = @needs_safety_import
 
     # 3. Detect if test uses DO/BG blocks, TCP resources, or sharded EACH (all need a running fiber scheduler).
@@ -171,72 +137,28 @@ class TestGenerator < ZigTranspiler
     require_relative '../src/mir_emitter'
 
     @source_dir = File.expand_path(source_dir)
-    @importer   = ModuleImporter.new(base_dir: @source_dir)
+    @importer   = ModuleImporter.new(base_dir: @source_dir, use_mir: true)
 
-    # 1. Parse + annotate
-    tokens = Lexer.new(cheat_code).tokenize
-    ast = Parser.new(tokens, cheat_code).parse
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir)
-    annotator.annotate!(ast)
-    PipelineRewriter.new(annotator).rewrite!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-
-    # 2. MIR pass (inserts MIR::Drop etc into AST)
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir_pass.transform!(ast)
-
-    # 3. Collect schemas and fn_sigs
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
-    ast.statements.each do |stmt|
-      case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
-      when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
-      end
-    end
-
-    fn_sigs = {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        fn_sigs[stmt.name] = sig
-      else
-        fs = FunctionSignature.new(params: [], return_type: :Any)
-        fs.needs_rt = stmt.needs_rt
-        fs.can_fail = stmt.can_fail
-        fs.effects = stmt.effects
-        fn_sigs[stmt.name] = fs
-      end
-    end
-
-    moved_guard_info = {}
-    fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
+    result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
 
     # Set up old transpiler state for pipeline fallback
-    @fn_sigs = fn_sigs
+    @fn_sigs = result.fn_sigs
     @mir_pass_done = true
-    @moved_guard_info = moved_guard_info
+    @moved_guard_info = result.moved_guard_info
     @needs_safety_import = false
     pipeline_cb = ->(node) { visit(node) }
 
-    # 4. MIR lowering
     lowering = MIRLowering.new(
-      struct_schemas: struct_schemas,
-      enum_schemas: enum_schemas,
-      union_schemas: union_schemas,
-      fn_sigs: fn_sigs,
-      moved_guard_info: moved_guard_info,
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      moved_guard_info: result.moved_guard_info,
       pipeline_fallback: pipeline_cb,
       importer: @importer,
       source_dir: @source_dir
     )
-    program = lowering.lower_program(ast)
+    program = lowering.lower_program(result.ast)
 
     # 5. Emit Zig - skip imports/aliases (test harness provides them)
     emitter = MIREmitter.new

@@ -20,6 +20,7 @@ require_relative "./control_flow"
 require_relative "./static_leak_checker"
 require_relative "./importer"
 require_relative "./transpiler_context"
+require_relative "./compiler_frontend"
 
 class ZigTranspiler
   include PipelineGenerator
@@ -47,52 +48,15 @@ class ZigTranspiler
     @active_stubs = {}
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
 
-    tokens    = Lexer.new(cheat_code).tokenize
-    ast       = Parser.new(tokens, cheat_code).parse
+    result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test)
 
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
-    annotator.annotate!(ast)
-
-    # Pass 2b: Rewrite pipeline operators into plain AST nodes.
-    # Runs AFTER annotation so we have type information for folds (MIN/MAX/AVG).
-    PipelineRewriter.new(annotator).rewrite!(ast)
-
-    # Pass 2c: Flatten chained string + into StringConcat nodes.
-    # Runs AFTER annotation (needs type_info to identify string + vs numeric +).
-    StringConcatRewriter.new.rewrite!(ast)
-
-    @ownership_graph = annotator.instance_variable_get(:@og)
-
-    # Pass C+D: MIRPass computes plans, inserts MIR nodes, and stamps
-    # cleanup info on AST nodes. Transpiler reads stamps, not plans.
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
+    @ownership_graph = result.annotator.instance_variable_get(:@og)
     @mir_pass_done = true
-
-    # Build moved_guard_info from stamped FunctionDef nodes.
-    @moved_guard_info = {}
-    fn_nodes.each { |name, fn| @moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
-
+    @moved_guard_info = result.moved_guard_info
     @needs_safety_import = false
-    @fn_sigs = {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        @fn_sigs[stmt.name] = sig
-      else
-        # Fallback for gen.rb/specs that don't produce FunctionSignature
-        fs = FunctionSignature.new(params: [], return_type: :Any)
-        fs.needs_rt = stmt.needs_rt
-        fs.can_fail = stmt.can_fail
-        fs.effects = stmt.effects
-        @fn_sigs[stmt.name] = fs
-      end
-    end
-    body = visit(ast)
+    @fn_sigs = result.fn_sigs
+
+    body = visit(result.ast)
     safety_line = @needs_safety_import ? "const safety = @import(\"safety.zig\");\n" : ""
     # Auto-detect: use c_allocator when @sharded maps or @pinned BG blocks are present.
     # GPA is not suitable for multi-threaded workloads (canary corruption under concurrent load).
@@ -230,73 +194,30 @@ class ZigTranspiler
 
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
-    @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths)
+    @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)
 
-    tokens    = Lexer.new(cheat_code).tokenize
-    ast       = Parser.new(tokens, cheat_code).parse
-
-    annotator = SemanticAnnotator.new(importer: @importer, source_dir: @source_dir, strict_test: strict_test)
-    annotator.annotate!(ast)
-
-    PipelineRewriter.new(annotator).rewrite!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir_pass.transform!(ast)
-
-    # Collect schemas and fn_sigs for MIRLowering
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
-    ast.statements.each do |stmt|
-      case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
-      when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
-      end
-    end
-
-    fn_sigs = {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        fn_sigs[stmt.name] = sig
-      else
-        fs = FunctionSignature.new(params: [], return_type: :Any)
-        fs.needs_rt = stmt.needs_rt
-        fs.can_fail = stmt.can_fail
-        fs.effects = stmt.effects
-        fn_sigs[stmt.name] = fs
-      end
-    end
-
-    moved_guard_info = {}
-    fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
+    result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test)
 
     # Set up old transpiler state for pipeline fallback
-    @fn_sigs = fn_sigs
+    @fn_sigs = result.fn_sigs
     @mir_pass_done = true
-    @moved_guard_info = moved_guard_info
+    @moved_guard_info = result.moved_guard_info
     @needs_safety_import = false
     pipeline_cb = ->(node) { visit(node) }
 
     lowering = MIRLowering.new(
-      struct_schemas: struct_schemas,
-      enum_schemas: enum_schemas,
-      union_schemas: union_schemas,
-      fn_sigs: fn_sigs,
-      moved_guard_info: moved_guard_info,
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      moved_guard_info: result.moved_guard_info,
       pipeline_fallback: pipeline_cb,
       importer: @importer,
       source_dir: @source_dir
     )
 
     needs_c_alloc = use_c_allocator
-    program = lowering.lower_program(ast, use_c_allocator: needs_c_alloc)
+    program = lowering.lower_program(result.ast, use_c_allocator: needs_c_alloc)
 
     emitter = MIREmitter.new
     body = emitter.emit(program)
