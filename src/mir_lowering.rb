@@ -765,15 +765,21 @@ class MIRLowering
     # Stub interception: replace stubbed function calls with stub behavior
     stub_info = (@active_stubs || {})[node.name]
     if stub_info
-      args_zig = node.args.map { |a| emit_expr(lower(a)) }
-      stub_code = case stub_info[:kind]
-      when :returns then stub_info[:var]
-      when :captures then "{ #{stub_info[:var]} += 1; }"
-      when :sequence
-        "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
-      when :with then "#{stub_info[:var]}(#{args_zig.join(', ')})"
+      case stub_info[:kind]
+      when :returns
+        return MIR::Ident.new(stub_info[:var])
+      when :with
+        args_mir = node.args.map { |a| lower(a) }
+        return MIR::Call.new(stub_info[:var], args_mir, false)
+      when :captures, :sequence
+        args_zig = node.args.map { |a| emit_expr(lower(a)) }
+        stub_code = if stub_info[:kind] == :captures
+          "{ #{stub_info[:var]} += 1; }"
+        else
+          "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
+        end
+        return MIR::InlineZig.new(stub_code, "stub_call")
       end
-      return MIR::InlineZig.new(stub_code, "stub_call")
     end
 
     # Intrinsic pattern: already resolved by annotator
@@ -1186,20 +1192,24 @@ class MIRLowering
 
       needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
                     (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("NumericMapType"))
-      bare_init = needs_alloc ? "#{zig_t}{ .alloc = #{alloc} }" : "#{zig_t}{}"
+      inner = if needs_alloc
+        MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc) }])
+      else
+        MIR::StructInit.new(zig_t, [])
+      end
 
       # Apply sync wrapping if needed (skip for striped maps)
       if !bare_ft.respond_to?(:striped?) || !bare_ft.striped?
         if ti.sync == :write_locked
-          bare_init = "CheatLib.RwLocked(#{zig_t}).init(#{bare_init})"
+          inner = MIR::Call.new("CheatLib.RwLocked(#{zig_t}).init", [inner], false)
         elsif ti.sync == :locked
-          bare_init = "CheatLib.Locked(#{zig_t}).init(#{bare_init})"
+          inner = MIR::Call.new("CheatLib.Locked(#{zig_t}).init", [inner], false)
         end
       end
 
       wrap_fn = is_arc ? "arcCreate" : "rcCreate"
-      bare_init = "try CheatLib.#{wrap_fn}(#{zig_t}, #{alloc}, #{bare_init})"
-      return MIR::InlineZig.new(bare_init, "hashmap_init") if node.pairs.empty?
+      inner = MIR::Call.new("CheatLib.#{wrap_fn}", [MIR::Ident.new(zig_t), MIR::Ident.new(alloc), inner], true)
+      return inner if node.pairs.empty?
     end
 
     zig_t = transpile_type(ti)
