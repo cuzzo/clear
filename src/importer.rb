@@ -7,10 +7,13 @@ class CircularDependencyError < StandardError; end
 class ModuleImporter
   CompiledModule = Struct.new(
     :ast,
-    :global_scope,   # annotator's global Scope (for importing symbols)
+    :global_scope,    # annotator's global Scope (for importing symbols)
     :transpiled_body, # the Zig body string for inlining
-    :source_dir,     # absolute directory containing the source file
-    :struct_schemas  # transpiler's @struct_schemas for RC cleanup propagation
+    :source_dir,      # absolute directory containing the source file
+    :struct_schemas,  # transpiler's @struct_schemas for RC cleanup propagation
+    :union_schemas,   # transpiler's @union_schemas for MATCH dispatch
+    :enum_schemas,    # transpiler's @enum_schemas for MATCH dispatch
+    :type_defs        # Zig type definitions (structs/unions/enums) for file-scope emission
   )
 
   def initialize(base_dir: Dir.pwd, pkg_paths: {})
@@ -67,7 +70,10 @@ class ModuleImporter
       annotator.scope_stack.first,
       zig_body,
       source_dir,
-      transpiler.struct_schemas
+      transpiler.struct_schemas,
+      transpiler.union_schemas,
+      transpiler.enum_schemas,
+      transpiler.module_type_defs
     )
 
     @module_cache[abs_path] = mod

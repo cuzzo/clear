@@ -270,8 +270,11 @@ private
       current_scope.declare(name, nil, imported_sig, false, false, nil, :static)
     end
 
-    # Import type definitions (structs) — pub and package types from same dir.
+    # Import type definitions (structs, unions, enums) respecting visibility.
     mod.global_scope.types.each do |type_name, type_entry|
+      vis = type_entry[:schema][:visibility] || :package
+      next if vis == :private
+      next unless (vis == :pub) || (vis == :package && same_dir)
       current_scope.declare_type(type_name, type_entry[:schema])
     end
   end
@@ -567,12 +570,14 @@ private
     # lookups don't reject them as unknown types.
     schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
 
+    schema[:visibility] = node.visibility || :package
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
 
   def visit_EnumDef(node)
     schema = { kind: :enum, variants: node.variants.to_set }
+    schema[:visibility] = node.visibility || :package
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
@@ -609,6 +614,7 @@ private
 
     schema = { kind: :union, variants: node.variants }
     schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
+    schema[:visibility] = node.visibility || :package
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end

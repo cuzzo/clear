@@ -2457,6 +2457,75 @@ RSpec.describe SemanticAnnotator do
         expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
       end
     end
+
+    context "importing union types from a required file" do
+      let(:helper) {
+        <<~FLUX
+          PUB UNION Result { Ok: Float64, Err: String }
+        FLUX
+      }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Float64 ->
+            r = Result{ Ok: 42.0 };
+            MATCH r START
+              Result.Ok AS val -> RETURN val;,
+              Result.Err -> RETURN 0.0;,
+            END
+          END
+        FLUX
+      }
+
+      it "makes the imported union type available" do
+        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+      end
+    end
+
+    context "importing enum types from a required file" do
+      let(:helper) {
+        <<~FLUX
+          PUB ENUM Color { Red, Green, Blue }
+        FLUX
+      }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Bool ->
+            c = Color.Red;
+            RETURN c == Color.Red;
+          END
+        FLUX
+      }
+
+      it "makes the imported enum type available" do
+        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+      end
+    end
+
+    context "PRIVATE types are not imported" do
+      let(:helper) {
+        <<~FLUX
+          PRIVATE STRUCT Secret { code: Float64 }
+          PUB FN helper() RETURNS Float64 -> RETURN 1.0; END
+        FLUX
+      }
+      let(:main) {
+        <<~FLUX
+          REQUIRE "helper.cht";
+          FN caller() RETURNS Float64 ->
+            s = Secret{ code: 42.0 };
+            RETURN s.code;
+          END
+        FLUX
+      }
+
+      it "rejects usage of a private struct from the required file" do
+        expect {
+          annotate_with_require(main, helpers: { "helper.cht" => helper })
+        }.to raise_error(/Secret/)
+      end
+    end
   end
 
   # ---------------------------------------------------------------------------

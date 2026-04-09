@@ -26,7 +26,7 @@ class ZigTranspiler
   include OwnershipGenerator
   include ZigTypeMapper
 
-  attr_reader :struct_schemas
+  attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
 
   def initialize(importer: nil, source_dir: nil)
     @importer   = importer
@@ -122,32 +122,31 @@ class ZigTranspiler
   # declarations that are importable (non-private). Used by ModuleImporter.
   def transpile_module(ast)
     @emitted_extern_modules = Set.new
-    parts = []
+    @fn_sigs ||= {}
+    type_parts = []
+    fn_parts = []
     ast.statements.each do |stmt|
       case stmt
       when AST::FunctionDef
         next if stmt.visibility == :private
-        parts << visit(stmt)
-      when AST::StructDef
+        fn_parts << visit(stmt)
+      when AST::StructDef, AST::EnumDef, AST::UnionDef
         next if stmt.visibility == :private
-        parts << visit(stmt)
-      when AST::EnumDef
-        next if stmt.visibility == :private
-        parts << visit(stmt)
-      when AST::UnionDef
-        next if stmt.visibility == :private
-        parts << visit(stmt)
+        type_parts << visit(stmt)
       when AST::RequireNode
         # Re-export nested REQUIRE namespaces into this module's namespace.
-        parts << visit(stmt)
+        fn_parts << visit(stmt)
       when AST::ExternFnDecl, AST::ExternStructDecl
         # Emit @import for the native module and (for structs) a type alias.
-        parts << visit(stmt)
+        fn_parts << visit(stmt)
       # Top-level executable statements (VarDecl, BindExpr, etc.) are not
       # exported — module files are declaration-only at the top level.
       end
     end
-    parts.compact.join("\n\n")
+    # Store type definitions separately so REQUIRE can emit them at file scope
+    # (outside the struct wrapper) to avoid Zig name-ambiguity errors.
+    @module_type_defs = type_parts.compact.join("\n\n")
+    (type_parts + fn_parts).compact.join("\n\n")
   end
 
   # CLI --module entry point: emit a Zig module file (no runtime footer).
@@ -302,6 +301,7 @@ private
         # Package imports use Zig's named module system (@import).
         # The build system wires the actual module; we just emit the import.
         # Propagate needs_rt/can_fail from the package so call sites emit correct code.
+        mod = nil
         if @importer
           mod = @importer.compile_package(node.path, caller_dir: @source_dir)
           if mod&.ast
@@ -318,8 +318,12 @@ private
               end
             end
           end
+          merge_module_schemas!(mod)
         end
-        "const #{node.namespace} = @import(\"#{node.namespace}\");"
+
+        lines = ["const #{node.namespace} = @import(\"#{node.namespace}\");"]
+        lines.concat(type_aliases_for(mod, node.namespace, package: true))
+        lines.join("\n")
       else
         # Local file imports: inline the compiled module as a Zig const struct namespace.
         # The module body was already transpiled (and cached) by ModuleImporter.
@@ -327,11 +331,7 @@ private
 
         mod = @importer.compile_file(node.path, caller_dir: @source_dir)
 
-        # Merge the module's struct schemas so RC cleanup works for imported types.
-        if mod.struct_schemas
-          @struct_schemas ||= {}
-          @struct_schemas.merge!(mod.struct_schemas)
-        end
+        merge_module_schemas!(mod)
 
         # Propagate needs_rt/can_fail from imported functions so call sites
         # correctly omit or inject rt and try.
@@ -350,11 +350,23 @@ private
           end
         end
 
-        body = mod.transpiled_body.strip
-        # Indent each line of the module body for readability inside the struct.
-        indented = body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
+        # Emit type definitions (structs/unions/enums) at file scope so the
+        # requiring file can reference them directly. Only functions go inside
+        # the namespace struct wrapper to avoid Zig name-ambiguity errors.
+        same_dir = mod.source_dir == @source_dir
 
-        "const #{node.namespace} = struct {\n#{indented}\n};"
+        # Filter type defs by visibility for file-scope emission.
+        file_scope_types = visible_type_defs(mod, same_dir: same_dir)
+
+        # Strip type definitions from the body — they'll be emitted at file scope.
+        body = mod.transpiled_body.strip
+        fn_body = strip_type_defs(body, mod)
+        indented = fn_body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
+
+        lines = []
+        lines << file_scope_types if file_scope_types && !file_scope_types.strip.empty?
+        lines << "const #{node.namespace} = struct {\n#{indented}\n};"
+        lines.join("\n")
       end
 
     when AST::EnumDef
@@ -3922,6 +3934,140 @@ private
     end
     traverse.call(nodes)
     names
+  end
+
+  # Merge struct/union/enum schemas from a required module so the requiring
+  # file can do RC cleanup and MATCH dispatch on imported types.
+  def merge_module_schemas!(mod)
+    if mod.struct_schemas
+      @struct_schemas ||= {}
+      @struct_schemas.merge!(mod.struct_schemas)
+    end
+    if mod.union_schemas
+      @union_schemas ||= {}
+      @union_schemas.merge!(mod.union_schemas)
+    end
+    if mod.enum_schemas
+      @enum_schemas ||= {}
+      @enum_schemas.merge!(mod.enum_schemas)
+    end
+  end
+
+  # Generate top-level type aliases for types in a package import.
+  # Package types are in a separate compilation unit, so aliases don't cause
+  # Zig ambiguity (unlike local inline struct wrappers).
+  def type_aliases_for(mod, namespace, package: false, same_dir: false)
+    aliases = []
+    return aliases unless mod&.ast
+
+    mod.ast.statements.each do |stmt|
+      case stmt
+      when AST::StructDef, AST::UnionDef, AST::EnumDef
+        vis = stmt.visibility || :package
+        next if vis == :private
+        next if package && vis != :pub
+        next if !package && vis != :pub && !same_dir
+        aliases << "const #{stmt.name} = #{namespace}.#{stmt.name};"
+        if stmt.is_a?(AST::UnionDef)
+          stmt.variants.each do |var_name, var_data|
+            next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+            aliases << "const #{stmt.name}_#{var_name} = #{namespace}.#{stmt.name}_#{var_name};"
+          end
+        end
+      end
+    end
+    aliases
+  end
+
+  # Return the Zig type definitions from a module, filtered by visibility,
+  # for emission at file scope (outside the struct wrapper).
+  def visible_type_defs(mod, same_dir: false)
+    return nil unless mod&.type_defs && !mod.type_defs.strip.empty?
+    return nil unless mod&.ast
+
+    # Collect names of visible types to filter the type_defs string.
+    visible_names = Set.new
+    mod.ast.statements.each do |stmt|
+      case stmt
+      when AST::StructDef, AST::EnumDef, AST::UnionDef
+        vis = stmt.visibility || :package
+        next if vis == :private
+        next unless (vis == :pub) || same_dir
+        visible_names.add(stmt.name.to_s)
+        # Include synthetic inline-struct variants for unions
+        if stmt.is_a?(AST::UnionDef)
+          stmt.variants.each do |var_name, var_data|
+            next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+            visible_names.add("#{stmt.name}_#{var_name}")
+          end
+        end
+      end
+    end
+
+    return nil if visible_names.empty?
+
+    # Filter the type_defs: keep only blocks starting with `const <visible_name>`
+    filter_zig_blocks(mod.type_defs, visible_names)
+  end
+
+  # Strip type definitions from a transpiled body, leaving only functions
+  # and other non-type code for the struct wrapper.
+  def strip_type_defs(body, mod)
+    return body unless mod&.ast
+    type_names = Set.new
+    mod.ast.statements.each do |stmt|
+      case stmt
+      when AST::StructDef, AST::EnumDef, AST::UnionDef
+        next if stmt.visibility == :private
+        type_names.add(stmt.name.to_s)
+        if stmt.is_a?(AST::UnionDef)
+          stmt.variants.each do |var_name, var_data|
+            next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+            type_names.add("#{stmt.name}_#{var_name}")
+          end
+        end
+      end
+    end
+    return body if type_names.empty?
+    filter_zig_blocks(body, type_names, keep: false)
+  end
+
+  # Filter Zig top-level const blocks by name.
+  # keep: true = return only matching blocks, false = return everything except.
+  def filter_zig_blocks(source, names, keep: true)
+    lines = source.lines
+    result = []
+    i = 0
+    while i < lines.length
+      line = lines[i]
+      # Detect top-level const declarations: `const Name = ...`
+      if line =~ /\Aconst (\w+)\s*=/
+        name = $1
+        is_target = names.include?(name)
+        # Find the end of this block by tracking brace depth
+        block_lines = [line]
+        depth = line.count('{') - line.count('}')
+        i += 1
+        while i < lines.length && depth > 0
+          block_lines << lines[i]
+          depth += lines[i].count('{') - lines[i].count('}')
+          i += 1
+        end
+        # Also grab trailing semicolons on their own line
+        if i < lines.length && lines[i].strip == '};'
+          block_lines << lines[i]
+          i += 1
+        end
+        if (keep && is_target) || (!keep && !is_target)
+          result.concat(block_lines)
+        end
+      else
+        # Non-const lines (blank, comments): keep unless stripping
+        result << line unless keep && !line.strip.empty?
+        i += 1
+      end
+    end
+    result.join
   end
 end
 
