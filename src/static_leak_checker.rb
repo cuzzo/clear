@@ -105,12 +105,17 @@ class StaticLeakChecker
   # Mismatch means init uses one arena but cleanup frees from another --
   # either a leak (freed from wrong arena) or UAF (wrong arena reclaimed).
   def check_alloc_consistency!(allocs, drops)
-    allocs.each do |name, alloc_node|
-      drop_node = drops[name]
-      next unless drop_node
-      if alloc_node.alloc != drop_node.alloc
-        @errors << error(:ALLOC_MISMATCH, name,
-          "Alloc uses :#{alloc_node.alloc} but Drop uses :#{drop_node.alloc}")
+    allocs.each do |name, alloc_nodes|
+      drop_nodes = drops[name]
+      next unless drop_nodes
+      alloc_nodes.each do |alloc_node|
+        drop_nodes.each do |drop_node|
+          if alloc_node.alloc != drop_node.alloc
+            @errors << error(:ALLOC_MISMATCH, name,
+              "Alloc uses :#{alloc_node.alloc} but Drop uses :#{drop_node.alloc}")
+            return # one error per name is enough
+          end
+        end
       end
     end
   end
@@ -119,27 +124,33 @@ class StaticLeakChecker
   # guarded. Without a guard, the defer fires unconditionally after promotion,
   # freeing from the original (frame) allocator while data is now on heap.
   def check_promote_alloc_consistency!(promotes, drops)
-    promotes.each do |name, promote|
+    promotes.each do |name, promote_nodes|
       next unless name.is_a?(String) # skip synthetic names (:__ret, :__catch_ret, etc.)
-      next unless [:list, :string_map, :generic].include?(promote.strategy)
-      drop = drops[name]
-      next unless drop
-      # Promote converts to heap; if Drop would still fire (no guard), allocator is wrong.
-      if !drop.has_moved_guard && drop.alloc == :frame
-        @errors << error(:ALLOC_MISMATCH, name,
-          "MIR::Promote converts to heap but unguarded Drop uses :frame (UAF after promotion)")
+      promote_nodes.each do |promote|
+        next unless [:list, :string_map, :generic].include?(promote.strategy)
+        drop_nodes = drops[name]
+        next unless drop_nodes
+        # Promote converts to heap; if any Drop would still fire (no guard), allocator is wrong.
+        drop_nodes.each do |drop|
+          if !drop.has_moved_guard && drop.alloc == :frame
+            @errors << error(:ALLOC_MISMATCH, name,
+              "MIR::Promote converts to heap but unguarded Drop uses :frame (UAF after promotion)")
+          end
+        end
       end
     end
   end
 
   # Dataflow says maybe-moved -> Drop must be guarded.
   def check_guards!(drops, df_summary)
-    drops.each do |name, drop|
+    drops.each do |name, drop_nodes|
       df_entry = df_summary[name]
       next unless df_entry
 
-      if df_entry[:has_moved_guard] && !drop.has_moved_guard
-        @errors << error(:GUARD, name, "dataflow says maybe-moved but Drop lacks guard")
+      drop_nodes.each do |drop|
+        if df_entry[:has_moved_guard] && !drop.has_moved_guard
+          @errors << error(:GUARD, name, "dataflow says maybe-moved but Drop lacks guard")
+        end
       end
     end
   end
@@ -148,9 +159,12 @@ class StaticLeakChecker
   # defer doesn't fire when ownership transfers to the caller.
   def check_escapes!(escapes, drops)
     escapes.each do |name|
-      drop = drops[name]
-      if drop && !drop.has_moved_guard
-        @errors << error(:ESCAPE, name, "escapes via return but Drop is unguarded")
+      drop_nodes = drops[name]
+      next unless drop_nodes
+      drop_nodes.each do |drop|
+        if !drop.has_moved_guard
+          @errors << error(:ESCAPE, name, "escapes via return but Drop is unguarded")
+        end
       end
     end
   end
@@ -320,9 +334,9 @@ class StaticLeakChecker
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
-      when MIR::Alloc  then allocs[stmt.name] = stmt
-      when MIR::Drop   then drops[stmt.name] = stmt
-      when MIR::Promote then promotes[stmt.name || :"__container_promote_#{promotes.size}"] = stmt
+      when MIR::Alloc  then (allocs[stmt.name] ||= []) << stmt
+      when MIR::Drop   then (drops[stmt.name] ||= []) << stmt
+      when MIR::Promote then (promotes[stmt.name || :"__container_promote_#{promotes.size}"] ||= []) << stmt
       when MIR::Return then (stmt.escaped_vars || []).each { |v| escapes << v }
       when MIR::SuppressCleanup then suppresses << stmt.name
       when MIR::ReassignCleanup then reassign_cleanups[stmt.name] = stmt
