@@ -1,0 +1,93 @@
+-- RwLock Writer Starvation Benchmark -- CLEAR
+--
+-- Tests whether CLEAR's @shared:writeLocked (Arc<RwLock<T>>) starves writers
+-- under heavy read contention.
+--
+-- Setup:
+--   - N-1 reader fibers each hold read lock for ~busyWork(100), loop 2M times
+--   - 1 writer fiber acquires exclusive lock, loops 1K times
+--   - Measure: writer completion time, avg/max writer wait per acquire
+--
+-- CLEAR uses Zig's std.Thread.RwLock under the hood.
+-- Zig's RwLock is reader-preferring: writers CAN starve under heavy read load.
+
+STRUCT Counter { value: Int64 }
+STRUCT WriterResult { doneMs: Int64, avgWaitMs: Int64, maxWaitMs: Int64 }
+
+FN busyWork(n: Int64) RETURNS Int64 ->
+    MUTABLE acc = 0_i64;
+    MUTABLE i = 0_i64;
+    WHILE i < n DO
+        acc = acc + i;
+        i += 1;
+    END
+    RETURN acc;
+END
+
+FN main() RETURNS Void ->
+    nCPU = threadCount();
+    MUTABLE nReaders = nCPU - 1;
+    IF nReaders < 1 THEN nReaders = 1; END
+
+    readIters = 2000000_i64;
+    writeIters = 1000_i64;
+    workPerOp = 100_i64;
+
+    c = Counter{ value: 0 } @shared:writeLocked;
+
+    t0 = timestampMs();
+
+    -- Spawn readers
+    MUTABLE readers: ~Void[]@list = [];
+    FOR r IN (0_i64 ..< nReaders) DO
+        readers.append(BG { @parallel ->
+            MUTABLE localSink = 0_i64;
+            FOR i IN (0_i64 ..< readIters) DO
+                WITH c AS inner {
+                    localSink = localSink + inner.value;
+                    localSink = localSink + busyWork(workPerOp);
+                }
+            END
+        });
+    END
+
+    -- Spawn writer - measure per-write latency
+    writer = BG { @parallel ->
+        MUTABLE maxWaitMs = 0_i64;
+        MUTABLE totalWaitMs = 0_i64;
+        MUTABLE localSink = 0_i64;
+        FOR i IN (0_i64 ..< writeIters) DO
+            wt0 = timestampMs();
+            WITH EXCLUSIVE c AS inner {
+                waited = timestampMs() - wt0;
+                IF waited > maxWaitMs THEN maxWaitMs = waited; END
+                totalWaitMs = totalWaitMs + waited;
+                inner.value = inner.value + 1;
+                localSink = localSink + busyWork(workPerOp);
+            }
+        END
+        writerDone = timestampMs() - t0;
+        avgWaitMs = totalWaitMs / writeIters;
+        WriterResult{ doneMs: writerDone, avgWaitMs: avgWaitMs, maxWaitMs: maxWaitMs };
+    };
+
+    -- Wait for all
+    FOR r IN (0_i64 ..< nReaders) -> NEXT readers[r];
+    result: WriterResult = NEXT writer;
+    elapsed = timestampMs() - t0;
+
+    -- Read final value
+    MUTABLE finalVal = 0_i64;
+    WITH c AS inner {
+        finalVal = inner.value;
+    }
+
+    print("Readers:        ${nReaders.toString()}");
+    print("Read iters:     ${readIters.toString()} per reader");
+    print("Write iters:    ${writeIters.toString()}");
+    print("Total time:     ${elapsed.toString()} ms");
+    print("Writer done:    ${result.doneMs.toString()} ms");
+    print("Avg write wait: ${result.avgWaitMs.toString()} ms");
+    print("Max write wait: ${result.maxWaitMs.toString()} ms");
+    print("Final value:    ${finalVal.toString()}");
+END
