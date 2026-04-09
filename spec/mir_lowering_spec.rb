@@ -1846,7 +1846,7 @@ RSpec.describe MIRLowering do
       expect(zig).to include("20")
     end
 
-    it "lowers complex pipeline ops to InlineZig placeholder" do
+    it "lowers complex pipeline ops to Comment placeholder" do
       lhs = make_id("items", full_type: :List)
       rhs = AST::CountOp.new(tok)
       rhs.full_type = :Number
@@ -1855,8 +1855,8 @@ RSpec.describe MIRLowering do
       node.full_type = :Number
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
-      expect(result.reason).to include("pipeline")
+      expect(result).to be_a(MIR::Comment)
+      expect(result.text).to include("PIPELINE")
     end
 
     it "raises on unhandled SMOOTH RHS" do

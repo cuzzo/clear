@@ -699,10 +699,8 @@ class MIRLowering
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
                                   outer_body, vis, false, comptime_params)
 
-      # Return both as RawZig combining them
-      inner_zig = emit_expr(inner_fn)
-      outer_zig = emit_expr(outer_fn)
-      MIR::RawZig.new("#{inner_zig}\n\n#{outer_zig}", "catch_function_pair")
+      # Return both FnDefs as an array (lower_program/lower_module flatten arrays)
+      [inner_fn, outer_fn]
     elsif @current_fn_preserve_rewind
       # Wrap body in a labeled block for preserveAndRewind
       rt = MIR::Ident.new(@rt_name)
@@ -2145,11 +2143,7 @@ class MIRLowering
         zig_code = @pipeline_fallback.call(node)
         return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
       end
-      left_zig = emit_expr(lower(node.left))
-      return MIR::InlineZig.new(
-        "/* PIPELINE: #{rhs.class.name.split('::').last} on #{left_zig} */",
-        "pipeline_#{rhs.class.name.split('::').last.downcase}"
-      )
+      return MIR::Comment.new("PIPELINE: #{rhs.class.name.split('::').last} (no fallback)")
     end
 
     # RecoverOp: x s> RECOVER(default) -> (x catch default)
