@@ -200,10 +200,6 @@ class PipelineHost
     lhs = node.left
     rhs = node.right
 
-    # Try pipeline loop fusion
-    fusible = collect_fusible_chain(node)
-    return transpile_fused_pipeline(fusible) if fusible
-
     # Dispatch by operator type
     if rhs.is_a?(AST::SelectOp)
       return transpile_select_projection(lhs, rhs.expression)
