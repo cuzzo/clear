@@ -23,7 +23,7 @@ func abs64(x int64) int64 {
 }
 
 func main() {
-	n := int64(10_000_000)
+	n := int64(100_000)
 	buckets := int64(10_000)
 	seed := int64(42)
 

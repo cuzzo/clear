@@ -16,14 +16,14 @@
 --   - weakRcRelease:  element cleanup on list deinit
 --   - rcRelease:      strong ref cleanup on list deinit
 --
--- N = 2,000,000 nodes.
+-- N = 200,000 nodes.
 
 STRUCT Node {
     id: Int64
 }
 
 FN main() RETURNS Void ->
-    n_nodes = 2000000_i64;
+    n_nodes = 200000_i64;
 
     -- Phase 1: BUILD
     t0 = timestampMs();

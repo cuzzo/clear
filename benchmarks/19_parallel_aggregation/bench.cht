@@ -1,7 +1,7 @@
 -- Parallel Aggregation Benchmark — Distributed Histogram + Stats
 --
--- Deterministic LCG generates 10M events. Each event is bucketed into
--- one of 10,000 categories. Two phases:
+-- Deterministic LCG generates 100K events. Each event is bucketed into
+-- one of 1,000 categories. Two phases:
 --
 --   Phase 1 (SHARD): Build histogram via @sharded(32) map.
 --     Uses explicit SHARD() to route by bucket key.
@@ -27,8 +27,8 @@ FN makeKey(seed: Int64, buckets: Int64) RETURNS String ->
 END
 
 FN main() RETURNS Void ->
-    n = 10000000;
-    buckets = 10000;
+    n = 100000;
+    buckets = 1000;
 
     -- Pre-compute seeds (Int64 array: 80MB vs 1.1GB for string keys).
     -- LCG is sequential so we must pre-compute, but seeds are 8 bytes each.

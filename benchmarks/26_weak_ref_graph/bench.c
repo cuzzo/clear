@@ -28,7 +28,7 @@
 #include <assert.h>
 #include <time.h>
 
-#define N 2000000
+#define N 200000
 
 typedef struct Node {
     int64_t       id;

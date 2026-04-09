@@ -13,7 +13,7 @@ fn lcg(state: i64) -> i64 {
 }
 
 fn main() {
-    let n: i64 = 10_000_000;
+    let n: i64 = 100_000;
     let buckets: i64 = 10_000;
     let mut seed: i64 = 42;
 

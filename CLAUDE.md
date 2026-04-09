@@ -98,15 +98,22 @@ See `docs/profiling.md` for a full case study.
 
 ## Architecture
 
-The compiler is a 3-pass system written in Ruby:
-1.  **Parsing:** `src/lexer.rb`, `src/parser.rb`
-2.  **Semantic Analysis:** `src/annotator.rb`, `src/type.rb`, `src/scope.rb`, `src/ownership_graph.rb`
-3.  **Code Generation:** `src/transpiler.rb` (generates Zig code)
-
-Semantic Analyis consists of three stages:
-1.  Type Inference
-2.  Promotion Planning
-3.  Escape Analysis / Cleanup Planning
+The compiler is a 5-pass system written in Ruby:
+- **Pass 0: Parsing:** `src/lexer.rb`, `src/parser.rb`. Builds the raw AST.
+- **Pass 1: Annotation:** `src/annotator.rb`, `src/type.rb`. Performs type inference, symbol resolution, and capability checks.
+- **Pass 2: Dataflow & MIR Lowering:** `src/control_flow.rb`, `src/ownership_graph.rb`, `src/promotion_plan.rb`.
+  - Computes `PromotionPlan` (escape promotion) and `CleanupPlan` (cleanup requirements).
+  - Performs `Escape Analysis` and forward `OwnershipDataflow` on the CFG.
+  - Lowers all `Alloc`/`Dealloc`/`Free`/`Move`/`Promote` events into explicit **MIRNodes** (`MIR::Alloc`, `MIR::Drop`, `MIR::Promote`, `MIR::SuppressCleanup`).
+- **Pass 3: MIR Validation:** `src/static_leak_checker.rb`. Verifies the post-MIR function body for:
+  - Memory leaks (including frame arena overflows).
+  - Double-frees (missing or incorrect moved guards).
+  - Use-after-frees.
+  - Allocator consistency (heap vs frame).
+- **Pass 4: Transpiling:** `src/transpiler.rb`.
+  - **Dumb Transpiler:** Zero on-the-fly decisions. No on-the-fly allocator choices, no on-the-fly deinit/cleanup choices.
+  - Purely mechanical emission driven by MIR nodes and AST stamps.
+  - At no point outside of `src/std_lib.rb` or `src/type.rb` should there be special logic for intrinsic or standard library functions.
 
 The transpiler is supposed to be as dumb as possible so that:
 1.  We can catch as many bugs as possible at unit test time.

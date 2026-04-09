@@ -20,16 +20,22 @@ end
 # Standard benchmark: self-contained binary, timed externally
 # -------------------------------------------------------------------------
 def run_bench(dir)
+  leak_mode = ENV['BENCH_MODE'] == 'leak'
+
   # Detect server benchmarks (have client.go + server.cht)
   if File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
+    if leak_mode
+      puts "=== LEAK CHECK: #{dir} === SKIP (server benchmark)"
+      return
+    end
     return run_server_bench(dir)
   end
 
-  puts "=== BENCHMARK: #{dir} ==="
+  puts leak_mode ? "=== LEAK CHECK: #{dir} ===" : "=== BENCHMARK: #{dir} ==="
 
-  has_c    = File.exist?("#{dir}/bench.c")
-  has_rust = File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
-  has_go   = File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
+  has_c    = !leak_mode && File.exist?("#{dir}/bench.c")
+  has_rust = !leak_mode && File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
+  has_go   = !leak_mode && File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
 
   # Clean stale binaries before recompiling
   %w[bench_c bench_rust bench_go bench_clear].each { |b| FileUtils.rm_f("#{dir}/#{b}") }
@@ -65,39 +71,53 @@ def run_bench(dir)
   # 4. Compile CLEAR
   # bench.zt: pure Zig benchmark (runtime-level, no CLEAR transpilation needed).
   # bench.cht with "@use_zig": scheduler-dependent Zig (e.g. socket I/O, fiber benchmarks).
-  use_zt  = File.exist?("#{dir}/bench.zt")
-  use_zig = !use_zt &&
-            File.exist?("#{dir}/bench.zig") &&
-            File.exist?("#{dir}/bench.cht") &&
-            File.read("#{dir}/bench.cht").include?("@use_zig")
-
-  if use_zt
-    puts "Compiling CLEAR (runtime Zig, .zt)..."
-    FileUtils.cp("#{dir}/bench.zt", "zig/bench.zig")
-  elsif use_zig
-    puts "Compiling CLEAR (native Zig, scheduler required)..."
-    FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
-  elsif File.exist?("#{dir}/bench.cht")
-    puts "Transpiling CLEAR..."
-    # Run from root to ensure relative requires in src/ work
-    `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
-    puts "Compiling CLEAR (Zig output)..."
-  else
-    puts "No CLEAR source found, skipping CLEAR."
-  end
-
   has_clear = false
-  if File.exist?("zig/bench.zig")
-    Dir.chdir("zig") do
-      `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
-    end
-    if File.exist?("zig/bench_clear")
-      FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
-      has_clear = true
+  if leak_mode
+    # Leak mode: build with ./clear build (debug, GPA leak detection enabled)
+    if File.exist?("#{dir}/bench.cht")
+      puts "Compiling CLEAR (debug, leak detection)..."
+      output = `./clear build #{dir}/bench.cht -o #{dir}/bench_clear 2>&1`
+      if File.exist?("#{dir}/bench_clear")
+        has_clear = true
+      else
+        puts "WARNING: debug build failed: #{output.lines.last&.strip}"
+      end
     else
-      puts "WARNING: bench_clear was not generated."
+      puts "No CLEAR source found, skipping."
     end
-    FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+  else
+    use_zt  = File.exist?("#{dir}/bench.zt")
+    use_zig = !use_zt &&
+              File.exist?("#{dir}/bench.zig") &&
+              File.exist?("#{dir}/bench.cht") &&
+              File.read("#{dir}/bench.cht").include?("@use_zig")
+
+    if use_zt
+      puts "Compiling CLEAR (runtime Zig, .zt)..."
+      FileUtils.cp("#{dir}/bench.zt", "zig/bench.zig")
+    elsif use_zig
+      puts "Compiling CLEAR (native Zig, scheduler required)..."
+      FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
+    elsif File.exist?("#{dir}/bench.cht")
+      puts "Transpiling CLEAR..."
+      `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
+      puts "Compiling CLEAR (Zig output)..."
+    else
+      puts "No CLEAR source found, skipping CLEAR."
+    end
+
+    if File.exist?("zig/bench.zig")
+      Dir.chdir("zig") do
+        `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
+      end
+      if File.exist?("zig/bench_clear")
+        FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
+        has_clear = true
+      else
+        puts "WARNING: bench_clear was not generated."
+      end
+      FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+    end
   end
 
 # 5. Execution & Timing
@@ -107,8 +127,45 @@ def run_bench(dir)
   runs = case ENV['BENCH_MODE']
          when 'fast' then 3
          when 'release' then 5
+         when 'leak' then 1
          else 5
          end
+
+  # Leak mode: run CLEAR once with timeout, capture stderr for GPA leak reports
+  if leak_mode
+    if has_clear
+      threads = ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+      threads = "0" if threads.empty?
+      cmd = "BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} timeout 60 ./#{dir}/bench_clear"
+      output = `#{cmd} 2>&1`
+      exit_status = $?.exitstatus
+      leak_lines = output.lines.select { |l| l.include?("leaked:") }
+      leak_count = leak_lines.size
+
+      if exit_status == 124
+        puts "  TIMEOUT (60s in debug mode)"
+      elsif exit_status != 0 && exit_status != 124
+        puts "  CRASH (exit #{exit_status}), leaks: #{leak_count}"
+        # Show first leak source if any
+        if leak_count > 0
+          sources = output.scan(/in (\S+) \(/).flatten.uniq
+          sources.each { |s| puts "    - #{s}" }
+        end
+      elsif leak_count > 0
+        puts "  LEAKS: #{leak_count}"
+        sources = output.scan(/in (\S+) \(/).flatten
+        # Group by unique source function
+        tallied = sources.tally.sort_by { |_, c| -c }
+        tallied.each { |fn, count| puts "    - #{fn} (#{count}x)" }
+      else
+        puts "  CLEAN"
+      end
+    else
+      puts "  SKIP (no CLEAR source or build failed)"
+    end
+    FileUtils.rm_f("#{dir}/bench_clear")
+    return
+  end
 
   if has_c && File.exist?("#{dir}/bench_c")
     puts "Running C baseline (best of #{runs}, scale=#{scale})..."
@@ -417,6 +474,12 @@ if __FILE__ == $0
       scale = "1.0"
     when /^--cores=(\d+)$/
       cores = $1
+    when "--leak"
+      mode = "leak"
+      scale = "0.001"
+    when "--smoke"
+      mode = "smoke"
+      scale = "0.1"
     when "--all"
       dirs += Dir.glob("benchmarks/0*").sort + Dir.glob("benchmarks/1*").sort + Dir.glob("benchmarks/2*").sort
     else
