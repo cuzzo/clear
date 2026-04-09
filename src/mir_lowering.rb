@@ -2965,45 +2965,38 @@ class MIRLowering
                     when AST::MethodCall then c[:value].name
                     else emit_expr(lower(c[:value]))
                     end
-          subj_zig = emit_expr(subject)
           # Union AS binding: const alias = subject.Variant;
           if c[:binding]
-            bind_kw = (node.expr.is_a?(AST::Identifier) && node.expr.was_moved) ? "var" : "const"
-            payload_access = c[:indirect_payload_as] ? "#{subj_zig}.#{variant}.*" : "#{subj_zig}.#{variant}"
-            binding = MIR::RawZig.new(
-              "#{bind_kw} #{c[:binding]} = #{payload_access}; _ = &#{c[:binding]};",
-              "union_match_binding"
-            )
+            is_mutable = node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+            payload = MIR::FieldGet.new(subject, variant.to_s)
+            payload = MIR::Deref.new(payload) if c[:indirect_payload_as]
+            binding = MIR::Let.new(c[:binding], payload, is_mutable, nil, "_ = &#{c[:binding]};")
             body = [binding] + body
           elsif c[:destructure]
-            payload_access = "#{subj_zig}.#{variant}"
             bind_stmts = c[:destructure].fields.filter_map do |f|
               next if f[:value] == :wildcard
               if f[:value] == :bind
-                MIR::RawZig.new(
-                  "const #{f[:name]} = #{payload_access}.#{f[:name]}; _ = &#{f[:name]};",
-                  "union_destructure_bind"
-                )
+                payload_field = MIR::FieldGet.new(MIR::FieldGet.new(subject, variant.to_s), f[:name].to_s)
+                MIR::Let.new(f[:name].to_s, payload_field, false, nil, "_ = &#{f[:name]};")
               end
             end
             body = bind_stmts + body if bind_stmts.any?
           end
-          MIR::InlineZig.new(
-            "std.meta.activeTag(#{subj_zig}) == .#{variant}",
-            "union_match"
-          )
+          tag_check = MIR::Call.new("std.meta.activeTag", [subject], false)
+          MIR::BinOp.new("==", tag_check, MIR::Ident.new(".#{variant}"))
         elsif node.string_match
           val = lower(c[:value])
-          MIR::InlineZig.new(
-            "CheatLib.strEql(#{emit_expr(subject)}, #{emit_expr(val)})",
-            "string_match"
-          )
+          MIR::Call.new("CheatLib.strEql", [subject, val], false)
         elsif c[:kind] == :struct_pattern
           pat = c[:value]
           cond_parts, bind_stmts = lower_struct_pattern(subject, pat)
           body = bind_stmts + body if bind_stmts.any?
-          cond_str = cond_parts.empty? ? "true" : cond_parts.join(" and ")
-          MIR::InlineZig.new(cond_str, "struct_pattern")
+          cond_node = if cond_parts.empty?
+            MIR::Lit.new("true")
+          else
+            cond_parts.reduce { |acc, part| MIR::BinOp.new("and", acc, part) }
+          end
+          cond_node
         elsif c[:kind] == :when
           # WHEN guard: condition IS the guard expression, not subject == guard
           lower(c[:value])
@@ -3117,20 +3110,18 @@ class MIRLowering
   # conditions: Array of Zig boolean fragments ("subject.x == 10")
   # binding_stmts: Array of MIR nodes (const decls for :bind fields)
   def lower_struct_pattern(subject, pat)
-    subj_zig = emit_expr(subject)
     conditions = []
     bindings = []
 
     pat.fields.each do |f|
       next if f[:value] == :wildcard
       if f[:value] == :bind
-        bindings << MIR::RawZig.new(
-          "const #{f[:name]} = #{subj_zig}.#{f[:name]}; _ = &#{f[:name]};",
-          "struct_pattern_bind"
-        )
+        field_access = MIR::FieldGet.new(subject, f[:name].to_s)
+        bindings << MIR::Let.new(f[:name].to_s, field_access, false, nil, "_ = &#{f[:name]};")
       else
-        val_zig = emit_expr(lower(f[:value]))
-        conditions << "#{subj_zig}.#{f[:name]} == #{val_zig}"
+        val = lower(f[:value])
+        field_access = MIR::FieldGet.new(subject, f[:name].to_s)
+        conditions << MIR::BinOp.new("==", field_access, val)
       end
     end
 
