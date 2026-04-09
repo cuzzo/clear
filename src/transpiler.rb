@@ -989,7 +989,7 @@ private
             # Auto-deref Arc/Rc-wrapped containers.
             target_ref = "#{target_ref}.ctrl.data.*" if target_ti&.map? && (target_ti&.shared? || target_ti&.multiowned?)
             rt_name = @do_rt_name || "rt"
-            return transpile_container_set(target_ref, receiver_type, node.name.index, node.value, rt_name)
+            return transpile_container_set(target_ref, receiver_type, node.name.index, node.value, rt_name, target_node: target_node)
           end
           arr_ref = visit(target_node)
           idx_ref = visit(node.name.index)
@@ -3173,7 +3173,7 @@ private
   # All allocator selection, value transforms, and template selection
   # are declared in INDEX_OPS — zero special-case logic here.
 
-  def transpile_container_set(target_ref, receiver_type, index_node, val_node, rt_name)
+  def transpile_container_set(target_ref, receiver_type, index_node, val_node, rt_name, target_node: nil)
     kind = container_kind_for(receiver_type)
     entry = INDEX_OPS.dig(kind, :set)
 
@@ -3184,7 +3184,7 @@ private
     val_ref = apply_value_transforms(entry[:value_transforms] || [], val_ref, val_node, rt_name)
 
     # Select template: shard-direct > sharded > default.
-    template = select_set_template(entry, receiver_type, target_ref, index_node)
+    template = select_set_template(entry, receiver_type, target_ref, index_node, target_node: target_node)
 
     # Resolve all placeholders in the template.
     resolve_set_placeholders(template, target_ref, index_ref, val_ref, entry, receiver_type, rt_name)
@@ -3202,11 +3202,15 @@ private
   end
 
   # Pick the Zig template string from an INDEX_OPS :set entry.
-  def select_set_template(entry, receiver_type, target_ref, index_node)
-    # Pipeline shard-direct optimization.
-    if entry[:shard_direct_zig] && @shard_direct_map &&
-       index_node&.respond_to?(:name) && target_ref.include?(@shard_direct_map.to_s)
-      return entry[:shard_direct_zig]
+  def select_set_template(entry, receiver_type, target_ref, index_node, target_node: nil)
+    # Pipeline shard-direct optimization: use putDirect when inside a SHARD
+    # body writing to the shard map. Check original AST target name because
+    # fiber capture mapping changes the emitted Zig name (e.g. "counts" -> "ctx.map_ptr").
+    if entry[:shard_direct_zig] && @shard_direct_map
+      orig_name = target_node.is_a?(AST::Identifier) ? target_node.name : nil
+      if orig_name == @shard_direct_map || target_ref.include?(@shard_direct_map.to_s)
+        return entry[:shard_direct_zig]
+      end
     end
     # Sharded/striped receivers use a different Zig API shape.
     if entry[:sharded_zig] && (receiver_type.sharded? || receiver_type.striped?)

@@ -227,6 +227,28 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("saveLoopMark")
     end
 
+    it "emits putDirect in SHARD worker body (not generic put)" do
+      src = <<~CLEAR
+        FN makeKey(n: Int64) RETURNS String ->
+            RETURN "k:${toString(n)}";
+        END
+
+        FN main() RETURNS Void ->
+            MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+            (0_i64 ..< 100_i64) s> SHARD(makeKey(_), counts) s> CONCURRENT EACH {
+                cur = counts[_] OR 0;
+                counts[_] = cur + 1;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Worker must use putDirect (zero-overhead shard-local), not generic put
+      # (which re-hashes, re-dupes key, and routes through sendAndWait).
+      expect(zig).to include("putDirect")
+      expect(zig).not_to match(/map_ptr\.put\(/)
+    end
+
     it "skips saveLoopMark in SHARD producer when key is a pre-built array lookup (no frame alloc)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

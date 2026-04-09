@@ -1564,100 +1564,42 @@ module PipelineGenerator
     key_code = with_pipeline_context(placeholder: "__sh#{id}_i") { visit(key_expr_node) }
 
     # Build the EACH body. Map accesses use putDirect/getDirect (no double hash).
-    # In streaming mode, the current item is __sh#{id}_item (a struct with .key and .hash).
-    captures = map_var_name ? { map_var_name => "ctx.map_ptr" } : {}
+    # Fused streaming: route + process in a single loop. No intermediate queues,
+    # no fibers, no ring buffers. Each item is processed and discarded immediately.
+    # The placeholder `_` resolves to the current key string.
     body_code = with_pipeline_context(
-      placeholder: "__sh#{id}_item.key",
+      placeholder: "__sh#{id}_key",
       shard_map: map_var_name,
-      shard_idx: "ctx.shard_idx",
-      shard_key: "__sh#{id}_item.key",
-      shard_hash: "__sh#{id}_item.hash"
+      shard_idx: "__sh#{id}_sh.shard",
+      shard_key: "__sh#{id}_key",
+      shard_hash: "__sh#{id}_sh.hash"
     ) do
-      with_fiber_capture_map(captures) do
-        each_op.body.map { |stmt|
-          code = visit(stmt)
-          code.strip.end_with?(";") ? code : "#{code};"
-        }.join("\n                          ")
-      end
+      each_op.body.map { |stmt|
+        code = visit(stmt)
+        code.strip.end_with?(";") ? code : "#{code};"
+      }.join("\n              ")
     end
 
     range_op = exclusive ? "<" : "<="
 
     <<~ZIG.chomp
       {
-          // ── SHARD + CONCURRENT EACH (streaming, backpressure) ──
+          // ── SHARD + CONCURRENT EACH (fused streaming) ──
+          // Bounded range: route + process each item in a single loop.
+          // Zero intermediate storage, zero fibers, zero atomics.
+          // Memory: O(1) per iteration (key lives on frame arena, freed by rewind).
           const __sh#{id}_map = &#{map_code};
           __sh#{id}_map.ensureOwnership();
-          const __sh#{id}_N = #{shard_count};
-
-          // Stream element: key + pre-computed hash per item.
-          const __ShardItem#{id} = struct { key: []const u8, hash: u64 };
-          const __ShardStream#{id} = CheatLib.InfStream(__ShardItem#{id});
-
-          // Per-shard SPSC streams with backpressure (64-slot ring buffer).
-          // Memory bound: N_shards * 64 * sizeof(item) instead of O(total_items).
-          var __sh#{id}_streams: [__sh#{id}_N]__ShardStream#{id} = undefined;
-          for (&__sh#{id}_streams) |*s| s.* = try __ShardStream#{id}.spawnNew(std.heap.c_allocator, #{rt_name}.getSched());
-
-          // Worker struct: reads items from its stream until EOF.
-          const __ShardWorker#{id} = struct {
-              wg: *CheatHeader.WaitGroup,
-              map_ptr: *@TypeOf(__sh#{id}_map.*),
-              stream: *__ShardStream#{id},
-              shard_idx: usize,
-              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                  _ = &__rt;
-                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
-                  defer ctx.wg.done();
-                  while (true) {
-                      #{body_needs_frame_mark ? "const __sh#{id}_wk_mark = __rt.saveLoopMark(); defer __rt.restoreLoopMark(__sh#{id}_wk_mark);" : ""}
-                      const __sh#{id}_item = try ctx.stream.nextOrNull() orelse break;
-                      defer std.heap.c_allocator.free(__sh#{id}_item.key);
-                      #{body_code}
-                      __rt.checkYield();
-                  }
-              }
-          };
-
-          // Spawn ALL shard workers (they block on empty streams until producer pushes).
-          var __sh#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          __sh#{id}_wg.add(__sh#{id}_N);
-          var __sh#{id}_ctxs: [__sh#{id}_N]__ShardWorker#{id} = undefined;
-          for (0..__sh#{id}_N) |__sh#{id}_si| {
-              __sh#{id}_ctxs[__sh#{id}_si] = .{
-                  .wg = &__sh#{id}_wg,
-                  .map_ptr = __sh#{id}_map,
-                  .stream = &__sh#{id}_streams[__sh#{id}_si],
-                  .shard_idx = __sh#{id}_si,
-              };
-              try __sh#{id}_map.owners[__sh#{id}_si].?.submitSpawn(
-                  @intFromPtr(&Runtime.entryWrapper),
-                  @as(CheatHeader.TaskFn, @ptrCast(&__ShardWorker#{id}.run)),
-                  &__sh#{id}_ctxs[__sh#{id}_si],
-                  .{ .pinned = true },
-              );
-          }
-
-          // Producer: route items to shards via streams (backpressure when full).
           {
               var __sh#{id}_i: i64 = #{range_start};
               const __sh#{id}_end: i64 = #{range_end};
               while (__sh#{id}_i #{range_op} __sh#{id}_end) : (__sh#{id}_i += 1) {
                   #{key_needs_frame_mark ? "const __sh#{id}_loop_mark = #{rt_name}.saveLoopMark(); defer #{rt_name}.restoreLoopMark(__sh#{id}_loop_mark);" : ""}
-                  const __sh#{id}_tmp_key = #{key_code};
-                  const __sh#{id}_key = try std.heap.c_allocator.dupe(u8, __sh#{id}_tmp_key);
+                  const __sh#{id}_key = #{key_code};
                   const __sh#{id}_sh = @TypeOf(__sh#{id}_map.*).shardIndexWithHash(__sh#{id}_key);
-                  __sh#{id}_streams[__sh#{id}_sh.shard].push(.{ .key = __sh#{id}_key, .hash = __sh#{id}_sh.hash }) catch break;
+                  #{body_code}
               }
-              // Signal EOF to all workers.
-              for (&__sh#{id}_streams) |*s| s.close();
           }
-
-          __sh#{id}_wg.wait();
-
-          // Free stream Inner allocations.
-          for (&__sh#{id}_streams) |*s| std.heap.c_allocator.destroy(s.inner);
       }
     ZIG
   end

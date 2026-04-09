@@ -3452,16 +3452,16 @@ pub const CheatLib = struct {
             // Zero overhead: no shardIndex(), no sendAndWait(), no key dupe.
 
             pub fn putDirect(self: *Self, shard: usize, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
-                const owned_key = try alloc.dupe(u8, key);
-                const safe_val = if (comptime is_slice_value)
+                const gop = try self.shards[shard].map.getOrPut(alloc, key);
+                if (gop.found_existing) {
+                    if (comptime is_slice_value) alloc.free(gop.value_ptr.*);
+                } else {
+                    gop.key_ptr.* = try alloc.dupe(u8, key);
+                }
+                gop.value_ptr.* = if (comptime is_slice_value)
                     try alloc.dupe(@typeInfo(V).pointer.child, value)
                 else
                     value;
-                self.shards[shard].map.put(alloc, owned_key, safe_val) catch |e| {
-                    alloc.free(owned_key);
-                    if (comptime is_slice_value) alloc.free(safe_val);
-                    return e;
-                };
             }
 
             /// Insert using a pre-computed hash. The hash MUST have been computed
