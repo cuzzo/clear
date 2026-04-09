@@ -1091,27 +1091,25 @@ class MIRLowering
     @lambda_counter = (@lambda_counter || 0) + 1
     fn_name = "_lambda_#{@lambda_counter}"
 
-    params_zig = (sig.respond_to?(:params) ? sig.params : sig[:params] || []).map { |p|
+    params_list = sig.respond_to?(:params) ? sig.params : sig[:params] || []
+    params_mir = [MIR::Param.new("_rt", "*Runtime")] + params_list.map { |p|
       p_type = p[:type]
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
-      "#{p[:name]}: #{type_str}"
+      MIR::Param.new(p[:name], type_str)
     }
 
     ret = sig.respond_to?(:return_type) ? (sig.return_type || :Void) : (sig[:return]&.fetch(:type, nil) || :Void)
     ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
     ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
 
-    all_params = ["_rt: *Runtime"] + params_zig
-    body_zig = emit_expr(lower(node.body))
+    # Build body: suppressions + return expr
+    body_mir = []
+    body_mir << MIR::Suppress.new("_rt")
+    params_list.each { |p| body_mir << MIR::Suppress.new(p[:name]) }
+    body_mir << MIR::ReturnStmt.new(lower(node.body))
 
-    rt_sup = "_ = &_rt;"
-    param_sups = (sig[:params] || []).map { |p| "_ = &#{p[:name]};" }.join(" ")
-    sups = [rt_sup, param_sups].reject(&:empty?).join(" ")
-
-    MIR::InlineZig.new(
-      "&(struct { fn #{fn_name}(#{all_params.join(', ')}) #{ret_str} { #{sups} return #{body_zig}; } }).#{fn_name}",
-      "lambda"
-    )
+    fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
+    MIR::LambdaExpr.new(fn_def)
   end
 
   # ================================================================

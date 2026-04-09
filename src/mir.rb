@@ -611,6 +611,13 @@ module MIR
     # safe: true -> emit @hasField guard, false -> direct .items
   end
 
+  # Lambda expression (anonymous function pointer via struct trick).
+  # Zig: &(struct { fn name(params) ret { body } }).name
+  LambdaExpr = Struct.new(:fn_def) do
+    include Expr
+    # fn_def: MIR::FnDef with the lambda's implementation
+  end
+
   # Inline Zig expression. Tracked escape hatch.
   InlineZig = Struct.new(:code, :reason) do
     include Expr

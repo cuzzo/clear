@@ -107,6 +107,7 @@ class MIREmitter
     when MIR::RangeLit         then emit_range_lit(node)
     when MIR::HasField         then emit_has_field(node)
     when MIR::ItemsAccess      then emit_items_access(node)
+    when MIR::LambdaExpr       then emit_lambda(node)
     when MIR::InlineZig        then node.code
 
     else
@@ -653,6 +654,12 @@ class MIREmitter
 
   def emit_has_field(node)
     "@hasField(@TypeOf(#{emit(node.expr)}), \"#{node.field}\")"
+  end
+
+  def emit_lambda(node)
+    fn = node.fn_def
+    fn_zig = emit_fn_def(fn)
+    "&(struct { #{fn_zig} }).#{fn.name}"
   end
 
   def emit_items_access(node)
