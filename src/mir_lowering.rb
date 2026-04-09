@@ -2167,12 +2167,16 @@ class MIRLowering
       AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
     ]
     if complex_ops.any? { |t| rhs.is_a?(t) }
-      # Delegate to PipelineHost (which includes PipelineGenerator).
-      # PipelineHost.visit() routes sub-expressions back through lower()+emit().
+      host = pipeline_host
+
+      # Try MIR path first (migrated operators return MIR node tree)
+      mir_result = host.lower_pipeline(node)
+      return mir_result if mir_result
+
+      # Fall back to string path (non-migrated operators)
       if @pipeline_fallback
         zig_code = @pipeline_fallback.call(node)
       else
-        host = pipeline_host
         zig_code = host.transpile_pipeline(node)
       end
       return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")

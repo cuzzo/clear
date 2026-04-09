@@ -26,6 +26,7 @@ class PipelineHost
     @soa_rewrite_active = false
     @soa_needed_fields = Set.new
     @transpiler_context_stack = []
+    @mir_mode = false
   end
 
   def current_tp_ctx; @transpiler_context_stack.last; end
@@ -43,6 +44,9 @@ class PipelineHost
   # Route AST node -> Zig string, handling pipeline-specific nodes
   # (Placeholder, SOA field rewrites) before general MIR lowering.
   def visit(node)
+    # In MIR mode, return MIR nodes instead of Zig strings.
+    return visit_mir(node) if @mir_mode
+
     # Placeholder: _ inside pipeline expression -> loop variable name
     if node.is_a?(AST::Identifier) && node.name == "_" && @placeholder_name
       return @placeholder_name
@@ -83,6 +87,13 @@ class PipelineHost
     # General case: lower to MIR, emit to Zig
     mir_node = @lowering.lower(substituted)
     @emitter.emit(mir_node)
+  end
+
+  # MIR-mode visit: returns MIR node instead of Zig string.
+  # Used by lower_* pipeline methods during MIR migration.
+  def visit_mir(node)
+    substituted = substitute_placeholders(node)
+    @lowering.lower(substituted)
   end
 
   private
@@ -194,8 +205,15 @@ class PipelineHost
 
   public
 
-  # Entry point for SMOOTH pipeline nodes from MIRLowering.
-  # Moved from transpiler.rb -- dispatches to PipelineGenerator methods.
+  # MIR entry point: returns MIR node tree for migrated pipeline operators.
+  # Returns nil for non-migrated operators (caller falls back to string path).
+  def lower_pipeline(node)
+    # Phase 1+ will add operator dispatch here.
+    nil
+  end
+
+  # String entry point for SMOOTH pipeline nodes from MIRLowering.
+  # Dispatches to PipelineGenerator methods that return Zig strings.
   def transpile_pipeline(node)
     lhs = node.left
     rhs = node.right
