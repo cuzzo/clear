@@ -442,6 +442,8 @@ module CleanupClassifier
   end
 
   private_class_method def self.classify_collection(ti, schema_lookup)
+    # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
+    return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.fixed_soa?
     if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,

@@ -741,6 +741,11 @@ class Type
     !!@soa
   end
 
+  # Fixed-size SOA array without collection wrapper (T[N]@soa).
+  def fixed_soa?
+    fixed? && soa? && !collection?
+  end
+
   # A sharded collection with sync capability = lock-striped (skew-safe).
   # Replaces the old :striped(N) keyword — now expressed via composition:
   #   HashMap<V>:sharded(N) @locked → StripedStringMap
@@ -1371,7 +1376,13 @@ class Type
         bare.sync = @sync
         inner_zig = bare.zig_type(is_param: is_param, is_field: is_field)
       else
-        inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
+        if fixed_soa?
+          # T[N]@soa:shared etc. — inner type is SoaList, not bare [N]T
+          base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+          inner_zig = "CheatLib.SoaList(#{base_zig})"
+        else
+          inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
+        end
         inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
         inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
@@ -1423,6 +1434,12 @@ class Type
         return "CheatLib.SoaList(#{base_zig})"
       end
       return sharded? ? "CheatLib.ShardedList(#{base_zig}, #{shard_count})" : "std.ArrayListUnmanaged(#{base_zig})"
+    end
+
+    # 3e. Handle fixed SOA arrays (T[N]@soa — no @pool/@list wrapper)
+    if fixed_soa?
+      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.SoaList(#{base_zig})"
     end
 
     # 4. Handle Arrays recursively

@@ -3361,6 +3361,12 @@ pub const CheatLib = struct {
 
             data: MAL = .{},
 
+            pub fn initCapacity(allocator: std.mem.Allocator, cap: usize) !Self {
+                var data: MAL = .{};
+                try data.setCapacity(allocator, cap);
+                return Self{ .data = data };
+            }
+
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
                 self.data.deinit(allocator);
             }

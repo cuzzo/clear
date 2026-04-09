@@ -282,7 +282,7 @@ module PipelineGenerator
     @current_pipe_label = my_label  # restore after inner pipeline may have changed it
     alloc = storage_node.storage == :heap ? "rt.heapAlloc()" : "rt.frameAlloc()"
     lhs_type = list_node.type_info
-    is_soa = !force_aos && (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
+    is_soa = !force_aos && lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
 
     # Optional result initialization (e.g. creating the output ArrayList)
     res_init = if init
@@ -759,7 +759,7 @@ module PipelineGenerator
     lhs      = smooth_node.left
     each_op  = smooth_node.right
     lhs_type = lhs.type_info
-    is_soa   = (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
+    is_soa   = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
 
     if is_soa
       # SOA EACH: enable field-slice rewrite so _.field reads/writes become
@@ -790,6 +790,8 @@ module PipelineGenerator
       transpile_each_soa_list(lhs, body_code)
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
       transpile_each_sharded_list(lhs, body_code, lhs_type)
+    elsif lhs_type&.fixed_soa?
+      transpile_each_soa_list(lhs, body_code)
     else
       raise "BUG: plain-array EACH should have been rewritten by PipelineRewriter"
     end

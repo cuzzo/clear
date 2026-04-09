@@ -102,7 +102,7 @@ module OwnershipGenerator
     when :string_map, :numeric_map
       conditional_cleanup(name, zig_type, alloc, guarded: g)
 
-    when :pool
+    when :pool, :fixed_soa
       "defer #{name}.deinit(#{alloc});\n"
 
     when :set

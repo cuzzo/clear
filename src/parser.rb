@@ -1817,10 +1817,11 @@ class Parser
     sync       = nil
     collection = nil
     is_soa     = false
-    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @raw @list @pool @set].include?(current.value)
+    is_indirect = false
+    if match?(:VAR_ID) && %w[@multiowned @shared @locked @writeLocked @local @indirect @link @raw @list @pool @set @soa].include?(current.value)
       # Collection types (@list, @pool, @set), @link (weak reference), and @raw (byte buffer)
       # are structural types — they must be allowed on function parameters.
-      is_structural = %w[@list @pool @set @link @raw].include?(current.value)
+      is_structural = %w[@list @pool @set @link @raw @soa @indirect].include?(current.value)
       unless allow_capabilities || is_structural
         error!(current, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
@@ -1835,6 +1836,12 @@ class Parser
       when "@raw"         then sync     = :raw
       when "@indirect"
         @last_indirect_consumed = true  # Signal to union field parser
+        is_indirect = true if inner.start_with?("[")
+      when "@soa"
+        unless inner.start_with?("[") && inner.match?(/\[\d+\]/)
+          error!(cap_tok, "@soa requires a fixed-size array type (e.g. Particle[10000]@soa)")
+        end
+        is_soa = true
       when "@list"
         unless inner.start_with?("[")
           error!(cap_tok, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
@@ -1862,7 +1869,7 @@ class Parser
       # Only for @multiowned/@shared/@locked/@writeLocked — not @list/@pool.
       # Accepts both 'locked' and '@locked' after ':' (same convention as branch prefixes).
       # Allow chaining multiple modifiers with ':' (e.g., @shared:sharded(32):locked)
-      while (ownership || sync || shard_count) && !collection && match?(:CHAR, ':')
+      while (ownership || sync || shard_count || is_soa || is_indirect) && !collection && match?(:CHAR, ':')
         consume(:CHAR, ':')
         unless current.type == :VAR_ID || current.type == :INT64
           error!(current, "Expected a capability modifier after ':'")
@@ -1891,8 +1898,14 @@ class Parser
           error!(cap_tok, "@sharded requires N >= 2, got #{n}") if n < 2
           consume(:CHAR, ')')
           shard_count = n
+        when "@soa"
+          error!(current, "Duplicate soa") if is_soa
+          consume(:VAR_ID); is_soa = true
+        when "@indirect"
+          error!(current, "Duplicate indirect") if is_indirect
+          consume(:VAR_ID); is_indirect = true
         else
-          error!(current, "Expected a capability modifier (locked, writeLocked, shared, sharded) after ':'")
+          error!(current, "Expected a capability modifier (locked, writeLocked, shared, sharded, soa, indirect) after ':'")
         end
       end
 
@@ -1923,7 +1936,8 @@ class Parser
     end
 
 
-    t = Type.new(base_sym, ownership: ownership, sync: sync, location: is_heap ? :heap : nil, collection: collection, shard_count: shard_count)
+    loc = is_heap ? :heap : (is_indirect ? :heap : nil)
+    t = Type.new(base_sym, ownership: ownership, sync: sync, location: loc, collection: collection, shard_count: shard_count)
     t.soa = true if is_soa
     t.elem_ownership = elem_ownership if elem_ownership
     t.elem_sync = elem_sync if elem_sync

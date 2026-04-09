@@ -286,6 +286,12 @@ module GenericAnalysis
       end
     end
 
+    # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
+    if !coll_src && (decl_t = node.type).is_a?(Type) && decl_t.soa
+      node.type_info.soa = true if node.type_info
+      node.full_type.soa = true if node.full_type.is_a?(Type)
+    end
+
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
     if (decl_t = node.type).is_a?(Type)
       if decl_t.shard_count && !node.type_info&.shard_count

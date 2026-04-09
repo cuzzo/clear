@@ -874,6 +874,11 @@ private
         # PartitionedStringMap (shared-nothing): no alloc field.
         @used_sharded_map = true
         "#{node.type.zig_type}{}"
+      elsif node.full_type&.fixed_soa?
+        # T[N]@soa: pre-allocate SoaList with fixed capacity, set len = N.
+        alloc = alloc_expr(node.cleanup_alloc || :heap, rt_name)
+        cap = node.full_type.capacity
+        "try #{node.full_type.zig_type}.initCapacity(#{alloc}, #{cap})"
       elsif rhs_ti&.any_rc? && !rhs_is_unwrapped && !@current_rhs_is_move
         transpile_rc_retain(rhs_ti, rhs_ident.name)
       else
@@ -887,6 +892,11 @@ private
       # T[N]@list: expand len to capacity so indexed writes (arr[i] = val) work.
       if node.full_type&.list_collection? && node.full_type.capacity.is_a?(Integer) && node.full_type.capacity > 0
         decl += "\n#{safe_name}.expandToCapacity();"
+      end
+
+      # T[N]@soa: set len = capacity so iteration covers all N slots.
+      if node.full_type&.fixed_soa?
+        decl += "\n#{safe_name}.data.len = #{node.full_type.capacity};"
       end
 
       # 2. Move suppression is now handled by MIR::SuppressCleanup nodes.
