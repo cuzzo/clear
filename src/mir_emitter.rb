@@ -645,8 +645,9 @@ class MIREmitter
       next nil unless code
       # Expression nodes used as statements need trailing semicolons.
       # Statement nodes (Let, Set, If, While, etc.) already include them
-      # or end with }. Raw/Inline Zig handles its own formatting.
-      if s.expr? && !code.strip.end_with?(";") && !code.strip.end_with?("}")
+      # or end with }. Block openers ({) and closers (}) never get ;.
+      stripped = code.strip
+      if s.expr? && !stripped.end_with?(";") && !stripped.end_with?("}") && !stripped.end_with?("{")
         "#{code};"
       else
         code
@@ -682,7 +683,7 @@ class MIREmitter
 
   def guarded_cleanup(name, zig_type, alloc, guarded)
     if guarded
-      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})")
+      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})", true)
     else
       "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
     end

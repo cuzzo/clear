@@ -277,12 +277,20 @@ class ZigTranspiler
     moved_guard_info = {}
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
+    # Set up old transpiler state for pipeline fallback
+    @fn_sigs = fn_sigs
+    @mir_pass_done = true
+    @moved_guard_info = moved_guard_info
+    @needs_safety_import = false
+    pipeline_cb = ->(node) { visit(node) }
+
     lowering = MIRLowering.new(
       struct_schemas: struct_schemas,
       enum_schemas: enum_schemas,
       union_schemas: union_schemas,
       fn_sigs: fn_sigs,
-      moved_guard_info: moved_guard_info
+      moved_guard_info: moved_guard_info,
+      pipeline_fallback: pipeline_cb
     )
 
     needs_c_alloc = use_c_allocator
@@ -297,7 +305,7 @@ class ZigTranspiler
       // -------------------------------------------------------------------------
       // 3. Main Entry (Test Harness)
       // -------------------------------------------------------------------------
-      #{File.read("./zig/runtime-footer.zig")}
+      #{File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime-footer.zig'))}
     ZIG
   end
 

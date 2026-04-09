@@ -378,8 +378,9 @@ when 'test'
 
   if File.directory?(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
+    gen_flags = @use_mir ? " --mir" : ""
     puts "Generating tests..."
-    system("ruby #{gen_script}")
+    system("ruby #{gen_script}#{gen_flags}")
     puts "Running tests..."
     passed = 0
     failed = 0

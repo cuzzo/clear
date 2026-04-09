@@ -1380,7 +1380,7 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include("stack_size = 16384")
+      expect(zig).to include("stack_size = .Micro")
     end
   end
 
@@ -1456,7 +1456,7 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include("stack_size = 262144")
+      expect(zig).to include("stack_size = .Large")
     end
 
     it "flattens ThenChain in BgBlock body" do

@@ -20,7 +20,8 @@ class MIRLowering
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
 
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
-                 fn_sigs: {}, moved_guard_info: {})
+                 fn_sigs: {}, moved_guard_info: {},
+                 pipeline_fallback: nil)
     @struct_schemas = struct_schemas || {}
     @enum_schemas = enum_schemas || {}
     @union_schemas = union_schemas || {}
@@ -30,6 +31,7 @@ class MIRLowering
     @emitted_extern_modules = Set.new
     @block_expr_counter = 0
     @indirect_fields = {}
+    @pipeline_fallback = pipeline_fallback
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -600,10 +602,11 @@ class MIRLowering
     # Standard call
     args_mir = node.args.map { |a|
       arg = lower(a)
-      # Array/List args: convert to slice via .items
-      if a.type_info&.array? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      # Array/List args: convert to slice via .items (skip strings - already []const u8)
+      ti = a.type_info
+      if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
-      elsif a.type_info.is_a?(Type) && Type.new(a.type_info).needs_pointer_passing?
+      elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         MIR::AddressOf.new(arg)
       else
         arg
@@ -660,9 +663,10 @@ class MIRLowering
     obj_mir = lower(node.object)
     args_mir = node.args.map { |a|
       arg = lower(a)
-      if a.type_info&.array? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      ti = a.type_info
+      if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
-      elsif a.type_info.is_a?(Type) && Type.new(a.type_info).needs_pointer_passing?
+      elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         MIR::AddressOf.new(arg)
       else
         arg
@@ -694,7 +698,15 @@ class MIRLowering
   def lower_intrinsic(node)
     # Symbol-based intrinsics are complex special builtins
     if node.zig_pattern.is_a?(Symbol)
-      return MIR::InlineZig.new("/* intrinsic: #{node.zig_pattern} */", "symbol_intrinsic_#{node.zig_pattern}")
+      case node.zig_pattern
+      when :macro_print
+        return lower_macro_print(node)
+      when :macro_map
+        # map is handled by PipelineRewriter; if we get here, emit a no-op
+        return MIR::InlineZig.new("// map intrinsic (should be rewritten)", "macro_map")
+      else
+        return MIR::InlineZig.new("/* intrinsic: #{node.zig_pattern} */", "symbol_intrinsic_#{node.zig_pattern}")
+      end
     end
 
     # Template-based intrinsics: resolve placeholders
@@ -782,13 +794,15 @@ class MIRLowering
   def lower_set_method(node)
     obj_zig = emit_expr(lower(node.object))
     args_zig = node.args.map { |a| emit_expr(lower(a)) }
-    MIR::InlineZig.new("#{obj_zig}.#{node.set_method}(#{args_zig.join(', ')})", "set_method")
+    method_name = zig_safe_name(node.set_method.to_s)
+    MIR::InlineZig.new("#{obj_zig}.#{method_name}(#{args_zig.join(', ')})", "set_method")
   end
 
   def lower_map_method(node)
     obj_zig = emit_expr(lower(node.object))
     args_zig = node.args.map { |a| emit_expr(lower(a)) }
-    MIR::InlineZig.new("#{obj_zig}.#{node.map_method}(#{args_zig.join(', ')})", "map_method")
+    method_name = zig_safe_name(node.map_method.to_s)
+    MIR::InlineZig.new("#{obj_zig}.#{method_name}(#{args_zig.join(', ')})", "map_method")
   end
 
   # ================================================================
@@ -844,9 +858,10 @@ class MIRLowering
         alloc = alloc_for_node(node)
         return MIR::ContainerInit.new(zig_t, :list_empty, alloc, nil)
       end
-      # Empty slice
+      # Dynamic empty list: use makeList with empty items
       elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
-      return MIR::InlineZig.new("&[_]#{elem_zig}{}", "empty_array")
+      alloc = alloc_for_node(node)
+      return MIR::MakeList.new(elem_zig, [], alloc)
     end
 
     # Non-empty list literal -> makeList
@@ -868,9 +883,9 @@ class MIRLowering
     # Non-empty hash: init + puts
     items = []
     items << MIR::RawZig.new("var __hm = #{zig_t}{ .alloc = #{alloc} };", "hashmap_init")
-    node.pairs.each do |pair|
-      k = emit_expr(lower(pair[:key]))
-      v = emit_expr(lower(pair[:value]))
+    node.pairs.each do |key_node, val_node|
+      k = emit_expr(lower(key_node))
+      v = emit_expr(lower(val_node))
       items << MIR::RawZig.new("try __hm.put(#{k}, #{v});", "hashmap_put")
     end
     items << MIR::RawZig.new("break :__hm_blk __hm;", "hashmap_break")
@@ -928,7 +943,7 @@ class MIRLowering
       end
     end
 
-    body_zig = lower_body(node.body).filter_map { |s| emit_expr(s) }.join("\n")
+    body_zig = emit_stmts_zig(lower_body(node.body))
     all_bindings = bindings.reject(&:empty?).join("\n")
     MIR::RawZig.new("{\n#{all_bindings}\n#{body_zig}\n}", "with_block")
   end
@@ -1253,7 +1268,7 @@ class MIRLowering
 
   def lower_test_block(node)
     test_name = node.name
-    setup_zig = lower_body(node.setup).filter_map { |s| emit_expr(s) }.join("\n    ")
+    setup_zig = emit_stmts_zig(lower_body(node.setup), indent: "    ")
 
     tests = []
     (node.whens || []).each do |when_block|
@@ -1261,12 +1276,12 @@ class MIRLowering
 
       stubs = when_block.setup.select { |s| s.is_a?(AST::StubDecl) }
       non_stub_setup = when_block.setup.reject { |s| s.is_a?(AST::StubDecl) }
-      when_setup_zig = lower_body(non_stub_setup).filter_map { |s| emit_expr(s) }.join("\n    ")
+      when_setup_zig = emit_stmts_zig(lower_body(non_stub_setup), indent: "    ")
       stub_decls = stubs.map { |s| emit_expr(lower(s)) }.join("\n    ")
 
       (when_block.tests || []).each do |test_that|
         full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
-        body_zig = lower_body(test_that.body).filter_map { |s| emit_expr(s) }.join("\n    ")
+        body_zig = emit_stmts_zig(lower_body(test_that.body), indent: "    ")
 
         tests << <<~ZIG
           test "#{full_name}" {
@@ -1349,15 +1364,20 @@ class MIRLowering
   # Helpers for concurrent blocks
   # ================================================================
 
+  STACK_SIZE_ZIG_VARIANT = {
+    :micro => "Micro", :standard => "Standard", :large => "Large", :xl => "XL",
+    "micro" => "Micro", "standard" => "Standard", "large" => "Large", "xl" => "XL",
+  }.freeze
+
   def task_config_zig(stack_size, computed_tier)
-    tier = computed_tier || :standard
-    case tier
-    when :micro  then ".{ .stack_size = 16384 }"
-    when :large  then ".{ .stack_size = 262144 }"
-    when :xl     then ".{ .stack_size = 1048576 }"
+    variant = if stack_size
+      STACK_SIZE_ZIG_VARIANT.fetch(stack_size, "Standard")
+    elsif computed_tier
+      STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, "Standard")
     else
-      stack_size ? ".{ .stack_size = #{stack_size} }" : ".{}"
+      "Large"  # Default for tests (debug builds have large frames)
     end
+    ".{ .stack_size = .#{variant} }"
   end
 
   def bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
@@ -1555,8 +1575,12 @@ class MIRLowering
       AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
     ]
     if complex_ops.any? { |t| rhs.is_a?(t) }
-      # Delegate to pipeline_generator via RawZig escape hatch.
-      # Phase 7 will migrate these individually.
+      # Delegate to old transpiler's pipeline_generator via callback.
+      # Phase 8 will migrate these individually to proper MIR nodes.
+      if @pipeline_fallback
+        zig_code = @pipeline_fallback.call(node)
+        return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
+      end
       left_zig = emit_expr(lower(node.left))
       return MIR::InlineZig.new(
         "/* PIPELINE: #{rhs.class.name.split('::').last} on #{left_zig} */",
@@ -1993,8 +2017,8 @@ class MIRLowering
   end
 
   def lower_for_range(node)
-    start_expr = lower(node.start)
-    end_expr = lower(node.end)
+    start_expr = lower(node.start_expr)
+    end_expr = lower(node.end_expr)
     var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
 
@@ -2052,8 +2076,31 @@ class MIRLowering
                     when AST::MethodCall then c[:value].name
                     else emit_expr(lower(c[:value]))
                     end
+          subj_zig = emit_expr(subject)
+          # Union AS binding: const alias = subject.Variant;
+          if c[:binding]
+            bind_kw = (node.expr.is_a?(AST::Identifier) && node.expr.was_moved) ? "var" : "const"
+            payload_access = c[:indirect_payload_as] ? "#{subj_zig}.#{variant}.*" : "#{subj_zig}.#{variant}"
+            binding = MIR::RawZig.new(
+              "#{bind_kw} #{c[:binding]} = #{payload_access}; _ = &#{c[:binding]};",
+              "union_match_binding"
+            )
+            body = [binding] + body
+          elsif c[:destructure]
+            payload_access = "#{subj_zig}.#{variant}"
+            bind_stmts = c[:destructure].fields.filter_map do |f|
+              next if f[:value] == :wildcard
+              if f[:value] == :bind
+                MIR::RawZig.new(
+                  "const #{f[:name]} = #{payload_access}.#{f[:name]}; _ = &#{f[:name]};",
+                  "union_destructure_bind"
+                )
+              end
+            end
+            body = bind_stmts + body if bind_stmts.any?
+          end
           MIR::InlineZig.new(
-            "std.meta.activeTag(#{emit_expr(subject)}) == .#{variant}",
+            "std.meta.activeTag(#{subj_zig}) == .#{variant}",
             "union_match"
           )
         elsif node.string_match
@@ -2062,6 +2109,12 @@ class MIRLowering
             "CheatLib.strEql(#{emit_expr(subject)}, #{emit_expr(val)})",
             "string_match"
           )
+        elsif c[:kind] == :struct_pattern
+          pat = c[:value]
+          cond_parts, bind_stmts = lower_struct_pattern(subject, pat)
+          body = bind_stmts + body if bind_stmts.any?
+          cond_str = cond_parts.empty? ? "true" : cond_parts.join(" and ")
+          MIR::InlineZig.new(cond_str, "struct_pattern")
         else
           val = lower(c[:value])
           MIR::BinOp.new("==", subject, val)
@@ -2075,7 +2128,11 @@ class MIRLowering
 
   def lower_return(node)
     value = node.value ? lower(node.value) : nil
-    MIR::ReturnStmt.new(value)
+    if @current_fn_preserve_rewind && value
+      MIR::RawZig.new("break :__pr_body #{emit_expr(value)};", "preserve_rewind_break")
+    else
+      MIR::ReturnStmt.new(value)
+    end
   end
 
   # ================================================================
@@ -2086,6 +2143,47 @@ class MIRLowering
     return true if name.nil? || name.to_s.empty?
     sig = @fn_sigs&.dig(name)
     sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true
+  end
+
+  # Lower a StructPattern into (conditions, binding_stmts).
+  # conditions: Array of Zig boolean fragments ("subject.x == 10")
+  # binding_stmts: Array of MIR nodes (const decls for :bind fields)
+  def lower_struct_pattern(subject, pat)
+    subj_zig = emit_expr(subject)
+    conditions = []
+    bindings = []
+
+    pat.fields.each do |f|
+      next if f[:value] == :wildcard
+      if f[:value] == :bind
+        bindings << MIR::RawZig.new(
+          "const #{f[:name]} = #{subj_zig}.#{f[:name]}; _ = &#{f[:name]};",
+          "struct_pattern_bind"
+        )
+      else
+        val_zig = emit_expr(lower(f[:value]))
+        conditions << "#{subj_zig}.#{f[:name]} == #{val_zig}"
+      end
+    end
+
+    [conditions, bindings]
+  end
+
+  def lower_macro_print(node)
+    formats = node.args.map { |arg| zig_format_for_type(arg.full_type) }.join(" ")
+    values = node.args.map { |a| emit_expr(lower(a)) }.join(", ")
+    MIR::InlineZig.new("std.debug.print(\"#{formats}\\n\", .{#{values}})", "macro_print")
+  end
+
+  def zig_format_for_type(flux_type)
+    t = flux_type.to_s
+    return "{s}" if t.include?("String") || t.match?(/^Byte\[/)
+    case t
+    when "Number", "Int64", "Byte" then "{d}"
+    when "Bool" then "{}"
+    when "Void" then "{}"
+    else "{any}"
+    end
   end
 
   def callee_can_fail?(name)
@@ -2118,5 +2216,21 @@ class MIRLowering
       MIREmitter.new
     end
     @_emitter.emit(node)
+  end
+
+  # Emit a list of MIR statements as Zig body text, adding semicolons
+  # to expression nodes used as statements. Mirrors MIREmitter#emit_body.
+  def emit_stmts_zig(mir_nodes, indent: "")
+    mir_nodes.filter_map { |s|
+      code = emit_expr(s)
+      next nil unless code
+      stripped = code.strip
+      if s.respond_to?(:expr?) && s.expr? &&
+         !stripped.end_with?(";") && !stripped.end_with?("}") && !stripped.end_with?("{")
+        "#{indent}#{code};"
+      else
+        "#{indent}#{code}"
+      end
+    }.join("\n")
   end
 end
