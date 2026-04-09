@@ -932,10 +932,38 @@ class MIRPass
     end
   end
 
+  # Find all BG/stream blocks reachable from a statement. Walks into expression
+  # positions: direct values (VarDecl, BindExpr, Assignment), MethodCall args,
+  # FuncCall args. Yields each BgBlock/BgStreamBlock found.
+  def each_bg_in_stmt(stmt, &block)
+    case stmt
+    when AST::BgBlock, AST::BgStreamBlock
+      yield stmt
+    when AST::VarDecl, AST::BindExpr, AST::Assignment
+      _walk_expr_for_bg(stmt.value, &block)
+    when AST::FuncCall
+      stmt.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    when AST::MethodCall
+      stmt.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    end
+  end
+
+  def _walk_expr_for_bg(expr, &block)
+    return unless expr
+    case expr
+    when AST::BgBlock, AST::BgStreamBlock
+      yield expr
+    when AST::FuncCall
+      expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    when AST::MethodCall
+      _walk_expr_for_bg(expr.object, &block)
+      expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    end
+  end
+
   # Insert MIR::SuppressCleanup for resources captured by BG blocks.
   # When a BG fiber captures a resource (TCP fd, etc.), ownership transfers
   # to the fiber — the outer scope's defer must not close it.
-  # BG blocks appear as expressions inside VarDecl/BindExpr/Assignment.
   #
   # If dataflow determines the resource is ALWAYS moved (unconditional BG),
   # cleanup is eliminated entirely (no defer emitted) and no SuppressCleanup
@@ -943,19 +971,15 @@ class MIRPass
   # (MAYBE_MOVED) and the binding retains a moved guard.
   def insert_bg_resource_suppress!(result, stmt, bindings)
     return unless bindings
-    bg = case stmt
-         when AST::BgBlock then stmt
-         when AST::VarDecl    then stmt.value.is_a?(AST::BgBlock) ? stmt.value : nil
-         when AST::BindExpr   then stmt.value.is_a?(AST::BgBlock) ? stmt.value : nil
-         when AST::Assignment then stmt.value.is_a?(AST::BgBlock) ? stmt.value : nil
-         end
-    return unless bg
-    resource_captures = bg.capture_analysis&.resource_captures
-    return unless resource_captures&.any?
-    resource_captures.each do |name|
-      entry = bindings[name]
-      next unless entry && entry[:has_moved_guard]
-      result << MIR::SuppressCleanup.new(stmt.token, name)
+    each_bg_in_stmt(stmt) do |bg|
+      next unless bg.is_a?(AST::BgBlock) # resource suppress only for BgBlock
+      resource_captures = bg.capture_analysis&.resource_captures
+      next unless resource_captures&.any?
+      resource_captures.each do |name|
+        entry = bindings[name]
+        next unless entry && entry[:has_moved_guard]
+        result << MIR::SuppressCleanup.new(stmt.token, name)
+      end
     end
   end
 
@@ -965,19 +989,16 @@ class MIRPass
   def body_has_bg_escape_promotes?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |stmt|
-      bg = case stmt
-           when AST::BgBlock, AST::BgStreamBlock then stmt
-           when AST::VarDecl, AST::BindExpr, AST::Assignment
-             v = stmt.value
-             (v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)) ? v : nil
-           end
-      next false unless bg
-      captured = bg.capture_analysis&.captures
-      next false unless captured&.any?
-      captured.any? do |_, type_obj|
-        t = type_obj ? Type.new(type_obj) : nil
-        t && t.needs_escape_promotion? && !t.needs_pointer_passing?
+      found = false
+      each_bg_in_stmt(stmt) do |bg|
+        captured = bg.capture_analysis&.captures
+        next unless captured&.any?
+        found = true if captured.any? do |_, type_obj|
+          t = type_obj ? Type.new(type_obj) : nil
+          t && t.needs_escape_promotion? && !t.needs_pointer_passing?
+        end
       end
+      found
     end
   end
 
@@ -985,22 +1006,16 @@ class MIRPass
   # Lists get :list strategy (in-place promoteList). Strings get :bg_string
   # strategy (transpiler emits dupe inside the BG block where the allocator is available).
   def insert_bg_escape_promote!(result, stmt)
-    bg = case stmt
-         when AST::BgBlock, AST::BgStreamBlock then stmt
-         when AST::VarDecl, AST::BindExpr, AST::Assignment
-           v = stmt.value
-           (v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)) ? v : nil
-         end
-    return unless bg
-    captured = bg.capture_analysis&.captures
-    return unless captured&.any?
-
-    captured.each do |name, type_obj|
-      t = type_obj ? Type.new(type_obj) : nil
-      next unless t && t.needs_escape_promotion?
-      next if t.needs_pointer_passing?
-      strategy = t.list_collection? ? :list : :bg_string
-      result << MIR::Promote.new(bg.token, name, t.zig_type, strategy, nil)
+    each_bg_in_stmt(stmt) do |bg|
+      captured = bg.capture_analysis&.captures
+      next unless captured&.any?
+      captured.each do |name, type_obj|
+        t = type_obj ? Type.new(type_obj) : nil
+        next unless t && t.needs_escape_promotion?
+        next if t.needs_pointer_passing?
+        strategy = t.list_collection? ? :list : :bg_string
+        result << MIR::Promote.new(bg.token, name, t.zig_type, strategy, nil)
+      end
     end
   end
 

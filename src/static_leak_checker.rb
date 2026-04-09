@@ -339,14 +339,8 @@ class StaticLeakChecker
   def check_bg_capture_promotes!(stmts, promotes)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
-      bg = case stmt
-           when AST::BgBlock, AST::BgStreamBlock then stmt
-           when AST::VarDecl, AST::BindExpr, AST::Assignment
-             v = stmt.respond_to?(:value) ? stmt.value : nil
-             (v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)) ? v : nil
-           else nil
-           end
-      if bg
+      # Walk into all expression positions where BG blocks can appear.
+      each_bg_in_stmt(stmt) do |bg|
         captures = bg.capture_analysis&.captures
         captures&.each do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
@@ -371,6 +365,34 @@ class StaticLeakChecker
       when AST::DoBlock
         stmt.branches&.each { |b| check_bg_capture_promotes!(b[:body], promotes) }
       end
+    end
+  end
+
+  # Find all BG/stream blocks reachable from a statement. Walks into expression
+  # positions: direct values, MethodCall args, FuncCall args.
+  def each_bg_in_stmt(stmt, &block)
+    case stmt
+    when AST::BgBlock, AST::BgStreamBlock
+      yield stmt
+    when AST::VarDecl, AST::BindExpr, AST::Assignment
+      _walk_expr_for_bg(stmt.respond_to?(:value) ? stmt.value : nil, &block)
+    when AST::FuncCall
+      stmt.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    when AST::MethodCall
+      stmt.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    end
+  end
+
+  def _walk_expr_for_bg(expr, &block)
+    return unless expr
+    case expr
+    when AST::BgBlock, AST::BgStreamBlock
+      yield expr
+    when AST::FuncCall
+      expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    when AST::MethodCall
+      _walk_expr_for_bg(expr.object, &block)
+      expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
     end
   end
 

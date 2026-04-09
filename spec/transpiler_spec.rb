@@ -1129,4 +1129,48 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("free(__old)")
     end
   end
+
+  # ===========================================================================
+  # BG string capture: defer free only for promoted captures
+  # ===========================================================================
+  describe "BG string capture defer free" do
+    it "emits defer free for promoted (frame-allocated) string capture" do
+      src = <<~CLEAR
+        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN main() RETURNS Void ->
+            msg = greet!("hello");
+            p: ~Void = BG { print(msg); };
+            NEXT p;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # msg is frame-allocated, captured by BG -> must be duped + freed
+      expect(zig).to include("dupe(u8, msg)")
+      expect(zig).to include(".free(")
+    end
+
+    it "does NOT emit defer free for unpromoted string captures (BG inside MethodCall)" do
+      src = <<~CLEAR
+        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN main() RETURNS Void ->
+            msg = greet!("hello");
+            needle = "the";
+            MUTABLE futures: ~Void[]@list = [];
+            futures.append(BG { print(msg); print(needle); });
+            NEXT futures[0];
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # BG is inside a MethodCall arg. If MIR::Promote was missed, there
+      # should be NO defer free (freeing un-duped data crashes).
+      # After the fix: both msg and needle should be duped AND freed.
+      has_msg_dupe = zig.include?("dupe(u8, msg)")
+      has_msg_free = zig.match?(/free.*msg/)
+      # Either both dupe+free, or neither. Never free without dupe.
+      expect(has_msg_free && !has_msg_dupe).to be(false),
+        "free without dupe is a crash: msg is freed but was never duped to heap"
+    end
+  end
 end

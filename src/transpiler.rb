@@ -1611,7 +1611,6 @@ private
 
       # Pre-computed capture metadata from analysis.
       pointer_captures = analysis&.pointer_captures || Set.new
-      string_captures = analysis&.string_captures || Set.new
       resource_captures = analysis&.resource_captures || Set.new
 
       node.captures_resource = resource_captures.any?
@@ -1718,12 +1717,12 @@ private
       arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
 
       # Defer-free for promoted captures inside the fiber.
-      # Strings need explicit free (duped to heap); collections are freed
-      # via their own deinit in the fiber's normal cleanup path.
+      # Only free strings that were actually duped via MIR::Promote(:bg_string).
+      # string_captures marks all string-typed captures but includes literals and
+      # heap strings that were never duped -- freeing those crashes (invalid free).
       # Resources use the schema-driven close_zig pattern from the symbol entry.
-      # capture_close_zig from analysis above
       capture_frees = captured.filter_map do |name, _|
-        if string_captures.include?(name)
+        if bg_string_promotes.include?(name)
           "defer ctx.alloc.free(ctx.#{name});"
         elsif capture_close_zig[name]
           "defer #{capture_close_zig[name].gsub('{0}', "ctx.#{name}")};"
@@ -1779,7 +1778,6 @@ private
 
       analysis = node.capture_analysis
       captured = analysis&.captures || {}
-      string_captures = analysis&.string_captures || Set.new
 
       # Consume pending BG string promotes from MIR::Promote(:bg_string) nodes.
       bg_string_promotes = @pending_bg_string_promotes || Set.new
@@ -1835,7 +1833,7 @@ private
                     const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_sg#{id}.?)));
                     defer ctx.alloc.destroy(ctx);
                     #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
-                    #{string_captures.filter_map { |n| "defer ctx.alloc.free(ctx.#{n});" }.join("\n                    ")}
+                    #{bg_string_promotes.filter_map { |n| "defer ctx.alloc.free(ctx.#{n});" }.join("\n                    ")}
                     var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
                     defer #{local_stream}.close();
                     errdefer |gen_err| #{local_stream}.inner.err = gen_err;

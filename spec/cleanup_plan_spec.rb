@@ -968,4 +968,79 @@ RSpec.describe StaticLeakChecker do
       expect(errors).to include(a_string_matching(/ORPHAN.*phantom/))
     end
   end
+
+  # ===========================================================================
+  # BG escape promotion: MIR::Promote(:bg_string) for string captures
+  # ===========================================================================
+  describe "BG escape promotion for string captures" do
+    # Helper: run full pipeline through MIR, return fn body statements
+    def mir_body_for(src, fn_name)
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir.transform!(ast)
+      fn_nodes[fn_name].body
+    end
+
+    def bg_string_promotes_in(body)
+      body.select { |s| s.is_a?(MIR::Promote) && s.strategy == :bg_string }.map(&:name)
+    end
+
+    it "emits MIR::Promote(:bg_string) for direct BG assignment capturing a string" do
+      body = mir_body_for(<<~CLEAR, "test")
+        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN test() RETURNS Void ->
+            msg = greet!("hello");
+            p: ~Void = BG { print(msg); };
+            NEXT p;
+            RETURN;
+        END
+      CLEAR
+      expect(bg_string_promotes_in(body)).to include("msg")
+    end
+
+    it "emits MIR::Promote(:bg_string) for BG inside a MethodCall arg" do
+      body = mir_body_for(<<~CLEAR, "test")
+        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN test() RETURNS Void ->
+            msg = greet!("hello");
+            MUTABLE futures: ~Void[]@list = [];
+            futures.append(BG { print(msg); });
+            NEXT futures[0];
+            RETURN;
+        END
+      CLEAR
+      expect(bg_string_promotes_in(body)).to include("msg")
+    end
+
+    it "emits MIR::Promote(:bg_string) for BG inside a FuncCall arg" do
+      body = mir_body_for(<<~CLEAR, "test")
+        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN consume(p: ~Void) RETURNS Void -> NEXT p; RETURN; END
+        FN test() RETURNS Void ->
+            msg = greet!("hello");
+            consume(BG { print(msg); });
+            RETURN;
+        END
+      CLEAR
+      expect(bg_string_promotes_in(body)).to include("msg")
+    end
+
+    it "does NOT emit MIR::Promote(:bg_string) for string literals (no frame alloc)" do
+      body = mir_body_for(<<~CLEAR, "test")
+        FN test() RETURNS Void ->
+            p: ~Void = BG { print("hello"); };
+            NEXT p;
+            RETURN;
+        END
+      CLEAR
+      # "hello" is a literal, not a frame-allocated binding — no promote needed
+      expect(bg_string_promotes_in(body)).to be_empty
+    end
+  end
 end
