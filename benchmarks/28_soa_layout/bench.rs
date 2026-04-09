@@ -17,6 +17,18 @@ struct Particle {
     mass: f64, radius: f64, charge: f64,
     ax: f64, ay: f64, az: f64,
     age: f64, energy: f64, temperature: f64, pressure: f64,
+    r01: f64, r02: f64, r03: f64, r04: f64,
+    r05: f64, r06: f64, r07: f64, r08: f64,
+    r09: f64, r10: f64, r11: f64, r12: f64,
+    r13: f64, r14: f64, r15: f64, r16: f64,
+    r17: f64, r18: f64, r19: f64, r20: f64,
+    r21: f64, r22: f64, r23: f64, r24: f64,
+    r25: f64, r26: f64, r27: f64, r28: f64,
+    r29: f64, r30: f64, r31: f64, r32: f64,
+    r33: f64, r34: f64, r35: f64, r36: f64,
+    r37: f64, r38: f64, r39: f64, r40: f64,
+    r41: f64, r42: f64, r43: f64, r44: f64,
+    r45: f64, r46: f64, r47: f64, r48: f64,
 }
 
 struct SoaParticles {
@@ -32,6 +44,18 @@ fn run_aos() -> (f64, f64) {
             mass: 1.0, radius: 0.1, charge: 0.0,
             ax: 0.0, ay: 0.0, az: 0.0,
             age: 0.0, energy: 0.0, temperature: 0.0, pressure: 0.0,
+            r01: 0.0, r02: 0.0, r03: 0.0, r04: 0.0,
+            r05: 0.0, r06: 0.0, r07: 0.0, r08: 0.0,
+            r09: 0.0, r10: 0.0, r11: 0.0, r12: 0.0,
+            r13: 0.0, r14: 0.0, r15: 0.0, r16: 0.0,
+            r17: 0.0, r18: 0.0, r19: 0.0, r20: 0.0,
+            r21: 0.0, r22: 0.0, r23: 0.0, r24: 0.0,
+            r25: 0.0, r26: 0.0, r27: 0.0, r28: 0.0,
+            r29: 0.0, r30: 0.0, r31: 0.0, r32: 0.0,
+            r33: 0.0, r34: 0.0, r35: 0.0, r36: 0.0,
+            r37: 0.0, r38: 0.0, r39: 0.0, r40: 0.0,
+            r41: 0.0, r42: 0.0, r43: 0.0, r44: 0.0,
+            r45: 0.0, r46: 0.0, r47: 0.0, r48: 0.0,
         })
         .collect();
 
@@ -81,7 +105,7 @@ fn main() {
     let (aos_ms, _) = run_aos();
     let (soa_ms, _) = run_soa();
 
-    println!("Particles:   {}  (128 bytes/particle, 16 fields)", N_PARTICLES);
+    println!("Particles:   {}  (512 bytes/particle, 64 fields)", N_PARTICLES);
     println!("Iterations:  {}", ITERATIONS);
     println!("AOS:         {:.1} ms", aos_ms);
     println!("SOA:         {:.1} ms", soa_ms);

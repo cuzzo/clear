@@ -15,24 +15,26 @@
 #define N_PARTICLES 10000
 #define ITERATIONS  100
 
-/* AOS layout: 128 bytes per particle */
+/* AOS layout: 512 bytes per particle (64 fields) */
 typedef struct {
     double x, y, z;
     double vx, vy, vz;
     double mass, radius, charge;
     double ax, ay, az;
     double age, energy, temperature, pressure;
+    double r01, r02, r03, r04, r05, r06, r07, r08;
+    double r09, r10, r11, r12, r13, r14, r15, r16;
+    double r17, r18, r19, r20, r21, r22, r23, r24;
+    double r25, r26, r27, r28, r29, r30, r31, r32;
+    double r33, r34, r35, r36, r37, r38, r39, r40;
+    double r41, r42, r43, r44, r45, r46, r47, r48;
 } Particle;
 
 static Particle aos[N_PARTICLES];
 
-/* SOA layout: each field contiguous */
-static double soa_x[N_PARTICLES], soa_y[N_PARTICLES], soa_z[N_PARTICLES];
-static double soa_vx[N_PARTICLES], soa_vy[N_PARTICLES], soa_vz[N_PARTICLES];
-static double soa_mass[N_PARTICLES], soa_radius[N_PARTICLES], soa_charge[N_PARTICLES];
-static double soa_ax[N_PARTICLES], soa_ay[N_PARTICLES], soa_az[N_PARTICLES];
-static double soa_age[N_PARTICLES], soa_energy[N_PARTICLES];
-static double soa_temperature[N_PARTICLES], soa_pressure[N_PARTICLES];
+/* SOA layout: only the hot fields (what the loop actually touches) */
+static double soa_x[N_PARTICLES], soa_y[N_PARTICLES];
+static double soa_vx[N_PARTICLES], soa_vy[N_PARTICLES];
 
 static void init_aos(void) {
     for (int i = 0; i < N_PARTICLES; i++) {
@@ -43,17 +45,14 @@ static void init_aos(void) {
             .ax = 0.0, .ay = 0.0, .az = 0.0,
             .age = 0.0, .energy = 0.0, .temperature = 0.0, .pressure = 0.0,
         };
+        /* r01..r48 zero-initialized by designated init */
     }
 }
 
 static void init_soa(void) {
     for (int i = 0; i < N_PARTICLES; i++) {
-        soa_x[i] = (double)i;  soa_y[i] = (double)i * 2.0;  soa_z[i] = 0.0;
-        soa_vx[i] = 1.0;  soa_vy[i] = 0.5;  soa_vz[i] = 0.0;
-        soa_mass[i] = 1.0;  soa_radius[i] = 0.1;  soa_charge[i] = 0.0;
-        soa_ax[i] = 0.0;  soa_ay[i] = 0.0;  soa_az[i] = 0.0;
-        soa_age[i] = 0.0;  soa_energy[i] = 0.0;
-        soa_temperature[i] = 0.0;  soa_pressure[i] = 0.0;
+        soa_x[i] = (double)i;  soa_y[i] = (double)i * 2.0;
+        soa_vx[i] = 1.0;  soa_vy[i] = 0.5;
     }
 }
 
@@ -113,7 +112,7 @@ int main(void) {
     double aos_ms = run_aos();
     double soa_ms = run_soa();
 
-    printf("Particles:   %d  (128 bytes/particle, 16 fields)\n", N_PARTICLES);
+    printf("Particles:   %d  (512 bytes/particle, 64 fields)\n", N_PARTICLES);
     printf("Iterations:  %d\n", ITERATIONS);
     printf("AOS:         %.1f ms\n", aos_ms);
     printf("SOA:         %.1f ms\n", soa_ms);

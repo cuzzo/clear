@@ -5,9 +5,9 @@
 --   1. AOS: regular Entity[] array (array of structs)
 --   2. SOA: Entity@pool:soa (struct of arrays, compiler-managed)
 --
--- The position update loop (x += vx, y += vy) only touches 2 of 4 fields
--- per pass. SOA keeps each field contiguous in memory, so the CPU
--- prefetcher loads full cache lines of useful data.
+-- The position update loop (x += vx, y += vy) only touches 4 of 64 fields
+-- per pass (6% utilization). SOA keeps each field contiguous in memory,
+-- so the CPU prefetcher loads full cache lines of useful data.
 --
 -- CLEAR's @pool:soa gives SOA layout with AOS syntax -- the compiler
 -- transposes the data automatically. No manual struct-splitting needed.
@@ -17,7 +17,19 @@ STRUCT Particle {
     vx: Float64, vy: Float64, vz: Float64,
     mass: Float64, radius: Float64, charge: Float64,
     ax: Float64, ay: Float64, az: Float64,
-    age: Float64, energy: Float64, temperature: Float64, pressure: Float64
+    age: Float64, energy: Float64, temperature: Float64, pressure: Float64,
+    r01: Float64, r02: Float64, r03: Float64, r04: Float64,
+    r05: Float64, r06: Float64, r07: Float64, r08: Float64,
+    r09: Float64, r10: Float64, r11: Float64, r12: Float64,
+    r13: Float64, r14: Float64, r15: Float64, r16: Float64,
+    r17: Float64, r18: Float64, r19: Float64, r20: Float64,
+    r21: Float64, r22: Float64, r23: Float64, r24: Float64,
+    r25: Float64, r26: Float64, r27: Float64, r28: Float64,
+    r29: Float64, r30: Float64, r31: Float64, r32: Float64,
+    r33: Float64, r34: Float64, r35: Float64, r36: Float64,
+    r37: Float64, r38: Float64, r39: Float64, r40: Float64,
+    r41: Float64, r42: Float64, r43: Float64, r44: Float64,
+    r45: Float64, r46: Float64, r47: Float64, r48: Float64
 }
 
 FN main() RETURNS Void ->
@@ -32,7 +44,19 @@ FN main() RETURNS Void ->
             vx: 1.0, vy: 0.5, vz: 0.0,
             mass: 1.0, radius: 0.1, charge: 0.0,
             ax: 0.0, ay: 0.0, az: 0.0,
-            age: 0.0, energy: 0.0, temperature: 0.0, pressure: 0.0
+            age: 0.0, energy: 0.0, temperature: 0.0, pressure: 0.0,
+            r01: 0.0, r02: 0.0, r03: 0.0, r04: 0.0,
+            r05: 0.0, r06: 0.0, r07: 0.0, r08: 0.0,
+            r09: 0.0, r10: 0.0, r11: 0.0, r12: 0.0,
+            r13: 0.0, r14: 0.0, r15: 0.0, r16: 0.0,
+            r17: 0.0, r18: 0.0, r19: 0.0, r20: 0.0,
+            r21: 0.0, r22: 0.0, r23: 0.0, r24: 0.0,
+            r25: 0.0, r26: 0.0, r27: 0.0, r28: 0.0,
+            r29: 0.0, r30: 0.0, r31: 0.0, r32: 0.0,
+            r33: 0.0, r34: 0.0, r35: 0.0, r36: 0.0,
+            r37: 0.0, r38: 0.0, r39: 0.0, r40: 0.0,
+            r41: 0.0, r42: 0.0, r43: 0.0, r44: 0.0,
+            r45: 0.0, r46: 0.0, r47: 0.0, r48: 0.0
         });
     END
 
