@@ -552,7 +552,16 @@ when 'doctor'
             else "" end
       avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
       kb = s[:bytes] / 1024.0
-      leak = s[:frees] == 0 && s[:allocs] > 0 ? "  ** LEAK **" : ""
+      leak = if s[:frees] == 0 && s[:allocs] > 0
+               # The profiler only tracks frame-arena allocations (smartAlloc).
+               # smartFree is a no-op — arena memory is reclaimed by rewind, not
+               # individual free.  So frees==0 is expected, not a leak.
+               "  (arena)"
+             elsif s[:frees] > 0 && s[:frees] < s[:allocs]
+               "  ** LEAK ** (#{s[:allocs] - s[:frees]} unfreed)"
+             else
+               ""
+             end
       if kb >= 1.0
         puts "  #{i + 1}. %-25s %6.1f KB  (%s allocs, %d bytes avg)%s" % [
           "#{func} #{loc}", kb, s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
@@ -560,6 +569,11 @@ when 'doctor'
         puts "  #{i + 1}. %-25s %6d B   (%s allocs, %d bytes avg)%s" % [
           "#{func} #{loc}", s[:bytes], s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
       end
+    end
+    arena_count = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 }
+    leak_count  = sites.first(10).count { |s| s[:frees] > 0 && s[:frees] < s[:allocs] }
+    if arena_count > 0 && leak_count == 0
+      puts "  (arena) = frame-arena allocation, freed in bulk by rewind (not a leak)"
     end
     puts ""
   else
