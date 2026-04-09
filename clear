@@ -470,12 +470,15 @@ when 'test'
     leak_seen = {}
     IO.popen("cd #{ZIG_DIR} && #{ZIG} test all-tests.zig -lc switch.S onRoot.S 2>&1") do |io|
       io.each_line do |line|
-        # New test starts
-        if line =~ %r{^(\d+)/(\d+)\s+all-tests\.test\.(.+?)\.\.\.(.*)$}
+        # Zig test result format: "N/M all-tests.test.NAME...OK" or "...FAIL"
+        # Result may be on the same line (inline) or a standalone "OK"/"FAIL" line.
+        if line =~ %r{^(\d+)/(\d+)\s+all-tests\.test\.(.+?)\.\.\.\s*(.*)$}
           current_test = $3
-          rest = $4
+          result = $4.strip
         else
-          rest = line
+          result = nil
+          # Standalone result line (test printed output before result)
+          result = line.strip if current_test && line.strip =~ /^(OK|FAIL)\b/
         end
 
         # Track leaks: GPA output appears after the test's OK/FAIL line,
@@ -490,25 +493,23 @@ when 'test'
 
         next unless current_test
 
-        if rest.include?('OK')
+        if result == 'OK'
           print "\e[32m.\e[0m"
           passed += 1
           last_completed_test = current_test
           current_test = nil
-        elsif rest.include?('FAIL') || rest.include?('Segmentation fault')
+        elsif result =~ /^FAIL/ || line.include?('Segmentation fault at address')
           print "\e[31mF\e[0m"
           failed += 1
           failed_names << current_test
           last_completed_test = current_test
           current_test = nil
         elsif line.include?('error: the following test command crashed')
-          if current_test
-            print "\e[31mF\e[0m"
-            failed += 1
-            failed_names << current_test
-            last_completed_test = current_test
-            current_test = nil
-          end
+          print "\e[31mF\e[0m"
+          failed += 1
+          failed_names << current_test
+          last_completed_test = current_test
+          current_test = nil
         end
       end
     end
