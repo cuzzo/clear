@@ -320,12 +320,33 @@ when 'run'
     run_args = []
   end
 
-  source = clear_args.first
-  error "Usage: clear run <file.cht> [-- args...]" unless source
+  # Parse run flags
+  opt_level = 'Debug'
+  extra_flags = ['-fno-llvm', '-fno-lld']
+  run_remaining = []
+  clear_args.each do |arg|
+    case arg
+    when '--optimized', '--release', '--fast'
+      opt_level = 'ReleaseFast'
+      extra_flags = []
+    when '--safe'
+      opt_level = 'ReleaseSafe'
+      extra_flags = []
+    when '--debug'
+      opt_level = 'Debug'
+      extra_flags = ['-fno-llvm', '-fno-lld']
+    else
+      run_remaining << arg
+    end
+  end
+
+  source = run_remaining.first
+  error "Usage: clear run <file.cht> [--optimized|--safe] [-- args...]" unless source
 
   source = File.expand_path(source)
   output = File.join(File.dirname(source), File.basename(source, '.cht'))
-  do_build(source, output: output)
+  default_stack = (opt_level == 'Debug') ? 'Large' : nil
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack)
 
   # Hints
   unless ENV['CLEAR_THREADS']
