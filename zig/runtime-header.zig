@@ -2332,7 +2332,7 @@ pub const CheatLib = struct {
                         const ElemT = ft_info.pointer.child;
                         const buf = try alloc.alloc(ElemT, src.len);
                         for (src, 0..) |elem, i| {
-                            buf[i] = dupeUnionValue(ElemT, elem, alloc) catch elem;
+                            buf[i] = try dupeUnionValue(ElemT, elem, alloc);
                         }
                         @field(result, field.name) = buf;
                     }
@@ -2348,16 +2348,16 @@ pub const CheatLib = struct {
                     // Use dupeStructSlices for struct pointees (deep-copies string/slice fields).
                     // Use dupeUnionValue for union pointees.
                     if (@typeInfo(ChildT) == .@"struct")
-                        new_ptr.* = dupeStructSlices(ChildT, src_ptr.*, alloc) catch src_ptr.*
+                        new_ptr.* = try dupeStructSlices(ChildT, src_ptr.*, alloc)
                     else
-                        new_ptr.* = dupeUnionValue(ChildT, src_ptr.*, alloc) catch src_ptr.*;
+                        new_ptr.* = try dupeUnionValue(ChildT, src_ptr.*, alloc);
                     @field(result, field.name) = new_ptr;
                     return result;
                 } else if (ft_info == .@"struct" and
                     !isArrayList(FT) and !isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
                     !(@hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")))
                 {
-                    @field(result, field.name) = dupeStructSlices(FT, @field(value, field.name), alloc) catch @field(value, field.name);
+                    @field(result, field.name) = try dupeStructSlices(FT, @field(value, field.name), alloc);
                     return result;
                 }
                 return value;
@@ -2383,7 +2383,7 @@ pub const CheatLib = struct {
                     } else {
                         const buf = try alloc.alloc(ElemT, src.len);
                         for (src, 0..) |elem, i| {
-                            buf[i] = dupeUnionValue(ElemT, elem, alloc) catch elem;
+                            buf[i] = try dupeUnionValue(ElemT, elem, alloc);
                         }
                         @field(result, field.name) = buf;
                     }
@@ -2392,10 +2392,10 @@ pub const CheatLib = struct {
                 const child_ptr = @field(value, field.name);
                 const ChildT = ft_info.pointer.child;
                 const new_ptr = try alloc.create(ChildT);
-                new_ptr.* = dupeUnionValue(ChildT, child_ptr.*, alloc) catch child_ptr.*;
+                new_ptr.* = try dupeUnionValue(ChildT, child_ptr.*, alloc);
                 @field(result, field.name) = new_ptr;
             } else if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
-                @field(result, field.name) = dupeUnionValue(FT, @field(value, field.name), alloc) catch @field(value, field.name);
+                @field(result, field.name) = try dupeUnionValue(FT, @field(value, field.name), alloc);
             }
         }
         return result;

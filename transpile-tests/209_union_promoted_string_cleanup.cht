@@ -1,0 +1,14 @@
+UNION Val { Nil, Str: String }
+
+FN makeVal(label: String) RETURNS Val ->
+    RETURN Val{ Str: label + "!" };
+END
+
+FN main() RETURNS Void ->
+    v = makeVal("hello");
+    MATCH v START
+        Val.Str AS s -> ASSERT s == "hello!", "promoted string in union";,
+        DEFAULT -> ASSERT FALSE, "should be Str";
+    END
+    print("PASS");
+END

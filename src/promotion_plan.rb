@@ -569,7 +569,7 @@ module CleanupClassifier
     is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
     return nil if is_copy
     has_heap_variants = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-    alloc = ti.provenance_alloc || (has_heap_variants ? :heap : :frame)
+    alloc = has_heap_variants ? :heap : (ti.provenance_alloc || :frame)
     entry(:non_copy_union, alloc: alloc)
   end
 

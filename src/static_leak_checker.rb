@@ -136,11 +136,11 @@ class StaticLeakChecker
         next unless [:list, :string_map, :generic].include?(promote.strategy)
         drop_nodes = drops[name]
         next unless drop_nodes
-        # Promote converts to heap; if any Drop would still fire (no guard), allocator is wrong.
+        # Promote converts to heap; Drop allocator must match.
         drop_nodes.each do |drop|
-          if !drop.has_moved_guard && drop.alloc == :frame
+          if drop.alloc == :frame
             @errors << error(:ALLOC_MISMATCH, name,
-              "MIR::Promote converts to heap but unguarded Drop uses :frame (UAF after promotion)")
+              "MIR::Promote converts to heap but Drop uses :frame (alloc mismatch after promotion)")
           end
         end
       end

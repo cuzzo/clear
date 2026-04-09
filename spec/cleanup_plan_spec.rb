@@ -84,6 +84,7 @@ RSpec.describe CleanupClassifier do
         # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
         expect([:non_copy_union, :heap_union]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:alloc]).to eq(:heap)
       end
     end
 
@@ -953,6 +954,51 @@ RSpec.describe StaticLeakChecker do
         END
       CLEAR
       expect(errors).to be_empty
+    end
+  end
+
+  context "promote alloc mismatch with guarded drop" do
+    it "catches ALLOC_MISMATCH even when drop has_moved_guard is true" do
+      src = <<~CLEAR
+        UNION Val { Nil, Str: String }
+        FN makeVal() RETURNS Val ->
+            RETURN Val{ Str: "hello" };
+        END
+        FN test() RETURNS Void ->
+            v = makeVal();
+            RETURN;
+        END
+      CLEAR
+
+      # Clean pipeline passes
+      errors = run_checker(src, "test")
+      expect(errors).to be_empty
+
+      # Re-run pipeline, sabotage Drop alloc to :frame, re-check
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir.transform!(ast)
+      fn = fn_nodes["test"]
+      bindings = mir.cleanup_bindings["test"] || {}
+
+      # Sabotage: set Drop alloc to :frame while keeping has_moved_guard true
+      fn.body.each do |stmt|
+        if stmt.is_a?(MIR::Drop) && stmt.name == "v"
+          stmt.alloc = :frame
+        end
+      end
+
+      can_fail_fns = Set.new
+      fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
+      checker = StaticLeakChecker.new(fn, bindings: bindings, can_fail_fns: can_fail_fns)
+      errors = checker.check!
+      expect(errors.any? { |e| e.include?("ALLOC_MISMATCH") }).to eq(true)
     end
   end
 
