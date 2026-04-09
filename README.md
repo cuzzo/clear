@@ -75,7 +75,7 @@ In CLEAR, at runtime, the Control Plane can detect when you've employed a bad st
 
 CLEAR is designed such that you can override default compiler behviors if you know what you're doing, but you don't have the tools to shoot yourself in the foot.
 
-### Full Access to the C Standard Library
+### Full Access to the Entire C Library
 
 CLEAR lowers to Zig, which has native access to the entire C library.
 
