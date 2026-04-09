@@ -1895,10 +1895,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE isp: Int64 = 0;
     MUTABLE fstack: Float64[] = [];
     MUTABLE fsp: Int64 = 0;
-    -- Pre-allocate 64 slots and 64 typed stack entries
+    -- Native typed slots: avoid Value wrapping for i64/f64 locals
+    MUTABLE islots: Int64[] = [];
+    MUTABLE fslots: Float64[] = [];
+    -- Pre-allocate 64 slots and 64 typed stack/slot entries
     FOR si IN (0_i64 ..< 64) DO slots.append(Value.Nil); END
     FOR si IN (0_i64 ..< 64) DO istack.append(0_i64); END
     FOR si IN (0_i64 ..< 64) DO fstack.append(0.0); END
+    FOR si IN (0_i64 ..< 64) DO islots.append(0_i64); END
+    FOR si IN (0_i64 ..< 64) DO fslots.append(0.0); END
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -2260,6 +2265,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         print("  unknown command. type :help for commands");
                     END
                 END,
+            59 -> -- LOAD_ISLOT [idx] (islots -> istack, no Value wrapping)
+                slotIdx = ops[ip]; ip += 1;
+                istack[isp] = islots[slotIdx];
+                isp += 1;,
+            60 -> -- STORE_ISLOT [idx] (istack -> islots, no Value wrapping)
+                slotIdx = ops[ip]; ip += 1;
+                isp -= 1;
+                islots[slotIdx] = istack[isp];,
+            61 -> -- LOAD_FSLOT [idx] (fslots -> fstack, no Value wrapping)
+                slotIdx = ops[ip]; ip += 1;
+                fstack[fsp] = fslots[slotIdx];
+                fsp += 1;,
+            62 -> -- STORE_FSLOT [idx] (fstack -> fslots, no Value wrapping)
+                slotIdx = ops[ip]; ip += 1;
+                fsp -= 1;
+                fslots[slotIdx] = fstack[fsp];,
             DEFAULT ->
         END
     END

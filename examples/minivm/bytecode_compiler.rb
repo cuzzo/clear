@@ -23,6 +23,8 @@ class BytecodeCompiler
   EQ_F64      = 53; NEQ_F64     = 54
   I_TO_VAL    = 55; F_TO_VAL    = 56; BOOL_TO_VAL = 57
   DEBUG_BREAK = 58
+  # Native typed slots: avoid Value wrapping for i64/f64 locals
+  LOAD_ISLOT  = 59; STORE_ISLOT = 60; LOAD_FSLOT  = 61; STORE_FSLOT = 62
 
   # Native function IDs (must match interpreter's setupEnv!)
   NATIVES = {
@@ -54,23 +56,60 @@ class BytecodeCompiler
     @ops = []
     @consts = []
     @mutables = Set.new
-    @slots = {}       # var_name -> slot_index
+    @slots = {}       # var_name -> slot_index (Value slots)
+    @islots = {}      # var_name -> islot_index (native i64 slots)
+    @fslots = {}      # var_name -> fslot_index (native f64 slots)
     @slot_types = {}  # var_name -> :i64, :f64, :str, :any
     @next_slot = 0
+    @next_islot = 0
+    @next_fslot = 0
     @type_stack = []  # tracks type of each expression on the compile stack
   end
 
   def alloc_slot(name, type = :any)
-    unless @slots[name]
-      @slots[name] = @next_slot
-      @next_slot += 1
+    case type
+    when :i64
+      unless @islots[name]
+        @islots[name] = @next_islot
+        @next_islot += 1
+      end
+      @slot_types[name] = type
+      @islots[name]
+    when :f64
+      unless @fslots[name]
+        @fslots[name] = @next_fslot
+        @next_fslot += 1
+      end
+      @slot_types[name] = type
+      @fslots[name]
+    else
+      unless @slots[name]
+        @slots[name] = @next_slot
+        @next_slot += 1
+      end
+      @slot_types[name] = type
+      @slots[name]
     end
-    @slot_types[name] = type
-    @slots[name]
   end
 
   def var_type(name)
     @slot_types[name] || :any
+  end
+
+  def has_slot?(name)
+    @islots.key?(name) || @fslots.key?(name) || @slots.key?(name)
+  end
+
+  # Emit the correct store opcode based on variable type.
+  def emit_store(name, val_type)
+    case val_type
+    when :i64
+      emit(STORE_ISLOT, @islots[name])
+    when :f64
+      emit(STORE_FSLOT, @fslots[name])
+    else
+      emit(STORE_SLOT, @slots[name])
+    end
   end
 
   def push_type(t)
@@ -123,7 +162,7 @@ class BytecodeCompiler
             next if node.is_a?(AST::ReturnNode) && node.value.nil?
             compile(node)
             t = pop_type
-            emit(POP) unless t == :i64 || t == :f64 || t == :bool
+            emit(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
           end
         else
           # Compile function as lambda + store
@@ -166,13 +205,15 @@ class BytecodeCompiler
       compile_literal(node)
     when AST::Identifier
       name = node.name.to_s
-      if @slots[name]
-        vt = var_type(name)
-        case vt
-        when :i64 then emit(LOAD_SLOT_I64, @slots[name])
-        when :f64 then emit(LOAD_SLOT_F64, @slots[name])
-        else emit(LOAD_SLOT, @slots[name])
-        end
+      vt = var_type(name)
+      if vt == :i64 && @islots[name]
+        emit(LOAD_ISLOT, @islots[name])
+        push_type(:i64)
+      elsif vt == :f64 && @fslots[name]
+        emit(LOAD_FSLOT, @fslots[name])
+        push_type(:f64)
+      elsif @slots[name]
+        emit(LOAD_SLOT, @slots[name])
         push_type(vt)
       else
         name_idx = add_const(name)
@@ -283,19 +324,19 @@ class BytecodeCompiler
       if left_type == :str || right_type == :str then emit(CONCAT); push_type(:str)
       elsif both_i64 then emit(ADD_I64); push_type(:i64)
       elsif both_f64 then emit(ADD_F64); push_type(:f64)
-      else emit(ADD); push_type(:f64) end
+      else emit(ADD); push_type(:any) end
     when :SUB
       if both_i64 then emit(SUB_I64); push_type(:i64)
       elsif both_f64 then emit(SUB_F64); push_type(:f64)
-      else emit(SUB); push_type(:f64) end
+      else emit(SUB); push_type(:any) end
     when :MUL
       if both_i64 then emit(MUL_I64); push_type(:i64)
       elsif both_f64 then emit(MUL_F64); push_type(:f64)
-      else emit(MUL); push_type(:f64) end
+      else emit(MUL); push_type(:any) end
     when :DIV
       if both_i64 then emit(DIV_I64); push_type(:i64)
       elsif both_f64 then emit(DIV_F64); push_type(:f64)
-      else emit(DIV); push_type(:f64) end
+      else emit(DIV); push_type(:any) end
     when :EQ
       if both_i64 then emit(EQ_I64)
       elsif both_f64 then emit(EQ_F64)
@@ -359,26 +400,11 @@ class BytecodeCompiler
     val_type = pop_type
     name = node.name.to_s
 
-    if @mutables.include?(name) && @slots[name]
-      case val_type
-      when :i64 then emit(STORE_SLOT_I64, @slots[name])
-      when :f64 then emit(STORE_SLOT_F64, @slots[name])
-      else emit(STORE_SLOT, @slots[name])
-      end
-    elsif @mutables.include?(name)
-      slot = alloc_slot(name, val_type)
-      case val_type
-      when :i64 then emit(STORE_SLOT_I64, slot)
-      when :f64 then emit(STORE_SLOT_F64, slot)
-      else emit(STORE_SLOT, slot)
-      end
+    if @mutables.include?(name) && has_slot?(name)
+      emit_store(name, val_type)
     else
-      slot = alloc_slot(name, val_type)
-      case val_type
-      when :i64 then emit(STORE_SLOT_I64, slot)
-      when :f64 then emit(STORE_SLOT_F64, slot)
-      else emit(STORE_SLOT, slot)
-      end
+      alloc_slot(name, val_type)
+      emit_store(name, val_type)
     end
     push_type(val_type)
   end
@@ -408,12 +434,8 @@ class BytecodeCompiler
       end
     end
 
-    slot = alloc_slot(name, val_type)
-    case val_type
-    when :i64 then emit(STORE_SLOT_I64, slot)
-    when :f64 then emit(STORE_SLOT_F64, slot)
-    else emit(STORE_SLOT, slot)
-    end
+    alloc_slot(name, val_type)
+    emit_store(name, val_type)
     push_type(val_type)
   end
 
@@ -422,12 +444,8 @@ class BytecodeCompiler
     val_type = pop_type
     if node.name.is_a?(String) || node.name.is_a?(Symbol)
       name = node.name.to_s
-      if @slots[name]
-        case val_type
-        when :i64 then emit(STORE_SLOT_I64, @slots[name])
-        when :f64 then emit(STORE_SLOT_F64, @slots[name])
-        else emit(STORE_SLOT, @slots[name])
-        end
+      if has_slot?(name)
+        emit_store(name, val_type)
         @slot_types[name] = val_type
       else
         name_idx = add_const(name)
@@ -460,8 +478,8 @@ class BytecodeCompiler
       @ops[jump_end_idx] = @ops.length
     else
       @ops[jump_false_idx] = @ops.length
-      cidx = add_const(nil)
-      emit(LOAD_CONST, cidx)
+      # No dead Nil push -- if without else is a statement
+      push_type(:void)
     end
   end
 
@@ -477,16 +495,14 @@ class BytecodeCompiler
     node.do_branch.each do |stmt|
       compile(stmt)
       t = pop_type
-      emit(POP) unless t == :i64 || t == :f64 || t == :bool
+      emit(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
     end
 
     emit(JUMP, loop_start)
 
     @ops[jump_exit_idx] = @ops.length
-
-    cidx = add_const(nil)
-    emit(LOAD_CONST, cidx)
-    push_type(:any)
+    # No dead Nil push -- while is a statement, not an expression
+    push_type(:void)
   end
 
   def compile_for_range(node)
@@ -745,7 +761,7 @@ class BytecodeCompiler
       end
       compile(stmt)
       t = pop_type
-      emit(POP) if i < stmts.length - 1 && t != :i64 && t != :f64 && t != :bool
+      emit(POP) if i < stmts.length - 1 && t != :i64 && t != :f64 && t != :bool && t != :void
     end
   end
 
