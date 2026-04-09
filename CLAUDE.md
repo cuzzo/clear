@@ -115,9 +115,59 @@ The compiler is a 5-pass system written in Ruby:
   - Purely mechanical emission driven by MIR nodes and AST stamps.
   - At no point outside of `src/std_lib.rb` or `src/type.rb` should there be special logic for intrinsic or standard library functions.
 
-The transpiler is supposed to be as dumb as possible so that:
-1.  We can catch as many bugs as possible at unit test time.
-2.  We can support different backends easily besides just Zig.
+### Pass 1: Annotation / Type Inference
+- `src/annotator.rb`, `src/type.rb`, `src/scope.rb`, `src/ownership_graph.rb`
+- Type inference, ownership tracking, borrow checking
+- Marks AST nodes with `type_info`, `full_type`, `storage`, `provenance`
+- Resolves stdlib intrinsics via `src/stdlib.rb`
+
+### Pass 2: Dataflow (Escape Analysis + Ownership Lowering to MIR)
+Two sub-passes that lower all allocation/deallocation/move decisions into MIR nodes:
+
+**2a. Promotion Planning** (`src/promotion_plan.rb: PromotionClassifier`)
+- Identifies frame-allocated variables that escape via return
+- Plans frame-to-heap promotions (list, string_map, generic, fields)
+
+**2b. Cleanup Planning** (`src/promotion_plan.rb: CleanupClassifier`, `src/control_flow.rb: OwnershipDataflow, MIRPass`)
+- Classifies every binding needing cleanup (kind, allocator, moved-guard)
+- Forward dataflow on CFG refines moved-guards (removes unnecessary guards, eliminates cleanup for always-moved vars)
+- HPT hoisting: heap-returning sub-expressions lifted into VarDecls
+- Inserts MIR nodes into AST: `MIR::Alloc`, `MIR::Drop`, `MIR::Promote`, `MIR::Return`, `MIR::SuppressCleanup`, `MIR::ReassignCleanup`, `MIR::FieldCleanup`
+
+### Pass 3: Validate MIR Nodes (Static Leak Checker)
+- `src/static_leak_checker.rb`
+- Verifies: no memory leaks (every Alloc has a Drop), no double-free (moved guards correct), no use-after-free (frame escapes promoted), no frame overflow (loops have per-iteration rewind)
+- Cross-references MIR events with OwnershipDataflow results
+- Safety net: catches unhoisted heap calls, orphan MIR nodes, allocator mismatches
+
+### Pass 4: Transpiling
+- `src/transpiler.rb`, `src/ownership_generator.rb` (generates Zig code)
+- Dumb: no on-the-fly allocator choices, no on-the-fly deinit/cleanup choices
+- MIR::Drop -> `emit_cleanup_from_entry` (mechanical Zig template from pre-computed entry)
+- MIR::Promote -> promotion code or pending flag for next statement
+- MIR::SuppressCleanup -> `var_moved = true;`
+- MIR::Alloc/Return/ReassignCleanup/FieldCleanup -> no code emitted (verification only)
+
+### Architectural Rules
+- At no point outside of `src/std_lib.rb` or `src/type.rb` should there be special logic for intrinsic / standard library functions. All stdlib behavior is registry-driven.
+- All alloc/dealloc/move decisions must flow through MIR nodes. The transpiler must never make allocator choices.
+- Never allocate on the frame and then unconditionally promote to the heap. If a value is ALWAYS promoted, allocate directly on the heap at declaration time. Escape analysis in Pass 1 must propagate provenance back to declarations so finalize_decl_storage! makes the correct choice upfront.
+- See `mir-bugs.md` for known MIR violations. See `alloc-bugs.md` for frame-then-always-promote gaps. See `memory-safety.md` for the full plan.
+
+### Memory Safety Invariants
+
+These invariants MUST remain true. Verify them before every commit.
+
+1. **Single allocator per binding.** Every binding has exactly one allocator for its entire lifetime, determined at declaration time, never changed. No runtime promotion that mutates allocator identity. (Enforced by: ALLOC_MISMATCH check in StaticLeakChecker)
+2. **Every allocation has a cleanup path.** Every MIR::Alloc must have a matching MIR::Drop on every control flow path -- including error paths, early returns, and break/continue. (Enforced by: LEAK check + OwnershipDataflow)
+3. **No cleanup without allocation.** Every MIR::Drop must have a matching MIR::Alloc or TAKES parameter. No orphan cleanups. (Enforced by: ORPHAN check)
+4. **Moved values are never cleaned up.** If a value is moved (GIVE, return, TAKES consumption), its cleanup is suppressed via _moved guard. The receiver takes ownership. (Enforced by: GUARD + GUARD_NO_SUPPRESS checks)
+5. **Frame values never escape their scope.** Frame-allocated values must not be returned, captured by BG blocks, or stored in heap containers. If escape is detected, allocation must be upgraded to heap BEFORE the value is created. (Enforced by: FRAME_ESCAPE check)
+6. **Loops don't overflow the frame arena.** Every loop body that allocates from the frame arena must have per-iteration mark/rewind. (Enforced by: FRAME_OVERFLOW check)
+7. **The transpiler makes zero memory decisions.** It emits code mechanically from MIR nodes and pre-computed metadata. It never inspects types to choose allocators, never decides whether to deinit, never special-cases intrinsic functions. (Enforced by: code review)
+8. **All stdlib behavior is registry-driven.** Intrinsic function allocation, cleanup, and method dispatch are defined in std_lib.rb and type.rb. No other file may contain type-specific memory logic. (Enforced by: code review)
+9. **Error paths preserve allocator identity.** If an operation can fail (try/catch), the error path must not change the allocator identity of any live value. No `catch` fallbacks that return data from a different allocator. (Enforced by: no `catch original_value` patterns in runtime)
+10. **Union variant cleanup uses the union's allocator.** When cleaning up a union, the allocator passed to cleanup() must match the allocator used to create the variant's payload. Guaranteed by INV-1 (single allocator). (Enforced by: INV-1 + comptime cleanup dispatch)
 
 ## Language Semantics
 
@@ -148,6 +198,15 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 - **Fortress Architecture:** Public APIs must be strictly defined and handle all errors.
 
 ## Contributing
+
+### Before committing:
+
+Verify the Memory Safety Invariants (INV-1 through INV-10 above) are not violated by your changes. Specifically:
+- If you added or changed an allocation: does it have a matching cleanup on every path? (INV-2)
+- If you added a new type or collection: is its cleanup driven by MIR nodes, not transpiler heuristics? (INV-7, INV-8)
+- If you changed escape analysis or storage decisions: does every escaping value get heap-allocated at declaration, not frame-then-promoted? (INV-1, INV-5)
+- If you changed error handling: does the error path preserve allocator identity? No `catch` fallbacks returning data from a different allocator? (INV-9)
+- Run `bundle exec rspec` and `./clear test transpile-tests/` to verify no regressions.
 
 ### When fixing a bug:
 
