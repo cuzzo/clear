@@ -74,7 +74,7 @@ class MIRLowering
     when AST::ReturnNode        then lower_return(node)
     when AST::BreakNode         then MIR::BreakStmt.new(nil, nil)
     when AST::ContinueNode      then MIR::ContinueStmt.new(nil)
-    when AST::PassStmt          then MIR::RawZig.new("{}", "pass")
+    when AST::PassStmt          then MIR::Noop.new("pass")
 
     # --- Functions & calls ---
     when AST::FunctionDef       then lower_function_def(node)
@@ -102,8 +102,8 @@ class MIRLowering
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)
-    when AST::ThrowNode         then MIR::RawZig.new("return error.CheatError;", "throw")
-    when AST::DieNode           then MIR::RawZig.new("std.process.exit(#{node.status || 1});", "die")
+    when AST::ThrowNode         then MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    when AST::DieNode           then MIR::ExprStmt.new(MIR::Call.new("std.process.exit", [MIR::Lit.new((node.status || 1).to_s)], false), false)
 
     # --- Memory / capability expressions ---
     when AST::CopyNode          then lower_copy(node)
@@ -127,9 +127,9 @@ class MIRLowering
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
     when AST::OrRaise          then MIR::Ident.new("error.OrRaise")
-    when AST::OrBreak          then MIR::RawZig.new("break;", "or_break")
-    when AST::OrPass           then MIR::InlineZig.new("undefined", "or_pass")
-    when AST::OrPrune          then MIR::InlineZig.new("undefined", "or_prune")
+    when AST::OrBreak          then MIR::BreakStmt.new(nil, nil)
+    when AST::OrPass           then MIR::Ident.new("undefined")
+    when AST::OrPrune          then MIR::Ident.new("undefined")
     when AST::OrExit           then lower_or_exit(node)
     when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
     when AST::AssertRaises     then lower_assert_raises(node)
@@ -210,7 +210,7 @@ class MIRLowering
     items << MIR::Import.new("safety", "safety.zig", nil) if needs_safety
 
     if use_c_allocator || @used_sharded_map
-      items << MIR::RawZig.new("pub const USE_C_ALLOCATOR = true;", "c_allocator_flag")
+      items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")
     end
 
     # Lower each statement, adding source line comments
@@ -219,7 +219,7 @@ class MIRLowering
       next unless lowered
       line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
       if line
-        items << MIR::RawZig.new("// CLR:#{line}", "source_line")
+        items << MIR::Comment.new("CLR:#{line}")
       end
       items << lowered
     end
@@ -528,8 +528,8 @@ class MIRLowering
 
       items = []
       if @emitted_extern_modules.add?(mod)
-        import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
-        items << MIR::RawZig.new("const #{mod_alias} = #{import_expr};", "extern_struct_import")
+        member_chain = mod_parts[1..].any? ? mod_parts[1..].join(".") : nil
+        items << MIR::Import.new(mod_alias, mod_parts.first, member_chain)
       end
       items << MIR::TypeAlias.new(node.name, "#{mod_alias}.#{node.name}")
       items.length == 1 ? items.first : MIR::RawZig.new(items.map { |i| emit_item(i) }.join("\n"), "extern_struct")
@@ -633,7 +633,7 @@ class MIRLowering
     has_promotion = node.has_promotion
 
     if fn_needs_rt
-      prologue << MIR::RawZig.new("@setEvalBranchQuota(100000);", "eval_branch_quota")
+      prologue << MIR::ExprStmt.new(MIR::Call.new("@setEvalBranchQuota", [MIR::Lit.new("100000")], false), false)
       if uses_frame_or_alloc && returns_value_type
         prologue << MIR::FrameSave.new(@rt_name)
         prologue << MIR::FrameRestore.new(@rt_name)
@@ -641,7 +641,7 @@ class MIRLowering
         prologue << MIR::FrameSave.new(@rt_name)
         # No FrameRestore -- preserveAndRewind at return sites
       else
-        prologue << MIR::RawZig.new("_ = &rt;", "rt_suppress")
+        prologue << MIR::Suppress.new("rt")
       end
     end
 
@@ -657,13 +657,13 @@ class MIRLowering
     (node.params || []).each do |p|
       next if used_names.include?(p[:name])
       suppress_name = mutable_scalar_params.include?(p[:name]) ? "_m_#{p[:name]}" : p[:name]
-      prologue << MIR::RawZig.new("_ = &#{suppress_name};", "param_suppress")
+      prologue << MIR::Suppress.new(suppress_name)
     end
 
     # Mutable scalar param shadows
     mutable_scalar_params.each do |name|
       next unless used_names.include?(name)
-      prologue << MIR::RawZig.new("var #{name} = _m_#{name}; _ = &#{name};", "mutable_param_shadow")
+      prologue << MIR::Let.new(name, MIR::Ident.new("_m_#{name}"), true, nil, "_ = &#{name};")
     end
 
     # Track preserveAndRewind state for return lowering
@@ -962,17 +962,15 @@ class MIRLowering
   end
 
   def lower_extern_call(node)
-    # Extern FFI calls use trampolines -- complex Zig codegen.
-    # Bridge via InlineZig for now, tracked for Phase 4 migration.
-    args_zig = node.args.map { |a| emit_expr(lower(a)) }
+    args = node.args.map { |a| lower(a) }
     mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
-    MIR::InlineZig.new("#{mod_prefix}#{node.name}(#{args_zig.join(', ')})", "extern_call")
+    MIR::Call.new("#{mod_prefix}#{node.name}", args, false)
   end
 
   def lower_extern_method(node)
-    obj_zig = emit_expr(lower(node.object))
-    args_zig = node.args.map { |a| emit_expr(lower(a)) }
-    MIR::InlineZig.new("#{obj_zig}.#{node.name}(#{args_zig.join(', ')})", "extern_method")
+    obj = lower(node.object)
+    args = node.args.map { |a| lower(a) }
+    MIR::MethodCall.new(obj, node.name.to_s, args, false)
   end
 
   def lower_pool_method(node)
@@ -1211,14 +1209,15 @@ class MIRLowering
 
     # Non-empty hash: init + puts
     items = []
-    items << MIR::RawZig.new("var __hm = #{zig_t}{ .alloc = #{alloc} };", "hashmap_init")
+    alloc_expr = MIR::MethodCall.new(MIR::Ident.new(rt_name), "heapAlloc", [], false)
+    items << MIR::Let.new("__hm", MIR::StructInit.new(zig_t, [{ name: "alloc", value: alloc_expr }]), true, nil, nil)
     node.pairs.each do |key_node, val_node|
-      k = emit_expr(lower(key_node))
-      v = emit_expr(lower(val_node))
-      # StringMap.put takes (key_alloc, bucket_alloc, key, value)
-      items << MIR::RawZig.new("try __hm.put(#{alloc}, #{alloc}, #{k}, #{v});", "hashmap_put")
+      k = lower(key_node)
+      v = lower(val_node)
+      put_call = MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, k, v], true)
+      items << MIR::ExprStmt.new(put_call, false)
     end
-    items << MIR::RawZig.new("break :__hm_blk __hm;", "hashmap_break")
+    items << MIR::BreakStmt.new("__hm_blk", MIR::Ident.new("__hm"))
     MIR::BlockExpr.new("__hm_blk", items)
   end
 
@@ -1604,13 +1603,13 @@ class MIRLowering
 
   def lower_yield(node)
     stream_local = @current_stream_local || "__stream_local"
-    expr_zig = emit_expr(lower(node.expr))
-    MIR::InlineZig.new("try #{stream_local}.push(#{expr_zig})", "yield")
+    expr = lower(node.expr)
+    MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [expr], true)
   end
 
   def lower_next_expr(node)
-    inner = emit_expr(lower(node.expr))
-    MIR::InlineZig.new("try #{inner}.next()", "next")
+    inner = lower(node.expr)
+    MIR::MethodCall.new(inner, "next", [], true)
   end
 
   def lower_static_call(node)
@@ -2270,7 +2269,7 @@ class MIRLowering
       if schema
         var_data = schema[node.field]
         unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
-          return MIR::InlineZig.new("#{node.target.name}{ .#{node.field} = {} }", "union_unit_variant")
+          return MIR::StructInit.new(node.target.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
         end
       end
     end
@@ -2682,42 +2681,47 @@ class MIRLowering
     target_node = node.name.target
     ti = target_node.type_info rescue nil
     receiver_type = ti ? Type.new(ti) : nil
-    rt_name = @rt_name
-    target_zig = emit_expr(lower(target_node))
-    idx_zig = emit_expr(lower(node.name.index))
-    val_zig = emit_expr(lower(node.value))
+    rt = MIR::Ident.new(@rt_name)
+    target = lower(target_node)
+    idx = lower(node.name.index)
+    val = lower(node.value)
 
     # Auto-deref Arc/Rc-wrapped containers
     if ti&.map? && (ti&.shared? || ti&.multiowned?)
-      target_zig = "#{target_zig}.ctrl.data.*"
+      target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
     if receiver_type&.numeric_map?
       key_zig = receiver_type.key_type.zig_type
       val_type_zig = receiver_type.value_type.zig_type
-      alloc = "#{rt_name}.frameAlloc()"
-      code = "try CheatLib.numericMapPut(#{key_zig}, #{val_type_zig}, #{alloc}, &#{target_zig}, #{idx_zig}, #{val_zig});"
+      frame_alloc = MIR::MethodCall.new(rt, "frameAlloc", [], false)
+      call = MIR::Call.new("CheatLib.numericMapPut",
+        [MIR::Ident.new(key_zig), MIR::Ident.new(val_type_zig), frame_alloc, MIR::AddressOf.new(target), idx, val], true)
+      MIR::ExprStmt.new(call, false)
     elsif receiver_type&.map?
       val_node = node.value
       val_ti = val_node.type_info rescue nil
-      # StringMap.put takes (key_alloc, bucket_alloc, key, value)
-      val_alloc = "#{rt_name}.heapAlloc()"
-      # Apply value transforms: dupe_string_literal, dupe_borrowed_union, container_promote
-      final_val = val_zig
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      # Apply value transforms
       if val_ti&.string?
-        final_val = "try #{rt_name}.heapAlloc().dupe(u8, #{val_zig})"
+        val = MIR::MethodCall.new(MIR::MethodCall.new(rt, "heapAlloc", [], false), "dupe", [MIR::Ident.new("u8"), val], true)
       else
-        final_val = dupe_borrowed_union_zig(final_val, val_node, rt_name)
-        final_val = apply_container_promote_zig(final_val, rt_name)
+        val_zig = emit_expr(val)
+        val_zig = dupe_borrowed_union_zig(val_zig, val_node, @rt_name)
+        val_zig = apply_container_promote_zig(val_zig, @rt_name)
+        val = MIR::InlineZig.new(val_zig, "map_indexed_val") if val_zig != emit_expr(lower(node.value))
       end
-      code = "try #{target_zig}.put(#{rt_name}.heapAlloc(), #{val_alloc}, #{idx_zig}, #{final_val});"
+      call = MIR::MethodCall.new(target, "put", [heap_alloc, heap_alloc, idx, val], true)
+      MIR::ExprStmt.new(call, false)
     elsif receiver_type&.pool?
-      code = "try #{target_zig}.insert(#{rt_name}.heapAlloc(), #{idx_zig}, #{val_zig});"
+      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      call = MIR::MethodCall.new(target, "insert", [heap_alloc, idx, val], true)
+      MIR::ExprStmt.new(call, false)
     else
       # List/array setAt
-      code = "CheatLib.setAt(#{target_zig}, #{idx_zig}, #{val_zig});"
+      call = MIR::Call.new("CheatLib.setAt", [target, idx, val], false)
+      MIR::ExprStmt.new(call, false)
     end
-    MIR::RawZig.new(code, "indexed_assignment")
   end
 
   def lower_field_assignment_with_cleanup(node)
@@ -2986,7 +2990,7 @@ class MIRLowering
     @pending_hpt_return_promote = nil
 
     if @current_fn_preserve_rewind && value
-      MIR::RawZig.new("break :__pr_body #{emit_expr(value)};", "preserve_rewind_break")
+      MIR::BreakStmt.new("__pr_body", value)
     elsif node.promote_ret_wrap == :var && ret_field_promote && value
       val_code = emit_expr(value)
       zig_type = ret_field_promote[:zig_type]

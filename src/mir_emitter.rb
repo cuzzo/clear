@@ -51,6 +51,9 @@ class MIREmitter
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
     when MIR::RawZig           then node.code
+    when MIR::Comment          then "// #{node.text}"
+    when MIR::Suppress         then "_ = &#{node.name};"
+    when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
     when MIR::Noop             then nil
 
     # --- Memory operations ---

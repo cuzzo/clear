@@ -217,6 +217,24 @@ module MIR
     include Stmt
   end
 
+  # Source line comment.
+  # Zig: // CLR:42
+  Comment = Struct.new(:text) do
+    include Stmt
+  end
+
+  # Variable/param suppression.
+  # Zig: _ = &name;
+  Suppress = Struct.new(:name) do
+    include Stmt
+  end
+
+  # Public const declaration.
+  # Zig: pub const NAME = VALUE;
+  PubConst = Struct.new(:name, :value) do
+    include Stmt
+  end
+
   # ================================================================
   # Memory Operations (the point of the entire MIR system)
   # ================================================================

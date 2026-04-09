@@ -583,8 +583,7 @@ RSpec.describe MIRLowering do
     it "lowers pass statement" do
       node = AST::PassStmt.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(emit(result)).to eq("{}")
+      expect(result).to be_a(MIR::Noop)
     end
   end
 
@@ -1157,7 +1156,7 @@ RSpec.describe MIRLowering do
       node = AST::PassStmt.new(tok)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(emit(result)).to eq("{}")
+      expect(result).to be_a(MIR::Noop)
     end
   end
 
@@ -1514,7 +1513,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::MethodCall)
       zig = emit(result)
       expect(zig).to include("try __stream_local.push(7)")
     end
@@ -1531,7 +1530,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Int64
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::MethodCall)
       zig = emit(result)
       expect(zig).to include("try promise.next()")
     end
@@ -1582,24 +1581,24 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("error.OrRaise")
     end
 
-    it "lowers OrBreak to RawZig break" do
+    it "lowers OrBreak to BreakStmt" do
       node = AST::OrBreak.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::BreakStmt)
       expect(emit(result)).to eq("break;")
     end
 
-    it "lowers OrPass to InlineZig undefined" do
+    it "lowers OrPass to Ident undefined" do
       node = AST::OrPass.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Ident)
       expect(emit(result)).to eq("undefined")
     end
 
-    it "lowers OrPrune to InlineZig undefined" do
+    it "lowers OrPrune to Ident undefined" do
       node = AST::OrPrune.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::Ident)
       expect(emit(result)).to eq("undefined")
     end
 
