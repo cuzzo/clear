@@ -1,0 +1,50 @@
+-- SOA vs AOS Layout Benchmark -- CLEAR (@pool:soa)
+--
+-- Particle simulation: 10K particles, 100 iterations of position update.
+-- Two layouts:
+--   1. AOS: regular Entity[] array (array of structs)
+--   2. SOA: Entity@pool:soa (struct of arrays, compiler-managed)
+--
+-- The position update loop (x += vx, y += vy) only touches 2 of 4 fields
+-- per pass. SOA keeps each field contiguous in memory, so the CPU
+-- prefetcher loads full cache lines of useful data.
+--
+-- CLEAR's @pool:soa gives SOA layout with AOS syntax -- the compiler
+-- transposes the data automatically. No manual struct-splitting needed.
+
+STRUCT Particle {
+    x: Float64, y: Float64, z: Float64,
+    vx: Float64, vy: Float64, vz: Float64,
+    mass: Float64, radius: Float64, charge: Float64,
+    ax: Float64, ay: Float64, az: Float64,
+    age: Float64, energy: Float64, temperature: Float64, pressure: Float64
+}
+
+FN main() RETURNS Void ->
+    n = 10000_i64;
+    iterations = 100_i64;
+
+    -- SOA layout via @pool:soa
+    MUTABLE soa: Particle[10000]@pool:soa = [];
+    FOR i IN (0_i64 ..< n) DO
+        soa.insert(Particle{
+            x: toFloat(i), y: toFloat(i) * 2.0, z: 0.0,
+            vx: 1.0, vy: 0.5, vz: 0.0,
+            mass: 1.0, radius: 0.1, charge: 0.0,
+            ax: 0.0, ay: 0.0, az: 0.0,
+            age: 0.0, energy: 0.0, temperature: 0.0, pressure: 0.0
+        });
+    END
+
+    t0 = timestampMs();
+    FOR iter IN (0_i64 ..< iterations) DO
+        soa s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
+    END
+    soaMs = timestampMs() - t0;
+
+    checksum = soa s> SUM _.x + _.y;
+    print("SOA checksum: ${checksum.toString()}");
+    print("Particles:   ${n.toString()}");
+    print("Iterations:  ${iterations.toString()}");
+    print("SOA:         ${soaMs.toString()} ms");
+END
