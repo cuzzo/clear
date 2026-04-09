@@ -675,6 +675,365 @@ pub const CheatLib = struct {
         return ctx.result;
     }
 
+    // Line editing with history (POSIX termios)
+    const LINE_MAX = 4096;
+    const HISTORY_MAX = 256;
+
+    var rl_history: [HISTORY_MAX][LINE_MAX]u8 = undefined;
+    var rl_history_lens: [HISTORY_MAX]usize = [_]usize{0} ** HISTORY_MAX;
+    var rl_history_count: usize = 0;
+    var rl_history_initialized: bool = false;
+
+    fn rlHistoryAdd(buf: []const u8) void {
+        if (buf.len == 0) return;
+        // Don't add duplicates of the last entry
+        if (rl_history_count > 0) {
+            const last_idx = rl_history_count - 1;
+            const last = rl_history[last_idx][0..rl_history_lens[last_idx]];
+            if (std.mem.eql(u8, last, buf)) return;
+        }
+        if (rl_history_count < HISTORY_MAX) {
+            @memcpy(rl_history[rl_history_count][0..buf.len], buf);
+            rl_history_lens[rl_history_count] = buf.len;
+            rl_history_count += 1;
+        } else {
+            // Shift history up, drop oldest
+            for (0..HISTORY_MAX - 1) |i| {
+                @memcpy(rl_history[i][0..rl_history_lens[i + 1]], rl_history[i + 1][0..rl_history_lens[i + 1]]);
+                rl_history_lens[i] = rl_history_lens[i + 1];
+            }
+            @memcpy(rl_history[HISTORY_MAX - 1][0..buf.len], buf);
+            rl_history_lens[HISTORY_MAX - 1] = buf.len;
+        }
+    }
+
+    const ReadLineEditCtx = struct {
+        allocator: std.mem.Allocator,
+        prompt: []const u8,
+        result: []const u8 = &.{},
+        err: ?anyerror = null,
+
+        fn run(ptr: ?*anyopaque) callconv(.c) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.result = rlEdit(self.allocator, self.prompt) catch |e| {
+                self.err = e;
+                return;
+            };
+        }
+    };
+
+    fn rlEdit(allocator: std.mem.Allocator, prompt: []const u8) ![]const u8 {
+        const stdin_fd = std.posix.STDIN_FILENO;
+        const stderr_fd = std.posix.STDERR_FILENO;
+
+        // Check if stdin is a tty; if not, fall back to basic readLine
+        if (!std.posix.isatty(stdin_fd)) {
+            return readLine(allocator);
+        }
+
+        // Save original terminal state
+        const orig = try std.posix.tcgetattr(stdin_fd);
+
+        // Enter raw mode
+        var raw = orig;
+        // Input: no break/CR-to-NL/parity/strip/flow-control
+        raw.iflag.BRKINT = false;
+        raw.iflag.ICRNL = false;
+        raw.iflag.INPCK = false;
+        raw.iflag.ISTRIP = false;
+        raw.iflag.IXON = false;
+        // Output: keep default
+        // Local: no echo, no canonical, no signals, no extended
+        raw.lflag.ECHO = false;
+        raw.lflag.ICANON = false;
+        raw.lflag.IEXTEN = false;
+        raw.lflag.ISIG = false;
+        // Read returns after 1 byte
+        raw.cc[@intFromEnum(std.posix.V.MIN)] = 1;
+        raw.cc[@intFromEnum(std.posix.V.TIME)] = 0;
+
+        try std.posix.tcsetattr(stdin_fd, .FLUSH, raw);
+        errdefer std.posix.tcsetattr(stdin_fd, .FLUSH, orig) catch {};
+
+        defer std.posix.tcsetattr(stdin_fd, .FLUSH, orig) catch {};
+
+        // Write prompt
+        _ = std.posix.write(stderr_fd, prompt) catch {};
+
+        var buf: [LINE_MAX]u8 = undefined;
+        var line_len: usize = 0;
+        var pos: usize = 0; // cursor position within buf
+        var hist_idx: usize = rl_history_count; // browsing index (count = "current line")
+        var saved_line: [LINE_MAX]u8 = undefined;
+        var saved_len: usize = 0;
+
+        while (true) {
+            var c: [1]u8 = undefined;
+            const n = std.posix.read(stdin_fd, &c) catch break;
+            if (n == 0) {
+                // EOF
+                if (line_len == 0) return error.EndOfStream;
+                break;
+            }
+
+            switch (c[0]) {
+                '\r', '\n' => {
+                    // Submit line
+                    _ = std.posix.write(stderr_fd, "\r\n") catch {};
+                    break;
+                },
+                3 => {
+                    // Ctrl-C: discard line, print ^C
+                    _ = std.posix.write(stderr_fd, "^C\r\n") catch {};
+                    line_len = 0;
+                    pos = 0;
+                    break;
+                },
+                4 => {
+                    // Ctrl-D: EOF if empty, delete-char otherwise
+                    if (line_len == 0) {
+                        _ = std.posix.write(stderr_fd, "\r\n") catch {};
+                        return error.EndOfStream;
+                    }
+                    if (pos < line_len) {
+                        std.mem.copyForwards(u8, buf[pos..line_len - 1], buf[pos + 1 .. line_len]);
+                        line_len -= 1;
+                        rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                    }
+                },
+                1 => {
+                    // Ctrl-A: home
+                    pos = 0;
+                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                },
+                5 => {
+                    // Ctrl-E: end
+                    pos = line_len;
+                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                },
+                11 => {
+                    // Ctrl-K: kill to end of line
+                    line_len = pos;
+                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                },
+                21 => {
+                    // Ctrl-U: kill to start of line
+                    std.mem.copyForwards(u8, buf[0 .. line_len - pos], buf[pos..line_len]);
+                    line_len -= pos;
+                    pos = 0;
+                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                },
+                12 => {
+                    // Ctrl-L: clear screen and redraw
+                    _ = std.posix.write(stderr_fd, "\x1b[H\x1b[2J") catch {};
+                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                },
+                127, 8 => {
+                    // Backspace (127 or BS 8)
+                    if (pos > 0) {
+                        std.mem.copyForwards(u8, buf[pos - 1 .. line_len - 1], buf[pos..line_len]);
+                        pos -= 1;
+                        line_len -= 1;
+                        rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                    }
+                },
+                27 => {
+                    // Escape sequence
+                    var seq: [2]u8 = undefined;
+                    const n1 = std.posix.read(stdin_fd, seq[0..1]) catch break;
+                    if (n1 == 0) break;
+                    if (seq[0] == '[') {
+                        const n2 = std.posix.read(stdin_fd, seq[1..2]) catch break;
+                        if (n2 == 0) break;
+                        switch (seq[1]) {
+                            'A' => {
+                                // Up arrow: history previous
+                                if (rl_history_count > 0 and hist_idx > 0) {
+                                    if (hist_idx == rl_history_count) {
+                                        // Save current line
+                                        @memcpy(saved_line[0..line_len], buf[0..line_len]);
+                                        saved_len = line_len;
+                                    }
+                                    hist_idx -= 1;
+                                    const hlen = rl_history_lens[hist_idx];
+                                    @memcpy(buf[0..hlen], rl_history[hist_idx][0..hlen]);
+                                    line_len = hlen;
+                                    pos = line_len;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            'B' => {
+                                // Down arrow: history next
+                                if (hist_idx < rl_history_count) {
+                                    hist_idx += 1;
+                                    if (hist_idx == rl_history_count) {
+                                        // Restore saved line
+                                        @memcpy(buf[0..saved_len], saved_line[0..saved_len]);
+                                        line_len = saved_len;
+                                    } else {
+                                        const hlen = rl_history_lens[hist_idx];
+                                        @memcpy(buf[0..hlen], rl_history[hist_idx][0..hlen]);
+                                        line_len = hlen;
+                                    }
+                                    pos = line_len;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            'C' => {
+                                // Right arrow
+                                if (pos < line_len) {
+                                    pos += 1;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            'D' => {
+                                // Left arrow
+                                if (pos > 0) {
+                                    pos -= 1;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            'H' => {
+                                // Home
+                                pos = 0;
+                                rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                            },
+                            'F' => {
+                                // End
+                                pos = line_len;
+                                rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                            },
+                            '3' => {
+                                // Delete key: ESC [ 3 ~
+                                var tilde: [1]u8 = undefined;
+                                _ = std.posix.read(stdin_fd, &tilde) catch break;
+                                if (tilde[0] == '~' and pos < line_len) {
+                                    std.mem.copyForwards(u8, buf[pos..line_len - 1], buf[pos + 1 .. line_len]);
+                                    line_len -= 1;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            '1' => {
+                                // Home: ESC [ 1 ~
+                                var tilde: [1]u8 = undefined;
+                                _ = std.posix.read(stdin_fd, &tilde) catch break;
+                                if (tilde[0] == '~') {
+                                    pos = 0;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            '4' => {
+                                // End: ESC [ 4 ~
+                                var tilde: [1]u8 = undefined;
+                                _ = std.posix.read(stdin_fd, &tilde) catch break;
+                                if (tilde[0] == '~') {
+                                    pos = line_len;
+                                    rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                                }
+                            },
+                            else => {},
+                        }
+                    } else if (seq[0] == 'O') {
+                        // ESC O H (Home), ESC O F (End) - alternate sequences
+                        switch (seq[1]) {
+                            'H' => {
+                                pos = 0;
+                                rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                            },
+                            'F' => {
+                                pos = line_len;
+                                rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                            },
+                            else => {},
+                        }
+                    }
+                },
+                else => {
+                    // Printable character
+                    if (c[0] >= 32 and line_len < LINE_MAX - 1) {
+                        if (pos < line_len) {
+                            // Shift right to make room
+                            std.mem.copyBackwards(u8, buf[pos + 1 .. line_len + 1], buf[pos..line_len]);
+                        }
+                        buf[pos] = c[0];
+                        pos += 1;
+                        line_len += 1;
+                        rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
+                    }
+                },
+            }
+        }
+
+        // Add to history
+        if (line_len > 0) {
+            rlHistoryAdd(buf[0..line_len]);
+        }
+
+        return try allocator.dupe(u8, buf[0..line_len]);
+    }
+
+    fn rlRefresh(fd: std.posix.fd_t, prompt: []const u8, line: []const u8, cursor: usize) void {
+        // \r to start of line, write prompt + buffer, clear to end, reposition cursor
+        var out: [LINE_MAX + 256]u8 = undefined;
+        var off: usize = 0;
+
+        // Carriage return
+        out[off] = '\r';
+        off += 1;
+
+        // Prompt
+        const plen = @min(prompt.len, out.len - off - 64);
+        @memcpy(out[off .. off + plen], prompt[0..plen]);
+        off += plen;
+
+        // Line content
+        const llen = @min(line.len, out.len - off - 64);
+        @memcpy(out[off .. off + llen], line[0..llen]);
+        off += llen;
+
+        // Clear to end of line: ESC [ K
+        out[off] = '\x1b';
+        off += 1;
+        out[off] = '[';
+        off += 1;
+        out[off] = 'K';
+        off += 1;
+
+        // Move cursor to correct position: \r then ESC [ <n> C
+        out[off] = '\r';
+        off += 1;
+
+        const cursor_pos = prompt.len + cursor;
+        if (cursor_pos > 0) {
+            // ESC [ <n> C - move cursor forward n columns
+            out[off] = '\x1b';
+            off += 1;
+            out[off] = '[';
+            off += 1;
+            // Format the number
+            var num_buf: [16]u8 = undefined;
+            const num_str = std.fmt.bufPrint(&num_buf, "{d}", .{cursor_pos}) catch return;
+            @memcpy(out[off .. off + num_str.len], num_str);
+            off += num_str.len;
+            out[off] = 'C';
+            off += 1;
+        }
+
+        _ = std.posix.write(fd, out[0..off]) catch {};
+    }
+
+    pub noinline fn readLinePrompt(allocator: std.mem.Allocator, prompt: []const u8) ![]const u8 {
+        var ctx = ReadLineEditCtx{ .allocator = allocator, .prompt = prompt };
+        if (fp.scheduler_running) {
+            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
+            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &ReadLineEditCtx.run), @ptrCast(&ctx));
+        } else {
+            ReadLineEditCtx.run(@ptrCast(&ctx));
+        }
+        if (ctx.err) |e| return e;
+        return ctx.result;
+    }
+
     // String Lib
 
     // Used to make HEAP strings

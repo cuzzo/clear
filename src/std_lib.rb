@@ -142,6 +142,17 @@ STD_LIB = {
     can_fail: true,
   },
 
+  # 6b. Read Line with prompt, editing, and history
+  "readLinePrompt!" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE,
+    return_alloc: :heap,
+    zig: "try CheatLib.readLinePrompt({alloc}, {0})",
+    allocates: true,
+    alloc: :node_storage,
+    can_fail: true,
+  },
+
   # 7. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE],
