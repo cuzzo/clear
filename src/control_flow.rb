@@ -709,11 +709,10 @@ class MIRPass
 
       if !df_entry[:needs_cleanup]
         # Moved on ALL paths (including error edges) → normally no cleanup needed.
-        if entry[:kind] == :takes_union
-          # Exception: MATCH TAKES on unions may extract Copy-type payloads
-          # (strings) where extraction copies the slice header but doesn't
-          # consume the underlying buffer. The source defer must stay with a
-          # guard so branches that extract non-Copy variants can suppress it.
+        # Exception: unions consumed by MATCH TAKES need the defer with a moved
+        # guard because non-AS branches (DEFAULT, cases without bindings) don't
+        # extract ownership - the source must still be cleaned up on those paths.
+        if entry[:kind] == :takes_union || match_takes_var?(fn, var)
           entry[:has_moved_guard] = true
         else
           entry[:needs_cleanup] = false
@@ -724,6 +723,18 @@ class MIRPass
         entry[:has_moved_guard] = false
       end
     end
+  end
+
+  # Returns true if the given variable is the subject of a MATCH TAKES statement.
+  def match_takes_var?(fn, var_name)
+    found = false
+    AST.walk_body(fn.body) do |stmt|
+      if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
+         stmt.expr.is_a?(AST::Identifier) && stmt.expr.name.to_s == var_name
+        found = true
+      end
+    end
+    found
   end
 
   # Recursively transform a statement list, inserting MIR nodes.

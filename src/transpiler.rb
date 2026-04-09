@@ -2747,6 +2747,13 @@ private
       when :generic
         vname = zig_safe_name(node.name)
         "try CheatLib.promote(#{node.zig_type}, #{rt_name}, &#{vname});"
+      when :hpt_string_dupe, :hpt_promote
+        # Consumed by ReturnNode handler (line ~2276), not here.
+        # Present in the MIR body for StaticLeakChecker verification only.
+        nil
+      else
+        raise "MIR::Promote: unhandled strategy :#{node.strategy} for '#{node.name}'. " \
+              "MIR generated a promotion but the transpiler has no handler for this strategy."
       end
 
     when MIR::SuppressCleanup

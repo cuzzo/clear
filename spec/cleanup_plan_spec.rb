@@ -86,6 +86,35 @@ RSpec.describe CleanupClassifier do
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
+
+    context "COPY of non-Copy union" do
+      let(:plan) do
+        cleanup_for(<<~CLEAR, "test")
+          UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
+          FN makeData() RETURNS Data ->
+              RETURN Data{ Text: "hello" };
+          END
+          FN test() RETURNS Void ->
+              d = makeData();
+              d2 = COPY d;
+              RETURN;
+          END
+        CLEAR
+      end
+
+      it "marks original for cleanup" do
+        entry = plan["d"]
+        expect(entry).not_to be_nil
+        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+      end
+
+      it "marks COPY result for cleanup" do
+        entry = plan["d2"]
+        expect(entry).not_to be_nil
+        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect(entry[:alloc]).to eq(:heap)
+      end
+    end
   end
 
   # =========================================================================
@@ -814,6 +843,35 @@ RSpec.describe CleanupClassifier do
         expect(hoisted_values.none? { |v| v.is_a?(AST::FuncCall) && v.name == "prStr" }).to be(true),
           "prStr() is the direct return — should NOT be hoisted"
       end
+    end
+  end
+
+  # ===========================================================================
+  # COPY of non-Copy union consumed by MATCH TAKES: cleanup must survive
+  # ===========================================================================
+  describe "COPY non-Copy union consumed by MATCH TAKES" do
+    it "keeps cleanup for COPY result after refine_moved_guards" do
+      plan, _, _ = hpt_for(<<~CLEAR, "main")
+        UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
+        FN makeNested() RETURNS Data ->
+            inner = Data{ Text: "hello" };
+            RETURN Data.Nested{ label: "outer", inner: inner };
+        END
+        FN main() RETURNS Void ->
+            d = makeNested();
+            d2 = COPY d;
+            MATCH d2 START
+                Data.Nested AS n -> print(n.label);,
+                DEFAULT -> print("wrong");
+            END
+        END
+      CLEAR
+      # d2 is consumed by MATCH TAKES (auto), but cleanup must survive for
+      # the DEFAULT branch where no AS binding extracts the payload.
+      d2_entry = plan["d2"]
+      expect(d2_entry).not_to be_nil, "d2 must have a cleanup entry"
+      expect(d2_entry[:needs_cleanup]).to eq(true), "d2 cleanup must not be eliminated"
+      expect(d2_entry[:has_moved_guard]).to eq(true), "d2 needs moved guard for MATCH TAKES"
     end
   end
 end

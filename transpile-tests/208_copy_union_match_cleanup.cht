@@ -1,0 +1,34 @@
+-- Test: COPY of non-Copy union consumed by MATCH TAKES gets proper cleanup.
+-- d2 = COPY d; MATCH d2 ... must clean up d2 on non-AS paths (DEFAULT).
+-- Bug: refine_moved_guards! eliminated d2's cleanup because dataflow said MOVED on all paths.
+
+UNION Data { Empty, Text: String }
+
+-- AS case: n takes ownership, d2 cleanup suppressed
+FN testAs() RETURNS Void ->
+    d = Data{ Text: "hello" };
+    d2 = COPY d;
+    MATCH d2 START
+        Data.Text AS s -> print(s);,
+        DEFAULT -> print("wrong");
+    END
+END
+
+-- DEFAULT case: d2 has heap data (Text), cleanup must fire for d2
+FN testDefault() RETURNS Void ->
+    d = Data{ Text: "world" };
+    d2 = COPY d;
+    MATCH d2 START
+        Data.Empty -> print("empty");,
+        DEFAULT -> print("default");
+    END
+END
+
+FN main() RETURNS Void ->
+    testAs();
+    testDefault();
+END
+
+-- EXPECT
+-- hello
+-- default

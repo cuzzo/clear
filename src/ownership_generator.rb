@@ -124,7 +124,8 @@ module OwnershipGenerator
       guarded_cleanup(name, zig_type, alloc)
 
     else
-      ""
+      raise "emit_cleanup_from_entry: unhandled cleanup kind :#{entry[:kind]} for '#{name}'. " \
+            "MIR::Drop was generated but the transpiler has no Zig template for this kind."
     end
   end
 
