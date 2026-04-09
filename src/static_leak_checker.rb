@@ -69,6 +69,12 @@ class StaticLeakChecker
       check_reassign_completeness!(reassign_cleanups)
     end
 
+    # Universal invariant: every guarded Drop must have a SuppressCleanup or
+    # Return escape that sets the guard. A guarded Drop with no suppress means
+    # the guard is always false (cleanup always fires = potential double-free
+    # if the variable IS moved by a path the MIR forgot to cover).
+    check_guard_suppress_completeness!(drops, suppresses, escapes)
+
     # Orphan checks always run (catch rogue MIR nodes).
     check_orphans!(allocs, drops, suppresses, reassign_cleanups, field_cleanups, takes)
 
@@ -167,6 +173,84 @@ class StaticLeakChecker
         end
       end
     end
+  end
+
+  # Every guarded Drop must have a SuppressCleanup or Return escape that
+  # sets the guard variable. Without one, the guard is dead code and the
+  # cleanup fires unconditionally - if the variable IS moved on some path,
+  # that's a double-free.
+  #
+  # Excluded from this check:
+  # - TAKES parameters (guard is set by TAKES machinery, not MIR::SuppressCleanup)
+  # - MATCH TAKES source variables (guard is set by transpiler's match handling)
+  # - MATCH AS bindings (inner-scope, guard is harmless default)
+  def check_guard_suppress_completeness!(drops, suppresses, escapes)
+    takes = takes_param_names
+    match_takes_sources = collect_match_takes_sources(@fn.body)
+    match_as_bindings = collect_match_as_bindings(@fn.body)
+
+    drops.each do |name, drop_nodes|
+      drop_nodes.each do |drop|
+        next unless drop.has_moved_guard
+        next if suppresses.include?(name) || escapes.include?(name)
+        next if takes.include?(name)
+        next if match_takes_sources.include?(name)
+        next if match_as_bindings.include?(name)
+        @errors << error(:GUARD_NO_SUPPRESS, name,
+          "guarded Drop but no SuppressCleanup or Return escape sets the guard")
+      end
+    end
+  end
+
+  def collect_match_takes_sources(stmts)
+    sources = Set.new
+    return sources unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
+         stmt.expr.is_a?(AST::Identifier)
+        sources << stmt.expr.name.to_s
+      end
+      case stmt
+      when AST::IfStatement
+        sources.merge(collect_match_takes_sources(stmt.then_branch))
+        sources.merge(collect_match_takes_sources(stmt.else_branch))
+      when AST::WhileLoop then sources.merge(collect_match_takes_sources(stmt.do_branch))
+      when AST::ForRange, AST::ForEach then sources.merge(collect_match_takes_sources(stmt.body))
+      when AST::MatchStatement
+        stmt.cases&.each { |c| sources.merge(collect_match_takes_sources(c[:body])) }
+        sources.merge(collect_match_takes_sources(stmt.default_case))
+      when AST::WithBlock then sources.merge(collect_match_takes_sources(stmt.body))
+      when AST::DoBlock
+        stmt.branches&.each { |b| sources.merge(collect_match_takes_sources(b[:body])) }
+      end
+    end
+    sources
+  end
+
+  def collect_match_as_bindings(stmts)
+    bindings = Set.new
+    return bindings unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      if stmt.is_a?(AST::MatchStatement)
+        stmt.cases&.each do |c|
+          bindings << c[:binding].to_s if c[:binding]
+        end
+      end
+      case stmt
+      when AST::IfStatement
+        bindings.merge(collect_match_as_bindings(stmt.then_branch))
+        bindings.merge(collect_match_as_bindings(stmt.else_branch))
+      when AST::WhileLoop then bindings.merge(collect_match_as_bindings(stmt.do_branch))
+      when AST::ForRange, AST::ForEach then bindings.merge(collect_match_as_bindings(stmt.body))
+      when AST::MatchStatement
+        stmt.cases&.each { |c| bindings.merge(collect_match_as_bindings(c[:body])) }
+        bindings.merge(collect_match_as_bindings(stmt.default_case))
+      when AST::WithBlock then bindings.merge(collect_match_as_bindings(stmt.body))
+      when AST::DoBlock
+        stmt.branches&.each { |b| bindings.merge(collect_match_as_bindings(b[:body])) }
+      end
+    end
+    bindings
   end
 
   # Frame-allocated bindings that escape via return must be promoted to heap

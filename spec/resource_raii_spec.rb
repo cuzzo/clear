@@ -9,7 +9,7 @@ RSpec.describe "Resource RAII Transpilation" do
     ZigTranspiler.new.transpile(src)
   end
 
-  it "emits conditional defer f.close() for File::open" do
+  it "emits plain defer f.close() when File::open is never moved" do
     src = <<~CLEAR
       FN test() RETURNS Void ->
         f = File::open("test.txt");
@@ -18,8 +18,8 @@ RSpec.describe "Resource RAII Transpilation" do
     CLEAR
     zig = transpile(src)
     expect(zig).to include("var f = try CheatLib.fileOpen")
-    expect(zig).to include("var f_moved = false; _ = &f_moved;")
-    expect(zig).to include("defer if (!f_moved) f.close();")
+    expect(zig).to include("defer f.close();")
+    expect(zig).not_to include("f_moved")
   end
 
   it "DOES NOT emit defer close() when returning a resource (regression)" do

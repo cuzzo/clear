@@ -142,16 +142,18 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.fileOpen("data.txt")')
       end
 
-      it "emits defer with move-guarded f.close() for auto-RAII" do
+      it "emits plain defer f.close() when resource is never moved" do
         src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer if (!f_moved) f.close();")
+        expect(out).to include("defer f.close();")
+        expect(out).not_to include("f_moved")
       end
 
-      it "emits a _moved flag for resource move tracking" do
-        src = 'FN f() RETURNS Void -> f = File::open("data.txt"); RETURN; END'
+      it "emits guarded defer when resource is maybe-moved" do
+        src = 'FN f(x: Number) RETURNS File -> f = File::open("data.txt"); IF x > 0 THEN RETURN f; END RETURN File::open("b.txt"); END'
         out = transpile_fn(src)
         expect(out).to include("f_moved")
+        expect(out).to include("defer if (!f_moved) f.close();")
       end
 
       it "maps File to std.fs.File Zig type" do
@@ -286,10 +288,11 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketListen(@intCast(8080))')
       end
 
-      it "emits defer with move-guarded CheatLib.socketClose for server RAII" do
+      it "emits plain defer CheatLib.socketClose when server is never moved" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(8080); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer if (!s_moved) CheatLib.socketClose(s);")
+        expect(out).to include("defer CheatLib.socketClose(s);")
+        expect(out).not_to include("s_moved")
       end
 
       it "emits CheatLib.socketAccept for accept()" do
@@ -298,10 +301,11 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketAccept(s)')
       end
 
-      it "emits defer with move-guarded CheatLib.socketClose for client RAII" do
+      it "emits plain defer CheatLib.socketClose when client is never moved" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer if (!c_moved) CheatLib.socketClose(c);")
+        expect(out).to include("defer CheatLib.socketClose(c);")
+        expect(out).not_to include("c_moved")
       end
 
       it "emits CheatLib.socketRead for tcpRead()" do
@@ -324,10 +328,10 @@ RSpec.describe SemanticAnnotator do
         expect(Type.new(:TCPClient).zig_type).to eq("i32")
       end
 
-      it "emits a _moved flag for TCPServer resource move tracking" do
+      it "does not emit _moved flag when TCPServer is never moved" do
         src = 'FN f() RETURNS Void -> s = TCPServer::listen(0); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("s_moved")
+        expect(out).not_to include("s_moved")
       end
     end
 
@@ -635,10 +639,11 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.fileCreate(')
       end
 
-      it "emits defer with move-guarded f.close() RAII for File::create" do
+      it "emits plain defer f.close() when File::create is never moved" do
         src = 'FN f() RETURNS Void -> f = File::create("out.txt"); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer if (!f_moved) f.close();")
+        expect(out).to include("defer f.close();")
+        expect(out).not_to include("f_moved")
       end
 
       it "raises on File::create with wrong arg count" do
@@ -698,10 +703,11 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketConnect(')
       end
 
-      it "emits defer with move-guarded CheatLib.socketClose RAII for TCPClient::connect" do
+      it "emits plain defer CheatLib.socketClose when TCPClient::connect is never moved" do
         src = 'FN f() RETURNS Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
         out = transpile_fn(src)
-        expect(out).to include("defer if (!c_moved) CheatLib.socketClose(c);")
+        expect(out).to include("defer CheatLib.socketClose(c);")
+        expect(out).not_to include("c_moved")
       end
 
       it "raises on TCPClient::connect with wrong arg count" do

@@ -495,7 +495,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.ShardedPool(Score, 4).initCapacity(rt.heapAlloc(), 100)")
       end
 
-      it "emits defer with move-guarded sp.deinit for @pool:sharded cleanup (RAII)" do
+      it "emits plain defer sp.deinit when sharded pool is never moved" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS Void ->
@@ -503,7 +503,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("defer if (!sp_moved) sp.deinit(rt.heapAlloc())")
+        expect(out).to include("defer sp.deinit(rt.heapAlloc())")
+        expect(out).not_to include("sp_moved")
       end
 
       it "raises for @pool:sharded(1) — shard count must be >= 2" do

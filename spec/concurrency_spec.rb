@@ -1801,6 +1801,23 @@ RSpec.describe SemanticAnnotator do
       # No outer cleanup needed - fiber owns and closes the resource.
       expect(out).not_to include("client_moved")
     end
+
+    it "emits guarded defer + suppress for resource captured by BG inside while loop" do
+      out = transpile_fn(<<~CLEAR)
+        FN f(server: TCPServer) RETURNS Void ->
+          MUTABLE tasks: ~Void[]@list = [];
+          WHILE TRUE DO
+            client = accept(server);
+            tasks.append(BG { tcpWrite(client, "hi"); });
+          END
+          RETURN;
+        END
+      CLEAR
+      # Resource captured by BG inside while loop: maybe-moved (loop back
+      # edge means client could be re-declared). Guarded defer + suppress.
+      expect(out).to include("client_moved = true")
+      expect(out).to include("defer if (!client_moved)")
+    end
   end
 
   describe "DO block" do

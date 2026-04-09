@@ -736,7 +736,7 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits defer with move-guarded s.deinit() for ~Float64[?] declaration" do
+      it "emits plain defer s.deinit() when stream is never moved" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
@@ -744,7 +744,8 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer if (!s_moved) s.deinit()")
+        expect(out).to include("defer s.deinit(")
+        expect(out).not_to include("s_moved")
       end
     end
 
@@ -995,7 +996,7 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits defer with move-guarded s.deinit() for ~Float64[INF] declaration" do
+      it "emits plain defer s.deinit() when infinite stream is never moved" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
@@ -1003,7 +1004,8 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer if (!s_moved) s.deinit()")
+        expect(out).to include("defer s.deinit(")
+        expect(out).not_to include("s_moved")
       end
     end
 

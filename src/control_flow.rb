@@ -410,6 +410,8 @@ class OwnershipDataflow
     when AST::FuncCall, AST::MethodCall
       # Function args: only was_moved (TAKES/GIVE) triggers a move.
       collect_explicit_moves(stmt, state).each { |n| state[n] = MOVED }
+      # BG blocks in args transfer ownership of captured resources.
+      collect_bg_captures_in_args(stmt, state).each { |n| state[n] = MOVED }
 
     when AST::IfStatement, AST::WhileLoop, AST::ForRange, AST::ForEach, AST::MatchStatement
       # Control flow headers: only process condition/expr for explicit moves.
@@ -485,7 +487,7 @@ class OwnershipDataflow
     when AST::CopyNode
       # COPY does NOT move the source.
 
-    when AST::BgBlock
+    when AST::BgBlock, AST::BgStreamBlock
       # Resources captured by BG fibers transfer ownership.
       node.capture_analysis&.resource_captures&.each do |name|
         consumed << name if state[name]
@@ -497,8 +499,10 @@ class OwnershipDataflow
   end
 
   # Collect only was_moved identifiers from an expression subtree.
+  # Skips CopyNode children: COPY wraps a was_moved identifier but the
+  # source is NOT consumed (the copy is what transfers ownership).
   def collect_explicit_in(node, state, consumed)
-    walk_expr(node) do |n|
+    walk_expr_skip_copy(node) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
       next unless state[name]
@@ -512,7 +516,7 @@ class OwnershipDataflow
   def collect_explicit_moves(node, state)
     return [] unless node
     consumed = []
-    walk_expr(node) do |n|
+    walk_expr_skip_copy(node) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
       next unless state[name]
@@ -520,6 +524,33 @@ class OwnershipDataflow
       consumed << name
     end
     consumed
+  end
+
+  # Collect resource captures from BG blocks nested in function/method call args.
+  # Without this, the dataflow doesn't see ownership transfers via BG capture
+  # when the BG block appears inside a MethodCall like tasks.append(BG { ... }).
+  def collect_bg_captures_in_args(stmt, state)
+    consumed = []
+    args = stmt.args || []
+    args.each do |arg|
+      _walk_bg_captures_in_expr(arg, state, consumed)
+    end
+    consumed
+  end
+
+  def _walk_bg_captures_in_expr(expr, state, consumed)
+    return unless expr
+    case expr
+    when AST::BgBlock, AST::BgStreamBlock
+      expr.capture_analysis&.resource_captures&.each do |name|
+        consumed << name if state[name]
+      end
+    when AST::FuncCall
+      expr.args&.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
+    when AST::MethodCall
+      _walk_bg_captures_in_expr(expr.object, state, consumed)
+      expr.args&.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
+    end
   end
 
   # Returns true if this identifier's type is Copy (no move on assignment).
@@ -573,6 +604,46 @@ class OwnershipDataflow
       walk_expr(node.value, &block)
     when AST::VarDecl, AST::BindExpr
       walk_expr(node.value, &block)
+    end
+  end
+
+  # Like walk_expr but does NOT recurse into CopyNode. CopyNode wraps
+  # was_moved identifiers for implicit copies -- the source is NOT consumed.
+  def walk_expr_skip_copy(node, &block)
+    return unless node
+    yield node
+    case node
+    when AST::CopyNode
+      # Do not recurse: COPY means the source is retained.
+    when AST::BinaryOp
+      walk_expr_skip_copy(node.left, &block)
+      walk_expr_skip_copy(node.right, &block)
+    when AST::UnaryOp
+      walk_expr_skip_copy(node.right, &block)
+    when AST::FuncCall
+      node.args&.each { |a| walk_expr_skip_copy(a, &block) }
+    when AST::MethodCall
+      walk_expr_skip_copy(node.object, &block)
+      node.args&.each { |a| walk_expr_skip_copy(a, &block) }
+    when AST::GetField
+      walk_expr_skip_copy(node.target, &block)
+    when AST::GetIndex
+      walk_expr_skip_copy(node.target, &block)
+      walk_expr_skip_copy(node.index, &block)
+    when AST::StructLit
+      node.fields&.each_value { |v| walk_expr_skip_copy(v, &block) }
+    when AST::ListLit
+      node.items&.each { |i| walk_expr_skip_copy(i, &block) }
+    when AST::HashLit
+      node.pairs&.each { |_k, v| walk_expr_skip_copy(v.is_a?(Array) ? v[1] : v, &block) }
+    when AST::MoveNode
+      walk_expr_skip_copy(node.value, &block)
+    when AST::ReturnNode
+      walk_expr_skip_copy(node.value, &block)
+    when AST::Assignment
+      walk_expr_skip_copy(node.value, &block)
+    when AST::VarDecl, AST::BindExpr
+      walk_expr_skip_copy(node.value, &block)
     end
   end
 
@@ -652,6 +723,10 @@ class MIRPass
     has_catch = fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
     return unless has_bindings || promo || has_bg_escapes || has_catch
 
+    # Pre-mark bindings captured by BG blocks so has_moved_guard is correct
+    # BEFORE refine_moved_guards! runs and Drops snapshot cleanup_entry.
+    pre_mark_bg_resource_captures!(fn, bindings) if has_bindings
+
     # Use dataflow analysis to tighten has_moved_guard decisions.
     # The classifier conservatively sets has_moved_guard=true for all non-trivial
     # types. Dataflow precisely tracks which variables are actually consumed on
@@ -681,6 +756,50 @@ class MIRPass
 
     # Build moved_guard_info map: { var_name => bool } for all bindings.
     stamp_moved_guard_info!(fn, bindings) if has_bindings
+  end
+
+  # Pre-mark bindings that are captured by BG blocks as needing moved guards.
+  # This runs BEFORE refine_moved_guards! so that when Drops are later created
+  # (which snapshot cleanup_entry = entry.dup), the has_moved_guard flag is
+  # already correct. Without this, insert_bg_resource_suppress! would mutate
+  # bindings AFTER Drops were created, causing a split between the Drop's
+  # snapshot and the binding's current state.
+  def pre_mark_bg_resource_captures!(fn, bindings)
+    walk_for_bg_captures(fn.body, bindings)
+  end
+
+  def walk_for_bg_captures(stmts, bindings)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      each_bg_in_stmt(stmt) do |bg|
+        resource_captures = bg.capture_analysis&.resource_captures
+        next unless resource_captures&.any?
+        resource_captures.each do |name|
+          entry = bindings&.dig(name)
+          next unless entry && entry[:needs_cleanup]
+          entry[:has_moved_guard] = true
+        end
+      end
+      # Recurse into nested control flow.
+      case stmt
+      when AST::IfStatement
+        walk_for_bg_captures(stmt.then_branch, bindings)
+        walk_for_bg_captures(stmt.else_branch, bindings)
+      when AST::WhileLoop
+        walk_for_bg_captures(stmt.do_branch, bindings)
+      when AST::ForRange, AST::ForEach
+        walk_for_bg_captures(stmt.body, bindings)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| walk_for_bg_captures(c[:body], bindings) }
+        walk_for_bg_captures(stmt.default_case, bindings)
+      when AST::WithBlock
+        walk_for_bg_captures(stmt.body, bindings)
+      when AST::DoBlock
+        stmt.branches&.each { |b| walk_for_bg_captures(b[:body], bindings) }
+      when AST::BgBlock, AST::BgStreamBlock
+        walk_for_bg_captures(stmt.body, bindings)
+      end
+    end
   end
 
   # Tighten cleanup decisions using ownership dataflow analysis.
@@ -982,18 +1101,14 @@ class MIRPass
   # don't appear in the function-level bindings hash.
   def insert_bg_resource_suppress!(result, stmt, bindings)
     each_bg_in_stmt(stmt) do |bg|
-      next unless bg.is_a?(AST::BgBlock) # resource suppress only for BgBlock
       resource_captures = bg.capture_analysis&.resource_captures
       next unless resource_captures&.any?
       resource_captures.each do |name|
         entry = bindings&.dig(name)
         # When dataflow says always-moved (needs_cleanup=false), no Drop was
-        # inserted — the fiber is the sole owner. No suppress needed.
+        # inserted - the fiber is the sole owner. No suppress needed.
         next if entry && !entry[:needs_cleanup]
-        # Resource cleanup always uses guarded_defer (emits X_moved variable)
-        # regardless of has_moved_guard. Mark it true so the static leak
-        # checker accepts the SuppressCleanup node.
-        entry[:has_moved_guard] = true if entry && entry[:kind] == :resource
+        # has_moved_guard was already set by pre_mark_bg_resource_captures!
         result << MIR::SuppressCleanup.new(stmt.token, name)
       end
     end
