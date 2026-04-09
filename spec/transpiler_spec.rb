@@ -205,6 +205,49 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
+  # SHARD pipeline producer loop frame marks
+  # ===========================================================================
+  describe "SHARD pipeline producer loop frame marks" do
+    it "emits saveLoopMark in SHARD producer when key expression allocates from frame" do
+      src = <<~CLEAR
+        FN makeKey(n: Int64) RETURNS String ->
+            RETURN "k:${toString(n)}";
+        END
+
+        FN main() RETURNS Void ->
+            MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+            (0_i64 ..< 100_i64) s> SHARD(makeKey(_), counts) s> CONCURRENT EACH {
+                cur = counts[_] OR 0;
+                counts[_] = cur + 1;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+    end
+
+    it "skips saveLoopMark in SHARD producer when key is a pre-built array lookup (no frame alloc)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            MUTABLE keys: String[]@list = [];
+            keys.append("a");
+            keys.append("b");
+            MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+            (0_i64 ..< 2_i64) s> SHARD(keys[_], counts) s> CONCURRENT EACH {
+                cur = counts[_] OR 0;
+                counts[_] = cur + 1;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # keys[_] is a GetIndex into an existing String[] — no frame allocation.
+      expect(zig).not_to include("saveLoopMark")
+    end
+  end
+
+  # ===========================================================================
   # Cooperative yield injection
   # ===========================================================================
   describe "cooperative yield injection" do
