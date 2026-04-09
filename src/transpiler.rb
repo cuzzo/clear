@@ -992,6 +992,14 @@ private
             return "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value};\n}"
           end
 
+          # SOA field-slice rewrite for assignments: _.field = expr → __soa_field[__soa_i] = expr
+          if @soa_rewrite_active && node.name.target.is_a?(AST::Identifier) && node.name.target.name == "_"
+            field = node.name.field
+            @soa_needed_fields << field
+            value = visit(node.value)
+            return "__soa_#{field}[__soa_i] = #{value};"
+          end
+
           target = visit(node.name.target)
           field  = node.name.field
           value  = visit(node.value)

@@ -759,15 +759,26 @@ module PipelineGenerator
     lhs      = smooth_node.left
     each_op  = smooth_node.right
     lhs_type = lhs.type_info
+    is_soa   = (lhs_type&.pool? || lhs_type&.list_collection?) && lhs_type&.soa?
 
-    body_code = with_pipeline_context(placeholder: "__each_item") do
+    if is_soa
+      # SOA EACH: enable field-slice rewrite so _.field reads/writes become
+      # __soa_field[__soa_i] instead of materializing the full struct.
+      prev_soa_active = @soa_rewrite_active
+      prev_soa_fields = @soa_needed_fields
+      @soa_rewrite_active = true
+      @soa_needed_fields = Set.new
+    end
+
+    placeholder = is_soa ? "_" : "__each_item"
+    body_code = with_pipeline_context(placeholder: placeholder) do
       each_op.body.map { |stmt|
         code = visit(stmt)
         code.strip.end_with?(";") ? code : "#{code};"
       }.join("\n        ")
     end
 
-    if lhs_type&.pool?
+    result = if lhs_type&.pool?
       if lhs_type.sharded?
         transpile_each_sharded_pool(lhs, body_code, lhs_type)
       elsif lhs_type.soa?
@@ -782,6 +793,13 @@ module PipelineGenerator
     else
       raise "BUG: plain-array EACH should have been rewritten by PipelineRewriter"
     end
+
+    if is_soa
+      @soa_rewrite_active = prev_soa_active
+      @soa_needed_fields  = prev_soa_fields
+    end
+
+    result
   end
 
   def transpile_each_pool(pool_node, body_code)
@@ -800,14 +818,15 @@ module PipelineGenerator
 
   def transpile_each_soa_list(list_node, body_code)
     list_code = visit(list_node)
+    field_slices = @soa_needed_fields.map { |f|
+      "const __soa_#{f} = __soa_src.data.items(.#{f});"
+    }.join("\n          ")
     <<~ZIG.chomp
       {
-          const __each_src = &#{list_code};
-          for (0..@intCast(__each_src.data.len)) |__each_i| {
-              var __each_item = __each_src.data.get(__each_i);
-              _ = &__each_item;
+          const __soa_src = &#{list_code};
+          #{field_slices}
+          for (0..@intCast(__soa_src.data.len)) |__soa_i| {
               #{body_code}
-              __each_src.data.set(__each_i, __each_item);
           }
       }
     ZIG
@@ -815,19 +834,16 @@ module PipelineGenerator
 
   def transpile_each_soa_pool(pool_node, body_code)
     pool_code = visit(pool_node)
-    # For SOA pools, use data.get(i) to reassemble the struct for the body.
-    # This is correct but not cache-optimal for single-field access.
-    # Full field-slice optimization for EACH requires tracking which fields
-    # the body writes vs reads, which is future work (EACH bodies are mutable).
+    field_slices = @soa_needed_fields.map { |f|
+      "const __soa_#{f} = __soa_src.data.items(.#{f});"
+    }.join("\n          ")
     <<~ZIG.chomp
       {
-          const __each_src = &#{pool_code};
-          for (0..@intCast(__each_src.data.len)) |__each_i| {
-              if (!__each_src.alive[__each_i]) continue;
-              var __each_item = __each_src.data.get(__each_i);
-              _ = &__each_item;
+          const __soa_src = &#{pool_code};
+          #{field_slices}
+          for (0..@intCast(__soa_src.data.len)) |__soa_i| {
+              if (!__soa_src.alive[__soa_i]) continue;
               #{body_code}
-              __each_src.data.set(__each_i, __each_item);
           }
       }
     ZIG
