@@ -3,6 +3,7 @@
 
 REQUIRE "types.cht";
 REQUIRE "parser.cht";
+REQUIRE "debugger.cht";
 
 -- FFI functions: native CLEAR functions callable from Scheme via typed arrays.
 -- These operate on real Int64[] - no Value wrapping, no conversion.
@@ -59,56 +60,6 @@ END
 -- Parent links stored as Value.EnvRef in vars["__p"].
 -- Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
 -- Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
-
-FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
-    MATCH v START
-        Value.Nil -> RETURN "nil";,
-        Value.TrueVal -> RETURN "true";,
-        Value.FalseVal -> RETURN "false";,
-        Value.Number AS n ->
-            IF n == floor(n) THEN RETURN toInt(n).toString(); END
-            RETURN n.toString();,
-        Value.Int64Val AS i -> RETURN i.toString();,
-        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
-        Value.Symbol AS s -> RETURN s;,
-        Value.List AS items ->
-            MUTABLE out = "(";
-            FOR li IN (0_i64 ..< items.length()) DO
-                IF li > 0 THEN out = out + " "; END
-                out = out + prStr(items[li], readably);
-            END
-            RETURN out + ")";,
-        Value.Vector AS velems ->
-            MUTABLE vout = "#(";
-            FOR vi IN (0_i64 ..< velems.length()) DO
-                IF vi > 0 THEN vout = vout + " "; END
-                vout = vout + prStr(velems[vi], readably);
-            END
-            RETURN vout + ")";,
-        Value.Pair AS p ->
-            RETURN "(" + prStr(p.pairCar, readably) + " . " + prStr(p.pairCdr, readably) + ")";,
-        Value.TypedI64Arr AS iarr ->
-            MUTABLE iout = "[";
-            FOR ii IN (0_i64 ..< iarr.length()) DO
-                IF ii > 0 THEN iout = iout + " "; END
-                iout = iout + iarr[ii].toString();
-            END
-            RETURN iout + "]:i64";,
-        Value.TypedF64Arr AS farr ->
-            MUTABLE fout = "[";
-            FOR fi IN (0_i64 ..< farr.length()) DO
-                IF fi > 0 THEN fout = fout + " "; END
-                fout = fout + farr[fi].toString();
-            END
-            RETURN fout + "]:f64";,
-        Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
-        Value.Lambda -> RETURN "#<function>";,
-        Value.EnvRef -> RETURN "#<envref>";,
-        Value.Tco -> RETURN "#<tco>";,
-        Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";
-    END
-    RETURN "";
-END
 
 -- Native function dispatch by numeric ID.
 -- IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
@@ -447,23 +398,6 @@ END
 
 -- Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    val = COPY (pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 });
-    MATCH val START
-        Value.Number AS n ->
-            IF n == 0.0 - 777777.0 THEN
-                parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
-                MATCH parentVal START
-                    Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
-                    DEFAULT -> RETURN Value.Nil;
-                END
-            END
-            RETURN val;,
-        DEFAULT -> RETURN val;
-    END
-    RETURN Value.Nil;
-END
-
 -- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
@@ -595,8 +529,6 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
     END
     RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
 END
-
--- @include "debugger.cht"
 
 FN isSymbol?(v: Value) RETURNS Bool ->
     MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
@@ -1528,7 +1460,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY callDesc };
                 END
 
-                action = debugPause!(callDesc, envId, pool);
+                MUTABLE action = debugPause!(callDesc, envId, "", pool);
+
+                -- Handle inspect requests from debugger
+                WHILE action == 4 DO
+                    inspAst = envGet!(envId, "__dbg_inspect", pool);
+                    inspResult = eval!(COPY inspAst, envId, pool);
+                    action = debugPause!(callDesc, envId, prStr(inspResult, TRUE), pool);
+                END
 
                 -- Set step mode based on debug action
                 pool[envId]?.vars["__dbg_step"] = Value{ Number: toFloat(action) };

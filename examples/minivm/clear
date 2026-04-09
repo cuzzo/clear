@@ -33,10 +33,6 @@ class InterpreterBridge
   def initialize
     @interp_path = File.join(DIR, "interpreter.cht")
     @interp_src = File.read(@interp_path)
-    # Resolve -- @include "file.cht" markers by inlining the referenced files
-    @interp_src = @interp_src.gsub(/^-- @include "(.+?)"$/) do
-      File.read(File.join(DIR, $1))
-    end
     # Strip from main() onward
     main_idx = @interp_src.index(/^FN main\(\)/)
     @interp_base = main_idx ? @interp_src[0...main_idx] : @interp_src

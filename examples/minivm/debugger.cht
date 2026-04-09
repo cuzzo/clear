@@ -1,6 +1,9 @@
 -- Debugger support for the Mal interpreter.
 -- File-based debug pause (tree-walker) and helpers.
--- Depends on Value union, eval!, prStr, envGet! from interpreter.cht.
+-- Returns action codes: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
+
+REQUIRE "types.cht";
+REQUIRE "parser.cht";
 
 FN readFileOr!(path: String, fallback: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
     content = readFile(path) OR RAISE;
@@ -13,19 +16,30 @@ FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS String ->
 END
 
 -- Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
--- Returns the debug action: 0=continue, 1=step-into, 2=step-over, 3=step-out
+-- When inspectResult is non-empty, writes it as response from a prior :i command.
+-- Returns: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
+-- When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
+-- The caller should eval it, format with prStr, and re-call with the result string.
 
-FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
-    -- Build call stack string
-    stackStr = envGet!(envId, "__dbg_stack", pool);
-    stackDisplay = getStr(stackStr);
+FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
+    -- If we have an inspect result from the caller, write it before resuming polling
+    IF inspectResult.length() > 0 THEN
+        writeFile("/tmp/_debug_resp.txt", inspectResult);
+    ELSE
+        -- Build call stack string
+        stackStr = envGet!(envId, "__dbg_stack", pool);
+        stackDisplay = getStr(stackStr);
 
-    -- Write break info
-    MUTABLE breakInfo = COPY reason;
-    IF stackDisplay.length() > 0 THEN
-        breakInfo = breakInfo + "\n  stack: " + stackDisplay;
+        -- Write break info
+        MUTABLE breakInfo = COPY reason;
+        IF stackDisplay.length() > 0 THEN
+            breakInfo = breakInfo + "\n  stack: " + stackDisplay;
+        END
+        writeFile("/tmp/_debug_break.txt", breakInfo);
     END
-    writeFile("/tmp/_debug_break.txt", breakInfo);
+
+    stackStr2 = envGet!(envId, "__dbg_stack", pool);
+    stackDisplay2 = getStr(stackStr2);
 
     MUTABLE debugAction: Int64 = 0;
     MUTABLE debugActive = TRUE;
@@ -42,15 +56,15 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
             ELSE_IF cmdRaw == ":f" || cmdRaw == ":finish" THEN
                 debugAction = 3; debugActive = FALSE;
             ELSE_IF startsWith?(cmdRaw, ":i ") THEN
+                -- Parse the inspect expression, store AST in env, return 4
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
                 MUTABLE inspPenv: HashMap<Value> = {};
                 tokenizeToEnv!(inspPenv, inspectExpr);
                 inspPenv["__rp"] = Value{ Number: 0.0 };
                 inspAst = readFormEnv!(inspPenv);
-                inspResult = eval!(COPY inspAst, envId, pool);
-                writeFile("/tmp/_debug_resp.txt", prStr(inspResult, TRUE));
+                pool[envId]?.vars["__dbg_inspect"] = COPY inspAst;
+                debugAction = 4; debugActive = FALSE;
             ELSE_IF cmdRaw == ":l" || cmdRaw == ":locals" THEN
-                -- Dump all known variable names from locals tracking
                 localsStr = envGet!(envId, "__dbg_locals", pool);
                 MUTABLE localDump = "";
                 IF getStr(localsStr).length() > 0 THEN
@@ -60,8 +74,8 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
                 END
                 writeFile("/tmp/_debug_resp.txt", localDump);
             ELSE_IF cmdRaw == ":w" || cmdRaw == ":where" || cmdRaw == ":bt" THEN
-                IF stackDisplay.length() > 0 THEN
-                    writeFile("/tmp/_debug_resp.txt", stackDisplay);
+                IF stackDisplay2.length() > 0 THEN
+                    writeFile("/tmp/_debug_resp.txt", stackDisplay2);
                 ELSE
                     writeFile("/tmp/_debug_resp.txt", "(top level)");
                 END

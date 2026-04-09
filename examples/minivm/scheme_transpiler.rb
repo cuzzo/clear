@@ -842,11 +842,6 @@ if $PROGRAM_NAME == __FILE__
     project_root = File.expand_path("../../", __dir__)
     interp_path = File.join(__dir__, "interpreter.cht")
     interp_src = File.read(interp_path)
-    # Resolve -- @include "file.cht" markers by inlining the referenced files
-    interp_src = interp_src.gsub(/^-- @include "(.+?)"$/) do
-      inc_path = File.join(__dir__, $1)
-      File.read(inc_path)
-    end
     main_idx = interp_src.index(/^FN main\(\)/)
     interp_base = main_idx ? interp_src[0...main_idx] : interp_src
 
