@@ -42,6 +42,15 @@ class StaticLeakChecker
     field_cleanups = []
     collect_mir_nodes(@fn.body, allocs, drops, promotes, escapes, suppresses,
                       reassign_cleanups, field_cleanups)
+    # Walk catch clause bodies for MIR nodes (e.g., MIR::Promote for catch_string_dupe).
+    (@fn.catch_clauses || []).each do |clause|
+      collect_mir_nodes(clause[:body], allocs, drops, promotes, escapes, suppresses,
+                        reassign_cleanups, field_cleanups) if clause[:body]
+    end
+    if @fn.default_catch.is_a?(Array)
+      collect_mir_nodes(@fn.default_catch, allocs, drops, promotes, escapes, suppresses,
+                        reassign_cleanups, field_cleanups)
+    end
 
     takes = takes_param_names
     has_bindings = !@bindings.empty? || !takes.empty?

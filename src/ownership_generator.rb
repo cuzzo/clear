@@ -42,10 +42,32 @@ module OwnershipGenerator
 
   # Mechanical Zig template emitter. Entry has everything needed - no type
   # derivation, no schema lookups. All fields are pre-computed by build_drop_entry.
+  # Kinds that require a resolved zig_type to emit correct cleanup code.
+  NEEDS_ZIG_TYPE = Set[:list, :list_with_elem_cleanup, :string_map, :numeric_map, :set,
+    :rc, :locked, :write_locked, :heap_slice, :heap_union, :heap_struct,
+    :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union,
+    :match_as_inline_struct].freeze
+
+  # Kinds that require a resolved elem_zig_type.
+  NEEDS_ELEM_ZIG = Set[:list_with_elem_cleanup, :array_with_struct_strings,
+    :takes_slice, :match_as_slice].freeze
+
   def emit_cleanup_from_entry(name, entry)
     alloc = alloc_expr_from_plan(entry)
-    zig_type = entry[:zig_type] || "UNKNOWN"
-    elem_zig = entry[:elem_zig_type] || "UNKNOWN"
+    zig_type = entry[:zig_type]
+    elem_zig = entry[:elem_zig_type]
+
+    if NEEDS_ZIG_TYPE.include?(entry[:kind]) && (zig_type.nil? || zig_type == "UNKNOWN")
+      raise "emit_cleanup_from_entry: :#{entry[:kind]} for '#{name}' has unresolved zig_type=#{zig_type.inspect}. " \
+            "compute_drop_type_strings! must populate zig_type before emission."
+    end
+    if NEEDS_ELEM_ZIG.include?(entry[:kind]) && (elem_zig.nil? || elem_zig == "UNKNOWN")
+      raise "emit_cleanup_from_entry: :#{entry[:kind]} for '#{name}' has unresolved elem_zig_type=#{elem_zig.inspect}. " \
+            "compute_drop_type_strings! must populate elem_zig_type before emission."
+    end
+
+    zig_type ||= "UNKNOWN"
+    elem_zig ||= "UNKNOWN"
 
     case entry[:kind]
     when :resource
