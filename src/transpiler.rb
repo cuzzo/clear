@@ -4,6 +4,7 @@ require 'bundler/setup' # so `bundle exec` not needed
 require "optparse"
 require "logger"
 require "set"
+require "json"
 require "byebug"
 
 require_relative "./lexer"
@@ -28,6 +29,7 @@ class ZigTranspiler
   include ZigTypeMapper
 
   attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
+  attr_accessor :exact_tiers  # Hash: { bg_index => :micro/:standard/:large/:xl }
 
   def initialize(importer: nil, source_dir: nil)
     @importer   = importer
@@ -1691,6 +1693,11 @@ private
       @bg_block_counter ||= 0
       id = @bg_block_counter
       @bg_block_counter += 1
+
+      # Apply exact tier override from post-build analysis.
+      if @exact_tiers&.key?(id) && !node.stack_size
+        node.computed_stack_tier = @exact_tiers[id]
+      end
 
       tense_t     = Type.new(node.full_type || :"~Void")
       inner_t     = Type.new(tense_t.tense_type)
@@ -3508,21 +3515,22 @@ private
     end
   end
 
-  # Tier ordering for max() comparison
   TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
 
   def task_config_zig(stack_size, pinned: false, use_arena: false, computed_tier: nil)
     default = @default_stack_size || "Standard"
     if stack_size
-      # User explicitly chose a size - honor it
       variant = STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
     elsif computed_tier
-      # Auto-sized: take the MAX of computed tier and build-mode default.
-      # Debug builds use Large default because safety checks inflate frames.
-      computed = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
-      variant = TIER_RANK.fetch(computed, 0) >= TIER_RANK.fetch(default, 0) ? computed : default
+      variant = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
     else
       variant = default
+    end
+
+    # Floor: when @default_stack_size is set (debug builds = "Large"),
+    # enforce it as a minimum. Safety checks inflate stack frames.
+    if @default_stack_size
+      variant = default if TIER_RANK.fetch(variant, 0) < TIER_RANK.fetch(default, 0)
     end
     fields = ".stack_size = .#{variant}"
     fields += ", .pinned = true" if pinned
@@ -4182,6 +4190,9 @@ if __FILE__ == $0
     opts.on('--mir', 'Use MIR pipeline (MIRLowering + MIREmitter) instead of old transpiler') do
       options[:mir] = true
     end
+    opts.on('--exact-tiers JSON', 'Override BG block tiers from post-build analysis (JSON: {"0":"micro","1":"standard"})') do |json|
+      options[:exact_tiers] = JSON.parse(json).transform_keys(&:to_i).transform_values(&:to_sym)
+    end
   end.parse!
 
   script_file = ARGV.first
@@ -4191,6 +4202,7 @@ if __FILE__ == $0
     transpiler = ZigTranspiler.new
 
     transpiler.instance_variable_set(:@default_stack_size, options[:default_stack]) if options[:default_stack]
+    transpiler.exact_tiers = options[:exact_tiers] if options[:exact_tiers]
 
     if options[:mir]
       puts transpiler.transpile_mir(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],

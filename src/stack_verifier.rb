@@ -188,6 +188,173 @@ class StackVerifier
     results
   end
 
+  # ── Exact Stack Sizing ──────────────────────────────────────────
+
+  # Parse ALL functions from objdump: frame sizes and call edges.
+  # Returns { frame_sizes: { addr => bytes }, call_graph: { addr => [addr, ...] },
+  #           fn_names: { addr => name }, bg_entries: [addr, ...] }
+  def extract_full_call_graph
+    output = objdump_output
+    return nil if output.empty?
+
+    frame_sizes = {}  # fn_addr => stack_bytes
+    call_graph  = {}  # fn_addr => Set of callee addrs
+    fn_names    = {}  # fn_addr => display name
+    fn_addrs    = {}  # name => fn_addr (for resolving call targets)
+    bg_entries  = []  # addrs of __BgCtx*.run functions
+
+    current_addr = nil
+    current_name = nil
+    saw_frame    = false
+
+    output.each_line do |line|
+      # Function header: "0000000001162520 <bench.clearMain>:"
+      if line =~ /^([0-9a-f]+)\s+<(.+)>:\s*$/
+        raw_addr, name = $1, $2   # capture before sub() clobbers $2
+        addr = raw_addr.sub(/^0+/, '')  # normalize: strip leading zeros
+
+        current_addr = addr
+        current_name = name
+        saw_frame = false
+        fn_names[addr] = name
+        fn_addrs[name] = addr
+        call_graph[addr] ||= Set.new
+
+        # Detect BG entry functions
+        bg_entries << addr if name =~ /__BgCtx\d+\.run$/
+
+      elsif current_addr
+        # Stack frame allocation: "sub $0xNN,%rsp"
+        if !saw_frame && line =~ /sub\s+\$0x([0-9a-f]+),%rsp/
+          frame_sizes[current_addr] = $1.to_i(16)
+          saw_frame = true
+        end
+
+        # Call instruction: "call ADDR <name>"
+        if line =~ /\bcall\s+([0-9a-f]+)\s+</
+          call_graph[current_addr] << $1
+        end
+      end
+    end
+
+    { frame_sizes: frame_sizes, call_graph: call_graph,
+      fn_names: fn_names, fn_addrs: fn_addrs, bg_entries: bg_entries }
+  end
+
+  # Functions that leave the fiber stack. Treated as leaf nodes: their
+  # own frame counts, but callees do not execute on the fiber stack.
+  #
+  # Two categories:
+  # 1. Trampoline/yield: execution continues on scheduler or OS thread stack
+  # 2. Panic/abort: execution never returns (program terminates)
+  LEAF_PATTERNS = %w[
+    Scheduler.coopYield
+    Fiber.yield
+    switchContext
+    onRootStack
+    callOnStack
+    defaultPanic
+    FullPanic
+    unexpectedErrno
+    returnError
+  ].freeze
+
+  # Compute the deepest stack path cost from a given entry function address.
+  # Uses DFS with memoization. Returns total bytes for the worst-case call chain.
+  # Cycles (recursion) are detected and excluded (reentrant functions have
+  # unbounded depth - they must use @canSmash).
+  # Functions that trampoline off the fiber stack are treated as leaf nodes.
+  def deepest_path_cost(entry_addr, graph_data)
+    frame_sizes = graph_data[:frame_sizes]
+    call_graph  = graph_data[:call_graph]
+    fn_names    = graph_data[:fn_names]
+    memo = {}
+    in_stack = Set.new  # cycle detection
+
+    dfs = lambda do |addr|
+      return memo[addr] if memo.key?(addr)
+      return 0 if in_stack.include?(addr)  # cycle -> reentrant
+
+      my_frame = frame_sizes[addr] || 0
+
+      # Leaf functions: trampolines leave the fiber stack, panics abort.
+      # Count their frame but don't follow their callees.
+      name = fn_names[addr]
+      if name && LEAF_PATTERNS.any? { |p| name.include?(p) }
+        memo[addr] = my_frame
+        return my_frame
+      end
+
+      in_stack.add(addr)
+      callees = call_graph[addr] || Set.new
+
+      max_callee_cost = 0
+      callees.each do |callee_addr|
+        cost = dfs.call(callee_addr)
+        max_callee_cost = cost if cost > max_callee_cost
+      end
+
+      in_stack.delete(addr)
+      total = my_frame + max_callee_cost
+      memo[addr] = total
+      total
+    end
+
+    dfs.call(entry_addr)
+  end
+
+  # Compute optimal tiers for all BG entry functions in the binary.
+  # Returns array of { bg_index:, entry_name:, path_cost:, optimal_tier:, current_tier: }
+  def compute_optimal_tiers(fn_nodes: nil)
+    graph_data = extract_full_call_graph
+    return [] unless graph_data
+
+    results = []
+    graph_data[:bg_entries].each do |addr|
+      name = graph_data[:fn_names][addr]
+      # Extract BG index from name like "bench.clearMain.__BgCtx0.run"
+      next unless name =~ /__BgCtx(\d+)\.run/
+      bg_index = $1.to_i
+
+      cost = deepest_path_cost(addr, graph_data)
+      tier = cost_to_tier(cost)
+
+      results << {
+        bg_index: bg_index,
+        entry_name: name,
+        path_cost: cost,
+        optimal_tier: tier,
+      }
+    end
+
+    results.sort_by { |r| r[:bg_index] }
+  end
+
+  # Map a byte cost to the smallest tier that fits.
+  def cost_to_tier(bytes)
+    if bytes <= TIER_BUDGET[:micro]
+      :micro
+    elsif bytes <= TIER_BUDGET[:standard]
+      :standard
+    elsif bytes <= TIER_BUDGET[:large]
+      :large
+    else
+      :xl
+    end
+  end
+
+  # Print optimal tier report.
+  def print_tier_report(results, io: $stderr)
+    return if results.empty?
+
+    io.puts ""
+    io.puts "  Exact stack analysis (deepest call path):"
+    results.each do |r|
+      tier_str = r[:optimal_tier].to_s.upcase
+      io.puts "    BG##{r[:bg_index]}: #{r[:path_cost]} bytes -> #{tier_str}"
+    end
+  end
+
   private
 
   def detect_prefix(path)

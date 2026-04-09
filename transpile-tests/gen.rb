@@ -12,6 +12,7 @@ class TestGenerator < ZigTranspiler
 
   def generate_test_block(filename, cheat_code, source_dir: Dir.pwd)
     @source_dir = File.expand_path(source_dir)
+    @default_stack_size = "Large"  # tests are debug builds
     @importer   = ModuleImporter.new(base_dir: @source_dir)
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
@@ -137,6 +138,7 @@ class TestGenerator < ZigTranspiler
     require_relative '../src/mir_emitter'
 
     @source_dir = File.expand_path(source_dir)
+    @default_stack_size = "Large"  # tests are debug builds
     @importer   = ModuleImporter.new(base_dir: @source_dir, use_mir: true)
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)

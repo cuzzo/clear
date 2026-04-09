@@ -13,7 +13,15 @@ pub fn SlabAllocator(comptime T: type) type {
             count: usize = 0,
             owner: ?*Self = null, // which instance owns these objects
         };
-        const MAGAZINE_SIZE = 64;
+        // Scale magazine size inversely with object size to keep total
+        // pre-allocated memory per thread roughly constant (~1 MB).
+        // Standard 16KB x 64 = 1MB; Large 64KB x 16 = 1MB; XL 256KB x 4 = 1MB.
+        const MAGAZINE_SIZE = blk: {
+            const obj_size = @sizeOf(T);
+            const target_bytes = 64 * 16 * 1024; // 1 MB baseline (64 x Standard)
+            const computed = target_bytes / obj_size;
+            break :blk if (computed < 4) 4 else if (computed > 64) 64 else computed;
+        };
 
         threadlocal var local_alloc_mag: Magazine = .{};
         threadlocal var local_free_mag: Magazine = .{};

@@ -44,10 +44,23 @@ def error(msg)
   exit 1
 end
 
+# Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
+def find_bg_blocks(node, result)
+  case node
+  when Array
+    node.each { |n| find_bg_blocks(n, result) }
+  when AST::BgBlock
+    result << node
+    find_bg_blocks(node.body, result) if node.respond_to?(:body)
+  else
+    node.each_pair { |_, v| find_bg_blocks(v, result) } if node.respond_to?(:each_pair)
+  end
+end
+
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -75,6 +88,10 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   transpile_flag = module_mode ? '--test' : ''
   transpile_flag += " --default-stack #{default_stack}" if default_stack
   transpile_flag += " --strict" if strict_test
+  if exact_tiers
+    require 'json'
+    transpile_flag += " --exact-tiers '#{exact_tiers.transform_keys(&:to_s).to_json}'"
+  end
 
   # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.cht
   source_text = File.read(source)
@@ -280,7 +297,7 @@ when 'build'
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
-  # Post-build stack verification
+  # Post-build stack verification and exact sizing
   if stack_check && File.exist?(output_path) && File.read(source).scan(/REQUIRE\s+"pkg:([^"]+)"/).empty?
     require_relative 'src/stack_verifier'
     require_relative 'src/transpiler'
@@ -296,6 +313,8 @@ when 'build'
       base_name = File.basename(source, '.cht')
       prefix = "._clear_tmp_#{base_name}"
       verifier = StackVerifier.new(output_path, prefix)
+
+      # Phase 1: Per-function frame size report
       report = verifier.analyze(fn_nodes: fn_nodes, source_file: source)
       verifier.print_report(report)
 
@@ -308,8 +327,69 @@ when 'build'
           $stderr.puts "\e[31m[tco FAILED]\e[0m '#{r[:name]}' - contains call-to-self (NOT tail-call optimized)"
         end
       end
+
+      # Phase 2: Exact stack sizing via call graph analysis
+      optimal = verifier.compute_optimal_tiers(fn_nodes: fn_nodes)
+      if optimal.any?
+        verifier.print_tier_report(optimal)
+
+        # Find BG blocks in the AST to check user annotations
+        bg_nodes = []
+        ast.statements.each do |stmt|
+          next unless stmt.is_a?(AST::FunctionDef)
+          find_bg_blocks(stmt.body, bg_nodes)
+        end
+
+        needs_rebuild = false
+        exact = {}
+
+        optimal.each do |r|
+          idx = r[:bg_index]
+          bg_node = bg_nodes[idx]
+          user_tier = bg_node&.stack_size  # explicit user annotation (e.g. @micro)
+          computed = bg_node&.computed_stack_tier
+          optimal_tier = r[:optimal_tier]
+          tier_order = { micro: 0, standard: 1, large: 2, xl: 3 }
+
+          if user_tier
+            # User explicitly picked a tier. Error if it will overflow.
+            user_sym = user_tier.to_s.downcase.to_sym
+            if tier_order.fetch(user_sym, 0) < tier_order.fetch(optimal_tier, 0)
+              $stderr.puts "\e[31m[stack error]\e[0m BG##{idx}: user annotation @#{user_tier} " \
+                           "(#{StackVerifier::TIER_BUDGET[user_sym]} bytes) is too small. " \
+                           "Deepest call path needs #{r[:path_cost]} bytes (#{optimal_tier})."
+              exit 1
+            end
+          else
+            # No user annotation. Downsize if possible, error if too large.
+            if tier_order.fetch(optimal_tier, 0) > tier_order[:standard]
+              $stderr.puts "\e[31m[stack error]\e[0m BG##{idx}: deepest call path is #{r[:path_cost]} bytes " \
+                           "(needs #{optimal_tier}). Standard (#{StackVerifier::TIER_BUDGET[:standard]} bytes) " \
+                           "is too small. Add @large or @xl to the BG block."
+              exit 1
+            end
+            # Downsize if optimal is smaller than what heuristic assigned
+            current_tier = computed || :standard
+            if tier_order.fetch(optimal_tier, 0) < tier_order.fetch(current_tier, 0)
+              exact[idx] = optimal_tier
+              needs_rebuild = true
+            end
+          end
+        end
+
+        # Phase 3: Rebuild with exact tiers
+        if needs_rebuild
+          $stderr.puts ""
+          exact.each { |idx, tier| $stderr.puts "  [exact] BG##{idx}: #{tier} (downsized)" }
+          $stderr.puts "  Rebuilding with exact stack sizes..."
+          do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags,
+                   default_stack: default_stack, force: true, exact_tiers: exact)
+          puts "Rebuilt: #{output_path}"
+        end
+      end
     rescue => e
       $stderr.puts "[stack-check] Analysis failed: #{e.message}"
+      $stderr.puts e.backtrace.first(3).join("\n")
     end
   end
 
@@ -385,7 +465,10 @@ when 'test'
     passed = 0
     failed = 0
     failed_names = []
+    leak_tests = []
     current_test = nil
+    last_completed_test = nil
+    leak_seen = {}
     IO.popen("cd #{ZIG_DIR} && #{ZIG} test all-tests.zig -lc switch.S onRoot.S 2>&1") do |io|
       io.each_line do |line|
         # New test starts
@@ -396,22 +479,35 @@ when 'test'
           rest = line
         end
 
+        # Track leaks: GPA output appears after the test's OK/FAIL line,
+        # so attribute to last_completed_test when current_test is nil.
+        if line.include?('[gpa] (err)') && line.include?('leaked')
+          leaker = current_test || last_completed_test
+          if leaker && !leak_seen[leaker]
+            leak_seen[leaker] = true
+            leak_tests << leaker
+          end
+        end
+
         next unless current_test
 
         if rest.include?('OK')
           print "\e[32m.\e[0m"
           passed += 1
+          last_completed_test = current_test
           current_test = nil
         elsif rest.include?('FAIL') || rest.include?('Segmentation fault')
           print "\e[31mF\e[0m"
           failed += 1
           failed_names << current_test
+          last_completed_test = current_test
           current_test = nil
         elsif line.include?('error: the following test command crashed')
           if current_test
             print "\e[31mF\e[0m"
             failed += 1
             failed_names << current_test
+            last_completed_test = current_test
             current_test = nil
           end
         end
@@ -425,12 +521,19 @@ when 'test'
       failed_names.each { |n| puts "    \e[31m\e[1m#{n}\e[0m" }
       puts
       puts "  \e[31m\e[1m#{passed} passed, #{failed} FAILED, #{passed + failed} total\e[0m"
-      puts
-      exit 1
     else
       puts "  \e[32m#{passed} passed, #{passed} total\e[0m"
-      exit 0
     end
+
+    puts
+    if leak_tests.any?
+      puts "  \e[31m\e[1mMEMORY LEAKS: #{leak_tests.size}\e[0m"
+      leak_tests.each { |n| puts "    \e[31m\e[1m#{n}\e[0m" }
+    else
+      puts "  \e[32m\e[1mMEMORY LEAKS: 0\e[0m"
+    end
+    puts
+    exit(failed_names.any? ? 1 : 0)
   else
     output = do_build(source, module_mode: true, profile: !!profile_mode, strict_test: !!strict_mode)
     if output.include?('FAIL') || !$?.success?
