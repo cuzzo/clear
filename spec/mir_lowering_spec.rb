@@ -1,4 +1,5 @@
 require "rspec"
+require "ostruct"
 require_relative "../src/mir"
 require_relative "../src/mir_lowering"
 require_relative "../src/mir_emitter"
@@ -1124,17 +1125,10 @@ RSpec.describe MIRLowering do
   end
 
   # =========================================================================
-  # Phase 3: Placeholder / escape hatch nodes
+  # Phase 3: Escape hatch nodes
   # =========================================================================
 
   describe "escape hatch nodes" do
-    it "lowers BgBlock to RawZig placeholder" do
-      node = AST::BgBlock.new(tok, [], nil, nil, nil, nil, nil, nil)
-      node.full_type = :Void
-      result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-    end
-
     it "lowers ThrowNode" do
       node = AST::ThrowNode.new(tok, nil)
       node.full_type = :Void
@@ -1150,6 +1144,622 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::Cast)
       expect(emit(result)).to eq("@as(i32, 42)")
+    end
+
+    it "lowers DieNode" do
+      node = AST::DieNode.new(tok, 2)
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(emit(result)).to include("std.process.exit(2)")
+    end
+
+    it "lowers PassStmt" do
+      node = AST::PassStmt.new(tok)
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(emit(result)).to eq("{}")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: WithBlock
+  # =========================================================================
+
+  describe "WithBlock lowering" do
+    it "lowers multiowned capability unwrap" do
+      var_node = make_id("counter", full_type: :Counter)
+      cap = { var_node: var_node, alias: nil, capability: :multiowned, resolved_type: nil }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      zig = emit(result)
+      expect(zig).to include("__counter_unwrap")
+      expect(zig).to include("ctrl.data.*")
+    end
+
+    it "lowers shared capability unwrap" do
+      var_node = make_id("counter", full_type: :Counter)
+      cap = { var_node: var_node, alias: nil, capability: :shared, resolved_type: nil }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("__counter_unwrap")
+      expect(zig).to include("ctrl.data.*")
+    end
+
+    it "lowers EXCLUSIVE mutex capability with acquire/release" do
+      var_node = make_id("counter", full_type: :Counter)
+      resolved = Type.new(:Counter, sync: :locked)
+      cap = { var_node: var_node, alias: "c", capability: :EXCLUSIVE, resolved_type: resolved }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("__counter_guard")
+      expect(zig).to include(".acquire()")
+      expect(zig).to include("defer __counter_guard.release()")
+      expect(zig).to include("const c =")
+    end
+
+    it "lowers EXCLUSIVE write_locked capability with write()" do
+      var_node = make_id("counter", full_type: :Counter)
+      resolved = Type.new(:Counter, sync: :write_locked)
+      cap = { var_node: var_node, alias: "c", capability: :EXCLUSIVE, resolved_type: resolved }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include(".write()")
+      expect(zig).to include("defer __counter_guard.release()")
+    end
+
+    it "lowers write_locked_read capability with read()" do
+      var_node = make_id("counter", full_type: :Counter)
+      resolved = Type.new(:Counter, sync: :write_locked)
+      cap = { var_node: var_node, alias: "c", capability: :write_locked_read, resolved_type: resolved }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include(".read()")
+      expect(zig).to include("defer __counter_guard.release()")
+    end
+
+    it "lowers BORROWED capability" do
+      var_node = make_id("data", full_type: :Data)
+      cap = { var_node: var_node, alias: "d", capability: :BORROWED, resolved_type: nil }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("const d = data")
+    end
+
+    it "lowers RESTRICT capability" do
+      var_node = make_id("buf", full_type: :Buffer)
+      resolved = Type.new(:Buffer)
+      cap = { var_node: var_node, alias: "b", capability: :RESTRICT, alias_mutable: false, resolved_type: resolved }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("const b = buf")
+    end
+
+    it "lowers RESTRICT mutable capability with pointer" do
+      var_node = make_id("buf", full_type: :Buffer)
+      resolved = Type.new(:Buffer)
+      cap = { var_node: var_node, alias: "b", capability: :RESTRICT, alias_mutable: true, resolved_type: resolved }
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("const b = &buf")
+    end
+
+    it "lowers empty WithBlock" do
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::WithBlock.new(tok, [], [body_lit], nil)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.reason).to eq("with_block")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: DoBlock
+  # =========================================================================
+
+  describe "DoBlock lowering" do
+    it "lowers single-branch DoBlock with WaitGroup" do
+      body_lit = make_lit(:NUMBER, 42, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      branch = {
+        body: [body_lit],
+        capture_analysis: nil,
+        pinned: false,
+        stack_size: nil,
+        computed_stack_tier: nil
+      }
+      node = AST::DoBlock.new(tok, [branch])
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.reason).to eq("do_block")
+      zig = emit(result)
+      expect(zig).to include("WaitGroup")
+      expect(zig).to include(".add(1)")
+      expect(zig).to include(".wait()")
+      expect(zig).to include("__DoBranchCtx")
+      expect(zig).to include("fn run(")
+    end
+
+    it "lowers multi-branch DoBlock" do
+      lit1 = make_lit(:NUMBER, 1, full_type: :Int64)
+      lit1.coerced_type = :Int64
+      lit2 = make_lit(:NUMBER, 2, full_type: :Int64)
+      lit2.coerced_type = :Int64
+      branches = [
+        { body: [lit1], capture_analysis: nil, pinned: false, stack_size: nil, computed_stack_tier: nil },
+        { body: [lit2], capture_analysis: nil, pinned: true, stack_size: nil, computed_stack_tier: nil }
+      ]
+      node = AST::DoBlock.new(tok, branches)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include(".add(2)")
+      expect(zig).to include("__DoBranchCtx")
+      # Pinned branch uses submitSpawn, unpinned uses spawnBest
+      expect(zig).to include("spawnBest")
+      expect(zig).to include("submitSpawn")
+    end
+
+    it "lowers DoBlock with captures" do
+      body_id = make_id("x", full_type: :Int64)
+      captures_hash = { "x" => :Int64 }
+      analysis = OpenStruct.new(captures: captures_hash)
+      branch = {
+        body: [body_id],
+        capture_analysis: analysis,
+        pinned: false,
+        stack_size: nil,
+        computed_stack_tier: nil
+      }
+      node = AST::DoBlock.new(tok, [branch])
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("x: *const")
+      expect(zig).to include(".x = &x")
+    end
+
+    it "lowers DoBlock with stack tier" do
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      branch = {
+        body: [body_lit],
+        capture_analysis: nil,
+        pinned: false,
+        stack_size: nil,
+        computed_stack_tier: :micro
+      }
+      node = AST::DoBlock.new(tok, [branch])
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("stack_size = 16384")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: BgBlock
+  # =========================================================================
+
+  describe "BgBlock lowering" do
+    it "lowers void BgBlock with promise spawn" do
+      body_lit = make_lit(:NUMBER, 42, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::BgBlock.new(tok, [body_lit], nil, nil, nil, nil, nil, nil)
+      node.full_type = :"~Void"
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.reason).to eq("bg_block")
+      zig = emit(result)
+      expect(zig).to include("__BgCtx")
+      expect(zig).to include(".spawn(")
+      expect(zig).to include("fn run(")
+      expect(zig).to include("spawnBest")
+    end
+
+    it "lowers BgBlock with captures" do
+      body_id = make_id("x", full_type: :Int64)
+      captures_hash = { "x" => :Int64 }
+      analysis = OpenStruct.new(
+        captures: captures_hash,
+        close_patterns: {},
+        pointer_captures: Set.new(["x"]),
+        resource_captures: Set.new
+      )
+      node = AST::BgBlock.new(tok, [body_id], nil, nil, nil, nil, nil, nil)
+      node.full_type = :"~Void"
+      node.capture_analysis = analysis
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("x: *")
+      expect(zig).to include(".x = &x")
+    end
+
+    it "lowers pinned BgBlock with submitSpawn" do
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::BgBlock.new(tok, [body_lit], nil, nil, true, nil, nil, nil)
+      node.full_type = :"~Void"
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("submitSpawn")
+      expect(zig).not_to include("spawnBest")
+    end
+
+    it "lowers BgBlock with arena mode" do
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::BgBlock.new(tok, [body_lit], nil, nil, nil, nil, true, nil)
+      node.full_type = :"~Void"
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("arena_mode = true")
+    end
+
+    it "lowers BgBlock with stack tier" do
+      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+      body_lit.coerced_type = :Int64
+      node = AST::BgBlock.new(tok, [body_lit], nil, nil, nil, nil, nil, nil)
+      node.full_type = :"~Void"
+      node.computed_stack_tier = :large
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("stack_size = 262144")
+    end
+
+    it "flattens ThenChain in BgBlock body" do
+      step1 = make_lit(:NUMBER, 1, full_type: :Int64)
+      step1.coerced_type = :Int64
+      step2 = make_lit(:NUMBER, 2, full_type: :Int64)
+      step2.coerced_type = :Int64
+      chain = AST::ThenChain.new(tok, [
+        { expr: step1, binding: "a" },
+        { expr: step2, binding: nil }
+      ])
+      chain.full_type = :Int64
+      node = AST::BgBlock.new(tok, [chain], nil, nil, nil, nil, nil, nil)
+      node.full_type = :"~Void"
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("const a = 1")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: BgStreamBlock + Yield
+  # =========================================================================
+
+  describe "BgStreamBlock lowering" do
+    it "lowers basic stream generator" do
+      yield_expr = make_lit(:NUMBER, 42, full_type: :Int64)
+      yield_expr.coerced_type = :Int64
+      yield_node = AST::YieldExpr.new(tok, yield_expr)
+      yield_node.full_type = :Void
+      node = AST::BgStreamBlock.new(tok, [yield_node], nil, nil)
+      node.full_type = :"~Void[?]"
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.reason).to eq("bg_stream_block")
+      zig = emit(result)
+      expect(zig).to include("__SgCtx")
+      expect(zig).to include("spawnNew")
+      expect(zig).to include(".close()")
+      expect(zig).to include(".push(")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: YieldExpr (standalone)
+  # =========================================================================
+
+  describe "YieldExpr lowering" do
+    it "lowers yield outside stream context" do
+      expr = make_lit(:NUMBER, 7, full_type: :Int64)
+      expr.coerced_type = :Int64
+      node = AST::YieldExpr.new(tok, expr)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      zig = emit(result)
+      expect(zig).to include("try __stream_local.push(7)")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: NextExpr
+  # =========================================================================
+
+  describe "NextExpr lowering" do
+    it "lowers NEXT expression" do
+      inner = make_id("promise", full_type: :"~Int64")
+      node = AST::NextExpr.new(tok, inner)
+      node.full_type = :Int64
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      zig = emit(result)
+      expect(zig).to include("try promise.next()")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: StaticCall
+  # =========================================================================
+
+  describe "StaticCall lowering" do
+    it "lowers static call with pattern substitution" do
+      arg = make_lit(:NUMBER, 10, full_type: :Int64)
+      arg.coerced_type = :Int64
+      node = AST::StaticCall.new(tok, "Math", "sqrt", [arg])
+      node.full_type = :Number
+      node.zig_pattern = "std.math.sqrt({0})"
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      zig = emit(result)
+      expect(zig).to eq("std.math.sqrt(10)")
+    end
+
+    it "lowers static call with multiple args" do
+      arg0 = make_lit(:NUMBER, 1, full_type: :Int64)
+      arg0.coerced_type = :Int64
+      arg1 = make_lit(:NUMBER, 2, full_type: :Int64)
+      arg1.coerced_type = :Int64
+      node = AST::StaticCall.new(tok, "Math", "max", [arg0, arg1])
+      node.full_type = :Number
+      node.zig_pattern = "std.math.max({0}, {1})"
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to eq("std.math.max(1, 2)")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: Or* error chains
+  # =========================================================================
+
+  describe "Or* error chain lowering" do
+    it "lowers OrRaise to InlineZig" do
+      node = AST::OrRaise.new(tok)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(emit(result)).to eq("error.OrRaise")
+    end
+
+    it "lowers OrBreak to RawZig break" do
+      node = AST::OrBreak.new(tok)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(emit(result)).to eq("break;")
+    end
+
+    it "lowers OrPass to InlineZig undefined" do
+      node = AST::OrPass.new(tok)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(emit(result)).to eq("undefined")
+    end
+
+    it "lowers OrPrune to InlineZig undefined" do
+      node = AST::OrPrune.new(tok)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(emit(result)).to eq("undefined")
+    end
+
+    it "lowers OrExit with message" do
+      msg = make_lit(:STRING, "fatal", full_type: :String)
+      node = AST::OrExit.new(tok, msg)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      zig = emit(result)
+      expect(zig).to include("setError")
+      expect(zig).to include("return error.CheatError")
+    end
+
+    it "lowers OrExit without message" do
+      node = AST::OrExit.new(tok, nil)
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include('""')
+      expect(zig).to include("setError")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: TestBlock
+  # =========================================================================
+
+  describe "TestBlock lowering" do
+    it "lowers basic test block with WHEN and TEST THAT" do
+      body_lit = make_lit(:BOOLEAN, true, full_type: :Boolean)
+      assert_node = AST::Assert.new(tok, body_lit, nil)
+      assert_node.full_type = :Void
+      test_that = AST::TestThat.new(tok, "works", [assert_node])
+      when_block = AST::WhenBlock.new(tok, "given input", [], [test_that], [])
+      node = AST::TestBlock.new(tok, "MyTest", [], [when_block])
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.reason).to eq("test_block")
+      zig = emit(result)
+      expect(zig).to include('test "MyTest: given input: works"')
+      expect(zig).to include("Runtime.init")
+      expect(zig).to include("defer __rt_instance.deinit()")
+    end
+
+    it "lowers test block with setup code" do
+      setup_lit = make_lit(:NUMBER, 0, full_type: :Int64)
+      setup_lit.coerced_type = :Int64
+      body_lit = make_lit(:BOOLEAN, true, full_type: :Boolean)
+      assert_node = AST::Assert.new(tok, body_lit, nil)
+      assert_node.full_type = :Void
+      test_that = AST::TestThat.new(tok, "passes", [assert_node])
+      when_block = AST::WhenBlock.new(tok, "setup", [], [test_that], [])
+      node = AST::TestBlock.new(tok, "WithSetup", [setup_lit], [when_block])
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include('test "WithSetup: setup: passes"')
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: AssertRaises
+  # =========================================================================
+
+  describe "AssertRaises lowering" do
+    it "lowers assert raises with kind" do
+      expr = make_lit(:BOOLEAN, true, full_type: :Boolean)
+      node = AST::AssertRaises.new(tok, :Runtime, nil, expr)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      zig = emit(result)
+      expect(zig).to include("ASSERT_RAISES")
+      expect(zig).to include("matchesKind(.Runtime)")
+    end
+
+    it "lowers assert raises with kind and error name" do
+      expr = make_lit(:BOOLEAN, true, full_type: :Boolean)
+      node = AST::AssertRaises.new(tok, :Type, "NotFound", expr)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("matchesKind(.Type)")
+      expect(zig).to include('matchesName("NotFound")')
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: RequireNode
+  # =========================================================================
+
+  describe "RequireNode lowering" do
+    it "lowers package require to MIR::Import" do
+      node = AST::RequireNode.new(tok, "math", "math", :package)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::Import)
+      zig = emit(result)
+      expect(zig).to include('@import("math")')
+    end
+
+    it "lowers local require to RawZig placeholder" do
+      node = AST::RequireNode.new(tok, "utils.cht", nil, :local)
+      node.full_type = :Void
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(result.reason).to eq("require_local")
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: StubDecl, BenchmarkStmt, SmashStmt, ProfileStmt
+  # =========================================================================
+
+  describe "test framework helpers" do
+    it "lowers StubDecl to RawZig comment" do
+      node = AST::StubDecl.new(tok, "getData", :returns, make_lit(:NUMBER, 42))
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+      expect(emit(result)).to include("stub")
+    end
+
+    it "lowers BenchmarkStmt to RawZig placeholder" do
+      node = AST::BenchmarkStmt.new(tok, make_lit(:NUMBER, 1), 1000)
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+    end
+
+    it "lowers SmashStmt to RawZig placeholder" do
+      node = AST::SmashStmt.new(tok, make_lit(:NUMBER, 1))
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+    end
+
+    it "lowers ProfileStmt to RawZig placeholder" do
+      node = AST::ProfileStmt.new(tok, make_lit(:NUMBER, 1))
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RawZig)
+    end
+  end
+
+  # =========================================================================
+  # Phase 4: ThenChain error
+  # =========================================================================
+
+  describe "ThenChain" do
+    it "raises when encountered directly" do
+      node = AST::ThenChain.new(tok, [])
+      node.full_type = :Void
+      expect { lowering.lower(node) }.to raise_error(/ThenChain should be flattened/)
     end
   end
 end

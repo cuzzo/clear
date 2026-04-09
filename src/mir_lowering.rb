@@ -108,19 +108,27 @@ class MIRLowering
     # --- Slice ---
     when AST::Slice             then lower_slice(node)
 
-    # --- Concurrent / capability blocks (tracked escape hatches for Phase 4+) ---
-    when AST::BgBlock, AST::BgStreamBlock
-      MIR::RawZig.new("// TODO: BG block lowering", "bg_block")
-    when AST::WithBlock
-      MIR::RawZig.new("// TODO: WITH block lowering", "with_block")
-    when AST::DoBlock
-      MIR::RawZig.new("// TODO: DO block lowering", "do_block")
-    when AST::TestBlock
-      MIR::RawZig.new("// TODO: TEST block lowering", "test_block")
-    when AST::RequireNode
-      MIR::RawZig.new("// TODO: REQUIRE lowering", "require")
-    when AST::YieldExpr
-      MIR::RawZig.new("// TODO: YIELD lowering", "yield")
+    # --- Concurrent / capability blocks ---
+    when AST::BgBlock          then lower_bg_block(node)
+    when AST::BgStreamBlock    then lower_bg_stream_block(node)
+    when AST::WithBlock        then lower_with_block(node)
+    when AST::DoBlock          then lower_do_block(node)
+    when AST::TestBlock        then lower_test_block(node)
+    when AST::RequireNode      then lower_require(node)
+    when AST::YieldExpr        then lower_yield(node)
+    when AST::NextExpr         then lower_next_expr(node)
+    when AST::StaticCall       then lower_static_call(node)
+    when AST::OrRaise          then MIR::InlineZig.new("error.OrRaise", "or_raise")
+    when AST::OrBreak          then MIR::RawZig.new("break;", "or_break")
+    when AST::OrPass           then MIR::InlineZig.new("undefined", "or_pass")
+    when AST::OrPrune          then MIR::InlineZig.new("undefined", "or_prune")
+    when AST::OrExit           then lower_or_exit(node)
+    when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
+    when AST::AssertRaises     then lower_assert_raises(node)
+    when AST::StubDecl         then lower_stub_decl(node)
+    when AST::BenchmarkStmt    then lower_benchmark(node)
+    when AST::SmashStmt        then lower_smash(node)
+    when AST::ProfileStmt      then lower_profile(node)
 
     else
       raise "MIRLowering: unhandled node type #{node.class} at #{node.respond_to?(:token) && node.token ? "line #{node.token.line}" : 'unknown'}"
@@ -839,6 +847,502 @@ class MIRLowering
     inner = lower(node.value)
     target_type = transpile_type(node.target)
     MIR::Cast.new(inner, target_type, :as)
+  end
+
+  # ================================================================
+  # Concurrent / capability blocks
+  # ================================================================
+
+  def lower_with_block(node)
+    rt_name = @rt_name
+    bindings = []
+
+    (node.capabilities || []).each do |cap|
+      var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
+      alias_name = cap[:alias] || var_name
+      resolved = cap[:resolved_type]
+      zig_var = var_name
+
+      case cap[:capability]
+      when :multiowned, :shared
+        inner = "__#{var_name}_unwrap"
+        bindings << "const #{inner} = #{zig_var}.ctrl.data.*;\n_ = &#{inner};"
+      when :EXCLUSIVE
+        guard_var = "__#{var_name}_guard"
+        lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
+        if resolved&.write_locked?
+          bindings << "var #{guard_var} = #{lock_expr}.write();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+        else
+          bindings << "var #{guard_var} = #{lock_expr}.acquire();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+        end
+      when :write_locked_read
+        guard_var = "__#{var_name}_guard"
+        lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
+        bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+      when :BORROWED
+        source_zig = emit_expr(lower(cap[:var_node]))
+        bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
+      when :RESTRICT
+        if !resolved&.any_sync?
+          source_zig = emit_expr(lower(cap[:var_node]))
+          if cap[:alias_mutable]
+            bindings << "const #{zig_safe_name(alias_name)} = &#{source_zig};"
+          else
+            bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
+          end
+        end
+      end
+    end
+
+    body_zig = lower_body(node.body).filter_map { |s| emit_expr(s) }.join("\n")
+    all_bindings = bindings.reject(&:empty?).join("\n")
+    MIR::RawZig.new("{\n#{all_bindings}\n#{body_zig}\n}", "with_block")
+  end
+
+  def lower_do_block(node)
+    @do_block_counter = (@do_block_counter || 0) + 1
+    id = @do_block_counter - 1
+    n = node.branches.length
+    wg_var = "__do#{id}_wg"
+
+    branch_parts = node.branches.each_with_index.map { |branch, i|
+      ctx_type = "__DoBranchCtx#{id}_#{i}"
+      ctx_var = "__do#{id}_ctx#{i}"
+      analysis = branch[:capture_analysis]
+      captured = analysis&.captures || {}
+      pinned = branch[:pinned]
+
+      capture_fields = captured.map { |name, type_obj|
+        zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
+        "#{name}: *const #{zig_t},"
+      }.join("\n    ")
+
+      capture_inits = ([".wg = &#{wg_var}"] + captured.map { |name, _| ".#{name} = &#{name}" }).join(", ")
+
+      body_code = branch[:body].map { |e|
+        code = emit_expr(lower(e))
+        code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+        code
+      }.join("\n        ")
+
+      task_cfg = task_config_zig(branch[:stack_size], branch[:computed_stack_tier])
+      spawn_fn = pinned ? "try #{wg_var}.sched.submitSpawn" : "try CheatHeader.spawnBest"
+
+      <<~ZIG.chomp
+        const #{ctx_type} = struct {
+            wg: *CheatHeader.WaitGroup,
+            #{capture_fields}
+            fn run(__raw_rt_do#{id}_#{i}: *anyopaque, __raw_args_do#{id}_#{i}: ?*anyopaque) anyerror!void {
+                const __rt = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_do#{id}_#{i})));
+                #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
+                const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_do#{id}_#{i}.?)));
+                defer ctx.wg.done();
+                #{body_code}
+            }
+        };
+        var #{ctx_var} = #{ctx_type}{ #{capture_inits} };
+        #{spawn_fn}(
+            @intFromPtr(&Runtime.entryWrapper),
+            @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+            &#{ctx_var},
+            #{task_cfg}
+        );
+      ZIG
+    }
+
+    inner = branch_parts.join("\n")
+    MIR::RawZig.new(<<~ZIG.chomp, "do_block")
+      {
+          var #{wg_var} = CheatHeader.WaitGroup.init(rt.getSched());
+          #{wg_var}.add(#{n});
+          #{inner}
+          #{wg_var}.wait();
+      }
+    ZIG
+  end
+
+  def lower_bg_block(node)
+    @bg_block_counter = (@bg_block_counter || 0) + 1
+    id = @bg_block_counter - 1
+
+    tense_t = Type.new(node.full_type || :"~Void")
+    inner_t = Type.new(tense_t.tense_type)
+    inner_zig = inner_t.zig_type
+    promise_zig = tense_t.zig_type
+    is_void = inner_zig == "void"
+
+    ctx_type = "__BgCtx#{id}"
+    alloc_var = "__bg#{id}_alloc"
+    promise_var = "__bg#{id}_promise"
+    ctx_var = "__bg#{id}_ctx"
+    blk_label = "__bg#{id}"
+    bg_rt = "__rt_bg#{id}"
+
+    analysis = node.capture_analysis
+    captured = analysis&.captures || {}
+    capture_close_zig = analysis&.close_patterns || {}
+    pointer_captures = analysis&.pointer_captures || Set.new
+    resource_captures = analysis&.resource_captures || Set.new
+
+    rt_name = @rt_name
+
+    # Build capture fields
+    capture_fields = captured.map { |name, type_obj|
+      t = type_obj ? Type.new(type_obj) : nil
+      zig_t = t ? t.zig_type : "anyopaque"
+      pointer_captures.include?(name) ? "#{name}: *#{zig_t}," : "#{name}: #{zig_t},"
+    }.join("\n        ")
+
+    # String promotions from MIR::Promote(:bg_string)
+    bg_string_promotes = @pending_bg_string_promotes || Set.new
+    @pending_bg_string_promotes = nil
+    promoted_names = {}
+    bg_string_promotes.each { |name| promoted_names[name] = "__bgp_#{id}_#{name}" }
+
+    capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
+      captured.map { |name, _|
+        if pointer_captures.include?(name)
+          ".#{name} = &#{name}"
+        elsif promoted_names[name]
+          ".#{name} = #{promoted_names[name]}"
+        else
+          ".#{name} = #{name}"
+        end
+      }).join(", ")
+
+    # Flatten ThenChain + lower body
+    flat_steps = []
+    node.body.each { |stmt|
+      if stmt.is_a?(AST::ThenChain)
+        stmt.steps.each { |s| flat_steps << s }
+      else
+        flat_steps << { expr: stmt, binding: nil }
+      end
+    }
+    last_step = flat_steps.pop
+    pre_steps = flat_steps
+
+    stmt_code = pre_steps.map { |step|
+      code = emit_expr(lower(step[:expr]))
+      if step[:binding]
+        "const #{step[:binding]} = #{code};"
+      elsif code.strip.end_with?(";") || code.strip.end_with?("}")
+        code
+      else
+        expr_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type : :Void
+        is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+        is_void_step ? "#{code};" : "_ = #{code};"
+      end
+    }.join("\n            ")
+
+    last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
+    result_line = if last_step.nil? || is_void || last_is_assign
+      if last_step
+        last_code = emit_expr(lower(last_step[:expr]))
+        (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
+      else
+        ""
+      end
+    else
+      result_code = emit_expr(lower(last_step[:expr]))
+      result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
+      "__ctx_#{id}.inner.result = #{result_code};"
+    end
+
+    arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
+
+    capture_frees = captured.filter_map { |name, _|
+      if bg_string_promotes.include?(name)
+        "defer __ctx_#{id}.alloc.free(__ctx_#{id}.#{name});"
+      elsif capture_close_zig[name]
+        "defer #{capture_close_zig[name].gsub('{0}', "__ctx_#{id}.#{name}")};"
+      end
+    }.join("\n                    ")
+
+    promoted_decls = promoted_names.map { |name, promoted|
+      "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});"
+    }.join("\n            ")
+
+    task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
+    spawn_call = bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
+
+    MIR::RawZig.new(<<~ZIG.chomp, "bg_block")
+      #{blk_label}: {
+          const #{ctx_type} = struct {
+              inner: *#{promise_zig}.Inner,
+              alloc: std.mem.Allocator,
+              #{capture_fields}
+              fn run(__raw_rt_#{id}: *anyopaque, __raw_args_#{id}: ?*anyopaque) anyerror!void {
+                  const #{bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_#{id})));
+                  #{(stmt_code + result_line + capture_frees + arena_init).include?(bg_rt) ? "" : "_ = &#{bg_rt};"}
+                  #{arena_init}
+                  const __ctx_#{id} = @as(*@This(), @ptrCast(@alignCast(__raw_args_#{id}.?)));
+                  defer __ctx_#{id}.alloc.destroy(__ctx_#{id});
+                  defer __ctx_#{id}.inner.wg.done();
+                  errdefer |fiber_err| __ctx_#{id}.inner.result = fiber_err;
+                  #{capture_frees}
+                  #{stmt_code}
+                  #{result_line}
+                  #{is_void ? "__ctx_#{id}.inner.result = {};" : ""}
+              }
+          };
+          const #{alloc_var} = #{rt_name}.getSched().allocator;
+          const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
+          #{promoted_decls}
+          const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
+          errdefer #{alloc_var}.destroy(#{ctx_var});
+          #{ctx_var}.* = .{ #{capture_inits} };
+          #{spawn_call}
+          break :#{blk_label} #{promise_var};
+      }
+    ZIG
+  end
+
+  def lower_bg_stream_block(node)
+    @stream_gen_counter = (@stream_gen_counter || 0) + 1
+    id = @stream_gen_counter - 1
+
+    tense_t = Type.new(node.full_type || :"~Void[?]")
+    is_inf = tense_t.inf_stream?
+    stream_zig = tense_t.zig_type
+
+    ctx_type = "__SgCtx#{id}"
+    alloc_var = "__sg#{id}_alloc"
+    stream_var = "__sg#{id}_stream"
+    ctx_var = "__sg#{id}_ctx"
+    blk_label = "__sg#{id}"
+    local_stream = "__sg#{id}_local"
+
+    analysis = node.capture_analysis
+    captured = analysis&.captures || {}
+    rt_name = @rt_name
+
+    bg_string_promotes = @pending_bg_string_promotes || Set.new
+    @pending_bg_string_promotes = nil
+    promoted_names = {}
+    bg_string_promotes.each { |name| promoted_names[name] = "__sgp_#{id}_#{name}" }
+
+    capture_fields = captured.map { |name, type_obj|
+      zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
+      "#{name}: #{zig_t},"
+    }.join("\n        ")
+
+    capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
+      captured.map { |name, _|
+        promoted_names[name] ? ".#{name} = #{promoted_names[name]}" : ".#{name} = #{name}"
+      }).join(", ")
+
+    # Save/restore stream context for YieldExpr
+    prev_stream_local = @current_stream_local
+    prev_stream_is_inf = @current_stream_is_inf
+    @current_stream_local = local_stream
+    @current_stream_is_inf = is_inf
+
+    body_code = node.body.map { |expr|
+      code = emit_expr(lower(expr))
+      code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+      code
+    }.join("\n            ")
+
+    @current_stream_local = prev_stream_local
+    @current_stream_is_inf = prev_stream_is_inf
+
+    promoted_decls = promoted_names.map { |name, promoted|
+      "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});"
+    }.join("\n            ")
+    string_frees = bg_string_promotes.filter_map { |n| "defer ctx.alloc.free(ctx.#{n});" }.join("\n                    ")
+
+    task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
+
+    MIR::RawZig.new(<<~ZIG.chomp, "bg_stream_block")
+      #{blk_label}: {
+          const #{ctx_type} = struct {
+              stream_inner: *#{stream_zig}.Inner,
+              alloc: std.mem.Allocator,
+              #{capture_fields}
+              fn run(__raw_rt_sg#{id}: *anyopaque, __raw_args_sg#{id}: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_sg#{id})));
+                  #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_sg#{id}.?)));
+                  defer ctx.alloc.destroy(ctx);
+                  #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
+                  #{string_frees}
+                  var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
+                  defer #{local_stream}.close();
+                  errdefer |gen_err| #{local_stream}.inner.err = gen_err;
+                  #{body_code}
+              }
+          };
+          const #{alloc_var} = #{rt_name}.getSched().allocator;
+          const #{stream_var} = try #{stream_zig}.spawnNew(#{alloc_var}, #{rt_name}.getSched());
+          #{promoted_decls}
+          const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
+          errdefer #{alloc_var}.destroy(#{ctx_var});
+          #{ctx_var}.* = .{ #{capture_inits} };
+          try #{rt_name}.getSched().submitSpawn(
+              @intFromPtr(&Runtime.entryWrapper),
+              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+              #{ctx_var},
+              #{task_cfg}
+          );
+          break :#{blk_label} #{stream_var};
+      }
+    ZIG
+  end
+
+  def lower_yield(node)
+    stream_local = @current_stream_local || "__stream_local"
+    expr_zig = emit_expr(lower(node.expr))
+    MIR::InlineZig.new("try #{stream_local}.push(#{expr_zig})", "yield")
+  end
+
+  def lower_next_expr(node)
+    inner = emit_expr(lower(node.expr))
+    MIR::InlineZig.new("try #{inner}.next()", "next")
+  end
+
+  def lower_static_call(node)
+    pattern = node.zig_pattern.dup
+    arg_strs = node.args.map { |a| emit_expr(lower(a)) }
+    arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}", arg) }
+    MIR::InlineZig.new(pattern, "static_call")
+  end
+
+  def lower_or_exit(node)
+    msg = node.message ? emit_expr(lower(node.message)) : '""'
+    MIR::RawZig.new("{ #{@rt_name}.setError(.System, \"\", #{msg}, #{node.token.line}); return error.CheatError; }", "or_exit")
+  end
+
+  # ================================================================
+  # Test framework
+  # ================================================================
+
+  def lower_test_block(node)
+    test_name = node.name
+    setup_zig = lower_body(node.setup).filter_map { |s| emit_expr(s) }.join("\n    ")
+
+    tests = []
+    (node.whens || []).each do |when_block|
+      when_desc = when_block.description
+
+      stubs = when_block.setup.select { |s| s.is_a?(AST::StubDecl) }
+      non_stub_setup = when_block.setup.reject { |s| s.is_a?(AST::StubDecl) }
+      when_setup_zig = lower_body(non_stub_setup).filter_map { |s| emit_expr(s) }.join("\n    ")
+      stub_decls = stubs.map { |s| emit_expr(lower(s)) }.join("\n    ")
+
+      (when_block.tests || []).each do |test_that|
+        full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
+        body_zig = lower_body(test_that.body).filter_map { |s| emit_expr(s) }.join("\n    ")
+
+        tests << <<~ZIG
+          test "#{full_name}" {
+              var __rt_instance = try Runtime.init(.{});
+              defer __rt_instance.deinit();
+              const rt: *Runtime = &__rt_instance;
+              #{stub_decls}
+              #{setup_zig}
+              #{when_setup_zig}
+              #{body_zig}
+          }
+        ZIG
+      end
+
+      (when_block.benchmarks || []).each do |b|
+        bench_name = "#{test_name}: #{when_desc}: benchmark"
+        bench_zig = emit_expr(lower(b))
+        tests << <<~ZIG
+          test "#{bench_name}" {
+              var __rt_instance = try Runtime.init(.{});
+              defer __rt_instance.deinit();
+              const rt: *Runtime = &__rt_instance;
+              #{stub_decls}
+              #{setup_zig}
+              #{when_setup_zig}
+              #{bench_zig}
+          }
+        ZIG
+      end
+    end
+
+    MIR::RawZig.new(tests.join("\n"), "test_block")
+  end
+
+  def lower_assert_raises(node)
+    rt_name = @rt_name
+    kind = node.kind
+    expr_zig = emit_expr(lower(node.expression))
+    error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(\"#{node.error_name}\")" : ""
+    MIR::RawZig.new(<<~ZIG.chomp, "assert_raises")
+      {
+          if (#{expr_zig}) |_| {
+              @panic("ASSERT_RAISES: expected #{kind} error but none raised");
+          } else |_| {
+              if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_check}) {
+                  @panic("ASSERT_RAISES: expected #{kind} error, got different kind");
+              }
+          }
+      }
+    ZIG
+  end
+
+  def lower_stub_decl(node)
+    # StubDecl is handled at test framework level
+    MIR::RawZig.new("// stub: #{node.respond_to?(:name) ? node.name : 'unknown'}", "stub_decl")
+  end
+
+  def lower_benchmark(node)
+    MIR::RawZig.new("// benchmark lowering placeholder", "benchmark")
+  end
+
+  def lower_smash(node)
+    MIR::RawZig.new("// smash test placeholder", "smash")
+  end
+
+  def lower_profile(node)
+    MIR::RawZig.new("// profile placeholder", "profile")
+  end
+
+  def lower_require(node)
+    if node.kind == :package
+      MIR::Import.new(node.namespace || node.path, node.namespace || node.path, nil)
+    else
+      # Local require: needs module compilation (handled by importer at higher level)
+      MIR::RawZig.new("// REQUIRE \"#{node.path}\" — needs importer integration", "require_local")
+    end
+  end
+
+  # ================================================================
+  # Helpers for concurrent blocks
+  # ================================================================
+
+  def task_config_zig(stack_size, computed_tier)
+    tier = computed_tier || :standard
+    case tier
+    when :micro  then ".{ .stack_size = 16384 }"
+    when :large  then ".{ .stack_size = 262144 }"
+    when :xl     then ".{ .stack_size = 1048576 }"
+    else
+      stack_size ? ".{ .stack_size = #{stack_size} }" : ".{}"
+    end
+  end
+
+  def bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
+    pinned = node.respond_to?(:pinned) && node.pinned
+    if pinned
+      "try #{rt_name}.getSched().submitSpawn(\n" \
+      "    @intFromPtr(&Runtime.entryWrapper),\n" \
+      "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
+      "    #{ctx_var},\n" \
+      "    #{task_cfg}\n" \
+      ");"
+    else
+      "try CheatHeader.spawnBest(\n" \
+      "    @intFromPtr(&Runtime.entryWrapper),\n" \
+      "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
+      "    #{ctx_var},\n" \
+      "    #{task_cfg}\n" \
+      ");"
+    end
   end
 
   # ================================================================
