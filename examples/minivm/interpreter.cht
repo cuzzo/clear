@@ -2274,8 +2274,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE ip: Int64 = 0;
     MUTABLE curEnv: Id<Env> = COPY envId;
     MUTABLE running = TRUE;
-    -- Pre-allocate 64 slots
+    -- Typed stacks: avoid 40-byte Value union copies for typed arithmetic
+    MUTABLE istack: Int64[] = [];
+    MUTABLE isp: Int64 = 0;
+    MUTABLE fstack: Float64[] = [];
+    MUTABLE fsp: Int64 = 0;
+    -- Pre-allocate 64 slots and 64 typed stack entries
     FOR si IN (0_i64 ..< 64) DO slots.append(Value.Nil); END
+    FOR si IN (0_i64 ..< 64) DO istack.append(0_i64); END
+    FOR si IN (0_i64 ..< 64) DO fstack.append(0.0); END
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -2431,80 +2438,55 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             21 -> -- STORE_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 slots[slotIdx] = stack[sp - 1];,
-            22 -> -- ADD_I64
-                pv = Value{ Int64Val: getInt(stack[sp - 2]) + getInt(stack[sp - 1]) };
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            23 -> -- SUB_I64
-                pv = Value{ Int64Val: getInt(stack[sp - 2]) - getInt(stack[sp - 1]) };
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            24 -> -- MUL_I64
-                pv = Value{ Int64Val: getInt(stack[sp - 2]) * getInt(stack[sp - 1]) };
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            25 -> -- LT_I64
-                pv = boolVal(getInt(stack[sp - 2]) < getInt(stack[sp - 1]));
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            26 -> -- EQ_I64
-                pv = boolVal(getInt(stack[sp - 2]) == getInt(stack[sp - 1]));
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            27 -> -- INT_TO_F64
-                sp -= 1;
-                pv = Value{ Number: toFloat(getInt(stack[sp])) };
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            28 -> -- F64_TO_INT
-                sp -= 1;
-                convInt = toInt(getNum(stack[sp]));
-                pv = Value{ Int64Val: convInt };
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            29 -> -- MOD_I64
-                ia = getInt(stack[sp - 2]);
-                ib = getInt(stack[sp - 1]);
-                MUTABLE modR: Int64 = 0;
-                IF ib != 0 THEN modR = ia MOD ib; END
-                pv = Value{ Int64Val: modR };
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            30 -> -- GTE_I64
-                pv = boolVal(getInt(stack[sp - 2]) >= getInt(stack[sp - 1]));
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            31 -> -- GT_I64
-                pv = boolVal(getInt(stack[sp - 2]) > getInt(stack[sp - 1]));
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            32 -> -- LTE_I64
-                pv = boolVal(getInt(stack[sp - 2]) <= getInt(stack[sp - 1]));
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            33 -> -- NEQ_I64
-                pv = boolVal(getInt(stack[sp - 2]) != getInt(stack[sp - 1]));
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
-            34 -> -- DIV_I64
-                ia = getInt(stack[sp - 2]);
-                ib = getInt(stack[sp - 1]);
+            22 -> -- ADD_I64 (istack)
+                istack[isp - 2] = istack[isp - 2] + istack[isp - 1];
+                isp -= 1;,
+            23 -> -- SUB_I64 (istack)
+                istack[isp - 2] = istack[isp - 2] - istack[isp - 1];
+                isp -= 1;,
+            24 -> -- MUL_I64 (istack)
+                istack[isp - 2] = istack[isp - 2] * istack[isp - 1];
+                isp -= 1;,
+            25 -> -- LT_I64 (istack -> istack, 0/1)
+                IF istack[isp - 2] < istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            26 -> -- EQ_I64 (istack -> istack, 0/1)
+                IF istack[isp - 2] == istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            27 -> -- INT_TO_F64 (istack -> fstack)
+                isp -= 1;
+                convFloat = toFloat(istack[isp]);
+                fstack[fsp] = convFloat;
+                fsp += 1;,
+            28 -> -- F64_TO_INT (fstack -> istack)
+                fsp -= 1;
+                convInt = toInt(fstack[fsp]);
+                istack[isp] = convInt;
+                isp += 1;,
+            29 -> -- MOD_I64 (istack)
+                ia = istack[isp - 2];
+                ib = istack[isp - 1];
+                IF ib != 0 THEN istack[isp - 2] = ia MOD ib; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            30 -> -- GTE_I64 (istack -> istack, 0/1)
+                IF istack[isp - 2] >= istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            31 -> -- GT_I64 (istack -> istack, 0/1)
+                IF istack[isp - 2] > istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            32 -> -- LTE_I64 (istack -> istack, 0/1)
+                IF istack[isp - 2] <= istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            33 -> -- NEQ_I64 (istack -> istack, 0/1)
+                IF istack[isp - 2] != istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
+                isp -= 1;,
+            34 -> -- DIV_I64 (istack)
+                ia = istack[isp - 2];
+                ib = istack[isp - 1];
                 MUTABLE divR: Int64 = 0;
                 IF ib != 0 THEN divR = toInt(toFloat(ia) / toFloat(ib)); END
-                pv = Value{ Int64Val: divR };
-                sp -= 2;
-                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                sp += 1;,
+                istack[isp - 2] = divR;
+                isp -= 1;,
             35 -> -- JUMP_BACK
                 ip = ops[ip];,
             36 -> -- CONCAT
@@ -2520,6 +2502,78 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sexprStr = getStr(consts[sexprIdx]);
                 MUTABLE defPenv: HashMap<Value> = {};
                 pv = runTest!(sexprStr, curEnv, pool, defPenv);,
+            38 -> -- LOAD_SLOT_I64 [slot] (slots -> istack)
+                slotIdx = ops[ip]; ip += 1;
+                istack[isp] = getInt(slots[slotIdx]);
+                isp += 1;,
+            39 -> -- STORE_SLOT_I64 [slot] (istack -> slots)
+                slotIdx = ops[ip]; ip += 1;
+                isp -= 1;
+                slots[slotIdx] = Value{ Int64Val: istack[isp] };,
+            40 -> -- LOAD_CONST_I64 [idx] (consts -> istack)
+                idx = ops[ip]; ip += 1;
+                istack[isp] = getInt(consts[idx]);
+                isp += 1;,
+            41 -> -- JUMP_IF_FALSE_I (istack, 0=false)
+                isp -= 1;
+                IF istack[isp] == 0 THEN ip = ops[ip]; ELSE ip += 1; END,
+            42 -> -- LOAD_SLOT_F64 [slot] (slots -> fstack)
+                slotIdx = ops[ip]; ip += 1;
+                fstack[fsp] = getNum(slots[slotIdx]);
+                fsp += 1;,
+            43 -> -- STORE_SLOT_F64 [slot] (fstack -> slots)
+                slotIdx = ops[ip]; ip += 1;
+                fsp -= 1;
+                slots[slotIdx] = Value{ Number: fstack[fsp] };,
+            44 -> -- LOAD_CONST_F64 [idx] (consts -> fstack)
+                idx = ops[ip]; ip += 1;
+                fstack[fsp] = getNum(consts[idx]);
+                fsp += 1;,
+            45 -> -- ADD_F64 (fstack)
+                fstack[fsp - 2] = fstack[fsp - 2] + fstack[fsp - 1];
+                fsp -= 1;,
+            46 -> -- SUB_F64 (fstack)
+                fstack[fsp - 2] = fstack[fsp - 2] - fstack[fsp - 1];
+                fsp -= 1;,
+            47 -> -- MUL_F64 (fstack)
+                fstack[fsp - 2] = fstack[fsp - 2] * fstack[fsp - 1];
+                fsp -= 1;,
+            48 -> -- DIV_F64 (fstack)
+                IF fstack[fsp - 1] != 0.0 THEN fstack[fsp - 2] = fstack[fsp - 2] / fstack[fsp - 1]; ELSE fstack[fsp - 2] = 0.0; END
+                fsp -= 1;,
+            49 -> -- LT_F64 (fstack -> istack, 0/1)
+                IF fstack[fsp - 2] < fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
+                fsp -= 2; isp += 1;,
+            50 -> -- GT_F64 (fstack -> istack, 0/1)
+                IF fstack[fsp - 2] > fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
+                fsp -= 2; isp += 1;,
+            51 -> -- LTE_F64 (fstack -> istack, 0/1)
+                IF fstack[fsp - 2] <= fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
+                fsp -= 2; isp += 1;,
+            52 -> -- GTE_F64 (fstack -> istack, 0/1)
+                IF fstack[fsp - 2] >= fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
+                fsp -= 2; isp += 1;,
+            53 -> -- EQ_F64 (fstack -> istack, 0/1)
+                IF fstack[fsp - 2] == fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
+                fsp -= 2; isp += 1;,
+            54 -> -- NEQ_F64 (fstack -> istack, 0/1)
+                IF fstack[fsp - 2] != fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
+                fsp -= 2; isp += 1;,
+            55 -> -- I_TO_VAL (istack -> Value stack as Int64Val)
+                isp -= 1;
+                pv = Value{ Int64Val: istack[isp] };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            56 -> -- F_TO_VAL (fstack -> Value stack)
+                fsp -= 1;
+                pv = Value{ Number: fstack[fsp] };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            57 -> -- BOOL_TO_VAL (istack 0/1 -> Value stack TrueVal/FalseVal)
+                isp -= 1;
+                pv = boolVal(istack[isp] != 0);
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
             DEFAULT ->
         END
     END

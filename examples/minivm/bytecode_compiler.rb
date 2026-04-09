@@ -15,6 +15,13 @@ class BytecodeCompiler
   INT_TO_F64  = 27; F64_TO_INT  = 28; MOD_I64     = 29; GTE_I64     = 30
   GT_I64      = 31; LTE_I64     = 32; NEQ_I64     = 33; DIV_I64     = 34
   JUMP_BACK   = 35; CONCAT      = 36; DEFINE_FN   = 37
+  # Typed stack opcodes: i64 and f64 operate on dedicated 8-byte stacks
+  LOAD_SLOT_I64  = 38; STORE_SLOT_I64 = 39; LOAD_CONST_I64 = 40; JUMP_IF_FALSE_I = 41
+  LOAD_SLOT_F64  = 42; STORE_SLOT_F64 = 43; LOAD_CONST_F64 = 44
+  ADD_F64     = 45; SUB_F64     = 46; MUL_F64     = 47; DIV_F64     = 48
+  LT_F64      = 49; GT_F64      = 50; LTE_F64     = 51; GTE_F64     = 52
+  EQ_F64      = 53; NEQ_F64     = 54
+  I_TO_VAL    = 55; F_TO_VAL    = 56; BOOL_TO_VAL = 57
 
   # Native function IDs (must match interpreter's setupEnv!)
   NATIVES = {
@@ -77,6 +84,30 @@ class BytecodeCompiler
     @type_stack.last || :any
   end
 
+  # Ensure the top value is on the Value stack (for untyped consumers like CALL, NATIVE_CALL, CONCAT).
+  # If top is on a typed stack, emit a transfer opcode.
+  # :bool from typed comparisons is on istack (as 0/1), so it also needs I_TO_VAL.
+  def ensure_value_stack
+    t = peek_type
+    case t
+    when :i64
+      emit(I_TO_VAL)
+      @type_stack[-1] = :any
+    when :bool
+      emit(BOOL_TO_VAL)
+      @type_stack[-1] = :any
+    when :f64
+      emit(F_TO_VAL)
+      @type_stack[-1] = :any
+    end
+  end
+
+  # Compile a node and ensure the result is on the Value stack.
+  def compile_to_value(node)
+    compile(node)
+    ensure_value_stack
+  end
+
   def compile_program(source)
     tokens = Lexer.new(source).tokenize
     ast = Parser.new(tokens, source).parse
@@ -90,7 +121,8 @@ class BytecodeCompiler
           stmt.body.each do |node|
             next if node.is_a?(AST::ReturnNode) && node.value.nil?
             compile(node)
-            emit(POP) # discard statement results
+            t = pop_type
+            emit(POP) unless t == :i64 || t == :f64 || t == :bool
           end
         else
           # Compile function as lambda + store
@@ -134,8 +166,13 @@ class BytecodeCompiler
     when AST::Identifier
       name = node.name.to_s
       if @slots[name]
-        emit(LOAD_SLOT, @slots[name])
-        push_type(var_type(name))
+        vt = var_type(name)
+        case vt
+        when :i64 then emit(LOAD_SLOT_I64, @slots[name])
+        when :f64 then emit(LOAD_SLOT_F64, @slots[name])
+        else emit(LOAD_SLOT, @slots[name])
+        end
+        push_type(vt)
       else
         name_idx = add_const(name)
         emit(LOAD_NAME, name_idx)
@@ -187,11 +224,11 @@ class BytecodeCompiler
     case node.type
     when :INT64
       cidx = add_const([:i64, node.value])
-      emit(LOAD_CONST, cidx)
+      emit(LOAD_CONST_I64, cidx)
       push_type(:i64)
     when :NUMBER, :FLOAT
       cidx = add_const([:f64, node.value])
-      emit(LOAD_CONST, cidx)
+      emit(LOAD_CONST_F64, cidx)
       push_type(:f64)
     when :STRING
       cidx = add_const([:str, node.value])
@@ -238,38 +275,55 @@ class BytecodeCompiler
     right_type = pop_type
 
     both_i64 = (left_type == :i64 && right_type == :i64)
+    both_f64 = (left_type == :f64 && right_type == :f64)
 
     case op
     when :ADD
       if left_type == :str || right_type == :str then emit(CONCAT); push_type(:str)
       elsif both_i64 then emit(ADD_I64); push_type(:i64)
+      elsif both_f64 then emit(ADD_F64); push_type(:f64)
       else emit(ADD); push_type(:f64) end
     when :SUB
       if both_i64 then emit(SUB_I64); push_type(:i64)
+      elsif both_f64 then emit(SUB_F64); push_type(:f64)
       else emit(SUB); push_type(:f64) end
     when :MUL
       if both_i64 then emit(MUL_I64); push_type(:i64)
+      elsif both_f64 then emit(MUL_F64); push_type(:f64)
       else emit(MUL); push_type(:f64) end
     when :DIV
       if both_i64 then emit(DIV_I64); push_type(:i64)
+      elsif both_f64 then emit(DIV_F64); push_type(:f64)
       else emit(DIV); push_type(:f64) end
     when :EQ
-      if both_i64 then emit(EQ_I64) else emit(EQ) end
+      if both_i64 then emit(EQ_I64)
+      elsif both_f64 then emit(EQ_F64)
+      else emit(EQ) end
       push_type(:bool)
     when :NEQ
-      if both_i64 then emit(NEQ_I64) else emit(EQ); emit(NOT) end
+      if both_i64 then emit(NEQ_I64)
+      elsif both_f64 then emit(NEQ_F64)
+      else emit(EQ); emit(NOT) end
       push_type(:bool)
     when :LT
-      if both_i64 then emit(LT_I64) else emit(LT) end
+      if both_i64 then emit(LT_I64)
+      elsif both_f64 then emit(LT_F64)
+      else emit(LT) end
       push_type(:bool)
     when :GT
-      if both_i64 then emit(GT_I64) else emit(GT) end
+      if both_i64 then emit(GT_I64)
+      elsif both_f64 then emit(GT_F64)
+      else emit(GT) end
       push_type(:bool)
     when :LTE
-      if both_i64 then emit(LTE_I64) else emit(LTE) end
+      if both_i64 then emit(LTE_I64)
+      elsif both_f64 then emit(LTE_F64)
+      else emit(LTE) end
       push_type(:bool)
     when :GTE
-      if both_i64 then emit(GTE_I64) else emit(GTE) end
+      if both_i64 then emit(GTE_I64)
+      elsif both_f64 then emit(GTE_F64)
+      else emit(GTE) end
       push_type(:bool)
     when :MOD
       if both_i64 then emit(MOD_I64) else emit(NATIVE_CALL, NATIVES["modulo"], 2) end
@@ -305,15 +359,27 @@ class BytecodeCompiler
     name = node.name.to_s
 
     if @mutables.include?(name) && @slots[name]
-      emit(STORE_SLOT, @slots[name])
+      case val_type
+      when :i64 then emit(STORE_SLOT_I64, @slots[name])
+      when :f64 then emit(STORE_SLOT_F64, @slots[name])
+      else emit(STORE_SLOT, @slots[name])
+      end
     elsif @mutables.include?(name)
       slot = alloc_slot(name, val_type)
-      emit(STORE_SLOT, slot)
+      case val_type
+      when :i64 then emit(STORE_SLOT_I64, slot)
+      when :f64 then emit(STORE_SLOT_F64, slot)
+      else emit(STORE_SLOT, slot)
+      end
     else
       slot = alloc_slot(name, val_type)
-      emit(STORE_SLOT, slot)
+      case val_type
+      when :i64 then emit(STORE_SLOT_I64, slot)
+      when :f64 then emit(STORE_SLOT_F64, slot)
+      else emit(STORE_SLOT, slot)
+      end
     end
-    push_type(val_type)  # STORE_SLOT peeks (doesn't pop in exec!)
+    push_type(val_type)
   end
 
   def compile_vardecl(node)
@@ -342,7 +408,11 @@ class BytecodeCompiler
     end
 
     slot = alloc_slot(name, val_type)
-    emit(STORE_SLOT, slot)
+    case val_type
+    when :i64 then emit(STORE_SLOT_I64, slot)
+    when :f64 then emit(STORE_SLOT_F64, slot)
+    else emit(STORE_SLOT, slot)
+    end
     push_type(val_type)
   end
 
@@ -352,7 +422,11 @@ class BytecodeCompiler
     if node.name.is_a?(String) || node.name.is_a?(Symbol)
       name = node.name.to_s
       if @slots[name]
-        emit(STORE_SLOT, @slots[name])
+        case val_type
+        when :i64 then emit(STORE_SLOT_I64, @slots[name])
+        when :f64 then emit(STORE_SLOT_F64, @slots[name])
+        else emit(STORE_SLOT, @slots[name])
+        end
         @slot_types[name] = val_type
       else
         name_idx = add_const(name)
@@ -364,7 +438,9 @@ class BytecodeCompiler
 
   def compile_if(node)
     compile(node.condition)
-    emit(JUMP_IF_FALSE)
+    cond_type = pop_type
+    emit(cond_type == :bool ? JUMP_IF_FALSE_I : JUMP_IF_FALSE)
+    push_type(cond_type)  # restore for balance
     jump_false_idx = @ops.length
     emit(0) # placeholder
 
@@ -392,15 +468,15 @@ class BytecodeCompiler
     loop_start = @ops.length
 
     compile(node.condition)
-    pop_type  # condition type
-    emit(JUMP_IF_FALSE)
+    cond_type = pop_type
+    emit(cond_type == :bool ? JUMP_IF_FALSE_I : JUMP_IF_FALSE)
     jump_exit_idx = @ops.length
     emit(0) # placeholder
 
     node.do_branch.each do |stmt|
       compile(stmt)
-      pop_type
-      emit(POP)
+      t = pop_type
+      emit(POP) unless t == :i64 || t == :f64 || t == :bool
     end
 
     emit(JUMP, loop_start)
@@ -519,7 +595,7 @@ class BytecodeCompiler
     # Check for native function
     native_id = NATIVES[name]
     if native_id
-      node.args.each { |a| compile(a) }
+      node.args.each { |a| compile_to_value(a) }
       emit(NATIVE_CALL, native_id, node.args.length)
       return
     end
@@ -527,11 +603,11 @@ class BytecodeCompiler
     # Map builtins
     case name
     when "print"
-      node.args.each { |a| compile(a) }
+      node.args.each { |a| compile_to_value(a) }
       emit(NATIVE_CALL, NATIVES["display"], node.args.length)
       return
     when "eql?"
-      node.args.each { |a| compile(a) }
+      node.args.each { |a| compile_to_value(a) }
       emit(EQ)
       return
     when "toInt"
@@ -547,7 +623,7 @@ class BytecodeCompiler
     # User-defined function: load fn, load args, CALL
     fn_idx = add_const(name)
     emit(LOAD_NAME, fn_idx)
-    node.args.each { |a| compile(a) }
+    node.args.each { |a| compile_to_value(a) }
     emit(CALL, node.args.length)
   end
 
@@ -555,39 +631,37 @@ class BytecodeCompiler
     name = node.name.to_s
     case name
     when "length"
-      compile(node.object)
+      compile_to_value(node.object)
       emit(NATIVE_CALL, NATIVES["list-length"], 1)
     when "append"
       # list.append(val) -> set! list (list-push list val)
-      compile(node.object)
-      compile(node.args[0])
+      compile_to_value(node.object)
+      compile_to_value(node.args[0])
       emit(NATIVE_CALL, NATIVES["list-push"], 2)
       if node.object.is_a?(AST::Identifier)
         name_idx = add_const(node.object.name.to_s)
         emit(SET_NAME, name_idx)
       end
     when "toString"
-      compile(node.object)
+      compile_to_value(node.object)
       emit(NATIVE_CALL, NATIVES["number->string"], 1)
     when "trim"
-      compile(node.object)
+      compile_to_value(node.object)
       emit(NATIVE_CALL, NATIVES["trim"], 1)
     when "split"
-      compile(node.object)
-      compile(node.args[0])
+      compile_to_value(node.object)
+      compile_to_value(node.args[0])
       emit(NATIVE_CALL, NATIVES["split"], 2)
     else
       # UFCS: obj.method(args) -> (method obj args)
-      compile(node.object)
-      node.args.each { |a| compile(a) }
+      compile_to_value(node.object)
+      node.args.each { |a| compile_to_value(a) }
       native_id = NATIVES[name]
       if native_id
         emit(NATIVE_CALL, native_id, 1 + node.args.length)
       else
         fn_idx = add_const(name)
         emit(LOAD_NAME, fn_idx)
-        # Reorder: fn should be before args on stack... this is tricky
-        # For now, use CALL
         emit(CALL, 1 + node.args.length)
       end
     end
@@ -595,8 +669,18 @@ class BytecodeCompiler
 
   def compile_assert(node)
     compile(node.condition)
-    emit(NOT)
-    emit(JUMP_IF_FALSE)
+    cond_type = pop_type
+    if cond_type == :bool
+      # Typed bool is on istack as 0/1. Transfer to Value stack as TrueVal/FalseVal,
+      # then use standard NOT + JUMP_IF_FALSE for the assert logic.
+      emit(BOOL_TO_VAL)
+      emit(NOT)
+      emit(JUMP_IF_FALSE)
+    else
+      ensure_value_stack
+      emit(NOT)
+      emit(JUMP_IF_FALSE)
+    end
     jump_ok_idx = @ops.length
     emit(0) # placeholder
 
@@ -656,7 +740,8 @@ class BytecodeCompiler
         return
       end
       compile(stmt)
-      emit(POP) if i < stmts.length - 1
+      t = pop_type
+      emit(POP) if i < stmts.length - 1 && t != :i64 && t != :f64 && t != :bool
     end
   end
 
