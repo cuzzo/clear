@@ -1,6 +1,7 @@
 -- S-expression parser for the Mal interpreter.
 -- Tokenizes input strings into HashMap<Value> and reads S-expressions.
--- Depends on Value union and helper functions from interpreter.cht.
+
+REQUIRE "types.cht";
 
 FN readAtom(token: String) RETURNS Value ->
     IF token.length() == 0 THEN RETURN Value.Nil; END

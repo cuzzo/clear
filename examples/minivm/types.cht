@@ -1,0 +1,132 @@
+-- Shared types and pure helpers for the Mal interpreter.
+-- Value union, Env struct, and accessor functions.
+
+STRUCT Env {
+    vars: HashMap<Value>
+}
+
+UNION Value {
+    Nil, TrueVal, FalseVal,
+    Number: Float64, Str: String, Symbol: String,
+    List: Value[],
+    Vector: Value[],
+    Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
+    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    NativeFn: Int64,
+    EnvRef: Id<Env>,
+    Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
+    Error { errMsg: String, errKind: String },
+    Int64Val: Int64,
+    TypedI64Arr: Int64[],
+    TypedF64Arr: Float64[],
+}
+
+-- Pure helpers
+
+FN boolVal(b: Bool) RETURNS Value ->
+    IF b -> RETURN Value.TrueVal;
+    RETURN Value.FalseVal;
+END
+
+FN isTruthy?(v: Value) RETURNS Bool ->
+    MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
+    RETURN TRUE;
+END
+
+FN getSymName(v: Value) RETURNS String ->
+    MATCH v START Value.Symbol AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+FN getNum(v: Value) RETURNS Float64 ->
+    MATCH v START
+        Value.Number AS n -> RETURN n;,
+        Value.Int64Val AS i -> RETURN toFloat(i);,
+        DEFAULT -> RETURN 0.0;
+    END
+    RETURN 0.0;
+END
+
+FN getInt(v: Value) RETURNS Int64 ->
+    MATCH v START
+        Value.Int64Val AS i -> RETURN i;,
+        Value.Number AS n -> tr = toInt(n); RETURN tr;,
+        DEFAULT -> RETURN 0;
+    END
+    RETURN 0;
+END
+
+FN isInt64?(v: Value) RETURNS Bool ->
+    MATCH v START Value.Int64Val -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN getStr(v: Value) RETURNS String ->
+    MATCH v START Value.Str AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+FN getNativeId(v: Value) RETURNS Int64 ->
+    MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
+    RETURN 0;
+END
+
+FN isList?(v: Value) RETURNS Bool ->
+    MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN listLen(v: Value) RETURNS Int64 ->
+    MATCH v START
+        Value.List AS items -> RETURN items.length();,
+        Value.TypedI64Arr AS iarr -> RETURN iarr.length();,
+        Value.TypedF64Arr AS farr -> RETURN farr.length();,
+        DEFAULT -> RETURN 0;
+    END
+    RETURN 0;
+END
+
+FN isLambda?(v: Value) RETURNS Bool ->
+    MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
+    MATCH a START
+        Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.TrueVal -> MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.FalseVal -> MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.Number AS na -> MATCH b START
+            Value.Number AS nb -> RETURN na == nb;,
+            Value.Int64Val AS ib -> RETURN na == toFloat(ib);,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Int64Val AS ia -> MATCH b START
+            Value.Int64Val AS ib -> RETURN ia == ib;,
+            Value.Number AS nb -> RETURN toFloat(ia) == nb;,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Str AS sa -> MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.Symbol AS sa -> MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.List AS la -> MATCH b START
+            Value.List AS lb ->
+                IF la.length() != lb.length() THEN RETURN FALSE; END
+                FOR ci IN (0_i64 ..< la.length()) DO
+                    IF valEqual?(la[ci], lb[ci]) == FALSE THEN RETURN FALSE; END
+                END
+                RETURN TRUE;,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Vector AS va -> MATCH b START
+            Value.Vector AS vb ->
+                IF va.length() != vb.length() THEN RETURN FALSE; END
+                FOR vi IN (0_i64 ..< va.length()) DO
+                    IF valEqual?(va[vi], vb[vi]) == FALSE THEN RETURN FALSE; END
+                END
+                RETURN TRUE;,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Pair AS pa -> MATCH b START
+            Value.Pair AS pb ->
+                RETURN valEqual?(pa.pairCar, pb.pairCar) && valEqual?(pa.pairCdr, pb.pairCdr);,
+            DEFAULT -> RETURN FALSE; END,
+        DEFAULT -> RETURN FALSE;
+    END
+    RETURN FALSE;
+END
