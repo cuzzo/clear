@@ -488,10 +488,9 @@ POOL_METHODS = {
 SET_METHODS = {
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
-    takes_args: [0],
     zig: "try {0}.insert({alloc}, {1})",
     alloc: :heap,
-    args: [:"Any[]", { type: :Any, takes: true }],
+    args: [:"Any[]", :Any],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type

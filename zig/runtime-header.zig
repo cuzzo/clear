@@ -2114,8 +2114,15 @@ pub const CheatLib = struct {
 
         // 4. Numeric map (AutoHashMapUnmanaged or custom hash)
         if (comptime isNumericMap(T)) {
-            const VT = @TypeOf(ptr.values());
-            const ElemT = std.meta.Elem(VT);
+            // Extract V from the pub ValueIterator type: its `items` field is [*]V
+            const ElemT = comptime blk: {
+                for (@typeInfo(T.ValueIterator).@"struct".fields) |f| {
+                    if (std.mem.eql(u8, f.name, "items")) {
+                        break :blk @typeInfo(f.type).pointer.child;
+                    }
+                }
+                unreachable;
+            };
             if (comptime needsCleanup(ElemT)) {
                 var vit = ptr.valueIterator();
                 while (vit.next()) |val_ptr| cleanup(ElemT, alloc, val_ptr);

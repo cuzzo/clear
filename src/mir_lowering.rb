@@ -2781,8 +2781,26 @@ class MIRLowering
   def lower_indexed_assignment(node)
     target_node = node.name.target
     ti = target_node.type_info rescue nil
-    receiver_type = ti ? Type.new(ti) : nil
-    rt = MIR::Ident.new(@rt_name)
+
+    # Raw slice index (synthetic nodes from SOA rewrite have no type_info)
+    unless ti
+      target = lower(target_node)
+      idx = lower(node.name.index)
+      val = lower(node.value)
+      return MIR::Set.new(MIR::IndexGet.new(target, idx), val)
+    end
+
+    receiver_type = Type.new(ti)
+    rt_name = @rt_name
+
+    # Resolve INDEX_OPS :set entry for this container kind
+    kind = if ti&.numeric_map? then :numeric_map
+           elsif ti&.map? then :string_map
+           elsif ti&.pool? then :pool
+           elsif ti&.array? || ti&.list_collection? then :array
+           end
+    op = kind && INDEX_OPS.dig(kind, :set)
+
     target = lower(target_node)
     idx = lower(node.name.index)
     val = lower(node.value)
@@ -2792,42 +2810,84 @@ class MIRLowering
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
-    if receiver_type&.numeric_map?
-      key_zig = receiver_type.key_type.zig_type
-      val_type_zig = receiver_type.value_type.zig_type
-      frame_alloc = MIR::MethodCall.new(rt, "frameAlloc", [], false)
-      call = MIR::Call.new("CheatLib.numericMapPut",
-        [MIR::Ident.new(key_zig), MIR::Ident.new(val_type_zig), frame_alloc, MIR::AddressOf.new(target), idx, val], true)
-      MIR::ExprStmt.new(call, false)
-    elsif receiver_type&.map?
-      # Map keys are duped internally by put -- always frame-allocate the key
-      # expression so it's cleaned by arena rewind (no orphaned heap temporary).
-      if idx.is_a?(MIR::ConcatStr)
-        idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
-      end
-      val_node = node.value
-      val_ti = val_node.type_info rescue nil
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      # Apply value transforms
-      if val_ti&.string?
-        val = MIR::MethodCall.new(MIR::MethodCall.new(rt, "heapAlloc", [], false), "dupe", [MIR::Ident.new("u8"), val], true)
-      else
-        val_zig = emit_expr(val)
-        val_zig = dupe_borrowed_union_zig(val_zig, val_node, @rt_name)
-        val_zig = apply_container_promote_zig(val_zig, @rt_name)
-        val = MIR::InlineZig.new(val_zig, "map_indexed_val") if val_zig != emit_expr(lower(node.value))
-      end
-      call = MIR::MethodCall.new(target, "put", [heap_alloc, heap_alloc, idx, val], true)
-      MIR::ExprStmt.new(call, false)
-    elsif receiver_type&.pool?
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      call = MIR::MethodCall.new(target, "insert", [heap_alloc, idx, val], true)
-      MIR::ExprStmt.new(call, false)
-    else
-      # List/array setAt
+    # Fallback for unknown container types or missing registry entries
+    unless op
       call = MIR::Call.new("CheatLib.setAt", [target, idx, val], false)
-      MIR::ExprStmt.new(call, false)
+      return MIR::ExprStmt.new(call, false)
     end
+
+    # Pick sharded zig variant if applicable
+    zig = if (receiver_type&.sharded? || receiver_type&.striped?) && op[:sharded_zig]
+      op[:sharded_zig]
+    else
+      op[:zig]
+    end
+
+    # Map keys are duped internally by put -- always frame-allocate the key
+    # expression so it's cleaned by arena rewind (no orphaned heap temporary).
+    if kind == :string_map && idx.is_a?(MIR::ConcatStr)
+      idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
+    end
+
+    # Apply value transforms from registry
+    val_node = node.value
+    val_ti = val_node.type_info rescue nil
+    (op[:value_transforms] || []).each do |transform|
+      case transform
+      when :dupe_string_literal
+        if val_ti&.string? && !val_node.is_a?(AST::CopyNode)
+          val_zig = emit_expr(val)
+          val = MIR::InlineZig.new("try #{rt_name}.heapAlloc().dupe(u8, #{val_zig})", "index_dupe_string")
+        end
+      when :dupe_borrowed_union
+        unless val_ti&.string?
+          val_zig = emit_expr(val)
+          new_zig = dupe_borrowed_union_zig(val_zig, val_node, rt_name)
+          val = MIR::InlineZig.new(new_zig, "index_dupe_union") if new_zig != val_zig
+        end
+      when :container_promote
+        unless val_ti&.string?
+          val_zig = emit_expr(val)
+          new_zig = apply_container_promote_zig(val_zig, rt_name)
+          val = MIR::InlineZig.new(new_zig, "index_promote") if new_zig != val_zig
+        end
+      end
+    end
+
+    # Resolve allocator placeholders
+    target_zig = emit_expr(target)
+    idx_zig = emit_expr(idx)
+    val_zig = emit_expr(val)
+
+    pattern = zig.dup
+    pattern = pattern.gsub("{target}", target_zig)
+    pattern = pattern.gsub("&{target}", "&#{target_zig}")
+    pattern = pattern.gsub("{index}", idx_zig)
+    pattern = pattern.gsub("{value}", val_zig)
+
+    # Resolve allocator placeholders -- use target_node for :receiver_storage
+    [:alloc, :key_alloc, :val_alloc].each do |alloc_key|
+      placeholder = "{#{alloc_key}}"
+      next unless pattern.include?(placeholder)
+      alloc_sym = op[alloc_key] || :heap
+      if alloc_sym == :receiver_storage
+        needs_heap = receiver_type&.needs_heap_backing?
+        needs_heap ||= (target_node.respond_to?(:storage) && target_node.storage == :heap)
+        pattern = pattern.gsub(placeholder, needs_heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()")
+      else
+        pattern = pattern.gsub(placeholder, resolve_intrinsic_alloc(alloc_sym, node))
+      end
+    end
+
+    # Resolve type placeholders from receiver
+    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
+      pattern = pattern.gsub("{key_zig}", receiver_type.key_type&.zig_type || "i64")
+      pattern = pattern.gsub("{val_zig}", receiver_type.value_type&.zig_type || "f64")
+    end
+
+    iz = MIR::InlineZig.new(pattern, "index_set")
+    iz.stdlib_def = op
+    MIR::ExprStmt.new(iz, false)
   end
 
   def lower_field_assignment_with_cleanup(node)
