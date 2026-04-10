@@ -389,18 +389,19 @@ pub const Runtime = struct {
 
     // ── Error Context Helpers ─────────────────────────────────────
     pub fn setError(self: *Runtime, kind: ErrorKind, error_name: []const u8, message: []const u8, clear_line: u32) void {
-        self.__error = .{ .kind = kind, .error_name = error_name, .message = message, .clear_line = clear_line };
+        self.__error.kind = kind;
+        self.__error.error_name = error_name;
+        self.__error.message = message;
+        self.__error.clear_line = clear_line;
     }
 
     /// Map a Zig error into the CLEAR error context.
     /// Called by EXTERN FN trampolines when a native Zig function returns an error.
     pub fn setZigError(self: *Runtime, err: anyerror, clear_line: u32) void {
-        self.__error = .{
-            .kind = zigErrorToKind(err),
-            .error_name = @errorName(err),
-            .message = "",
-            .clear_line = clear_line,
-        };
+        self.__error.kind = zigErrorToKind(err);
+        self.__error.error_name = @errorName(err);
+        self.__error.message = "";
+        self.__error.clear_line = clear_line;
     }
 
     /// Heap-copy a value as a snapshot (shallow copy).

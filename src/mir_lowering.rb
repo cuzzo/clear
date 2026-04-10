@@ -2214,13 +2214,35 @@ class MIRLowering
     left = lower(node.left)
     left_zig = emit_expr(left)
 
-    if rhs.is_a?(AST::Identifier)
+    # Capture snapshot for CATCH blocks: store LHS before the failable call
+    snapshot_stmts = nil
+    if @current_fn_has_catch
+      lhs_type = node.left.respond_to?(:full_type) ? node.left.full_type : nil
+      if lhs_type
+        t = Type.new(lhs_type)
+        unless t.void? || t.error_union?
+          snap_zig_type = transpile_type(t)
+          snapshot_stmts = [
+            MIR::Let.new("__snap_input", left, false, nil, nil),
+            MIR::ExprStmt.new(
+              MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
+                MIR::Ident.new(snap_zig_type),
+                MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
+              ], false), false)
+          ]
+          # Rewrite left to use the hoisted variable
+          left = MIR::Ident.new("__snap_input")
+        end
+      end
+    end
+
+    call_mir = if rhs.is_a?(AST::Identifier)
       # x s> f -> f(x)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
       synthetic.full_type = node.full_type
       synthetic.storage = node.storage if node.respond_to?(:storage)
       synthetic.zig_pattern = rhs.zig_pattern if rhs.respond_to?(:zig_pattern) && rhs.zig_pattern
-      return lower_func_call(synthetic)
+      lower_func_call(synthetic)
     elsif rhs.is_a?(AST::FuncCall)
       # x s> f(y) -> f(x, y)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
@@ -2230,10 +2252,17 @@ class MIRLowering
       if rhs.respond_to?(:coerced_type) && rhs.coerced_type
         synthetic.coerced_type = rhs.coerced_type
       end
-      return lower_func_call(synthetic)
+      lower_func_call(synthetic)
+    else
+      raise "MIRLowering: unhandled SMOOTH RHS #{rhs.class}"
     end
 
-    raise "MIRLowering: unhandled SMOOTH RHS #{rhs.class}"
+    if snapshot_stmts
+      label = "__snap_blk"
+      MIR::BlockExpr.new(label, snapshot_stmts + [MIR::BreakStmt.new(label, call_mir)])
+    else
+      call_mir
+    end
   end
 
   # ================================================================
@@ -3118,7 +3147,7 @@ class MIRLowering
       else
         zig_type = ret_field_promote[:zig_type]
         stmts << MIR::ExprStmt.new(
-          MIR::Call.new("CheatLib.promoteFields", [
+          MIR::Call.new("CheatLib.promoteDeep", [
             MIR::Ident.new(zig_type), rt, MIR::AddressOf.new(MIR::Ident.new("__ret"))
           ], true), false)
       end
