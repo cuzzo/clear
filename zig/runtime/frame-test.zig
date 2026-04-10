@@ -484,7 +484,7 @@ test "Runtime.saveLoopMark/restoreLoopMark: arena rewinds per iteration" {
     // so list backing buffers don't accumulate across loop iterations.
     const allocator = std.testing.allocator;
     const Runtime = @import("runtime.zig").Runtime;
-    const EbrContext = @import("ebr.zig").EbrContext;
+    const EbrContext = @import("ebr").EbrContext;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);

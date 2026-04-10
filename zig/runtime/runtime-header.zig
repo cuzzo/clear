@@ -5,7 +5,7 @@ pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 
-pub const EbrContext = @import("ebr.zig").EbrContext;
+pub const EbrContext = @import("ebr").EbrContext;
 const Task = @import("queues.zig").Task;
 const Fiber = fc.Fiber;
 

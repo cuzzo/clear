@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 const qs = @import("queues.zig");
 const fc = @import("fiber-core.zig");
 const fm = @import("fiber-memory.zig");
-const EbrContext = @import("ebr.zig").EbrContext;
+const EbrContext = @import("ebr").EbrContext;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 fn milliTimestamp() i64 {

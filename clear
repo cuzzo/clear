@@ -25,7 +25,7 @@ ZIG = [
 ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
 
 # Runtime files needed for linking
-RUNTIME_FILES = %w[switch.S onRoot.S].map { |f| File.join(ZIG_DIR, f) }
+RUNTIME_FILES = %w[runtime/switch.S runtime/onRoot.S].map { |f| File.join(ZIG_DIR, f) }
 
 # Detect jemalloc/tcmalloc
 def find_alloc_preload
@@ -75,7 +75,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       out_mtime = File.mtime(output)
       src_mtime = File.mtime(source)
       compiler_mtime = Dir.glob(File.join(SRC_DIR, '*.rb')).map { |f| File.mtime(f) }.max
-      runtime_mtime = File.mtime(File.join(ZIG_DIR, 'runtime-header.zig')) rescue Time.at(0)
+      runtime_mtime = File.mtime(File.join(ZIG_DIR, 'runtime', 'runtime-header.zig')) rescue Time.at(0)
       newest_dep = [src_mtime, compiler_mtime, runtime_mtime].compact.max
       if out_mtime > newest_dep
         $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
@@ -166,9 +166,9 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       system("ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} > /dev/null")
       error "Package '#{pkg_name}' transpilation failed"
     end
-    # Rewrite module imports to file-path imports.
-    # cheat_runtime -> runtime-header.zig, nested packages -> name.zig
-    pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime-header.zig")')
+    # Rewrite module imports to file-path imports (all files live in zig/).
+    # cheat_runtime → runtime-header.zig, nested packages → name.zig
+    pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
     nested_pkgs.each do |np|
       pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
     end
@@ -177,10 +177,13 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     pkg_name
   end
 
-  # Build Zig command (runs from per-process build dir).
-  # All files use file-path imports (no Zig module system) since everything
-  # is in the build dir.  FFI modules use --dep/-M for named imports.
-  all_modules = ffi_modules  # Only FFI modules need Zig named-module wiring
+  # Build Zig command (runs from zig/ directory where runtime files live).
+  # Named modules are always required for cross-directory lib/ imports.
+  # FFI modules are added alongside the standard lib modules.
+  all_modules = ffi_modules  # FFI modules need Zig named-module wiring
+
+  # Standard lib modules (always needed for cross-directory imports)
+  lib_modules = { 'safety' => 'lib/safety.zig', 'ebr' => 'lib/ebr.zig', 'ownership' => 'lib/ownership.zig' }
 
   if module_mode
     cmd_parts = [ZIG, 'test']
@@ -188,13 +191,14 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     cmd_parts = [ZIG, 'build-exe']
   end
 
-  if all_modules.any?
-    all_modules.each { |m| cmd_parts += ['--dep', m] }
-    cmd_parts += ["-Mroot=#{tmp_name}", '-lc', 'switch.S', 'onRoot.S']
-    all_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
-  else
-    cmd_parts += [tmp_name, '-lc', 'switch.S', 'onRoot.S']
-  end
+  # Always use -Mroot= mode since lib/ modules require named imports.
+  # Assembly files must go after -Mroot= but before -Msafety= etc.
+  lib_modules.each_key { |m| cmd_parts += ['--dep', m] }
+  all_modules.each { |m| cmd_parts += ['--dep', m] }
+  cmd_parts += ["-Mroot=#{tmp_name}", 'runtime/switch.S', 'runtime/onRoot.S']
+  lib_modules.each { |m, path| cmd_parts += ["-M#{m}=#{path}"] }
+  all_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
+  cmd_parts += ['-lc']
 
   unless module_mode
     cmd_parts += ['-O', opt_level] + extra_flags
@@ -477,7 +481,7 @@ when 'test'
     current_test = nil
     last_completed_test = nil
     leak_seen = {}
-    IO.popen("cd #{ZIG_DIR} && #{ZIG} test all-tests.zig -lc switch.S onRoot.S 2>&1") do |io|
+    IO.popen("cd #{ZIG_DIR} && #{ZIG} test --dep safety --dep ebr --dep ownership -Mroot=all-tests.zig runtime/switch.S runtime/onRoot.S -Msafety=lib/safety.zig -Mebr=lib/ebr.zig -Mownership=lib/ownership.zig -lc 2>&1") do |io|
       io.each_line do |line|
         # Zig test result format: "N/M all-tests.test.NAME...OK" or "...FAIL"
         # Result may be on the same line (inline) or a standalone "OK"/"FAIL" line.

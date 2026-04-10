@@ -7,7 +7,7 @@ const std = @import("std");
 const CheatHeader = @import("runtime-header.zig");
 const CheatLib = CheatHeader.CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
-const ebr_mod = @import("ebr.zig");
+const ebr_mod = @import("ebr");
 
 // A tagged union similar to json_parser's JsonValue
 const TestValue = union(enum) {

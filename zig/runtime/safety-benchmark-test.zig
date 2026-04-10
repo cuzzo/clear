@@ -1,5 +1,5 @@
 const std = @import("std");
-const safety = @import("safety.zig");
+const safety = @import("safety");
 
 // -------------------------------------------------------------------------
 // 1. TRIVIAL: Fibonacci (Tight Loop Recursion)

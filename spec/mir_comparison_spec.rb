@@ -515,7 +515,7 @@ RSpec.describe "MIR pipeline comparison" do
 
       zig = emitter.emit(program)
       expect(zig).to include('@import("std")')
-      expect(zig).to include('@import("runtime-header.zig")')
+      expect(zig).to include('@import("runtime/runtime-header.zig")')
       expect(zig).to include("Color")
       expect(zig).to include("enum")
       expect(zig).to include("clearMain")
@@ -560,7 +560,7 @@ RSpec.describe "MIR pipeline comparison" do
       CLEAR
       zig = ZigTranspiler.new.transpile_mir(src)
       expect(zig).to include('@import("std")')
-      expect(zig).to include('@import("runtime-header.zig")')
+      expect(zig).to include('@import("runtime/runtime-header.zig")')
       expect(zig).to include("CheatHeader.CheatLib")
       expect(zig).to include("Point")
       expect(zig).to include("clearMain")

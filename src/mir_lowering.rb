@@ -321,11 +321,11 @@ class MIRLowering
 
     # Standard imports
     items << MIR::Import.new("std", "std", nil)
-    items << MIR::Import.new("CheatHeader", "runtime-header.zig", nil)
+    items << MIR::Import.new("CheatHeader", "runtime/runtime-header.zig", nil)
     items << MIR::TypeAlias.new("CheatLib", "CheatHeader.CheatLib")
     items << MIR::TypeAlias.new("Runtime", "CheatHeader.Runtime")
     items << MIR::TypeAlias.new("EbrContext", "CheatHeader.EbrContext")
-    items << MIR::Import.new("safety", "safety.zig", nil) if needs_safety
+    items << MIR::Import.new("safety", "safety", nil) if needs_safety
 
     if use_c_allocator || @used_sharded_map
       items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")

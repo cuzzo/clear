@@ -76,7 +76,7 @@ const RunQueue = qs.RunQueue;
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;
 const fp = @import("scheduler.zig");
-const EbrContext = @import("ebr.zig").EbrContext;
+const EbrContext = @import("ebr").EbrContext;
 const fm = @import("fiber-memory.zig");
 
 const MAX_THREADS = 4;

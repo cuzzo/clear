@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const safety = @import("safety.zig");
+const safety = @import("safety");
 
 // Fibers
 

@@ -3,7 +3,7 @@ const std = @import("std");
 const CheatHeader = @import("runtime-header.zig");
 const CheatLib = CheatHeader.CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
-const ebr_mod = @import("ebr.zig");
+const ebr_mod = @import("ebr");
 
 fn trivialWork(rt: *Runtime) f64 {
     _ = rt;

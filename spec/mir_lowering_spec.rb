@@ -1793,7 +1793,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::Program)
       zig = emit(result)
       expect(zig).to include('@import("std")')
-      expect(zig).to include('@import("runtime-header.zig")')
+      expect(zig).to include('@import("runtime/runtime-header.zig")')
       expect(zig).to include("CheatLib")
       expect(zig).to include("Runtime")
       expect(zig).to include("EbrContext")
@@ -1813,7 +1813,7 @@ RSpec.describe MIRLowering do
       prog = AST::Program.new(tok, [])
       result = lowering.lower_program(prog, needs_safety: true)
       zig = emit(result)
-      expect(zig).to include('@import("safety.zig")')
+      expect(zig).to include('@import("safety")')
     end
 
     it "includes USE_C_ALLOCATOR when requested" do

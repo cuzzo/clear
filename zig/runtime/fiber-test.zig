@@ -16,7 +16,7 @@ fn milliTimestamp() i64 {
 const Stack = fc.Stack;
 const Fiber = fc.Fiber;
 const Context = fc.Context;
-const EbrContext = @import("ebr.zig").EbrContext;
+const EbrContext = @import("ebr").EbrContext;
 const Scheduler = fp.Scheduler;
 const WaitGroup = fp.WaitGroup;
 const StackPool = fm.StackPool;

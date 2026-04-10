@@ -44,8 +44,8 @@ class TestGenerator
 
     execution_block = if needs_scheduler
       <<~ZIG
-          const fm = @import("fiber-memory.zig");
-          const fp = @import("scheduler.zig");
+          const fm = @import("runtime/fiber-memory.zig");
+          const fp = @import("runtime/scheduler.zig");
           var stack_pool = fm.StackPool.init(t_alloc);
           defer stack_pool.deinit();
           var sched = try fp.Scheduler.init(t_alloc, &global_ctx, &stack_pool);
@@ -87,7 +87,7 @@ class TestGenerator
     end
 
     needs_safety = transpiled_body.include?("safety.")
-    safety_import = needs_safety ? "const safety = @import(\"safety.zig\");" : ""
+    safety_import = needs_safety ? "const safety = @import(\"safety\");" : ""
     <<~ZIG
       test "#{filename}" {
           #{safety_import}
@@ -150,7 +150,7 @@ end
 
 TEST_DIR = "transpile-tests"
 OUTPUT_FILE = "zig/all-tests.zig"
-HEADER_FILE = "zig/runtime-header.zig"
+HEADER_FILE = "zig/runtime/runtime-header.zig"
 
 puts "Generating #{OUTPUT_FILE}..."
 
@@ -159,7 +159,7 @@ File.open(OUTPUT_FILE, "w") do |f|
   if File.exist?(HEADER_FILE)
     f.puts "// --- RUNTIME HEADER ---"
     f.puts "const std = @import(\"std\");"
-    f.puts "const CheatHeader = @import(\"runtime-header.zig\");"
+    f.puts "const CheatHeader = @import(\"runtime/runtime-header.zig\");"
     f.puts "const CheatLib = CheatHeader.CheatLib;"
     f.puts "const Runtime = CheatHeader.Runtime;"
     f.puts "const EbrContext = CheatHeader.EbrContext;"

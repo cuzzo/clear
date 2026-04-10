@@ -105,7 +105,7 @@ class ZigTranspiler
       // -------------------------------------------------------------------------
       // 3. Main Entry (Test Harness)
       // -------------------------------------------------------------------------
-      #{File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime-footer.zig'))}
+      #{File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime', 'runtime-footer.zig'))}
     ZIG
   end
 
@@ -144,7 +144,7 @@ class ZigTranspiler
     type_defs_zig = mod_result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     body = [type_defs_zig, items_zig].reject(&:empty?).join("\n\n")
-    safety_line = body.include?("safety.") ? "const safety = @import(\"safety.zig\");\n" : ""
+    safety_line = body.include?("safety.") ? "const safety = @import(\"safety\");\n" : ""
 
     # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.

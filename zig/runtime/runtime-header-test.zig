@@ -3,7 +3,7 @@ const rt_mod = @import("runtime.zig");
 const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
 const fm = @import("fiber-memory.zig");
-const ebr = @import("ebr.zig");
+const ebr = @import("ebr");
 const header = @import("runtime-header.zig");
 
 // Import the C library

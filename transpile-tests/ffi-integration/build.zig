@@ -15,10 +15,18 @@ pub fn build(b: *std.Build) void {
     // cheat_runtime module
     // -----------------------------------------------------------------------
     const cheat_runtime_mod = b.createModule(.{
-        .root_source_file = b.path("../../zig/runtime-header.zig"),
+        .root_source_file = b.path("../../zig/runtime/runtime-header.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    // Named modules for cross-directory lib/ imports
+    const safety_mod = b.createModule(.{ .root_source_file = b.path("../../zig/lib/safety.zig") });
+    const ebr_mod = b.createModule(.{ .root_source_file = b.path("../../zig/lib/ebr.zig") });
+    const ownership_mod = b.createModule(.{ .root_source_file = b.path("../../zig/lib/ownership.zig") });
+    cheat_runtime_mod.addImport("safety", safety_mod);
+    cheat_runtime_mod.addImport("ebr", ebr_mod);
+    cheat_runtime_mod.addImport("ownership", ownership_mod);
 
     // -----------------------------------------------------------------------
     // native_math: pure Zig module (no CLEAR transpilation needed)
@@ -49,8 +57,8 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run CLEAR FFI integration tests");
 
     const integration_test = b.addTest(.{ .root_module = main_mod });
-    integration_test.addAssemblyFile(b.path("../../zig/switch.S"));
-    integration_test.addAssemblyFile(b.path("../../zig/onRoot.S"));
+    integration_test.addAssemblyFile(b.path("../../zig/runtime/switch.S"));
+    integration_test.addAssemblyFile(b.path("../../zig/runtime/onRoot.S"));
     integration_test.linkLibC();
 
     const run_test = b.addRunArtifact(integration_test);

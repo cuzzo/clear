@@ -19,7 +19,7 @@ const fm        = @import("fiber-memory.zig");
 
 const Scheduler = fp.Scheduler;
 const StackPool = fm.StackPool;
-const EbrContext = @import("ebr.zig").EbrContext;
+const EbrContext = @import("ebr").EbrContext;
 
 // comptime guard — force linker to include assembly trampolines
 comptime { _ = fc; }

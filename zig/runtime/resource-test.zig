@@ -7,7 +7,7 @@
 const std = @import("std");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
-const EbrContext = @import("ebr.zig").EbrContext;
+const EbrContext = @import("ebr").EbrContext;
 
 // comptime linker shims (matches pattern used in other test files)
 comptime {

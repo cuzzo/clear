@@ -4,11 +4,21 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Common paths
+    const switch_s = b.path("runtime/switch.S");
+    const onroot_s = b.path("runtime/onRoot.S");
+    const fiber_core_path = b.path("runtime/fiber-core.zig");
+
+    // Named modules for lib/ dependencies (leaf nodes, no cross-imports)
+    const safety_mod = b.createModule(.{ .root_source_file = b.path("lib/safety.zig") });
+    const ebr_mod = b.createModule(.{ .root_source_file = b.path("lib/ebr.zig") });
+    const ownership_mod = b.createModule(.{ .root_source_file = b.path("lib/ownership.zig") });
+
     // -------------------------------------------------------------------------
     // MODULES & EXECUTABLES
     // -------------------------------------------------------------------------
     const mod = b.addModule("zig", .{
-        .root_source_file = b.path("runtime.zig"),
+        .root_source_file = b.path("runtime/runtime.zig"),
         .target = target,
     });
 
@@ -22,12 +32,12 @@ pub fn build(b: *std.Build) void {
         .root_module = mod,
     });
 
-    mod_tests.root_module.addImport("fiber-core", b.createModule(.{
-        .root_source_file = b.path("fiber-core.zig"),
-    }));
-
-    mod_tests.addAssemblyFile(b.path("switch.S"));
-    mod_tests.addAssemblyFile(b.path("onRoot.S"));
+    mod_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+    mod_tests.root_module.addImport("safety", safety_mod);
+    mod_tests.root_module.addImport("ebr", ebr_mod);
+    mod_tests.root_module.addImport("ownership", ownership_mod);
+    mod_tests.addAssemblyFile(switch_s);
+    mod_tests.addAssemblyFile(onroot_s);
     mod_tests.linkLibC();
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
@@ -54,22 +64,19 @@ pub fn build(b: *std.Build) void {
     cmake_build.step.dependOn(&cmake_config.step);
 
     // STEP 2: Emit Bitcode (Zig -> BC)
-    // Equivalent to: zig test ... -femit-llvm-bc=... -fno-emit-bin
     const emit_bc = b.addSystemCommand(&.{
         b.graph.zig_exe,
         "test",
-        "fiber-overflow-test.zig",
-        "switch.S",
-        "onRoot.S",
+        "runtime/fiber-overflow-test.zig",
+        "runtime/switch.S",
+        "runtime/onRoot.S",
         "--library", "c",
-        "-O", "ReleaseSafe", // Keep stack frame small
+        "-O", "ReleaseSafe",
         b.fmt("-femit-llvm-bc={s}", .{raw_bc}),
         "-fno-emit-bin",
     });
-    // We don't depend on cmake here, but it's part of the flow
 
     // STEP 3: Instrument Bitcode (Opt -> BC)
-    // Equivalent to: opt -load-pass-plugin=... -passes="fiber-stack-check" ...
     const instrument_bc = b.addSystemCommand(&.{
         "opt",
         b.fmt("-load-pass-plugin={s}", .{pass_lib}),
@@ -77,25 +84,23 @@ pub fn build(b: *std.Build) void {
         raw_bc,
         "-o", instr_bc,
     });
-    instrument_bc.step.dependOn(&cmake_build.step); // Pass must exist
-    instrument_bc.step.dependOn(&emit_bc.step);     // Raw BC must exist
+    instrument_bc.step.dependOn(&cmake_build.step);
+    instrument_bc.step.dependOn(&emit_bc.step);
 
     // STEP 4: Compile Executable (Zig -> Exe)
-    // Equivalent to: zig build-exe fiber-test-instrumented.bc ...
     const build_exe = b.addSystemCommand(&.{
         b.graph.zig_exe,
         "build-exe",
         instr_bc,
-        "switch.S",
-        "onRoot.S",
+        "runtime/switch.S",
+        "runtime/onRoot.S",
         "--library", "c",
         "-O", "ReleaseSafe",
         "--name", runner_exe,
     });
     build_exe.step.dependOn(&instrument_bc.step);
 
-    // STEP 5: Run It (and snoop for TEST FAILED SUCCESFULLY)
-    // Equivalent to: ./fiber-test-runner
+    // STEP 5: Run It
     const run_cmd = b.addSystemCommand(&.{
         "sh", "-c",
         b.fmt(
@@ -116,42 +121,40 @@ pub fn build(b: *std.Build) void {
     test_stack_step.dependOn(&run_cmd.step);
 
     // -------------------------------------------------------------------------
-    // INDIVIDUAL TEST FILES
+    // INDIVIDUAL TEST FILES (all in runtime/)
     // -------------------------------------------------------------------------
-    // We add every test file found in your directory here.
     const test_files = [_][]const u8{
-        "arena-mode-test.zig",
-        "asm-test.zig",
-        "bounded-stream-test.zig",
-        "control-plane-test.zig",
-        "fiber-control-tests.zig",
-        "fiber-test.zig",
-        "frame-test.zig",
-        "inf-stream-test.zig",
-        "iouring-test.zig",
-        "ownership-test.zig",
-        "pool-test.zig",
-        "promote-list-test.zig",
-        "queues-test.zig",
-        "resource-test.zig",
-        "runtime-header-test.zig",
-        "semaphore-test.zig",
-        "shared-promise-test.zig",
-        "sharded-list-test.zig",
-        "sharded-pool-test.zig",
-        "slab-alloc-test.zig",
-        "soa-list-test.zig",
-        "soa-pool-test.zig",
-        "spsc-test.zig",
-        "spsc-scheduler-test.zig",
-        "stream-test.zig",
-        "vopr.zig",
-        "vopr-loom.zig",
-        "yield-test.zig",
+        "runtime/arena-mode-test.zig",
+        "runtime/asm-test.zig",
+        "runtime/bounded-stream-test.zig",
+        "runtime/control-plane-test.zig",
+        "runtime/fiber-control-tests.zig",
+        "runtime/fiber-test.zig",
+        "runtime/frame-test.zig",
+        "runtime/inf-stream-test.zig",
+        "runtime/iouring-test.zig",
+        "runtime/ownership-test.zig",
+        "runtime/pool-test.zig",
+        "runtime/promote-list-test.zig",
+        "runtime/queues-test.zig",
+        "runtime/resource-test.zig",
+        "runtime/runtime-header-test.zig",
+        "runtime/semaphore-test.zig",
+        "runtime/shared-promise-test.zig",
+        "runtime/sharded-list-test.zig",
+        "runtime/sharded-pool-test.zig",
+        "runtime/slab-alloc-test.zig",
+        "runtime/soa-list-test.zig",
+        "runtime/soa-pool-test.zig",
+        "runtime/spsc-test.zig",
+        "runtime/spsc-scheduler-test.zig",
+        "runtime/stream-test.zig",
+        "runtime/vopr.zig",
+        "runtime/vopr-loom.zig",
+        "runtime/yield-test.zig",
     };
 
     for (test_files) |filename| {
-        // Create a dedicated test executable for this file
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
@@ -160,20 +163,14 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
-        // ensure ASM symbols exist
-        unit_tests.root_module.addImport("fiber-core", b.createModule(.{
-            .root_source_file = b.path("fiber-core.zig"),
-        }));
-
-        // CRITICAL: Link the context switching assembly to every test.
-        // Even if a specific test doesn't use fibers, linking it doesn't hurt,
-        // and it ensures 'thread-test' and 'fiber-test' work correctly.
-        unit_tests.addAssemblyFile(b.path("switch.S"));
-        unit_tests.addAssemblyFile(b.path("onRoot.S"));
-
+        unit_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        unit_tests.root_module.addImport("safety", safety_mod);
+        unit_tests.root_module.addImport("ebr", ebr_mod);
+        unit_tests.root_module.addImport("ownership", ownership_mod);
+        unit_tests.addAssemblyFile(switch_s);
+        unit_tests.addAssemblyFile(onroot_s);
         unit_tests.linkLibC();
 
-        // Create the run step and attach it to the top-level 'test' command
         const run_unit_tests = b.addRunArtifact(unit_tests);
         test_step.dependOn(&run_unit_tests.step);
     }
@@ -184,19 +181,15 @@ pub fn build(b: *std.Build) void {
     const bench_step = b.step("benchmark", "Run performance benchmarks");
 
     const benchmark_files = [_][]const u8{
-        "arena-benchmark-test.zig",
-        "benchmark-test.zig",
-        "safety-benchmark-test.zig",
-        "slab-alloc-benchmark-test.zig",
-        "queues-benchmark-test.zig",
-        "scheduler-benchmark-test.zig",
-        "frame-cache-bench-test.zig",
+        "runtime/arena-benchmark-test.zig",
+        "runtime/benchmark-test.zig",
+        "runtime/safety-benchmark-test.zig",
+        "runtime/slab-alloc-benchmark-test.zig",
+        "runtime/queues-benchmark-test.zig",
+        "runtime/scheduler-benchmark-test.zig",
     };
 
     for (benchmark_files) |filename| {
-        // We usually want benchmarks to run in ReleaseFast mode
-        // to see real performance, but Debug is fine for development.
-        // You can use `zig build benchmark -Doptimize=ReleaseFast` to override.
         const bench_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
@@ -205,19 +198,16 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
-        bench_tests.root_module.addImport("fiber-core", b.createModule(.{
-            .root_source_file = b.path("fiber-core.zig"),
-        }));
-
-        bench_tests.addAssemblyFile(b.path("switch.S"));
-        bench_tests.addAssemblyFile(b.path("onRoot.S"));
+        bench_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        bench_tests.root_module.addImport("safety", safety_mod);
+        bench_tests.root_module.addImport("ebr", ebr_mod);
+        bench_tests.root_module.addImport("ownership", ownership_mod);
+        bench_tests.addAssemblyFile(switch_s);
+        bench_tests.addAssemblyFile(onroot_s);
         bench_tests.linkLibC();
 
-        // Optional: Benchmarks often output to stdout, which `zig build` hides by default.
-        // We can force it to show up.
         const run_bench = b.addRunArtifact(bench_tests);
         run_bench.has_side_effects = true;
-
         bench_step.dependOn(&run_bench.step);
     }
 
@@ -226,10 +216,9 @@ pub fn build(b: *std.Build) void {
     // -------------------------------------------------------------------------
     const hammer_step = b.step("hammer", "Run stress tests and race detectors");
 
-    // Tests with `test` blocks (zig test compatible)
     const hammer_test_files = [_][]const u8{
-        "arena-fuzz-test.zig",
-        "control-plane-hammer-test.zig",
+        "runtime/arena-fuzz-test.zig",
+        "runtime/control-plane-hammer-test.zig",
     };
 
     for (hammer_test_files) |filename| {
@@ -240,40 +229,42 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        hammer_tests.root_module.addImport("fiber-core", b.createModule(.{
-            .root_source_file = b.path("fiber-core.zig"),
-        }));
-        hammer_tests.addAssemblyFile(b.path("switch.S"));
-        hammer_tests.addAssemblyFile(b.path("onRoot.S"));
+        hammer_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        hammer_tests.root_module.addImport("safety", safety_mod);
+        hammer_tests.root_module.addImport("ebr", ebr_mod);
+        hammer_tests.root_module.addImport("ownership", ownership_mod);
+        hammer_tests.addAssemblyFile(switch_s);
+        hammer_tests.addAssemblyFile(onroot_s);
         hammer_tests.linkLibC();
         const run_hammer = b.addRunArtifact(hammer_tests);
         run_hammer.has_side_effects = true;
         hammer_step.dependOn(&run_hammer.step);
     }
 
-    // Standalone exe tests (pub fn main — bootstrap their own scheduler)
+    // Standalone exe tests (pub fn main -- bootstrap their own scheduler)
     const hammer_exe_files = [_][]const u8{
-        "shared-nothing-test.zig",
-        "routing-crash-test.zig",
-        "scheduler-race-test.zig",
-        "inbox-race-test.zig",
-        "io-pressure-test.zig",
+        "runtime/shared-nothing-test.zig",
+        "runtime/routing-crash-test.zig",
+        "runtime/scheduler-race-test.zig",
+        "runtime/inbox-race-test.zig",
+        "runtime/io-pressure-test.zig",
     };
 
     for (hammer_exe_files) |filename| {
         const hammer_exe = b.addExecutable(.{
-            .name = filename[0 .. filename.len - 4], // strip .zig
+            .name = std.fs.path.stem(filename),
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
                 .target = target,
                 .optimize = optimize,
             }),
         });
-        hammer_exe.root_module.addImport("fiber-core", b.createModule(.{
-            .root_source_file = b.path("fiber-core.zig"),
-        }));
-        hammer_exe.addAssemblyFile(b.path("switch.S"));
-        hammer_exe.addAssemblyFile(b.path("onRoot.S"));
+        hammer_exe.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        hammer_exe.root_module.addImport("safety", safety_mod);
+        hammer_exe.root_module.addImport("ebr", ebr_mod);
+        hammer_exe.root_module.addImport("ownership", ownership_mod);
+        hammer_exe.addAssemblyFile(switch_s);
+        hammer_exe.addAssemblyFile(onroot_s);
         hammer_exe.linkLibC();
         const run_hammer_exe = b.addRunArtifact(hammer_exe);
         run_hammer_exe.has_side_effects = true;
@@ -281,13 +272,13 @@ pub fn build(b: *std.Build) void {
     }
 
     // -------------------------------------------------------------------------
-    // VOPR — Deterministic simulation testing
+    // VOPR -- Deterministic simulation testing
     // -------------------------------------------------------------------------
     const vopr_step = b.step("vopr", "Run VOPR deterministic simulation tests");
     const vopr_exe = b.addExecutable(.{
         .name = "vopr",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("vopr.zig"),
+            .root_source_file = b.path("runtime/vopr.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
@@ -298,19 +289,23 @@ pub fn build(b: *std.Build) void {
     vopr_step.dependOn(&run_vopr.step);
 
     // -------------------------------------------------------------------------
-    // LOOM — Deterministic atomic interleaving tests
+    // LOOM -- Deterministic atomic interleaving tests
     // -------------------------------------------------------------------------
     const loom_step = b.step("loom", "Run Loom deterministic interleaving tests");
     const loom_exe = b.addExecutable(.{
         .name = "loom",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("vopr-loom.zig"),
+            .root_source_file = b.path("runtime/vopr-loom.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
     });
-    loom_exe.addAssemblyFile(b.path("switch.S"));
-    loom_exe.addAssemblyFile(b.path("onRoot.S"));
+    loom_exe.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+    loom_exe.root_module.addImport("safety", safety_mod);
+    loom_exe.root_module.addImport("ebr", ebr_mod);
+    loom_exe.root_module.addImport("ownership", ownership_mod);
+    loom_exe.addAssemblyFile(switch_s);
+    loom_exe.addAssemblyFile(onroot_s);
     loom_exe.linkLibC();
     const run_loom = b.addRunArtifact(loom_exe);
     run_loom.has_side_effects = true;
@@ -323,15 +318,18 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .name = "cheat-runtime",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("runtime-header.zig"),
+            .root_source_file = b.path("runtime/runtime-header.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
 
-    lib.addAssemblyFile(b.path("switch.S"));
-    lib.addAssemblyFile(b.path("onRoot.S"));
+    lib.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+    lib.root_module.addImport("safety", safety_mod);
+    lib.root_module.addImport("ebr", ebr_mod);
+    lib.root_module.addImport("ownership", ownership_mod);
+    lib.addAssemblyFile(switch_s);
+    lib.addAssemblyFile(onroot_s);
     lib.linkLibC();
     b.installArtifact(lib);
 }
-
