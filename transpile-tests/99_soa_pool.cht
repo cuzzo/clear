@@ -86,10 +86,28 @@ FN main() RETURNS Void ->
     ASSERT length(arr_alive) == 2, "arr WHERE health > 0 should have 2";
     ASSERT length(pool_alive) == 2, "pool WHERE health > 0 should have 2";
 
-    -- EACH (mutate via SOA field-slice rewriting)
-    fixed s> EACH { _.x = _.x + 1.0; };
-    fixed_sum2 = fixed s> SUM _.x;
-    ASSERT fixed_sum2 == 93, "fixed SUM x after EACH should be 93";
+    -- EACH: single constant field write
+    pool s> EACH { _.health = 42.0; };
+    each_sum = pool s> SUM _.health;
+    ASSERT each_sum == 126.0, "EACH set health=42, sum should be 126";
+
+    -- EACH: multiple field writes in one body
+    pool s> EACH { _.x = 1.0; _.y = 2.0; };
+    each_sx = pool s> SUM _.x;
+    each_sy = pool s> SUM _.y;
+    ASSERT each_sx == 3.0, "EACH set x=1, sum should be 3";
+    ASSERT each_sy == 6.0, "EACH set y=2, sum should be 6";
+
+    -- EACH: write with expression RHS (no field read)
+    pool s> EACH { _.vx = 3.0 + 4.0; };
+    each_vx = pool s> SUM _.vx;
+    ASSERT each_vx == 21.0, "EACH set vx=7, sum should be 21";
+
+    -- EACH: alive-check -- remove one entity, EACH should skip dead slot
+    pool.remove(pool.insert(Entity{ x: 0, y: 0, vx: 0, vy: 0, health: 0 }));
+    pool s> EACH { _.vy = 10.0; };
+    each_vy = pool s> SUM _.vy;
+    ASSERT each_vy == 30.0, "EACH should skip dead slots, sum vy should be 30";
 
     RETURN;
 END
