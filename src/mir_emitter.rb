@@ -385,10 +385,10 @@ class MIREmitter
       guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g)
 
     when :heap_string, :takes_string
-      guarded_defer(name, "rt.heapAlloc().free(#{name})", g)
+      guarded_defer(name, "#{alloc}.free(#{name})", g)
 
     when :heap_slice, :heap_union, :heap_struct
-      guarded_cleanup(name, zig_type, "rt.heapAlloc()", g)
+      guarded_cleanup(name, zig_type, alloc, g)
 
     when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
       guarded_cleanup(name, zig_type, alloc, g)
@@ -400,11 +400,11 @@ class MIREmitter
       if entry[:is_fixed]
         guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g)
       else
-        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } }", g)
+        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g)
       end
 
     when :takes_union
-      guarded_cleanup(name, zig_type, "rt.heapAlloc()", g)
+      guarded_cleanup(name, zig_type, alloc, g)
 
     when :takes_slice, :match_as_slice
       body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"

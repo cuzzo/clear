@@ -134,10 +134,10 @@ module OwnershipGenerator
       conditional_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", guarded: g)
 
     when :heap_string, :takes_string
-      conditional_defer(name, "rt.heapAlloc().free(#{name})", guarded: g)
+      conditional_defer(name, "#{alloc}.free(#{name})", guarded: g)
 
     when :heap_slice, :heap_union, :heap_struct
-      conditional_cleanup(name, zig_type, "rt.heapAlloc()", guarded: g)
+      conditional_cleanup(name, zig_type, alloc, guarded: g)
 
     when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
       conditional_cleanup(name, zig_type, alloc, guarded: g)
@@ -149,11 +149,11 @@ module OwnershipGenerator
       if entry[:is_fixed]
         conditional_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", guarded: g)
       else
-        conditional_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.heapAlloc(), __e); } }", guarded: g)
+        conditional_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", guarded: g)
       end
 
     when :takes_union
-      conditional_cleanup(name, zig_type, "rt.heapAlloc()", guarded: g)
+      conditional_cleanup(name, zig_type, alloc, guarded: g)
 
     when :takes_slice
       conditional_defer(name, "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }", guarded: g)
