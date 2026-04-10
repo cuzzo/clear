@@ -3113,7 +3113,7 @@ class MIRLowering
         stmts = [
           MIR::Let.new("__hpt_ret", value, true, zig_t, nil),
           MIR::ExprStmt.new(
-            MIR::Call.new("CheatLib.promote", [MIR::Ident.new(zig_t), rt, MIR::AddressOf.new(MIR::Ident.new("__hpt_ret"))], true), false),
+            MIR::Call.new("CheatLib.promoteDeep", [MIR::Ident.new(zig_t), rt, MIR::AddressOf.new(MIR::Ident.new("__hpt_ret"))], true), false),
           MIR::ReturnStmt.new(MIR::Ident.new("__hpt_ret"))
         ]
         MIR::ScopeBlock.new(stmts)

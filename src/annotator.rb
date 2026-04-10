@@ -3851,6 +3851,10 @@ private
       matched_def = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
       if matched_def.is_a?(Hash) && matched_def[:return_alloc]
         ti.cleanup_alloc = matched_def[:return_alloc]
+        # Only set provenance when the function always allocates on heap
+        # (alloc: :heap), not when it uses the call site's allocator
+        # (alloc: :node_storage) which could be frame or heap.
+        ti.provenance ||= :heap if matched_def[:alloc] == :heap
         return
       end
     end

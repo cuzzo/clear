@@ -21,10 +21,11 @@
 class StaticLeakChecker
   attr_reader :errors
 
-  def initialize(fn_node, bindings:, can_fail_fns: nil)
+  def initialize(fn_node, bindings:, can_fail_fns: nil, schema_lookup: nil)
     @fn = fn_node
     @bindings = bindings || {}
     @can_fail_fns = can_fail_fns
+    @schema_lookup = schema_lookup
     @errors = []
   end
 
@@ -67,6 +68,16 @@ class StaticLeakChecker
       check_escapes!(escapes, drops)
       check_frame_escapes!(escapes, promotes)
       check_reassign_completeness!(reassign_cleanups)
+    end
+
+    # ── INDEPENDENT OWNERSHIP VERIFICATION ──
+    # Re-derive what needs cleanup from first principles (dataflow + type),
+    # independent of CleanupClassifier. Catches classifier gaps.
+    if @schema_lookup
+      df ||= OwnershipDataflow.analyze(@fn, can_fail_fns: @can_fail_fns)
+      df_summary ||= df.cleanup_summary
+      check_independent_ownership!(allocs, drops, df_summary)
+      check_field_ownership!(@fn.body)
     end
 
     # Universal invariant: every guarded Drop must have a SuppressCleanup or
@@ -526,6 +537,160 @@ class StaticLeakChecker
     Set.new((@fn.deferred_drops || [])
       .select { |dd| @fn.params&.any? { |p| p[:name] == dd[:name] && p[:takes] } }
       .map { |dd| dd[:name].to_s })
+  end
+
+  # ── Independent Ownership Verification ──────────────────────────
+  #
+  # Re-derives what needs cleanup from first principles:
+  #   1. OwnershipDataflow says which bindings are OWNED at function exit
+  #   2. Type + provenance says which of those need cleanup
+  #   3. Cross-reference against MIR events to find mismatches
+  #
+  # This catches any binding that the classifier missed. If the dataflow
+  # says OWNED + the type says needs_cleanup but there's no MIR::Drop,
+  # that's a guaranteed leak and compilation must fail.
+  def check_independent_ownership!(allocs, drops, df_summary)
+    # Build declaration map: { var_name => AST::VarDecl/BindExpr }
+    declarations = {}
+    collect_declarations(@fn.body, declarations)
+    # Also check TAKES parameters via deferred_drops
+    (@fn.deferred_drops || []).each do |dd|
+      name = dd.is_a?(Hash) ? dd[:name].to_s : dd.to_s
+      declarations[name] ||= dd
+    end
+
+    takes = takes_param_names
+
+    df_summary.each do |name, df_entry|
+      next unless df_entry[:needs_cleanup]  # MOVED on all paths -> skip
+
+      # Skip if already in @bindings with needs_cleanup -- existing checks handle it
+      next if @bindings.key?(name) && @bindings[name][:needs_cleanup]
+
+      # Skip TAKES params that are already handled
+      next if takes.include?(name) && @bindings.key?(name)
+
+      # Find declaration and get type info
+      decl = declarations[name]
+      next unless decl
+
+      ti = if decl.is_a?(Hash)
+        # deferred_drops entry
+        t = decl[:type]
+        t.is_a?(Type) ? t : (t ? Type.new(t) : nil)
+      else
+        t = decl.type_info rescue nil
+        t && !t.is_a?(Type) ? Type.new(t) : t
+      end
+      next unless ti
+
+      # Does this type independently need cleanup?
+      next unless ti.needs_cleanup?(@schema_lookup)
+
+      # This binding needs cleanup but the classifier missed it.
+      # Verify MIR nodes exist.
+      has_alloc = allocs.key?(name) || takes.include?(name)
+      has_drop = drops.key?(name)
+
+      # If NEITHER alloc nor drop exists, the binding is a container
+      # borrow or shallow copy (e.g. `item = map["key"]`).  The
+      # container owns the data -- individual cleanup would double-free.
+      # Only flag when alloc exists without matching drop (real leak).
+      next if !has_alloc && !has_drop
+
+      unless has_alloc
+        @errors << error(:LEAK, name,
+          "ownership verifier: OWNED at exit, type #{ti.resolved} needs cleanup, " \
+          "but no MIR::Alloc (missed by classifier)")
+      end
+      unless has_drop
+        @errors << error(:LEAK, name,
+          "ownership verifier: OWNED at exit, type #{ti.resolved} needs cleanup, " \
+          "but no MIR::Drop (missed by classifier)")
+      end
+    end
+  end
+
+  # Walk function body collecting VarDecl/BindExpr(decl) declarations.
+  def collect_declarations(stmts, declarations)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::VarDecl
+        declarations[stmt.name.to_s] = stmt
+      when AST::BindExpr
+        declarations[stmt.name.to_s] = stmt if stmt.mode == :decl
+      end
+      # Recurse into all control flow
+      case stmt
+      when AST::IfStatement
+        collect_declarations(stmt.then_branch, declarations)
+        collect_declarations(stmt.else_branch, declarations)
+      when AST::WhileLoop
+        collect_declarations(stmt.do_branch, declarations)
+      when AST::ForRange, AST::ForEach
+        collect_declarations(stmt.body, declarations)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| collect_declarations(c[:body], declarations) }
+        collect_declarations(stmt.default_case, declarations)
+      when AST::WithBlock
+        collect_declarations(stmt.body, declarations)
+      when AST::DoBlock
+        stmt.branches&.each { |b| collect_declarations(b[:body], declarations) }
+      when AST::BgBlock, AST::BgStreamBlock
+        collect_declarations(stmt.body, declarations)
+      end
+    end
+  end
+
+  # Verify that every field assignment to an owned field has pre-cleanup.
+  # Without pre-cleanup, the old field value leaks when overwritten.
+  def check_field_ownership!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      if stmt.is_a?(AST::Assignment) && stmt.name.is_a?(AST::GetField)
+        target = stmt.name.target
+        if target.is_a?(AST::Identifier)
+          field_ti = stmt.name.type_info rescue nil
+          field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+
+          target_entry = @bindings[target.name.to_s]
+          needs_field_cleanup = false
+
+          if field_ti&.needs_cleanup?(@schema_lookup)
+            needs_field_cleanup = true
+          elsif field_ti&.string? && target_entry && target_entry[:alloc] == :heap
+            # Heap struct's string fields are heap-duped at creation.
+            # Overwriting leaks the old heap string.
+            needs_field_cleanup = true
+          end
+
+          if needs_field_cleanup && !stmt.field_pre_cleanup
+            line = stmt.token&.line || "?"
+            @errors << "[FIELD_LEAK] #{@fn.name}::#{target.name}.#{stmt.name.field} " \
+                       "(line #{line}) -- field reassignment without pre-cleanup (old value leaks)"
+          end
+        end
+      end
+
+      # Recurse into control flow
+      case stmt
+      when AST::IfStatement
+        check_field_ownership!(stmt.then_branch)
+        check_field_ownership!(stmt.else_branch)
+      when AST::WhileLoop
+        check_field_ownership!(stmt.do_branch)
+      when AST::ForRange, AST::ForEach
+        check_field_ownership!(stmt.body)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| check_field_ownership!(c[:body]) }
+        check_field_ownership!(stmt.default_case)
+      when AST::WithBlock
+        check_field_ownership!(stmt.body)
+      when AST::DoBlock
+        stmt.branches&.each { |b| check_field_ownership!(b[:body]) }
+      end
+    end
   end
 
   def error(kind, name, msg)

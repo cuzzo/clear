@@ -718,10 +718,9 @@ class MIRPass
 
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      bindings = @cleanup_bindings[stmt.name]
-      next unless bindings && !bindings.empty?
+      bindings = @cleanup_bindings[stmt.name] || {}
 
-      checker = StaticLeakChecker.new(stmt, bindings: bindings, can_fail_fns: can_fail_fns)
+      checker = StaticLeakChecker.new(stmt, bindings: bindings, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
       errors = checker.check!
       unless errors.empty?
         raise "Your code is correct. This is a compiler error. Sorry for the inconvenience.\n\n#{errors.join("\n")}"

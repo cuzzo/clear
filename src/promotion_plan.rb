@@ -243,6 +243,16 @@ module CleanupClassifier
         next
       end
 
+      # Heap struct string fields: heap-allocated structs dupe their string
+      # fields to heap at creation. Overwriting without freeing the old leaks.
+      if field_ti&.string? && !field_ti&.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
+        target_entry = bindings[target_node.name.to_s]
+        if target_entry && target_entry[:alloc] == :heap
+          stmt.field_pre_cleanup = { zig_type: "[]const u8", alloc: :heap }
+          next
+        end
+      end
+
       next unless field_ti&.needs_cleanup?(schema_lookup)
 
       alloc = if target_node.is_a?(AST::Identifier)

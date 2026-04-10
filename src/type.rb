@@ -1023,6 +1023,7 @@ class Type
     return true if map?  # includes numeric_map
     return true if pool?
     return true if set_collection?
+    return true if string? && heap_provenance?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash)

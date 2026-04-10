@@ -217,6 +217,7 @@ pub const CheatLib = struct {
     // Keys are re-copied to heapAlloc by mapPromote() when the map escapes its frame.
     pub fn mapPut(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
         if (map.getPtr(key)) |val_ptr| {
+            cleanup(V, bucket_alloc, val_ptr);
             val_ptr.* = value;
             return;
         }
@@ -2405,15 +2406,93 @@ pub const CheatLib = struct {
         try promote(T, rt, value);
     }
 
+    /// Deep promote: unconditionally dupe ALL strings (including heap).
+    /// Used for HPT independence -- the source is about to be freed,
+    /// so the returned copy must own its own data regardless of allocator.
+    pub fn promoteDeep(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
+        const info = @typeInfo(T);
+
+        if (T == []const u8 or T == []u8) {
+            if (value.len == 0) return;
+            value.* = try rt.heapAlloc().dupe(u8, value.*);
+            return;
+        }
+
+        if (comptime isArrayList(T)) {
+            const ElemT = comptime arrayListElemType(T).?;
+            try promoteList(ElemT, rt, value);
+            if (comptime needsPromotion(ElemT)) {
+                for (value.items) |*elem| {
+                    try promoteDeep(ElemT, rt, elem);
+                }
+            }
+            return;
+        }
+
+        if (comptime isStringMap(T)) {
+            value.alloc = rt.heapAlloc();
+            return;
+        }
+
+        if (info == .@"union" and info.@"union".tag_type != null) {
+            inline for (info.@"union".fields) |field| {
+                if (comptime needsPromotion(field.type)) {
+                    if (std.meta.activeTag(value.*) == @field(std.meta.Tag(T), field.name)) {
+                        const FT = field.type;
+                        const ft_info = @typeInfo(FT);
+                        if (ft_info == .pointer and ft_info.pointer.size == .one and
+                            @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
+                        {
+                            const ChildT = ft_info.pointer.child;
+                            if (comptime needsPromotion(ChildT)) {
+                                try promoteDeep(ChildT, rt, @field(value, field.name));
+                            }
+                        } else {
+                            try promoteDeep(FT, rt, &@field(value, field.name));
+                        }
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        if (info == .@"struct") {
+            inline for (info.@"struct".fields) |field| {
+                const FT = field.type;
+                const ft_info = @typeInfo(FT);
+                if (ft_info == .pointer and ft_info.pointer.size == .one and
+                    @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
+                {
+                    const ChildT = ft_info.pointer.child;
+                    if (comptime needsPromotion(ChildT)) {
+                        try promoteDeep(ChildT, rt, @field(value, field.name));
+                    }
+                } else if (comptime needsPromotion(FT)) {
+                    try promoteDeep(FT, rt, &@field(value, field.name));
+                }
+            }
+            return;
+        }
+    }
+
     /// Generic comptime promotion: walks any type and dupes all frame-arena
     /// data to heap. Handles strings, ArrayLists, StringMaps, structs, and
     /// tagged unions recursively. No-op for primitives (comptime eliminated).
     pub fn promote(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
         const info = @typeInfo(T);
 
-        // 1. Strings: dupe to heap
+        // 1. Strings: dupe only frame-arena strings to heap.
+        // Heap strings (from COPY, toString, etc.) are already escaped —
+        // duping them again leaks the original.
         if (T == []const u8 or T == []u8) {
-            value.* = try rt.heapAlloc().dupe(u8, value.*);
+            if (value.len == 0) return;
+            const frame_mem = rt.overflow_arena.static_block;
+            const p = @intFromPtr(value.*.ptr);
+            const frame_base = @intFromPtr(frame_mem.ptr);
+            if (p >= frame_base and p < frame_base + frame_mem.len) {
+                value.* = try rt.heapAlloc().dupe(u8, value.*);
+            }
             return;
         }
 
@@ -3752,7 +3831,8 @@ pub const CheatLib = struct {
                     const c: *@This() = @ptrCast(@alignCast(raw));
                     if (c.map.shards[c.shard].map.fetchRemove(c.key)) |kv| {
                         remote_alloc.free(kv.key);
-                        if (is_slice_value) remote_alloc.free(kv.value);
+                        var val = kv.value;
+                        CheatLib.cleanup(V, remote_alloc, &val);
                     }
                     c.done.store(true, .release);
                 }
@@ -3859,7 +3939,7 @@ pub const CheatLib = struct {
             pub fn putDirect(self: *Self, shard: usize, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 const gop = try self.shards[shard].map.getOrPut(alloc, key);
                 if (gop.found_existing) {
-                    if (comptime is_slice_value) alloc.free(gop.value_ptr.*);
+                    CheatLib.cleanup(V, alloc, gop.value_ptr);
                 } else {
                     gop.key_ptr.* = try alloc.dupe(u8, key);
                 }
@@ -3944,7 +4024,7 @@ pub const CheatLib = struct {
                     var it = shard.map.iterator();
                     while (it.next()) |entry| {
                         remote_alloc.free(entry.key_ptr.*);
-                        if (is_slice_value) remote_alloc.free(entry.value_ptr.*);
+                        CheatLib.cleanup(V, remote_alloc, entry.value_ptr);
                     }
                     shard.map.deinit(remote_alloc);
                 }
@@ -3987,6 +4067,7 @@ pub const CheatLib = struct {
                 self.shards[s].lock.lock();
                 defer self.shards[s].lock.unlock();
                 if (self.shards[s].map.getPtr(key)) |val_ptr| {
+                    CheatLib.cleanup(V, self.alloc, val_ptr);
                     val_ptr.* = value;
                     return;
                 }
@@ -4015,6 +4096,8 @@ pub const CheatLib = struct {
                 defer self.shards[s].lock.unlock();
                 if (self.shards[s].map.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
+                    var val = kv.value;
+                    CheatLib.cleanup(V, self.alloc, &val);
                 }
             }
 
@@ -4055,7 +4138,10 @@ pub const CheatLib = struct {
                 _ = bucket_alloc;
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
-                    while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+                    while (it.next()) |entry| {
+                        self.alloc.free(entry.key_ptr.*);
+                        CheatLib.cleanup(V, self.alloc, entry.value_ptr);
+                    }
                     shard.map.deinit(self.alloc);
                 }
             }
@@ -4160,6 +4246,7 @@ pub const CheatLib = struct {
                 defer self.shards[s].lock.unlock();
                 // Update in-place if key exists (avoids key re-dupe and leak).
                 if (self.shards[s].map.getPtr(key)) |val_ptr| {
+                    CheatLib.cleanup(V, self.alloc, val_ptr);
                     val_ptr.* = value;
                     return;
                 }
@@ -4188,6 +4275,8 @@ pub const CheatLib = struct {
                 defer self.shards[s].lock.unlock();
                 if (self.shards[s].map.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
+                    var val = kv.value;
+                    CheatLib.cleanup(V, self.alloc, &val);
                 }
             }
 
@@ -4240,7 +4329,10 @@ pub const CheatLib = struct {
                 }
                 for (&self.shards) |*shard| {
                     var it = shard.map.iterator();
-                    while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+                    while (it.next()) |entry| {
+                        self.alloc.free(entry.key_ptr.*);
+                        CheatLib.cleanup(V, self.alloc, entry.value_ptr);
+                    }
                     shard.map.deinit(self.alloc);
                 }
             }
