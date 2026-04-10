@@ -105,12 +105,41 @@ class TestGenerator
       }
     ZIG
   end
+
+  # Generate a complete single-file zig test (header + one test block).
+  def generate_single_test(filename, cheat_code, source_dir: Dir.pwd)
+    block = generate_test_block(filename, cheat_code, source_dir: source_dir)
+    <<~ZIG
+      const std = @import("std");
+      const CheatHeader = @import("runtime-header.zig");
+      const CheatLib = CheatHeader.CheatLib;
+      const Runtime = CheatHeader.Runtime;
+      const EbrContext = CheatHeader.EbrContext;
+
+      #{block}
+    ZIG
+  end
 end
 
 # --- Script Execution ---
 
 # Accept --mir for backward compatibility (ignored, MIR is always used)
 ARGV.delete('--mir')
+
+# Single-file mode: ruby gen.rb --single foo.cht
+# Outputs a complete zig test file to stdout.
+if ARGV.delete('--single')
+  test_file = ARGV.first
+  unless test_file && File.exist?(test_file)
+    $stderr.puts "Usage: ruby gen.rb --single <file.cht>"
+    exit 1
+  end
+  code = File.read(test_file)
+  source_dir = File.expand_path(File.dirname(test_file))
+  generator = TestGenerator.new
+  puts generator.generate_single_test(File.basename(test_file), code, source_dir: source_dir)
+  exit 0
+end
 
 TEST_DIR = "transpile-tests"
 OUTPUT_FILE = "zig/all-tests.zig"

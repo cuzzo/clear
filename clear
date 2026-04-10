@@ -543,14 +543,41 @@ when 'test'
     puts
     exit(failed_names.any? ? 1 : 0)
   else
-    output = do_build(source, module_mode: true, profile: !!profile_mode, strict_test: !!strict_mode)
-    if output.include?('FAIL') || !$?.success?
+    source = File.expand_path(source)
+    gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
+
+    # Transpile via gen.rb --single to get a proper zig test block
+    zig_code = `ruby #{gen_script} --single #{source} 2>/dev/null`
+    unless $?.success?
+      # Re-run with stderr visible for error messages
+      system("ruby #{gen_script} --single #{source} > /dev/null")
+      error "Transpilation failed"
+    end
+
+    # Write to per-process build dir
+    base_name = File.basename(source, '.cht')
+    build_dir = File.join(ZIG_DIR, ".build-#{$$}")
+    FileUtils.mkdir_p(build_dir)
+    Dir.glob(File.join(ZIG_DIR, '*.{zig,S}')).each do |f|
+      dst = File.join(build_dir, File.basename(f))
+      File.symlink(f, dst) unless File.exist?(dst)
+    end
+    tmp_name = "._clear_tmp_#{base_name}.zig"
+    tmp_zig = File.join(build_dir, tmp_name)
+    File.write(tmp_zig, zig_code)
+
+    # Compile and run with zig test
+    cmd = "#{ZIG} test #{tmp_name} -lc switch.S onRoot.S --test-filter \"#{File.basename(source)}\""
+    compile_output = `cd #{build_dir} && #{cmd} 2>&1`
+    success = $?.success?
+    FileUtils.rm_rf(build_dir)
+
+    if !success || compile_output.include?('FAIL')
       $stderr.puts "\e[31m\e[1mTEST FAILED\e[0m"
-      $stderr.puts output
+      $stderr.puts compile_output
       exit 1
     end
-    # Print pass count from test output if available
-    puts output unless output.strip.empty?
+    puts compile_output unless compile_output.strip.empty?
     exit 0
   end
 
