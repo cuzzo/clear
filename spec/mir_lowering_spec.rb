@@ -815,11 +815,25 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers raise" do
-      node = AST::Raise.new(tok, :ERROR, nil, nil)
+      msg = AST::Literal.new(tok, :String, "timed out")
+      msg.full_type = :String
+      node = AST::Raise.new(tok, :Transient, :Timeout, msg)
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::ReturnStmt)
-      expect(emit(result)).to include("return error.CheatError")
+      expect(result).to be_a(MIR::ScopeBlock)
+      code = emit(result)
+      expect(code).to include('setError(.Transient, "Timeout"')
+      expect(code).to include("return error.CheatError")
+    end
+
+    it "lowers raise with no message" do
+      node = AST::Raise.new(tok, :NotFound, nil, nil)
+      node.full_type = :Void
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::ScopeBlock)
+      code = emit(result)
+      expect(code).to include('setError(.NotFound, ""')
+      expect(code).to include("return error.CheatError")
     end
   end
 

@@ -2523,7 +2523,21 @@ class MIRLowering
   end
 
   def lower_raise(node)
-    MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    rt = MIR::Ident.new(@rt_name)
+    kind = ".#{node.kind || :Unknown}"
+    error_name = node.error_name ? node.error_name.to_s : ""
+    msg_expr = node.message_expr ? lower(node.message_expr) : MIR::Lit.new('""')
+    line = node.token.line.to_s
+
+    set_error = MIR::MethodCall.new(rt, "setError", [
+      MIR::Ident.new(kind),
+      MIR::Lit.new("\"#{error_name}\""),
+      msg_expr,
+      MIR::Lit.new(line)
+    ], false)
+
+    ret = MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    MIR::ScopeBlock.new([MIR::ExprStmt.new(set_error, false), ret])
   end
 
   # ================================================================
