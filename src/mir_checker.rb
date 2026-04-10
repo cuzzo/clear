@@ -1,23 +1,26 @@
 # mir_checker.rb -- Post-MIRLowering ownership verification.
 #
-# Runs AFTER MIRLowering produces the final MIR tree -- verifies the SAME
-# code that MIREmitter will emit to Zig. This closes the gap where the old
-# StaticLeakChecker verified AST+markers that were then transformed by
-# MIRLowering into different code.
+# Enforces the same invariants as Rust's ownership model:
+#   1. Every heap allocation has exactly one owner (binding with cleanup).
+#   2. At scope exit, cleanup all owned bindings.
+#   3. Moves transfer ownership; source cleanup is suppressed via guard.
+#   4. Frame-allocated values cannot escape their scope without promotion.
 #
-# Checks performed:
-#   LEAK           -- AllocMark without matching Cleanup (missing cleanup)
-#   GUARD          -- maybe-moved binding's Cleanup lacks moved guard (double-free)
-#   ORPHAN         -- Cleanup/AllocMark without counterpart
-#   ALLOC_MISMATCH -- AllocMark and Cleanup disagree on allocator; INV-9 catch paths
-#   ESCAPE         -- ReturnMark escape without guarded Cleanup
-#   FRAME_ESCAPE   -- frame binding escapes without EscapePromote
-#   BG_ESCAPE      -- BG capture needs escape promotion but no EscapePromote found
-#   GUARD_NO_SUPPRESS -- guarded Cleanup with no MoveMark (dead guard)
-#   FIELD_LEAK      -- field assignment without pre-cleanup (old value leaks)
-#   HPT_LEAK        -- heap-returning call result discarded (leak)
+# Error codes:
+#   LEAK             -- allocation without matching cleanup
+#   ORPHAN           -- cleanup/move without matching allocation
+#   ALLOC_MISMATCH   -- allocation and cleanup disagree on allocator
+#   ESCAPE           -- value escapes via return without guarded cleanup
+#   FRAME_ESCAPE     -- frame value escapes without promotion (use-after-free)
+#   BG_ESCAPE        -- BG capture needs promotion but none found (use-after-free)
+#   GUARD_NO_SUPPRESS -- guarded cleanup with no move/return to trigger it
+#   REASSIGN_LEAK    -- reassignment without pre-cleanup of old value
+#   FIELD_LEAK       -- field assignment without pre-cleanup of old value
+#   HPT_LEAK         -- heap-returning call result discarded
+#   FRAME_OVERFLOW   -- loop allocates from frame arena without per-iteration rewind
+#   RAW_CONTRACT     -- RawZig ownership contract violation (deprecated)
 #
-# Design: ONE generic walk, ~15 MIR node types, zero AST dependencies.
+# Design: single tree walk collects all data; simple set comparisons verify.
 
 require_relative "type"
 
@@ -34,38 +37,56 @@ class MIRChecker
     @fn_name = fn_def.name
     @errors = []
 
-    allocs     = {}  # name => [AllocMark]
-    cleanups   = {}  # name => [Cleanup]
-    promotes   = {}  # name => [EscapePromote]
+    # Collection bins -- populated by single tree walk.
+    allocs     = {}       # name => [AllocMark]
+    cleanups   = {}       # name => [Cleanup]
+    promotes   = {}       # name => [EscapePromote]
     escapes    = Set.new  # var names from ReturnMark
     moves      = Set.new  # var names from MoveMark
-    reassigns  = {}  # name => ReassignMark
-    field_marks = [] # FieldCleanupMark nodes
-    raw_nodes  = []  # RawZig/InlineZig nodes
-    bg_blocks  = []  # BgBlock nodes
-    catch_wrappers = [] # CatchWrapper nodes
-    lambdas    = []  # LambdaExpr fn_defs (checked as separate scopes)
+    reassigns  = {}       # name => ReassignMark
+    raw_nodes  = []       # RawZig/InlineZig with ownership_contract
+    bg_blocks  = []       # BgBlock nodes
+    catch_wrappers = []   # CatchWrapper nodes
+    lambdas    = []       # LambdaExpr fn_defs (checked as separate scopes)
 
-    # Single pass: collect all marker nodes from the MIR tree.
-    walk_mir(fn_def.body) do |node|
+    # Inline detections -- collected during the same walk.
+    reassign_targets = Set.new  # names targeted by MIR::Set
+    field_leaks      = []       # MIR::Set with needs_field_cleanup
+    hpt_leaks        = []       # ExprStmt with discarded heap calls
+    loop_stack       = []       # tracks current loop nesting for frame overflow
+
+    # Single pass: collect all markers and detect inline issues.
+    walk_mir(fn_def.body) do |node, context|
       case node
       when MIR::AllocMark
         (allocs[node.name] ||= []) << node
+        # Track frame allocs inside loops for FRAME_OVERFLOW
+        if context[:in_loop] && node.alloc == :frame
+          context[:in_loop][:has_frame_alloc] = true
+        end
       when MIR::Cleanup
         (cleanups[node.name] ||= []) << node
       when MIR::EscapePromote
-        name = node.name
-        (promotes[name] ||= []) << node if name
+        (promotes[node.name] ||= []) << node if node.name
       when MIR::ReturnMark
         (node.escaped_vars || []).each { |v| escapes << v.to_s }
       when MIR::MoveMark
         moves << node.name.to_s
       when MIR::ReassignMark
         reassigns[node.name] = node
-      when MIR::FieldCleanupMark
-        field_marks << node
+      when MIR::Set
+        # Collect reassignment targets
+        reassign_targets << node.target.name.to_s if node.target.is_a?(MIR::Ident)
+        # Detect field leaks inline
+        if node.needs_field_cleanup
+          field_leaks << extract_field_path(node.target)
+        end
+      when MIR::ExprStmt
+        # Detect discarded heap-returning calls inline
+        scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
       when MIR::RawZig, MIR::InlineZig
-        raw_nodes << node
+        contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
+        raw_nodes << node if contract
       when MIR::BgBlock
         bg_blocks << node
       when MIR::CatchWrapper
@@ -75,33 +96,32 @@ class MIRChecker
       end
     end
 
-    # Reconstruct bindings from AllocMark + Cleanup pairs.
-    bindings = {}
-    allocs.each do |name, anodes|
-      bindings[name] = { alloc: anodes.first.alloc, kind: anodes.first.kind }
-    end
-    cleanups.each do |name, cnodes|
-      entry = cnodes.first.cleanup_entry || {}
-      bindings[name] ||= {}
-      bindings[name][:has_moved_guard] = entry[:has_moved_guard]
-      bindings[name][:alloc] ||= entry[:alloc]
-      bindings[name][:kind] ||= entry[:kind]
-    end
+    # --- Verify ownership invariants ---
 
-    check_completeness!(allocs, cleanups)
-    check_alloc_consistency!(allocs, cleanups)
-    check_promote_alloc_consistency!(promotes, cleanups)
-    check_escapes!(escapes, cleanups)
-    check_frame_escapes!(escapes, cleanups, promotes, bindings)
-    check_guard_suppress_completeness!(cleanups, moves, escapes)
-    check_reassign_completeness!(allocs, reassigns, fn_def.body)
+    # Rule 1: Every allocation has exactly one cleanup (and vice versa).
+    verify_alloc_cleanup_pairs!(allocs, cleanups, moves)
+
+    # Rule 2: Allocation and cleanup agree on allocator identity.
+    verify_allocator_consistency!(allocs, cleanups, promotes, catch_wrappers)
+
+    # Rule 3: Moves/returns have correct guard setup.
+    verify_move_guards!(cleanups, moves, escapes, promotes, allocs)
+
+    # Rule 4: Frame values cannot escape without promotion.
+    verify_frame_safety!(escapes, allocs, cleanups, promotes, bg_blocks)
+
+    # Rule 5: Reassignments and field assignments clean up old values.
+    verify_reassign_cleanup!(allocs, reassigns, reassign_targets)
+    field_leaks.each { |path| @errors << error(:FIELD_LEAK, path, "field assignment without pre-cleanup (old value leaks)") }
+
+    # Rule 6: Heap-returning calls must be bound to a variable.
+    hpt_leaks.each { |e| @errors << e }
+
+    # Rule 7: Loops with frame allocations have per-iteration rewind.
     check_frame_overflow!(fn_def.body)
-    check_bg_capture_escapes!(bg_blocks, promotes)
-    check_error_path_consistency!(catch_wrappers, allocs)
-    check_orphans!(allocs, cleanups, moves, reassigns, field_marks)
-    check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
-    check_field_leaks!(fn_def.body)
-    check_unhoisted_heap_calls!(fn_def.body)
+
+    # Deprecated: RawZig ownership contracts. Remove when RawZig is eliminated.
+    verify_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
 
     # Verify nested lambda scopes independently.
     lambdas.each do |lambda_fn|
@@ -117,8 +137,7 @@ class MIRChecker
     all_errors = []
     program.items.each do |item|
       next unless item.is_a?(MIR::FnDef)
-      errors = check_fn!(item)
-      all_errors.concat(errors)
+      all_errors.concat(check_fn!(item))
     end
     all_errors
   end
@@ -126,76 +145,78 @@ class MIRChecker
   private
 
   # ================================================================
-  # Generic MIR tree walker -- yields every node, recursing into all
-  # body/branch arrays. ~15 node types, exhaustive.
+  # Tree walker -- single pass, yields (node, context) for every node.
+  # Context tracks loop nesting for frame overflow detection.
   # ================================================================
 
-  def walk_mir(stmts, &block)
+  def walk_mir(stmts, context = {}, &block)
     return unless stmts.is_a?(Array)
-    stmts.each { |s| walk_mir_node(s, &block) }
+    stmts.each { |s| walk_mir_node(s, context, &block) }
   end
 
-  def walk_mir_node(node, &block)
+  def walk_mir_node(node, context, &block)
     return unless node
-    yield node
+    yield node, context
 
     case node
     when MIR::FnDef
-      walk_mir(node.body, &block)
+      walk_mir(node.body, context, &block)
     when MIR::IfStmt
-      walk_mir(node.then_body, &block)
-      walk_mir(node.else_body, &block)
-    when MIR::WhileStmt
-      walk_mir(node.body, &block)
-    when MIR::ForStmt
-      walk_mir(node.body, &block)
+      walk_mir(node.then_body, context, &block)
+      walk_mir(node.else_body, context, &block)
+    when MIR::WhileStmt, MIR::ForStmt
+      loop_ctx = { has_frame_alloc: false, node: node }
+      inner = context.merge(in_loop: loop_ctx)
+      walk_mir(node.body, inner, &block)
+      # After walking body, check frame overflow for this loop
+      if !node.tight && !node.mark_per_iter && loop_ctx[:has_frame_alloc]
+        @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
+      end
     when MIR::ScopeBlock
-      walk_mir(node.body, &block)
+      walk_mir(node.body, context, &block)
     when MIR::BlockExpr
-      walk_mir(node.body, &block)
+      walk_mir(node.body, context, &block)
     when MIR::SwitchStmt
-      node.arms&.each { |a| walk_mir(a[:body], &block) }
-      walk_mir(node.default_body, &block)
+      node.arms&.each { |a| walk_mir(a[:body], context, &block) }
+      walk_mir(node.default_body, context, &block)
     when MIR::IfChain
-      node.branches&.each { |b| walk_mir(b[:body], &block) }
-      walk_mir(node.default_body, &block)
+      node.branches&.each { |b| walk_mir(b[:body], context, &block) }
+      walk_mir(node.default_body, context, &block)
     when MIR::Let
-      # Expose LambdaExpr init values so lambda scopes are collected.
-      yield node.init if node.init.is_a?(MIR::LambdaExpr)
+      yield node.init, context if node.init.is_a?(MIR::LambdaExpr)
     when MIR::DeferStmt
-      walk_mir_node(node.body, &block) if node.body
+      walk_mir_node(node.body, context, &block) if node.body
     when MIR::ErrDeferStmt
-      walk_mir_node(node.body, &block) if node.body
-    when MIR::BgBlock
-      # Code is opaque Zig, but captures are visible for verification.
-    when MIR::CatchWrapper
-      # Code is opaque Zig, but error_reassigns are visible for verification.
-    when MIR::RawZig
-      # Opaque -- cannot walk inside. Marker already yielded above.
+      walk_mir_node(node.body, context, &block) if node.body
     end
   end
 
   # ================================================================
-  # Invariant checks
+  # Verification rules
   # ================================================================
 
-  # Every AllocMark must have a matching Cleanup.
-  def check_completeness!(allocs, cleanups)
+  # Rule 1: Every AllocMark has a Cleanup. Every Cleanup has an AllocMark.
+  def verify_alloc_cleanup_pairs!(allocs, cleanups, moves)
     allocs.each do |name, _|
       unless cleanups.key?(name)
         @errors << error(:LEAK, name, "AllocMark without matching Cleanup (leak)")
       end
     end
     cleanups.each do |name, _|
-      unless allocs.key?(name)
-        # Cleanup without alloc could be a TAKES param (valid) -- only warn
-        # if it's not a known pattern.
-      end
+      next if allocs.key?(name)
+      @errors << error(:ORPHAN, name, "Cleanup without matching AllocMark")
+    end
+    moves.each do |name|
+      cnodes = cleanups[name]
+      next if cnodes&.any? { |c| c.cleanup_entry&.dig(:has_moved_guard) }
+      next if allocs.key?(name)
+      @errors << error(:ORPHAN, name, "MoveMark without matching guarded Cleanup")
     end
   end
 
-  # AllocMark and Cleanup for the same binding must agree on allocator.
-  def check_alloc_consistency!(allocs, cleanups)
+  # Rule 2: Allocator identity is consistent across alloc/cleanup/promote/catch.
+  def verify_allocator_consistency!(allocs, cleanups, promotes, catch_wrappers)
+    # AllocMark vs Cleanup
     allocs.each do |name, anodes|
       cnodes = cleanups[name]
       next unless cnodes
@@ -211,10 +232,46 @@ class MIRChecker
         end
       end
     end
+
+    # EscapePromote: frame cleanup after promote must be guarded
+    promotes.each do |name, promote_nodes|
+      promote_nodes.each do |promote|
+        next unless [:list, :string_map, :generic].include?(promote.strategy)
+        cnodes = cleanups[name]
+        next unless cnodes
+        cnodes.each do |cnode|
+          entry = cnode.cleanup_entry || {}
+          next unless entry[:alloc] == :frame
+          unless entry[:has_moved_guard]
+            @errors << error(:ALLOC_MISMATCH, name,
+              "EscapePromote converts to heap but Cleanup uses :frame without moved guard")
+          end
+        end
+      end
+    end
+
+    # INV-9: catch paths must not change allocator identity
+    catch_wrappers.each do |cw|
+      (cw.error_reassigns || []).each do |reassign|
+        name = reassign[:name]
+        alloc_nodes = allocs[name]
+        next unless alloc_nodes
+        alloc_nodes.each do |alloc_node|
+          if alloc_node.alloc != reassign[:alloc]
+            @errors << error(:ALLOC_MISMATCH, name,
+              "catch reassigns with :#{reassign[:alloc]} but original alloc is :#{alloc_node.alloc} (INV-9)")
+          end
+        end
+      end
+    end
   end
 
-  # Escaped variables (via ReturnMark) must have guarded Cleanups.
-  def check_escapes!(escapes, cleanups)
+  # Rule 3: Moved/returned values have correct guard setup.
+  GUARD_EXEMPT_KINDS = Set[:takes_union, :takes_string, :takes_slice,
+                           :match_as_inline_struct, :match_as_slice].freeze
+
+  def verify_move_guards!(cleanups, moves, escapes, promotes, allocs)
+    # Escaped vars must have guarded cleanup
     escapes.each do |name|
       cnodes = cleanups[name]
       next unless cnodes
@@ -224,153 +281,8 @@ class MIRChecker
         end
       end
     end
-  end
 
-  # Frame-allocated bindings that escape via return need EscapePromote.
-  def check_frame_escapes!(escapes, cleanups, promotes, bindings)
-    escapes.each do |name|
-      b = bindings[name]
-      next unless b && b[:alloc] == :frame
-      next if promotes.key?(name)
-      @errors << error(:FRAME_ESCAPE, name,
-        "frame-allocated binding escapes via return without promotion (UAF)")
-    end
-  end
-
-  # EscapePromote converts a binding to heap. If Cleanup is :frame,
-  # the cleanup must be guarded (so the frame cleanup only fires if
-  # the promote didn't happen, i.e. the value wasn't moved/returned).
-  def check_promote_alloc_consistency!(promotes, cleanups)
-    promotes.each do |name, promote_nodes|
-      promote_nodes.each do |promote|
-        next unless [:list, :string_map, :generic].include?(promote.strategy)
-        cnodes = cleanups[name]
-        next unless cnodes
-        cnodes.each do |cnode|
-          entry = cnode.cleanup_entry || {}
-          calloc = entry[:alloc]
-          next unless calloc == :frame
-          # Frame cleanup after promote is only safe if guarded by moved flag
-          unless entry[:has_moved_guard]
-            @errors << error(:ALLOC_MISMATCH, name,
-              "EscapePromote converts to heap but Cleanup uses :frame without moved guard")
-          end
-        end
-      end
-    end
-  end
-
-  # Every reassignment of an owned binding must have a ReassignMark
-  # (which emits pre-cleanup of the old value).
-  def check_reassign_completeness!(allocs, reassigns, body)
-    reassign_targets = Set.new
-    collect_reassign_targets(body, reassign_targets)
-
-    reassign_targets.each do |name|
-      next unless allocs.key?(name)
-      unless reassigns.key?(name)
-        @errors << error(:REASSIGN_LEAK, name,
-          "reassignment without pre-cleanup (old value leaks)")
-      end
-    end
-  end
-
-  # Walk MIR body collecting names of variables targeted by MIR::Set.
-  def collect_reassign_targets(stmts, targets)
-    return unless stmts.is_a?(Array)
-    stmts.each { |s| collect_reassign_targets_node(s, targets) }
-  end
-
-  def collect_reassign_targets_node(node, targets)
-    return unless node
-    if node.is_a?(MIR::Set) && node.target.is_a?(MIR::Ident)
-      targets << node.target.name.to_s
-    end
-    case node
-    when MIR::FnDef       then collect_reassign_targets(node.body, targets)
-    when MIR::IfStmt      then collect_reassign_targets(node.then_body, targets)
-                               collect_reassign_targets(node.else_body, targets)
-    when MIR::WhileStmt   then collect_reassign_targets(node.body, targets)
-    when MIR::ForStmt     then collect_reassign_targets(node.body, targets)
-    when MIR::ScopeBlock  then collect_reassign_targets(node.body, targets)
-    when MIR::BlockExpr   then collect_reassign_targets(node.body, targets)
-    when MIR::SwitchStmt  then node.arms&.each { |a| collect_reassign_targets(a[:body], targets) }
-                               collect_reassign_targets(node.default_body, targets)
-    when MIR::IfChain     then node.branches&.each { |b| collect_reassign_targets(b[:body], targets) }
-                               collect_reassign_targets(node.default_body, targets)
-    when MIR::DeferStmt   then collect_reassign_targets_node(node.body, targets)
-    when MIR::ErrDeferStmt then collect_reassign_targets_node(node.body, targets)
-    end
-  end
-
-  # Loops with frame-arena allocations must have mark_per_iter for
-  # per-iteration rewind. Without it, each iteration grows the arena
-  # unboundedly -- eventual overflow.
-  def check_frame_overflow!(stmts)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      case stmt
-      when MIR::WhileStmt
-        if !stmt.tight && !stmt.mark_per_iter && body_has_frame_alloc?(stmt.body)
-          @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
-        end
-        check_frame_overflow!(stmt.body)
-      when MIR::ForStmt
-        if !stmt.tight && !stmt.mark_per_iter && body_has_frame_alloc?(stmt.body)
-          @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
-        end
-        check_frame_overflow!(stmt.body)
-      when MIR::IfStmt
-        check_frame_overflow!(stmt.then_body)
-        check_frame_overflow!(stmt.else_body)
-      when MIR::ScopeBlock
-        check_frame_overflow!(stmt.body)
-      when MIR::BlockExpr
-        check_frame_overflow!(stmt.body)
-      when MIR::SwitchStmt
-        stmt.arms&.each { |a| check_frame_overflow!(a[:body]) }
-        check_frame_overflow!(stmt.default_body)
-      when MIR::IfChain
-        stmt.branches&.each { |b| check_frame_overflow!(b[:body]) }
-        check_frame_overflow!(stmt.default_body)
-      end
-    end
-  end
-
-  # Does the body contain any AllocMark with :frame allocator?
-  def body_has_frame_alloc?(stmts)
-    return false unless stmts.is_a?(Array)
-    stmts.any? { |s| node_has_frame_alloc?(s) }
-  end
-
-  def node_has_frame_alloc?(node)
-    return false unless node
-    return true if node.is_a?(MIR::AllocMark) && node.alloc == :frame
-    case node
-    when MIR::IfStmt      then body_has_frame_alloc?(node.then_body) || body_has_frame_alloc?(node.else_body)
-    when MIR::ScopeBlock   then body_has_frame_alloc?(node.body)
-    when MIR::BlockExpr    then body_has_frame_alloc?(node.body)
-    when MIR::SwitchStmt   then (node.arms || []).any? { |a| body_has_frame_alloc?(a[:body]) } || body_has_frame_alloc?(node.default_body)
-    when MIR::IfChain      then (node.branches || []).any? { |b| body_has_frame_alloc?(b[:body]) } || body_has_frame_alloc?(node.default_body)
-    when MIR::DeferStmt    then node_has_frame_alloc?(node.body)
-    when MIR::ErrDeferStmt then node_has_frame_alloc?(node.body)
-    # Don't recurse into nested loops -- they have their own mark_per_iter
-    when MIR::WhileStmt, MIR::ForStmt then false
-    else false
-    end
-  end
-
-  # Every guarded Cleanup must have a MoveMark or ReturnMark escape.
-  # A guarded Cleanup with no suppress means the guard is dead code.
-  #
-  # Excluded:
-  # - TAKES params (takes_union, takes_string, takes_slice) -- guard managed
-  #   by TAKES/MATCH machinery, not MoveMark.
-  # - MATCH AS bindings (match_as_*) -- inner-scope, guard managed by match arm.
-  GUARD_EXEMPT_KINDS = Set[:takes_union, :takes_string, :takes_slice,
-                           :match_as_inline_struct, :match_as_slice].freeze
-
-  def check_guard_suppress_completeness!(cleanups, moves, escapes)
+    # Every guarded cleanup must have a MoveMark or ReturnMark to trigger it
     cleanups.each do |name, cnodes|
       cnodes.each do |cnode|
         entry = cnode.cleanup_entry || {}
@@ -384,10 +296,18 @@ class MIRChecker
     end
   end
 
-  # BG blocks that capture frame-allocated variables needing escape promotion
-  # must have a corresponding MIR::EscapePromote. Without promotion the fiber
-  # outlives the parent frame -- use-after-free.
-  def check_bg_capture_escapes!(bg_blocks, promotes)
+  # Rule 4: Frame-allocated values cannot escape their scope.
+  def verify_frame_safety!(escapes, allocs, cleanups, promotes, bg_blocks)
+    # Frame bindings that escape via return need EscapePromote
+    escapes.each do |name|
+      anodes = allocs[name]
+      next unless anodes&.any? { |a| a.alloc == :frame }
+      next if promotes.key?(name)
+      @errors << error(:FRAME_ESCAPE, name,
+        "frame-allocated binding escapes via return without promotion (UAF)")
+    end
+
+    # BG blocks capturing frame variables need EscapePromote
     bg_blocks.each do |bg|
       (bg.captures || {}).each do |name, type_obj|
         t = type_obj ? Type.new(type_obj) : nil
@@ -401,49 +321,31 @@ class MIRChecker
     end
   end
 
-  # INV-9: Error paths must not change the allocator identity of live bindings.
-  # CatchWrapper nodes carry pre-extracted reassignment metadata from catch
-  # clause bodies. Cross-reference against AllocMark allocators.
-  def check_error_path_consistency!(catch_wrappers, allocs)
-    catch_wrappers.each do |cw|
-      (cw.error_reassigns || []).each do |reassign|
-        name = reassign[:name]
-        new_alloc = reassign[:alloc]
-        alloc_nodes = allocs[name]
-        next unless alloc_nodes
-        alloc_nodes.each do |alloc_node|
-          if alloc_node.alloc != new_alloc
-            @errors << error(:ALLOC_MISMATCH, name,
-              "catch reassigns with :#{new_alloc} but original alloc is :#{alloc_node.alloc} (INV-9)")
-          end
-        end
+  # Rule 5: Reassignment of owned bindings must pre-cleanup old value.
+  def verify_reassign_cleanup!(allocs, reassigns, reassign_targets)
+    reassign_targets.each do |name|
+      next unless allocs.key?(name)
+      unless reassigns.key?(name)
+        @errors << error(:REASSIGN_LEAK, name,
+          "reassignment without pre-cleanup (old value leaks)")
       end
     end
   end
 
-  # No orphan MIR markers.
-  def check_orphans!(allocs, cleanups, moves, reassigns, field_marks)
-    # Cleanup without AllocMark (and not a TAKES param pattern)
-    cleanups.each do |name, _|
-      next if allocs.key?(name)
-      # Cleanups for TAKES params have AllocMark too in the lowered tree,
-      # so this genuinely means an orphan.
-      @errors << error(:ORPHAN, name, "Cleanup without matching AllocMark")
-    end
-
-    # MoveMark for a binding that has no guarded Cleanup
-    moves.each do |name|
-      cnodes = cleanups[name]
-      next if cnodes&.any? { |c| c.cleanup_entry&.dig(:has_moved_guard) }
-      next if allocs.key?(name) # may be a TAKES param consumed before cleanup
-      @errors << error(:ORPHAN, name, "MoveMark without matching guarded Cleanup")
-    end
+  # FRAME_OVERFLOW: loops with frame allocations need per-iteration rewind.
+  # This is detected inline during the walk (via loop context tracking).
+  # This method handles recursive checking into nested control flow that
+  # contains loops -- the walk already handles the top-level detection.
+  def check_frame_overflow!(stmts)
+    # Frame overflow is now detected during the single walk pass.
+    # This method is a no-op kept for structural clarity.
   end
 
-  # RawZig/InlineZig ownership contract verification.
-  def check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
+  # Deprecated: RawZig ownership contract verification.
+  # To be removed when all RawZig nodes are eliminated from the pipeline.
+  def verify_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
     raw_nodes.each do |node|
-      contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
+      contract = node.ownership_contract
       next unless contract
 
       (contract[:consumes] || []).each do |name|
@@ -466,62 +368,33 @@ class MIRChecker
     end
   end
 
-  # Field assignment where old value needs cleanup but no pre-cleanup was emitted.
-  # The lowering sets needs_field_cleanup=true on Set nodes that lack pre-cleanup
-  # for owned field types.
-  def check_field_leaks!(stmts)
-    walk_mir(stmts) do |node|
-      if node.is_a?(MIR::Set) && node.needs_field_cleanup
-        target_name = extract_field_path(node.target)
-        @errors << error(:FIELD_LEAK, target_name,
-          "field assignment without pre-cleanup (old value leaks)")
-      end
-    end
-  end
+  # ================================================================
+  # Helpers
+  # ================================================================
 
-  # Extract a human-readable field path from a FieldGet chain.
   def extract_field_path(node)
     case node
-    when MIR::FieldGet
-      "#{extract_field_path(node.object)}.#{node.field}"
-    when MIR::Ident
-      node.name.to_s
-    else
-      "?"
+    when MIR::FieldGet then "#{extract_field_path(node.object)}.#{node.field}"
+    when MIR::Ident    then node.name.to_s
+    else "?"
     end
   end
 
-  # Heap-returning call whose result is discarded (ExprStmt) or nested as an
-  # argument to another call without being bound to a variable. These leak the
-  # heap allocation.
-  def check_unhoisted_heap_calls!(stmts)
-    walk_mir(stmts) do |node|
-      next unless node.is_a?(MIR::ExprStmt)
-      scan_expr_for_hpt_leak!(node.expr)
-    end
-  end
-
-  # Recursively scan an expression tree for heap-provenance calls.
-  def scan_expr_for_hpt_leak!(node)
+  def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
     if node.is_a?(MIR::Call) && node.heap_provenance
-      @errors << error(:HPT_LEAK, node.callee,
+      leaks << error(:HPT_LEAK, node.callee,
         "heap-returning call result not bound to variable (leak)")
     end
-    # Stdlib intrinsic that allocates, used as discarded expression.
     if node.is_a?(MIR::InlineZig) && node.stdlib_def&.dig(:allocates)
       ret = node.stdlib_def[:return]
-      # Only flag if the stdlib call returns a value (not :Void).
-      # Void-returning allocators (e.g. append, put) allocate internally
-      # but don't produce an ownable return value.
       unless ret == :Void || ret.nil?
-        @errors << error(:HPT_LEAK, node.reason,
+        leaks << error(:HPT_LEAK, node.reason,
           "stdlib call with allocates:true result not bound to variable (leak)")
       end
     end
-    # Recurse into call arguments for nested heap calls.
     if node.is_a?(MIR::Call) && node.args
-      node.args.each { |a| scan_expr_for_hpt_leak!(a) }
+      node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
     end
   end
 
