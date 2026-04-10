@@ -73,11 +73,17 @@ fn executeStep(state: *VoprState, sched_idx: usize, step: StepKind) void {
 }
 
 fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) void {
-    if (sched.ready_queue.len() == 0) return;
-
-    // This exercises the real pop() — the TOCTOU fix (bug 1) means
-    // pop() can return null even after len() > 0.
-    const task = sched.ready_queue.pop() orelse return;
+    // Pinned queue first (matches production scheduler's run loop),
+    // then ready queue. Pinned tasks include both permanently-pinned
+    // tasks and temporarily-pinned tasks from sendAndWait's steal guard.
+    const task = if (sched.pinned_queue.items.len > 0)
+        sched.pinned_queue.swapRemove(0)
+    else blk: {
+        if (sched.ready_queue.len() == 0) return;
+        // This exercises the real pop() — the TOCTOU fix (bug 1) means
+        // pop() can return null even after len() > 0.
+        break :blk sched.ready_queue.pop() orelse return;
+    };
 
     // Validate the pointer is in our registry
     if (!state.task_registry.contains(task)) {
@@ -118,11 +124,10 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             sim.alive = false;
         }
     } else {
-        // Simulate shard access (30% chance) for pinned tasks only.
-        // PartitionedStringMap requires pinned fibers — unpinned tasks can be
-        // stolen to the shard owner, causing concurrent access (bug #9, caught
-        // by the "stolen task with pending remote shard op" deterministic test).
-        if (state.shard_count > 0 and task.config.pinned and state.random.intRangeAtMost(u8, 0, 2) == 0) {
+        // Simulate shard access (30% chance). Both pinned and unpinned tasks
+        // can access shards. The sendAndWait fix (temporary pin during yield)
+        // prevents unpinned tasks from being stolen while a remote op is pending.
+        if (state.shard_count > 0 and state.random.intRangeAtMost(u8, 0, 2) == 0) {
             const shard_idx = state.random.intRangeLessThan(usize, 0, state.shard_count);
             const shard = &state.shards[shard_idx];
             if (shard.owner_sched == @as(u32, @intCast(sched_idx))) {
@@ -132,11 +137,16 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
                 shard.last_access_sched = @intCast(sched_idx);
             } else {
                 // REMOTE path: queue a pending op on the owner's inbox.
+                // Temporarily pin the task (models sendAndWait's steal guard).
                 const owner = &state.schedulers[shard.owner_sched];
                 owner.pending_shard_ops.append(state.allocator, .{
                     .shard = @intCast(shard_idx),
                     .source_task = task,
                 }) catch {};
+                sim.pending_remote_count += 1;
+                if (!task.config.pinned) {
+                    task.config.pinned = true;
+                }
             }
         }
 
@@ -247,6 +257,7 @@ fn executeShardAccess(state: *VoprState, sched: *SimScheduler, sched_idx: u32) v
 
 /// Simulate drainChannels: process pending remote shard ops.
 /// Each processed op accesses the shard (records tick + sched).
+/// Restores the temporary pin set by sendAndWait's steal guard.
 fn executeDrainShardOps(state: *VoprState, sched: *SimScheduler, sched_idx: u32) void {
     while (sched.pending_shard_ops.items.len > 0) {
         const op = sched.pending_shard_ops.orderedRemove(0);
@@ -254,6 +265,16 @@ fn executeDrainShardOps(state: *VoprState, sched: *SimScheduler, sched_idx: u32)
         // The drain happens on the OWNER scheduler's thread.
         shard.last_access_tick = state.tick;
         shard.last_access_sched = sched_idx;
+        // Decrement pending count; restore unpinned when all ops drained
+        // (only for originally-unpinned tasks -- permanent pins never clear).
+        if (state.getSimTask(op.source_task)) |sim| {
+            if (sim.pending_remote_count > 0) {
+                sim.pending_remote_count -= 1;
+                if (sim.pending_remote_count == 0 and !sim.originally_pinned) {
+                    op.source_task.config.pinned = false;
+                }
+            }
+        }
     }
 }
 
@@ -498,27 +519,32 @@ test "vopr: task conservation and pinned affinity" {
 }
 
 test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAccess" {
-    // Deterministic reproduction of the PartitionedStringMap stolen-fiber bug:
-    //   1. Unpinned task on sched 1 sends REMOTE op for shard 0 (owned by sched 0)
-    //   2. Task is stolen from sched 1 to sched 0
-    //   3. Invariant fires: task is in sched 0's queue AND sched 0 has a pending
-    //      remote op from that same task — concurrent access to shard 0.
+    // Deterministic reproduction: verifies the invariant checker catches the
+    // scenario that sendAndWait's temporary pin prevents in the real runtime.
+    //   1. Unpinned task on sched 1 (no shards yet, so no temporary pin)
+    //   2. Manually inject a pending remote shard op (bypass the pin guard)
+    //   3. Steal the task to sched 0
+    //   4. Invariant fires: task is in sched 0's queue AND sched 0 has a pending
+    //      remote op from that same task.
     const allocator = std.testing.allocator;
     var state = VoprState.init(42, allocator);
     state.random = state.rng.random();
     defer state.deinit();
 
-    // 2 schedulers, 2 shards: shard 0 -> sched 0, shard 1 -> sched 1
+    // Init schedulers first, shards AFTER pop-and-run to avoid the
+    // temporary pin from shard access during executePopAndRun.
     state.initSchedulers(2);
-    state.initShards(2);
 
     // Spawn an unpinned task on sched 1
     try state.spawnTask(1, false);
     const task = &state.tasks[0].?.task;
 
-    // Step 1: Pop the task on sched 1 (makes it current_task/Running)
+    // Step 1: Pop the task on sched 1 (no shards, so no shard access).
     executePopAndRun(&state, &state.schedulers[1], 1);
-    // After PopAndRun, the task yielded back to sched 1's queue (steps_remaining > 0).
+    // After PopAndRun, the task yielded back to sched 1's ready queue.
+
+    // Now init shards for the invariant checker.
+    state.initShards(2);
 
     // Step 2: Simulate the task sending a REMOTE shard op to sched 0.
     // This is what happens inside sendAndWait when the task accesses shard 0

@@ -66,6 +66,12 @@ pub const SimTask = struct {
     owner_sched: u32,
     alive: bool,
     stub_stack: [64]u8,
+    /// Count of pending remote shard ops (models sendAndWait's steal-prevention
+    /// pin). Task stays pinned until all pending ops are drained.
+    pending_remote_count: u32 = 0,
+    /// True if task was spawned as pinned (permanent). Drain never clears
+    /// config.pinned for originally-pinned tasks.
+    originally_pinned: bool = false,
 };
 
 /// SimScheduler wraps a heap-allocated RunQueue.
@@ -235,6 +241,8 @@ pub const VoprState = struct {
         sim.io_fd = -1;
         sim.owner_sched = target_sched;
         sim.alive = true;
+        sim.pending_remote_count = 0;
+        sim.originally_pinned = pinned;
 
         self.tasks[self.task_count] = sim;
         self.task_count += 1;

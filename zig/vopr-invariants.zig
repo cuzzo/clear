@@ -125,10 +125,12 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
                     }
                     seen_map.put(state.allocator, task, @intCast(sched_idx)) catch unreachable;
 
-                    // Pinned affinity check (bug 5)
+                    // Pinned affinity check (bug 5).
+                    // Skip for temporarily-pinned tasks (pinned_for_remote) --
+                    // they're pinned to prevent stealing, not for scheduler affinity.
                     if (task.config.pinned) {
                         if (state.getSimTask(task)) |sim| {
-                            if (sim.owner_sched != @as(u32, @intCast(sched_idx))) {
+                            if (sim.pending_remote_count == 0 and sim.owner_sched != @as(u32, @intCast(sched_idx))) {
                                 std.debug.print("VOPR INVARIANT: pinned task {*} on sched {d}, should be on sched {d}\n", .{ task, sched_idx, sim.owner_sched });
                                 return InvariantError.PinnedAffinityViolation;
                             }
@@ -138,7 +140,8 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
             }
         }
 
-        // Walk pinned_queue (owner-local, never stolen)
+        // Walk pinned_queue (owner-local for permanent pins; may contain
+        // temporarily-pinned tasks from sendAndWait steal guard)
         for (sched.pinned_queue.items) |task| {
             if (!state.task_registry.contains(task)) {
                 return InvariantError.InvalidTaskPointer;
@@ -150,7 +153,7 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
             seen_map.put(state.allocator, task, @intCast(sched_idx)) catch unreachable;
             if (task.config.pinned) {
                 if (state.getSimTask(task)) |sim| {
-                    if (sim.owner_sched != @as(u32, @intCast(sched_idx))) {
+                    if (sim.pending_remote_count == 0 and sim.owner_sched != @as(u32, @intCast(sched_idx))) {
                         std.debug.print("VOPR INVARIANT: pinned task {*} on sched {d}, should be on sched {d}\n", .{ task, sched_idx, sim.owner_sched });
                         return InvariantError.PinnedAffinityViolation;
                     }

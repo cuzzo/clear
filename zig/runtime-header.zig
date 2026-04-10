@@ -3870,17 +3870,25 @@ pub const CheatLib = struct {
                 // visibility.  Fall back to yield so the scheduler can drain
                 // channels — without yield, two fibers on different schedulers
                 // can deadlock when each spin-waits for the other's shard.
+                //
+                // Pin the task during yield to prevent work-stealing.  A stolen
+                // task would land on the shard owner's scheduler, where it takes
+                // the LOCAL path on next access — racing with the still-pending
+                // RemoteCall being processed by drainChannels on the same thread.
+                const task = fp.active_scheduler.getCurrent();
+                const was_pinned = task.config.pinned;
+                task.config.pinned = true;
                 var _sw_spins: u32 = 0;
                 while (!done_flag.load(.acquire)) {
                     std.atomic.spinLoopHint();
                     _sw_spins += 1;
                     if (_sw_spins >= 8192) {
                         _sw_spins = 0;
-                        const task = fp.active_scheduler.getCurrent();
                         task.status.store(.Ready, .release);
                         task.base.yield();
                     }
                 }
+                task.config.pinned = was_pinned;
             }
 
             // ONE path for every operation. No hot/cold split.
