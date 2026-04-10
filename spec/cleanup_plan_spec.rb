@@ -4,7 +4,7 @@ require_relative "../src/parser"
 require_relative "../src/annotator"
 require_relative "../src/promotion_plan"
 require_relative "../src/control_flow"
-require_relative "../src/static_leak_checker"
+require_relative "../src/mir"
 
 # Tests CleanupClassifier - classifies which bindings need cleanup.
 # MIRPass consumes this to insert MIR::Drop nodes and stamp AST.
@@ -877,98 +877,14 @@ RSpec.describe CleanupClassifier do
   end
 end
 
-RSpec.describe StaticLeakChecker do
-  def run_checker(src, fn_name)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
+# All StaticLeakChecker checks have been migrated to MIRChecker
+# (post-lowering). See spec/mir_checker_spec.rb for unit tests.
 
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
-
-    fn = fn_nodes[fn_name]
-    raise "Function '#{fn_name}' not found" unless fn
-    bindings = mir.cleanup_bindings[fn_name] || {}
-
-    can_fail_fns = Set.new
-    fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
-
-    checker = StaticLeakChecker.new(fn, bindings: bindings, can_fail_fns: can_fail_fns)
-    checker.check!
-  end
-
-  context "list variable with cleanup" do
-    it "passes — MIR::Alloc and MIR::Drop are present" do
-      errors = run_checker(<<~CLEAR, "test")
-        FN test() RETURNS Void ->
-            MUTABLE xs: Int64[]@list = List[];
-            xs.append(42);
-            RETURN;
-        END
-      CLEAR
-      expect(errors).to be_empty
-    end
-  end
-
-  context "TAKES parameter" do
-    it "passes — TAKES param has MIR::Alloc and MIR::Drop" do
-      errors = run_checker(<<~CLEAR, "consume")
-        UNION Value { Nil, Num: Float64 }
-        FN consume(TAKES v: Value) RETURNS Void ->
-            RETURN;
-        END
-      CLEAR
-      expect(errors).to be_empty
-    end
-  end
-
-  context "MATCH AS binding" do
-    it "passes — match-as bindings are excluded from completeness check" do
-      errors = run_checker(<<~CLEAR, "test")
-        UNION Value { Nil, List: Value[] }
-        FN test(TAKES v: Value) RETURNS Void ->
-            MATCH TAKES v START
-                Value.List AS items ->
-                    RETURN;,
-                DEFAULT -> RETURN;
-            END
-            RETURN;
-        END
-      CLEAR
-      expect(errors).to be_empty
-    end
-  end
-
-  context "HashMap with cleanup" do
-    it "passes — map variable has correct MIR nodes" do
-      errors = run_checker(<<~CLEAR, "test")
-        FN test() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
-            m["key"] = 42;
-            RETURN;
-        END
-      CLEAR
-      expect(errors).to be_empty
-    end
-  end
-
-  # ALLOC_MISMATCH, LEAK, ORPHAN, FRAME_OVERFLOW now verified by MIRChecker
-  # (post-lowering). See spec/mir_checker_spec.rb for unit tests.
-
-  # FRAME_OVERFLOW sabotage tests removed -- now verified by MIRChecker.
-  # See spec/mir_checker_spec.rb for unit tests.
-  # The "passes when mark_per_iter is set correctly" case is implicitly
-  # tested by all 269 transpile-tests (MIRChecker runs on every compile).
-
-  # ===========================================================================
-  # BG escape promotion: MIR::Promote(:bg_string) for string captures
-  # ===========================================================================
-  describe "BG escape promotion for string captures" do
+# ===========================================================================
+# BG escape promotion: MIR::Promote(:bg_string) for string captures
+# (Tests MIRPass behavior, not checker)
+# ===========================================================================
+RSpec.describe "BG escape promotion for string captures" do
     # Helper: run full pipeline through MIR, return fn body statements
     def mir_body_for(src, fn_name)
       tokens = Lexer.new(src).tokenize
@@ -1038,5 +954,4 @@ RSpec.describe StaticLeakChecker do
       # "hello" is a literal, not a frame-allocated binding — no promote needed
       expect(bg_string_promotes_in(body)).to be_empty
     end
-  end
 end

@@ -758,20 +758,6 @@ class MIRPass
       transform_function!(stmt, promotion_plans[stmt.name])
     end
 
-    # Phase 4: static leak verification on post-MIR bodies.
-    can_fail_fns = Set.new
-    @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
-
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      bindings = @cleanup_bindings[stmt.name] || {}
-
-      checker = StaticLeakChecker.new(stmt, bindings: bindings, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
-      errors = checker.check!
-      unless errors.empty?
-        raise "Your code is correct. This is a compiler error. Sorry for the inconvenience.\n\n#{errors.join("\n")}"
-      end
-    end
   end
 
   private

@@ -270,6 +270,59 @@ RSpec.describe MIRChecker do
       expect(errors.select { |e| e.include?("ALLOC_MISMATCH") }).to be_empty
     end
 
+    it "detects FIELD_LEAK for Set with needs_field_cleanup" do
+      body = [
+        MIR::Set.new(MIR::FieldGet.new(MIR::Ident.new("user"), "name"), MIR::Lit.new("new"), true),
+      ]
+      errors = checker.check_fn!(fn_def("field_leak", body))
+      expect(errors.any? { |e| e.include?("FIELD_LEAK") && e.include?("user.name") }).to be true
+    end
+
+    it "passes for Set without needs_field_cleanup" do
+      body = [
+        MIR::Set.new(MIR::FieldGet.new(MIR::Ident.new("user"), "name"), MIR::Lit.new("new")),
+      ]
+      errors = checker.check_fn!(fn_def("field_ok", body))
+      expect(errors.select { |e| e.include?("FIELD_LEAK") }).to be_empty
+    end
+
+    it "detects HPT_LEAK for discarded heap-returning call" do
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [
+        MIR::ExprStmt.new(call, true),
+      ]
+      errors = checker.check_fn!(fn_def("hpt_leak", body))
+      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("makeList") }).to be true
+    end
+
+    it "passes for heap-returning call bound to Let" do
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [
+        MIR::Let.new("x", call, false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("hpt_ok", body))
+      expect(errors.select { |e| e.include?("HPT_LEAK") }).to be_empty
+    end
+
+    it "passes for ExprStmt with non-heap call" do
+      call = MIR::Call.new("doWork", [MIR::Ident.new("rt")], false)
+      body = [
+        MIR::ExprStmt.new(call, true),
+      ]
+      errors = checker.check_fn!(fn_def("no_heap", body))
+      expect(errors.select { |e| e.include?("HPT_LEAK") }).to be_empty
+    end
+
+    it "detects HPT_LEAK for heap call nested as argument" do
+      inner = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      outer = MIR::Call.new("process", [inner], false)
+      body = [
+        MIR::ExprStmt.new(outer, true),
+      ]
+      errors = checker.check_fn!(fn_def("nested_hpt", body))
+      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("makeList") }).to be true
+    end
+
   end
 
   describe "#check_program!" do

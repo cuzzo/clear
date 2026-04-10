@@ -14,6 +14,8 @@
 #   FRAME_ESCAPE   -- frame binding escapes without EscapePromote
 #   BG_ESCAPE      -- BG capture needs escape promotion but no EscapePromote found
 #   GUARD_NO_SUPPRESS -- guarded Cleanup with no MoveMark (dead guard)
+#   FIELD_LEAK      -- field assignment without pre-cleanup (old value leaks)
+#   HPT_LEAK        -- heap-returning call result discarded (leak)
 #
 # Design: ONE generic walk, ~15 MIR node types, zero AST dependencies.
 
@@ -95,6 +97,8 @@ class MIRChecker
     check_error_path_consistency!(catch_wrappers, allocs)
     check_orphans!(allocs, cleanups, moves, reassigns, field_marks)
     check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
+    check_field_leaks!(fn_def.body)
+    check_unhoisted_heap_calls!(fn_def.body)
 
     @errors
   end
@@ -447,6 +451,54 @@ class MIRChecker
             "RawZig(#{node.reason}) produces '#{name}' but no Cleanup found")
         end
       end
+    end
+  end
+
+  # Field assignment where old value needs cleanup but no pre-cleanup was emitted.
+  # The lowering sets needs_field_cleanup=true on Set nodes that lack pre-cleanup
+  # for owned field types.
+  def check_field_leaks!(stmts)
+    walk_mir(stmts) do |node|
+      if node.is_a?(MIR::Set) && node.needs_field_cleanup
+        target_name = extract_field_path(node.target)
+        @errors << error(:FIELD_LEAK, target_name,
+          "field assignment without pre-cleanup (old value leaks)")
+      end
+    end
+  end
+
+  # Extract a human-readable field path from a FieldGet chain.
+  def extract_field_path(node)
+    case node
+    when MIR::FieldGet
+      "#{extract_field_path(node.object)}.#{node.field}"
+    when MIR::Ident
+      node.name.to_s
+    else
+      "?"
+    end
+  end
+
+  # Heap-returning call whose result is discarded (ExprStmt) or nested as an
+  # argument to another call without being bound to a variable. These leak the
+  # heap allocation.
+  def check_unhoisted_heap_calls!(stmts)
+    walk_mir(stmts) do |node|
+      next unless node.is_a?(MIR::ExprStmt)
+      scan_expr_for_hpt_leak!(node.expr)
+    end
+  end
+
+  # Recursively scan an expression tree for heap-provenance calls.
+  def scan_expr_for_hpt_leak!(node)
+    return unless node
+    if node.is_a?(MIR::Call) && node.heap_provenance
+      @errors << error(:HPT_LEAK, node.callee,
+        "heap-returning call result not bound to variable (leak)")
+    end
+    # Recurse into call arguments for nested heap calls.
+    if node.is_a?(MIR::Call) && node.args
+      node.args.each { |a| scan_expr_for_hpt_leak!(a) }
     end
   end
 

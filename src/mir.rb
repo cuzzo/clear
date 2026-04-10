@@ -125,7 +125,9 @@ module MIR
   # Assignment.
   # Zig: target = value;
   # target is an MIR expression (Ident, FieldGet, IndexGet, Deref)
-  Set = Struct.new(:target, :value) do
+  # needs_field_cleanup: true if this is a field assignment where the old
+  #   value needs cleanup but no pre-cleanup was emitted (FIELD_LEAK).
+  Set = Struct.new(:target, :value, :needs_field_cleanup) do
     include Stmt
   end
 
@@ -437,7 +439,7 @@ module MIR
   end
 
   # ================================================================
-  # Verification-Only Nodes (no codegen, for StaticLeakChecker)
+  # Verification-Only Nodes (no codegen, for MIRChecker)
   # ================================================================
 
   # Marks an allocation point. Subsumes old MIR::Alloc.
@@ -470,11 +472,9 @@ module MIR
 
   # Function call.
   # Zig: [try] callee(args)
-  Call = Struct.new(:callee, :args, :try_wrap) do
+  # heap_provenance: true if return type is heap-allocated (for HPT_LEAK check).
+  Call = Struct.new(:callee, :args, :try_wrap, :heap_provenance) do
     include Expr
-    # callee: String (Zig function name, possibly qualified)
-    # args: [MIR expr]
-    # try_wrap: bool
   end
 
   # Tail call (emits @call(.always_tail, callee, .{args})).

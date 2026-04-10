@@ -910,7 +910,9 @@ class MIRLowering
       return MIR::DupeSlice.new(inner_call, "#{@rt_name}.heapAlloc()")
     end
 
-    MIR::Call.new(fn_zig, all_args, can_fail)
+    call = MIR::Call.new(fn_zig, all_args, can_fail)
+    call.heap_provenance = call_heap_provenance?(node)
+    call
   end
 
   def lower_method_call(node)
@@ -965,7 +967,9 @@ class MIRLowering
       return MIR::DupeSlice.new(inner_call, "#{@rt_name}.heapAlloc()")
     end
 
-    MIR::Call.new(fn_zig, all_args, can_fail)
+    call = MIR::Call.new(fn_zig, all_args, can_fail)
+    call.heap_provenance = call_heap_provenance?(node)
+    call
   end
 
   def lower_intrinsic(node)
@@ -2827,7 +2831,28 @@ class MIRLowering
       lower(node.name)
     end
     value = lower(node.value)
-    MIR::Set.new(target, value)
+    result = MIR::Set.new(target, value)
+
+    # Detect field assignments where old value needs cleanup but no pre-cleanup exists.
+    if node.name.is_a?(AST::GetField) && !node.field_pre_cleanup
+      field_ti = node.name.type_info rescue nil
+      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+      sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+      if field_ti&.needs_cleanup?(sl)
+        result.needs_field_cleanup = true
+      elsif field_ti&.string?
+        # String fields on heap-allocated structs need cleanup
+        root = node.name.target
+        root = root.target while root.is_a?(AST::GetField)
+        if root.is_a?(AST::Identifier)
+          root_ti = root.type_info rescue nil
+          root_ti = Type.new(root_ti) if root_ti && !root_ti.is_a?(Type)
+          result.needs_field_cleanup = true if root_ti&.heap_provenance?
+        end
+      end
+    end
+
+    result
   end
 
   def lower_indexed_assignment(node)
@@ -3265,6 +3290,13 @@ class MIRLowering
   # ================================================================
   # Helpers
   # ================================================================
+
+  # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
+  def call_heap_provenance?(node)
+    ti = node.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    ti&.heap_provenance? || false
+  end
 
   def callee_needs_rt?(name)
     return true if name.nil? || name.to_s.empty?
