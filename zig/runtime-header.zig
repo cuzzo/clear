@@ -2746,24 +2746,55 @@ pub const CheatLib = struct {
     /// RwLocked(T): a readers-writer-lock heap-allocated value.
     /// Multiple concurrent readers allowed; writers are exclusive.
     /// Acquire read access via read(); write access via write().
+    ///
+    /// Uses writer-preferring pthread_rwlock to prevent writer starvation.
+    /// glibc's default pthread_rwlock is reader-preferring: new readers can
+    /// acquire while a writer waits, causing indefinite starvation under load.
+    /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP blocks new readers once
+    /// a writer is waiting, matching Go's sync.RWMutex and Rust's futex_rwlock.
     pub fn RwLocked(comptime T: type) type {
         return struct {
-            lock: std.Thread.RwLock = .{},
+            lock: std.c.pthread_rwlock_t = .{},
             data: T,
 
             const Self = @This();
 
+            /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP (glibc extension).
+            /// Prevents writer starvation by blocking new readers when a writer waits.
+            const PREFER_WRITER_NONRECURSIVE_NP: c_int = 2;
+
+            const pthread_rwlockattr_t = extern struct {
+                data: [8]u8 align(@alignOf(c_long)) = [_]u8{0} ** 8,
+            };
+
+            extern "c" fn pthread_rwlock_init(rwl: *std.c.pthread_rwlock_t, attr: ?*const pthread_rwlockattr_t) callconv(.c) std.c.E;
+            extern "c" fn pthread_rwlockattr_init(attr: *pthread_rwlockattr_t) callconv(.c) std.c.E;
+            extern "c" fn pthread_rwlockattr_destroy(attr: *pthread_rwlockattr_t) callconv(.c) std.c.E;
+            extern "c" fn pthread_rwlockattr_setkind_np(attr: *pthread_rwlockattr_t, kind: c_int) callconv(.c) std.c.E;
+
             pub fn init(val: T) Self {
-                return .{ .data = val };
+                var self = Self{ .data = val };
+                var attr: pthread_rwlockattr_t = .{};
+                var rc = pthread_rwlockattr_init(&attr);
+                std.debug.assert(rc == .SUCCESS);
+                rc = pthread_rwlockattr_setkind_np(&attr, PREFER_WRITER_NONRECURSIVE_NP);
+                std.debug.assert(rc == .SUCCESS);
+                rc = pthread_rwlock_init(&self.lock, &attr);
+                std.debug.assert(rc == .SUCCESS);
+                rc = pthread_rwlockattr_destroy(&attr);
+                std.debug.assert(rc == .SUCCESS);
+                return self;
             }
 
             pub fn read(self: *Self) ReadGuard {
-                self.lock.lockShared();
+                const rc = std.c.pthread_rwlock_rdlock(&self.lock);
+                std.debug.assert(rc == .SUCCESS);
                 return ReadGuard{ .parent = self };
             }
 
             pub fn write(self: *Self) WriteGuard {
-                self.lock.lock();
+                const rc = std.c.pthread_rwlock_wrlock(&self.lock);
+                std.debug.assert(rc == .SUCCESS);
                 return WriteGuard{ .parent = self };
             }
 
@@ -2775,7 +2806,8 @@ pub const CheatLib = struct {
                 }
 
                 pub fn release(self: *ReadGuard) void {
-                    self.parent.lock.unlockShared();
+                    const rc = std.c.pthread_rwlock_unlock(&self.parent.lock);
+                    std.debug.assert(rc == .SUCCESS);
                 }
             };
 
@@ -2791,7 +2823,8 @@ pub const CheatLib = struct {
                 }
 
                 pub fn release(self: *WriteGuard) void {
-                    self.parent.lock.unlock();
+                    const rc = std.c.pthread_rwlock_unlock(&self.parent.lock);
+                    std.debug.assert(rc == .SUCCESS);
                 }
             };
         };

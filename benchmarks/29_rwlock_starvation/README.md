@@ -12,34 +12,38 @@ Tests whether a language's RwLock starves writers under heavy read contention.
 
 | Lang  | Total  | Writer Done | Max Write Wait | Starved? |
 |-------|--------|-------------|----------------|----------|
-| CLEAR | 5.4s   | 5.2s        | 5.1s           | YES      |
+| CLEAR | 5.6s   | 15-83ms     | 1-2ms          | No       |
 | Go    | 2.9s   | 14ms        | 25us           | No       |
-| Rust  | 6.4s   | 77ms        | 1.8ms          | No       |
+| Rust  | 6.2s   | 77ms        | 1.8ms          | No       |
+
+All three languages use writer-preferring RwLock implementations, so none exhibit
+writer starvation.
 
 ## Analysis
 
-**CLEAR (Zig std.Thread.RwLock)**: Severe writer starvation. The writer is blocked
-for nearly the entire benchmark duration. Zig's RwLock is reader-preferring -- new
-readers can acquire the lock while a writer is waiting, so a steady stream of
-overlapping readers starves the writer indefinitely.
+**CLEAR**: Uses `pthread_rwlock_t` initialized with `PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP`.
+This blocks new readers once a writer is waiting, preventing starvation. Writer completes
+in 15-83ms with 1-2ms max wait per acquire.
 
-**Go (sync.RWMutex)**: No starvation. Go's RWMutex is writer-preferring -- once a
-writer calls Lock(), new RLock() calls block until the writer finishes. The writer
-completes in 14ms despite 31 concurrent readers.
+**Go (sync.RWMutex)**: Custom writer-preferring implementation. Once a writer calls
+Lock(), new RLock() calls block until the writer finishes. Writer completes in 14ms.
 
-**Rust (std::sync::RwLock / pthread_rwlock)**: No starvation on Linux. Linux's
-pthread_rwlock is writer-preferring -- pthread_rwlock_wrlock blocks incoming readers
-once a writer is waiting. The writer sees brief contention (1.8ms max) but is never
-starved.
+**Rust (std::sync::RwLock)**: Custom futex-based RwLock (not pthread). Writer-preferring.
+Writer sees brief contention (1.8ms max) but is never starved.
 
-## Implications for CLEAR
+### History: glibc reader-preferring default
 
-CLEAR's `@shared:writeLocked` (Arc<RwLock<T>>) should not be used for write-heavy or
-write-latency-sensitive workloads under read contention. Alternatives:
+Before this fix, CLEAR used Zig's `std.Thread.RwLock` which zero-initializes
+`pthread_rwlock_t`. On glibc, zero-initialized = `PTHREAD_RWLOCK_PREFER_READER_NP`
+(reader-preferring). This caused severe writer starvation: the writer was blocked
+for 5+ seconds (the entire benchmark duration) because new readers continuously
+acquired the lock ahead of the waiting writer.
 
-- `@shared:locked` (Arc<Mutex<T>>) -- no reader/writer distinction, FIFO fairness
-- `@sharded(N):locked` -- partition data to reduce contention
-- Application-level batching -- accumulate writes and apply under a single lock acquire
+The fix: initialize with `PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP` (value 2),
+a glibc extension that blocks new `rdlock()` calls once a `wrlock()` is pending.
+This matches Go and Rust behavior. The `_NONRECURSIVE` suffix means a thread holding
+a read lock cannot recursively re-acquire it (deadlock instead). CLEAR's `WITH` block
+semantics already prevent recursive locking, so this is safe.
 
 ## Running
 
