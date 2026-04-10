@@ -2928,7 +2928,7 @@ class MIRLowering
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
     end
 
-    MIR::WhileStmt.new(cond, body, nil, nil)
+    MIR::WhileStmt.new(cond, body, nil, nil, node.mark_per_iter, !!node.tight)
   end
 
   def lower_for_each(node)
@@ -2950,9 +2950,10 @@ class MIRLowering
       iter_var = "__kit_#{@for_counter}"
       # { var iter = coll.keyIterator(); while (iter.next()) |var| { body } }
       iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
+      tight = node.respond_to?(:tight) && node.tight
       while_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
-        body, var, nil
+        body, var, nil, node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil, tight
       )
       MIR::ScopeBlock.new([iter_init, while_stmt])
     else
@@ -2968,7 +2969,8 @@ class MIRLowering
         MIR::AddressOf.new(coll)
       end
       capture = is_mutable ? "*#{var}" : var
-      MIR::ForStmt.new(iter, capture, body, nil)
+      tight = node.respond_to?(:tight) && node.tight
+      MIR::ForStmt.new(iter, capture, body, nil, node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil, tight)
     end
   end
 
@@ -3021,7 +3023,8 @@ class MIRLowering
 
     # Wrapping block: { var __for: i64 = start; while (...) : (...) { body } }
     iter_init = MIR::Let.new(iter_var, start_val, true, "i64", nil)
-    while_stmt = MIR::WhileStmt.new(cond, body, nil, update)
+    tight = node.respond_to?(:tight) && node.tight
+    while_stmt = MIR::WhileStmt.new(cond, body, nil, update, node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil, tight)
     MIR::ScopeBlock.new([iter_init, while_stmt])
   end
 

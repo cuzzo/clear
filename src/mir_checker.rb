@@ -76,9 +76,12 @@ class MIRChecker
 
     check_completeness!(allocs, cleanups)
     check_alloc_consistency!(allocs, cleanups)
+    check_promote_alloc_consistency!(promotes, cleanups)
     check_escapes!(escapes, cleanups)
     check_frame_escapes!(escapes, cleanups, promotes, bindings)
     check_guard_suppress_completeness!(cleanups, moves, escapes)
+    check_reassign_completeness!(allocs, reassigns, fn_def.body)
+    check_frame_overflow!(fn_def.body)
     check_orphans!(allocs, cleanups, moves, reassigns, field_marks)
     check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
 
@@ -200,6 +203,129 @@ class MIRChecker
       next if promotes.key?(name)
       @errors << error(:FRAME_ESCAPE, name,
         "frame-allocated binding escapes via return without promotion (UAF)")
+    end
+  end
+
+  # EscapePromote converts a binding to heap. If Cleanup is :frame,
+  # the cleanup must be guarded (so the frame cleanup only fires if
+  # the promote didn't happen, i.e. the value wasn't moved/returned).
+  def check_promote_alloc_consistency!(promotes, cleanups)
+    promotes.each do |name, promote_nodes|
+      promote_nodes.each do |promote|
+        next unless [:list, :string_map, :generic].include?(promote.strategy)
+        cnodes = cleanups[name]
+        next unless cnodes
+        cnodes.each do |cnode|
+          entry = cnode.cleanup_entry || {}
+          calloc = entry[:alloc]
+          next unless calloc == :frame
+          # Frame cleanup after promote is only safe if guarded by moved flag
+          unless entry[:has_moved_guard]
+            @errors << error(:ALLOC_MISMATCH, name,
+              "EscapePromote converts to heap but Cleanup uses :frame without moved guard")
+          end
+        end
+      end
+    end
+  end
+
+  # Every reassignment of an owned binding must have a ReassignMark
+  # (which emits pre-cleanup of the old value).
+  def check_reassign_completeness!(allocs, reassigns, body)
+    reassign_targets = Set.new
+    collect_reassign_targets(body, reassign_targets)
+
+    reassign_targets.each do |name|
+      next unless allocs.key?(name)
+      unless reassigns.key?(name)
+        @errors << error(:REASSIGN_LEAK, name,
+          "reassignment without pre-cleanup (old value leaks)")
+      end
+    end
+  end
+
+  # Walk MIR body collecting names of variables targeted by MIR::Set.
+  def collect_reassign_targets(stmts, targets)
+    return unless stmts.is_a?(Array)
+    stmts.each { |s| collect_reassign_targets_node(s, targets) }
+  end
+
+  def collect_reassign_targets_node(node, targets)
+    return unless node
+    if node.is_a?(MIR::Set) && node.target.is_a?(MIR::Ident)
+      targets << node.target.name.to_s
+    end
+    case node
+    when MIR::FnDef       then collect_reassign_targets(node.body, targets)
+    when MIR::IfStmt      then collect_reassign_targets(node.then_body, targets)
+                               collect_reassign_targets(node.else_body, targets)
+    when MIR::WhileStmt   then collect_reassign_targets(node.body, targets)
+    when MIR::ForStmt     then collect_reassign_targets(node.body, targets)
+    when MIR::ScopeBlock  then collect_reassign_targets(node.body, targets)
+    when MIR::BlockExpr   then collect_reassign_targets(node.body, targets)
+    when MIR::SwitchStmt  then node.arms&.each { |a| collect_reassign_targets(a[:body], targets) }
+                               collect_reassign_targets(node.default_body, targets)
+    when MIR::IfChain     then node.branches&.each { |b| collect_reassign_targets(b[:body], targets) }
+                               collect_reassign_targets(node.default_body, targets)
+    when MIR::DeferStmt   then collect_reassign_targets_node(node.body, targets)
+    when MIR::ErrDeferStmt then collect_reassign_targets_node(node.body, targets)
+    end
+  end
+
+  # Loops with frame-arena allocations must have mark_per_iter for
+  # per-iteration rewind. Without it, each iteration grows the arena
+  # unboundedly -- eventual overflow.
+  def check_frame_overflow!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when MIR::WhileStmt
+        if !stmt.tight && !stmt.mark_per_iter && body_has_frame_alloc?(stmt.body)
+          @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
+        end
+        check_frame_overflow!(stmt.body)
+      when MIR::ForStmt
+        if !stmt.tight && !stmt.mark_per_iter && body_has_frame_alloc?(stmt.body)
+          @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
+        end
+        check_frame_overflow!(stmt.body)
+      when MIR::IfStmt
+        check_frame_overflow!(stmt.then_body)
+        check_frame_overflow!(stmt.else_body)
+      when MIR::ScopeBlock
+        check_frame_overflow!(stmt.body)
+      when MIR::BlockExpr
+        check_frame_overflow!(stmt.body)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| check_frame_overflow!(a[:body]) }
+        check_frame_overflow!(stmt.default_body)
+      when MIR::IfChain
+        stmt.branches&.each { |b| check_frame_overflow!(b[:body]) }
+        check_frame_overflow!(stmt.default_body)
+      end
+    end
+  end
+
+  # Does the body contain any AllocMark with :frame allocator?
+  def body_has_frame_alloc?(stmts)
+    return false unless stmts.is_a?(Array)
+    stmts.any? { |s| node_has_frame_alloc?(s) }
+  end
+
+  def node_has_frame_alloc?(node)
+    return false unless node
+    return true if node.is_a?(MIR::AllocMark) && node.alloc == :frame
+    case node
+    when MIR::IfStmt      then body_has_frame_alloc?(node.then_body) || body_has_frame_alloc?(node.else_body)
+    when MIR::ScopeBlock   then body_has_frame_alloc?(node.body)
+    when MIR::BlockExpr    then body_has_frame_alloc?(node.body)
+    when MIR::SwitchStmt   then (node.arms || []).any? { |a| body_has_frame_alloc?(a[:body]) } || body_has_frame_alloc?(node.default_body)
+    when MIR::IfChain      then (node.branches || []).any? { |b| body_has_frame_alloc?(b[:body]) } || body_has_frame_alloc?(node.default_body)
+    when MIR::DeferStmt    then node_has_frame_alloc?(node.body)
+    when MIR::ErrDeferStmt then node_has_frame_alloc?(node.body)
+    # Don't recurse into nested loops -- they have their own mark_per_iter
+    when MIR::WhileStmt, MIR::ForStmt then false
+    else false
     end
   end
 

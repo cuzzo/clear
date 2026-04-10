@@ -137,6 +137,85 @@ RSpec.describe MIRChecker do
       # consumes x but no MoveMark
       expect(errors.any? { |e| e.include?("RAW_CONTRACT") }).to be true
     end
+
+    it "detects ALLOC_MISMATCH when EscapePromote + frame cleanup without guard" do
+      body = [
+        MIR::AllocMark.new("x", :list, :frame),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :frame, has_moved_guard: false }),
+        MIR::EscapePromote.new("x", "ArrayList(u8)", :list, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("promote_mismatch", body))
+      expect(errors.any? { |e| e.include?("ALLOC_MISMATCH") }).to be true
+    end
+
+    it "passes for EscapePromote + frame cleanup with moved guard" do
+      body = [
+        MIR::AllocMark.new("x", :list, :frame),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :frame, has_moved_guard: true }),
+        MIR::EscapePromote.new("x", "ArrayList(u8)", :list, nil, nil),
+        MIR::ReturnMark.new(["x"]),
+        MIR::MoveMark.new("x"),
+      ]
+      errors = checker.check_fn!(fn_def("promote_ok", body))
+      expect(errors).to be_empty
+    end
+
+    it "detects REASSIGN_LEAK for Set without ReassignMark" do
+      body = [
+        MIR::AllocMark.new("x", :list, :heap),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :heap, has_moved_guard: false }),
+        MIR::Set.new(MIR::Ident.new("x"), MIR::Lit.new("new_value")),
+      ]
+      errors = checker.check_fn!(fn_def("reassign_leak", body))
+      expect(errors.any? { |e| e.include?("REASSIGN_LEAK") }).to be true
+    end
+
+    it "passes for Set with ReassignMark" do
+      body = [
+        MIR::AllocMark.new("x", :list, :heap),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :heap, has_moved_guard: false }),
+        MIR::ReassignMark.new("x", :heap),
+        MIR::Set.new(MIR::Ident.new("x"), MIR::Lit.new("new_value")),
+      ]
+      errors = checker.check_fn!(fn_def("reassign_ok", body))
+      expect(errors).to be_empty
+    end
+
+    it "detects FRAME_OVERFLOW for loop with frame alloc and no mark_per_iter" do
+      loop_body = [
+        MIR::AllocMark.new("tmp", :string, :frame),
+        MIR::Cleanup.new("tmp", { kind: :string, alloc: :frame, has_moved_guard: false }),
+      ]
+      body = [
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("frame_overflow", body))
+      expect(errors.any? { |e| e.include?("FRAME_OVERFLOW") }).to be true
+    end
+
+    it "passes for loop with frame alloc and mark_per_iter" do
+      loop_body = [
+        MIR::AllocMark.new("tmp", :string, :frame),
+        MIR::Cleanup.new("tmp", { kind: :string, alloc: :frame, has_moved_guard: false }),
+      ]
+      body = [
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
+      ]
+      errors = checker.check_fn!(fn_def("frame_ok", body))
+      expect(errors.select { |e| e.include?("FRAME_OVERFLOW") }).to be_empty
+    end
+
+    it "passes for loop with heap alloc and no mark_per_iter" do
+      loop_body = [
+        MIR::AllocMark.new("tmp", :list, :heap),
+        MIR::Cleanup.new("tmp", { kind: :list, alloc: :heap, has_moved_guard: false }),
+      ]
+      body = [
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("heap_loop", body))
+      expect(errors.select { |e| e.include?("FRAME_OVERFLOW") }).to be_empty
+    end
   end
 
   describe "#check_program!" do

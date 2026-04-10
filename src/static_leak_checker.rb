@@ -1,22 +1,20 @@
-# static_leak_checker.rb -- Post-MIR ownership verification.
+# static_leak_checker.rb -- Pre-MIR ownership verification.
 #
-# Runs after MIRPass inserts Alloc/Drop/Return/Promote nodes into the AST
-# and verifies that the MIR correctly implements the ownership dataflow
-# requirements. Catches MIRPass bugs before code reaches the transpiler.
+# Runs BEFORE MIRLowering on the AST+markers. Checks that require AST
+# structure, dataflow summary, or schema lookup live here. All structural
+# checks (LEAK, ORPHAN, ESCAPE, FRAME_ESCAPE, ALLOC_MISMATCH, etc.) have
+# migrated to MIRChecker which runs on the post-lowering MIR tree.
 #
 # Checks performed:
-#   LEAK           -- binding needs cleanup but lacks MIR::Alloc or MIR::Drop
 #   GUARD          -- maybe-moved binding's Drop lacks moved guard (double-free)
-#   ESCAPE         -- variable escapes via return but Drop is unguarded
-#   ORPHAN         -- MIR node without matching cleanup binding
-#   FRAME_ESCAPE   -- frame-allocated binding escapes via return without promotion
-#   FRAME_OVERFLOW -- loop body allocates from frame arena without per-iteration rewind
-#   ALLOC_MISMATCH -- MIR::Alloc and MIR::Drop disagree on allocator (leak or UAF)
-#   REASSIGN_LEAK  -- mutable reassignment without pre-cleanup (old value leaks)
-#
-# Path sensitivity comes from OwnershipDataflow (run independently on the
-# pre-MIR CFG). The checker cross-references the dataflow results with
-# the MIR events to verify consistency.
+#   INDEPENDENT    -- cross-check type-system vs MIR events (classifier gap detector)
+#   FIELD_LEAK     -- field reassignment without pre-cleanup (old value leaks)
+#   BG_ESCAPE      -- BG block captures frame-allocated var without promotion
+#   HPT_LEAK       -- heap-returning call not hoisted into VarDecl
+#   LAMBDA_CAPTURE -- non-Copy lambda capture warning
+#   BG_HEAP_DECL   -- BG capture should be heap at declaration
+#   ALLOC_MISMATCH -- error path changes allocator identity (INV-9)
+#   RAW_CONTRACT   -- RawZig/InlineZig ownership contract violation
 
 class StaticLeakChecker
   attr_reader :errors
@@ -29,7 +27,8 @@ class StaticLeakChecker
     @errors = []
   end
 
-  # Verify the post-MIR function body. Returns array of error strings.
+  # Pre-MIR verification. Returns array of error strings.
+  # Structural checks (LEAK, ORPHAN, ESCAPE, etc.) are in MIRChecker.
   def check!
     @errors = []
 
@@ -53,26 +52,16 @@ class StaticLeakChecker
                         reassign_cleanups, field_cleanups)
     end
 
-    takes = takes_param_names
-    has_bindings = !@bindings.empty? || !takes.empty?
+    has_bindings = !@bindings.empty? || !takes_param_names.empty?
 
     if has_bindings
-      # Independent path-sensitive move analysis.
+      # Path-sensitive move analysis for guard checks.
       df = OwnershipDataflow.analyze(@fn, can_fail_fns: @can_fail_fns)
       df_summary = df.cleanup_summary
-
-      check_completeness!(allocs, drops, takes)
-      check_alloc_consistency!(allocs, drops)
-      check_promote_alloc_consistency!(promotes, drops)
       check_guards!(drops, df_summary)
-      check_escapes!(escapes, drops)
-      check_frame_escapes!(escapes, promotes)
-      check_reassign_completeness!(reassign_cleanups)
     end
 
-    # ── INDEPENDENT OWNERSHIP VERIFICATION ──
-    # Re-derive what needs cleanup from first principles (dataflow + type),
-    # independent of CleanupClassifier. Catches classifier gaps.
+    # Independent ownership verification (classifier gap detector).
     if @schema_lookup
       df ||= OwnershipDataflow.analyze(@fn, can_fail_fns: @can_fail_fns)
       df_summary ||= df.cleanup_summary
@@ -80,96 +69,25 @@ class StaticLeakChecker
       check_field_ownership!(@fn.body)
     end
 
-    # Universal invariant: every guarded Drop must have a SuppressCleanup or
-    # Return escape that sets the guard. A guarded Drop with no suppress means
-    # the guard is always false (cleanup always fires = potential double-free
-    # if the variable IS moved by a path the MIR forgot to cover).
-    check_guard_suppress_completeness!(drops, suppresses, escapes)
-
-    # Orphan checks always run (catch rogue MIR nodes).
-    check_orphans!(allocs, drops, suppresses, reassign_cleanups, field_cleanups, takes)
-
-    # Frame overflow checks always run (catch missing loop marks).
-    check_frame_overflow!(@fn.body)
-
-    # BG capture promotion checks always run (catch missing escape promotions).
+    # BG capture promotion checks.
     check_bg_capture_promotes!(@fn.body, promotes)
 
     # Safety net: catch heap-returning calls that HPT hoisting missed.
     check_unhoisted_heap_calls!(@fn.body)
 
-    # BG captures should ideally be heap-allocated at declaration, not frame+promote.
+    # BG captures should be heap-allocated at declaration.
     check_bg_capture_heap_at_decl!(allocs)
 
-    # Lambda USE captures of non-Copy bindings are borrows -- track for future
-    # move capture enforcement.
+    # Lambda USE captures of non-Copy bindings.
     check_lambda_captures!(@fn.body)
 
-    # INV-9: error paths must not change allocator identity of live bindings.
+    # INV-9: error paths must not change allocator identity.
     check_error_path_consistency!(allocs)
-
-    # RawZig/InlineZig ownership contract verification.
-    check_raw_zig_contracts!(allocs, drops, suppresses)
 
     @errors
   end
 
   private
-
-  # Every binding with needs_cleanup must have MIR::Alloc + MIR::Drop.
-  def check_completeness!(allocs, drops, takes)
-    @bindings.each do |name, entry|
-      next unless entry[:needs_cleanup]
-
-      unless allocs.key?(name) || takes.include?(name)
-        @errors << error(:LEAK, name, "needs cleanup but no MIR::Alloc")
-      end
-
-      unless drops.key?(name)
-        @errors << error(:LEAK, name, "needs cleanup but no MIR::Drop")
-      end
-    end
-  end
-
-  # MIR::Alloc and MIR::Drop for the same binding must agree on allocator.
-  # Mismatch means init uses one arena but cleanup frees from another --
-  # either a leak (freed from wrong arena) or UAF (wrong arena reclaimed).
-  def check_alloc_consistency!(allocs, drops)
-    allocs.each do |name, alloc_nodes|
-      drop_nodes = drops[name]
-      next unless drop_nodes
-      alloc_nodes.each do |alloc_node|
-        drop_nodes.each do |drop_node|
-          if alloc_node.alloc != drop_node.alloc
-            @errors << error(:ALLOC_MISMATCH, name,
-              "Alloc uses :#{alloc_node.alloc} but Drop uses :#{drop_node.alloc}")
-            return # one error per name is enough
-          end
-        end
-      end
-    end
-  end
-
-  # MIR::Promote that converts frame->heap requires the matching Drop to be
-  # guarded. Without a guard, the defer fires unconditionally after promotion,
-  # freeing from the original (frame) allocator while data is now on heap.
-  def check_promote_alloc_consistency!(promotes, drops)
-    promotes.each do |name, promote_nodes|
-      next unless name.is_a?(String) # skip synthetic names (:__ret, :__catch_ret, etc.)
-      promote_nodes.each do |promote|
-        next unless [:list, :string_map, :generic].include?(promote.strategy)
-        drop_nodes = drops[name]
-        next unless drop_nodes
-        # Promote converts to heap; Drop allocator must match.
-        drop_nodes.each do |drop|
-          if drop.alloc == :frame
-            @errors << error(:ALLOC_MISMATCH, name,
-              "MIR::Promote converts to heap but Drop uses :frame (alloc mismatch after promotion)")
-          end
-        end
-      end
-    end
-  end
 
   # Dataflow says maybe-moved -> Drop must be guarded.
   def check_guards!(drops, df_summary)
@@ -182,281 +100,6 @@ class StaticLeakChecker
           @errors << error(:GUARD, name, "dataflow says maybe-moved but Drop lacks guard")
         end
       end
-    end
-  end
-
-  # Escaped variables (via MIR::Return) must have guarded Drops so the
-  # defer doesn't fire when ownership transfers to the caller.
-  def check_escapes!(escapes, drops)
-    escapes.each do |name|
-      drop_nodes = drops[name]
-      next unless drop_nodes
-      drop_nodes.each do |drop|
-        if !drop.has_moved_guard
-          @errors << error(:ESCAPE, name, "escapes via return but Drop is unguarded")
-        end
-      end
-    end
-  end
-
-  # Every guarded Drop must have a SuppressCleanup or Return escape that
-  # sets the guard variable. Without one, the guard is dead code and the
-  # cleanup fires unconditionally - if the variable IS moved on some path,
-  # that's a double-free.
-  #
-  # Excluded from this check:
-  # - TAKES parameters (guard is set by TAKES machinery, not MIR::SuppressCleanup)
-  # - MATCH TAKES source variables (guard is set by transpiler's match handling)
-  # - MATCH AS bindings (inner-scope, guard is harmless default)
-  def check_guard_suppress_completeness!(drops, suppresses, escapes)
-    takes = takes_param_names
-    match_takes_sources = collect_match_takes_sources(@fn.body)
-    match_as_bindings = collect_match_as_bindings(@fn.body)
-
-    drops.each do |name, drop_nodes|
-      drop_nodes.each do |drop|
-        next unless drop.has_moved_guard
-        next if suppresses.include?(name) || escapes.include?(name)
-        next if takes.include?(name)
-        next if match_takes_sources.include?(name)
-        next if match_as_bindings.include?(name)
-        @errors << error(:GUARD_NO_SUPPRESS, name,
-          "guarded Drop but no SuppressCleanup or Return escape sets the guard")
-      end
-    end
-  end
-
-  def collect_match_takes_sources(stmts)
-    sources = Set.new
-    return sources unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
-         stmt.expr.is_a?(AST::Identifier)
-        sources << stmt.expr.name.to_s
-      end
-      case stmt
-      when AST::IfStatement
-        sources.merge(collect_match_takes_sources(stmt.then_branch))
-        sources.merge(collect_match_takes_sources(stmt.else_branch))
-      when AST::WhileLoop then sources.merge(collect_match_takes_sources(stmt.do_branch))
-      when AST::ForRange, AST::ForEach then sources.merge(collect_match_takes_sources(stmt.body))
-      when AST::MatchStatement
-        stmt.cases&.each { |c| sources.merge(collect_match_takes_sources(c[:body])) }
-        sources.merge(collect_match_takes_sources(stmt.default_case))
-      when AST::WithBlock then sources.merge(collect_match_takes_sources(stmt.body))
-      when AST::DoBlock
-        stmt.branches&.each { |b| sources.merge(collect_match_takes_sources(b[:body])) }
-      end
-    end
-    sources
-  end
-
-  def collect_match_as_bindings(stmts)
-    bindings = Set.new
-    return bindings unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      if stmt.is_a?(AST::MatchStatement)
-        stmt.cases&.each do |c|
-          bindings << c[:binding].to_s if c[:binding]
-        end
-      end
-      case stmt
-      when AST::IfStatement
-        bindings.merge(collect_match_as_bindings(stmt.then_branch))
-        bindings.merge(collect_match_as_bindings(stmt.else_branch))
-      when AST::WhileLoop then bindings.merge(collect_match_as_bindings(stmt.do_branch))
-      when AST::ForRange, AST::ForEach then bindings.merge(collect_match_as_bindings(stmt.body))
-      when AST::MatchStatement
-        stmt.cases&.each { |c| bindings.merge(collect_match_as_bindings(c[:body])) }
-        bindings.merge(collect_match_as_bindings(stmt.default_case))
-      when AST::WithBlock then bindings.merge(collect_match_as_bindings(stmt.body))
-      when AST::DoBlock
-        stmt.branches&.each { |b| bindings.merge(collect_match_as_bindings(b[:body])) }
-      end
-    end
-    bindings
-  end
-
-  # Frame-allocated bindings that escape via return must be promoted to heap
-  # first. Without promotion the caller receives a pointer into the callee's
-  # frame arena which is freed on return -- use-after-free.
-  def check_frame_escapes!(escapes, promotes)
-    escapes.each do |name|
-      entry = @bindings[name]
-      next unless entry && entry[:alloc] == :frame && entry[:needs_cleanup]
-      next if promotes.key?(name)
-      @errors << error(:FRAME_ESCAPE, name,
-        "frame-allocated binding escapes via return without promotion (use-after-free)")
-    end
-  end
-
-  # Every reassignment of a needs_cleanup binding must have a
-  # MIR::ReassignCleanup so the old value is freed before overwrite.
-  def check_reassign_completeness!(reassign_cleanups)
-    reassign_sites = Set.new
-    collect_reassign_sites(@fn.body, reassign_sites)
-
-    reassign_sites.each do |name|
-      entry = @bindings[name]
-      next unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
-      unless reassign_cleanups.key?(name)
-        @errors << error(:REASSIGN_LEAK, name,
-          "reassignment without pre-cleanup (old value leaks)")
-      end
-    end
-  end
-
-  # Loops that allocate from the frame arena must have mark_per_iter set
-  # so the transpiler emits saveLoopMark/restoreLoopMark. Without it,
-  # each iteration grows the arena unboundedly -- eventual overflow.
-  def check_frame_overflow!(stmts)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      case stmt
-      when AST::WhileLoop
-        if !stmt.mark_per_iter && !stmt.tight && body_has_frame_alloc?(stmt.do_branch)
-          @errors << loop_error(:FRAME_OVERFLOW, stmt,
-            "loop body allocates from frame arena without per-iteration rewind")
-        end
-        check_frame_overflow!(stmt.do_branch)
-      when AST::ForRange
-        if !stmt.mark_per_iter && !stmt.tight && body_has_frame_alloc?(stmt.body)
-          @errors << loop_error(:FRAME_OVERFLOW, stmt,
-            "loop body allocates from frame arena without per-iteration rewind")
-        end
-        check_frame_overflow!(stmt.body)
-      when AST::IfStatement
-        check_frame_overflow!(stmt.then_branch)
-        check_frame_overflow!(stmt.else_branch)
-      when AST::MatchStatement
-        stmt.cases&.each { |c| check_frame_overflow!(c[:body]) }
-        check_frame_overflow!(stmt.default_case)
-      when AST::WithBlock
-        check_frame_overflow!(stmt.body)
-      when AST::DoBlock
-        stmt.branches&.each { |b| check_frame_overflow!(b[:body]) }
-      when AST::BgBlock, AST::BgStreamBlock
-        check_frame_overflow!(stmt.body)
-      # MIR control-flow nodes (from migrated pipeline operators)
-      when MIR::IfStmt
-        check_frame_overflow!(stmt.then_body)
-        check_frame_overflow!(stmt.else_body)
-      when MIR::ForStmt
-        check_frame_overflow!(stmt.body)
-      when MIR::WhileStmt
-        check_frame_overflow!(stmt.body)
-      when MIR::BlockExpr
-        check_frame_overflow!(stmt.body)
-      when MIR::ScopeBlock
-        check_frame_overflow!(stmt.body)
-      when MIR::SwitchStmt
-        stmt.arms&.each { |a| check_frame_overflow!(a[:body]) }
-        check_frame_overflow!(stmt.default_body)
-      end
-    end
-  end
-
-  # No orphan MIR nodes -- every Alloc/Drop/SuppressCleanup/ReassignCleanup/FieldCleanup
-  # should correspond to a binding with needs_cleanup or a TAKES parameter.
-  def check_orphans!(allocs, drops, suppresses, reassign_cleanups, field_cleanups, takes)
-    drops.each do |name, _|
-      next if @bindings.dig(name, :needs_cleanup) || takes.include?(name)
-      @errors << error(:ORPHAN, name, "MIR::Drop without matching cleanup binding")
-    end
-
-    allocs.each do |name, _|
-      next if @bindings.dig(name, :needs_cleanup) || takes.include?(name)
-      @errors << error(:ORPHAN, name, "MIR::Alloc without matching cleanup binding")
-    end
-
-    suppresses.each do |name|
-      next if @bindings.dig(name, :has_moved_guard) || takes.include?(name)
-      @errors << error(:ORPHAN, name, "MIR::SuppressCleanup without matching guarded binding")
-    end
-
-    reassign_cleanups.each do |name, _|
-      next if @bindings.dig(name, :needs_cleanup) || takes.include?(name)
-      @errors << error(:ORPHAN, name, "MIR::ReassignCleanup without matching cleanup binding")
-    end
-
-    field_cleanups.each do |fc|
-      next unless fc.target_name
-      next if @bindings.key?(fc.target_name) || takes.include?(fc.target_name)
-      @errors << error(:ORPHAN, fc.target_name,
-        "MIR::FieldCleanup for #{fc.field} without matching binding")
-    end
-  end
-
-  # Check if a loop body contains any frame allocation.
-  # Checks both MIR::Alloc nodes AND AST-level indicators (stdlib_allocates,
-  # string concat BinaryOp) to catch cases where the transpiler emits
-  # rt.frameAlloc() without a corresponding MIR::Alloc node.
-  def body_has_frame_alloc?(stmts)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |stmt|
-      case stmt
-      when MIR::Alloc then stmt.alloc == :frame
-      when AST::VarDecl, AST::BindExpr
-        stmt.storage == :frame || expr_has_frame_alloc?(stmt.value)
-      when AST::FuncCall, AST::MethodCall
-        expr_has_frame_alloc?(stmt)
-      when AST::Assignment
-        expr_has_frame_alloc?(stmt.value)
-      when AST::IfStatement
-        body_has_frame_alloc?(stmt.then_branch) || body_has_frame_alloc?(stmt.else_branch)
-      when AST::MatchStatement
-        (stmt.cases || []).any? { |c| body_has_frame_alloc?(c[:body]) } ||
-          body_has_frame_alloc?(stmt.default_case)
-      when AST::WhileLoop then body_has_frame_alloc?(stmt.do_branch)
-      when AST::ForRange, AST::ForEach then body_has_frame_alloc?(stmt.body)
-      when AST::WithBlock then body_has_frame_alloc?(stmt.body)
-      when AST::DoBlock
-        (stmt.branches || []).any? { |b| body_has_frame_alloc?(b[:body]) }
-      when AST::BgBlock, AST::BgStreamBlock then body_has_frame_alloc?(stmt.body)
-      # MIR control-flow nodes
-      when MIR::IfStmt
-        body_has_frame_alloc?(stmt.then_body) || body_has_frame_alloc?(stmt.else_body)
-      when MIR::ForStmt, MIR::WhileStmt then body_has_frame_alloc?(stmt.body)
-      when MIR::BlockExpr, MIR::ScopeBlock then body_has_frame_alloc?(stmt.body)
-      when MIR::SwitchStmt
-        (stmt.arms || []).any? { |a| body_has_frame_alloc?(a[:body]) } ||
-          body_has_frame_alloc?(stmt.default_body)
-      else false
-      end
-    end
-  end
-
-  # Check if an expression tree contains implicit frame allocations
-  # (stdlib_allocates calls, string concat BinaryOps).
-  # mutates_receiver calls (append, etc.) allocate into the container's
-  # backing, not per-iteration frame scope -- skip their own stdlib_allocates
-  # but still check value args.
-  def expr_has_frame_alloc?(node)
-    return false unless node
-    case node
-    when AST::FuncCall
-      if node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        return node.args&.drop(1)&.any? { |a| expr_has_frame_alloc?(a) } || false
-      end
-      return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
-      node.args&.any? { |a| expr_has_frame_alloc?(a) } || false
-    when AST::MethodCall
-      if node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        return node.args&.any? { |a| expr_has_frame_alloc?(a) } || false
-      end
-      return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
-      expr_has_frame_alloc?(node.object) ||
-        (node.args&.any? { |a| expr_has_frame_alloc?(a) } || false)
-    when AST::BinaryOp
-      if node.op == :ADD
-        lt = node.left.type_info rescue nil
-        rt = node.right.type_info rescue nil
-        return true if (lt.is_a?(Type) ? lt.string? : lt == :String) ||
-                       (rt.is_a?(Type) ? rt.string? : rt == :String)
-      end
-      expr_has_frame_alloc?(node.left) || expr_has_frame_alloc?(node.right)
-    else
-      false
     end
   end
 
@@ -505,43 +148,6 @@ class StaticLeakChecker
       when MIR::SwitchStmt
         stmt.arms&.each { |a| collect_mir_nodes(a[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
         collect_mir_nodes(stmt.default_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      end
-    end
-  end
-
-  # Walk the function body for BindExpr :assign nodes to find reassignment sites.
-  def collect_reassign_sites(stmts, sites)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      case stmt
-      when AST::BindExpr
-        sites << stmt.name.to_s if stmt.mode == :assign
-      when AST::IfStatement
-        collect_reassign_sites(stmt.then_branch, sites)
-        collect_reassign_sites(stmt.else_branch, sites)
-      when AST::WhileLoop
-        collect_reassign_sites(stmt.do_branch, sites)
-      when AST::ForRange, AST::ForEach
-        collect_reassign_sites(stmt.body, sites)
-      when AST::MatchStatement
-        stmt.cases&.each { |c| collect_reassign_sites(c[:body], sites) }
-        collect_reassign_sites(stmt.default_case, sites)
-      when AST::WithBlock
-        collect_reassign_sites(stmt.body, sites)
-      when AST::DoBlock
-        stmt.branches&.each { |b| collect_reassign_sites(b[:body], sites) }
-      when AST::BgBlock, AST::BgStreamBlock
-        collect_reassign_sites(stmt.body, sites)
-      # MIR control-flow nodes
-      when MIR::IfStmt
-        collect_reassign_sites(stmt.then_body, sites)
-        collect_reassign_sites(stmt.else_body, sites)
-      when MIR::WhileStmt then collect_reassign_sites(stmt.body, sites)
-      when MIR::ForStmt then collect_reassign_sites(stmt.body, sites)
-      when MIR::BlockExpr, MIR::ScopeBlock then collect_reassign_sites(stmt.body, sites)
-      when MIR::SwitchStmt
-        stmt.arms&.each { |a| collect_reassign_sites(a[:body], sites) }
-        collect_reassign_sites(stmt.default_body, sites)
       end
     end
   end
@@ -980,78 +586,6 @@ class StaticLeakChecker
     end
   end
 
-  # Verify ownership contracts on RawZig/InlineZig nodes.
-  # For each node with a contract:
-  #   - consumed bindings must have SuppressCleanup
-  #   - produced bindings must have MIR::Alloc + MIR::Drop
-  # Nodes without contracts are unaudited (tracked but not blocking).
-  def check_raw_zig_contracts!(allocs, drops, suppresses)
-    raw_nodes = []
-    collect_raw_zig_nodes(@fn.body, raw_nodes)
-    (@fn.catch_clauses || []).each { |c| collect_raw_zig_nodes(c[:body], raw_nodes) if c[:body] }
-    collect_raw_zig_nodes(@fn.default_catch, raw_nodes) if @fn.default_catch.is_a?(Array)
-
-    raw_nodes.each do |node|
-      contract = node.ownership_contract
-      next unless contract  # unaudited nodes are allowed (for now)
-
-      (contract[:consumes] || []).each do |name|
-        unless suppresses.include?(name)
-          @errors << error(:RAW_CONTRACT, name,
-            "RawZig(#{node.reason}) consumes '#{name}' but no SuppressCleanup found")
-        end
-      end
-
-      (contract[:produces] || []).each do |name|
-        unless allocs.key?(name)
-          @errors << error(:RAW_CONTRACT, name,
-            "RawZig(#{node.reason}) produces '#{name}' but no MIR::Alloc found")
-        end
-        unless drops.key?(name)
-          @errors << error(:RAW_CONTRACT, name,
-            "RawZig(#{node.reason}) produces '#{name}' but no MIR::Drop found")
-        end
-      end
-    end
-  end
-
-  def collect_raw_zig_nodes(stmts, result)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      result << stmt if stmt.is_a?(MIR::RawZig) || stmt.is_a?(MIR::InlineZig)
-      # Check expression positions in statements
-      if stmt.respond_to?(:value)
-        v = stmt.value
-        result << v if v.is_a?(MIR::InlineZig) || v.is_a?(MIR::RawZig)
-      end
-      # Recurse into control flow
-      case stmt
-      when AST::IfStatement
-        collect_raw_zig_nodes(stmt.then_branch, result)
-        collect_raw_zig_nodes(stmt.else_branch, result)
-      when AST::WhileLoop then collect_raw_zig_nodes(stmt.do_branch, result)
-      when AST::ForRange, AST::ForEach then collect_raw_zig_nodes(stmt.body, result)
-      when AST::MatchStatement
-        stmt.cases&.each { |c| collect_raw_zig_nodes(c[:body], result) }
-        collect_raw_zig_nodes(stmt.default_case, result)
-      when AST::WithBlock then collect_raw_zig_nodes(stmt.body, result)
-      when AST::DoBlock
-        stmt.branches&.each { |b| collect_raw_zig_nodes(b[:body], result) }
-      when AST::BgBlock, AST::BgStreamBlock then collect_raw_zig_nodes(stmt.body, result)
-      when MIR::IfStmt
-        collect_raw_zig_nodes(stmt.then_body, result)
-        collect_raw_zig_nodes(stmt.else_body, result)
-      when MIR::ForStmt, MIR::WhileStmt then collect_raw_zig_nodes(stmt.body, result)
-      when MIR::BlockExpr, MIR::ScopeBlock then collect_raw_zig_nodes(stmt.body, result)
-      when MIR::SwitchStmt
-        stmt.arms&.each { |a| collect_raw_zig_nodes(a[:body], result) }
-        collect_raw_zig_nodes(stmt.default_body, result)
-      when MIR::DeferStmt, MIR::ErrDeferStmt
-        collect_raw_zig_nodes(Array(stmt.body), result)
-      end
-    end
-  end
-
   # INV-9: Error paths must not change the allocator identity of live bindings.
   # If a binding has MIR::Alloc with allocator A, and a catch/default clause
   # reassigns it with a value from allocator B != A, the cleanup path uses the
@@ -1114,8 +648,4 @@ class StaticLeakChecker
     nil
   end
 
-  def loop_error(kind, loop_node, msg)
-    line = loop_node.token&.line || "?"
-    "[#{kind}] #{@fn.name} (line #{line}) -- #{msg}"
-  end
 end
