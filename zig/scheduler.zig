@@ -767,32 +767,6 @@ pub const Scheduler = struct {
         self.sleeping_queue.append(self.allocator, task) catch unreachable;
     }
 
-    // Register fd for read-readiness with this scheduler's io_uring.
-    // Submits POLL_ADD with POLLIN. The CQE user_data is the task pointer
-    // (bit 0 clear) so processCqes dispatches via wakeTaskFromIo.
-    //
-    // If the fd was previously registered with a DIFFERENT scheduler (fiber
-    // was stolen), the old ring may still have a pending POLL_ADD for this fd.
-    // The stale CQE is harmless: wakeTaskFromIo does a CAS Blocked->Ready
-    // that fails if the task is no longer Blocked on the old scheduler.
-    pub fn registerFd(self: *Scheduler, fd: i32, task: *Task) !void {
-        _ = try self.ring.poll_add(@intFromPtr(task), fd, linux.POLL.IN);
-        _ = try self.ring.submit();
-    }
-
-    // Register fd for write-readiness (used by socketWrite EAGAIN path).
-    pub fn registerWriteFd(self: *Scheduler, fd: i32, task: *Task) !void {
-        _ = try self.ring.poll_add(@intFromPtr(task), fd, linux.POLL.OUT);
-        _ = try self.ring.submit();
-    }
-
-    // No-op for io_uring. POLL_ADD is oneshot: the poll is removed when
-    // the CQE fires. If the fd is closed with a poll still pending, the
-    // kernel delivers -ECANCELED in the CQE, and wakeTaskFromIo safely
-    // ignores it (CAS Blocked->Ready fails because task is not Blocked).
-    // Kept for API compatibility with socketClose().
-    pub fn unregisterFd(_: *Scheduler, _: i32) void {}
-
     // -----------------------------------------------------------------
     // io_uring helpers
     // -----------------------------------------------------------------
@@ -882,8 +856,6 @@ pub const Scheduler = struct {
         }
     }
 
-    // Keep old name as alias for backward compatibility with existing callers.
-    pub const wakeTaskFromEpoll = wakeTaskFromIo;
 
     /// Process CQEs from the io_uring ring. Unified handler for:
     /// - Poll readiness (POLL_ADD completions) -> wake blocked task

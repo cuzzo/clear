@@ -1494,10 +1494,9 @@ pub const CheatLib = struct {
         return sent;
     }
 
-    // Close a TCP socket fd. With io_uring, any in-flight poll for this fd
-    // produces a -ECANCELED CQE that processCqes handles safely.
+    // Close a TCP socket fd. With io_uring completion-based I/O, there are
+    // no pending polls to cancel -- the fd is simply closed.
     pub noinline fn socketClose(fd: i32) void {
-        fp.active_scheduler.unregisterFd(fd);
         std.posix.close(fd);
     }
 
