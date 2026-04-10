@@ -168,6 +168,15 @@ class PipelineHost
         return new_bin
       end
     when AST::GetField
+      # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
+      if @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+        @soa_needed_fields << node.field
+        soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
+        soa_idx = AST::Identifier.new(node.token, "__soa_i")
+        new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
+        copy_type_info(node, new_gi)
+        return new_gi
+      end
       new_target = substitute_placeholders(node.target)
       if new_target != node.target
         new_gf = AST::GetField.new(node.token, new_target, node.field)
@@ -995,26 +1004,34 @@ class PipelineHost
     is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
 
     if is_soa
-      # SOA path: field-slice access (preserves SOA cache locality)
+      # SOA path: field-slice access (preserves SOA cache locality).
+      # substitute_placeholders rewrites _.field -> __soa_field[__soa_i]
+      # and collects accessed fields in @soa_needed_fields.
       prev_soa_active = @soa_rewrite_active
       prev_soa_fields = @soa_needed_fields
       @soa_rewrite_active = true
       @soa_each_mode = true
       @soa_needed_fields = Set.new
 
-      body_code = with_pipeline_context(placeholder: "_") do
-        each_op.body.map { |stmt|
-          code = visit(stmt)
-          code.strip.end_with?(";") ? code : "#{code};"
-        }.join("\n        ")
-      end
+      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "_")
 
       source_mir = visit_mir(list_node)
-      field_slices = @soa_needed_fields.map { |f|
-        "const __soa_#{f} = __soa_src.data.items(.#{f});"
-      }.join("\n    ")
+      field_slice_lets = @soa_needed_fields.map { |f|
+        MIR::Let.new("__soa_#{f}",
+          MIR::InlineZig.new("__soa_src.data.items(.#{f})", "soa_field_#{f}"),
+          false, nil, nil)
+      }
 
-      alive_check = lhs_type&.pool? ? "if (!__soa_src.alive[__soa_i]) continue;\n        " : ""
+      alive_guard = if lhs_type&.pool?
+        [MIR::IfStmt.new(
+          MIR::UnaryOp.new("!",
+            MIR::IndexGet.new(
+              MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "alive"),
+              MIR::Ident.new("__soa_i"))),
+          [MIR::ContinueStmt.new(nil)], nil)]
+      else
+        []
+      end
 
       @soa_rewrite_active = prev_soa_active
       @soa_each_mode = false
@@ -1022,12 +1039,12 @@ class PipelineHost
 
       return MIR::ScopeBlock.new([
         MIR::Let.new("__soa_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
-        MIR::RawZig.new(
-          "#{field_slices}\n" \
-          "for (0..@intCast(__soa_src.data.len)) |__soa_i| {\n" \
-          "    #{alive_check}#{body_code}\n" \
-          "}", "each_soa_loop",
-          { consumes: [], produces: [], borrows: [] })
+        *field_slice_lets,
+        MIR::ForStmt.new(
+          MIR::InlineZig.new("0..@intCast(__soa_src.data.len)", "soa_range"),
+          "__soa_i",
+          [*alive_guard, *body_mir],
+          nil)
       ])
     end
 

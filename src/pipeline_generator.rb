@@ -221,14 +221,17 @@ module PipelineGenerator
   def visit_pipeline_expr(list_node, expr_node, placeholder = "it")
     lhs_t = list_node.type_info
     is_soa = (lhs_t&.pool? || lhs_t&.list_collection?) && lhs_t&.soa?
+    prev_soa_active = @soa_rewrite_active
     # SOA state is set directly (not via with_pipeline_context) because
-    # @soa_needed_fields must survive beyond the visit — the caller
+    # @soa_needed_fields must survive beyond the visit -- the caller
     # (transpile_pipeline_macro) reads it after this returns.
     @soa_rewrite_active = is_soa
     @soa_needed_fields = Set.new if is_soa
-    with_pipeline_context(placeholder: placeholder) do
+    result = with_pipeline_context(placeholder: placeholder) do
       visit(expr_node)
     end
+    @soa_rewrite_active = prev_soa_active
+    result
   end
 
   def transpile_select_projection(list_node, expression_node)
