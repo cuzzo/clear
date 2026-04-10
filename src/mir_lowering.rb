@@ -817,7 +817,9 @@ class MIRLowering
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
-        if a.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(a.name)
+        # Also skip & for BG pointer captures (already stored as *T in fiber context)
+        if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
+                                         @current_bg_pointer_captures&.include?(a.name))
           arg
         else
           MIR::AddressOf.new(arg)
@@ -881,7 +883,8 @@ class MIRLowering
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
-        if a.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(a.name)
+        if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
+                                         @current_bg_pointer_captures&.include?(a.name))
           arg
         else
           MIR::AddressOf.new(arg)
@@ -1472,6 +1475,8 @@ class MIRLowering
 
     # Rewrite captured variable references and rt inside the fiber body
     bg_capture_map = captured.map { |name, _| [name, "__ctx_#{id}.#{name}"] }.to_h
+    prev_bg_ptr_caps = @current_bg_pointer_captures
+    @current_bg_pointer_captures = pointer_captures
     stmt_code, result_line = with_fiber_capture_map(bg_capture_map, rt_override: bg_rt) do
       sc = pre_steps.map { |step|
         code = emit_expr(lower(step[:expr]))
@@ -1501,6 +1506,7 @@ class MIRLowering
       end
       [sc, rl]
     end
+    @current_bg_pointer_captures = prev_bg_ptr_caps
 
     arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
 
@@ -1995,7 +2001,7 @@ class MIRLowering
     when :local, true
       "try #{rt_name}.getSched().submitSpawn(\n    #{spawn_args}\n);"
     when :shared
-      "try #{rt_name}.getSched().spawnPinned(\n    #{spawn_args}\n);"
+      "try CheatHeader.spawnPinned(\n    #{spawn_args}\n);"
     else
       "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
     end
