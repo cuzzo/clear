@@ -8,8 +8,8 @@
 --   - 1 writer fiber acquires exclusive lock, loops 1K times
 --   - Measure: writer completion time, avg/max writer wait per acquire
 --
--- CLEAR uses Zig's std.Thread.RwLock under the hood.
--- Zig's RwLock is reader-preferring: writers CAN starve under heavy read load.
+-- CLEAR uses pthread_rwlock_t with PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP.
+-- Writer-preferring: new readers block once a writer is waiting. No starvation.
 
 STRUCT Counter { value: Int64 }
 STRUCT WriterResult { doneMs: Int64, avgWaitMs: Int64, maxWaitMs: Int64 }

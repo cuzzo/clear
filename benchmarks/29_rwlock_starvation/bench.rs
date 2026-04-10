@@ -1,12 +1,13 @@
 // RwLock Writer Starvation Benchmark -- Rust
 //
-// Rust's std::sync::RwLock is platform-dependent:
-//   - Linux (pthread_rwlock): typically writer-preferring (writers block new readers)
-//   - macOS: reader-preferring (writers can starve)
+// Tests writer fairness of Rust's std::sync::RwLock under heavy read contention.
+// Rust uses a custom futex-based RwLock (not pthread_rwlock_t). Writer-preferring
+// on all platforms: new readers block once a writer is waiting. No starvation.
 //
-// This benchmark measures writer latency under heavy read contention.
-// On Linux, Rust writers should NOT starve because pthread_rwlock_wrlock
-// blocks incoming readers once a writer is waiting.
+// Setup:
+//   - N reader threads each hold read lock for ~busy_work(100), loop 2M times
+//   - 1 writer thread acquires write lock, loop 1K times
+//   - Measure: writer completion time, avg/max writer wait per acquire
 //
 // Build: rustc -C opt-level=3 bench.rs -o bench_rust
 

@@ -44,9 +44,11 @@ simple spin-then-futex strategy. parking_lot uses adaptive spinning calibrated t
 the critical section length, plus thread parking with backoff. Closing this gap
 requires a custom Mutex implementation.
 
-Note: Zig's `std.Thread.RwLock` is much worse - it's `pthread_rwlock_t` on Linux
-(kernel lock, reader-preferring). Mixed workloads see 72ms vs 15ms (5x). CLEAR
-uses Mutex (`:locked`) to avoid this.
+Note: CLEAR's RwLock (`@shared:writeLocked`) now uses `pthread_rwlock_t` with
+writer-preferring attributes (`PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP`),
+eliminating the starvation that previously caused 5x overhead on mixed workloads.
+For short critical sections like KV ops, Mutex (`:locked`) is still preferred
+since RwLock has slightly higher per-operation overhead from tracking reader count.
 
 ### Fiber runtime per-iteration overhead (7x)
 

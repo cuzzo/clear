@@ -1,14 +1,13 @@
 // RwLock Writer Starvation Benchmark -- Go
 //
-// Demonstrates Go's sync.RWMutex writer starvation under heavy read load.
-// Go's RWMutex is reader-preferring: new readers can acquire the lock
-// even while a writer is waiting, so a steady stream of overlapping
-// readers can starve writers indefinitely.
+// Tests writer fairness of Go's sync.RWMutex under heavy read contention.
+// Go's RWMutex is writer-preferring: once a writer calls Lock(), new
+// RLock() calls block until the writer finishes. No starvation.
 //
 // Setup:
-//   - N reader goroutines each hold RLock for ~1us (simulated work), loop M times
-//   - 1 writer goroutine attempts to acquire Lock, loop W times
-//   - Measure: writer completion time, reader completion time, max writer wait
+//   - N reader goroutines each hold RLock for ~busyWork(100), loop 2M times
+//   - 1 writer goroutine acquires Lock, loop 1K times
+//   - Measure: writer completion time, avg/max writer wait per acquire
 //
 // Build: go build -o bench_go bench.go
 
