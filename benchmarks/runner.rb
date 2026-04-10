@@ -87,8 +87,13 @@ def run_bench(dir)
       build_src = "#{dir}/bench.cht"
       subs = src.scan(/^--\s*@leak:\s*(.+?)\s*->\s*(.+?)\s*$/)
       if subs.any?
-        patched = src.dup
-        subs.each { |old, new_val| patched.sub!(old.strip, new_val.strip) }
+        # Split into comment and code lines so sub! doesn't match the @leak comment itself
+        comment_lines = []
+        code_lines = []
+        src.each_line { |l| (l.match?(/^\s*--/) ? comment_lines : code_lines) << l }
+        code_text = code_lines.join
+        subs.each { |old, new_val| code_text.sub!(old.strip, new_val.strip) }
+        patched = comment_lines.join + code_text
         build_src = "/tmp/bench_leak_#{File.basename(dir)}.cht"
         File.write(build_src, patched)
       end
