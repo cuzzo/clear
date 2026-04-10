@@ -323,6 +323,32 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("makeList") }).to be true
     end
 
+    it "detects LEAK inside nested lambda scope" do
+      lambda_body = [
+        MIR::AllocMark.new("y", :list, :heap),
+        # No Cleanup for y -- should be caught inside lambda
+      ]
+      lambda_fn = MIR::FnDef.new("lambda_impl", [], "void", lambda_body, :private, false, nil)
+      body = [
+        MIR::Let.new("f", MIR::LambdaExpr.new(lambda_fn), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("outer", body))
+      expect(errors.any? { |e| e.include?("LEAK") && e.include?("y") }).to be true
+    end
+
+    it "passes for lambda with correct ownership" do
+      lambda_body = [
+        MIR::AllocMark.new("y", :list, :heap),
+        MIR::Cleanup.new("y", { kind: :list, alloc: :heap, has_moved_guard: false }),
+      ]
+      lambda_fn = MIR::FnDef.new("lambda_impl", [], "void", lambda_body, :private, false, nil)
+      body = [
+        MIR::Let.new("f", MIR::LambdaExpr.new(lambda_fn), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("outer", body))
+      expect(errors).to be_empty
+    end
+
   end
 
   describe "#check_program!" do

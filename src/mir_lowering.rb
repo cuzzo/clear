@@ -2247,7 +2247,8 @@ class MIRLowering
       # Test fallback bypasses pipeline host entirely
       if @pipeline_fallback
         zig_code = @pipeline_fallback.call(node)
-        return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
+        return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}",
+          { consumes: [], produces: [], borrows: [] })
       end
 
       host = pipeline_host
@@ -2258,7 +2259,8 @@ class MIRLowering
 
       # Fall back to string path (non-migrated operators)
       zig_code = host.transpile_pipeline(node)
-      return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}")
+      return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}",
+        { consumes: [], produces: [], borrows: [] })
     end
 
     # RecoverOp: x s> RECOVER(default) -> (x catch default)

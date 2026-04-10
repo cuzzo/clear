@@ -44,6 +44,7 @@ class MIRChecker
     raw_nodes  = []  # RawZig/InlineZig nodes
     bg_blocks  = []  # BgBlock nodes
     catch_wrappers = [] # CatchWrapper nodes
+    lambdas    = []  # LambdaExpr fn_defs (checked as separate scopes)
 
     # Single pass: collect all marker nodes from the MIR tree.
     walk_mir(fn_def.body) do |node|
@@ -69,6 +70,8 @@ class MIRChecker
         bg_blocks << node
       when MIR::CatchWrapper
         catch_wrappers << node
+      when MIR::LambdaExpr
+        lambdas << node.fn_def if node.fn_def
       end
     end
 
@@ -99,6 +102,12 @@ class MIRChecker
     check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
     check_field_leaks!(fn_def.body)
     check_unhoisted_heap_calls!(fn_def.body)
+
+    # Verify nested lambda scopes independently.
+    lambdas.each do |lambda_fn|
+      sub = MIRChecker.new
+      @errors.concat(sub.check_fn!(lambda_fn))
+    end
 
     @errors
   end
@@ -150,6 +159,9 @@ class MIRChecker
     when MIR::IfChain
       node.branches&.each { |b| walk_mir(b[:body], &block) }
       walk_mir(node.default_body, &block)
+    when MIR::Let
+      # Expose LambdaExpr init values so lambda scopes are collected.
+      yield node.init if node.init.is_a?(MIR::LambdaExpr)
     when MIR::DeferStmt
       walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt

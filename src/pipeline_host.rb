@@ -804,7 +804,8 @@ class PipelineHost
           "            try res_list.append(#{alloc}, val);\n" \
           "        }\n" \
           "    }\n" \
-          "}", "window_loop"),
+          "}", "window_loop",
+          { consumes: [], produces: [], borrows: [] }),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
     end
@@ -821,13 +822,15 @@ class PipelineHost
           MIR::InlineZig.new(
             "try CheatLib.makeList(#{elem_zig}, #{alloc}, #{items})",
             "make_ord_list"), true, nil, nil),
-        MIR::RawZig.new("_ = &ord_result;", "suppress_unused"),
+        MIR::RawZig.new("_ = &ord_result;", "suppress_unused",
+          { consumes: [], produces: [], borrows: [] }),
         MIR::RawZig.new(
           "std.mem.sort(#{elem_zig}, ord_result.items, {}, struct {\n" \
           "    pub fn lessThan(_: void, a: #{elem_zig}, b: #{elem_zig}) bool {\n" \
           "        return #{@emitter.emit(key_a)} < #{@emitter.emit(key_b)};\n" \
           "    }\n" \
-          "}.lessThan);", "order_by_sort"),
+          "}.lessThan);", "order_by_sort",
+          { consumes: [], produces: [], borrows: [] }),
         MIR::BreakStmt.new(label, MIR::Ident.new("ord_result"))
       ]
     end
@@ -841,7 +844,8 @@ class PipelineHost
       [
         MIR::RawZig.new(
           "var idx_result: CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig})) = .{ .alloc = #{alloc} };",
-          "index_init"),
+          "index_init",
+          { consumes: [], produces: [], borrows: [] }),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("idx_key", expr_mir, false, nil, nil),
           MIR::RawZig.new(
@@ -850,7 +854,8 @@ class PipelineHost
             "    gop.value_ptr.* = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
             "}\n" \
             "gop.value_ptr.append(#{alloc}, it) catch @panic(\"INDEX append failed\");",
-            "index_get_or_put")
+            "index_get_or_put",
+            { consumes: [], produces: [], borrows: [] })
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
@@ -911,7 +916,8 @@ class PipelineHost
         "        }\n" \
         "    }\n" \
         "    try res_list.append(#{alloc}, .{ .left = __jl, .right = __match });\n" \
-        "}", "join_loop"),
+        "}", "join_loop",
+        { consumes: [], produces: [], borrows: [] }),
       MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
     ])
   end
@@ -937,7 +943,8 @@ class PipelineHost
       MIR::RawZig.new(
         "for (__tap_items) |__tap_item| {\n" \
         "    #{body_code}\n" \
-        "}", "tap_loop"),
+        "}", "tap_loop",
+        { consumes: [], produces: [], borrows: [] }),
       MIR::BreakStmt.new(label, MIR::Ident.new("__tap_src"))
     ])
   end
@@ -982,7 +989,8 @@ class PipelineHost
           "#{field_slices}\n" \
           "for (0..@intCast(__soa_src.data.len)) |__soa_i| {\n" \
           "    #{alive_check}#{body_code}\n" \
-          "}", "each_soa_loop")
+          "}", "each_soa_loop",
+          { consumes: [], produces: [], borrows: [] })
       ])
     end
 
@@ -1002,7 +1010,8 @@ class PipelineHost
           "    if (!__each_slot.alive) continue;\n" \
           "    const __each_item = &__each_slot.value;\n" \
           "    #{body_code}\n" \
-          "}", "each_pool_loop")
+          "}", "each_pool_loop",
+          { consumes: [], produces: [], borrows: [] })
       ])
     end
 
@@ -1020,7 +1029,8 @@ class PipelineHost
         MIR::RawZig.new(
           "for (if (@hasField(@TypeOf(__each_src), \"items\")) __each_src.items else __each_src[0..]) |__each_item| {\n" \
           "    #{body_code}\n" \
-          "}", "each_list_loop")
+          "}", "each_list_loop",
+          { consumes: [], produces: [], borrows: [] })
       ])
     end
 
