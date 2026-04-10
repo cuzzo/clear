@@ -20,6 +20,7 @@ require_relative "./compiler_frontend"
 require_relative "./mir"
 require_relative "./mir_lowering"
 require_relative "./mir_emitter"
+require_relative "./mir_checker"
 
 class ZigTranspiler
   include ZigTypeMapper
@@ -60,6 +61,13 @@ class ZigTranspiler
     needs_c_alloc = use_c_allocator
     program = lowering.lower_program(result.ast, use_c_allocator: needs_c_alloc)
 
+    # Post-MIR verification: check the ACTUAL code that will be emitted.
+    checker = MIRChecker.new
+    mir_errors = checker.check_program!(program)
+    unless mir_errors.empty?
+      raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
+    end
+
     emitter = MIREmitter.new
     body = emitter.emit(program)
 
@@ -92,6 +100,17 @@ class ZigTranspiler
     )
 
     mod_result = lowering.lower_module(result.ast)
+
+    # Post-MIR verification on module functions.
+    checker = MIRChecker.new
+    mod_result[:items].flatten.each do |item|
+      next unless item.is_a?(MIR::FnDef)
+      mir_errors = checker.check_fn!(item)
+      unless mir_errors.empty?
+        raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
+      end
+    end
+
     emitter = MIREmitter.new
     items_zig = mod_result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
     type_defs_zig = mod_result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
