@@ -3303,22 +3303,9 @@ private
     call_node = node.value
     return if call_node.is_a?(AST::MethodCall) && call_node.pool_method
 
-    func_name = call_node.name
-    scope = lookup_scope_for(func_name)
-    return unless scope
-
-    func_type = scope.resolve_type(func_name)
-    return unless func_type.is_a?(Hash)
-
-    lifetime = func_type.dig(:return, :lifetime)
-    return if lifetime.nil?
-
-    param_index = func_type[:params].find_index { |p| p[:name] == lifetime }
-    error!(node, "Missing lifetime") if param_index.nil?
-
-    args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
-    actual_arg = args[param_index]
-    error!(node, "Missing borrowed param") if actual_arg.nil?
+    # Resolve the borrowed argument from either user-defined or stdlib functions.
+    actual_arg = resolve_borrow_source(call_node)
+    return unless actual_arg
 
     path = get_path_to_root(actual_arg)
     return if path.nil?
@@ -3331,6 +3318,43 @@ private
     lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
     err = @og.borrow(lhs_name, root_var, mutable: node.mutable)
     error!(node, "Lifetime Error: '#{root_var}' (or part of it) is already borrowed.") if err
+  end
+
+  # Returns the AST node of the argument the return value borrows from, or nil.
+  def resolve_borrow_source(call_node)
+    # Path 1: stdlib functions with lifetime: "self"
+    matched_def = call_node.respond_to?(:matched_stdlib_def) ? call_node.matched_stdlib_def : nil
+    if matched_def.is_a?(Hash) && matched_def[:lifetime]
+      lifetime = matched_def[:lifetime]
+      if lifetime == "self" && call_node.is_a?(AST::MethodCall)
+        return call_node.object
+      end
+      # Named param lifetime -- find by index in args list
+      args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
+      arg_types = matched_def[:args]
+      if arg_types.is_a?(Array)
+        idx = arg_types.index { |a| a.is_a?(Hash) && a[:name] == lifetime }
+        return args[idx] if idx && args[idx]
+      end
+      return nil
+    end
+
+    # Path 2: user-defined functions with return: { lifetime: "param_name" }
+    func_name = call_node.name
+    scope = lookup_scope_for(func_name)
+    return nil unless scope
+
+    func_type = scope.resolve_type(func_name)
+    return nil unless func_type.is_a?(Hash)
+
+    lifetime = func_type.dig(:return, :lifetime)
+    return nil if lifetime.nil?
+
+    param_index = func_type[:params]&.find_index { |p| p[:name] == lifetime }
+    return nil unless param_index
+
+    args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
+    args[param_index]
   end
 
   def handle_return_escape(value_node, expected_type = nil)
@@ -3849,17 +3873,25 @@ private
     ti = node.type_info
     return unless ti
 
-    # Check if value comes from a stdlib function with explicit return_alloc
+    # Check if value comes from a stdlib function with explicit metadata
     val = node.respond_to?(:value) ? node.value : nil
     if val && (val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall))
       matched_def = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
-      if matched_def.is_a?(Hash) && matched_def[:return_alloc]
-        ti.cleanup_alloc = matched_def[:return_alloc]
-        # Only set provenance when the function always allocates on heap
-        # (alloc: :heap), not when it uses the call site's allocator
-        # (alloc: :node_storage) which could be frame or heap.
-        ti.provenance ||= :heap if matched_def[:alloc] == :heap
-        return
+      if matched_def.is_a?(Hash)
+        # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
+        if matched_def[:lifetime]
+          ti.cleanup_alloc = :none
+          ti.provenance = :borrow
+          return
+        end
+        if matched_def[:return_alloc]
+          ti.cleanup_alloc = matched_def[:return_alloc]
+          # Only set provenance when the function always allocates on heap
+          # (alloc: :heap), not when it uses the call site's allocator
+          # (alloc: :node_storage) which could be frame or heap.
+          ti.provenance ||= :heap if matched_def[:alloc] == :heap
+          return
+        end
       end
     end
 

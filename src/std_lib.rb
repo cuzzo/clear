@@ -173,8 +173,8 @@ STD_LIB = {
 
   "trim" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE, return_alloc: :frame,
-    # No 'rt.' prefix needed. We call std directly.
+    return: STRING_TYPE,
+    lifetime: "self",  # returns a sub-slice of the input; no allocation
     zig: "std.mem.trim(u8, {0}, &std.ascii.whitespace)"
   },
 

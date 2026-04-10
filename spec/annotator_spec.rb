@@ -1835,6 +1835,18 @@ RSpec.describe SemanticAnnotator do
       it "resolves trim to a String slice" do
         expect(result).to eq(:"String")
       end
+
+      it "sets cleanup_alloc to :none (borrow, no allocation)" do
+        decl = ast.statements.first
+        ti = decl.type_info
+        expect(ti.cleanup_alloc).to eq(:none)
+      end
+
+      it "sets provenance to :borrow" do
+        decl = ast.statements.first
+        ti = decl.type_info
+        expect(ti.provenance).to eq(:borrow)
+      end
     end
 
     context "Polymorphic Conversion (toInt)" do
