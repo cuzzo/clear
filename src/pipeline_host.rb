@@ -96,6 +96,16 @@ class PipelineHost
     @lowering.lower(substituted)
   end
 
+  # Lower an array of AST body statements to MIR nodes, with pipeline
+  # placeholder substitution. Used by side-effect operators (Tap, Each, Join)
+  # whose loop bodies contain multiple statements.
+  def visit_pipeline_body_mir(body_stmts, placeholder:)
+    with_pipeline_context(placeholder: placeholder) do
+      substituted = body_stmts.map { |stmt| substitute_placeholders(stmt) }
+      @lowering.lower_body(substituted)
+    end
+  end
+
   private
 
   # Recursively replace AST::Identifier("_") with the current placeholder name,
@@ -789,23 +799,40 @@ class PipelineHost
       visit_mir(window_node.expression)
     }
     lower_pipeline_block(list_node) do |items, label|
-      # Window uses a while loop with index, RawZig for slice + size logic
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
-        MIR::RawZig.new(
-          "{\n" \
-          "    const __w_size: usize = @intCast(#{@emitter.emit(size_mir)});\n" \
-          "    if (#{items}.len >= __w_size) {\n" \
-          "        var __wi: usize = 0;\n" \
-          "        while (__wi <= #{items}.len - __w_size) : (__wi += 1) {\n" \
-          "            const window_slice = #{items}[__wi .. __wi + __w_size];\n" \
-          "            const val = #{@emitter.emit(expr_mir)};\n" \
-          "            try res_list.append(#{alloc}, val);\n" \
-          "        }\n" \
-          "    }\n" \
-          "}", "window_loop",
-          { consumes: [], produces: [], borrows: [] }),
+        MIR::ScopeBlock.new([
+          MIR::Let.new("__w_size",
+            MIR::Cast.new(size_mir, "usize", :intCast), false, nil, nil),
+          MIR::IfStmt.new(
+            MIR::BinOp.new(">=",
+              MIR::FieldGet.new(MIR::Ident.new(items), "len"),
+              MIR::Ident.new("__w_size")),
+            [
+              MIR::Let.new("__wi", MIR::Lit.new("0"), true, "usize", nil),
+              MIR::WhileStmt.new(
+                MIR::BinOp.new("<=",
+                  MIR::Ident.new("__wi"),
+                  MIR::BinOp.new("-",
+                    MIR::FieldGet.new(MIR::Ident.new(items), "len"),
+                    MIR::Ident.new("__w_size"))),
+                [
+                  MIR::Let.new("window_slice",
+                    MIR::InlineZig.new("#{items}[__wi .. __wi + __w_size]", "window_slice_expr"),
+                    false, nil, nil),
+                  MIR::Let.new("val", expr_mir, false, nil, nil),
+                  MIR::ExprStmt.new(MIR::MethodCall.new(
+                    MIR::Ident.new("res_list"), "append",
+                    [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("val")],
+                    true), nil)
+                ],
+                nil,
+                MIR::Set.new(MIR::Ident.new("__wi"),
+                  MIR::BinOp.new("+", MIR::Ident.new("__wi"), MIR::Lit.new("1"))),
+                nil, nil)
+            ], nil)
+        ]),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
     end
@@ -816,21 +843,18 @@ class PipelineHost
     alloc = pipeline_alloc(smooth_node)
     key_a = with_pipeline_context(placeholder: "a") { visit_mir(order_node.expression) }
     key_b = with_pipeline_context(placeholder: "b") { visit_mir(order_node.expression) }
+    sort_code = "std.mem.sort(#{elem_zig}, ord_result.items, {}, struct {\n" \
+                "    pub fn lessThan(_: void, a: #{elem_zig}, b: #{elem_zig}) bool {\n" \
+                "        return #{@emitter.emit(key_a)} < #{@emitter.emit(key_b)};\n" \
+                "    }\n" \
+                "}.lessThan)"
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("ord_result",
           MIR::InlineZig.new(
             "try CheatLib.makeList(#{elem_zig}, #{alloc}, #{items})",
-            "make_ord_list"), true, nil, nil),
-        MIR::RawZig.new("_ = &ord_result;", "suppress_unused",
-          { consumes: [], produces: [], borrows: [] }),
-        MIR::RawZig.new(
-          "std.mem.sort(#{elem_zig}, ord_result.items, {}, struct {\n" \
-          "    pub fn lessThan(_: void, a: #{elem_zig}, b: #{elem_zig}) bool {\n" \
-          "        return #{@emitter.emit(key_a)} < #{@emitter.emit(key_b)};\n" \
-          "    }\n" \
-          "}.lessThan);", "order_by_sort",
-          { consumes: [], produces: [], borrows: [] }),
+            "make_ord_list"), true, nil, "_ = &ord_result;"),
+        MIR::ExprStmt.new(MIR::InlineZig.new(sort_code, "order_by_sort"), nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("ord_result"))
       ]
     end
@@ -840,22 +864,29 @@ class PipelineHost
     elem_zig = transpile_type(list_node.full_type.element_type.resolved.to_s)
     alloc = pipeline_alloc(smooth_node)
     expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
+    map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::RawZig.new(
-          "var idx_result: CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig})) = .{ .alloc = #{alloc} };",
-          "index_init",
-          { consumes: [], produces: [], borrows: [] }),
+        MIR::Let.new("idx_result",
+          MIR::InlineZig.new(".{ .alloc = #{alloc} }", "idx_init_val"),
+          true, map_type, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("idx_key", expr_mir, false, nil, nil),
-          MIR::RawZig.new(
-            "const gop = idx_result.inner.getOrPut(#{alloc}, idx_key) catch @panic(\"INDEX allocation failed\");\n" \
-            "if (!gop.found_existing) {\n" \
-            "    gop.value_ptr.* = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
-            "}\n" \
-            "gop.value_ptr.append(#{alloc}, it) catch @panic(\"INDEX append failed\");",
-            "index_get_or_put",
-            { consumes: [], produces: [], borrows: [] })
+          MIR::Let.new("gop",
+            MIR::InlineZig.new(
+              "idx_result.inner.getOrPut(#{alloc}, idx_key) catch @panic(\"INDEX allocation failed\")",
+              "idx_get_or_put"), false, nil, nil),
+          MIR::IfStmt.new(
+            MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
+            [MIR::ExprStmt.new(
+              MIR::InlineZig.new(
+                "gop.value_ptr.* = std.ArrayListUnmanaged(#{elem_zig}){}",
+                "idx_init_slot"), nil)
+            ], nil),
+          MIR::ExprStmt.new(
+            MIR::InlineZig.new(
+              "gop.value_ptr.append(#{alloc}, it) catch @panic(\"INDEX append failed\")",
+              "idx_append"), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
@@ -879,12 +910,12 @@ class PipelineHost
       right_param = params[1].is_a?(Hash) ? params[1][:name] : params[1].name
       old_join_map = @join_param_map
       @join_param_map = { left_param => "__jl", right_param => "__jr" }
-      pred_zig = visit(key_expr.body)
+      pred_mir = visit_mir(key_expr.body)
       @join_param_map = old_join_map
     else
-      left_key  = with_pipeline_context(placeholder: "__jl") { visit(key_expr) }
-      right_key = with_pipeline_context(placeholder: "__jr") { visit(key_expr) }
-      pred_zig = "CheatLib.eql(#{left_key}, #{right_key})"
+      left_key_mir  = with_pipeline_context(placeholder: "__jl") { visit_mir(key_expr) }
+      right_key_mir = with_pipeline_context(placeholder: "__jr") { visit_mir(key_expr) }
+      pred_mir = MIR::Call.new("CheatLib.eql", [left_key_mir, right_key_mir], false)
     end
 
     label = next_pipe_label
@@ -906,18 +937,20 @@ class PipelineHost
         MIR::InlineZig.new(
           "try CheatLib.makeList(#{result_zig}, #{alloc}, &.{})",
           "join_make_list"), true, nil, nil),
-      MIR::RawZig.new(
-        "for (__jl_items) |__jl| {\n" \
-        "    var __match: ?#{right_zig} = null;\n" \
-        "    for (__jr_items) |__jr| {\n" \
-        "        if (#{pred_zig}) {\n" \
-        "            __match = __jr;\n" \
-        "            break;\n" \
-        "        }\n" \
-        "    }\n" \
-        "    try res_list.append(#{alloc}, .{ .left = __jl, .right = __match });\n" \
-        "}", "join_loop",
-        { consumes: [], produces: [], borrows: [] }),
+      MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
+        MIR::Let.new("__match", MIR::Lit.new("null"), true, "?#{right_zig}", nil),
+        MIR::ForStmt.new(MIR::Ident.new("__jr_items"), "__jr", [
+          MIR::IfStmt.new(pred_mir, [
+            MIR::Set.new(MIR::Ident.new("__match"), MIR::Ident.new("__jr")),
+            MIR::BreakStmt.new(nil, nil),
+          ], nil)
+        ], nil),
+        MIR::ExprStmt.new(MIR::MethodCall.new(
+          MIR::Ident.new("res_list"), "append",
+          [MIR::InlineZig.new(alloc, "alloc"),
+           MIR::InlineZig.new(".{ .left = __jl, .right = __match }", "join_pair")],
+          true), nil)
+      ], nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
     ])
   end
@@ -927,12 +960,7 @@ class PipelineHost
     source_mir = visit_mir(list_node)
     @current_pipe_label = label
 
-    body_code = with_pipeline_context(placeholder: "__tap_item") do
-      tap_op.body.map { |stmt|
-        code = visit(stmt)
-        code.strip.end_with?(";") ? code : "#{code};"
-      }.join("\n        ")
-    end
+    body_mir = visit_pipeline_body_mir(tap_op.body, placeholder: "__tap_item")
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__tap_src", source_mir, false, nil, nil),
@@ -940,11 +968,7 @@ class PipelineHost
         MIR::InlineZig.new(
           'if (@hasField(@TypeOf(__tap_src), "items")) __tap_src.items else __tap_src[0..]',
           "tap_items"), false, nil, nil),
-      MIR::RawZig.new(
-        "for (__tap_items) |__tap_item| {\n" \
-        "    #{body_code}\n" \
-        "}", "tap_loop",
-        { consumes: [], produces: [], borrows: [] }),
+      MIR::ForStmt.new(MIR::Ident.new("__tap_items"), "__tap_item", body_mir, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("__tap_src"))
     ])
   end
@@ -997,40 +1021,35 @@ class PipelineHost
     # Non-SOA pool: iterate slots with alive check
     if lhs_type&.pool?
       source_mir = visit_mir(list_node)
-      body_code = with_pipeline_context(placeholder: "__each_item") do
-        each_op.body.map { |stmt|
-          code = visit(stmt)
-          code.strip.end_with?(";") ? code : "#{code};"
-        }.join("\n        ")
-      end
+      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
       return MIR::ScopeBlock.new([
         MIR::Let.new("__each_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
-        MIR::RawZig.new(
-          "for (__each_src.slots) |*__each_slot| {\n" \
-          "    if (!__each_slot.alive) continue;\n" \
-          "    const __each_item = &__each_slot.value;\n" \
-          "    #{body_code}\n" \
-          "}", "each_pool_loop",
-          { consumes: [], produces: [], borrows: [] })
+        MIR::ForStmt.new(
+          MIR::FieldGet.new(MIR::Ident.new("__each_src"), "slots"),
+          "*__each_slot",
+          [
+            MIR::IfStmt.new(
+              MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("__each_slot"), "alive")),
+              [MIR::ContinueStmt.new(nil)], nil),
+            MIR::Let.new("__each_item",
+              MIR::UnaryOp.new("&", MIR::FieldGet.new(MIR::Ident.new("__each_slot"), "value")),
+              false, nil, nil),
+            *body_mir
+          ], nil)
       ])
     end
 
     # Non-SOA list collection or fixed_soa: iterate items
     if lhs_type&.list_collection? || lhs_type&.fixed_soa?
       source_mir = visit_mir(list_node)
-      body_code = with_pipeline_context(placeholder: "__each_item") do
-        each_op.body.map { |stmt|
-          code = visit(stmt)
-          code.strip.end_with?(";") ? code : "#{code};"
-        }.join("\n        ")
-      end
+      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
       return MIR::ScopeBlock.new([
         MIR::Let.new("__each_src", source_mir, false, nil, nil),
-        MIR::RawZig.new(
-          "for (if (@hasField(@TypeOf(__each_src), \"items\")) __each_src.items else __each_src[0..]) |__each_item| {\n" \
-          "    #{body_code}\n" \
-          "}", "each_list_loop",
-          { consumes: [], produces: [], borrows: [] })
+        MIR::Let.new("__each_items",
+          MIR::InlineZig.new(
+            'if (@hasField(@TypeOf(__each_src), "items")) __each_src.items else __each_src[0..]',
+            "each_items"), false, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item", body_mir, nil)
       ])
     end
 
